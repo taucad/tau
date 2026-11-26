@@ -1,23 +1,27 @@
-# Flaky-regression detection and bisect under stress (CI flake quarantine blueprint, FQ-12; Brain
-# research/ci-flake-quarantine-blueprint.md, D4's flaky-regression class and D7).
+# Flaky-regression detection and bisect under stress.
 #
 # After each flake ledger ingestion this reads the ledger state (`ledger.json` on the `flake-ledger` branch, read
-# only) and finds the tests that ran 300 or more times without a flake event and then met the entry rule (two events
-# in 80 executions, or three in 230). Such a test is a regression with a culprit, not an ordinary flake: it is never
-# quarantined automatically (`isFlakyRegression` in `scripts/src/flake-regression.ts` is the entry automation's
-# check). Its issue is flagged for the operator (`flake`, `flake:regression`, `flake:needs-operator`; opened if the
-# identity has none), and one candidate per run is bisected between the last push to `main` the CI ran before the
-# onset and the onset's commit. The culprit, or the range the bisect narrowed to, is a comment on the issue.
+# only) and finds the tests that ran 300 or more times on one variant without a flake event and then met the
+# quarantine entry rule there (two events in 80 executions, or three in 230). Such a test is a regression with a
+# culprit, not an ordinary flake. This workflow changes no ledger or quarantine state; quarantine entry automation
+# refuses such a test once it checks `isFlakyRegression` (`scripts/src/flake-regression.ts`, #2864). The identity's
+# issue is flagged for the operator (`flake`, `flake:regression`, `flake:needs-operator`; opened if the identity has
+# none), and one candidate per run is bisected between the last push to `main` the CI ran before the onset and the
+# onset's commit. The provisional culprit, or the range the bisect narrowed to, is a comment on the issue. An onset on
+# a merge-queue commit that never reached `main` is not bisected automatically; the comment asks for an operator
+# dispatch with `bad`.
 #
 # Guardrails:
 # - Each probe is a dispatch of `flake-repro.yml` at one commit, so that workflow's gate keeps every probe inside its
 #   limits: three runs at once, 3,000 runner-minutes a week and the per-dispatch cap of 120 minutes. One bisect runs
 #   at a time (the concurrency group below), so it holds at most one of the three slots.
-# - One bisect is bounded at 10 probes and 300 runner-minutes (D7's per-flake budget) over a window of 250 commits;
-#   whatever the bounds cut short is reported with the narrowed range. The job's own timeout bounds the waiting.
+# - One bisect is bounded at 10 probes and 300 runner-minutes over a window of 250 commits, refused and unfinished
+#   dispatches included; whatever the bounds cut short is reported with the narrowed range. The job's own timeout
+#   bounds the waiting.
 # - The workflow's token only: `contents: read` for the state, history and project roots, `issues: write` for the
 #   flag and the comments, `actions: write` to dispatch `flake-repro.yml` and read its runs and reports. No secret,
-#   no environment, no cache. Ledger rows and repro reports are parsed as data, never executed.
+#   no environment, no cache. Ledger rows and repro reports are parsed as data, never executed, and bisect markers
+#   count only from this workflow's own account.
 # - Kill switch: the same `FLAKE_AGENT_ENABLED` repository variable as `flake-repro.yml`; unset is enabled, `false`
 #   skips the job.
 name: Flake regression

@@ -4,7 +4,7 @@ import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
 /*
- * `flake-regression.yml` (FQ-12) dispatches `flake-repro.yml` and writes to issues, so its guardrails are pinned
+ * `flake-regression.yml` dispatches `flake-repro.yml` and writes to issues, so its guardrails are pinned
  * here: it follows the ledger, it holds the workflow token's three scopes and no secret, one bisect runs at a time,
  * the shared kill switch stops it, and its sparse checkout carries every module the CLI imports.
  */

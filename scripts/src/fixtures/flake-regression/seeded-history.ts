@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Runs are GitHub REST JSON. */
 /**
- * A seeded flaky regression for the FQ-12 tests: a synthetic ledger history in which one test passes 322 pushes to
+ * A seeded flaky regression for the flake-regression tests: a synthetic ledger history in which one test passes 322 pushes to
  * `main` and starts flaking after commit {@link culpritCommit} lands, beside an ordinary flake and a one-off event,
  * and a stubbed `flake-repro` runner that reproduces the regression from the culprit on.
  */
@@ -45,7 +45,8 @@ export const pushRun = (n: number): IngestRun => ({
   run_attempt: 1,
 });
 
-const row = (id: string, run: number, flaky: boolean): OutcomeRow => {
+/** One passing outcome row of `id` in run n, retried when `flaky`. */
+export const outcomeRow = (id: string, run: number, flaky: boolean): OutcomeRow => {
   const [, location = ''] = id.split(' › ');
   return {
     kind: 'test',
@@ -77,7 +78,7 @@ export const seededLedger = (): LedgerState => {
   ];
   for (let n = 1; n <= pushes; n += 1) {
     const rows = [stableId, ...flakes.map(([id]) => id)].map((id) =>
-      row(
+      outcomeRow(
         id,
         n,
         flakes.some(([flaky, runs]) => flaky === id && runs.includes(n)),

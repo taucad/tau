@@ -1,17 +1,19 @@
 /* eslint-disable @typescript-eslint/naming-convention -- GitHub REST JSON fields. */
 /**
- * Flaky-regression detection and bisect: the IO half (`flake-regression.ts` holds the logic). FQ-12 of the CI flake
- * quarantine blueprint (Brain `research/ci-flake-quarantine-blueprint.md`, D4 and D7). `flake-regression.yml` runs it
- * after each flake ledger ingestion.
+ * Flaky-regression detection and bisect: the IO half (`flake-regression.ts` holds the logic). `flake-regression.yml`
+ * runs it after each flake ledger ingestion.
  *
  * Reads the ledger state from the `flake-ledger` branch (read only), finds the flaky-regression candidates, and makes
- * sure each has an open issue flagged for the operator (`flake`, `flake:regression`, `flake:needs-operator`), found by
- * its identity marker or opened. Then it bisects one candidate per invocation, the oldest whose onset has no bisect
- * yet: the first flaky commit is the commit of the onset's failing run, the last stable commit the last push to
- * `main` the CI ran before it, and each probe is a `flake-repro.yml` dispatch at one commit (that workflow's gate
- * holds it to three runs at once and 3,000 runner-minutes a week; `bisectLimits` holds one bisect to 10 probes and 300
- * runner-minutes). The result, a named culprit or the range it narrowed to, is a comment on the issue. Nothing is
- * quarantined and nothing is written to the ledger.
+ * sure each candidate without a bisect has an open issue flagged for the operator (`flake`, `flake:regression`,
+ * `flake:needs-operator`; at most five issues changed a run), found by its identity marker or opened. Then it bisects
+ * one candidate per invocation, the oldest whose onset has no bisect yet: the first flaky commit is the commit of the
+ * onset's failing run, the last stable commit the last push to `main` the CI ran before it, and each probe is a
+ * `flake-repro.yml` dispatch at one commit (that workflow's gate holds it to three runs at once and 3,000
+ * runner-minutes a week; `bisectLimits` holds one bisect to 10 probes and 300 runner-minutes, refused and unfinished
+ * dispatches included). An onset on a merge-queue commit that is not on `main` is not bisected automatically: the
+ * issue asks the operator for `--bad`. The result, a provisional culprit or the range it narrowed to, is a comment on
+ * the issue. It changes no ledger or quarantine state. Bisect state markers count only from the workflow's own
+ * account, so another commenter cannot suppress or fake a bisect.
  *
  * Usage: node scripts/src/flake-regression-cli.ts [--state-file <path>] [--state-branch flake-ledger]
  *          [--id <identity>] [--good <sha>] [--bad <sha>] [--modes repeat,cpu,parallel] [--dry-run]
@@ -45,7 +47,9 @@ import {
   defaultModes,
   detectRegressions,
   identityMarker,
-  latestOnset,
+  latestEvent,
+  quarantineNote,
+  regressionOnset,
   renderBisectComment,
   renderIssueBody,
   reproIdentity,
@@ -67,6 +71,10 @@ const maximumIssues = 5;
 /** Waits for a `flake-repro.yml` slot when its gate refuses a probe (three runs at once). */
 const gateRetries = 6;
 const gateWaitMinutes = 10;
+/** The workflow token's account: the only author whose bisect markers count. */
+export const automationLogin = 'github-actions[bot]';
+/** `flake-repro.yml`'s smallest `minutes`: a retry with less of the probe's budget left is not dispatched. */
+const minimumDispatchMinutes = 5;
 /** Time a dispatched run may queue before it starts, beyond its own cap. */
 const queueSlackMinutes = 60;
 
@@ -93,13 +101,22 @@ type Issue = { readonly number: number; readonly body?: string; readonly pull_re
 // ---------------------------------------------------------------------------------------------------------------
 // The commits.
 
-/** The run's commit. */
-const runSha = async (github: Client, run: number): Promise<{ sha: string; createdAt: string }> => {
-  const body = await github.get<Run>(`/repos/${github.repository}/actions/runs/${run}`);
+/** The run's commit, when it was created and the event that ran it. */
+const runSha = async (
+  github: Client,
+  run: number,
+): Promise<{ sha: string; createdAt: string; event: string | undefined }> => {
+  const body = await github.get<Run & { event?: string }>(`/repos/${github.repository}/actions/runs/${run}`);
   if (!body.head_sha) {
     throw new Error(`run ${run} has no head commit`);
   }
-  return { sha: body.head_sha, createdAt: body.created_at };
+  return { sha: body.head_sha, createdAt: body.created_at, event: body.event };
+};
+
+/** Whether `sha` is in `main`'s history (a merge-queue commit that landed), by the compare API. */
+export const onMain = async (github: Client, sha: string): Promise<boolean> => {
+  const body = await github.get<{ status?: string }>(`/repos/${github.repository}/compare/main...${sha}`);
+  return body.status === 'behind' || body.status === 'identical';
 };
 
 /** The commit of the last push to `main` the CI ran before `before`, other than `not`. */
@@ -162,8 +179,11 @@ export const findIssue = async (github: Client, id: string): Promise<number | un
 };
 
 /** The identity's issue, flagged for the operator: an existing one gains the labels, else one is opened. */
-export const flagIssue = async (github: Client, candidate: RegressionCandidate): Promise<number> => {
-  const existing = await findIssue(github, candidate.id);
+export const flagIssue = async (
+  github: Client,
+  candidate: RegressionCandidate,
+  existing: number | undefined,
+): Promise<number> => {
   if (existing !== undefined) {
     await github.send('POST', `/repos/${github.repository}/issues/${existing}/labels`, { labels: [...issueLabels] });
     return existing;
@@ -177,14 +197,15 @@ export const flagIssue = async (github: Client, candidate: RegressionCandidate):
   return created.number;
 };
 
-const issueComments = async (github: Client, issue: number): Promise<string[]> => {
+/** The bodies of the issue's comments written by {@link automationLogin}: the only ones whose markers count. */
+const automationComments = async (github: Client, issue: number): Promise<string[]> => {
   const bodies: string[] = [];
   for (let page = 1; page <= 10; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- pages are read in order until a short one
-    const comments = await github.get<Array<{ body?: string }>>(
+    const comments = await github.get<Array<{ body?: string; user?: { login?: string } }>>(
       `/repos/${github.repository}/issues/${issue}/comments?per_page=100&page=${page}`,
     );
-    bodies.push(...comments.map((comment) => comment.body ?? ''));
+    bodies.push(...comments.filter((entry) => entry.user?.login === automationLogin).map((entry) => entry.body ?? ''));
     if (comments.length < 100) {
       break;
     }
@@ -227,7 +248,12 @@ export const reportRows = (value: unknown): ProbeRow[] => {
   if (!Array.isArray(rows)) {
     return [];
   }
-  return rows.flatMap((row: NonNullable<ReportJson['rows']>[number]) => {
+  return (rows as unknown[]).flatMap((element) => {
+    /* A report is data from a run of pull-request code: an element that is not a row object is skipped. */
+    if (typeof element !== 'object' || element === null) {
+      return [];
+    }
+    const row = element as NonNullable<ReportJson['rows']>[number];
     if (typeof row.mode !== 'string' || typeof row.variant !== 'string') {
       return [];
     }
@@ -286,13 +312,21 @@ const refusedByGate = async (github: Client, run: number): Promise<boolean> => {
   );
 };
 
-/** A {@link Prober} that dispatches `flake-repro.yml` at the commit, waits for it and reads its report. */
+/**
+ * A {@link Prober} that dispatches `flake-repro.yml` at the commit, waits for it and reads its report. Every dispatch
+ * of the probe, a refused one included, spends the probe's `minutes`: a retry gets only what is left, and a run that
+ * did not finish in time is charged its whole cap, since it may still be running.
+ */
 export const reproProber =
   (deps: ReproDeps): Prober =>
   async (request) => {
     const { github, identity } = deps;
     let minutes = 0;
     for (let attempt = 0; attempt <= gateRetries; attempt += 1) {
+      const cap = Math.floor(request.minutes - minutes);
+      if (cap < minimumDispatchMinutes) {
+        return { sha: request.sha, rows: [], minutes, error: "refused dispatches spent the probe's minutes" };
+      }
       const since = new Date(deps.now().getTime() - 60_000).toISOString();
       // oxlint-disable-next-line no-await-in-loop -- one dispatch at a time
       const dispatched = await deps.dispatch({
@@ -304,7 +338,7 @@ export const reproProber =
         modes: request.modes,
         attempts: String(request.attempts),
         seed: '1',
-        minutes: String(request.minutes),
+        minutes: String(cap),
       });
       // oxlint-disable-next-line no-await-in-loop -- as above
       const id = await locateRun(deps, { id: dispatched, sha: request.sha, since });
@@ -312,7 +346,7 @@ export const reproProber =
         return { sha: request.sha, rows: [], minutes, error: 'the dispatched run was not found' };
       }
       const url = `https://github.com/${github.repository}/actions/runs/${id}`;
-      const deadline = deps.now().getTime() + (request.minutes + queueSlackMinutes) * 60_000;
+      const deadline = deps.now().getTime() + (cap + queueSlackMinutes) * 60_000;
       let run: Run;
       for (;;) {
         // oxlint-disable-next-line no-await-in-loop -- polling
@@ -323,10 +357,11 @@ export const reproProber =
         // oxlint-disable-next-line no-await-in-loop -- polling
         await deps.sleep(1);
       }
-      minutes += runMinutes(run);
       if (run.status !== 'completed') {
+        minutes += Math.max(runMinutes(run), cap);
         return { sha: request.sha, rows: [], minutes, run: { id, url }, error: 'the run did not finish in time' };
       }
+      minutes += runMinutes(run);
       // oxlint-disable-next-line no-await-in-loop -- a refused probe waits for a slot
       if (run.conclusion === 'failure' && (await refusedByGate(github, id))) {
         // oxlint-disable-next-line no-await-in-loop -- as above
@@ -460,9 +495,9 @@ export type InvocationResult = {
   readonly markdown: string;
 };
 
-/** A candidate for an identity named by hand: its latest onset, or its latest event when it has no stable run. */
+/** A candidate for an identity named by hand: its regression onset, or its latest event when it has none. */
 const manualCandidate = (id: string, identity: IdentityState): RegressionCandidate | undefined => {
-  const onset = latestOnset(identity, 0);
+  const onset = regressionOnset(identity) ?? latestEvent(identity);
   return onset ? { id, identity, ...onset } : undefined;
 };
 
@@ -476,11 +511,32 @@ const bisectCandidate = async (
   const { candidate, issue } = chosen;
   const root = deps.roots.get(candidate.identity.project);
   const identity = root === undefined ? undefined : reproIdentity(candidate.id, candidate.identity, root);
-  const failing = await runSha(github, candidate.onset.failedRun);
-  const bad = options.bad ?? failing.sha;
-  const good = options.good ?? (await lastStableSha(github, failing.createdAt, bad));
+  /* The onset's run is needed only for a bound the operator did not give. */
+  const failing =
+    options.bad === undefined || options.good === undefined
+      ? await runSha(github, candidate.onset.failedRun)
+      : undefined;
+  const bad = options.bad ?? failing?.sha ?? '';
+  if (options.bad === undefined && failing?.event === 'merge_group' && !(await onMain(github, bad))) {
+    const body =
+      `${bisectMarker(candidate.onset.failedRun, 'done', deps.now().toISOString())}\n\n` +
+      `### Flaky regression: not bisected\n\nThe onset's failing run tested merge-queue commit ${bad}, which is not on ` +
+      '`main`, so its history is not a history of landings. The bisect needs an operator dispatch of ' +
+      `\`flake-regression.yml\` with this identity and a \`bad\` commit on \`main\`. ${quarantineNote}\n`;
+    await comment(github, issue, body);
+    return {
+      result: { outcome: 'inconclusive', candidates: 0, introduced: false, probes: [], minutes: 0 },
+      comment: body,
+    };
+  }
+  const good = options.good ?? (failing ? await lastStableSha(github, failing.createdAt, bad) : undefined);
   const history = await historyTo(github, bad);
   const goodIndex = good === undefined ? -1 : history.shas.indexOf(good);
+  if (options.good !== undefined && (goodIndex === -1 || goodIndex >= history.shas.length - 1)) {
+    throw new Error(
+      `--good ${options.good} is not among the ${history.shas.length - 1} commits of main before --bad ${bad}`,
+    );
+  }
   let result: BisectResult = { outcome: 'inconclusive', candidates: 0, introduced: false, probes: [], minutes: 0 };
   if (identity) {
     await comment(
@@ -519,7 +575,7 @@ export const runInvocation = async (options: InvocationOptions, deps: Invocation
     });
   const state = await deps.store.read();
   if (!state) {
-    return { candidates: [], issues: new Map(), markdown: '## Flaky regressions (FQ-12)\n\nNo ledger state yet.\n' };
+    return { candidates: [], issues: new Map(), markdown: '## Flaky regressions\n\nNo ledger state yet.\n' };
   }
   const detected = detectRegressions(state);
   const named = options.id === undefined ? undefined : state.identities[options.id];
@@ -529,14 +585,15 @@ export const runInvocation = async (options: InvocationOptions, deps: Invocation
   const manual = options.id !== undefined && named ? manualCandidate(options.id, named) : undefined;
   const candidates = options.id === undefined ? detected : manual ? [manual] : [];
   const lines = [
-    '## Flaky regressions (FQ-12)',
+    '## Flaky regressions',
     '',
-    `${detected.length} flaky-regression candidates in the ledger (a test with ${'≥'}300 stable executions that meets the entry rule). ` +
-      'None is quarantined automatically; each is flagged for the operator and bisected under stress.',
+    `${detected.length} flaky-regression candidates in the ledger (a test with ${'≥'}300 stable executions on one variant ` +
+      'that then meets the entry rule there). Each is flagged for the operator and bisected under stress. ' +
+      quarantineNote,
     '',
     ...detected.map(
       (candidate) =>
-        `- ${candidate.id.replaceAll('`', "'")}: ${candidate.stableBefore} stable executions, then ${candidate.events.length} events from ${candidate.onset.at.slice(0, 16)}Z (run ${candidate.onset.failedRun})`,
+        `- ${candidate.id.replaceAll('`', "'")} (${candidate.variant}): ${candidate.stableBefore} stable executions, then ${candidate.events.length} events from ${candidate.onset.at.slice(0, 16)}Z (run ${candidate.onset.failedRun})`,
     ),
   ];
   const issues = new Map<string, number>();
@@ -545,21 +602,25 @@ export const runInvocation = async (options: InvocationOptions, deps: Invocation
     return { candidates, issues, markdown: `${lines.join('\n')}\n` };
   }
 
+  /* Candidates whose bisect is done or running are skipped before the cap, so they never crowd out pending ones. */
   let chosen: { candidate: RegressionCandidate; issue: number } | undefined;
-  for (const candidate of candidates.slice(0, maximumIssues)) {
-    // oxlint-disable-next-line no-await-in-loop -- issues are flagged one at a time
-    const issue = await flagIssue(github, candidate);
-    issues.set(candidate.id, issue);
-    if (chosen) {
+  for (const candidate of candidates) {
+    if (issues.size >= maximumIssues) {
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- issues are read and flagged one at a time
+    const existing = await findIssue(github, candidate.id);
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    const markers = existing === undefined ? [] : await automationComments(github, existing);
+    const recorded = bisectRecorded(markers, candidate.onset.failedRun, deps.now());
+    if (recorded !== undefined && options.id === undefined) {
+      log(`${candidate.id}: bisect ${recorded} on #${existing ?? '?'}`);
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- as above
-    const recorded = bisectRecorded(await issueComments(github, issue), candidate.onset.failedRun, deps.now());
-    if (recorded === undefined || options.id !== undefined) {
-      chosen = { candidate, issue };
-    } else {
-      log(`${candidate.id}: bisect ${recorded} on #${issue}`);
-    }
+    const issue = await flagIssue(github, candidate, existing);
+    issues.set(candidate.id, issue);
+    chosen ??= { candidate, issue };
   }
   if (!chosen) {
     lines.push('', 'No candidate waits for a bisect.');

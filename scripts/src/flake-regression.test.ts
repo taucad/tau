@@ -1,13 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
-import { meetsEntryRule } from '#ci-flake-ledger-state.js';
+import {
+  emptyState,
+  ingestRun,
+  maximumEvents,
+  meetsEntryRule,
+  pruneState,
+  retentionDays,
+} from '#ci-flake-ledger-state.js';
 import type { FlakeEvent, IdentityState } from '#ci-flake-ledger-state.js';
 import {
   commitSha,
   culpritCommit,
   oneOffId,
   ordinaryId,
+  outcomeRow,
+  pushRun,
   regressedId,
+  runAt,
   seededLedger,
   stubProber,
 } from '#fixtures/flake-regression/seeded-history.js';
@@ -20,7 +30,10 @@ import {
   detectRegressions,
   identityMarker,
   isFlakyRegression,
-  latestOnset,
+  latestEvent,
+  quarantineNote,
+  regressionOnset,
+  variantOnset,
   renderBisectComment,
   renderIssueBody,
   reproIdentity,
@@ -32,42 +45,50 @@ import {
 const historyTo = (last: number, first = 1): string[] =>
   Array.from({ length: last - first + 1 }, (_, index) => commitSha(first + index));
 
-const event = (execution: number, at = '2026-11-20T00:00:00.000Z'): FlakeEvent => ({
+const event = (variantExecution: number, variant = 'linux-x64', at = '2026-11-20T00:00:00.000Z'): FlakeEvent => ({
   kind: 'retry',
   at,
-  run: execution,
+  run: variantExecution,
   attempt: 1,
-  failedRun: execution,
+  failedRun: variantExecution,
   failedAttempt: 1,
-  variant: 'linux-x64',
-  execution,
+  variant,
+  execution: variantExecution,
+  variantExecution,
 });
 
-const identity = (events: FlakeEvent[], options: { executions: number; stableBefore?: number }): IdentityState => ({
+type Variants = Record<string, { executions: number; stableBefore?: number; evictedExecution?: number }>;
+
+const identity = (events: FlakeEvent[], variants: Variants): IdentityState => ({
   project: 'scripts',
   targetKey: 'test',
   file: 'src/a.test.ts',
   firstSeen: '2026-11-01T00:00:00.000Z',
   lastSeen: '2026-11-20T00:00:00.000Z',
   lastFailure: '2026-11-20T00:00:00.000Z',
-  executions: options.executions,
+  executions: Object.values(variants).reduce((sum, entry) => sum + entry.executions, 0),
   failures: 0,
   retriedPasses: events.length,
   passStreak: 0,
-  variants: {},
+  variants: Object.fromEntries(
+    Object.entries(variants).map(([key, entry]) => [
+      key,
+      { failures: 0, events: events.filter((item) => item.variant === key).length, lastSeen: '2026-11-20', ...entry },
+    ]),
+  ),
   events,
   openFailures: [],
   passHashes: [],
   failureShas: [],
   aliases: [],
-  ...(options.stableBefore === undefined ? {} : { stableBefore: options.stableBefore }),
 });
 
 describe('flaky-regression detection', () => {
-  it('should count the executions of a test before the ledger first tracked it', () => {
+  it('should count the executions of a test on a variant before the ledger first tracked it there', () => {
     const state = seededLedger();
-    expect(state.identities[regressedId]?.stableBefore).toBe(322);
-    expect(state.identities[ordinaryId]?.stableBefore).toBe(299);
+    expect(state.identities[regressedId]?.variants['linux-x64']?.stableBefore).toBe(322);
+    expect(state.identities[ordinaryId]?.variants['linux-x64']?.stableBefore).toBe(299);
+    expect(state.identities[regressedId]?.events.map((entry) => entry.variantExecution)).toEqual([1, 9]);
     expect(state.tasks['scripts:test']?.targets).toEqual({ 'test linux-x64': 340 });
   });
 
@@ -75,10 +96,15 @@ describe('flaky-regression detection', () => {
     const state = seededLedger();
     const candidates = detectRegressions(state);
     expect(candidates.map((candidate) => candidate.id)).toEqual([regressedId]);
-    expect(candidates[0]).toMatchObject({ stableBefore: 322, onset: { failedRun: 323 }, previous: undefined });
+    expect(candidates[0]).toMatchObject({
+      variant: 'linux-x64',
+      stableBefore: 322,
+      onset: { failedRun: 323 },
+      previous: undefined,
+    });
     expect(candidates[0]?.events.map((entry) => entry.failedRun)).toEqual([323, 331]);
 
-    // The ordinary flake meets the entry rule too, and stays an ordinary flake (quarantine is FQ-6's).
+    // The ordinary flake meets the entry rule too, and stays an ordinary flake (quarantine entry automation decides).
     const ordinary = state.identities[ordinaryId];
     expect(ordinary && meetsEntryRule(ordinary)).toBe(true);
     expect(ordinary && isFlakyRegression(ordinary)).toBe(false);
@@ -88,24 +114,70 @@ describe('flaky-regression detection', () => {
   });
 
   it('should measure the stable run from the event before it, and need at least 300', () => {
-    const stable = identity([event(10), event(311), event(330)], { executions: 340, stableBefore: 0 });
-    expect(latestOnset(stable)).toMatchObject({
+    const stable = identity([event(10), event(311), event(330)], { 'linux-x64': { executions: 340, stableBefore: 0 } });
+    expect(regressionOnset(stable)).toMatchObject({
       stableBefore: 300,
       onset: { execution: 311 },
       previous: { execution: 10 },
     });
     expect(isFlakyRegression(stable)).toBe(true);
 
-    const short = identity([event(10), event(310), event(330)], { executions: 340, stableBefore: 0 });
-    expect(latestOnset(short)).toBeUndefined();
+    const short = identity([event(10), event(310), event(330)], { 'linux-x64': { executions: 340, stableBefore: 0 } });
+    expect(variantOnset(short, 'linux-x64')).toBeUndefined();
     expect(isFlakyRegression(short)).toBe(false);
     expect(stableExecutions).toBe(300);
   });
 
-  it('should treat a test first tracked before the baseline existed as having only its tracked history', () => {
-    expect(latestOnset(identity([event(5), event(20)], { executions: 30 }))).toBeUndefined();
-    expect(latestOnset(identity([event(301), event(320)], { executions: 330 }))).toMatchObject({ stableBefore: 300 });
-    expect(latestOnset(identity([], { executions: 330 }))).toBeUndefined();
+  it('should not count a stable run it cannot see: no baseline, or none for that variant', () => {
+    expect(isFlakyRegression(identity([event(301), event(320)], { 'linux-x64': { executions: 330 } }))).toBe(false);
+    expect(isFlakyRegression(identity([], { 'linux-x64': { executions: 330, stableBefore: 400 } }))).toBe(false);
+    expect(variantOnset(identity([event(5)], { 'linux-x64': { executions: 9 } }), 'darwin-arm64')).toBeUndefined();
+    // An event recorded before events carried their variant execution is not on any stream.
+    const legacy: FlakeEvent = { ...event(301), variantExecution: undefined };
+    expect(
+      isFlakyRegression(identity([legacy, event(320)], { 'linux-x64': { executions: 330, stableBefore: 0 } })),
+    ).toBe(false);
+  });
+
+  it('should count the baseline, the gap and the entry rule on one variant, never across variants', () => {
+    // 300 stable on Linux, one Linux retry; then two retries on the first Windows executions, with no Windows history.
+    const crossed = identity(
+      [event(1, 'linux-x64', '2026-11-19T00:00:00.000Z'), event(1, 'win32-x64'), event(2, 'win32-x64')],
+      { 'linux-x64': { executions: 5, stableBefore: 300 }, 'win32-x64': { executions: 2, stableBefore: 0 } },
+    );
+    expect(meetsEntryRule(crossed)).toBe(true);
+    expect(isFlakyRegression(crossed)).toBe(false);
+    expect(variantOnset(crossed, 'linux-x64')).toMatchObject({ stableBefore: 300 });
+
+    // The same Windows events after 300 stable Windows executions are a regression on Windows.
+    const windows = identity([event(1, 'linux-x64'), event(1, 'win32-x64'), event(2, 'win32-x64')], {
+      'linux-x64': { executions: 5, stableBefore: 300 },
+      'win32-x64': { executions: 2, stableBefore: 300 },
+    });
+    expect(regressionOnset(windows)).toMatchObject({ variant: 'win32-x64', stableBefore: 300 });
+    expect(latestEvent(windows)?.variant).toBeDefined();
+  });
+
+  it('should measure a first retained event from the newest event the ledger dropped, not from the baseline', () => {
+    const events = Array.from({ length: 100 }, (_, index) => event(index + 2));
+    const evicted = identity(events, { 'linux-x64': { executions: 101, stableBefore: 299, evictedExecution: 1 } });
+    expect(isFlakyRegression(evicted)).toBe(false);
+    const never = identity(events, { 'linux-x64': { executions: 101, stableBefore: 299 } });
+    expect(isFlakyRegression(never)).toBe(true);
+
+    // Through the ledger: 299 passes, then 101 retried passes; the event cap drops the first and remembers it.
+    const state = emptyState(new Date(runAt(0)));
+    for (let n = 1; n <= 400; n += 1) {
+      ingestRun(state, { run: pushRun(n), rows: [outcomeRow(regressedId, n, n >= 300)], artifacts: 1, rejected: 0 });
+    }
+    const tracked = state.identities[regressedId];
+    expect(tracked?.events).toHaveLength(maximumEvents);
+    expect(tracked?.variants['linux-x64']).toMatchObject({ stableBefore: 299, evictedExecution: 1, events: 101 });
+    expect(tracked && isFlakyRegression(tracked)).toBe(false);
+
+    // Pruning old events by age remembers them the same way.
+    pruneState(state, new Date(Date.parse(runAt(400)) + (retentionDays + 1) * 86_400_000 - 50 * 3_600_000));
+    expect(state.identities[regressedId]?.variants['linux-x64']?.evictedExecution).toBeGreaterThan(1);
   });
 
   it('should map a ledger identity to the repro inputs', () => {
@@ -252,6 +324,24 @@ describe('the bisect under stress', () => {
     expect(noReport.outcome).toBe('inconclusive');
   });
 
+  it('should call a first probe that never ran the test inconclusive, not unreproduced', async () => {
+    const result = await bisectRegression({
+      history: historyTo(10),
+      good: 0,
+      modes: 'repeat,cpu',
+      prober: async (request) => ({
+        sha: request.sha,
+        minutes: 10,
+        rows: [
+          { key: 'repeat:alone', outcomes: { error: 30 } },
+          { key: 'cpu:pinned', outcomes: {}, unavailable: 'no taskset' },
+        ],
+      }),
+    });
+    expect(result.outcome).toBe('inconclusive');
+    expect(result.probes).toMatchObject([{ verdict: 'inconclusive' }]);
+  });
+
   it('should refuse a last stable commit that is not before the flaky one', async () => {
     const { prober } = stubProber({ culprit: 1, rates: {} });
     await expect(bisectRegression({ history: historyTo(10), good: 9, modes: 'repeat', prober })).rejects.toThrow(
@@ -263,8 +353,10 @@ describe('the bisect under stress', () => {
     expect(cleanAttempts(0, 30)).toBeUndefined();
     expect(cleanAttempts(30, 30)).toBe(bisectLimits.minimumCleanAttempts);
     expect(cleanAttempts(9, 30)).toBe(bisectLimits.minimumCleanAttempts);
-    expect(cleanAttempts(3, 30)).toBe(44);
-    expect(cleanAttempts(1, 100)).toBe(459);
+    // From the 95 % lower bound of the rate, not the rate: 3 in 30 is at least 2.1 %, 1 in 30 only 0.08 %.
+    expect(cleanAttempts(3, 30)).toBe(141);
+    expect(cleanAttempts(1, 30)).toBe(3550);
+    expect(cleanAttempts(1, 30)).toBeGreaterThan(bisectLimits.maximumCleanAttempts);
     expect(verdictOf({ key: 'repeat:alone', outcomes: { passed: 43, failed: 0 } }, 44)).toBe('inconclusive');
     expect(verdictOf({ key: 'repeat:alone', outcomes: { passed: 44 } }, 44)).toBe('clean');
     expect(verdictOf({ key: 'repeat:alone', outcomes: { passed: 40, timeout: 1 } }, 44)).toBe('flaky');
@@ -280,8 +372,8 @@ describe('the issue text', () => {
     const [candidate] = detectRegressions(seededLedger());
     const body = candidate ? renderIssueBody(candidate, 'taucad/tau') : '';
     expect(body.startsWith(identityMarker(regressedId))).toBe(true);
-    expect(body).toContain('After 322 executions without a flake event');
-    expect(body).toContain('**not quarantined automatically**');
+    expect(body).toContain('After 322 executions on `linux-x64` without a flake event');
+    expect(body).toContain(quarantineNote);
     expect(body).toContain('[323](https://github.com/taucad/tau/actions/runs/323)');
   });
 
@@ -296,9 +388,10 @@ describe('the issue text', () => {
       now: new Date('2026-11-20T00:00:00.000Z'),
     });
     expect(comment.startsWith(bisectMarker(323, 'done', '2026-11-20T00:00:00.000Z'))).toBe(true);
-    expect(comment).toContain(`### Flaky regression: culprit [${commitSha(culpritCommit).slice(0, 12)}]`);
+    expect(comment).toContain(`### Flaky regression: provisional culprit [${commitSha(culpritCommit).slice(0, 12)}]`);
+    expect(comment).toContain('assumes independent attempts');
     expect(comment).toContain('(#4321) by `octo`');
-    expect(comment).toContain('It is not quarantined automatically.');
+    expect(comment).toContain(quarantineNote);
     expect(comment).not.toContain('@');
   });
 

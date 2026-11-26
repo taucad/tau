@@ -1,46 +1,50 @@
 /**
  * Flaky-regression detection and its bisect under stress: the pure half (`flake-regression-cli.ts` does the IO).
- * FQ-12 of the CI flake quarantine blueprint (Brain `research/ci-flake-quarantine-blueprint.md`, D4's flaky-regression
- * class and D7's stress modes).
  *
- * **The class.** A test that ran 300 or more times without a flake event ({@link stableExecutions}) and then meets
- * D3's entry rule (two events in its last 80 executions, or three in 230) did not become flaky by chance: one landing
- * introduced an intermittent defect, often a race in the product. It is a regression candidate, not an ordinary flake,
- * so it is never quarantined automatically ({@link isFlakyRegression} is the check the entry automation makes): it is
- * flagged for the operator, bisected to the landing that introduced it, and the culprit is named on its issue.
+ * **The class.** A test that ran 300 or more times on one variant without a flake event ({@link stableExecutions})
+ * and then meets the quarantine entry rule on that variant (two events in its last 80 executions, or three in 230)
+ * did not become flaky by chance: one landing introduced an intermittent defect, often a race in the product. It is a
+ * regression candidate, not an ordinary flake: {@link isFlakyRegression} is the check for quarantine entry
+ * automation to refuse it. This module and its workflow change no ledger or quarantine state; they flag the
+ * candidate for the operator, bisect it to the landing that introduced it, and name the culprit on its issue.
  *
- * **The stable baseline.** The ledger tracks a test from its first failed or retried execution; the executions of its
- * target and variant before that are `stableBefore` (`ci-flake-ledger-state.ts`). The stable run before an onset is
- * the executions between the event before it and the onset, or, for a first event, `stableBefore` plus the tracked
- * executions before it.
+ * **One stream per variant.** The baseline, the gaps and the entry rule are all counted on one variant's executions
+ * (`linux-x64`, `linux-x64 browser=firefox`), so a flake on one variant never joins a burst or a stable run of
+ * another. The ledger tracks a test from its first failed or retried execution; the executions of its target on a
+ * variant before the ledger first counted the test there are that variant's `stableBefore`
+ * (`ci-flake-ledger-state.ts`). The stable run before an onset is the executions between the event before it and the
+ * onset; for the first event the ledger still holds, the executions since the newest event it dropped
+ * (`evictedExecution`), or, when it never dropped one, `stableBefore` plus the executions before the onset.
  *
  * **The bisect.** Between the last stable commit (the last push to `main` the CI ran before the onset) and the first
  * flaky one (the commit of the onset's failing run), on the linear history of `main`. Each probe is one dispatch of
  * `flake-repro.yml` at one commit, so the harness's own gate holds it to three runs at once, 3,000 runner-minutes a
  * week and its per-dispatch cap of 120 minutes. The first probe, at the flaky commit, runs the requested modes and
- * keeps the variant with the highest failure rate p; every later probe runs only that variant, and calls a commit
- * clean after n straight passes with (1 − p)ⁿ ≤ 1 % ({@link cleanAttempts}), so each clean verdict is wrong at most
- * 1 % of the time. A last stable commit that reproduces moves the clean end back by doubling the distance. A commit
- * where the test does not exist yet is clean, and a culprit whose parent lacks the test introduced it.
+ * keeps the variant with the highest failure rate; every later probe runs only that variant. A commit is clean after
+ * n straight passes, n from the 95 % lower bound of that rate ({@link cleanAttempts}). Assuming attempts are
+ * independent and the culprit's rate holds on every later commit, a flaky commit passes n straight attempts at most 5 %
+ * of the time; the culprit is provisional on that assumption. A last stable commit that reproduces moves the clean
+ * end back by doubling the distance. A commit where the test does not exist yet is clean, and a culprit whose parent
+ * lacks the test introduced it.
  *
- * **Bounds** ({@link bisectLimits}): at most 10 probes and 300 runner-minutes (D7's per-flake budget) for one bisect,
+ * **Bounds** ({@link bisectLimits}): at most 10 probes and 300 runner-minutes for one bisect, every dispatch counted,
  * and a history window of 250 commits; one bisect runs at a time. Whatever the bounds cut short is reported with the
  * range it narrowed to, for the operator.
  */
 import { createHash } from 'node:crypto';
 
-import { meetsEntryRule } from '#ci-flake-ledger-state.js';
-import type { FlakeEvent, IdentityState, LedgerState } from '#ci-flake-ledger-state.js';
-import { limits as reproLimits } from '#flake-repro.js';
+import { entryRule } from '#ci-flake-ledger-state.js';
+import type { FlakeEvent, IdentityState, LedgerState, VariantState } from '#ci-flake-ledger-state.js';
+import { exactInterval, limits as reproLimits } from '#flake-repro.js';
 
-/** Executions without a flake event that make a test stable (D4). */
+/** Executions of one variant without a flake event that make a test stable there. */
 export const stableExecutions = 300;
 
 /** The bounds of one bisect. */
 export const bisectLimits = {
   /** `flake-repro.yml` dispatches. Ten probes bracket and split a range of 256 commits. */
   probes: 10,
-  /** Runner-minutes of those dispatches: D7's budget per flake. */
+  /** Runner-minutes of every dispatch of one bisect: the stress budget of one flake. */
   minutes: 300,
   /** Each dispatch's own cap, `flake-repro.yml`'s `minutes` limit. */
   dispatchMinutes: reproLimits.dispatchMinutes,
@@ -65,60 +69,103 @@ export const defaultModes = 'repeat,cpu,parallel';
 // ---------------------------------------------------------------------------------------------------------------
 // Detection.
 
-/** Where a stable test started flaking. */
+/** Where a stable test started flaking, on one variant. */
 export type RegressionOnset = {
+  /** The variant whose stream the onset, the stable run and the entry rule were counted on. */
+  readonly variant: string;
   /** The first event after the stable run. */
   readonly onset: FlakeEvent;
-  /** The onset and the events after it. */
+  /** The onset and the variant's events after it. */
   readonly events: readonly FlakeEvent[];
-  /** Executions without an event before the onset. */
+  /** Executions of the variant without an event before the onset. */
   readonly stableBefore: number;
-  /** The event before the stable run, if the ledger holds one. */
+  /** The variant's event before the stable run, if the ledger holds one. */
   readonly previous?: FlakeEvent | undefined;
 };
 
-/**
- * The onset of an identity's latest burst of events: the first event after a run of at least `threshold` executions
- * without one. Undefined when the latest burst has no such run before it.
- */
-export const latestOnset = (identity: IdentityState, threshold = stableExecutions): RegressionOnset | undefined => {
-  const events = identity.events.toSorted((a, b) => a.execution - b.execution || a.at.localeCompare(b.at));
-  if (events.length === 0) {
-    return undefined;
+/** One variant's events with their position in its stream, oldest first. */
+const streamOf = (identity: IdentityState, variant: string): Array<FlakeEvent & { variantExecution: number }> =>
+  identity.events
+    .filter(
+      (event): event is FlakeEvent & { variantExecution: number } =>
+        event.variant === variant && event.variantExecution !== undefined,
+    )
+    .toSorted((a, b) => a.variantExecution - b.variantExecution || a.at.localeCompare(b.at));
+
+/** Executions of the variant without an event before its `index`th event; −1 when that is not known. */
+const gapBefore = (
+  state: VariantState,
+  events: ReadonlyArray<FlakeEvent & { variantExecution: number }>,
+  index: number,
+): number => {
+  const event = events[index];
+  const before = events[index - 1];
+  if (!event) {
+    return -1;
   }
-  /* Executions strictly between two events; one execution can hold more than one event (a retry and a same-hash). */
-  const gap = (index: number): number => {
-    const event = events[index];
-    const before = events[index - 1];
-    if (!event) {
-      return 0;
-    }
-    return before
-      ? Math.max(0, event.execution - before.execution - 1)
-      : (identity.stableBefore ?? 0) + event.execution - 1;
-  };
-  let start = events.length - 1;
-  while (start > 0 && gap(start) < threshold) {
-    start -= 1;
+  if (before) {
+    return Math.max(0, event.variantExecution - before.variantExecution - 1);
   }
-  const onset = events[start];
-  const stableBefore = gap(start);
-  if (!onset || stableBefore < threshold) {
-    return undefined;
+  if (state.evictedExecution !== undefined) {
+    return Math.max(0, event.variantExecution - state.evictedExecution - 1);
   }
-  return { onset, events: events.slice(start), stableBefore, previous: events[start - 1] };
+  return state.stableBefore === undefined ? -1 : state.stableBefore + event.variantExecution - 1;
 };
 
 /**
- * The flaky-regression onset of an identity: its latest burst meets D3's entry rule and followed a stable run.
- * Undefined for an ordinary flake (or none).
+ * The onset of one variant's latest burst of events: the first event after a run of at least `threshold` of its
+ * executions without one. Undefined when the latest burst has no such run before it (or it is not known).
  */
-export const regressionOnset = (identity: IdentityState): RegressionOnset | undefined =>
-  meetsEntryRule(identity) ? latestOnset(identity) : undefined;
+export const variantOnset = (
+  identity: IdentityState,
+  variant: string,
+  threshold = stableExecutions,
+): RegressionOnset | undefined => {
+  const state = identity.variants[variant];
+  const events = streamOf(identity, variant);
+  if (!state || events.length === 0) {
+    return undefined;
+  }
+  let start = events.length - 1;
+  while (start > 0 && gapBefore(state, events, start) < threshold) {
+    start -= 1;
+  }
+  const onset = events[start];
+  const stableBefore = gapBefore(state, events, start);
+  if (!onset || stableBefore < threshold) {
+    return undefined;
+  }
+  return { variant, onset, events: events.slice(start), stableBefore, previous: events[start - 1] };
+};
+
+/** Whether one variant's own events meet the entry rule over its own executions. */
+const meetsVariantEntryRule = (identity: IdentityState, variant: string): boolean => {
+  const executions = identity.variants[variant]?.executions ?? 0;
+  const events = streamOf(identity, variant);
+  return entryRule.some(
+    (rule) => events.filter((event) => event.variantExecution > executions - rule.executions).length >= rule.events,
+  );
+};
 
 /**
- * Whether an identity is a flaky-regression candidate. The entry automation (FQ-6) must not quarantine such a test as
- * an ordinary flake: it goes to the operator with its culprit (D4, D7 step 9).
+ * The flaky-regression onset of an identity: on some variant, its latest burst meets the entry rule and followed a
+ * stable run of that variant; the earliest such onset. Undefined for an ordinary flake (or none).
+ */
+export const regressionOnset = (identity: IdentityState): RegressionOnset | undefined =>
+  Object.keys(identity.variants)
+    .filter((variant) => meetsVariantEntryRule(identity, variant))
+    .flatMap((variant) => variantOnset(identity, variant) ?? [])
+    .toSorted((a, b) => a.onset.at.localeCompare(b.onset.at) || a.variant.localeCompare(b.variant))[0];
+
+/** The latest event of any variant, as an onset with no stable run: what an operator's named identity falls back to. */
+export const latestEvent = (identity: IdentityState): RegressionOnset | undefined =>
+  Object.keys(identity.variants)
+    .flatMap((variant) => variantOnset(identity, variant, -1) ?? [])
+    .toSorted((a, b) => b.onset.at.localeCompare(a.onset.at))[0];
+
+/**
+ * Whether an identity is a flaky-regression candidate: quarantine entry automation refuses such a test, which goes to
+ * the operator with its culprit instead of being quarantined as an ordinary flake.
  */
 export const isFlakyRegression = (identity: IdentityState): boolean => regressionOnset(identity) !== undefined;
 
@@ -134,7 +181,7 @@ export const detectRegressions = (state: LedgerState): RegressionCandidate[] =>
     })
     .sort((a, b) => a.onset.at.localeCompare(b.onset.at) || a.id.localeCompare(b.id));
 
-/** The hidden line that ties an issue to one test identity (D7: one issue per identity). */
+/** The hidden line that ties an issue to one test identity: one issue per identity. */
 export const identityMarker = (id: string): string =>
   `<!-- flake-identity: ${createHash('sha256').update(id).digest('hex').slice(0, 16)} -->`;
 
@@ -268,16 +315,17 @@ export const verdictOf = (row: ProbeRow | undefined, required: number): Verdict 
 
 /**
  * Straight passes that make a commit clean after the flaky commit failed k of m attempts: the least n with
- * (1 − k/m)ⁿ ≤ 1 %, at least {@link bisectLimits.minimumCleanAttempts}. Undefined when nothing failed.
+ * (1 − p)ⁿ ≤ 5 %, where p is the Clopper–Pearson 95 % lower bound of the rate k/m, and at least
+ * {@link bisectLimits.minimumCleanAttempts}. The observed rate itself would be no guarantee: a test failing 1 % of
+ * the time shows one failure in 30 attempts often enough. Assumes independent attempts at a rate that holds from the
+ * culprit on. Undefined when nothing failed.
  */
 export const cleanAttempts = (k: number, m: number): number | undefined => {
   if (k === 0 || m === 0) {
     return undefined;
   }
-  if (k >= m) {
-    return bisectLimits.minimumCleanAttempts;
-  }
-  return Math.max(bisectLimits.minimumCleanAttempts, Math.ceil(Math.log(0.01) / Math.log(1 - k / m)));
+  const lower = Math.min(exactInterval(Math.min(k, m), m).lower, 1 - Number.EPSILON);
+  return Math.max(bisectLimits.minimumCleanAttempts, Math.ceil(Math.log(0.05) / Math.log1p(-lower)));
 };
 
 /** One probe as the result records it. */
@@ -322,7 +370,7 @@ export type BisectResult = {
   readonly mode?: string | undefined;
   readonly failures?: number | undefined;
   readonly attempts?: number | undefined;
-  /** Straight passes per clean verdict. */
+  /** Straight passes per clean verdict ({@link cleanAttempts}). */
   readonly required?: number | undefined;
   readonly probes: readonly ProbeLog[];
   readonly minutes: number;
@@ -442,8 +490,10 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
     .filter((row) => row.unavailable === undefined && failuresOf(row) > 0)
     .toSorted((a, b) => failuresOf(b) / ranOf(b) - failuresOf(a) / ranOf(a))[0];
   if (!best) {
-    log(first, first.rows[0], first.rows.length === 0 ? 'inconclusive' : 'clean');
-    return finish(first.rows.length === 0 ? 'inconclusive' : 'not-reproduced');
+    /* No failure is evidence only from a variant that ran the test; build errors and unavailable variants are not. */
+    const ran = first.rows.some((row) => row.unavailable === undefined && ranOf(row) > 0);
+    log(first, first.rows[0], ran ? 'clean' : 'inconclusive');
+    return finish(ran ? 'not-reproduced' : 'inconclusive');
   }
   log(first, best, 'flaky');
   verdicts.set(bad, 'flaky');
@@ -500,6 +550,11 @@ export const bisectRegression = async (input: BisectInput): Promise<BisectResult
 // ---------------------------------------------------------------------------------------------------------------
 // Issue text.
 
+/** What happens to the quarantine: this workflow changes none, and entry automation refuses the test once it lands. */
+export const quarantineNote =
+  'This workflow changes no ledger or quarantine state; the quarantine entry automation refuses flaky regressions ' +
+  'once it lands (#2864), and until then nothing here keeps it from quarantining this test.';
+
 const code = (text: string): string => `\`${text.replaceAll('`', "'")}\``;
 const short = (sha: string | undefined): string => (sha === undefined ? 'unknown' : sha.slice(0, 12));
 
@@ -510,12 +565,12 @@ export const renderIssueBody = (candidate: RegressionCandidate, repository: stri
   return [
     identityMarker(candidate.id),
     '',
-    `**Flaky regression candidate** (FQ-12): ${code(candidate.id)}`,
+    `**Flaky regression candidate**: ${code(candidate.id)}`,
     '',
-    `After ${candidate.stableBefore} executions without a flake event, this test has ${candidate.events.length} events from ` +
-      `${onset.at.slice(0, 16)}Z on, which meets the entry rule (2 in 80 or 3 in 230). A stable test that starts flaking ` +
-      'after one landing is a regression with a culprit, not an ordinary flake: it is **not quarantined automatically** ' +
-      'and goes to the operator (blueprint D4). The bisect under stress names the culprit in a comment.',
+    `After ${candidate.stableBefore} executions on ${code(candidate.variant)} without a flake event, this test has ` +
+      `${candidate.events.length} events there from ${onset.at.slice(0, 16)}Z on, which meets the quarantine entry rule ` +
+      '(2 in 80 or 3 in 230). A stable test that starts flaking after one landing is a regression with a culprit, not an ' +
+      `ordinary flake, so it goes to the operator. ${quarantineNote} The bisect under stress names the culprit in a comment.`,
     '',
     `- Project and target: ${code(`${identity.project}:${identity.targetKey}`)}${identity.file ? `, file ${code(identity.file)}` : ''}`,
     `- Executions tracked: ${identity.executions}, failures ${identity.failures}, retried passes ${identity.retriedPasses}`,
@@ -571,7 +626,7 @@ export const renderBisectComment = (input: {
   if (result.outcome === 'culprit' && culprit) {
     const pull = pullNumber(culprit.title);
     lines.push(
-      `### Flaky regression: culprit ${commitLink(culprit.sha)}`,
+      `### Flaky regression: provisional culprit ${commitLink(culprit.sha)}`,
       '',
       `${culprit.title ? code(culprit.title) : 'Commit'}${pull === undefined ? '' : ` (#${pull})`}` +
         `${culprit.author ? ` by ${code(culprit.author)}` : ''} ` +
@@ -580,8 +635,9 @@ export const renderBisectComment = (input: {
           : 'is the first commit where the test flakes under stress; its parent ' +
             `${commitLink(result.clean)} passed ${result.required ?? 0} straight attempts.`),
       '',
-      "The culprit's author or agent fixes or reverts it; the operator decides whether the test is quarantined in the " +
-        'meantime (class `flaky-regression`). It is not quarantined automatically.',
+      'Provisional: each clean verdict assumes independent attempts at the rate the first flaky commit showed. ' +
+        "The culprit's author or agent fixes or reverts it; the operator decides whether the test is quarantined in the " +
+        `meantime (class \`flaky-regression\`). ${quarantineNote}`,
     );
   } else {
     lines.push(
@@ -592,13 +648,13 @@ export const renderBisectComment = (input: {
         : `The culprit is one of the ${result.candidates} commits after ${commitLink(result.clean)} up to and including ` +
             `${commitLink(result.flaky)}.`,
       '',
-      'The operator decides the next step; the test is not quarantined automatically.',
+      `The operator decides the next step. ${quarantineNote}`,
     );
   }
   lines.push(
     '',
     `Mode ${result.mode ? code(result.mode) : 'none'}: ${result.failures ?? 0} failures in ${result.attempts ?? 0} attempts ` +
-      `at the first flaky commit; a commit is clean after ${result.required ?? '—'} straight passes ((1 − p)ⁿ ≤ 1 %). ` +
+      `at the first flaky commit; a commit is clean after ${result.required ?? '—'} straight passes ((1 − p)ⁿ ≤ 5 % at the 95 % lower bound p of its rate). ` +
       `${result.probes.length} probes, ${Math.round(result.minutes)} runner-minutes (limits ${bisectLimits.probes} and ${bisectLimits.minutes}).`,
     '',
     '| Commit | Verdict | Failures / attempts | Minutes | Run |',

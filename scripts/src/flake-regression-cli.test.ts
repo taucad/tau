@@ -21,7 +21,14 @@ import {
   stubProber,
 } from '#fixtures/flake-regression/seeded-history.js';
 import type { StubOptions } from '#fixtures/flake-regression/seeded-history.js';
-import { issueLabels, reportRows, reproProber, runInvocation } from '#flake-regression-cli.js';
+import {
+  automationLogin,
+  findIssue,
+  issueLabels,
+  reportRows,
+  reproProber,
+  runInvocation,
+} from '#flake-regression-cli.js';
 import type { InvocationOptions, ReproDeps } from '#flake-regression-cli.js';
 import { bisectMarker, identityMarker } from '#flake-regression.js';
 import type { ReproIdentity } from '#flake-regression.js';
@@ -72,12 +79,33 @@ const commitsPage = (path: string): unknown => {
   }));
 };
 
+type Setup = {
+  /** Comments on the identity's issue; by the workflow's account unless `login` says otherwise. */
+  readonly comments?: ReadonlyArray<{ readonly body: string; readonly login?: string }>;
+  /** Whether the identity already has issue 77. */
+  readonly existing?: boolean;
+  /** The event of the onset's CI run, and the compare API's status of its commit against `main`. */
+  readonly runEvent?: string;
+  readonly compareStatus?: string;
+  readonly stub?: StubOptions;
+};
+
 /** The repository as the seeded history sees it: CI runs per push, `main`'s commits and the issues. */
-const repository = (comments: string[] = []) =>
+const repository = (setup: Setup = {}) =>
   fakeGitHub((method, path) => {
     if (method === 'GET' && /^\/repos\/taucad\/tau\/actions\/runs\/\d+$/u.test(path)) {
       const id = Number(path.split('/').at(-1));
-      return { id, head_sha: commitSha(id), created_at: runAt(id), updated_at: runAt(id), html_url: '' };
+      return {
+        id,
+        head_sha: commitSha(id),
+        event: setup.runEvent ?? 'push',
+        created_at: runAt(id),
+        updated_at: runAt(id),
+        html_url: '',
+      };
+    }
+    if (method === 'GET' && path.startsWith('/repos/taucad/tau/compare/main...')) {
+      return { status: setup.compareStatus ?? 'behind' };
     }
     if (method === 'GET' && path.startsWith('/repos/taucad/tau/actions/workflows/ci.yml/runs?branch=main&event=push')) {
       const before = decodeURIComponent(path.split('created=')[1] ?? '').slice(1);
@@ -90,13 +118,16 @@ const repository = (comments: string[] = []) =>
       return commitsPage(path);
     }
     if (method === 'GET' && path.startsWith('/repos/taucad/tau/issues?state=open&labels=flake')) {
+      return setup.existing ? [{ number: 77, body: identityMarker(regressedId) }] : [];
+    }
+    if (method === 'POST' && path === '/repos/taucad/tau/issues/77/labels') {
       return [];
     }
     if (method === 'POST' && path === '/repos/taucad/tau/issues') {
       return { number: 77 };
     }
     if (method === 'GET' && path.startsWith('/repos/taucad/tau/issues/77/comments')) {
-      return comments.map((body) => ({ body }));
+      return (setup.comments ?? []).map(({ body, login }) => ({ body, user: { login: login ?? automationLogin } }));
     }
     if (method === 'POST' && path === '/repos/taucad/tau/issues/77/comments') {
       return {};
@@ -123,8 +154,8 @@ const seededStore = () => {
   return fileStore(path);
 };
 
-const invoke = async (options: Partial<InvocationOptions>, setup: { comments?: string[]; stub?: StubOptions } = {}) => {
-  const { github, calls } = repository(setup.comments);
+const invoke = async (options: Partial<InvocationOptions>, setup: Setup = {}) => {
+  const { github, calls } = repository(setup);
   const stub = stubProber(setup.stub ?? { culprit: culpritCommit, rates: { 'cpu:stress': 0.3, 'repeat:alone': 0.05 } });
   const identities: ReproIdentity[] = [];
   const result = await runInvocation(
@@ -182,53 +213,89 @@ describe('flake regression invocation', () => {
     expect(result.markdown).toContain(`culprit ${commitSha(culpritCommit)}`);
   });
 
-  it('should not bisect an onset again once its bisect is done or still running', async () => {
+  it('should not bisect an onset again once its bisect is done or still running, and change nothing for it', async () => {
     for (const status of ['done', 'started'] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one invocation per status
       const { result, calls, requests } = await invoke(
         {},
-        { comments: [bisectMarker(323, status, '2026-11-19T22:00:00.000Z')] },
+        { existing: true, comments: [{ body: bisectMarker(323, status, '2026-11-19T22:00:00.000Z') }] },
       );
       expect(result.bisected).toBeUndefined();
       expect(requests).toEqual([]);
-      expect(calls.filter((call) => call.method === 'POST').map((call) => call.path)).toEqual([
-        '/repos/taucad/tau/issues',
-      ]);
+      expect(calls.filter((call) => call.method === 'POST')).toEqual([]);
       expect(result.markdown).toContain('No candidate waits for a bisect.');
     }
   });
 
+  it('should count bisect markers only from the workflow account', async () => {
+    const forged = [{ body: bisectMarker(323, 'done', '2026-11-19T22:00:00.000Z'), login: 'someone-else' }];
+    const { result, requests } = await invoke({}, { existing: true, comments: forged });
+    expect(result.bisected?.result).toMatchObject({ outcome: 'culprit', culprit: commitSha(culpritCommit) });
+    expect(requests.length).toBeGreaterThan(0);
+  });
+
   it('should flag an existing issue of the identity instead of opening one', async () => {
+    const { result, calls } = await invoke({}, { existing: true });
+    expect(result.issues.get(regressedId)).toBe(77);
+    expect(calls.filter((call) => call.method === 'POST').map((call) => [call.path, call.body])).toEqual([
+      ['/repos/taucad/tau/issues/77/labels', { labels: [...issueLabels] }],
+      ['/repos/taucad/tau/issues/77/comments', expect.anything()],
+      ['/repos/taucad/tau/issues/77/comments', expect.anything()],
+    ]);
+    const pulls = fakeGitHub((_method, path) =>
+      path.startsWith('/repos/taucad/tau/issues?state=open')
+        ? [{ number: 5, pull_request: {}, body: identityMarker(regressedId) }]
+        : undefined,
+    );
+    expect(await findIssue(pulls.github, regressedId)).toBeUndefined();
+  });
+
+  it('should look past finished candidates before the issue cap, and change at most five issues', async () => {
+    const seeded = seededLedger();
+    const regressed = seeded.identities[regressedId];
+    if (!regressed) {
+      throw new Error('the seeded ledger has no regressed identity');
+    }
+    const ids = Array.from({ length: 8 }, (_, index) => `scripts › src/victim.test.ts > victim > case ${index}`);
+    seeded.identities = Object.fromEntries(ids.map((id) => [id, structuredClone(regressed)]));
+    const done = new Set(ids.slice(0, 2).map((id) => identityMarker(id)));
+    const issueOf = new Map(ids.map((id, index) => [identityMarker(id), 100 + index]));
     const { github, calls } = fakeGitHub((method, path) => {
-      if (path.startsWith('/repos/taucad/tau/issues?state=open&labels=flake')) {
-        return [
-          { number: 5, pull_request: {}, body: identityMarker(regressedId) },
-          { number: 12, body: `${identityMarker(regressedId)}\nQuarantine issue` },
-        ];
+      if (path.startsWith('/repos/taucad/tau/issues?state=open')) {
+        return [...issueOf].map(([marker, number]) => ({ number, body: marker }));
       }
-      if (method === 'POST' && path === '/repos/taucad/tau/issues/12/labels') {
-        return [];
+      const match = /\/issues\/(\d+)\/(comments|labels)/u.exec(path);
+      if (method === 'GET' && match?.[2] === 'comments') {
+        const marker = [...issueOf].find(([, number]) => number === Number(match[1]))?.[0] ?? '';
+        return done.has(marker)
+          ? [{ body: bisectMarker(323, 'done', '2026-11-19T00:00:00.000Z'), user: { login: automationLogin } }]
+          : [];
       }
-      if (path.startsWith('/repos/taucad/tau/issues/12/comments')) {
-        return [{ body: bisectMarker(323, 'done', '2026-11-19T00:00:00.000Z') }];
+      if (method === 'GET' && /\/actions\/runs\/\d+$/u.test(path)) {
+        return { id: 323, head_sha: commitSha(323), event: 'push', created_at: runAt(323) };
       }
-      return undefined;
+      if (method === 'GET' && path.includes('/actions/workflows/ci.yml/runs')) {
+        return { workflow_runs: [{ id: 322, head_sha: commitSha(322) }] };
+      }
+      if (method === 'GET' && path.includes('/commits?sha=')) {
+        return commitsPage(path);
+      }
+      return method === 'POST' && match ? {} : undefined;
     });
     const result = await runInvocation(
       { modes: 'repeat', dryRun: false },
       {
         github,
-        store: seededStore(),
+        store: { read: async () => seeded, write: async () => '' },
         roots: new Map(),
         prober: () => stubProber({ culprit: 1, rates: {} }).prober,
         now: () => new Date('2026-11-20T00:00:00.000Z'),
         log: () => undefined,
       },
     );
-    expect(result.issues.get(regressedId)).toBe(12);
-    expect(calls.filter((call) => call.method === 'POST')).toEqual([
-      { method: 'POST', path: '/repos/taucad/tau/issues/12/labels', body: { labels: [...issueLabels] } },
-    ]);
+    expect([...result.issues.values()]).toEqual([102, 103, 104, 105, 106]);
+    expect(result.bisected?.issue).toBe(102);
+    expect(calls.filter((call) => call.path.endsWith('/labels'))).toHaveLength(5);
   });
 
   it('should only report on a dry run', async () => {
@@ -250,6 +317,52 @@ describe('flake regression invocation', () => {
     expect(requests[0]?.sha).toBe(commitSha(300));
     expect(requests[1]?.sha).toBe(commitSha(200));
     await expect(invoke({ id: 'scripts › src/none.test.ts > none' })).rejects.toThrow('no identity');
+  });
+
+  it('should keep the regression onset of an identity the operator names', async () => {
+    const { result, requests, calls } = await invoke({ id: regressedId });
+    expect(result.bisected?.result).toMatchObject({ outcome: 'culprit', culprit: commitSha(culpritCommit) });
+    expect(requests[0]?.sha).toBe(commitSha(323));
+    expect(bodyOf(calls.find((call) => call.method === 'POST' && call.path.endsWith('/comments')))).toContain(
+      'onset=323',
+    );
+  });
+
+  it('should not need the onset run when the operator gives both commits', async () => {
+    const { result, calls } = await invoke(
+      { id: ordinaryId, good: commitSha(200), bad: commitSha(300) },
+      { stub: { culprit: 250, rates: { 'repeat:alone': 0.5 } } },
+    );
+    expect(result.bisected?.result.outcome).toBe('culprit');
+    expect(calls.some((call) => call.path.includes('/actions/runs/'))).toBe(false);
+  });
+
+  it('should refuse a last stable commit outside the history before posting anything', async () => {
+    const { github, calls } = repository();
+    await expect(
+      runInvocation(
+        { modes: 'repeat', dryRun: false, id: regressedId, good: commitSha(5), bad: commitSha(300) },
+        {
+          github,
+          store: seededStore(),
+          roots: new Map([['scripts', 'scripts']]),
+          prober: () => stubProber({ culprit: 1, rates: {} }).prober,
+          now: () => new Date('2026-11-20T00:00:00.000Z'),
+          log: () => undefined,
+        },
+      ),
+    ).rejects.toThrow('is not among the 249 commits of main before --bad');
+    expect(calls.filter((call) => call.path.endsWith('/comments') && call.method === 'POST')).toEqual([]);
+  });
+
+  it('should not bisect from a merge-queue commit that is not on main, and ask the operator for one', async () => {
+    const queued = await invoke({}, { runEvent: 'merge_group', compareStatus: 'diverged' });
+    expect(queued.requests).toEqual([]);
+    expect(queued.result.bisected?.result).toMatchObject({ outcome: 'inconclusive', probes: [] });
+    expect(queued.result.bisected?.comment).toContain(bisectMarker(323, 'done', '2026-11-20T00:00:00.000Z'));
+    expect(queued.result.bisected?.comment).toContain('needs an operator dispatch');
+    const landed = await invoke({}, { runEvent: 'merge_group', compareStatus: 'behind' });
+    expect(landed.result.bisected?.result.outcome).toBe('culprit');
   });
 
   it('should report a test it cannot dispatch, and an empty ledger, without probing', async () => {
@@ -331,13 +444,13 @@ describe('the flake-repro prober', () => {
     };
     return { value, dispatched, sleeps, calls };
   };
-  const run = (status: string, conclusion: string | undefined) => ({
+  const run = (status: string, conclusion: string | undefined, updatedAt = '2026-11-20T00:31:00.000Z') => ({
     id: 41,
     status,
     conclusion,
     created_at: '2026-11-20T00:00:00.000Z',
     run_started_at: '2026-11-20T00:01:00.000Z',
-    updated_at: '2026-11-20T00:31:00.000Z',
+    updated_at: updatedAt,
     html_url: '',
   });
 
@@ -370,11 +483,20 @@ describe('the flake-repro prober', () => {
   });
 
   it('should wait for a slot and dispatch again when the gate refuses, within a bound', async () => {
-    const refused = deps([run('completed', 'failure')], { refused: true });
+    const refused = deps([run('completed', 'failure', '2026-11-20T00:02:00.000Z')], { refused: true });
     const result = await reproProber(refused.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60 });
     expect(refused.dispatched).toHaveLength(7);
     expect(result.error).toBe('the repro gate refused 7 dispatches');
     expect(result.rows).toEqual([]);
+    expect(result.minutes).toBe(7);
+  });
+
+  it('should spend one probe budget on every dispatch, refused ones included', async () => {
+    const refused = deps([run('completed', 'failure')], { refused: true });
+    const result = await reproProber(refused.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60 });
+    // Each refused run took 30 minutes: the retry gets the 30 left, and nothing is dispatched after that.
+    expect(refused.dispatched.map((inputs) => inputs['minutes'])).toEqual(['60', '30']);
+    expect(result).toMatchObject({ minutes: 60, rows: [], error: "refused dispatches spent the probe's minutes" });
   });
 
   it('should report a run without a report, or one that never finished, as no verdict', async () => {
@@ -398,6 +520,8 @@ describe('the flake-repro prober', () => {
       await reproProber(stuck.value)({ sha: commitSha(9), modes: 'repeat', attempts: 30, minutes: 60 }),
     ).toMatchObject({
       rows: [],
+      // A run still going may use its whole cap: it is charged the cap, not the 30 minutes seen so far.
+      minutes: 60,
       error: 'the run did not finish in time',
     });
   });
@@ -405,6 +529,9 @@ describe('the flake-repro prober', () => {
   it('should read only well-formed rows of a report', () => {
     expect(reportRows(undefined)).toEqual([]);
     expect(reportRows({ rows: 'no' })).toEqual([]);
+    expect(reportRows({ rows: [null, 3, { mode: 'repeat', variant: 'alone', outcomes: { passed: 1 } }] })).toEqual([
+      { key: 'repeat:alone', outcomes: { passed: 1 } },
+    ]);
     expect(
       reportRows({ rows: [{ mode: 'repeat', variant: 'alone', outcomes: { passed: 2, failed: -1, error: 1.5 } }] }),
     ).toEqual([{ key: 'repeat:alone', outcomes: { passed: 2 } }]);

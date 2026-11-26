@@ -464,6 +464,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   useOptionalChatComposer: () => undefined,
 }));
 vi.mock('#chat-clients/chat-turn-host.js', () => ({ ChatTurnHost: () => null }));
+vi.mock('#routes/w.$workspace.$project/chat-sign-in-return.js', () => ({ ChatSignInReturn: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-history.js', () => ({
   ChatHistory: () => <div data-testid='chat-lane' />,
 }));

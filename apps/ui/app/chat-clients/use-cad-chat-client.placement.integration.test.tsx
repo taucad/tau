@@ -250,6 +250,7 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
       return this.get(chatId)?.messages ?? [];
     },
     getProjection: () => undefined,
+    getAttachmentStatus: () => 'unknown',
     respondToProjectedApproval,
     ...partial,
   } as unknown as ChatSessionStore);

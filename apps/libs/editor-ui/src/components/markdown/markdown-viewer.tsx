@@ -7,7 +7,8 @@ import { memo, useMemo } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 import { MarkdownHyperlink } from '#components/markdown/markdown-hyperlink.js';
 import { MarkdownCode } from '#components/markdown/markdown-code.js';
-import { publicationRehypeSanitize } from '#components/markdown/markdown-sanitize.js';
+import { MarkdownImage } from '#components/markdown/markdown-image.js';
+import { markdownRehypeSanitize } from '#components/markdown/markdown-sanitize.js';
 
 type MarkdownViewerProps = {
   readonly children: string;
@@ -34,6 +35,7 @@ type MarkdownViewerProps = {
 export const defaultMarkdownComponents = {
   code: MarkdownCode,
   a: MarkdownHyperlink,
+  img: MarkdownImage,
 } as Components;
 
 export const defaultMarkdownControls = {
@@ -86,7 +88,7 @@ export const MarkdownViewer = memo(function ({
       ...(rehypePluginsBeforeHarden ?? []),
       ...(hardenPlugin === undefined ? [] : [hardenPlugin]),
       ...(additionalRehypePlugins ?? []),
-      ...publicationRehypeSanitize,
+      ...markdownRehypeSanitize,
     ],
     [additionalRehypePlugins, rehypePluginsBeforeHarden],
   );

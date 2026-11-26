@@ -1989,7 +1989,7 @@ it('should reject expired supplier rates using database admission time despite a
   request.invocation.supplierRatesValidUntil = '2021-01-01T00:00:00.000Z';
   const processClock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2020-01-01T00:00:00.000Z'));
   try {
-    expect(await firstLedger.admitOperation(request)).toEqual({ status: 'denied', reason: 'policy_unavailable' });
+    expect(await firstLedger.admitOperation(request)).toEqual({ status: 'denied', reason: 'route_rates_expired' });
   } finally {
     processClock.mockRestore();
   }

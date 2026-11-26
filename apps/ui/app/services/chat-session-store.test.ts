@@ -8162,6 +8162,36 @@ describe('ChatSessionStore — composer records (W7)', () => {
     reopened.release(chatId);
   });
 
+  it.each([
+    ['a trailing newline', 'model the bracket\n'],
+    ['a trailing space', 'model the bracket '],
+    ['leading whitespace', '\n model the bracket'],
+  ])('clears a sent draft that ends up queued when its text has %s', async (_case, typed) => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    session.draftActorRef.send({ type: 'setDraftText', text: typed });
+
+    /* The message carries the composed text, which `buildUserMessage` trims; the draft is what the editor holds. */
+    await store.requestTurn(chatId, { kind: 'send', message: buildUserMessage({ text: typed }) });
+
+    expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+    store.release(chatId);
+  });
+
+  it('keeps text typed after a send was composed, though it differs only past the sent text', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    const message = buildUserMessage({ text: 'model the bracket' });
+    session.draftActorRef.send({ type: 'setDraftText', text: 'model the bracket\nand a second one' });
+
+    await store.requestTurn(chatId, { kind: 'send', message });
+
+    expect(session.draftActorRef.getSnapshot().context.draftText).toBe('model the bracket\nand a second one');
+    store.release(chatId);
+  });
+
   /* PERF-8: a send writes the outbox, then the composer's cleared draft. A reload between the two restored the queued
    * prompt as a draft, and the next one typed was queued as "Prompt 4.Prompt 3.". */
   it('should not restore a queued send as the draft when a reload lands before the composer is cleared', async () => {
@@ -8206,12 +8236,16 @@ describe('ChatSessionStore — composer records (W7)', () => {
     { name: 'a draft that differs from every queued send', draft: 'Prompt 4.', held: false, kept: true },
     { name: 'a draft equal to a held send on its way to the composer', draft: 'Prompt 3.', held: true, kept: true },
     { name: 'a draft equal to a queued send', draft: 'Prompt 3.', held: false, kept: false },
+    { name: 'a draft equal to a queued send but for a trailing space', draft: 'Prompt 3. ', held: false, kept: false },
   ])('should restore $name: kept $kept (PERF-8)', async ({ draft, held, kept }) => {
     const client = createMemoryClient();
     const queued = buildUserMessage({ text: 'Prompt 3.' });
     await client.writeFile(
       composerPath(projectId, chatId),
-      new TextEncoder().encode(JSON.stringify({ version: 1, draft: { ...buildUserMessage({ text: draft }), id: '' } })),
+      /* The composer record holds the editor's raw text, which `buildUserMessage` would trim. */
+      new TextEncoder().encode(
+        JSON.stringify({ version: 1, draft: { id: '', role: 'user', parts: [{ type: 'text', text: draft }] } }),
+      ),
     );
     await client.writeFile(
       chatMessageQueuePath(projectId, chatId),

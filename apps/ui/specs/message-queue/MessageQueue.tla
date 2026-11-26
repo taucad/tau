@@ -188,6 +188,14 @@
 \* chat's host read met before a seed's command could, as the chat's error once the chat has loaded. The seed stays
 \* held, as before, until a host read answers; delivery, persistence and the queue are untouched. No action or verdict
 \* changes.
+\* Launch audit first fixes (2026-11-25): `chat-session-store.ts` compares the composer's draft with a sent message in
+\* the composed form before it clears the draft or returns the message to it. `use-turn-admission.ts` refuses a
+\* signed-out person's turn on the existing refused-admission path and records the refused gesture's identity and kind
+\* on the saved error; `chat-turn-host.tsx` and `use-cad-chat-client.ts` pass that kind. Delivery, persistence and the
+\* queue barrier are unchanged. No action or verdict changes.
+\* Launch audit review fixes (2026-11-25): `use-cad-chat-client.ts` names a refused attachment send or edit by its own
+\* gesture kind instead of always `send`. Delivery, persistence and the queue barrier are unchanged. No action or
+\* verdict changes.
 \* Chat UX F1/F2 (2026-11-25): a send made with nothing running is shown in the thread while it is admitted,
 \* not as a queue row. Stop during that admission, or a host refusal of it, withdraws the entry (Withdraw): an
 \* unprepared, unsteered, never-accepted entry leaves the queue and the submitted set and returns to the composer,
@@ -254,6 +262,8 @@
 \* slot for the draft's comment list. Dispatch, acknowledgement and the queue are untouched. No action or verdict
 \* changes.
 \* The flatten step and its painter load on demand as one module (`annotated-send.ts`), in the same place and order.
+\* Launch audit merged with PERF-8 (2026-11-26): the restored draft is matched to an outbox entry in the composed form,
+\* as a sent draft is, so a draft with trailing whitespace is let go too. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

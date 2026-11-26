@@ -55,7 +55,7 @@ import {
 } from '#harness/cad-middleware.js';
 import { omitAttachments, planAttachmentOmissions } from '#transport/document-payload.js';
 import type { ClientContext, RecentSkillsPort } from '#harness/cad-middleware.js';
-import { installCompaction, isCompactionSummaryRow } from '#harness/compaction.js';
+import { installCompaction, isCompactionSummaryRow, isPersonsContextMessage } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
 import { agentHistory } from '#harness/agent-context.js';
 import { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
@@ -1696,8 +1696,13 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   );
   const safeguards = createAgentSafeguards({
     thresholds: options.safeguardThresholds,
+    isPersonsMessage: (message) => isPersonsContextMessage(message, record.messages),
     recordOutcome: options.onSafeguardOutcome,
-    firedSignatures: initialEvents.flatMap((event) => (event.type === 'safeguard.recorded' ? [event.safeguardId] : [])),
+    nudgeSignatureOf: (message) => {
+      const internal = record.messages.metadata(message)?.tauInternal;
+      const anchorId = internal?.['anchorId'];
+      return internal?.['kind'] === 'safeguard' && typeof anchorId === 'string' ? anchorId : undefined;
+    },
     record: async (decision, reminder) => {
       if (decision.kind === 'terminate') {
         await record.append({
@@ -1711,7 +1716,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       if (reminder?.role !== 'user') {
         throw new TypeError('A safeguard nudge must commit the exact user reminder it delivers.');
       }
-      const id = `tau:safeguard:${decision.signature}`;
+      /* A signature is reminded once per window, not once per chat: a later turn that repeats the loop is reminded
+       * again, so the reminder's id is its own, and the signature stays its anchor. */
+      const id = `tau:safeguard:${decision.signature}:${createId()}`;
       const metadata = {
         tauInternal: {
           kind: 'safeguard',
@@ -2126,7 +2133,20 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     onCompaction: options.onCompaction,
     now: () => now().getTime(),
   });
-  const continueWithoutPreparation = agent.continue.bind(agent);
+  let abortRequested = false;
+  /* Read through a call: an abort lands while the turn awaits, which narrowing cannot see. */
+  const wasAbortRequested = (): boolean => abortRequested;
+  const startLoop = agent.continue.bind(agent);
+  /* Pi runs its loop under an abort controller it makes when the loop starts, so a Stop that landed before then has
+   * nothing of pi's to abort: the loop would start regardless, send its request and run every tool the model called
+   * (launch audit C-3). Every start of the loop passes this one check, in the tick pi registers its run; a Stop after
+   * it reaches pi's controller. */
+  const continueWithoutPreparation = async (): Promise<void> => {
+    if (wasAbortRequested()) {
+      return;
+    }
+    await startLoop();
+  };
   /* A nudge the safeguards append joins the run's live context, not only the one request that first carried it:
    * the next request then reproduces this one byte for byte (I1) without waiting for the between-turn projection
    * to read the nudge back from the log, and pi's own state agrees with that log. */
@@ -2155,9 +2175,6 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
 
   let state: RunLifecycleState = 'admitted';
   let turnId = initialHistory.findLast((message) => message.role === 'user')?.id ?? options.runId;
-  let abortRequested = false;
-  /* Read through a call: an abort lands while the turn awaits, which narrowing cannot see. */
-  const wasAbortRequested = (): boolean => abortRequested;
   let ran = false;
   let lastFinal: AgentMessage | undefined;
   const runAbortController = new AbortController();
@@ -2187,6 +2204,14 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     ) {
       /* Pi's abort result is provisional while the already-dispatched tool still owns the real result. */
       return;
+    }
+    if (event.type === 'turn_end') {
+      /* The batch is over, and whatever pi appends next belongs to a later step. A tool the stream dispatched that
+       * pi then never ran (the run was stopped between the reply that made the call and its batch, where pi answers
+       * the first call with a provisional result and skips the rest) records its own result now, directly after its
+       * call. Left to the end of the loop it landed after the assistant row the stopped run writes next, and every
+       * later request carried two results for the one call. */
+      await settlePrestartedTools();
     }
     await appendAgentEvent({ event, record, toolInputIds, toolOutputs, committedMessageIds, createId });
     if (event.type === 'agent_end') {

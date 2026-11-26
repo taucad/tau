@@ -853,6 +853,18 @@ export function stampMessageCreatedAt(messages: MyUIMessage[]): MyUIMessage[] {
 }
 
 /**
+ * The text a draft becomes when it is sent.
+ *
+ * The editor's draft keeps the whitespace the person typed around it (a Shift+Enter, a trailing space, a pasted
+ * newline); the message does not. Whoever asks "is this draft the text that message took?" composes the draft the same
+ * way first, so the answer cannot differ from the message by the builder's own normalisation.
+ *
+ * @param draftText - The composer's text, as the editor holds it.
+ * @returns The text the message carries.
+ */
+export const composeDraftText = (draftText: string): string => draftText.trim();
+
+/**
  * The one user-message builder for every chat verb that sends what the person
  * composed (submit, edit).
  *
@@ -873,7 +885,7 @@ export function buildUserMessage(input: {
   /** The draft's comments and annotated pictures. */
   readonly annotations?: MessageAnnotations;
 }): MyUIMessage {
-  const text = input.text.trim();
+  const text = composeDraftText(input.text);
   const references = messageReferences(text, input.references ?? []);
   return {
     id: generatePrefixedId(idPrefix.message),

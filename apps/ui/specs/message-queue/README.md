@@ -121,6 +121,10 @@ UI layering W5 re-pinned the drift after `chat-session-store.ts` began importing
 
 The FP10 held-seed fix re-pinned the drift after `chat-session-store.ts` began showing an agent host load failure that the chat's host read met before a seed's command could; the seed stays held until a host read answers, and no action changed.
 
+The launch audit's first fixes re-pinned the drift after `chat-session-store.ts` began comparing the composer's draft with a sent message in the composed form, `use-turn-admission.ts` began refusing a signed-out person's turn on the existing refused-admission path and recording the refused gesture on the saved error, and `chat-turn-host.tsx` and `use-cad-chat-client.ts` began passing that gesture's kind; no action changed.
+
+The launch audit's review fixes re-pinned the drift after `use-cad-chat-client.ts` began naming a refused attachment send or edit by its own gesture kind; no action changed.
+
 Chat UX F1/F2 (send/queue/stop lifecycle) re-pinned the drift after the session machine gained `withdrawTurn` (version 5), `chat-session-store.ts` gained the departing-send presentation, withdrawal and refused-admission return, `chat-message-queue.tsx` left the departing entry out of the strip, and `use-chat.tsx` exposed `departingMessageId`. `MessageQueue.tla` gained `Withdraw`, which removes an unprepared, unsteered, never-accepted entry from the queue and the submitted set; the target config passes and every witness config still fails on its own invariant (see "Departing sends, withdrawal and retraction").
 
 The chat UX review re-pinned the drift after the gate moved into `outbox-gate.ts` (now a hashed source), `Withdraw` began returning the message to `composer` and holding the rest of the queue, and the host gained the `TURN_WITHDRAWN` take-back code. `ComposerExclusive` and `HeldWaitsForPerson` joined the target, which passes; the new `withdraw-releases-held` witness fails on `HeldWaitsForPerson`, and every other witness still fails on its own invariant.
@@ -144,3 +148,5 @@ Chat UX F1/F2 merged with T2 re-pinned the drift: the departing send is shown on
 The second automated review re-pinned the drift after the gate held a send being taken back ahead of every other reason, a replayed send kept its accepted gesture, a handoff was reconciled with the log at once, the compatibility cancel stopped retrying once its Stop settled, and the return to the composer copied its bytes first, moved under the delivery lock and waited for the composer's record; no action changed.
 
 Comment pins S1 re-pins the drift after `use-cad-chat-client.ts` flattened a message's commented images before building it (after the queue intent is captured, sending nothing on failure), `chat-session-store.ts` gained a reader of the draft's attachment bytes, `use-chat.tsx` the draft's annotations, and `chat-textarea.tsx` a slot for the draft's comment list; no action changed. The flatten step and its painter then moved behind one on-demand module, in the same place and order.
+
+The launch audit merged with PERF-8 re-pinned the drift after `chat-session-store.ts` began matching a restored draft to an outbox entry in the composed form, as it already compared a sent draft, so a restored draft with trailing whitespace is let go too; no action changed.

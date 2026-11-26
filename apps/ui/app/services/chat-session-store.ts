@@ -80,7 +80,7 @@ import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store
 import { resizeImageActor } from '#hooks/attachment-image.actor.js';
 import { clearLedger } from '@taucad/chat-ui/services/rpc-ledger';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
-import { buildEditedUserMessage } from '#utils/chat.utils.js';
+import { buildEditedUserMessage, composeDraftText } from '#utils/chat.utils.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
@@ -703,9 +703,25 @@ type ChatSessionLivenessDebugGlobal = typeof globalThis & {
  */
 const composedText = (message: MyUIMessage): string => message.parts.find((part) => part.type === 'text')?.text ?? '';
 
-/** What a message says and carries, comparable whatever order its parts were built in. */
+/**
+ * What a message says and carries, comparable whatever order its parts were built in. The text is taken in its composed
+ * form, so a draft built from the editor's raw text compares equal to the message sent from it.
+ */
 const compositionOf = (message: MyUIMessage): string =>
-  JSON.stringify([composedText(message), message.parts.flatMap((part) => (part.type === 'file' ? [part.url] : []))]);
+  JSON.stringify([
+    composeDraftText(composedText(message)),
+    message.parts.flatMap((part) => (part.type === 'file' ? [part.url] : [])),
+  ]);
+
+/**
+ * Whether the composer still holds exactly what a sent message took out of it.
+ *
+ * The draft is the editor's raw text and the message is the composed one, so the two are compared in the composed
+ * form. Comparing them raw left every draft with a trailing newline or space in the composer after it was queued, where
+ * a second Enter sent it again.
+ */
+const draftIsOf = (draftText: string, message: MyUIMessage): boolean =>
+  composeDraftText(draftText) === composedText(message);
 
 /**
  * Park a send after the person's Stop: it leaves only by their Send now. A steer it carried was this send's own way out
@@ -1963,7 +1979,7 @@ export class ChatSessionStore {
     /* The thread or the strip shows it from the write on, even while a delivery elsewhere holds the outbox. */
     this.#loadOutbox(session, record);
     const draft = session.draftActorRef.getSnapshot().context;
-    if (draft.draftText === '' || draft.draftText === composedText(gesture.message)) {
+    if (draft.draftText === '' || draftIsOf(draft.draftText, gesture.message)) {
       session.draftActorRef.send({ type: 'clearDraft' });
       try {
         await this.releaseDraftAttachments(chatId);
@@ -3914,7 +3930,7 @@ export class ChatSessionStore {
      * person may have typed the next message into the same box. Neither the
      * clear nor a returning message may land on that. */
     const { draftText } = session.draftActorRef.getSnapshot().context;
-    if (gesture.kind === 'send' && draftText !== '' && draftText !== composedText(gesture.message)) {
+    if (gesture.kind === 'send' && draftText !== '' && !draftIsOf(draftText, gesture.message)) {
       return;
     }
     /* An `edit` and a `regenerate` rewind to a message the transcript still

@@ -16,7 +16,7 @@ import type {
   QualifiedBillableInvocation,
 } from '#billable-model-invocation.types.js';
 import type { InputCountCapability } from '#billable-model-input-count.js';
-import { CreditLedgerService } from '#credit-ledger.service.js';
+import { CreditLedgerService, StaleCreditOperationGenerationError } from '#credit-ledger.service.js';
 import type { BillingPolicyService } from '#billing-policy.service.js';
 import type { DatabaseService } from '@taucad/api-database';
 import type { QualifiedAdmissionInput, TerminalEvidence, TerminalReceipt } from '#credit-ledger.types.js';
@@ -629,6 +629,7 @@ describe('BillableModelInvocationService', () => {
       markDispatchIntent: vi.fn(async () => true),
       getDispatchTimeRemaining: vi.fn(async () => qualified.invocation.executionTimeout),
       recordInvocationEvidence: vi.fn(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
     };
     const service = new BillableModelInvocationService(
       ledger as unknown as CreditLedgerService,
@@ -925,6 +926,134 @@ describe('BillableModelInvocationService', () => {
       expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ evidence: recorded?.evidence }),
       );
+    });
+  });
+
+  /* Launch audit D-2. A supplier-side end is as final as a client's Stop: nothing further can price the step, and
+   * the host's retry of a lost reply, a Resume and the chat's next message ask about this attempt before they start.
+   * Left pending, they waited for `due_at` plus the recovery grace: about ten minutes with nothing happening. */
+  describe('a step the supplier ended without complete usage', () => {
+    const admitted = (qualified: QualifiedBillableInvocation) => {
+      const row = {
+        ...qualified,
+        id: 'operation',
+        accountId: 'account',
+        environment: 'development',
+        activity: 'agent',
+        requestDigest: '',
+        customerState: 'pending',
+        dueAt: new Date(Date.now() + 30_000),
+      };
+      const ledger = {
+        getOperationForAttempt: vi
+          .fn()
+          .mockResolvedValueOnce(undefined)
+          .mockImplementation(async () => row),
+        issueCurrentPromotion: vi.fn(),
+        admitOperation: vi.fn(async () => ({ status: 'admitted', operationId: 'operation', generation: 0n })),
+        markDispatchIntent: vi.fn(async () => true),
+        markDispatchAccepted: vi.fn(async () => true),
+        getDispatchTimeRemaining: vi.fn(async () => 30_000),
+        recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
+        recordCancellation: vi.fn(),
+        terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
+      };
+      const service = new BillableModelInvocationService(
+        ledger as unknown as CreditLedgerService,
+        { resolve: () => qualified },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+        new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+        undefined,
+        new ShutdownService(),
+      );
+      row.requestDigest = (
+        service as unknown as {
+          requestDigest(value: ReturnType<typeof intent>, pins: QualifiedBillableInvocation): string;
+        }
+      ).requestDigest(intent(), qualified);
+      return { ledger, service };
+    };
+
+    const openAiResponses = (): QualifiedBillableInvocation => {
+      const qualified = { ...qualification(), maximumResponseBytes: 64 * 1024 };
+      qualified.adapter.createEvidenceCollector = () =>
+        createBillableModelEvidenceCollector('openai-responses', new Set(['uncached_input']), 'openai');
+      return qualified;
+    };
+
+    it('should settle at once a step whose supplier connection dropped mid-stream', async () => {
+      const qualified = openAiResponses();
+      const encoder = new TextEncoder();
+      let pulls = 0;
+      qualified.adapter.executeOnce = vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array<ArrayBuffer>>({
+              pull(controller) {
+                pulls += 1;
+                if (pulls === 1) {
+                  controller.enqueue(
+                    encoder.encode('data: {"type":"response.output_text.delta","delta":"partial"}\n\n'),
+                  );
+                  return;
+                }
+                /* What undici reports when the supplier resets the connection mid-body. */
+                controller.error(new TypeError('terminated'));
+              },
+            }),
+          ),
+      );
+      const { ledger, service } = admitted(qualified);
+
+      const result = await service.invoke(intent());
+      if (result.state !== 'streaming') {
+        throw new Error('Invocation did not stream');
+      }
+      /* The client keeps reading (no Stop, no disconnect) and sees the relayed stream fail. */
+      await expect(result.response.text()).rejects.toThrow();
+      await result.completion;
+
+      const recorded = ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0];
+      expect(recorded?.evidence).toMatchObject({ kind: 'absorbed_unknown' });
+      expect(ledger.recordCancellation).not.toHaveBeenCalled();
+      expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ evidence: recorded?.evidence }),
+      );
+    });
+
+    it('should settle at once a step whose supplier request failed before any response', async () => {
+      const qualified = openAiResponses();
+      qualified.adapter.executeOnce = vi.fn(async () => {
+        throw new TypeError('fetch failed');
+      });
+      const { ledger, service } = admitted(qualified);
+
+      await expect(service.invoke(intent())).rejects.toThrow('The model provider is unavailable.');
+
+      const recorded = ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0];
+      expect(recorded?.evidence).toMatchObject({ kind: 'absorbed_unknown' });
+      expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ evidence: recorded?.evidence }),
+      );
+    });
+
+    /* A request that fails at its deadline races the recovery sweep for the row; the sweep's claim makes this
+     * generation stale. The row is then recovery's, and the caller still gets the typed refusal. */
+    it('should still answer the typed refusal when recovery has already claimed the step', async () => {
+      const qualified = openAiResponses();
+      qualified.adapter.executeOnce = vi.fn(async () => {
+        throw new TypeError('fetch failed');
+      });
+      const { ledger, service } = admitted(qualified);
+      ledger.terminalizeOperation.mockRejectedValue(new StaleCreditOperationGenerationError());
+      const logged = vi.spyOn(Logger.prototype, 'error');
+
+      await expect(service.invoke(intent())).rejects.toSatisfy(
+        (error: unknown) => error instanceof LlmGatewayError && gatewayErrorType(error) === 'PROVIDER_UNAVAILABLE',
+      );
+      /* The sweep's settlement is an expected end, not a failed one. */
+      expect(logged).not.toHaveBeenCalled();
+      logged.mockRestore();
     });
   });
 
@@ -1337,6 +1466,78 @@ describe('BillableModelInvocationService', () => {
     expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
   });
 
+  it('should answer a route whose published rates have expired as a route to switch from, never a provider outage', async () => {
+    const qualified = qualification();
+    const metrics = { ...genAiMetrics(), billingFundedOperationDenials: { add: vi.fn() } };
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'denied', reason: 'route_rates_expired' })),
+      recoverDueLlmOperationsForOwner: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      metrics as unknown as MetricsService,
+    );
+
+    const refusal = await service.invoke(intent()).catch((error: unknown) => error);
+
+    if (!(refusal instanceof LlmGatewayError)) {
+      throw new TypeError('Expected a typed gateway refusal');
+    }
+    /* Resuming re-sends to the same route and meets the same refusal; the client's card for this code offers the
+     * model switch and no Resume. */
+    expect(refusal.getStatus()).toBe(503);
+    expect(refusal.getResponse()).toEqual({
+      type: 'error',
+      error: {
+        type: 'MODEL_ROUTE_PAUSED',
+        message: 'This model route is paused: its published price has expired.',
+        details: { routeId: qualified.routeId },
+      },
+    });
+    expect(metrics.billingFundedOperationDenials.add).toHaveBeenCalledExactlyOnceWith(1, {
+      'deployment.environment': 'development',
+      'tau.billing.capacity_pool': 'primary',
+      'tau.billing.denial.reason': 'route_rates_expired',
+    });
+    expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+  });
+
+  it('should keep an admission reason it has no answer for out of the sentence a person reads', async () => {
+    const qualified = qualification();
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'denied', reason: 'policy_unavailable' })),
+      recoverDueLlmOperationsForOwner: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+    );
+
+    const refusal = await service.invoke(intent()).catch((error: unknown) => error);
+
+    if (!(refusal instanceof LlmGatewayError)) {
+      throw new TypeError('Expected a typed gateway refusal');
+    }
+    expect(refusal.getStatus()).toBe(503);
+    expect(refusal.getResponse()).toEqual({
+      type: 'error',
+      error: {
+        type: 'PROVIDER_UNAVAILABLE',
+        message: 'Tau cannot start requests to this model right now. Try again shortly, or switch to another model.',
+        details: { admissionDenial: 'policy_unavailable' },
+      },
+    });
+  });
+
   it('should answer a restricted account with 403 BILLING_ACCOUNT_RESTRICTED, never a provider outage', async () => {
     const qualified = qualification();
     const ledger = {
@@ -1370,6 +1571,8 @@ describe('BillableModelInvocationService', () => {
     const retired = [
       ['This model route is paused while Tau reconciles', 'its supplier evidence'].join(' '),
       ['Model admission failed:', 'account_restricted'].join(' '),
+      // An admission reason interpolated into the sentence a person reads.
+      'Model admission failed: $'.concat('{'),
     ];
     // The API's source: the app and the server libraries it is composed from.
     const apps = resolve(import.meta.dirname, '../../..');
@@ -1947,7 +2150,7 @@ describe('BillableModelInvocationService', () => {
       expect(unlabelled.llmTurnStepCacheOutcomes.add).not.toHaveBeenCalled();
     });
 
-    it('records neither tokens nor cost for an operation left pending for recovery', async () => {
+    it('records no tokens for a step that ended without the usage its route prices, and settles it absorbed', async () => {
       const qualified = qualification();
       qualified.adapter.createEvidenceCollector = () => ({
         accept: vi.fn(),
@@ -1965,9 +2168,17 @@ describe('BillableModelInvocationService', () => {
       await result.response.text();
       await result.completion;
 
-      expect(ledger.terminalizeOperation).not.toHaveBeenCalled();
+      /* The supplier stream is over, so no later evidence can price the step: it does not wait for recovery. */
+      expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          evidence: {
+            kind: 'absorbed_unknown',
+            meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 9n }],
+          },
+        }),
+      );
+      /* An absorbed step's partial meters are not usage it was charged for. */
       expect(metrics.genAiTokenUsage.record).not.toHaveBeenCalled();
-      expect(metrics.genAiCost.add).not.toHaveBeenCalled();
     });
 
     it('records cache reads and writes as their own token types', async () => {

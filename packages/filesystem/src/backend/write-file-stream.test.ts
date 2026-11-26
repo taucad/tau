@@ -277,9 +277,12 @@ describe('writeFileStream', () => {
     };
     const stagedLeft = async (root: ReturnType<typeof createMockRootHandle>): Promise<string[]> => {
       const names: string[] = [];
-      const staging = await (root as unknown as FileSystemDirectoryHandle).getDirectoryHandle(opfsStagingDirectory, {
-        create: true,
-      });
+      /* The provider's staging directory, one segment at a time as OPFS names it. */
+      let staging = root as unknown as FileSystemDirectoryHandle;
+      for (const segment of opfsStagingDirectory.split('/')) {
+        // oxlint-disable-next-line no-await-in-loop -- each segment opens inside the last.
+        staging = await staging.getDirectoryHandle(segment);
+      }
       for await (const [owner, handle] of (
         staging as unknown as { entries(): AsyncIterable<[string, FileSystemDirectoryHandle]> }
       ).entries()) {

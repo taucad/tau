@@ -97,10 +97,10 @@ const rowAnchor = (row: IgnoreRegistryRow): string => {
  *   the directory, so the `!` line after it can re-include each versioned row
  *   inside it — which `/<dir>/` would make impossible.
  * - An unversioned row the head already covers (anchored, inside the reserved
- *   directory) gets no line of its own: `/.tau/*` excludes `.tau/chats` as
- *   surely as `/.tau/chats/` would.
+ *   directory, under no versioned row a `!` line re-includes) gets no line of
+ *   its own: `/.tau/*` excludes `.tau/chats` as surely as `/.tau/chats/` would.
  * - A {@link IgnoreRegistryRow.selfIgnored} row gets no line: Git never walks
- *   into `.git`, and Jujutsu ignores its own store.
+ *   into `.git`.
  * - Every other unversioned row is one line, anchored with a leading `/` when it
  *   is Tau's only at the root. An unanchored prefix with no inner `/` already
  *   matches at any depth; one with an inner `/` is spelled `**\/`, because git
@@ -120,6 +120,11 @@ const rowAnchor = (row: IgnoreRegistryRow): string => {
 export const generatedIgnoreEntries = ({ rows, reservedDirectory }: IgnoreLayout): readonly string[] => {
   const inReserved = (row: IgnoreRegistryRow): boolean =>
     reservedDirectory !== undefined && row.prefix.startsWith(`${reservedDirectory}/`);
+  /* A `!` line re-includes its row's whole subtree, so a row beneath one is no longer under the head. */
+  const coveredByHead = (row: IgnoreRegistryRow): boolean =>
+    row.anchored &&
+    inReserved(row) &&
+    !rows.some((other) => other.versioned && inReserved(other) && row.prefix.startsWith(`${other.prefix}/`));
   return [
     /* ponytail: one negation re-includes a direct member only; a versioned row
      * nested deeper (`.tau/a/b`) needs a `!/.tau/a/` + `/.tau/a/*` chain. The
@@ -135,7 +140,7 @@ export const generatedIgnoreEntries = ({ rows, reservedDirectory }: IgnoreLayout
             .map((row) => `!/${row.prefix}`),
         ]),
     ...rows
-      .filter((row) => !row.versioned && row.selfIgnored !== true && !(row.anchored && inReserved(row)))
+      .filter((row) => !row.versioned && row.selfIgnored !== true && !coveredByHead(row))
       .map((row) => `${rowAnchor(row)}${rowPattern(row)}`),
   ];
 };

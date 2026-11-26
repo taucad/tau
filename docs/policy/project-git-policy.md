@@ -27,6 +27,7 @@ The generated ignore block is the one Tau artifact a person reads in their own c
 !/.tau/machines
 !/.tau/skills
 !/.tau/AGENTS.md
+.jj
 /exports/
 /thumbnail.webp
 node_modules/
@@ -64,13 +65,13 @@ INCORRECT:
 
 ### 3. Never ignore what Git or its owning tool already leaves untracked
 
-Git's directory walk never enters an entry named `.git` (directory or pointer file) at any depth, and Jujutsu writes `.jj/.gitignore` containing `/*` into every store it makes. Mark such registry rows `selfIgnored: true`; they stay control-plane (hidden, unversioned, refused by every view) but take no ignore line. Mark a row `selfIgnored` only with a stock-Git test that proves Git leaves it untracked without Tau's block.
+Git's directory walk never enters an entry named `.git` (directory or pointer file) at any depth. Mark such registry rows `selfIgnored: true`; they stay control-plane (hidden, unversioned, refused by every view) but take no ignore line. Mark a row `selfIgnored` only with a stock-Git test that proves Git leaves it untracked without Tau's block.
 
-| Store         | Why Git leaves it untracked                                | Ignore line |
-| ------------- | ---------------------------------------------------------- | ----------- |
-| `.git`        | Git skips every `.git` entry in its walk (`dir.c`)         | none        |
-| `.jj`         | Jujutsu writes `.jj/.gitignore` = `/*`                     | none        |
-| `.hg`, `.svn` | Nothing; not a registry row (shell-grant denies them only) | n/a         |
+| Store         | Why Git leaves it untracked                                                                                     | Ignore line       |
+| ------------- | --------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `.git`        | Git skips every `.git` entry in its walk (`dir.c`)                                                              | none              |
+| `.jj`         | Only a store colocated with Git gets Jujutsu's own `.jj/.gitignore` (`/*`); a nested non-colocated one has none | `.jj`, unanchored |
+| `.hg`, `.svn` | Nothing; not a registry row (shell-grant denies them only)                                                      | n/a               |
 
 ### 4. The only negations are re-includes of authored `.tau` controls
 
@@ -109,7 +110,7 @@ Moving a Tau-owned path (as `.tau-staging` → `.tau/staging`) ships as a breaki
 ## Anti-Patterns
 
 - Re-emitting a `.tau/*` row "so the file names every family".
-- Adding `**/.git`, `**/.jj`, `.DS_Store`, editor or OS patterns to Tau's block; the person's own lines or global excludes own those.
+- Adding `**/.git`, `.DS_Store`, editor or OS patterns to Tau's block; the person's own lines or global excludes own those.
 - A new top-level dot-folder (`.tau-<thing>`) for a Tau implementation detail.
 - Asserting the block with `toContain` instead of the literal pin, which lets a redundant line slip in unreviewed.
 

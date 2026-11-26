@@ -57,9 +57,10 @@ export type PathRegistryRow = PathClassification &
     directory: boolean;
     /**
      * Whether stock Git already leaves this path untracked without a line from
-     * Tau: `.git` is Git's own store, which its directory walk never enters, and
-     * Jujutsu writes `.jj/.gitignore` (`/*`) into every store it makes. The
+     * Tau: `.git` is Git's own store, which its directory walk never enters. The
      * generated ignore block omits such a row (project Git policy, rule 3).
+     * `.jj` is not one: Jujutsu writes its own `.jj/.gitignore` only in a store
+     * colocated with Git, so a nested non-colocated store needs Tau's line.
      */
     selfIgnored?: boolean;
   }>;
@@ -132,10 +133,9 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
   /* Control plane: hidden from every composed view, refused before provider
    * I/O. A revision hash never covers its own store — its own or a vendored
    * dependency's, a submodule's, a second project's (EQ1, CI1), which is why
-   * the store rows match a segment. Stock Git already leaves both stores
-   * untracked at every depth (`selfIgnored`), so they need no ignore line; the
-   * two `.tau` rows are root-only and fall under the block's `/.tau/*` head
-   * (PP5).
+   * the store rows match a segment. Stock Git never walks into `.git`
+   * (`selfIgnored`), so only `.jj` takes an ignore line, unanchored; the two
+   * `.tau` rows are root-only and fall under the block's `/.tau/*` head (PP5).
    *
    * They lead the table because {@link classify} takes the *first* match: behind
    * the rows below, a store vendored into `node_modules` was the cache's and one
@@ -164,7 +164,6 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     anchored: false,
     match: 'segment',
     directory: true,
-    selfIgnored: true,
   },
   {
     prefix: '.git',

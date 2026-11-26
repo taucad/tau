@@ -116,14 +116,39 @@ describe('generated ignore file', () => {
     );
   });
 
-  /* Git never walks into `.git` and Jujutsu ignores its own store, so neither
-   * takes a line; `node_modules` keeps its slash (a file of that name is not the
-   * cache) and needs no `**\/`, since a bare name matches at any depth. */
-  it('should leave self-ignored stores to Git and spell node_modules bare', () => {
+  /* Git never walks into `.git`, so it takes no line. Jujutsu ignores its own
+   * store only when colocated with Git, so `.jj` keeps one, bare and without a
+   * slash (it also covers a pointer file). `node_modules` keeps its slash (a
+   * file of that name is not the cache) and needs no `**\/` either. */
+  it('should leave .git to Git and spell the any-depth rows bare', () => {
     const entries = generatedIgnoreEntries(tauRevisionPolicy);
 
-    expect(entries.filter((entry) => entry.includes('.git') || entry.includes('.jj'))).toStrictEqual([]);
+    expect(entries.filter((entry) => entry.includes('.git'))).toStrictEqual([]);
+    expect(entries).toContain('.jj');
     expect(entries).toContain('node_modules/');
+  });
+
+  /* A `!` line re-includes its row's whole subtree, so an unversioned row
+   * beneath a re-included one keeps its own line (CodeRabbit on tau#2909). */
+  it('should keep a line for an unversioned row beneath a re-included one', () => {
+    const row = { class: 'records', versioned: false, agentAccess: 'read-only', watch: 'ui', directory: true } as const;
+    const entries = generatedIgnoreEntries({
+      reservedDirectory: '.tau',
+      rows: [
+        { ...row, prefix: '.tau/skills/private', anchored: true },
+        {
+          ...row,
+          class: 'authored',
+          versioned: true,
+          agentAccess: 'read-write',
+          prefix: '.tau/skills',
+          anchored: true,
+        },
+        { ...row, prefix: '.tau/chats', anchored: true },
+      ],
+    });
+
+    expect(entries).toStrictEqual(['/.tau/*', '!/.tau/skills', '/.tau/skills/private/']);
   });
 
   /* The whole block, literally: it is the one artifact a person reads in their
@@ -137,6 +162,7 @@ describe('generated ignore file', () => {
 !/.tau/machines
 !/.tau/skills
 !/.tau/AGENTS.md
+.jj
 /exports/
 /thumbnail.webp
 node_modules/
@@ -196,6 +222,8 @@ node_modules/
           '.jj/repo/store/x': true,
           'vendor/.jj/.gitignore': true,
           'vendor/.jj/working_copy/x': true,
+          /* A non-colocated store: Jujutsu writes no `.gitignore` into it. */
+          'lib/dep/.jj/repo/store/x': true,
           'exports/part.step': true,
           'thumbnail.webp': true,
           'lib/node_modules/dep/index.js': true,
@@ -209,7 +237,7 @@ node_modules/
         await Promise.all(
           Object.keys(paths).map(async (path) => {
             await mkdir(join(root, path, '..'), { recursive: true });
-            /* Jujutsu writes `/*` into every store's own `.gitignore`. */
+            /* Jujutsu writes `/*` into a colocated store's own `.gitignore`. */
             await writeFile(join(root, path), path.endsWith('.jj/.gitignore') ? '/*\n' : '');
           }),
         );

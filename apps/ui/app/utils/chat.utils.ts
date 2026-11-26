@@ -894,7 +894,7 @@ export function buildUserMessage(input: {
       ...(text.length > 0 ? [{ type: 'text', text } as const] : []),
     ],
     metadata: withAnnotations(
-      { createdAt: Date.now(), status: 'pending' as const, ...(references.length === 0 ? {} : { references }) },
+      { createdAt: Date.now(), status: 'pending', ...(references.length === 0 ? {} : { references }) } as const,
       input.annotations,
     ),
   };

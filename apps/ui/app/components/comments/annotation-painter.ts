@@ -118,16 +118,15 @@ export type PainterContext = Pick<
  *
  * @param context - A 2D context whose canvas is `size` pixels.
  * @param size - The canvas size in pixels.
- * @param marks - The image's drawn marks.
- * @param pins - The image's pins ({@link pinsOnImage}).
+ * @param drawn - The image's drawn marks and its pins ({@link pinsOnImage}).
  */
 export function drawAnnotations(
   context: PainterContext,
   size: { width: number; height: number },
-  marks: readonly AnnotationMark[],
-  pins: readonly DrawnPin[],
+  drawn: { marks: readonly AnnotationMark[]; pins: readonly DrawnPin[] },
 ): void {
   const { width, height } = size;
+  const { marks, pins } = drawn;
   const line = inkWidth(width, height);
   const px = (at: AnnotationVec2): AnnotationVec2 => [at[0] * width, at[1] * height];
   context.lineCap = 'round';

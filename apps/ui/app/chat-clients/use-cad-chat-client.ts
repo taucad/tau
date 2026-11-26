@@ -176,20 +176,23 @@ export const useCadChatClient = (): CadChatClient => {
   const submit = useCallback(
     async (input: CadChatSubmitInput): Promise<void> => {
       const queueIntent = store.captureMessageQueueIntent(activeChatId);
-      let send: AnnotatedSend;
-      try {
-        send = await prepareAnnotatedSend({
-          attachments: input.attachments ?? [],
-          annotations: input.annotations,
-          store: store.draftAttachmentBytes(activeChatId),
-          flatten: flattenImage,
-        });
-      } catch (error) {
-        console.error('[useCadChatClient] annotated images could not be prepared', error);
-        toast.error("Your comments couldn't be drawn on their images, so the message wasn't sent.", {
-          id: promotionToastId,
-        });
-        return;
+      // A message without annotations is sent as it always was, with no step before it.
+      let send: AnnotatedSend = { attachments: input.attachments ?? [], annotations: undefined, originals: [] };
+      if (input.annotations !== undefined) {
+        try {
+          send = await prepareAnnotatedSend({
+            attachments: send.attachments,
+            annotations: input.annotations,
+            store: store.draftAttachmentBytes(activeChatId),
+            flatten: flattenImage,
+          });
+        } catch (error) {
+          console.error('[useCadChatClient] annotated images could not be prepared', error);
+          toast.error("Your comments couldn't be drawn on their images, so the message wasn't sent.", {
+            id: promotionToastId,
+          });
+          return;
+        }
       }
       const attachments = input.attachments === undefined ? undefined : send.attachments;
       const userMessage = buildUserMessage({

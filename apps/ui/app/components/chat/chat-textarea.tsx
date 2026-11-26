@@ -4,6 +4,7 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
+import { DraftCommentList } from '#components/comments/comment-list.js';
 import { ChatTextareaDesktop } from '#components/chat/chat-textarea-desktop.js';
 import type { PaintedSendVerdict } from '#components/chat/chat-textarea-desktop.js';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
@@ -576,6 +577,7 @@ export const ChatTextarea = memo(function ({
         handleTextareaFocus={handleFocus}
         handleTextareaBlur={logic.handleTextareaBlur}
         removeAttachment={logic.removeAttachment}
+        comments={mode === 'main' ? <DraftCommentList /> : undefined}
       />
     </>
   );

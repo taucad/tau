@@ -85,6 +85,8 @@ import {
   sanitizeAgentPath,
   sanitizeAgentText,
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
+import { MessageCommentList } from '#components/comments/comment-list.js';
+import { annotationsOf } from '@taucad/chat/annotations';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { FileLink } from '@taucad/files-ui/components/files/file-link';
@@ -1137,6 +1139,7 @@ export const ChatMessage = memo(function ({
               {fileParts.length > 0 ? (
                 <ChatMessageFileAttachments parts={fileParts} directory={attachmentDirectories?.transcript} />
               ) : null}
+              {isUser ? <MessageCommentList annotations={annotationsOf(displayMessage.metadata)} /> : null}
               {isUser ? (
                 <div className={chatInputTextClassName}>
                   {collapsedUserRowsWithStableKeys.map(({ keyPrefix, row }) => (

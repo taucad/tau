@@ -560,6 +560,14 @@ export function useChatComposer(): ChatComposerContextValue {
 }
 
 /**
+ * The unified composer contract, or `undefined` outside a composer provider: for a surface that offers a composer
+ * feature only where a composer is mounted.
+ */
+export function useOptionalChatComposer(): ChatComposerContextValue | undefined {
+  return useContext(ChatComposerContext);
+}
+
+/**
  * Read the strict session triple. Use for genuine session consumers
  * (`useCadChatClient`, `CaptureViewControl`) that need the `chat` /
  * `persistenceActorRef` directly. Composer consumers should call

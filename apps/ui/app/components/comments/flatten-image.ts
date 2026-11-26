@@ -28,7 +28,11 @@ export async function flattenImage(
   context.drawImage(bitmap, 0, 0);
   bitmap.close();
   // Drawn at the image's real size: a stored record's size is what was asked for, not always what was delivered.
-  drawAnnotations(context, { width, height }, image.marks, pinsOnImage({ ...image, width, height }, comments));
+  drawAnnotations(
+    context,
+    { width, height },
+    { marks: image.marks, pins: pinsOnImage({ ...image, width, height }, comments) },
+  );
   // A browser that cannot encode WebP answers with PNG, which the attachment store takes as well.
   const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.92 });
   return { bytes: new Uint8Array(await blob.arrayBuffer()), mediaType: blob.type };

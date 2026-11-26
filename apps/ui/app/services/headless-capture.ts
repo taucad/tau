@@ -8,6 +8,7 @@ import {
   captureFilesToDataUrls as encodeCaptureDataUrls,
 } from '@taucad/agent-tools/capture';
 import type { ExportFile } from '@taucad/types';
+import { hashString } from '@taucad/utils/hash';
 import type { CameraState } from '@taucad/camera';
 import { toNanorasterCamera } from '@taucad/image/camera';
 import { normalizeImageLabel } from '@taucad/image/label';
@@ -171,6 +172,16 @@ const snapshotPresentationIntent = (
     sectionCuts: context.isSectionViewActive ? context.committedSectionCuts : [],
   };
 };
+
+/**
+ * An opaque hash of what a viewer presents beside its camera and geometry: display, hidden parts, pose and section.
+ * Two pins placed while it is equal can share one picture.
+ *
+ * @param graphicsRef - The viewer's graphics.
+ * @returns The hash.
+ */
+export const presentedSceneHash = (graphicsRef: ActorRefFrom<typeof graphicsMachine>): string =>
+  hashString(JSON.stringify(snapshotPresentationIntent(graphicsRef.getSnapshot())));
 
 const recipeSize = (recipe: HeadlessCaptureRecipe, cameraState?: CameraState): readonly [number, number] => {
   if (recipe.purpose === 'agent' || recipe.mode === 'orthographic') {

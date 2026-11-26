@@ -101,21 +101,23 @@ type CommentPinsValue = CommentPinsHost & Readonly<{ heads: CommentPinHeads }>;
 const CommentPinsContext = createContext<CommentPinsValue | undefined>(undefined);
 
 /**
- * Gives a viewer its comment pins. Without this provider the viewer has no Comment tool.
+ * Gives a viewer its comment pins. Without a host the viewer has no Comment tool; the provider stays mounted either
+ * way, so a host that arrives later does not remount the viewer under it.
  *
- * @param props - The pins, what a click does, and the viewer under it.
+ * @param props - The host, and the viewer under it.
  * @returns The provider.
  * @public
  */
 export function CommentPinsProvider({
-  pins,
-  onPlace,
-  onMiss,
+  host,
   children,
-}: CommentPinsHost & { readonly children: React.ReactNode }): React.JSX.Element {
+}: {
+  readonly host: CommentPinsHost | undefined;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
   // oxlint-disable-next-line react/hook-use-state -- created once for the provider's life; never replaced.
   const [heads] = useState(createCommentPinHeads);
-  const value = useMemo(() => ({ pins, onPlace, onMiss, heads }), [heads, onMiss, onPlace, pins]);
+  const value = useMemo(() => (host ? { ...host, heads } : undefined), [heads, host]);
   return <CommentPinsContext.Provider value={value}>{children}</CommentPinsContext.Provider>;
 }
 

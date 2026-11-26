@@ -26,6 +26,8 @@ describe('recordHostTiming', () => {
     vi.spyOn(performance, 'mark').mockImplementation(() => {
       throw new Error('no user timing');
     });
-    expect(() => recordHostTiming('model-request-sent')).not.toThrow();
+    expect(() => {
+      recordHostTiming('model-request-sent');
+    }).not.toThrow();
   });
 });

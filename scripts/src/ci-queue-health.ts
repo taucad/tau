@@ -609,8 +609,8 @@ const runnerMinutes = (seconds: number): number => Math.round(seconds / 6) / 10;
 /**
  * What the cancelled runs had spent, over every attempt: dispatched jobs and their runner minutes. Every cancelled
  * run counts, including the failed runs `Fail fast` cancelled. The victims whose commit landed are named apart:
- * the merge-queue sweep cancels the rest of a group's run once it merged (CI audit 2026-11-12, F14), so their
- * minutes bought a merge.
+ * the merge-queue sweep cancelled the rest of a group's run once it merged (CI audit 2026-11-12, F14) until
+ * 2026-11-26, when it began leaving a merged group's run to finish its shadow rows, so their minutes bought a merge.
  */
 export const cancelledWaste = (evidence: readonly RunEvidence[]): CancelledWaste => {
   let runs = 0;

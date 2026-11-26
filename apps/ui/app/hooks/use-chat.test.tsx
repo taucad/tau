@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mocks keep the environment's `ENV`/`TAU_API_URL` and the AI SDK's own export names verbatim. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { memo } from 'react';
 import type { ReactNode } from 'react';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
@@ -23,6 +24,7 @@ import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.j
 import { publishChatTurnAdmission, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import { presentMessages } from '#services/chat-session-store.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
+import type { CombinedChatState } from '#hooks/use-chat.js';
 import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
 
 /** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
@@ -494,6 +496,46 @@ describe('hooks resolution rules', () => {
     });
     expect(result.current.status).toBe('ready');
     expect(renderCount).toBe(beforeMessageUpdate + 1);
+  });
+
+  it('should wake a selector only for the sources it read (WP-06a, D3)', () => {
+    const transcriptSelector = vi.fn((state: CombinedChatState) => state.messages);
+    const draftSelector = vi.fn((state: CombinedChatState) => state.draftText);
+    let draftText: string | undefined;
+    /* Each selector in its own component, as a message row and the composer are: a render of one is not a wake of the other. */
+    const Transcript = memo(function Transcript() {
+      useChatSelector(transcriptSelector);
+      return null;
+    });
+    const Draft = memo(function Draft() {
+      draftText = useChatSelector(draftSelector);
+      return null;
+    });
+    const Base = createWrapper('chat_selector_reads');
+    const { result } = renderHook(() => ({ actions: useDraftActions(), store: useChatSessionStore() }), {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <Base>
+          <Transcript />
+          <Draft />
+          {children}
+        </Base>
+      ),
+    });
+    const transcriptRuns = transcriptSelector.mock.calls.length;
+    act(() => {
+      result.current.actions.setDraftText('typing');
+    });
+    expect(draftText).toBe('typing');
+    /* A keystroke moves nothing the transcript selector reads, so it did not run. */
+    expect(transcriptSelector.mock.calls.length).toBe(transcriptRuns);
+
+    const draftRuns = draftSelector.mock.calls.length;
+    act(() => {
+      publishLogRows(result.current.store, 'chat_selector_reads', runningRows());
+    });
+    /* The log moved what the transcript selector reads and nothing the draft selector reads. */
+    expect(transcriptSelector.mock.calls.length).toBeGreaterThan(transcriptRuns);
+    expect(draftSelector.mock.calls.length).toBe(draftRuns);
   });
 
   it('shows Stop status for a reattached host run', () => {

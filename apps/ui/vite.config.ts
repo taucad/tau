@@ -43,7 +43,6 @@ import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config lives outside app aliases.
 import { createServerOutputAssets } from './server-output-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
-import { netlifyFunctionExcludedPaths } from './app/lib/route-classes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
@@ -650,10 +649,11 @@ export default defineConfig(({ command, mode }) => {
             reactRouter(),
             /*
              * Netlify plugin is only needed for Netlify builds. Its function is registered at `/*` with
-             * `preferStatic`, and Netlify runs functions before redirects, so a static shell's URLs are excluded
-             * here for `netlify.toml`'s 200 rewrite to reach them (`app/lib/route-classes.ts`).
+             * `preferStatic`, so a redirect rule answers before it. It excludes nothing: the static shell edge
+             * function serves the project shell, and the function renders the same document whenever that edge
+             * function passes a request on (`app/lib/route-classes.ts`).
              */
-            ...(isNetlify ? [netlifyReactRouter({ excludedPaths: netlifyFunctionExcludedPaths() })] : []),
+            ...(isNetlify ? [netlifyReactRouter()] : []),
           ]),
       tailwindcss(),
       // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284

@@ -10,6 +10,11 @@
       "expect": "pass",
       "ref": "I8: the held reservation alone suffices (BoundaryExclusive FALSE)"
     },
+    "ChatRunSlot.liveness-claim-retry.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "HA4 (RC3, H22): a claim refused after the grant is retried (M2 to the still-closing bound, Node's reconcile), so every orphan is eventually abandoned"
+    },
     "ChatRunSlot.liveness-close.cfg": {
       "tier": "nightly",
       "expect": "pass",
@@ -507,6 +512,11 @@
       "kind": "witness",
       "ref": "W3 CL-S13: an eager claim row without the conditional append; a stale claim appends a lower epoch (2 sends)"
     },
+    "LogLeadership.leading-without-writer.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "HA4 (H22, RC3, AR3-6): M2 leads with no writer after a refused claim, retries it to the still-closing bound, then releases; safety and WriterlessReleased"
+    },
     "LogLeadership.scope-life-Served.cfg": {
       "tier": "pr",
       "expect": {
@@ -639,6 +649,14 @@
       "tier": "pr",
       "expect": "pass",
       "ref": "S4 3.5 (today)"
+    },
+    "LogLeadership.writerless-kept-WriterlessReleased.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "WriterlessReleased"
+      },
+      "kind": "witness",
+      "ref": "H22 before HA4: a refused claim only logged leaves M2 leading with no writer, and nothing releases the lock"
     },
     "PageBridgeRelease.aligned.cfg": {
       "tier": "pr",

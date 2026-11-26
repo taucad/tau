@@ -15,7 +15,7 @@ CONSTANTS Workers, Keys, MaxEpoch, MaxCrashes, MaxSends, Steal, Fence, IdemKeys,
 VARIABLES
     lock, lockEpoch, epochs, alive, lead, claimed, view, vlen, mine, pending, fence, handle, log, lockNotFence,
     frames, done, status, latest, refused, heard, tries, crashes, sends,
-    frozen, freezes, reading, noticeDue, queued, nqueues, want, wants, drives, run, nruns, zombie,
+    frozen, freezes, reading, noticeDue, queued, nqueues, want, wants, drives, run, nruns, zombie, refusal,
     act, m2
 
 L == INSTANCE LogLeadership

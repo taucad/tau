@@ -972,6 +972,12 @@ type ObservedChat = {
   ownWatch?: ObservationWatch;
   /** When the own watch was last registered: a watch that closes is registered again at most once a poll. */
   ownWatchAt?: number;
+  /** The own source start in flight or running: a newer start or a stop replaces it, and an older one stands down. */
+  ownStart?: symbol;
+  /** Settles the pending start's locality as not local when it is stopped before its first verdict. */
+  ownDecide?: (local: boolean) => void;
+  /** A restart (a pick) of a chat whose own run was unsettled: it stays unsettled until the new start decides. */
+  ownHeldUnsettled?: boolean;
 };
 
 /** The run IDs a Close prompt can truthfully promise to stop, and the work it cannot. @public */
@@ -3836,6 +3842,20 @@ export class ChatSessionStore {
    *   any other first verdict stops the source and keeps the host read, so a chat is never left with neither.
    */
   async #startOwnSource(chatId: string, observed: ObservedChat): Promise<boolean> {
+    const start = Symbol('own-start');
+    observed.ownStart = start;
+    /* Read through a call: a newer start or a stop lands across each await. */
+    const superseded = (): boolean => observed.ownStart !== start || this.#observed.get(chatId) !== observed;
+    /* Not local: this start, unless a newer one replaced it, leaves nothing pending. */
+    const notLocal = (): false => {
+      if (!superseded()) {
+        observed.ownStart = undefined;
+        observed.ownHeldUnsettled = undefined;
+        /* A pick waiting on the run this start held unsettled (HA-I7) waits no longer. */
+        this.#projectionTopics.get(chatId)?.emit();
+      }
+      return false;
+    };
     const directory = `/projects/${observed.projectId}/${chatRecordsPath(chatId)}`;
     const { client } = this.#deps;
     const held = async (path: string): Promise<boolean> => {
@@ -3849,8 +3869,8 @@ export class ChatSessionStore {
      * already reads those segments with no host (HA-I1 holds for every turn they carry), so the own source would add
      * only an empty own segment's authority, which no record vouches for there (HA0 row 18 is green on this path). */
     const [ownLog, record] = await Promise.all([held(`${directory}/events.jsonl`), held(`${directory}/chat.json`)]);
-    if (!ownLog && !record) {
-      return false;
+    if (superseded() || (!ownLog && !record)) {
+      return notLocal();
     }
     let settings: Awaited<ReturnType<ChatSessionStore['getChatHostSettings']>>;
     try {
@@ -3864,15 +3884,16 @@ export class ChatSessionStore {
       execution === undefined ||
       (execution.kind === 'tau' &&
         (host === undefined || host === 'desktop' || (ownLog && isDeviceRelativeHostId(host))));
-    if (!placedHere) {
-      return false;
+    if (superseded() || !placedHere) {
+      return notLocal();
     }
     const { createOwnSegmentSource } = await loadCode(async () => import('#services/chat-own-segment-source.js'));
-    if (this.#observed.get(chatId) !== observed) {
+    if (superseded()) {
       return false;
     }
     const first = Promise.withResolvers<boolean>();
     let decided = false;
+    observed.ownDecide = first.resolve;
     observed.source = createOwnSegmentSource({
       chatId,
       directory,
@@ -3884,11 +3905,17 @@ export class ChatSessionStore {
         },
       },
       onVerdict: (verdict) => {
+        if (superseded()) {
+          return;
+        }
         if (!decided) {
           decided = true;
+          observed.ownDecide = undefined;
+          observed.ownHeldUnsettled = undefined;
           const local = verdict === 'current' || verdict === 'deleted';
           if (!local) {
             this.#stopOwnSource(observed);
+            this.#projectionTopics.get(chatId)?.emit();
           }
           first.resolve(local);
           if (!local) {
@@ -3906,7 +3933,9 @@ export class ChatSessionStore {
         });
       },
       onStaleRun: () => {
-        this.#attachInPage(chatId, observed);
+        if (!superseded()) {
+          this.#attachInPage(chatId, observed);
+        }
       },
     });
     return first.promise;
@@ -3944,6 +3973,9 @@ export class ChatSessionStore {
   }
 
   #stopOwnSource(observed: ObservedChat): void {
+    observed.ownStart = undefined;
+    observed.ownDecide?.(false);
+    observed.ownDecide = undefined;
     observed.source?.stop();
     observed.source = undefined;
     observed.ownWatch?.dispose();
@@ -3991,12 +4023,11 @@ export class ChatSessionStore {
    */
   #ownRunUnsettled(chatId: string): boolean {
     const projection = this.#projectionContext(chatId);
-    return (
-      this.#observed.get(chatId)?.ownCurrent === true &&
-      projection !== undefined &&
-      selectCaughtUp(projection) &&
-      retainsLiveRun(selectRunPhase(projection))
-    );
+    const observed = this.#observed.get(chatId);
+    /* A restarting source (a pick) of a chat that was local keeps its unsettled run until the new start decides. */
+    const own =
+      observed?.ownCurrent === true || (observed?.ownStart !== undefined && observed.ownHeldUnsettled === true);
+    return own && projection !== undefined && selectCaughtUp(projection) && retainsLiveRun(selectRunPhase(projection));
   }
 
   /** Resolve once the chat's own run has settled; reject when `signal` aborts (a newer pick). */
@@ -5953,8 +5984,10 @@ export class ChatSessionStore {
                 if (observed !== undefined) {
                   /* The pick may move the chat off this device (a paired computer) or onto it: locality is decided
                    * again, so the new placement's turns are read where they are written (HA-I1). */
+                  const heldUnsettled = this.#ownRunUnsettled(input.chatId);
                   this.#stopOwnSource(observed);
                   observed.ownCurrent = undefined;
+                  observed.ownHeldUnsettled = heldUnsettled || undefined;
                   this.#stopObservedAttachment(input.chatId, observed);
                   this.#projectionTopics.get(input.chatId)?.emit();
                   observed.attempts = 0;

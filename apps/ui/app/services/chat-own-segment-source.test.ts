@@ -349,6 +349,11 @@ describe('own segment source: the stale-run settler span (HA-I5)', () => {
     /* The writer comes back and touches its marker: the span restarts, so nothing goes while it is fresh. */
     disk.mtimes.set(marker, clock.wall);
     expect(await sendsOver(twoBeats)).toBe(0);
+
+    /* It goes quiet again: a new span completes, sends, and backs off from 1 s again, not from the cap. */
+    disk.mtimes.set(marker, old);
+    expect(await sendsOver(twoBeats + unsettledReadPollMilliseconds)).toBe(1);
+    expect(await sendsOver(unsettledReadPollMilliseconds)).toBe(1);
     chat.stop();
   });
 

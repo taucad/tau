@@ -185,22 +185,22 @@ describe('createRenderer', () => {
     hoisted.webGlContextUnavailable = false;
   });
 
-  // First in this file: no test before it has reported a canvas loss to the shared module.
   it('should fail a first frame that throws without a device loss as an ordinary start, keeping WebGPU on', async () => {
     const { createRenderer } = await import('#graphics/three/renderer.js');
-    const { probeWebGpuSupport, webGpuFallbackReason } = await import('#graphics/graphics-backend.js');
+    const { onWebGpuCanvasLoss } = await import('#graphics/graphics-backend.js');
+    // A listener rather than the page-wide answer, which another test in a shuffled order may already have set.
+    const canvasLoss = vi.fn();
+    const stopListening = onWebGpuCanvasLoss(canvasLoss);
     hoisted.presentationThrows = true;
-    const creation = createRenderer('viewport', 'webgpu', document.createElement('canvas'));
-    await expect(creation).rejects.toBeInstanceOf(WebGpuInitializationError);
-    await expect(creation).rejects.toThrow('could not present its first frame: Canvas texture unavailable');
-    expect(hoisted.createdRenderers[0]?.dispose).toHaveBeenCalledOnce();
-    expect(hoisted.destroyDevice).toHaveBeenCalledOnce();
-    expect(webGpuFallbackReason()).toBeUndefined();
-    Object.defineProperty(navigator, 'gpu', { configurable: true, value: { requestAdapter: async () => ({}) } });
     try {
-      expect(await probeWebGpuSupport()).toBe(true);
+      const creation = createRenderer('viewport', 'webgpu', document.createElement('canvas'));
+      await expect(creation).rejects.toBeInstanceOf(WebGpuInitializationError);
+      await expect(creation).rejects.toThrow('could not present its first frame: Canvas texture unavailable');
+      expect(hoisted.createdRenderers[0]?.dispose).toHaveBeenCalledOnce();
+      expect(hoisted.destroyDevice).toHaveBeenCalledOnce();
+      expect(canvasLoss).not.toHaveBeenCalled();
     } finally {
-      Reflect.deleteProperty(navigator, 'gpu');
+      stopListening();
     }
   });
 

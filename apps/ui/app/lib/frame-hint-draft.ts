@@ -141,6 +141,48 @@ export const writeDraftHint = (
   }
 };
 
+/** The typing pause before a scheduled draft hint is written: the draft machine's own `saveDebounce`. */
+export const draftHintWriteDelay = 200;
+
+let pendingWrite: (() => void) | undefined;
+let pendingTimer: ReturnType<typeof setTimeout> | undefined;
+let isPageHideListening = false;
+
+/**
+ * Write any scheduled draft hint now: the page is hiding, or its composer is leaving.
+ */
+export const flushDraftHint = (): void => {
+  if (pendingTimer !== undefined) {
+    clearTimeout(pendingTimer);
+    pendingTimer = undefined;
+  }
+  const write = pendingWrite;
+  pendingWrite = undefined;
+  write?.();
+};
+
+/**
+ * {@link writeDraftHint} after a typing pause of {@link draftHintWriteDelay}. The write reads, parses and rewrites the
+ * whole record synchronously, so a keystroke only replaces the pending draft; the last one lands once typing pauses,
+ * or on `pagehide`, or when {@link flushDraftHint} is called.
+ *
+ * @param scope - Home, or a project by its URL key.
+ * @param draft - The draft's text, and for a project the chat it belongs to.
+ */
+export const scheduleDraftHint = (scope: DraftHintScope, draft: Readonly<{ text: string; chatId?: string }>): void => {
+  pendingWrite = () => {
+    writeDraftHint(scope, draft);
+  };
+  if (pendingTimer !== undefined) {
+    clearTimeout(pendingTimer);
+  }
+  pendingTimer = setTimeout(flushDraftHint, draftHintWriteDelay);
+  if (!isPageHideListening && typeof globalThis.addEventListener === 'function') {
+    isPageHideListening = true;
+    globalThis.addEventListener('pagehide', flushDraftHint);
+  }
+};
+
 /** Whether a write would store what is stored: the same draft for the same chat, or no draft where there is none. */
 const isUnchanged = (previous: DraftHintEntry | undefined, entry: DraftHintEntry | undefined): boolean =>
   entry === undefined

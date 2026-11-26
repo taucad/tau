@@ -252,6 +252,7 @@ describe('ChatTextarea screenshots', () => {
 describe('ChatTextarea while another device runs the chat', () => {
   beforeEach(() => {
     mocks.runElsewhere = undefined;
+    mocks.cloudIntent = undefined;
   });
 
   it('should hold the send while another device runs the chat', () => {

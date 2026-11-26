@@ -12,7 +12,7 @@ import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { useHandOffAdoption } from '#components/hand-off/hand-off-store.js';
 import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
 import type { HandOffSnapshot } from '#components/hand-off/hand-off.js';
-import { draftHintScopeOf, writeDraftHint } from '#lib/frame-hint-draft.js';
+import { draftHintScopeOf, flushDraftHint, scheduleDraftHint } from '#lib/frame-hint-draft.js';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 import { ChatTextareaSkeleton } from '@taucad/chat-ui/components/chat-textarea-skeleton';
 import { useProject } from '#hooks/use-project.js';
@@ -42,9 +42,6 @@ import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** The surface to adopt: none when a host above already owns the native input (`adoptedEarlyInput`, `enableEarlyInput`). */
-/** The typing pause before the draft hint is written: the draft machine's own `saveDebounce`. */
-const draftHintWriteDelay = 200;
-
 const handOffTarget = (
   target: HandOffTarget | undefined,
   adoptedEarlyInput: EarlyChatInput | undefined,
@@ -284,40 +281,20 @@ export const ChatTextarea = memo(function ({
    * on `/`, a project's under its URL key with the chat it belongs to. */
   const draftHintChatId = session?.activeChatId;
   const isProjectComposer = projectContext !== undefined;
-  /* The write reads, parses and rewrites the whole record synchronously, so it waits for the same typing pause as the
-   * draft's own persistence rather than running per keystroke, and a pending write lands on `pagehide` or unmount. */
-  const pendingDraftHint = useRef<(() => void) | undefined>(undefined);
+  /* Scheduled, not written: the write waits for a typing pause, and lands when the composer leaves. */
   useEffect(() => {
     if (mode !== 'main') {
-      return undefined;
+      return;
     }
     const scope = draftHintScopeOf(globalThis.location.pathname, isProjectComposer);
-    if (scope === undefined) {
-      return undefined;
-    }
-    const write = (): void => {
-      pendingDraftHint.current = undefined;
-      writeDraftHint(scope, {
+    if (scope !== undefined) {
+      scheduleDraftHint(scope, {
         text: logic.inputText,
         ...(scope.kind === 'project' && draftHintChatId !== undefined ? { chatId: draftHintChatId } : {}),
       });
-    };
-    pendingDraftHint.current = write;
-    const timer = setTimeout(write, draftHintWriteDelay);
-    return () => {
-      clearTimeout(timer);
-    };
+    }
   }, [mode, logic.inputText, draftHintChatId, isProjectComposer]);
-  useEffect(() => {
-    const flush = (): void => {
-      pendingDraftHint.current?.();
-    };
-    globalThis.addEventListener('pagehide', flush);
-    return () => {
-      globalThis.removeEventListener('pagehide', flush);
-      flush();
-    };
-  }, []);
+  useEffect(() => flushDraftHint, []);
 
   const setDraftText = useCallback(
     (text: string) => {

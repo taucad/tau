@@ -10,15 +10,20 @@ None == "none"
 Unknown == "unknown"
 Unconfirmed == "unconfirmed"
 PreparedCases == {"prepared", "legacy-prepared"}
+\* HA4 (2026-11-27, HA-I4): "unanswered" is a prepared command pinned to A that no host has accepted yet, so its
+\* answer's retry class decides: a `wait` keeps it to send again (`Retry`), a `never` or an applied not-applied ends it.
+Sending == PreparedCases \cup {"unanswered"}
+Outcomes == {"never", "noop"}
 
 Init == \E c \in Cases :
   s = [scenario |-> c, selected |-> Home, observed |-> Home,
        switched |-> FALSE, pendingGrant |-> None, granted |-> None,
-       after |-> c \notin PreparedCases, afterPlacement |-> IF c = "receipt" THEN Home ELSE Unknown,
-       rebased |-> None, known |-> {}, queued |-> c \notin PreparedCases,
-       prepared |-> c \in PreparedCases,
-       pin |-> IF c = "prepared" THEN Home ELSE IF c = "legacy-prepared" THEN Unconfirmed ELSE None,
+       after |-> c \notin Sending, afterPlacement |-> IF c = "receipt" THEN Home ELSE Unknown,
+       rebased |-> None, known |-> {}, queued |-> c \notin Sending,
+       prepared |-> c \in Sending,
+       pin |-> IF c \in {"prepared", "unanswered"} THEN Home ELSE IF c = "legacy-prepared" THEN Unconfirmed ELSE None,
        accepted |-> IF c \in PreparedCases THEN {Home} ELSE {},
+       ended |-> None,
        unsafeRelease |-> FALSE]
 
 \* The initial prepared state is after A's durable acceptance and a lost ACK.
@@ -59,12 +64,17 @@ DeliverNext == /\ s.queued /\ s.pendingGrant = None
 Retry == /\ s.prepared /\ s.pendingGrant = None /\ s.selected = s.observed
          /\ (~PinCommands \/ s.pin = s.selected)
          /\ s' = [s EXCEPT !.accepted = @ \cup {s.selected}]
+\* HA4: the selected host answered a command it never accepted: `never` (its card) or applied with nothing to do
+\* (`noop`). The item ends without a receipt and is never sent again. A `wait` is `Retry` again, by the same key.
+End(o) == /\ s.prepared /\ s.pendingGrant = None /\ s.selected = s.observed
+          /\ (~PinCommands \/ s.pin = s.selected) /\ s.selected \notin s.accepted
+          /\ s' = [s EXCEPT !.prepared = FALSE, !.pin = None, !.ended = o]
 \* The owner log can reconcile a retained command even without retransmission.
 Acknowledge == /\ s.prepared /\ s.observed \in s.accepted
                /\ s' = [s EXCEPT !.prepared = FALSE, !.pin = None,
                    !.after = TRUE, !.afterPlacement = s.observed, !.rebased = None]
 Next == (\E h \in Hosts : Switch(h)) \/ CancelBack \/ CommitGrant
-        \/ Observe \/ SeePredecessor \/ DeliverNext \/ Retry \/ Acknowledge
+        \/ Observe \/ SeePredecessor \/ DeliverNext \/ Retry \/ Acknowledge \/ (\E o \in Outcomes : End(o))
 Spec == Init /\ [][Next]_vars
 TypeOK == /\ s.scenario \in Cases /\ s.selected \in Hosts /\ s.observed \in Hosts
           /\ s.pendingGrant \in Hosts \cup {None} /\ s.granted \in Hosts \cup {None}
@@ -73,6 +83,7 @@ TypeOK == /\ s.scenario \in Cases /\ s.selected \in Hosts /\ s.observed \in Host
           /\ s.known \subseteq Hosts
           /\ s.after \in BOOLEAN /\ s.queued \in BOOLEAN /\ s.prepared \in BOOLEAN
           /\ s.switched \in BOOLEAN /\ s.unsafeRelease \in BOOLEAN
+          /\ s.ended \in Outcomes \cup {None}
 AtMostOneAcceptingHost == Cardinality(s.accepted) <= 1
 RebaseStaysAtDestination == ~s.unsafeRelease
 \* State predicates check permission, not eventual delivery or fairness.
@@ -81,4 +92,8 @@ KnownForeignReceiptCanContinue ==
 UnseenSameHostReceiptWaits ==
   (s.after /\ s.afterPlacement = s.observed /\ s.observed \notin s.known) => ~BarrierAllows
 PreparedReceiptSurvives == s.scenario \in PreparedCases => (s.prepared \/ s.after)
+\* HA4: no drop (a sent item leaves only with a receipt or its answer's outcome) and no duplicate (an item that
+\* ended was accepted nowhere, so no run of it exists to repeat, and it is never sent again).
+NoDrop == s.scenario \in Sending => (s.prepared \/ s.after \/ s.ended # None)
+NoDuplicate == s.ended # None => (s.accepted = {} /\ ~s.prepared)
 =============================================================================

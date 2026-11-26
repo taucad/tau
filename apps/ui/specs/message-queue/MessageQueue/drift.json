@@ -23,21 +23,21 @@
   ],
   "sources": {
     "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx": "a9293c32f2cd43071ad44214c879c3d9d30af67491f1c23730998a18cb62a13f",
-    "apps/libs/chat-ui/src/db/chat-message-queue-store.ts": "7f5887a1f65eea460b3463f445a3aef19dd7843ea1b379940e0273eebc1c32f7",
+    "apps/libs/chat-ui/src/db/chat-message-queue-store.ts": "cd14f1d27a7e4f99c7ef9abb572e713dcf5b971fe08a1c1fbc47e84d2d656f3b",
     "apps/libs/chat-ui/src/machines/chat-message-queue.machine.ts": "b8ff03658a2db816af1d7e34ad621d548653e48784d5c7b2ce7801a26bbfeb0f",
     "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "53443348c954ec1cb4656dda9569385dd0af65c39356e1cfadd5ddb44ded8d0a",
     "apps/ui/app/chat-clients/chat-turn-host.tsx": "f2037dc8f438aa8a006009909def50e9ba4d558896e77fe539f1613ecb030cd8",
     "apps/ui/app/chat-clients/use-cad-chat-client.ts": "3749ada815f745fed131d6990868df4733e3279a16f073a780a34513c6b3cbff",
     "apps/ui/app/components/chat/chat-message-queue.tsx": "77c8164d742b8c64dc79ae0969fa71721be0c3bc64ea908cb0b812b8c42c081b",
     "apps/ui/app/components/chat/chat-textarea.tsx": "8f684f3dc647ab0182bffd90ef3c163adde71ef24f06a33ada6807870c25a309",
-    "apps/ui/app/hooks/use-chat.tsx": "496d74fa89b50ef34da87d72475df71f232ff58539cffcbdedcac86e2c2d5f11",
+    "apps/ui/app/hooks/use-chat.tsx": "31b598f35717dca5c2be31a7540e37af62ac920600c4a78f7679fd6fe059a814",
     "apps/ui/app/machines/chat-session.machine.ts": "2076bc41cb203f45c0049297df17be9a4a4eed966d704f34423e3a2aa3f733cf",
-    "apps/ui/app/services/chat-session-store.ts": "c599b71d4dafec0510a442d7bdbd356e25703356f8961469b7c84e7dea58b94b",
+    "apps/ui/app/services/chat-session-store.ts": "f9e7f9d50d820fbe4227845015f1a3a184028ea92d705b17f061226922499e70",
     "apps/ui/app/services/outbox-gate.ts": "c9d5a33f02c06d6bb45657f76e30a6c3a28b31bf6403d7dc0e9d3c840c4e357e"
   },
   "specs": {
-    "MessageQueue.tla": "0695d44f8123c85202a6ba50cb9107313120d833fa6c58f55a5a464c973e9100",
-    "QueuePlacement.tla": "b4c85bb439e54faeef87790711cc1da9f5a3e21be4f589c58b83069f15f86c47"
+    "MessageQueue.tla": "ce49b824ae87c7c677fd108a790a10fcf1299b99f0ee2f9d6db16c290bc14db5",
+    "QueuePlacement.tla": "9b48032a2e40c1264f79b76a34aef4198c18b35e28329a703a6296ff31a37796"
   },
   "tables": {
     "MessageQueue.duplicate.cfg": "279034898f7a14736303bd4a3714d500d3950b43784ad3977fdcc860eedb319a",
@@ -51,7 +51,7 @@
     "MessageQueue.withdraw-releases-held.cfg": "ddfb665b567f55238c7c30c836ad51fced0604dcfae79f621cabbdfc48806211",
     "MessageQueue.wrong-cancel.cfg": "50428eeabac7aa72c78c8fcf59033a7ef22ea8e468005ddfbf666b9079fde041",
     "QueuePlacement.cross-host-replay.cfg": "507e578d96b08b85d0ee49b168dc7a8675482dba6106c6cda5453feb4ad0c2c0",
-    "QueuePlacement.target.cfg": "91bb01fafd3d18d06472fe06f008c177e9b428d59e5e61f0709256035b37c92b",
+    "QueuePlacement.target.cfg": "b4aa19007cf832d8029dbcd5423c22fb7e571d3958c03d3a426781489ddf8877",
     "QueuePlacement.unscoped-rebase.cfg": "487bb85bad45f03a17631de6afcad8b44ac933198f40824630da3048dc5f22a8",
     "expected.json": "7c235947e2c404b16e37157538c515ab69915cae30820b7844e2b89d15d87eeb"
   },

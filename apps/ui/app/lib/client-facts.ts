@@ -203,12 +203,15 @@ const legacyKeys = {
 } as const;
 
 /**
- * The inline head script. It reads only the record, `matchMedia` and nothing else, never throws, and leaves the
- * neutral default when storage fails. On the first load with no record it folds the {@link legacyKeys} stores in.
+ * The inline head script. It reads only the record, `matchMedia` and the platform, never throws, and leaves the
+ * neutral default when storage fails. The platform is no stored fact: `data-platform="other"` (Windows, Linux and the
+ * rest, as `detectPlatform` in `@taucad/ui/utils/platform` decides) lets a key chip drawn at first paint show its
+ * label before hydration (`KeyShortcut`'s `combination`). On the first load with no record it folds the {@link legacyKeys} stores in.
  * Keep it in step with {@link applyClientFacts}.
  */
 export const clientFactsScript = String.raw`(function(){try{
 var d=document.documentElement,s=window.localStorage,k=${JSON.stringify(clientFactsStorageKey)},f=null;
+try{var u=navigator.userAgentData,m=(u&&u.platform)||navigator.platform||"";if(!/mac|iphone|ipad|ipod/i.test(m))d.setAttribute("data-platform","other")}catch(e){}
 try{f=JSON.parse(s.getItem(k))}catch(e){}
 if(!f||f.v!==${recordVersion}){f={v:${recordVersion}};
 try{var t=s.getItem(${JSON.stringify(legacyKeys.theme)});if(t)f.theme=t;

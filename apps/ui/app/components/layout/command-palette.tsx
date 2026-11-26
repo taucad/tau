@@ -409,7 +409,7 @@ function CommandPaletteTrigger({
       >
         <Search aria-hidden className='size-4 shrink-0' />
         <span className='flex-1 whitespace-nowrap'>Search</span>
-        <KeyShortcut className='ml-2 shrink-0'>{formattedKeyCombination}</KeyShortcut>
+        <KeyShortcut className='ml-2 shrink-0' combination={commandKeyCombination} />
       </SidebarMenuButton>
       <CommandPalette isOpen={isOpen} items={items} onContentUnmount={returnFocus} onOpenChange={onOpenChange} />
     </>

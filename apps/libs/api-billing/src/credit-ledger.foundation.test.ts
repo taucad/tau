@@ -2837,7 +2837,7 @@ describe('admission without supplier state', () => {
 describe('post-hoc supplier metering', () => {
   const resolver = new CodeOwnedBillableModelQualificationResolver({
     adapters: new Map(
-      ['anthropic-claude-haiku-5.5', 'openai-gpt-5.6-luna', 'google-gemini-4-hydrogen', 'together-glm-5.3'].map(
+      ['anthropic-claude-haiku-5.5', 'openai-gpt-6-luna', 'google-gemini-4-hydrogen', 'together-glm-5.3'].map(
         (routeId) => [
           routeId,
           {
@@ -2931,7 +2931,7 @@ describe('post-hoc supplier metering', () => {
     },
     {
       // The base tier of a tiered route: $0.20, $0.02, $0.25 (30m write) and $1.20 per million.
-      routeId: 'openai-gpt-5.6-luna',
+      routeId: 'openai-gpt-6-luna',
       providerWire: 'openai-responses',
       body: { input: 'hello', max_output_tokens: 500 },
       cacheWriteTier: '30m',

@@ -1020,7 +1020,7 @@ export const serveCommand = defineCommand({
     model: {
       type: 'string',
       description: 'Catalog model id from GET /v1/models for agent turns a client does not override',
-      default: process.env['TAU_HOST_MODEL'] ?? 'openai-gpt-5.6-luna',
+      default: process.env['TAU_HOST_MODEL'] ?? 'openai-gpt-6-luna',
     },
     modelProvider: {
       type: 'string',

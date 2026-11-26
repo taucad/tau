@@ -24,7 +24,7 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
-import { and, asc, desc, eq, gt, inArray, lt, ne, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, gt, inArray, lt, ne, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   financialIdentitySchema,
@@ -466,6 +466,37 @@ export class StaleCreditOperationGenerationError extends Error {
   }
 }
 
+/** The operation row out of an insert's `returning`, without the computed columns beside it. */
+const operationOf = ({
+  remaining: _remaining,
+  ...operation
+}: typeof creditOperation.$inferSelect & { readonly remaining: number }): typeof creditOperation.$inferSelect =>
+  operation;
+
+/**
+ * The account of an owner binding, or the refusal a revoked binding or a closed account answers.
+ *
+ * @param found - The binding row joined with its account's status.
+ * @returns The account id.
+ */
+const openBindingAccount = (found: {
+  readonly accountId: string;
+  // oxlint-disable-next-line typescript/no-restricted-types -- the revoked_at column's own null
+  readonly revokedAt: Date | null;
+  readonly status: string;
+}): string => {
+  if (found.revokedAt !== null || found.status !== 'open') {
+    // A closed account is a refusal the client can act on, not a server fault.
+    throw new ForbiddenException({
+      code: 'billing_account_closed',
+      message: 'Financial owner is revoked or closed',
+      // An operator restriction is not a closure: model admission answers it with its own code.
+      ...(found.revokedAt === null && found.status === 'restricted' ? { restricted: true } : {}),
+    });
+  }
+  return found.accountId;
+};
+
 @Injectable()
 export class CreditLedgerService {
   private readonly logger = new Logger(CreditLedgerService.name);
@@ -501,16 +532,7 @@ export class CreditLedgerService {
             ),
           );
         if (found) {
-          if (found.revokedAt !== null || found.status !== 'open') {
-            // A closed account is a refusal the client can act on, not a server fault.
-            throw new ForbiddenException({
-              code: 'billing_account_closed',
-              message: 'Financial owner is revoked or closed',
-              // An operator restriction is not a closure: model admission answers it with its own code.
-              ...(found.revokedAt === null && found.status === 'restricted' ? { restricted: true } : {}),
-            });
-          }
-          return found.accountId;
+          return openBindingAccount(found);
         }
         const accountId = randomUUID();
         await tx.insert(creditAccount).values({ id: accountId, environment: input.environment });
@@ -683,8 +705,21 @@ export class CreditLedgerService {
   }
 
   /** Places the customer's source holds transactionally before any external dispatch. */
+  /**
+   * Admits one funded operation: the hold, the row and, with `recordIntent`, its dispatch intent.
+   *
+   * Chat performance WP-14 (`GatewayInvocation.tla` `AtomicAdmit`): `recordIntent` writes the row as
+   * `intent_recorded` in the admitting transaction and answers the time left before `due_at`, which
+   * `markDispatchIntent` and `getDispatchTimeRemaining` used to take two more round trips for. The caller then owns
+   * the abort check: a call that left after this commits is finished as a cut before any response.
+   *
+   * @param input - The qualified admission.
+   * @param options - `recordIntent` for a model step whose caller dispatches at once.
+   * @returns The admission, a replay of an earlier one, or the refusal.
+   */
   public async admitOperation(
     input: QualifiedAdmissionInput,
+    options: { readonly recordIntent?: boolean } = {},
   ): Promise<Exclude<AdmissionResult, { status: 'denied' }> | AdmissionDenied> {
     const history = parseAdmissionHistory(input);
     const invocation = input.invocation === undefined ? undefined : invocationSchema.parse(input.invocation);
@@ -707,19 +742,34 @@ export class CreditLedgerService {
     for (const item of input.maximumQuantities) {
       rationalUnsignedIntegerStringSchema.parse(item.quantity.toString());
     }
-    const accountId = await this.ensureAccountBinding(input);
-    const [existing] = await this.databaseService.database
-      .select()
-      .from(creditOperation)
-      .where(
+    /* Chat performance WP-14: the binding and an earlier row for this attempt in one statement, outside a
+     * transaction; only an owner with no binding yet pays for ensureAccountBinding's transaction. */
+    const [bound] = await this.databaseService.database
+      .select({
+        accountId: billingOwnerBinding.accountId,
+        revokedAt: billingOwnerBinding.revokedAt,
+        status: creditAccount.status,
+        existingId: creditOperation.id,
+      })
+      .from(billingOwnerBinding)
+      .innerJoin(creditAccount, eq(creditAccount.id, billingOwnerBinding.accountId))
+      .leftJoin(
+        creditOperation,
         and(
-          eq(creditOperation.accountId, accountId),
+          eq(creditOperation.accountId, billingOwnerBinding.accountId),
           eq(creditOperation.surface, input.surface),
           eq(creditOperation.attemptKey, input.attemptKey),
         ),
+      )
+      .where(
+        and(
+          eq(billingOwnerBinding.environment, input.environment),
+          eq(billingOwnerBinding.authUserId, input.authUserId),
+        ),
       );
-    if (existing) {
-      return this.replayAdmission(existing.id, input.requestDigest);
+    const accountId = bound === undefined ? await this.ensureAccountBinding(input) : openBindingAccount(bound);
+    if (bound?.existingId) {
+      return this.replayAdmission(bound.existingId, input.requestDigest);
     }
     try {
       return await this.databaseService.database.transaction(async (tx) => {
@@ -816,9 +866,6 @@ export class CreditLedgerService {
             }
           }
         }
-        if (await this.isRoutePaused(tx, input.environment, input.sku)) {
-          return { status: 'denied', reason: 'route_paused' };
-        }
         const account = await this.lockAccount(tx, accountId);
         const [replay] = await tx
           .select()
@@ -840,38 +887,24 @@ export class CreditLedgerService {
             customerState: customerState(replay.customerState),
           };
         }
+        /* Chat performance WP-14: the route pause, the void, the spend-blocking case, the capacity count and the
+         * reload consent in one statement under the account lock. The refusals keep their order below. */
+        const checks = await this.admissionChecks(tx, {
+          environment: input.environment,
+          sku: input.sku,
+          accountId,
+          surface: input.surface,
+          attemptKey: input.attemptKey,
+          ...(input.category === 'llm' && invocation !== undefined ? { capacity } : {}),
+        });
+        if (checks.routePaused) {
+          return { status: 'denied', reason: 'route_paused' };
+        }
         // GI-R3: a lookup found this key unadmitted and voided it under this same lock; its client has moved on.
-        const [voided] = await tx
-          .select({ attemptKey: creditAttemptVoid.attemptKey })
-          .from(creditAttemptVoid)
-          .where(
-            and(
-              eq(creditAttemptVoid.accountId, accountId),
-              eq(creditAttemptVoid.surface, input.surface),
-              eq(creditAttemptVoid.attemptKey, input.attemptKey),
-            ),
-          );
-        if (voided) {
+        if (checks.voided) {
           return { status: 'denied', reason: 'attempt_voided' };
         }
-        const [cashAttention] = await tx
-          .select({ id: billingFinancialCase.id })
-          .from(billingFinancialCase)
-          .where(
-            and(
-              eq(billingFinancialCase.environment, input.environment),
-              // Only a case that puts this account's own balance in question stops its spending; money
-              // Tau owes the customer, or Tau's own fee accounting, never does.
-              inArray(billingFinancialCase.kind, spendBlockingFinancialCaseKinds),
-              inArray(billingFinancialCase.state, ['open', 'attention']),
-              // Spending stops only for the account a case names; an unattributed case refuses no one and
-              // pages as operator work. The same cases refuse that account's new collection
-              // (`assertCollectionNotSpendBlocked`).
-              eq(billingFinancialCase.accountId, accountId),
-            ),
-          )
-          .limit(1);
-        if (cashAttention) {
+        if (checks.cashAttention) {
           return { status: 'denied', reason: 'account_restricted' };
         }
         if (account.status === 'restricted') {
@@ -889,15 +922,8 @@ export class CreditLedgerService {
         if (account.debtAtoms !== 0n) {
           return { status: 'denied', reason: 'debt', ...shortfall };
         }
-        if (input.category === 'llm' && invocation !== undefined) {
-          const pending = await tx
-            .select({ id: creditOperation.id })
-            .from(creditOperation)
-            .where(pendingLlmCapacityPool(accountId, capacity.pool))
-            .limit(capacity.limit);
-          if (pending.length >= capacity.limit) {
-            return { status: 'denied', reason: 'concurrency_unavailable' };
-          }
+        if (checks.pending >= capacity.limit && input.category === 'llm' && invocation !== undefined) {
+          return { status: 'denied', reason: 'concurrency_unavailable' };
         }
         const authorized = allocateSources(snapshot(account), authorizedAtoms);
         if (!authorized) {
@@ -905,6 +931,7 @@ export class CreditLedgerService {
             reasonKind: 'insufficient_funds',
             reasonAttemptKey: input.attemptKey,
             reasonRequestDigest: input.requestDigest,
+            consentKnown: checks.reloadConsent,
           });
           return { status: 'denied', reason: 'insufficient_credit', ...shortfall };
         }
@@ -927,39 +954,54 @@ export class CreditLedgerService {
         if (dueAt === undefined) {
           throw new Error('Qualified invocation deadline is required');
         }
-        await tx.insert(creditOperation).values({
-          id: operationId,
-          accountId,
-          environment: input.environment,
-          surface: input.surface,
-          attemptKey: input.attemptKey,
-          requestDigest: input.requestDigest,
-          requestKeyVersion: input.requestKeyVersion,
-          category: input.category,
-          modelId: input.modelId,
-          invocation,
-          historyVersion: 1,
-          modelDisplayName: history.modelDisplayName,
-          providerId: history.providerId,
-          projectHint: history.projectHint,
-          chatHint: history.chatHint,
-          admittedAt: sql`clock_timestamp()`,
-          activity: capacity.activity,
-          sku: input.sku,
-          policyId: effective.policyId,
-          activationId: effective.activationId,
-          meterContractId: effective.route.meterContractId,
-          pinnedTariff,
-          maximumQuantities,
-          authorizedAtoms,
-          promoHeldAtoms: authorized.promoAtoms,
-          planHeldAtoms: authorized.planAtoms,
-          purchasedHeldAtoms: authorized.purchasedAtoms,
-          dispatchState: 'admitted',
-          customerState: 'pending',
-          generation: 1n,
-          dueAt,
-        });
+        const recordIntent = options.recordIntent === true && invocation !== undefined;
+        const [inserted] = await tx
+          .insert(creditOperation)
+          .values({
+            id: operationId,
+            accountId,
+            environment: input.environment,
+            surface: input.surface,
+            attemptKey: input.attemptKey,
+            requestDigest: input.requestDigest,
+            requestKeyVersion: input.requestKeyVersion,
+            category: input.category,
+            modelId: input.modelId,
+            invocation,
+            historyVersion: 1,
+            modelDisplayName: history.modelDisplayName,
+            providerId: history.providerId,
+            projectHint: history.projectHint,
+            chatHint: history.chatHint,
+            admittedAt: recordIntent ? sql`statement_timestamp()` : sql`clock_timestamp()`,
+            // AtomicAdmit: the intent and the reporting time are the admission's own instant, as the update trigger
+            // would have stamped them on the separate markDispatchIntent.
+            ...(recordIntent
+              ? {
+                  dispatchIntentAt: sql`statement_timestamp()`,
+                  usageOccurredAt: sql`statement_timestamp()`,
+                }
+              : {}),
+            activity: capacity.activity,
+            sku: input.sku,
+            policyId: effective.policyId,
+            activationId: effective.activationId,
+            meterContractId: effective.route.meterContractId,
+            pinnedTariff,
+            maximumQuantities,
+            authorizedAtoms,
+            promoHeldAtoms: authorized.promoAtoms,
+            planHeldAtoms: authorized.planAtoms,
+            purchasedHeldAtoms: authorized.purchasedAtoms,
+            dispatchState: recordIntent ? 'intent_recorded' : 'admitted',
+            customerState: 'pending',
+            generation: 1n,
+            dueAt,
+          })
+          .returning({
+            ...getTableColumns(creditOperation),
+            remaining: sql<number>`greatest(0, floor(extract(epoch from (${creditOperation.dueAt} - clock_timestamp())) * 1000))::integer`,
+          });
         await this.queueReloadWork(
           tx,
           { ...account, revision: account.revision + 1n },
@@ -968,9 +1010,18 @@ export class CreditLedgerService {
             reasonOperationId: operationId,
             reasonAttemptKey: input.attemptKey,
             reasonRequestDigest: input.requestDigest,
+            consentKnown: checks.reloadConsent,
           },
         );
-        return { status: 'admitted', operationId, generation: 1n, authorized };
+        return {
+          status: 'admitted',
+          operationId,
+          generation: 1n,
+          authorized,
+          ...(recordIntent && inserted !== undefined
+            ? { dispatch: { operation: operationOf(inserted), remaining: inserted.remaining } }
+            : {}),
+        };
       });
     } catch (error) {
       if (!hasConstraint(error, 'credit_operation_attempt')) {
@@ -2493,6 +2544,22 @@ export class CreditLedgerService {
     };
   }
 
+  /**
+   * Whether the account has an enabled reload consent.
+   *
+   * @param tx - The admission or settlement transaction.
+   * @param accountId - The account.
+   * @returns True when one is enabled.
+   */
+  private async hasEnabledReloadConsent(tx: Tx, accountId: string): Promise<boolean> {
+    const rows = await tx
+      .select({ id: billingReloadConsent.id })
+      .from(billingReloadConsent)
+      .where(and(eq(billingReloadConsent.accountId, accountId), eq(billingReloadConsent.state, 'enabled')))
+      .limit(1);
+    return rows.length > 0;
+  }
+
   /** Persists a funded-work wake in the admitting/resolving transaction, including denials. */
   private async queueReloadWork(
     tx: Tx,
@@ -2502,16 +2569,14 @@ export class CreditLedgerService {
       reasonOperationId?: string;
       reasonAttemptKey: string;
       reasonRequestDigest: string;
+      /** Whether the account has an enabled reload consent, when the caller already read it under the same lock. */
+      consentKnown?: boolean;
     },
   ): Promise<void> {
-    const { reasonKind, reasonOperationId, reasonAttemptKey, reasonRequestDigest } = work;
+    const { reasonKind, reasonOperationId, reasonAttemptKey, reasonRequestDigest, consentKnown } = work;
     // Only an enabled consent can act on a wake; every other account would just churn the row.
-    const [consent] = await tx
-      .select({ id: billingReloadConsent.id })
-      .from(billingReloadConsent)
-      .where(and(eq(billingReloadConsent.accountId, account.id), eq(billingReloadConsent.state, 'enabled')))
-      .limit(1);
-    if (consent === undefined) {
+    const consented = consentKnown ?? (await this.hasEnabledReloadConsent(tx, account.id));
+    if (!consented) {
       return;
     }
     await tx
@@ -2908,6 +2973,93 @@ export class CreditLedgerService {
       throw new Error('Credit operation not found');
     }
     return operation.accountId;
+  }
+
+  /**
+   * The admission refusals that read other rows, in one statement under the account lock (chat performance WP-14).
+   *
+   * @param tx - The admitting transaction, which holds the account lock.
+   * @param input - The route, the account and attempt, and the capacity pool when one applies.
+   * @returns Each refusal's fact, the pending count (bounded by the pool's limit) and the reload consent.
+   */
+  private async admissionChecks(
+    tx: Tx,
+    input: {
+      readonly environment: BillingEnvironment;
+      readonly sku: string;
+      readonly accountId: string;
+      readonly surface: string;
+      readonly attemptKey: string;
+      readonly capacity?: { readonly pool: FundedLlmCapacityPool; readonly limit: number };
+    },
+  ): Promise<{
+    readonly routePaused: boolean;
+    readonly voided: boolean;
+    readonly cashAttention: boolean;
+    readonly pending: number;
+    readonly reloadConsent: boolean;
+  }> {
+    const pending =
+      input.capacity === undefined
+        ? sql`0`
+        : sql`(select count(*) from (select 1 from ${creditOperation} where ${pendingLlmCapacityPool(
+            input.accountId,
+            input.capacity.pool,
+          )} limit ${input.capacity.limit}) as pending)`;
+    const rows = await tx.execute<{
+      routePaused: boolean;
+      voided: boolean;
+      cashAttention: boolean;
+      pending: number | string;
+      reloadConsent: boolean;
+    }>(sql`
+      select
+        -- A pause covers the whole route family, as isRoutePaused reads it.
+        exists (
+          select 1 from ${billingRoutePause}
+          where ${billingRoutePause.environment} = ${input.environment}
+            and ${billingRoutePause.sku} = ${routeSkuFamily(input.sku)[0]}
+            and ${billingRoutePause.resumedAt} is null
+        ) as "routePaused",
+        exists (
+          select 1 from ${creditAttemptVoid}
+          where ${creditAttemptVoid.accountId} = ${input.accountId}
+            and ${creditAttemptVoid.surface} = ${input.surface}
+            and ${creditAttemptVoid.attemptKey} = ${input.attemptKey}
+        ) as "voided",
+        -- Only a case that puts this account's own balance in question stops its spending, and only for the
+        -- account it names; the same cases refuse that account's new collection (assertCollectionNotSpendBlocked).
+        exists (
+          select 1 from ${billingFinancialCase}
+          where ${billingFinancialCase.environment} = ${input.environment}
+            and ${inArray(billingFinancialCase.kind, spendBlockingFinancialCaseKinds)}
+            and ${inArray(billingFinancialCase.state, ['open', 'attention'])}
+            and ${billingFinancialCase.accountId} = ${input.accountId}
+        ) as "cashAttention",
+        ${pending}::integer as "pending",
+        exists (
+          select 1 from ${billingReloadConsent}
+          where ${billingReloadConsent.accountId} = ${input.accountId}
+            and ${billingReloadConsent.state} = 'enabled'
+        ) as "reloadConsent"
+    `);
+    const [row] = rows as unknown as ReadonlyArray<{
+      routePaused: boolean;
+      voided: boolean;
+      cashAttention: boolean;
+      pending: number | string;
+      reloadConsent: boolean;
+    }>;
+    if (row === undefined) {
+      throw new Error('Admission checks returned no row');
+    }
+    return {
+      routePaused: row.routePaused,
+      voided: row.voided,
+      cashAttention: row.cashAttention,
+      pending: Number(row.pending),
+      reloadConsent: row.reloadConsent,
+    };
   }
 
   /**

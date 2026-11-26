@@ -4,6 +4,7 @@ import type {
   JointInputMaximum,
   SupplierValuation,
 } from '@taucad/api-database/schema/billing.types';
+import type { creditOperation } from '@taucad/api-database/schema';
 
 export type CreditSource = 'promo' | 'plan' | 'purchased';
 export type QualifiedCategory = 'llm' | 'zoo_engine';
@@ -75,6 +76,11 @@ export type AdmissionResult =
       operationId: string;
       generation: bigint;
       authorized: SourceAmounts;
+      /**
+       * Present when the admit also recorded dispatch intent (chat performance WP-14): the row as written, and the
+       * milliseconds left before its dispatch deadline, read at commit.
+       */
+      dispatch?: { readonly operation: typeof creditOperation.$inferSelect; readonly remaining: number };
     }
   | {
       status: 'replay';

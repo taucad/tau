@@ -149,9 +149,10 @@ export class BillingPolicyService {
     database?: PolicyDatabase,
   ): Promise<EffectivePolicy> {
     if (database === undefined) {
-      return this.databaseService.database.transaction(async (transaction) =>
-        this.selectEffectivePolicy(input, transaction),
-      );
+      /* Chat performance WP-14: on the pool, outside a transaction. The read is one statement (two on a snapshot
+       * miss), and under read committed each took its own snapshot inside BEGIN/COMMIT too, so the transaction
+       * bought nothing but its two round trips. */
+      return this.selectEffectivePolicy(input, this.databaseService.database);
     }
     /* Chat performance WP-05 (server audit S-02): one statement observes the head and reads the activation, and
      * the stored document is sent and parsed only when this process has not validated that exact content. */
@@ -196,7 +197,7 @@ export class BillingPolicyService {
     const row =
       observation.activationId === null
         ? await this.readActivation(database, input.environment, observation.observedActivationId)
-        : activationRowSchema.parse(observation);
+        : activationRowSchema.parse(rows[0]);
     const validated =
       row.canonicalContent === null && known?.contentHash === row.contentHash
         ? known.validated

@@ -47,6 +47,16 @@
 (*                  cut is (launch audit D-2; FALSE left it pending until  *)
 (*                  due_at plus the grace, and the host's retry, a Resume  *)
 (*                  and the chat's next step waited on it)                 *)
+(*   AtomicAdmit    admission inserts the row with its dispatch intent in  *)
+(*                  the same transaction (chat performance WP-14, F-5);   *)
+(*                  the in-process abort check after it absorbs the row   *)
+(*                  at zero at once, as a cut before any response does.   *)
+(*                  FALSE is admitOperation then markDispatchIntent        *)
+(*   LateAccept     markDispatchAccepted is not awaited before the first  *)
+(*                  relayed byte: ApiAccepted is its own action, enabled  *)
+(*                  from the supplier call on, including after the finish; *)
+(*                  its CAS makes a late one a no-op. FALSE is the awaited *)
+(*                  mark inside ApiDispatch                                *)
 (***************************************************************************)
 EXTENDS Integers, FiniteSets
 
@@ -85,6 +95,10 @@ CONSTANTS
     CutSettles,
     \* @type: Bool;
     SupplierCutSettles,
+    \* @type: Bool;
+    AtomicAdmit,
+    \* @type: Bool;
+    LateAccept,
     \* mutation knobs: TRUE is the code as written
     \* @type: Bool;
     FenceGen,
@@ -389,15 +403,19 @@ ApiAdmit(k) ==
        ELSE IF k \in voided
        THEN /\ req' = [req EXCEPT ![k] = "refused"]
             /\ UNCHANGED <<row, acctHeld, fin>>
-       ELSE /\ row' = [row EXCEPT ![k] = [NoRow EXCEPT !.ex = TRUE, !.cust = "pending", !.disp = "admitted",
-                                                !.gen = 1, !.due = now + Due]]
+       ELSE /\ row' = [row EXCEPT ![k] =
+                    IF AtomicAdmit
+                    THEN [NoRow EXCEPT !.ex = TRUE, !.cust = "pending", !.disp = "intent_recorded", !.gen = 1,
+                                       !.due = now + Due, !.intent = now, !.igen = 1]
+                    ELSE [NoRow EXCEPT !.ex = TRUE, !.cust = "pending", !.disp = "admitted", !.gen = 1,
+                                       !.due = now + Due]]
             /\ acctHeld' = acctHeld + 1
             /\ req' = [req EXCEPT ![k] = "admitted"]
             /\ UNCHANGED fin
     /\ UNCHANGED <<now, refundHeld, voided, conn, sup, dispatches, claims, host, logVars>>
 
 \* The abort check after admission (recordCancellation), then markDispatchIntent (CAS, clock).
-ApiMarkIntent(k) ==
+ApiMarkIntentSequential(k) ==
     /\ req[k] = "admitted"
     /\ IF conn[k] = "noticed"
        THEN /\ row' = [row EXCEPT ![k].cancel = IF row[k].cust = "pending" /\ @ < 0 THEN now ELSE @]
@@ -410,6 +428,24 @@ ApiMarkIntent(k) ==
             /\ UNCHANGED row
     /\ UNCHANGED <<now, acctHeld, refundHeld, voided, fin, conn, sup, dispatches, claims, host, logVars>>
 
+\* AtomicAdmit: the intent was written with the row, so only the in-process abort check is left. An abort
+\* found there finishes the row as a cut before any response (finishUnanswered with client_abort):
+\* absorbed at zero under the admitting generation, so the chat's next step does not wait for recovery.
+ApiAbortCheck(k) ==
+    /\ req[k] = "admitted"
+    /\ IF conn[k] = "noticed"
+       THEN /\ IF (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"
+               THEN /\ row' = [row EXCEPT ![k] = [@ EXCEPT !.cancel = IF @ < 0 THEN now ELSE @,
+                                    !.cust = "absorbed", !.ev = @ \cup {"abort"}, !.rat = now, !.tgen = 1]]
+                    /\ acctHeld' = acctHeld - 1
+               ELSE UNCHANGED <<row, acctHeld>>
+            /\ req' = [req EXCEPT ![k] = "gone"]
+       ELSE /\ req' = [req EXCEPT ![k] = "intent"]
+            /\ UNCHANGED <<row, acctHeld>>
+    /\ UNCHANGED <<now, refundHeld, voided, fin, conn, sup, dispatches, claims, host, logVars>>
+
+ApiMarkIntent(k) == IF AtomicAdmit THEN ApiAbortCheck(k) ELSE ApiMarkIntentSequential(k)
+
 \* getDispatchTimeRemaining (CAS, clock), executeOnce, markDispatchAccepted.
 ApiDispatch(k) ==
     /\ req[k] = "intent"
@@ -417,11 +453,21 @@ ApiDispatch(k) ==
           /\ row[k].cancel < 0 /\ row[k].due > now
        THEN /\ sup' = [sup EXCEPT ![k] = "generating"]
             /\ dispatches' = [dispatches EXCEPT ![k] = @ + 1]
-            /\ row' = [row EXCEPT ![k].disp = "accepted"]
+            /\ row' = IF LateAccept THEN row ELSE [row EXCEPT ![k].disp = "accepted"]
             /\ req' = [req EXCEPT ![k] = "streaming"]
        ELSE /\ req' = [req EXCEPT ![k] = "gone"]
             /\ UNCHANGED <<sup, dispatches, row>>
     /\ UNCHANGED <<now, acctHeld, refundHeld, voided, fin, conn, claims, host, logVars>>
+
+\* markDispatchAccepted, not awaited (LateAccept): its CAS on the admitting generation, a pending
+\* customer state, intent_recorded and the deadline. It may land at any point after the supplier call,
+\* after the finish too, where its guard no longer holds and it writes nothing.
+ApiAccepted(k) ==
+    /\ LateAccept
+    /\ dispatches[k] >= 1
+    /\ row[k].gen = 1 /\ row[k].cust = "pending" /\ row[k].disp = "intent_recorded" /\ row[k].due > now
+    /\ row' = [row EXCEPT ![k].disp = "accepted"]
+    /\ UNCHANGED <<now, acctHeld, refundHeld, voided, apiVars, claims, host, logVars>>
 
 SupplierEnd(k) ==
     /\ sup[k] = "generating"
@@ -565,7 +611,7 @@ Host == \/ HostPrepare \/ HostSend \/ HostBind \/ HostComplete \/ HostSeesFailur
         \/ HostNetworkDrop \/ HostCrash \/ HostDiscard \/ HostResume \/ HostReprepare \/ HostEndRun
         \/ HostUserResume
 Api == \E k \in Keys : \/ ApiNotice(k) \/ ApiAbortBeforeAdmission(k) \/ ApiAdmit(k)
-                       \/ ApiMarkIntent(k) \/ ApiDispatch(k) \/ SupplierEnd(k)
+                       \/ ApiMarkIntent(k) \/ ApiDispatch(k) \/ ApiAccepted(k) \/ SupplierEnd(k)
                        \/ ApiObserve(k) \/ ApiClientCancel(k) \/ ApiServiceStop(k) \/ ApiFinish(k)
 Sweep == SweepClaim \/ SweepResolve \/ SweepFail \/ SweepCrash
 

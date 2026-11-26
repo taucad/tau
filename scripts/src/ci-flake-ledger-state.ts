@@ -95,6 +95,11 @@ export type OutcomeRow = {
   readonly run?: number | undefined;
   readonly attempt?: number | undefined;
   readonly job?: string | undefined;
+  /**
+   * The row came from a non-gating shadow row (a `test-outcomes-shadow-*` artifact, DC-25). Set by the reader from the
+   * artifact's name, never by the row; its events are recorded but do not count toward the entry rule (FQ-6).
+   */
+  readonly shadow?: boolean | undefined;
 };
 
 export type ParsedOutcomes = {
@@ -237,8 +242,15 @@ export type FlakeEvent = {
   readonly hash?: string | undefined;
   /** The identity's execution count at the failure: the entry rule's window is counted on it. */
   readonly execution: number;
+  /**
+   * The variant's execution count at the failure: a stable run is measured on one variant's own stream
+   * (`flake-regression.ts`). Absent on an event recorded before it was added.
+   */
+  readonly variantExecution?: number | undefined;
   /** The first line of the first error. */
   readonly error?: string | undefined;
+  /** Seen only in a non-gating shadow row: recorded, but not counted toward the entry rule. */
+  readonly shadow?: true | undefined;
 };
 
 /** A failed execution still waiting for a pass on its hash or in its lineage. */
@@ -255,7 +267,11 @@ export type OpenFailure = {
   /** The merge group's base, for a queue lineage. */
   readonly base?: string | undefined;
   readonly execution: number;
+  /** The variant's execution count at the failure. */
+  readonly variantExecution?: number | undefined;
   readonly error?: string | undefined;
+  /** The failure came from a non-gating shadow row. */
+  readonly shadow?: true | undefined;
 };
 
 export type VariantState = {
@@ -263,6 +279,14 @@ export type VariantState = {
   failures: number;
   events: number;
   lastSeen: string;
+  /**
+   * Executions of the test's target on this variant the ledger counted before it first counted this identity on
+   * it: each passed the test on its first attempt or did not run it (a test added since), since a failure or a retry
+   * would have tracked it. The stable baseline of `flake-regression.ts`; absent when the count did not exist yet.
+   */
+  stableBefore?: number;
+  /** The newest variant execution of an event of this variant the ledger dropped (the event cap or its age). */
+  evictedExecution?: number;
 };
 
 /** The history of one test identity (`<project> › <file> > <suite> > <title>`). */
@@ -307,6 +331,11 @@ export type TaskState = {
   otherFailures: number;
   firstSeen: string;
   lastSeen: string;
+  /**
+   * Executions per target and variant (`<target> <variant>`, the shard kept): what a test not tracked yet has run,
+   * for {@link VariantState.stableBefore}. Absent in a state written before it was added.
+   */
+  targets?: Record<string, number>;
 };
 
 /** A run attempt the ledger has ingested. */
@@ -400,6 +429,18 @@ export const aliasResolver = (aliases: readonly Alias[]): ((id: string) => strin
 const later = (a: string, b: string): string => (a > b ? a : b);
 const earlier = (a: string, b: string): string => (a < b ? a : b);
 
+/** Keep `kept` of `all` as the identity's events, and remember per variant the newest execution of those dropped. */
+const keepEvents = (identity: IdentityState, all: readonly FlakeEvent[], kept: readonly FlakeEvent[]): void => {
+  const retained = new Set(kept);
+  for (const event of all) {
+    const entry = identity.variants[event.variant];
+    if (!retained.has(event) && entry && event.variantExecution !== undefined) {
+      entry.evictedExecution = Math.max(entry.evictedExecution ?? 0, event.variantExecution);
+    }
+  }
+  identity.events = [...kept];
+};
+
 const mergeVariants = (
   older: Record<string, VariantState>,
   newer: Record<string, VariantState>,
@@ -407,12 +448,19 @@ const mergeVariants = (
   const variants: Record<string, VariantState> = structuredClone(older);
   for (const [key, entry] of Object.entries(newer)) {
     const existing = variants[key];
+    const baseline = existing?.stableBefore ?? entry.stableBefore;
+    const evicted = Math.max(
+      existing?.evictedExecution ?? -1,
+      entry.evictedExecution === undefined ? -1 : entry.evictedExecution + (existing?.executions ?? 0),
+    );
     variants[key] = existing
       ? {
           executions: existing.executions + entry.executions,
           failures: existing.failures + entry.failures,
           events: existing.events + entry.events,
           lastSeen: later(existing.lastSeen, entry.lastSeen),
+          ...(baseline === undefined ? {} : { stableBefore: baseline }),
+          ...(evicted < 0 ? {} : { evictedExecution: evicted }),
         }
       : { ...entry };
   }
@@ -422,7 +470,20 @@ const mergeVariants = (
 /** Fold `older` into `newer`: one history, the older one's executions first and the newer one's re-numbered after. */
 const mergeIdentities = (older: IdentityState, newer: IdentityState, renamed: string): IdentityState => {
   const offset = older.executions;
-  return {
+  /* The newer history's variant executions follow the older one's on the same variant. */
+  const shift = <T extends { variant: string; execution: number; variantExecution?: number | undefined }>(
+    item: T,
+  ): T => ({
+    ...item,
+    execution: item.execution + offset,
+    ...(item.variantExecution === undefined
+      ? {}
+      : { variantExecution: item.variantExecution + (older.variants[item.variant]?.executions ?? 0) }),
+  });
+  const events = [...older.events, ...newer.events.map(shift)].sort(
+    (a, b) => a.execution - b.execution || a.at.localeCompare(b.at),
+  );
+  const merged: IdentityState = {
     project: newer.project,
     targetKey: newer.targetKey,
     file: newer.file,
@@ -434,17 +495,14 @@ const mergeIdentities = (older: IdentityState, newer: IdentityState, renamed: st
     retriedPasses: older.retriedPasses + newer.retriedPasses,
     passStreak: newer.executions > 0 ? newer.passStreak : older.passStreak,
     variants: mergeVariants(older.variants, newer.variants),
-    events: [...older.events, ...newer.events.map((event) => ({ ...event, execution: event.execution + offset }))]
-      .sort((a, b) => a.execution - b.execution || a.at.localeCompare(b.at))
-      .slice(-maximumEvents),
-    openFailures: [
-      ...older.openFailures,
-      ...newer.openFailures.map((failure) => ({ ...failure, execution: failure.execution + offset })),
-    ],
+    events: [],
+    openFailures: [...older.openFailures, ...newer.openFailures.map(shift)],
     passHashes: [...new Set([...older.passHashes, ...newer.passHashes])].slice(-maximumPassHashes),
     failureShas: [...new Set([...older.failureShas, ...newer.failureShas])].slice(-maximumFailureShas),
     aliases: [...new Set([...older.aliases, ...newer.aliases, renamed])].sort(),
   };
+  keepEvents(merged, events, events.slice(-maximumEvents));
+  return merged;
 };
 
 /**
@@ -565,7 +623,8 @@ type Counting = {
 
 const recordEvent = (counting: Counting, event: FlakeEvent): void => {
   const { identity, id, events } = counting;
-  identity.events = [...identity.events, event].slice(-maximumEvents);
+  const all = [...identity.events, event];
+  keepEvents(identity, all, all.slice(-maximumEvents));
   const entry = identity.variants[event.variant];
   if (entry) {
     entry.events += 1;
@@ -601,7 +660,9 @@ const countFailure = (counting: Counting): void => {
       variant,
       hash: row.hash,
       execution: identity.executions,
+      variantExecution: variantState?.executions,
       error: firstError(row),
+      ...(row.shadow ? { shadow: true } : {}),
     });
     return;
   }
@@ -616,7 +677,9 @@ const countFailure = (counting: Counting): void => {
     lineage: lineage?.key,
     base: lineage?.kind === 'queue' ? lineage.base : undefined,
     execution: identity.executions,
+    variantExecution: variantState?.executions,
     error: firstError(row),
+    ...(row.shadow ? { shadow: true } : {}),
   });
 };
 
@@ -640,7 +703,9 @@ const countPass = (counting: Counting): LineageCandidate | undefined => {
       variant,
       hash: row.hash,
       execution: identity.executions,
+      variantExecution: identity.variants[variant]?.executions,
       error: firstError(row),
+      ...(row.shadow ? { shadow: true } : {}),
     });
   } else {
     identity.passStreak += 1;
@@ -662,7 +727,9 @@ const countPass = (counting: Counting): LineageCandidate | undefined => {
       variant,
       hash: failure.hash,
       execution: failure.execution,
+      variantExecution: failure.variantExecution,
       error: failure.error,
+      ...(failure.shadow ? { shadow: true } : {}),
     });
   }
   identity.openFailures = identity.openFailures.filter((failure) => !sameHash.includes(failure));
@@ -727,6 +794,9 @@ const ownRows = (
   return { own, replayed };
 };
 
+/** The key of {@link TaskState.targets}: the row's target (its shard kept) and variant. */
+const targetExecutionKey = (row: OutcomeRow): string => `${row.target} ${variantKey(row.variant)}`;
+
 /** Count a row into its task's totals; true when it is a test row. */
 const countTask = (
   state: LedgerState,
@@ -749,6 +819,8 @@ const countTask = (
   if (!executions.has(execution)) {
     executions.add(execution);
     task.executions += 1;
+    const target = targetExecutionKey(row);
+    task.targets = { ...task.targets, [target]: (task.targets?.[target] ?? 0) + 1 };
   }
   const failed = row.state === 'failed' ? 1 : 0;
   if (row.kind !== 'test') {
@@ -802,8 +874,16 @@ export const ingestRun = (
     identity.file = row.file;
     identity.executions += 1;
     identity.lastSeen = later(identity.lastSeen, at);
-    const variantState = identity.variants[variant] ?? { executions: 0, failures: 0, events: 0, lastSeen: at };
-    identity.variants[variant] = variantState;
+    let variantState = identity.variants[variant];
+    if (!variantState) {
+      variantState = { executions: 0, failures: 0, events: 0, lastSeen: at };
+      /* The executions before this one, counted by `countTask` with it; the variant was untracked, so each passed. */
+      const before = state.tasks[`${row.project}:${row.targetKey}`]?.targets?.[targetExecutionKey(row)];
+      if (before !== undefined) {
+        variantState.stableBefore = Math.max(0, before - 1);
+      }
+      identity.variants[variant] = variantState;
+    }
     variantState.executions += 1;
     variantState.lastSeen = later(variantState.lastSeen, at);
     const counting: Counting = { id, identity, row, variant, at, run, attempt: row.attempt ?? 1, events };
@@ -884,9 +964,12 @@ export const confirmLineage = (state: LedgerState, candidate: LineageCandidate):
     variant: candidate.failure.variant,
     hash: candidate.failure.hash,
     execution: candidate.failure.execution,
+    variantExecution: candidate.failure.variantExecution,
     error: candidate.failure.error,
+    ...(candidate.failure.shadow ? { shadow: true } : {}),
   };
-  identity.events = [...identity.events, event].slice(-maximumEvents);
+  const all = [...identity.events, event];
+  keepEvents(identity, all, all.slice(-maximumEvents));
   const entry = identity.variants[event.variant];
   if (entry) {
     entry.events += 1;
@@ -904,7 +987,11 @@ export const pruneState = (state: LedgerState, now: Date): void => {
   const kept: Array<[string, IdentityState]> = [];
   for (const [id, identity] of Object.entries(state.identities)) {
     identity.openFailures = identity.openFailures.filter((failure) => failure.at >= openCutoff);
-    identity.events = identity.events.filter((event) => event.at >= retentionCutoff);
+    keepEvents(
+      identity,
+      identity.events,
+      identity.events.filter((event) => event.at >= retentionCutoff),
+    );
     if (identity.lastFailure >= retentionCutoff || identity.events.length > 0) {
       kept.push([id, identity]);
     }
@@ -916,7 +1003,7 @@ export const pruneState = (state: LedgerState, now: Date): void => {
 export const eventsInLast = (identity: IdentityState, executions: number): number =>
   identity.events.filter((event) => event.execution > identity.executions - executions).length;
 
-/** Whether an identity meets D3's entry rule today (reported only; acting on it is FQ-6). */
+/** Whether an identity meets D3's entry rule today (`ci-flake-quarantine-entry.ts` acts on it). */
 export const meetsEntryRule = (identity: IdentityState): boolean =>
   entryRule.some((rule) => eventsInLast(identity, rule.executions) >= rule.events);
 
@@ -1000,7 +1087,7 @@ export const renderLedgerMarkdown = (summary: LedgerSummary, limit = 50): string
     return lines.join('\n');
   }
   lines.push(
-    'Events: `retry` failed and passed inside one task; `same-hash` failed and passed on one Nx task hash; `lineage` passed on the next run of the same unchanged pull request or push. Executions count from the first failure. "2 in 80 / 3 in 230" is the entry rule of D3, reported only.',
+    'Events: `retry` failed and passed inside one task; `same-hash` failed and passed on one Nx task hash; `lineage` passed on the next run of the same unchanged pull request or push. Executions count from the first failure. "2 in 80 / 3 in 230" is the entry rule of D3; the entry job quarantines such a test unless its newest execution failed every attempt.',
     '',
     '| Test | Events (retry / same-hash / lineage) | All events | Executions | Failures | Retried passes | Variants | First seen | Last seen | 2 in 80 / 3 in 230 |',
     '| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |',

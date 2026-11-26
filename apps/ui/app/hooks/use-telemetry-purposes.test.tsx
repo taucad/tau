@@ -189,4 +189,45 @@ describe('useTelemetryPurposes', () => {
 
     expect(result.current.canDecide).toBe(false);
   });
+
+  it('reads one answer for every rating mounted within the stale time (WP-02)', async () => {
+    const fetchMock = respond(answer({ projectId: 'project-a' }));
+    const first = renderHook(() => useTelemetryPurposes({ projectId: 'project-a' }), { wrapper });
+    await waitFor(() => {
+      expect(first.result.current.canDecide).toBe(true);
+    });
+
+    const second = renderHook(() => useTelemetryPurposes({ projectId: 'project-a' }), { wrapper });
+
+    expect(second.result.current.canDecide).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('asks again for every subject of the account after a decision, not only the one that decided', async () => {
+    const fetchMock = respond(
+      answer({ projectId: 'project-a' }),
+      answer(),
+      answer(),
+      answer({ projectId: 'project-a' }),
+      answer(),
+    );
+    const project = renderHook(() => useTelemetryPurposes({ projectId: 'project-a' }), { wrapper });
+    await waitFor(() => {
+      expect(project.result.current.canDecide).toBe(true);
+    });
+    const account = renderHook(() => useTelemetryPurposes(), { wrapper });
+    await waitFor(() => {
+      expect(account.result.current.canDecide).toBe(true);
+    });
+
+    await account.result.current.decide([{ purpose: 'summary', granted: true }]);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(5);
+    });
+    const urls = fetchMock.mock.calls.map(([input]) =>
+      typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+    );
+    expect(urls.filter((url) => url.includes('projectId=project-a'))).toHaveLength(2);
+  });
 });

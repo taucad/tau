@@ -357,6 +357,8 @@ describe('host attachment regression harness (HA2 rows)', () => {
       { log: unsettledLog, connect: overlayHost().connect, wait: 30_000 }, // A live run quiet for 30 s
       { log: pausedLog, connect: deadHost('PEER_GONE'), wait: 5000 }, // An approval wait, overlay down
       { log: recordedTurn, connect: deadHost('PEER_GONE'), wait: 5000 }, // An idle chat, overlay down
+      { log: unsettledLog, connect: deadHost('PEER_GONE'), wait: 5000 }, // A cold open whose first connect fails
+      { log: unsettledLog, connect: deadHost('WORKER_LOAD_FAILED'), wait: 5000 }, // A terminal cause (R9)
     ];
     for (const { log, connect, wait } of cases) {
       const chat = open(createStore(createDisk({ [ownLog]: log })), connect);
@@ -374,13 +376,44 @@ describe('host attachment regression harness (HA2 rows)', () => {
     }
   });
 
-  it('should say "Reconnecting…" once a live run\'s overlay has waited its debounce, and not before', async () => {
+  /** A host whose overlay subscribes once, then is lost with `code` and fails every dial after. */
+  const lostAfterSubscribing = (code: string) => {
+    const host = overlayHost();
+    const connect = vi.fn(async (): Promise<AgentHostClient> => {
+      throw Object.assign(new Error(`Host unavailable (${code})`), { code });
+    });
+    connect.mockImplementationOnce(host.connect);
+    return { connect, lose: () => host.end(Object.assign(new Error('lost'), { code })) };
+  };
+
+  it('row 16: says nothing over a coded terminal cause on a subscribed overlay', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const chat = open(createStore(createDisk({ [ownLog]: unsettledLog })), deadHost('PEER_GONE'));
+    const host = lostAfterSubscribing('WIRE_VERSION_UNSUPPORTED');
+    const chat = open(createStore(createDisk({ [ownLog]: unsettledLog })), host.connect);
     try {
       await vi.waitFor(() => {
+        expect(host.connect).toHaveBeenCalled();
+      }, coldBound);
+      await Promise.resolve();
+      host.lose();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(chat.store.isReconnecting(chatId)).toBe(false);
+    } finally {
+      chat.close();
+    }
+  });
+
+  it('should say "Reconnecting…" once a subscribed overlay has waited its debounce, and not before', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const host = lostAfterSubscribing('PEER_GONE');
+    const chat = open(createStore(createDisk({ [ownLog]: unsettledLog })), host.connect);
+    try {
+      await vi.waitFor(() => {
+        expect(host.connect).toHaveBeenCalled();
         expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
       }, coldBound);
+      await Promise.resolve();
+      host.lose();
       expect(chat.store.isReconnecting(chatId)).toBe(false);
       await vi.advanceTimersByTimeAsync(reconnectingCueMilliseconds + 100);
       expect(chat.store.isReconnecting(chatId)).toBe(true);
@@ -436,7 +469,8 @@ describe('HA2 successors: a local placement keeps no attachment state', () => {
     }
   });
 
-  it('should start a lost overlay again on the own reads of an unsettled run', async () => {
+  /* The own reads of an unsettled run poll at 1 Hz; the redial backoff (250 ms doubling to 30 s) paces the dials. */
+  it('should start a lost overlay again on the own reads of an unsettled run, backing off', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const connect = vi.fn(deadHost('PEER_GONE'));
     const chat = open(createStore(createDisk({ [ownLog]: unsettledLog })), connect);
@@ -447,6 +481,12 @@ describe('HA2 successors: a local placement keeps no attachment state', () => {
       const before = connect.mock.calls.length;
       await vi.advanceTimersByTimeAsync(3500);
       expect(connect.mock.calls.length).toBeGreaterThan(before);
+      /* A minute of 1 Hz reads dials about eight times (0.25, 0.5, 1, 2, 4, 8, 16, 30 s apart), not sixty. */
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(connect.mock.calls.length).toBeLessThanOrEqual(12);
+      const settled = connect.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(connect.mock.calls.length - settled).toBeLessThanOrEqual(1);
     } finally {
       chat.close();
     }

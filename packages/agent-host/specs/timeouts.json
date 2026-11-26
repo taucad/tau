@@ -891,7 +891,7 @@
     },
     {
       "id": "D-UI-12",
-      "bound": "A prepared send its host refused with an owner wait (RH-R17) is sent again by its key after 250 ms, doubling to 30 s, for as long as the wait lasts",
+      "bound": "A prepared send its host refused with any wait-class code (HA-I4; owner waits RH-R17 among them), or whose answer was lost past its 30 s bound, is sent again by its key after 250 ms, doubling to 30 s, for as long as the wait lasts",
       "site": "apps/ui/app/services/chat-session-store.ts",
       "token": "this.#hostWaitRanOut(session, timer)",
       "class": "Backoff",
@@ -934,7 +934,15 @@
       "bound": "The chat says Reconnecting only once an HA-I8 cause fact has held for reconnectingCueMilliseconds (2 s): a local chat's live overlay waiting while its own run is unsettled and not paused, or the outbox head re-sending after a lost answer or a wait code; never in a paused phase. A debounce on cause facts, not a silence detector",
       "site": "apps/ui/app/services/chat-session-store.ts",
       "token": "observed.cueTimer = setTimeout",
-      "class": "Presentation",
+      "class": "Debounce",
+      "owner": "host attachment reliability HA2"
+    },
+    {
+      "id": "HA2-OVERLAY-REDIAL",
+      "bound": "A local chat's lost live overlay is dialled again only on an own read at least overlayRedialFirstMilliseconds (250 ms) after the loss, doubling per loss to overlayRedialLongestMilliseconds (30 s); a subscription resets it. No timer: the own read is the wait's publisher (HA-I9)",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "Math.min(overlayRedialFirstMilliseconds * 2 ** losses, overlayRedialLongestMilliseconds)",
+      "class": "Backoff",
       "owner": "host attachment reliability HA2"
     },
     {

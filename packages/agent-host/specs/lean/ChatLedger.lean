@@ -332,6 +332,41 @@ def append (F : File) (A : App) (e : Row) : File × App × Outcome :=
          { A with red := R', view := A.view ++ [e], lines := A.lines + 1, torn := 0 }, .appended)
       else (F, { A with fenced := true }, .refused .fenced)
 
+/-- A batch appended one `append` at a time, each flushed before the next (`appendChatRows` before WP-10): the first
+refusal ends it, and the rows before it stay written. -/
+def appendSeq : File → App → List Row → File × App × List Outcome
+  | F, A, [] => (F, A, [])
+  | F, A, e :: es =>
+    match append F A e with
+    | (F1, A1, .refused r) => (F1, A1, [.refused r])
+    | (F1, A1, o) =>
+      let r := appendSeq F1 A1 es
+      (r.1, r.2.1, o :: r.2.2)
+
+/-- `appendMany` (WP-10 step A): one guarded section and one flush for a batch. Each row passes `append`'s rules in
+order; the fence is checked at the batch's first write only (`checked` after it), because this appender's own write
+keeps its view current. A refused row ends the batch; the rows before it stay written. -/
+def appendBatchFrom (checked : Bool) : File → App → List Row → File × App × List Outcome
+  | F, A, [] => (F, A, [])
+  | F, A, e :: es =>
+    if A.fenced then (F, A, [.refused .fenced])
+    else if e.invalid then (F, A, [.refused .invalid])
+    else
+      match A.red.prepare e with
+      | .error r => (F, A, [.refused r])
+      | .ok none =>
+        let r := appendBatchFrom checked F A es
+        (r.1, r.2.1, .duplicate :: r.2.2)
+      | .ok (some R') =>
+        if checked || current F A then
+          let r := appendBatchFrom true { lines := F.lines ++ [.row e], torn := 0 }
+            { A with red := R', view := A.view ++ [e], lines := A.lines + 1, torn := 0 } es
+          (r.1, r.2.1, .appended :: r.2.2)
+        else (F, { A with fenced := true }, [.refused .fenced])
+
+/-- `appendMany` over a batch, before its first write. -/
+def appendBatch (F : File) (A : App) (es : List Row) : File × App × List Outcome := appendBatchFrom false F A es
+
 /-- One read's answer: a batch, or a refusal (`ahead` is `cursor-ahead`, else `identity-mismatch`). -/
 inductive Answer where
   | batch (cursor next finish : Nat) (events : List Row)

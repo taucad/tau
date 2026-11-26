@@ -1,5 +1,6 @@
 import { createContext, memo, useCallback, useContext, useLayoutEffect, useMemo, useRef } from 'react';
 import type { PluggableList } from 'unified';
+import remend from 'remend';
 import { Block, parseMarkdownIntoBlocks } from 'streamdown';
 import type { BlockProps } from 'streamdown';
 import { createChatStreamingFadePlugin, getStreamingArrivalStart } from '#components/markdown/chat-streaming-fade.js';
@@ -35,9 +36,42 @@ export const ChatStreamingBlock = memo(function (properties: BlockProps): React.
 });
 
 type ChatStreamingFadeProviderProperties = {
-  readonly children: (parseBlocks: (markdown: string) => string[]) => React.ReactNode;
+  /**
+   * Renders the streaming markdown. `markdown` is the content with only its last block repaired; pass it to
+   * Streamdown with `parseIncompleteMarkdown={false}` and `parseMarkdownIntoBlocksFn={parseBlocks}`.
+   */
+  readonly children: (parseBlocks: (markdown: string) => string[], markdown: string) => React.ReactNode;
   readonly content: string;
 };
+
+/**
+ * Repair only the block still being written (WP-09). Streamdown repairs the whole text before splitting it, which is
+ * work proportional to the text on every render, and it can close a marker opened in an earlier, finished block
+ * inside the last one (for example a stray `*` closing into a code fence). A finished block needs no repair, so the
+ * settled blocks are kept as split and only the source after them is repaired.
+ */
+export function repairStreamingTail(
+  blocks: readonly string[],
+  content: string,
+): Readonly<{
+  markdown: string;
+  blocks: string[];
+}> {
+  const head = blocks.slice(0, -1);
+  let offset = 0;
+  for (const block of head) {
+    offset += block.length;
+  }
+  if (content.slice(0, offset) !== head.join('')) {
+    /* The split does not cover the source exactly (it normalised line endings): repair it whole. */
+    const markdown = remend(content);
+    return { markdown, blocks: parseMarkdownIntoBlocks(markdown) };
+  }
+  /* The source after the settled blocks is one block, and repair only appends to it. It is not split again: a second
+   * split would replace Streamdown's one remembered split, so the next render's split would start over from the top. */
+  const tail = remend(content.slice(offset));
+  return { markdown: content.slice(0, offset) + tail, blocks: [...head, tail] };
+}
 
 /** Keep settled Streamdown blocks memoized while marking only newly arrived source text. */
 export function ChatStreamingFadeProvider({
@@ -50,6 +84,7 @@ export function ChatStreamingFadeProvider({
   const hasCommittedRef = useRef(false);
   const arrivalOffsetsRef = useRef<readonly number[]>([]);
   const blocks = useMemo(() => parseMarkdownIntoBlocks(content), [content]);
+  const repaired = useMemo(() => repairStreamingTail(blocks, content), [blocks, content]);
   const arrivalStart = hasCommittedRef.current
     ? getStreamingArrivalStart(previousContentRef.current, content)
     : content.length;
@@ -65,8 +100,9 @@ export function ChatStreamingFadeProvider({
     });
   }, [arrivalStart, blocks]);
   const parseBlocks = useCallback(
-    (markdown: string): string[] => (markdown === content ? blocks : parseMarkdownIntoBlocks(markdown)),
-    [blocks, content],
+    (markdown: string): string[] =>
+      markdown === repaired.markdown ? repaired.blocks : parseMarkdownIntoBlocks(markdown),
+    [repaired],
   );
 
   useLayoutEffect(() => {
@@ -76,6 +112,10 @@ export function ChatStreamingFadeProvider({
   }, [blocks, content]);
 
   const value = useMemo<ChatStreamingFadeContextValue>(() => ({ arrivalOffsetsRef }), []);
-  return <ChatStreamingFadeContext.Provider value={value}>{children(parseBlocks)}</ChatStreamingFadeContext.Provider>;
+  return (
+    <ChatStreamingFadeContext.Provider value={value}>
+      {children(parseBlocks, repaired.markdown)}
+    </ChatStreamingFadeContext.Provider>
+  );
 }
 /* oxlint-enable react/refs, react/immutability */

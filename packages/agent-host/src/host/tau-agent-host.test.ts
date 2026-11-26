@@ -37,6 +37,7 @@ import {
   tools,
   hostOptions,
   fakePlacement,
+  rowByRow,
 } from '#host/tau-agent-host.fixture.js';
 import type { SeededLogEvent } from '#host/tau-agent-host.fixture.js';
 
@@ -135,7 +136,7 @@ describe('createTauAgentHost', () => {
       hostOptions({
         openEventLog: async () => {
           const log = await file.open();
-          return {
+          return rowByRow({
             ...log,
             append: async (event: AgentLogEvent) => {
               if (event.type === 'model.invocation-prepared') {
@@ -144,7 +145,7 @@ describe('createTauAgentHost', () => {
               }
               return log.append(event);
             },
-          };
+          });
         },
         transport: { funding: fundedFacet(), stream },
         toolRegistry: tools(async () => ({ content: null, isError: false })),
@@ -506,7 +507,7 @@ describe('createTauAgentHost', () => {
       ...hostOptions({
         openEventLog: async () => {
           const opened = await file.open();
-          return {
+          return rowByRow({
             ...opened,
             append: async (event) => {
               if (event.type === 'history.compacted' && failCompaction) {
@@ -515,7 +516,7 @@ describe('createTauAgentHost', () => {
               }
               return opened.append(event);
             },
-          };
+          });
         },
         transport: {
           funding: { type: 'unfunded' },
@@ -587,7 +588,7 @@ describe('createTauAgentHost', () => {
       ...hostOptions({
         openEventLog: async () => {
           const opened = await file.open();
-          return {
+          return rowByRow({
             ...opened,
             append: async (event) => {
               if (event.type === 'history.compacted' && rejectCompactionAppend) {
@@ -596,7 +597,7 @@ describe('createTauAgentHost', () => {
               }
               return opened.append(event);
             },
-          };
+          });
         },
         transport: {
           funding: { type: 'unfunded' },
@@ -1330,7 +1331,7 @@ the cancelled tools left the system unchanged.
     const options = hostOptions({
       openEventLog: async () => {
         const log = await file.open();
-        return {
+        return rowByRow({
           ...log,
           refresh: async () => undefined,
           foreignRuns: async () => reads.foreignRuns?.() ?? [],
@@ -1345,7 +1346,7 @@ the cancelled tools left the system unchanged.
             }
             return appended;
           },
-        };
+        });
       },
       transport: new ScriptedParityModelTransport(printResponses),
       toolRegistry: printTool([]),
@@ -3534,7 +3535,7 @@ describe('the host run ledger', () => {
       hostOptions({
         openEventLog: async () => {
           const log = await file.open();
-          return {
+          return rowByRow({
             ...log,
             read: async () => {
               reads++;
@@ -3544,7 +3545,7 @@ describe('the host run ledger', () => {
               readsAtAppend.push(reads);
               return log.append(row);
             },
-          };
+          });
         },
         transport: {
           funding: { type: 'unfunded' },
@@ -4749,7 +4750,7 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
         ...hostOptions({
           openEventLog: async () => {
             const log = await file.open();
-            return {
+            return rowByRow({
               ...log,
               read: async () => {
                 reads++;
@@ -4763,7 +4764,7 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
                 }
                 return log.append(event);
               },
-            };
+            });
           },
           transport: {
             funding: { type: 'unfunded' },
@@ -4838,7 +4839,7 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
       ...hostOptions({
         openEventLog: async () => {
           const log = await file.open();
-          return {
+          return rowByRow({
             ...log,
             append: async (event) => {
               if (failAppends) {
@@ -4846,7 +4847,7 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
               }
               return log.append(event);
             },
-          };
+          });
         },
         transport: okTransport,
         toolRegistry: tools(async () => ({ content: null, isError: false })),
@@ -5324,7 +5325,7 @@ describe('model attempts: charge and proceed (RA-S11, EQ1)', () => {
        * log: the chosen step waits here. */
       const open = async (): Promise<Awaited<ReturnType<typeof file.open>>> => {
         const appender = await file.open();
-        return {
+        return rowByRow({
           ...appender,
           append: async (event) => {
             if (dropped && (event.type === 'history.rewound' || event.type === 'message.envelope-replaced')) {
@@ -5344,7 +5345,7 @@ describe('model attempts: charge and proceed (RA-S11, EQ1)', () => {
             }
             return appender.read();
           },
-        };
+        });
       };
       const host = createTauAgentHost(
         hostOptions({

@@ -5664,6 +5664,124 @@ describe('ChatSessionStore', () => {
         }
       });
 
+      /* PERF-5: a `wait` refusal (RH-R17) was drawn as a failure whose own sentence says the message will be sent. */
+      const writerLocked = (commandId: string): Awaited<ReturnType<AgentHostClient['hostCommand']>> => ({
+        commandId,
+        generation: 1,
+        status: 'refused',
+        effect: 'not-applied',
+        code: 'WRITER_LOCKED',
+        message: 'This chat is still open for writing in a tab that is paused.',
+      });
+
+      it('should hold a send its host refuses with a wait, and send it again by its key until it is taken', async () => {
+        const chatId = 'departing_host_wait';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        hostCommand.mockResolvedValueOnce(writerLocked('req_waits')).mockResolvedValueOnce(writerLocked('req_waits'));
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('waits'));
+          await vi.waitFor(() => {
+            expect(store.hostWaitOf(chatId)).toMatch(/^Queued\. Another tab still has this chat open/u);
+          });
+          /* Not failed: the send is in the thread, the chat reads as on its way, and nothing offers Try again. */
+          expect(store.departingSendOf(chatId)).toBe('waits');
+          expect(store.getChatStatus(chatId)).toBe('submitted');
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+          expect(session.messageQueueRef.getSnapshot().context.error).toBeUndefined();
+          expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+            items: [{ id: 'waits', command: { commandId: 'req_waits' } }],
+          });
+          /* Sent again after 250 ms, then 500 ms, with the same key, until the host takes it. */
+          await vi.waitFor(
+            () => {
+              expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+            },
+            { timeout: 3000 },
+          );
+          expect(hostCommand.mock.calls.map(([command]) => command.commandId)).toEqual([
+            'req_waits',
+            'req_waits',
+            'req_waits',
+          ]);
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should take a send that waits for its host back to the composer on Stop, with no cancel sent', async () => {
+        const chatId = 'departing_host_wait_stopped';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        hostCommand.mockImplementation(async (command) => writerLocked(command.commandId));
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('stopped'));
+          await vi.waitFor(() => {
+            expect(store.hostWaitOf(chatId)).toBeDefined();
+          });
+          expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'dispatched' } })).toBe(true);
+
+          store.stopRun(chatId, 'stop-button');
+
+          expect(store.departingSendOf(chatId)).toBeUndefined();
+          await vi.waitFor(() => {
+            expect(store.isStopping(chatId)).toBe(false);
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('stopped');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+          });
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          expect(store.getChatStatus(chatId)).toBe('ready');
+          expect(session.stateActorRef.getSnapshot().matches({ run: 'idle' })).toBe(true);
+          expect(hostCommand.mock.calls.every(([command]) => command.type === 'start')).toBe(true);
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+          /* The backoff that was running sends nothing more. */
+          const sent = hostCommand.mock.calls.length;
+          await new Promise((resolve) => {
+            setTimeout(resolve, 600);
+          });
+          expect(hostCommand).toHaveBeenCalledTimes(sent);
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should still show a refusal that is not a wait as undelivered, sent once', async () => {
+        const chatId = 'departing_host_refusal';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockResolvedValueOnce({
+          commandId: 'req_refused_host',
+          generation: 1,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'HOST_MODEL_UNAVAILABLE',
+          message: 'No model is configured.',
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('refused_host'));
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.error).toBeDefined();
+          });
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          expect(hostCommand).toHaveBeenCalledOnce();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
       it('should return a refused send to the composer instead of holding it as undelivered', async () => {
         const chatId = 'departing_refused';
         const projectId = 'departing_project';
@@ -8071,6 +8189,81 @@ describe('ChatSessionStore — composer records (W7)', () => {
     await store.requestTurn(chatId, { kind: 'send', message });
 
     expect(session.draftActorRef.getSnapshot().context.draftText).toBe('model the bracket\nand a second one');
+    store.release(chatId);
+  });
+
+  /* PERF-8: a send writes the outbox, then the composer's cleared draft. A reload between the two restored the queued
+   * prompt as a draft, and the next one typed was queued as "Prompt 4.Prompt 3.". */
+  it('should not restore a queued send as the draft when a reload lands before the composer is cleared', async () => {
+    const client = createMemoryClient();
+    const first = openStore(client);
+    const session = first.store.acquire(chatId, projectId);
+    session.draftActorRef.send({ type: 'setDraftText', text: 'Prompt 3.' });
+    await vi.waitFor(() => {
+      expect(client.json(composerPath(projectId, chatId))).toMatchObject({
+        draft: { parts: [{ type: 'text', text: 'Prompt 3.' }] },
+      });
+    });
+    /* The page goes away before the composer's clear lands: that write never reaches the disk. */
+    let reloading = true;
+    const write = client.writeFile.bind(client);
+    vi.spyOn(client, 'writeFile').mockImplementation(async (path, data) => {
+      if (reloading && path === composerPath(projectId, chatId)) {
+        return new Promise<void>(() => {
+          /* The page went away: this write never lands. */
+        });
+      }
+      await write(path, data);
+    });
+    const message = buildUserMessage({ text: 'Prompt 3.' });
+    await first.store.requestTurn(chatId, { kind: 'send', message });
+    expect(client.json(composerPath(projectId, chatId))).toMatchObject({
+      draft: { parts: [{ type: 'text', text: 'Prompt 3.' }] },
+    });
+    reloading = false;
+
+    const reopened = openStore(client).store;
+    const restored = reopened.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(restored.messageQueueRef.getSnapshot().context.items.map((item) => item.message)).toEqual([message]);
+      expect(client.json(composerPath(projectId, chatId))).not.toHaveProperty('draft');
+    });
+    expect(restored.draftActorRef.getSnapshot().context.draftText).toBe('');
+    reopened.release(chatId);
+  });
+
+  it.each([
+    { name: 'a draft that differs from every queued send', draft: 'Prompt 4.', held: false, kept: true },
+    { name: 'a draft equal to a held send on its way to the composer', draft: 'Prompt 3.', held: true, kept: true },
+    { name: 'a draft equal to a queued send', draft: 'Prompt 3.', held: false, kept: false },
+    { name: 'a draft equal to a queued send but for a trailing space', draft: 'Prompt 3. ', held: false, kept: false },
+  ])('should restore $name: kept $kept (PERF-8)', async ({ draft, held, kept }) => {
+    const client = createMemoryClient();
+    const queued = buildUserMessage({ text: 'Prompt 3.' });
+    await client.writeFile(
+      composerPath(projectId, chatId),
+      /* The composer record holds the editor's raw text, which `buildUserMessage` would trim. */
+      new TextEncoder().encode(
+        JSON.stringify({ version: 1, draft: { id: '', role: 'user', parts: [{ type: 'text', text: draft }] } }),
+      ),
+    );
+    await client.writeFile(
+      chatMessageQueuePath(projectId, chatId),
+      new TextEncoder().encode(
+        JSON.stringify({
+          version: 1,
+          items: [{ id: queued.id, requestId: 'req_queued', message: queued, ...(held ? { held: true } : {}) }],
+        }),
+      ),
+    );
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.messageQueueRef.getSnapshot().context.items).toHaveLength(1);
+      expect(session.composerRecordRef.getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
+    });
+    await settle();
+    expect(session.draftActorRef.getSnapshot().context.draftText).toBe(kept ? draft : '');
     store.release(chatId);
   });
 

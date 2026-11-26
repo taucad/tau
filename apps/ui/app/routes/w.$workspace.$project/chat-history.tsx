@@ -106,6 +106,8 @@ const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: st
         ref={ref}
         role='region'
         aria-label='Chat history'
+        /* Session replay blocks this transcript while the account's chats may not be recorded (`replay-content.lib`). */
+        data-replay-content='chat'
         aria-busy={context === 'loading' ? true : undefined}
         data-transcript-state={context}
         className={cn('[scrollbar-gutter:stable]', props.className)}

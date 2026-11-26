@@ -29,6 +29,7 @@ const ready: OutboxReadiness = {
   commandInFlight: false,
   admitting: false,
   chatLoading: false,
+  hostWaiting: false,
 };
 
 const facts = (overrides: Partial<OutboxGateFacts> = {}): OutboxGateFacts => ({
@@ -71,6 +72,11 @@ describe('selectOutboxGate', () => {
       name: 'a command in flight',
       overrides: { readiness: { ...ready, commandInFlight: true } },
       expected: { kind: 'hold', reason: 'command-in-flight' },
+    },
+    {
+      name: 'a refused send whose backoff has not run out',
+      overrides: { readiness: { ...ready, hostWaiting: true } },
+      expected: { kind: 'hold', reason: 'host-wait' },
     },
     {
       name: 'an admission',

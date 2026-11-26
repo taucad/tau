@@ -889,6 +889,14 @@
       "owner": "chat UX F2"
     },
     {
+      "id": "D-UI-12",
+      "bound": "A prepared send its host refused with an owner wait (RH-R17) is sent again by its key after 250 ms, doubling to 30 s, for as long as the wait lasts",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "this.#hostWaitRanOut(session, timer)",
+      "class": "Backoff",
+      "owner": "PERF-5"
+    },
+    {
       "id": "D19",
       "bound": "Host command retry delay (20 ms doubling to 250 ms within its 30 s deadline)",
       "site": "apps/ui/app/chat-clients/_internal/host-command.ts",

@@ -14,7 +14,7 @@
       },
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/github-identity.test.ts apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node"
+        "command": "vitest run --config apps/ui-e2e/vitest.node.config.ts --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/github-identity.test.ts apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node"
       }
     },
     "test:e2e:queue": {
@@ -521,7 +521,7 @@
         "parallel": false,
         "commands": [
           "pnpm exec nx run ui:build",
-          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/stale-deploy-recovery.test.ts apps/ui-e2e/src/service-worker-boot.test.ts --environment=node"
+          "vitest run --config apps/ui-e2e/vitest.node.config.ts --dir apps/ui-e2e apps/ui-e2e/src/stale-deploy-recovery.test.ts apps/ui-e2e/src/service-worker-boot.test.ts --environment=node"
         ],
         "env": {
           "TAU_CLOUD_ENABLED": "false",
@@ -541,7 +541,7 @@
         "parallel": false,
         "commands": [
           "pnpm exec nx run ui:build",
-          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/service-worker.test.ts apps/ui-e2e/src/service-worker-deploy.test.ts --environment=node"
+          "vitest run --config apps/ui-e2e/vitest.node.config.ts --dir apps/ui-e2e apps/ui-e2e/src/service-worker.test.ts apps/ui-e2e/src/service-worker-deploy.test.ts --environment=node"
         ],
         "env": {
           "TAU_CLOUD_ENABLED": "false",
@@ -698,7 +698,7 @@
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "parallel": false,
         "commands": [
-          "pnpm --dir ../.. exec vitest run --dir apps/ui-e2e apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
+          "pnpm --dir ../.. exec vitest run --config apps/ui-e2e/vitest.node.config.ts --dir apps/ui-e2e apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
           "pnpm --dir ../.. exec nx run ui:build",
           "vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts"
         ],
@@ -873,7 +873,7 @@
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
-          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node",
+          "vitest run --config apps/ui-e2e/vitest.node.config.ts --dir apps/ui-e2e apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node",
           "vitest run --config apps/ui-e2e/src/filesystem-scenarios/vitest.config.ts"
         ]
       }
@@ -883,7 +883,7 @@
       "cache": false,
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/support/observability-staging.test.ts --environment=node"
+        "command": "vitest run --config apps/ui-e2e/vitest.node.config.ts --dir apps/ui-e2e apps/ui-e2e/src/support/observability-staging.test.ts --environment=node"
       }
     },
     "test:e2e:observability-staging": {
@@ -891,7 +891,7 @@
       "cache": false,
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/observability.staging.test.ts apps/ui-e2e/src/observability-delivery.staging.test.ts apps/ui-e2e/src/observability-ssr.staging.test.ts apps/ui-e2e/src/observability-runtime.staging.test.ts --environment=node --no-file-parallelism"
+        "command": "vitest run --config apps/ui-e2e/vitest.node.config.ts --dir apps/ui-e2e apps/ui-e2e/src/observability.staging.test.ts apps/ui-e2e/src/observability-delivery.staging.test.ts apps/ui-e2e/src/observability-ssr.staging.test.ts apps/ui-e2e/src/observability-runtime.staging.test.ts --environment=node --no-file-parallelism"
       }
     },
     "test:e2e:desktop-boot-signals-staging": {
@@ -899,7 +899,7 @@
       "cache": false,
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/observability.staging.test.ts --environment=node --testNamePattern=T-R9.3"
+        "command": "vitest run --config apps/ui-e2e/vitest.node.config.ts --dir apps/ui-e2e apps/ui-e2e/src/observability.staging.test.ts --environment=node --testNamePattern=T-R9.3"
       }
     }
   }

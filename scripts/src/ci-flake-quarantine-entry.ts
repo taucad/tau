@@ -3,8 +3,9 @@
  * the CI flake quarantine blueprint, Brain `research/ci-flake-quarantine-blueprint.md`, D3, D5 and D8; testing policy
  * § 16.3 and § 16.4). The pure half; `ci-flake-quarantine-entry-cli.ts` opens the owner issues and the pull request.
  *
- * An identity of the ledger state (`ci-flake-ledger-state.ts`) is an offender when its flake events meet the entry rule
- * (two inside its last 80 executions, or three inside 230). Each offender is then, in this order:
+ * An identity of the ledger state (`ci-flake-ledger-state.ts`) is an offender when its flake events from gating tasks
+ * meet the entry rule (two inside its last 80 executions, or three inside 230); events seen only in a non-gating
+ * shadow row (DC-25) never count. Each offender is then, in this order:
  *
  * - **refused as a failure** when its newest execution failed every attempt and has not passed since: a test that
  *   fails every attempt is a failure whatever its history (D1, invariant 2), and the queue is right to catch it;
@@ -76,7 +77,14 @@ export type PlannedEntry = Offender & {
   readonly linkedIssue?: number | undefined;
 };
 
-export type RefusalKind = 'failing' | 'flaky-regression' | 'no-project' | 'never-quarantine' | 'cap' | 'invalid';
+export type RefusalKind =
+  | 'shadow'
+  | 'failing'
+  | 'flaky-regression'
+  | 'no-project'
+  | 'never-quarantine'
+  | 'cap'
+  | 'invalid';
 
 /** An offender that does not become an entry, and why. */
 export type Refusal = Offender & {
@@ -114,20 +122,47 @@ const evidenceWindow = Math.max(...entryRule.map((rule) => rule.executions));
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** Every identity that meets the entry rule, most events in the window first. */
+/** The events that count toward the entry rule: those of gating tasks, never of a non-gating shadow row (DC-25). */
+const gatingEvents = (identity: IdentityState): FlakeEvent[] =>
+  identity.events.filter((event) => event.shadow !== true);
+
+/** Whether an identity's gating events meet the entry rule. */
+export const meetsGatingEntryRule = (identity: IdentityState): boolean => {
+  const events = gatingEvents(identity);
+  return entryRule.some(
+    (rule) => events.filter((event) => event.execution > identity.executions - rule.executions).length >= rule.events,
+  );
+};
+
+const offender = (id: string, identity: IdentityState): Offender => {
+  const separator = id.indexOf(projectSeparator);
+  return {
+    id,
+    identity,
+    test: separator === -1 ? id : id.slice(separator + projectSeparator.length),
+    events: gatingEvents(identity).filter((event) => event.execution > identity.executions - evidenceWindow),
+  };
+};
+
+const byEvents = (a: Offender, b: Offender): number =>
+  b.events.length - a.events.length || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/**
+ * Every identity whose gating events meet the entry rule, most events in the window first. Events seen only in a
+ * shadow row do not count: the test is already non-gating there, and an entry would only spend the caps.
+ */
 export const offenders = (state: LedgerState): Offender[] =>
   Object.entries(state.identities)
-    .filter(([, identity]) => meetsEntryRule(identity))
-    .map(([id, identity]) => {
-      const separator = id.indexOf(projectSeparator);
-      return {
-        id,
-        identity,
-        test: separator === -1 ? id : id.slice(separator + projectSeparator.length),
-        events: identity.events.filter((event) => event.execution > identity.executions - evidenceWindow),
-      };
-    })
-    .sort((a, b) => b.events.length - a.events.length || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    .filter(([, identity]) => meetsGatingEntryRule(identity))
+    .map(([id, identity]) => offender(id, identity))
+    .sort(byEvents);
+
+/** Identities that meet the entry rule only by counting their shadow-row events. */
+export const shadowOnlyOffenders = (state: LedgerState): Offender[] =>
+  Object.entries(state.identities)
+    .filter(([, identity]) => meetsEntryRule(identity) && !meetsGatingEntryRule(identity))
+    .map(([id, identity]) => offender(id, identity))
+    .sort(byEvents);
 
 /**
  * Whether the identity's newest execution failed every attempt and is still unpaired: no pass on its hash, inside the
@@ -243,6 +278,14 @@ export const planEntries = (input: PlanInput): EntryPlan => {
   const admitted: PlannedEntry[] = [];
   const refused: Refusal[] = [];
   const held: string[] = [];
+  for (const shadow of shadowOnlyOffenders(input.state)) {
+    refused.push({
+      ...shadow,
+      kind: 'shadow',
+      reason: 'its flake events that meet the entry rule come from non-gating shadow rows: it gates nothing there',
+      project: input.projects.get(shadow.identity.project),
+    });
+  }
   for (const offender of offenders(input.state)) {
     const project = input.projects.get(offender.identity.project);
     const { owner, issue } = ownership(input.owners, offender);
@@ -318,6 +361,11 @@ export const renderQuarantine = (path: string, text: string | undefined, add: re
   return `${JSON.stringify({ ...file, entries: [...entries, ...add] }, undefined, 2)}\n`;
 };
 
+/** Text from test output or test titles, made inert in Markdown: one line, no backticks, no mention. */
+const inert = (content: string, limit = 300): string => {
+  const line = content.replaceAll(/\s+/gu, ' ').replaceAll('`', "'").trim();
+  return line.length > limit ? `${line.slice(0, limit - 1)}…` : line;
+};
 
 const code = (content: string, limit?: number): string => `\`${inert(content, limit)}\``;
 

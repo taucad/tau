@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 import { readQuarantine } from '@taucad/vitest-ci/quarantine';
 
-import { emptyState, ingestRun, parseOutcomes } from '#ci-flake-ledger-state.js';
+import { artifactRows } from '#ci-flake-ledger-ingest-cli.js';
+import { emptyState, ingestRun, meetsEntryRule, parseOutcomes } from '#ci-flake-ledger-state.js';
 import type { FlakeEvent, IdentityState, IngestRun, LedgerState, OutcomeRow } from '#ci-flake-ledger-state.js';
 import { applyPlan, mayAutoMerge, proposedFiles, validatePlan } from '#ci-flake-quarantine-entry-cli.js';
 import type { Workspace } from '#ci-flake-quarantine-entry-cli.js';
@@ -50,10 +51,10 @@ const queueRun = (run: (typeof weekRuns)[number]): IngestRun => ({
   run_attempt: run.attempt,
 });
 
-const weekRows = (): OutcomeRow[] => {
+const weekRows = (name: string): OutcomeRow[] => {
   const parsed = parseOutcomes(
-    readFileSync(resolve(import.meta.dirname, 'fixtures/flake-quarantine/replay-week.outcomes.jsonl'), 'utf8'),
-    'replay-week',
+    readFileSync(resolve(import.meta.dirname, `fixtures/flake-quarantine/${name}.outcomes.jsonl`), 'utf8'),
+    name,
   );
   expect(parsed.problems).toEqual([]);
   return parsed.rows;
@@ -62,12 +63,16 @@ const weekRows = (): OutcomeRow[] => {
 /** The ledger state after ingesting the replay week, run by run, as `flake-ledger.yml` does. */
 const replayWeek = (): LedgerState => {
   const state = emptyState(new Date('2026-11-16T00:00:00Z'));
-  const rows = weekRows();
+  // Two artifacts a run: a gating lane's, and a non-gating shadow row's (DC-25), read as the ingestion reads them.
+  const rows = [
+    ...artifactRows('test-outcomes-affected-test-1', weekRows('replay-week')),
+    ...artifactRows('test-outcomes-shadow-journey-chat-1', weekRows('replay-week-shadow')),
+  ];
   for (const run of weekRuns) {
     ingestRun(state, {
       run: queueRun(run),
       rows: rows.filter((row) => row.run === run.id),
-      artifacts: 1,
+      artifacts: 2,
       rejected: 0,
     });
   }
@@ -81,6 +86,7 @@ const id = {
   tick: 'host › src/clock.test.ts > clock > should tick once a second',
   settle: 'api › src/billing/charge.test.ts > charge > should settle once',
   once: 'host › src/once.test.ts > once > should flake only once',
+  journey: 'ui-e2e › src/journey-chat.spec.ts > journey > should answer in the chat',
 };
 
 const projects = new Map<string, WorkspaceProject>([
@@ -160,6 +166,7 @@ describe('the replay week (FQ-6 acceptance)', () => {
 
     expect(admitted.map((planned) => planned.id)).toEqual([id.order, id.render]);
     expect(refused.map((refusal) => [refusal.id, refusal.kind])).toEqual([
+      [id.journey, 'shadow'],
       [id.settle, 'never-quarantine'],
       [id.tick, 'failing'],
     ]);
@@ -288,6 +295,34 @@ describe('the replay week (FQ-6 acceptance)', () => {
 
     expect(result.issues.get(id.order)).toBe(42);
     expect(requests.filter((request) => request.method === 'POST' && request.path.endsWith('/issues'))).toHaveLength(2);
+  });
+});
+
+describe('shadow rows (DC-25)', () => {
+  it('should open no entry for a test whose failures meet the rule only in a non-gating shadow row', () => {
+    const state = replayWeek();
+    const journey = state.identities[id.journey];
+
+    // Numerically it meets the rule: two retried passes in seven executions.
+    expect(journey && meetsEntryRule(journey)).toBe(true);
+    expect(journey?.events.every((event) => event.shadow === true)).toBe(true);
+    const result = plan(state);
+    expect(offenders(state).map((offender) => offender.id)).not.toContain(id.journey);
+    expect(result.admitted.map((planned) => planned.id)).not.toContain(id.journey);
+    expect(result.refused.find((refusal) => refusal.id === id.journey)?.kind).toBe('shadow');
+  });
+
+  it('should count only the gating events of a test that also flakes in a shadow row', () => {
+    const state = replayWeek();
+    const order = state.identities[id.order];
+    expect(order).toBeDefined();
+    if (order === undefined) {
+      return;
+    }
+    // One of its two events was a shadow row's: one gating event is below the rule.
+    order.events = order.events.map((event, index) => (index === 0 ? { ...event, shadow: true } : event));
+
+    expect(plan(state).admitted.map((planned) => planned.id)).toEqual([id.render]);
   });
 });
 

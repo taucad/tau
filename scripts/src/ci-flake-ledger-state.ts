@@ -94,6 +94,11 @@ export type OutcomeRow = {
   readonly run?: number | undefined;
   readonly attempt?: number | undefined;
   readonly job?: string | undefined;
+  /**
+   * The row came from a non-gating shadow row (a `test-outcomes-shadow-*` artifact, DC-25). Set by the reader from the
+   * artifact's name, never by the row; its events are recorded but do not count toward the entry rule (FQ-6).
+   */
+  readonly shadow?: boolean | undefined;
 };
 
 export type ParsedOutcomes = {
@@ -238,6 +243,8 @@ export type FlakeEvent = {
   readonly execution: number;
   /** The first line of the first error. */
   readonly error?: string | undefined;
+  /** Seen only in a non-gating shadow row: recorded, but not counted toward the entry rule. */
+  readonly shadow?: true | undefined;
 };
 
 /** A failed execution still waiting for a pass on its hash or in its lineage. */
@@ -255,6 +262,8 @@ export type OpenFailure = {
   readonly base?: string | undefined;
   readonly execution: number;
   readonly error?: string | undefined;
+  /** The failure came from a non-gating shadow row. */
+  readonly shadow?: true | undefined;
 };
 
 export type VariantState = {
@@ -598,6 +607,7 @@ const countFailure = (counting: Counting): void => {
       hash: row.hash,
       execution: identity.executions,
       error: firstError(row),
+      ...(row.shadow ? { shadow: true } : {}),
     });
     return;
   }
@@ -613,6 +623,7 @@ const countFailure = (counting: Counting): void => {
     base: lineage?.kind === 'queue' ? lineage.base : undefined,
     execution: identity.executions,
     error: firstError(row),
+    ...(row.shadow ? { shadow: true } : {}),
   });
 };
 
@@ -637,6 +648,7 @@ const countPass = (counting: Counting): LineageCandidate | undefined => {
       hash: row.hash,
       execution: identity.executions,
       error: firstError(row),
+      ...(row.shadow ? { shadow: true } : {}),
     });
   } else {
     identity.passStreak += 1;
@@ -659,6 +671,7 @@ const countPass = (counting: Counting): LineageCandidate | undefined => {
       hash: failure.hash,
       execution: failure.execution,
       error: failure.error,
+      ...(failure.shadow ? { shadow: true } : {}),
     });
   }
   identity.openFailures = identity.openFailures.filter((failure) => !sameHash.includes(failure));
@@ -881,6 +894,7 @@ export const confirmLineage = (state: LedgerState, candidate: LineageCandidate):
     hash: candidate.failure.hash,
     execution: candidate.failure.execution,
     error: candidate.failure.error,
+    ...(candidate.failure.shadow ? { shadow: true } : {}),
   };
   identity.events = [...identity.events, event].slice(-maximumEvents);
   const entry = identity.variants[event.variant];

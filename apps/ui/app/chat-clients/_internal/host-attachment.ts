@@ -22,7 +22,7 @@ export type HostAttachmentStatus = Readonly<{
   type: 'attachment.attached' | 'attachment.lost' | 'attachment.refused';
   reason?: string;
   error?: unknown;
-  /** The loss is residual R6: the computer was revoked or its grant refused, so only pairing it again helps. */
+  /** The loss is residual R6: the computer was revoked or is no longer paired, so only pairing it again helps. */
   residual?: 'R6';
 }>;
 
@@ -30,37 +30,36 @@ export type HostAttachmentStatus = Readonly<{
 export type RemoteCloseInfo = Readonly<{ code: number | string; reason?: string }>;
 
 /**
- * D17 (HA3): a remote read that is lost is dialled again after 250 ms, doubling to 30 s, with no give-up; a wake
- * (`online`, `visibilitychange` to visible, `pageshow`) retries at once. A read that attaches starts the curve over.
+ * D17 (HA3): a remote read that is lost is dialled again after a fully jittered delay (a random part of 250 ms,
+ * doubling to 30 s), with no give-up, so the tabs a deploy restart (1012) dropped do not redial together. A wake
+ * (`online`, `visibilitychange` to visible, `pageshow`) retries at once. A read that attaches starts the curve over
+ * once it has held `held`, as the local overlay's subscription must, so a host that attaches and drops at once still
+ * backs off.
  *
  * @public
  */
-export const remoteReadRetryMilliseconds = { first: 250, longest: 30_000 } as const;
-
-/** The API's 1008 refusals of a route's grant (`hosts.service.ts`); its other 1008, the peerless reap, is transient. */
-const grantRefusalReasons: ReadonlySet<string> = new Set([
-  'session unavailable',
-  'route already consumed',
-  'host grant unavailable',
-  'host grant route mismatch',
-]);
+export const remoteReadRetryMilliseconds = { first: 250, longest: 30_000, held: 2000 } as const;
 
 /**
- * Residual R6's close codes (AR3-8): 4003 is the device's revocation, and a 1008 is a grant refusal only by its reason.
- * The peerless reap (`1008 route peer did not connect`) and every other close stay transient. A host route is never
- * closed 4401.
+ * Residual R6's close code (AR3-8): 4003 is the device's revocation. Every other close is transient. A browser
+ * route's 1008 refusals (`session unavailable`, `route already consumed`) come from one dial's session, which the next
+ * dial mints afresh; the daemon-side grant refusals never reach the browser; the peerless reap is the daemon not
+ * connecting; and 4401 (`browser session required`) asks for a sign-in, not a pairing.
  *
  * @param info - How the remote connection closed.
- * @returns The bounded cause when the close is R6's, else `undefined`.
+ * @returns `revoked` when the close is R6's, else `undefined`.
  * @public
  */
-export const remoteCloseRefusal = (info: RemoteCloseInfo): 'revoked' | 'grant-refused' | undefined => {
-  if (info.code === 4003) {
-    return 'revoked';
+export const remoteCloseRefusal = (info: RemoteCloseInfo): 'revoked' | undefined =>
+  info.code === 4003 ? 'revoked' : undefined;
+
+/** Close a retired connection; its close failing changes nothing for the read that replaces it. */
+const closeQuietly = async (client: Readonly<{ close: () => Promise<void> }>): Promise<void> => {
+  try {
+    await client.close();
+  } catch {
+    /* The connection is gone either way. */
   }
-  return info.code === 1008 && info.reason !== undefined && grantRefusalReasons.has(info.reason)
-    ? 'grant-refused'
-    : undefined;
 };
 
 /** A read-only connection into one chat's projection. @public */
@@ -125,21 +124,27 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryRedial = false;
   let retries = 0;
+  let attachedAt: number | undefined;
   let scheduleRetry = (_again: boolean): void => undefined;
   const report = (status: HostAttachmentStatus): void => {
     if (closed) {
       return;
     }
-    /* A dial the API refused because the computer is no longer paired (`HOST_NOT_PAIRED`, `reauth`) is R6 too. */
+    /* A dial the API refused because the computer is no longer paired (`HOST_NOT_PAIRED`, `reauth`) is R6 too; only a
+     * relayed placement is refused so, so this holds before the read is known to be remote. */
     const event: HostAttachmentStatus =
-      remote && status.residual === undefined && getErrno(status.error) === 'HOST_NOT_PAIRED'
+      status.residual === undefined && getErrno(status.error) === 'HOST_NOT_PAIRED'
         ? { ...status, residual: 'R6' }
         : status;
     sendBack(event);
     input.onStatus?.(event);
     if (event.type === 'attachment.attached') {
-      retries = 0;
+      attachedAt = performance.now();
     } else if (remote && event.type === 'attachment.lost') {
+      if (attachedAt !== undefined && performance.now() - attachedAt >= remoteReadRetryMilliseconds.held) {
+        retries = 0;
+      }
+      attachedAt = undefined;
       scheduleRetry(event.reason !== 'owner-fenced');
     }
   };
@@ -586,7 +591,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
     const retired = client;
     client = undefined;
     if (retired !== undefined) {
-      void retired.close();
+      void closeQuietly(retired);
     }
     pending = undefined;
     liveUnavailable = false;
@@ -615,7 +620,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
       remoteReadRetryMilliseconds.longest,
     );
     retries += 1;
-    retryTimer = setTimeout(retryNow, retryDelayMilliseconds); // Bound: remoteReadRetryMilliseconds.
+    retryTimer = setTimeout(retryNow, Math.random() * retryDelayMilliseconds); // Bound: remoteReadRetryMilliseconds.
   };
   const onWake = (event: Event): void => {
     if (retryTimer !== undefined && (event.type !== 'visibilitychange' || document.visibilityState === 'visible')) {
@@ -683,7 +688,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
     unsubscribe?.();
     unsubscribeLive?.();
     if (client !== undefined) {
-      void client.close();
+      void closeQuietly(client);
     }
   };
 });

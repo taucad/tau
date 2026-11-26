@@ -16,12 +16,13 @@ import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { HostAttachmentStatus } from '#chat-clients/_internal/host-attachment.js';
 import { RemoteHostApiError } from '#lib/remote-host-client.js';
 
-const api = vi.hoisted(() => ({ sessionRefusal: undefined as Error | undefined }));
+const api = vi.hoisted(() => ({ sessionRefusal: undefined as Error | undefined, sessions: 0 }));
 
 vi.mock('#lib/remote-host-client.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listRemoteHosts: async () => [{ id: 'hst_daemon', label: 'Daemon', online: true, agent: true }],
   createRemoteHostSession: async () => {
+    api.sessions += 1;
     if (api.sessionRefusal !== undefined) {
       throw api.sessionRefusal;
     }
@@ -118,16 +119,15 @@ describe('a daemon socket close through dial, client, connector and attachment (
   beforeEach(() => {
     RelaySocket.opened.length = 0;
     api.sessionRefusal = undefined;
+    api.sessions = 0;
     vi.stubGlobal('WebSocket', RelaySocket);
   });
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
-  it.each([
-    [4003, 'device revoked', 'revoked'],
-    [1008, 'session unavailable', 'grant-refused'],
-  ] as const)('should report a %i %s close as R6', async (code, reason, refusal) => {
+  it('should report a 4003 revocation close as R6', async () => {
     const chat = attachThroughConnector();
     try {
       await vi.waitFor(() => {
@@ -136,22 +136,26 @@ describe('a daemon socket close through dial, client, connector and attachment (
       await vi.waitFor(() => {
         expect(RelaySocket.opened[0]?.readyState).toBe(1);
       });
-      RelaySocket.opened[0]?.serverClose(code, reason);
+      RelaySocket.opened[0]?.serverClose(4003, 'device revoked');
       await vi.waitFor(() => {
-        expect(chat.statuses).toContainEqual({ type: 'attachment.lost', reason: refusal, residual: 'R6' });
+        expect(chat.statuses).toContainEqual({ type: 'attachment.lost', reason: 'revoked', residual: 'R6' });
       });
     } finally {
       chat.stop();
     }
   });
 
-  it('should keep the peerless reap transient', async () => {
+  it.each([
+    [1008, 'route peer did not connect'],
+    [1008, 'session unavailable'],
+    [4401, 'browser session required'],
+  ])('should keep a %i %s close transient', async (code, reason) => {
     const chat = attachThroughConnector();
     try {
       await vi.waitFor(() => {
         expect(RelaySocket.opened[0]?.readyState).toBe(1);
       });
-      RelaySocket.opened[0]?.serverClose(1008, 'route peer did not connect');
+      RelaySocket.opened[0]?.serverClose(code, reason);
       await vi.waitFor(() => {
         expect(chat.statuses.some((event) => event.type === 'attachment.lost')).toBe(true);
       });
@@ -163,11 +167,19 @@ describe('a daemon socket close through dial, client, connector and attachment (
 
   it('should report a dial the API refuses with AGENT_NOT_FOUND as R6', async () => {
     api.sessionRefusal = new RemoteHostApiError('AGENT_NOT_FOUND', 'That computer is no longer paired.');
+    /* The jitter's top: the first retry waits its whole 250 ms, well past the first loss. */
+    vi.spyOn(Math, 'random').mockReturnValue(1);
     const chat = attachThroughConnector();
     try {
-      await vi.waitFor(() => {
-        expect(chat.statuses).toContainEqual(expect.objectContaining({ type: 'attachment.lost', residual: 'R6' }));
-      });
+      await vi.waitFor(
+        () => {
+          expect(chat.statuses.some((event) => event.type === 'attachment.lost')).toBe(true);
+        },
+        { interval: 5 },
+      );
+      /* The first loss of the first dial already says R6: no retry was needed to learn it. */
+      expect(api.sessions).toBe(1);
+      expect(chat.statuses.find((event) => event.type === 'attachment.lost')).toMatchObject({ residual: 'R6' });
       expect(RelaySocket.opened).toHaveLength(0);
     } finally {
       chat.stop();

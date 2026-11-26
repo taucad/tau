@@ -1809,8 +1809,9 @@ describe('hostAttachment', () => {
       },
     }).start();
 
+    /* At least: the remote read loop retries the loss on its jittered backoff, which may already have begun. */
     await vi.waitFor(() => {
-      expect(onStatus).toHaveBeenCalledTimes(2);
+      expect(onStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
     expect(onStatus).toHaveBeenNthCalledWith(1, {
       type: 'attachment.lost',

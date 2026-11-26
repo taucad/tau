@@ -269,7 +269,7 @@
 \* re-retained with its parts and the draft bytes reader falls back to the chat's directory (`chat-session-store.ts`);
 \* the edit composer shows its comment list (`chat-textarea.tsx`). A send without annotations still takes no tick
 \* before it is sent. No action or verdict changes.
-\* Chat performance WP-04 review (2026-11-26): the composer's draft hint is scheduled after a typing pause instead of
+\* Chat performance WP-04 review (2026-11-26): the composer's draft hint is held and written when the page hides instead of
 \* written per keystroke (`chat-textarea.tsx`), and `useDraftSelector` selects inside the draft actor's subscription
 \* (`use-chat.tsx`). Neither touches the outbox, a send or a turn request. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC

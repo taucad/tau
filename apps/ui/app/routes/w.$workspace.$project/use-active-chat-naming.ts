@@ -5,17 +5,12 @@ import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import { useProject } from '#hooks/use-project.js';
 
 /**
- * Milliseconds naming waits for the first model step to answer before it runs anyway (chat performance WP-05,
- * server audit S-09). A step that never answers must not leave the chat unnamed.
- */
-export const namingDeferral = 5000;
-
-/**
  * Applies the generated title for the first user message of a new chat.
  *
  * The name request is a funded call of its own, and it took the same request-pool connections and account
  * row lock as the chat's first model step, so it waits until that step has answered (`isAwaitingFirstStep`
- * goes false) or {@link namingDeferral} passes, whichever is first.
+ * goes false; chat performance WP-05, server audit S-09). A step that never answers still ends the wait: the
+ * request leaves `submitted` when it errors, times out or is stopped, so no timer of its own is needed.
  */
 export function useActiveChatNaming({
   activeChat,
@@ -37,28 +32,13 @@ export function useActiveChatNaming({
   const { projectId } = useProject();
   const attemptedChatId = useRef<string | undefined>(undefined);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [deferredChatId, setDeferredChatId] = useState<string | undefined>(undefined);
-  const isDeferred = isAwaitingFirstStep && activeChat?.name === 'New chat' && deferredChatId !== activeChat.id;
-  const deferredFor = isDeferred ? activeChat.id : undefined;
-
-  useEffect(() => {
-    if (deferredFor === undefined) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      setDeferredChatId(deferredFor);
-    }, namingDeferral);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [deferredFor]);
 
   useEffect(() => {
     if (
       !activeChat ||
       isProjectLoading ||
       isChatsLoading ||
-      isDeferred ||
+      isAwaitingFirstStep ||
       activeChat.name !== 'New chat' ||
       !firstMessage ||
       attemptedChatId.current === activeChat.id
@@ -96,7 +76,7 @@ export function useActiveChatNaming({
     applyGeneratedChatName,
     client,
     isChatsLoading,
-    isDeferred,
+    isAwaitingFirstStep,
     isProjectLoading,
     projectId,
   ]);

@@ -466,13 +466,6 @@ export class StaleCreditOperationGenerationError extends Error {
   }
 }
 
-/** The operation row out of an insert's `returning`, without the computed columns beside it. */
-const operationOf = ({
-  remaining: _remaining,
-  ...operation
-}: typeof creditOperation.$inferSelect & { readonly remaining: number }): typeof creditOperation.$inferSelect =>
-  operation;
-
 /**
  * The account of an owner binding, or the refusal a revoked binding or a closed account answers.
  *
@@ -704,13 +697,12 @@ export class CreditLedgerService {
     return { status: 'eligible', executionDeadline, remaining };
   }
 
-  /** Places the customer's source holds transactionally before any external dispatch. */
   /**
-   * Admits one funded operation: the hold, the row and, with `recordIntent`, its dispatch intent.
+   * Places the customer's source holds transactionally before any external dispatch, and admits one funded operation: the hold, the row and, with `recordIntent`, its dispatch intent.
    *
    * Chat performance WP-14 (`GatewayInvocation.tla` `AtomicAdmit`): `recordIntent` writes the row as
-   * `intent_recorded` in the admitting transaction and answers the time left before `due_at`, which
-   * `markDispatchIntent` and `getDispatchTimeRemaining` used to take two more round trips for. The caller then owns
+   * `intent_recorded` in the admitting transaction, which `markDispatchIntent` used to take another round trip for.
+   * The dispatch fence (`getDispatchTimeRemaining`) still reads the row at send time. The caller owns
    * the abort check: a call that left after this commits is finished as a cut before any response.
    *
    * @param input - The qualified admission.
@@ -1000,7 +992,6 @@ export class CreditLedgerService {
           })
           .returning({
             ...getTableColumns(creditOperation),
-            remaining: sql<number>`greatest(0, floor(extract(epoch from (${creditOperation.dueAt} - clock_timestamp())) * 1000))::integer`,
           });
         await this.queueReloadWork(
           tx,
@@ -1018,9 +1009,7 @@ export class CreditLedgerService {
           operationId,
           generation: 1n,
           authorized,
-          ...(recordIntent && inserted !== undefined
-            ? { dispatch: { operation: operationOf(inserted), remaining: inserted.remaining } }
-            : {}),
+          ...(recordIntent && inserted !== undefined ? { dispatch: { operation: inserted } } : {}),
         };
       });
     } catch (error) {

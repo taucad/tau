@@ -80,7 +80,7 @@ export type AdmissionResult =
        * Present when the admit also recorded dispatch intent (chat performance WP-14): the row as written, and the
        * milliseconds left before its dispatch deadline, read at commit.
        */
-      dispatch?: { readonly operation: typeof creditOperation.$inferSelect; readonly remaining: number };
+      dispatch?: { readonly operation: typeof creditOperation.$inferSelect };
     }
   | {
       status: 'replay';

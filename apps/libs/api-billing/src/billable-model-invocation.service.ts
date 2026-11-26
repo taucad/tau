@@ -446,10 +446,7 @@ export class BillableModelInvocationService {
       this.recordAdmission(intent, qualification, startedAt, 'held');
       return { state: 'pending', operationId: row.id };
     }
-    return this.dispatch(intent, qualification, row, admission.generation, startedAt, {
-      countSignal,
-      remaining: recorded?.remaining,
-    });
+    return this.dispatch(intent, qualification, row, admission.generation, startedAt, countSignal);
   }
 
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one immutable invocation checkpoint
@@ -459,9 +456,11 @@ export class BillableModelInvocationService {
     row: InvocationRow,
     generation: bigint,
     startedAt: number,
-    { countSignal, remaining: known }: { readonly countSignal?: AbortSignal; readonly remaining?: number } = {},
+    countSignal?: AbortSignal,
   ): Promise<BillableInvocationResult> {
-    const remaining = known ?? (await this.ledger.getDispatchTimeRemaining(row.id, generation));
+    /* `ApiDispatch` fences on the row as the database sees it at send time, not as the admission saw it: a process
+       paused between the commit and this line may find the operation recovered, cancelled or past due. */
+    const remaining = await this.ledger.getDispatchTimeRemaining(row.id, generation);
     if (remaining <= 0) {
       this.recordAdmission(intent, qualification, startedAt, 'held');
       return { state: 'pending', operationId: row.id };

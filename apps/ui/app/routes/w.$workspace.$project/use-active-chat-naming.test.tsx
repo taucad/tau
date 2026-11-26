@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Chat } from '@taucad/chat';
 
@@ -11,7 +11,7 @@ vi.mock('#chat-clients/use-project-name-client.js', () => ({ useProjectNameClien
 // context and forwards it to the name client.
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project_test' }) }));
 
-const { namingDeferral, useActiveChatNaming } = await import('#routes/w.$workspace.$project/use-active-chat-naming.js');
+const { useActiveChatNaming } = await import('#routes/w.$workspace.$project/use-active-chat-naming.js');
 
 const makeChat = (overrides: Partial<Chat> = {}): Chat => ({
   id: 'chat_new',
@@ -82,35 +82,6 @@ describe('useActiveChatNaming', () => {
     await waitFor(() => {
       expect(applyGeneratedChatName).toHaveBeenCalledWith('chat_new', 'Bracket design');
     });
-  });
-
-  it('names the chat anyway when the first model step has not answered within the deferral', async () => {
-    vi.useFakeTimers();
-    try {
-      const applyGeneratedChatName = vi.fn().mockResolvedValue(undefined);
-      generate.mockResolvedValue('Bracket design');
-      const activeChat = makeChat();
-      renderHook(() =>
-        useActiveChatNaming({
-          activeChat,
-          firstMessage: activeChat.messages[0],
-          isProjectLoading: false,
-          isChatsLoading: false,
-          isAwaitingFirstStep: true,
-          applyGeneratedChatName,
-        }),
-      );
-      await vi.advanceTimersByTimeAsync(namingDeferral - 1);
-      expect(generate).not.toHaveBeenCalled();
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1);
-      });
-
-      expect(generate).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('does nothing for an already named or message-less chat', async () => {

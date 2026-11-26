@@ -628,10 +628,10 @@ describe('BillableModelInvocationService', () => {
         status: 'admitted',
         operationId: 'operation',
         generation: 1n,
-        dispatch: { operation: row, remaining: 12_345 },
+        dispatch: { operation: row },
       })),
       markDispatchIntent: vi.fn(),
-      getDispatchTimeRemaining: vi.fn(),
+      getDispatchTimeRemaining: vi.fn(async () => 12_345),
       recordInvocationEvidence: vi.fn(),
       terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
     };
@@ -653,7 +653,7 @@ describe('BillableModelInvocationService', () => {
     expect(ledger.admitOperation).toHaveBeenCalledWith(expect.anything(), { recordIntent: true });
     expect(ledger.getOperationForAttempt).toHaveBeenCalledOnce();
     expect(ledger.markDispatchIntent).not.toHaveBeenCalled();
-    expect(ledger.getDispatchTimeRemaining).not.toHaveBeenCalled();
+    expect(ledger.getDispatchTimeRemaining).toHaveBeenCalledWith('operation', 1n);
     expect(qualified.adapter.executeOnce).toHaveBeenCalledOnce();
     expect(invocationTimeout).toHaveBeenCalledWith(12_345);
     expect(ledger.terminalizeOperation).toHaveBeenCalledOnce();
@@ -682,7 +682,7 @@ describe('BillableModelInvocationService', () => {
           status: 'admitted',
           operationId: 'operation',
           generation: 1n,
-          dispatch: { operation: row, remaining: 30_000 },
+          dispatch: { operation: row },
         };
       }),
       recordCancellation: vi.fn(),

@@ -11,10 +11,9 @@ import {
 } from '#testing/discovery-profile.js';
 import type { DiscoveryProfile, DiscoveryProfileShape } from '#testing/discovery-profile.js';
 import { ProjectDirectoryIndex } from '#project-directory-index.js';
-import type { ProjectDirectoryReading } from '#project-directory-index.js';
 import { racyTimestampMilliseconds } from '#external-change-ingest.js';
 import { discoveryAuditIntervalMilliseconds } from '#project-directories.js';
-import type { ProjectDiscoveryEntry } from '#project-directories.js';
+import type { ProjectDirectoryReading, ProjectDiscoveryEntry } from '#project-directories.js';
 import { workerTimings } from '#worker-timings.js';
 import type { WorkerTimingCounter } from '#worker-timings.js';
 
@@ -208,7 +207,7 @@ describe('A2: evidence at the source, armed first, applied under a version', () 
   });
 
   it('should keep a directory dirty when a fact arrives while its read runs', () => {
-    const index = new ProjectDirectoryIndex();
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
     index.beginColdRead('root');
     index.installNames('root', index.namesVersion('root'), ['a']);
     const version = index.version('root', 'a');
@@ -221,7 +220,7 @@ describe('A2: evidence at the source, armed first, applied under a version', () 
   });
 
   it('should refuse an install on a directory while this authority writes it', () => {
-    const index = new ProjectDirectoryIndex();
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
     index.beginColdRead('root');
     index.installNames('root', index.namesVersion('root'), ['a']);
     const settle = index.beginWrite('root', ['a/tau.json']);
@@ -292,7 +291,7 @@ describe('A2: evidence at the source, armed first, applied under a version', () 
     { paths: ['home-009'], dirty: ['home-009'], namesListed: false },
     { paths: ['', 'home-001/tau.json'], dirty: ['home-001'], namesListed: false },
   ])('should apply the evidence rule for $paths', ({ paths, dirty, namesListed }) => {
-    const index = new ProjectDirectoryIndex();
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
     index.beginColdRead('root');
     index.installNames('root', index.namesVersion('root'), ['home-001', 'home-002']);
     for (const name of ['home-001', 'home-002']) {
@@ -309,7 +308,7 @@ describe('A2: evidence at the source, armed first, applied under a version', () 
   });
 
   it('should make a root cold on a fact about the root that names no directory', () => {
-    const index = new ProjectDirectoryIndex();
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
     index.beginColdRead('root');
     index.installNames('root', index.namesVersion('root'), ['a']);
 
@@ -385,7 +384,7 @@ describe('A4: the audit', () => {
 
 describe('A5: bounds', () => {
   it('should not retain a reading past the retained-manifest budget, and read it again on the next pass', () => {
-    const index = new ProjectDirectoryIndex({ budgetBytes: 1 });
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>({ budgetBytes: 1 });
     index.beginColdRead('root');
     index.installNames('root', index.namesVersion('root'), ['a']);
     const before = counter('discovery.unretained');
@@ -403,7 +402,7 @@ describe('A5: bounds', () => {
   });
 
   it('should make a root cold when its dirty set outgrows its entries', () => {
-    const index = new ProjectDirectoryIndex();
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
     index.beginColdRead('root');
     index.installNames('root', index.namesVersion('root'), ['a']);
 

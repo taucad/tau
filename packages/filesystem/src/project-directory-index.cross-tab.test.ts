@@ -10,6 +10,7 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import { ProjectDirectoryIndex } from '#project-directory-index.js';
+import type { ProjectDirectoryReading } from '#project-directories.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 import { countProviderCalls } from '#testing/counting-provider.js';
 import type { CountingProvider } from '#testing/counting-provider.js';
@@ -88,7 +89,7 @@ const twoTabs = async (): Promise<Readonly<{ a: Tab; b: Tab; home: ReturnType<ty
       backend: 'memory',
       storageRootKey: rootKey,
     });
-    const index = new ProjectDirectoryIndex();
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
     const service = new WorkspaceFileService({
       providerRegistry: registry,
       resourceQueue: new ResourceQueue(),

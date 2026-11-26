@@ -57,3 +57,4 @@ pnpm nx run filesystem:formal:tla:discovery-index
 
 - FW2 (2026-11-26): first version, with the target and the four witnesses the index-contract review names; checked locally with TLC (`tla2tools` 2026.10.02) before the code.
 - FW2 acceptance tests (2026-11-26): `project-directory-index.ts` bounds `dirty` by the entries a root holds whether or not its names are listed (A5); the protocol and every verdict are unchanged. The differential test's schedules were lengthened after two mutants of the install rule (an unconditional install, an install while an own write is in flight) passed the shorter ones; both now fail it.
+- D5 boundary (2026-11-26): the index keeps an opaque reading and looks only at its `kind`; the reading types and their manifest vocabulary move back to `project-directories.ts`, as the layer-1 import boundary requires. Types only: every action and verdict is unchanged.

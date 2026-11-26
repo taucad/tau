@@ -16,28 +16,17 @@
  * @module
  */
 
-import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import { countDiscoveryAuditMismatch, countDiscoveryRootCold, workerTimings } from '#worker-timings.js';
 import type { DiscoveryRootColdReason, WorkerTimings } from '#worker-timings.js';
 
-/** Declaration or generated-identity failure affecting one discovery entry. @public */
-export type ProjectDiscoveryIssue =
-  | ProjectManifestParseIssue
-  | { readonly code: 'identity-invalid'; readonly message: string }
-  | { readonly code: 'identity-unavailable'; readonly message: string }
-  | { readonly code: 'identity-conflict'; readonly expectedProjectId: string; readonly actualProjectId: string };
-
-/** What one immediate child directory of a discovery root holds, as far as project identity goes. @public */
-export type ProjectDirectoryReading =
-  | { readonly kind: 'not-a-project' }
-  | {
-      readonly kind: 'identified';
-      readonly projectId: string;
-      readonly manifest: ProjectManifest;
-      readonly issue?: ProjectManifestParseIssue;
-    }
-  | { readonly kind: 'adoptable'; readonly manifest: ProjectManifest; readonly issue: ProjectManifestParseIssue }
-  | { readonly kind: 'invalid'; readonly issue: ProjectDiscoveryIssue };
+/**
+ * What the index keeps of one directory: an opaque reading, of which it looks only at `kind` (a `not-a-project`
+ * reading retains nothing). The readings themselves, and the manifest vocabulary they carry, belong to
+ * `project-directories.ts` (D5).
+ *
+ * @public
+ */
+export type IndexedReading = Readonly<{ kind: string }>;
 
 /**
  * How current a root's index is kept. `cold`: never read in full, or reset since. `exclusive`: only Tau writes it.
@@ -55,8 +44,8 @@ export const maxIndexedChildren = 20_000;
 export const retainedManifestBudgetBytes = 32 * 1024 * 1024;
 
 /** One directory's clean entry. */
-type IndexedDirectory = {
-  readonly reading: ProjectDirectoryReading;
+type IndexedDirectory<Reading extends IndexedReading> = {
+  readonly reading: Reading;
   /** Estimated bytes the reading retains. */
   readonly bytes: number;
   /** When its `tau.json` last changed: read only while another directory carries the same id. */
@@ -64,7 +53,7 @@ type IndexedDirectory = {
 };
 
 /** One root's index. */
-type RootIndex = {
+type RootIndex<Reading extends IndexedReading> = {
   /** Every directory is unknown: the next pass reads the root in full. */
   cold: boolean;
   /** Past the bounds: nothing retained, read on every pass. */
@@ -79,7 +68,7 @@ type RootIndex = {
   namesListed: boolean;
   /** The child directory names the root held when last listed, with the names own writes added since. */
   readonly names: Set<string>;
-  readonly entries: Map<string, IndexedDirectory>;
+  readonly entries: Map<string, IndexedDirectory<Reading>>;
   /** Directories with evidence since they were read. */
   readonly dirty: Set<string>;
   /** Each directory's clock reading of its last evidence. */
@@ -108,11 +97,11 @@ export type IndexedRootView = Readonly<{
 const normalizedPath = (path: string): string => path.replaceAll(/^\/+|\/+$/gu, '');
 
 /** Whether two readings are the same reading. */
-const sameReading = (left: ProjectDirectoryReading, right: ProjectDirectoryReading): boolean =>
+const sameReading = (left: IndexedReading, right: IndexedReading): boolean =>
   JSON.stringify(left) === JSON.stringify(right);
 
 /** What a reading retains, estimated by its serialized size in UTF-16 code units. */
-const readingBytes = (reading: ProjectDirectoryReading): number =>
+const readingBytes = (reading: IndexedReading): number =>
   reading.kind === 'not-a-project' ? 0 : 2 * JSON.stringify(reading).length;
 
 /**
@@ -120,8 +109,8 @@ const readingBytes = (reading: ProjectDirectoryReading): number =>
  *
  * @public
  */
-export class ProjectDirectoryIndex {
-  private readonly _roots = new Map<string, RootIndex>();
+export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReading> {
+  private readonly _roots = new Map<string, RootIndex<Reading>>();
   private _clock = 0;
   private _bytes = 0;
   /** The bytes the gauge last reported. */
@@ -226,7 +215,7 @@ export class ProjectDirectoryIndex {
    * @param name - The directory.
    * @returns The entry, or undefined when the directory is dirty or unknown.
    */
-  public entry(storageRootKey: string, name: string): Readonly<IndexedDirectory> | undefined {
+  public entry(storageRootKey: string, name: string): Readonly<IndexedDirectory<Reading>> | undefined {
     const root = this._roots.get(storageRootKey);
     return root === undefined || root.dirty.has(name) ? undefined : root.entries.get(name);
   }
@@ -312,7 +301,7 @@ export class ProjectDirectoryIndex {
   public install(
     storageRootKey: string,
     name: string,
-    read: Readonly<{ version: IndexVersion; reading: ProjectDirectoryReading; determined: boolean }>,
+    read: Readonly<{ version: IndexVersion; reading: Reading; determined: boolean }>,
   ): Readonly<{ status: 'installed'; changed: boolean } | { status: 'dirty' }> {
     const { version, reading, determined } = read;
     const root = this._roots.get(storageRootKey);
@@ -604,7 +593,7 @@ export class ProjectDirectoryIndex {
   }
 
   /** Whether `name` is a top-level directory evidence or a listing named, and the rules a path under it follows. */
-  private _noteNamed(root: RootIndex, path: string, source: 'foreign' | 'own'): boolean {
+  private _noteNamed(root: RootIndex<Reading>, path: string, source: 'foreign' | 'own'): boolean {
     const [name = '', ...rest] = path.split('/');
     if (name.startsWith('.')) {
       return false;
@@ -638,17 +627,17 @@ export class ProjectDirectoryIndex {
     return true;
   }
 
-  private _dirty(root: RootIndex, name: string): void {
+  private _dirty(root: RootIndex<Reading>, name: string): void {
     root.dirty.add(name);
     root.evidenceAt.set(name, this._tick());
   }
 
-  private _unlistNames(root: RootIndex): void {
+  private _unlistNames(root: RootIndex<Reading>): void {
     root.namesListed = false;
     root.namesAt = this._tick();
   }
 
-  private _reset(root: RootIndex): void {
+  private _reset(root: RootIndex<Reading>): void {
     this._release(root);
     root.cold = true;
     root.unindexed = false;
@@ -661,7 +650,7 @@ export class ProjectDirectoryIndex {
     root.auditCursor = 0;
   }
 
-  private _forget(root: RootIndex, name: string): void {
+  private _forget(root: RootIndex<Reading>, name: string): void {
     this._bytes -= root.entries.get(name)?.bytes ?? 0;
     root.entries.delete(name);
     root.names.delete(name);
@@ -669,7 +658,7 @@ export class ProjectDirectoryIndex {
     this._gauge();
   }
 
-  private _release(root: RootIndex): void {
+  private _release(root: RootIndex<Reading>): void {
     for (const entry of root.entries.values()) {
       this._bytes -= entry.bytes;
     }

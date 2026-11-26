@@ -63,6 +63,7 @@ import type { ImportStagingPort } from '#importer/staging.js';
 import type { HostImportSourcePort } from '#importer/sources.js';
 import type {
   ProjectAbsence,
+  ProjectDirectoryReading,
   ProjectDiscoveryResult,
   ProjectRouteVerification,
   ResolvedDiscoveryRoot,
@@ -256,7 +257,7 @@ export class WorkspaceFileService {
   private readonly _externalChanges: ExternalChangeIngest;
   private readonly _remoteChanges: RemoteChanges;
   /** The discovery index (FW2): a listing cache that nominates; storage decides. */
-  private readonly _discoveryIndex: ProjectDirectoryIndex;
+  private readonly _discoveryIndex: ProjectDirectoryIndex<ProjectDirectoryReading>;
   /** The audit's timer, started by the first discovery pass. */
   private _auditTimer: ReturnType<typeof setInterval> | undefined;
   /** When the audit last ran, and when it last finished a whole cycle. */
@@ -283,9 +284,9 @@ export class WorkspaceFileService {
     /** How long a read of a pending entry waits for its object; see {@link pendingStallMilliseconds}. */
     pendingStallMilliseconds?: number;
     /** The discovery index, for a test that drives it; a fresh one by default. @internal */
-    discoveryIndex?: ProjectDirectoryIndex;
+    discoveryIndex?: ProjectDirectoryIndex<ProjectDirectoryReading>;
   }) {
-    this._discoveryIndex = options.discoveryIndex ?? new ProjectDirectoryIndex();
+    this._discoveryIndex = options.discoveryIndex ?? new ProjectDirectoryIndex<ProjectDirectoryReading>();
     this._registry = options.providerRegistry;
     this._pendingStallMilliseconds = options.pendingStallMilliseconds;
     this._resourceQueue = options.resourceQueue;
@@ -1514,6 +1515,23 @@ export class WorkspaceFileService {
     await this._projectIndexes.close();
   }
 
+  /** Release all resources: watches, providers, caches, and event bus. */
+  public dispose(): void {
+    clearInterval(this._auditTimer);
+    this._auditTimer = undefined;
+    this._projectDirectories.dispose();
+    this._externalChanges.dispose();
+    this._projectIndexes.dispose();
+    this._projectRoutes.clear();
+    this._discoveryRoots = [];
+    this._mountTable.dispose();
+    this._watchRegistry.emitResetAll();
+    this._crossTabCoordinator.dispose();
+    this._watchRegistry.dispose();
+    this._registry.disposeAll();
+    this._eventBus.dispose();
+  }
+
   /** Start the discovery audit's timer once a pass has warmed the index: one rolling cycle per interval (A4). */
   private _startAudit(): void {
     if (this._auditTimer !== undefined) {
@@ -1554,23 +1572,6 @@ export class WorkspaceFileService {
         this._audit.running = false;
       }
     })();
-  }
-
-  /** Release all resources: watches, providers, caches, and event bus. */
-  public dispose(): void {
-    clearInterval(this._auditTimer);
-    this._auditTimer = undefined;
-    this._projectDirectories.dispose();
-    this._externalChanges.dispose();
-    this._projectIndexes.dispose();
-    this._projectRoutes.clear();
-    this._discoveryRoots = [];
-    this._mountTable.dispose();
-    this._watchRegistry.emitResetAll();
-    this._crossTabCoordinator.dispose();
-    this._watchRegistry.dispose();
-    this._registry.disposeAll();
-    this._eventBus.dispose();
   }
 
   /* A row as a rooted view's stat answers it: settled as its mount's marks say, a pending entry as its object (D9). */

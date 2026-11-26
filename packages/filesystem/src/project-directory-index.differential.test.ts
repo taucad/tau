@@ -5,7 +5,8 @@ import * as fc from 'fast-check';
 import { projectIdentityPath, serializeProjectIdentity } from '@taucad/project-core/identity';
 import { projectToManifest } from '@taucad/types';
 import { ProjectDirectoryIndex } from '#project-directory-index.js';
-import type { IndexVersion, ProjectDirectoryReading } from '#project-directory-index.js';
+import type { IndexVersion } from '#project-directory-index.js';
+import type { ProjectDirectoryReading } from '#project-directories.js';
 import { createDiscoveryProfile, discoveryProfileWorkspaceId } from '#testing/discovery-profile.js';
 
 /**
@@ -160,7 +161,7 @@ describe('the discovery index against DiscoveryIndex.tla (S12)', () => {
   it('should keep every clean directory current under dropped, delayed, reordered and repeated facts', () => {
     fc.assert(
       fc.property(fc.array(stepArbitrary, { minLength: 20, maxLength: 80, size: 'max' }), (steps) => {
-        const index = new ProjectDirectoryIndex();
+        const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
         const model: Model = {
           disk: new Map(directories.map((directory) => [directory, 0])),
           transit: new Set(),

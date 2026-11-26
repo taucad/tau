@@ -23,6 +23,7 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import { ProjectDirectoryIndex } from '#project-directory-index.js';
+import type { ProjectDirectoryReading } from '#project-directories.js';
 import { workerTimingCounters, workerTimings } from '#worker-timings.js';
 import type { WorkerTimingCounter } from '#worker-timings.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
@@ -191,7 +192,7 @@ export async function createDiscoveryProfile(
   const rootProvider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: rootStorageRootKey });
   const mountTable = new MountTable();
   mountTable.mount('/', rootProvider, { class: 'authored', backend: 'memory', storageRootKey: rootStorageRootKey });
-  const index = new ProjectDirectoryIndex();
+  const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
   const service = new WorkspaceFileService({
     providerRegistry,
     resourceQueue: new ResourceQueue(),

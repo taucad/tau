@@ -66,6 +66,7 @@ export { WorkspaceFileService } from '#workspace-file-service.js';
 export { pendingProjectCommitInputSchema } from '#project-directories.js';
 export type {
   ProjectDiscoveryEntry,
+  ProjectDiscoveryIssue,
   ResolvedProjectManifest,
   ProjectRouteVerification,
   ProjectAbsence,
@@ -73,7 +74,6 @@ export type {
   ProjectRootDiscoveryStatus,
   ResolvedDiscoveryRoot,
 } from '#project-directories.js';
-export type { ProjectDiscoveryIssue } from '#project-directory-index.js';
 /* `ProjectDirectories`, `MutationPipeline`, `RootedViews` and `ProjectIndexes` are the composition root's
  * own collaborators (D14): a consumer reaches them through
  * `WorkspaceFileService`, never by constructing one, so only the shapes they

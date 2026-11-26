@@ -56,6 +56,8 @@
 \* schedules against the index and checks `CleanIsCurrent` after every step.
 \* FW2 acceptance tests (2026-11-26): `project-directory-index.ts` bounds `dirty` by the entries a root holds whether or
 \* not its names are listed (A5), and orders its members; the protocol, every action and every verdict are unchanged.
+\* D5 boundary (2026-11-26): the index keeps an opaque reading and looks only at its `kind`; the reading types and
+\* their manifest vocabulary move back to `project-directories.ts`. Types only: every action and verdict is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

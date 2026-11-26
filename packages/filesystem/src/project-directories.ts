@@ -92,11 +92,26 @@ import type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '
 import { isReservedImportPath } from '#importer/path-policy.js';
 import { directoryConcurrency, mapConcurrent } from '#concurrency.js';
 import { workerTimings } from '#worker-timings.js';
-import type {
-  ProjectDirectoryIndex,
-  ProjectDirectoryReading,
-  ProjectDiscoveryIssue,
-} from '#project-directory-index.js';
+import type { ProjectDirectoryIndex } from '#project-directory-index.js';
+
+/** Declaration or generated-identity failure affecting one discovery entry. @public */
+export type ProjectDiscoveryIssue =
+  | ProjectManifestParseIssue
+  | { readonly code: 'identity-invalid'; readonly message: string }
+  | { readonly code: 'identity-unavailable'; readonly message: string }
+  | { readonly code: 'identity-conflict'; readonly expectedProjectId: string; readonly actualProjectId: string };
+
+/** What one immediate child directory of a discovery root holds, as far as project identity goes. @public */
+export type ProjectDirectoryReading =
+  | { readonly kind: 'not-a-project' }
+  | {
+      readonly kind: 'identified';
+      readonly projectId: string;
+      readonly manifest: ProjectManifest;
+      readonly issue?: ProjectManifestParseIssue;
+    }
+  | { readonly kind: 'adoptable'; readonly manifest: ProjectManifest; readonly issue: ProjectManifestParseIssue }
+  | { readonly kind: 'invalid'; readonly issue: ProjectDiscoveryIssue };
 
 /** A provider whose host copies a person's chosen source into it (the desktop node client, W7.4). */
 /**
@@ -447,7 +462,7 @@ export class ProjectDirectories {
    */
   private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean, boundTo?: PhysicalDirectory) => void;
   /** The discovery index: a listing cache that nominates and never decides (FW2). */
-  private readonly _index: ProjectDirectoryIndex;
+  private readonly _index: ProjectDirectoryIndex<ProjectDirectoryReading>;
   /** A root's live channels, from the external-change ingest. */
   private readonly _rootChannels: (storageRootKey: string) => DiscoveryRootChannels | undefined;
   /** One snapshot poll of a root that can be polled; resolves whether it ran. */
@@ -474,7 +489,7 @@ export class ProjectDirectories {
     /** A root's admission state; `pending` while a non-Home root is still being admitted. */
     rootState?: (storageRootKey: string) => RootState | 'pending' | undefined;
     revokeProjectRoute: (path: string, notifyPeers: boolean, boundTo?: PhysicalDirectory) => void;
-    index: ProjectDirectoryIndex;
+    index: ProjectDirectoryIndex<ProjectDirectoryReading>;
     rootChannels?: (storageRootKey: string) => DiscoveryRootChannels | undefined;
     validateRoot?: (storageRootKey: string) => Promise<boolean>;
     channelsArmed?: (storageRootKey: string) => Promise<void>;

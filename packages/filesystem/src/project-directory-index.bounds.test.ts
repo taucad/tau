@@ -10,6 +10,7 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import { maxIndexedChildren, ProjectDirectoryIndex, retainedManifestBudgetBytes } from '#project-directory-index.js';
+import type { ProjectDirectoryReading } from '#project-directories.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 import { workerTimings } from '#worker-timings.js';
 
@@ -75,7 +76,7 @@ describe('a root past the discovery index bounds (A5, S14)', () => {
       backend: 'memory',
       storageRootKey: rootKey,
     });
-    const index = new ProjectDirectoryIndex();
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>();
     const service = new WorkspaceFileService({
       providerRegistry: registry,
       resourceQueue: new ResourceQueue(),
@@ -107,7 +108,7 @@ describe('a root past the discovery index bounds (A5, S14)', () => {
   }, 300_000);
 
   it('should retain a root under the bound and keep the index under its manifest budget', async () => {
-    const index = new ProjectDirectoryIndex({ maxChildren: 10 });
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>({ maxChildren: 10 });
     index.beginColdRead('root');
     const names = Array.from({ length: 10 }, (_, at) => `n-${at}`);
 

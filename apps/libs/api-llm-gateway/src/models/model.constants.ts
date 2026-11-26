@@ -109,7 +109,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -155,7 +155,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -202,7 +202,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -249,7 +249,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -295,7 +295,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -341,7 +341,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -390,7 +390,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -435,7 +435,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -479,7 +479,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           type: 'adaptive',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -522,7 +522,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           type: 'adaptive',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -561,7 +561,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
@@ -601,7 +601,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
         temperature: 1,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
@@ -641,7 +641,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
         temperature: 1,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
@@ -680,7 +680,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
         temperature: 1,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
@@ -757,8 +757,8 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        // Google's own default for this model; it rejects MINIMAL outright.
-        thinkingLevel: 'HIGH',
+        // Medium default (docs/research/reasoning-effort-medium-default). Rejects MINIMAL.
+        thinkingLevel: 'MEDIUM',
       },
     },
     'gemini-4-argon': {
@@ -795,7 +795,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        thinkingLevel: 'HIGH',
+        thinkingLevel: 'MEDIUM',
       },
     },
     'gemini-4-carbon': {
@@ -832,7 +832,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        thinkingLevel: 'HIGH',
+        thinkingLevel: 'MEDIUM',
       },
     },
     'gemini-4-hydrogen': {
@@ -870,8 +870,8 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        // Google's own default for this model; it rejects MINIMAL outright.
-        thinkingLevel: 'HIGH',
+        // Medium default (docs/research/reasoning-effort-medium-default). Rejects MINIMAL.
+        thinkingLevel: 'MEDIUM',
       },
     },
   },
@@ -1085,7 +1085,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -1129,7 +1129,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
         maxOutputTokens: 64_000,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
@@ -1171,7 +1171,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
         maxOutputTokens: 64_000,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
@@ -1212,7 +1212,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },

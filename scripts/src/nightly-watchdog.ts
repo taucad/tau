@@ -524,14 +524,14 @@ const listingCap = 1000;
 
 /**
  * Every run a listing holds, page by page, counted against the `total_count` of its first page (a page past the end
- * reports 0). A listing over the API's 1,000-result cap, or one whose pages end before that count, throws: a partial
+ * reports 0). A listing at the API's 1,000-result cap (it may be cut there), or one whose pages end before that count, throws: a partial
  * list could hide a red run, so it fails closed.
  */
 export const readAllRuns = async (getPage: (page: number) => Promise<LedgerRunPage>): Promise<LedgerRun[]> => {
   const first = await getPage(1);
   const total = first.total_count;
-  if (total > listingCap) {
-    throw new Error(`${total} ledger runs in a day, over the listing cap of ${listingCap}; not read in part`);
+  if (total >= listingCap) {
+    throw new Error(`${total} ledger runs in a day, at or over the listing cap of ${listingCap}; not read in part`);
   }
   const runs: LedgerRun[] = [...first.workflow_runs];
   for (let page = 2; runs.length < total; page += 1) {

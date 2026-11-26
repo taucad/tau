@@ -370,7 +370,9 @@ describe('nightly watchdog', () => {
         'the listing ended at 100 of 150 runs',
       );
       // The API returns at most 1,000 results for a filtered listing.
-      await expect(readAllRuns(async () => page(100, 1500))).rejects.toThrow('over the listing cap of 1000');
+      await expect(readAllRuns(async () => page(100, 1500))).rejects.toThrow('at or over the listing cap of 1000');
+      await expect(readAllRuns(async () => page(100, 1000))).rejects.toThrow('1000 ledger runs in a day');
+      expect(await readAllRuns(async (number) => page(number <= 9 ? 100 : 99, 999))).toHaveLength(999);
     });
   });
 

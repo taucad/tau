@@ -640,7 +640,7 @@ describe('ChatAgentSheet', () => {
             defaultModel: 'gpt-5.6-sol',
             models: [
               { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
-              { id: 'gpt-5.5', name: 'GPT-5.5' },
+              { id: 'gpt-5.5-sol', name: 'GPT-5.5-Sol' },
             ],
           },
         ],
@@ -662,16 +662,16 @@ describe('ChatAgentSheet', () => {
     });
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
     await userEvent.click(screen.getByRole('button', { name: /^Model: .*Change$/u }));
-    /* GPT-5.5 is an older GPT: it sits behind More models. */
-    expect(screen.queryByRole('option', { name: 'GPT-5.5' })).toBeNull();
+    /* GPT-5.5-Sol is an older Sol: it sits behind More models. */
+    expect(screen.queryByRole('option', { name: 'GPT-5.5-Sol' })).toBeNull();
     await userEvent.click(screen.getByRole('option', { name: 'More models' }));
-    await userEvent.click(screen.getByRole('option', { name: 'GPT-5.5' }));
+    await userEvent.click(screen.getByRole('option', { name: 'GPT-5.5-Sol' }));
 
     expect(setActiveExecution).toHaveBeenCalledWith({
       kind: 'acp',
       hostId: 'desktop',
       agentId: 'codex',
-      model: 'gpt-5.5',
+      model: 'gpt-5.5-sol',
     });
   });
 

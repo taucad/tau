@@ -61,14 +61,24 @@ export const resolveDefaultChoice = (
 
 type ParsedName = { readonly family: string; readonly version: readonly number[] | undefined };
 
-/** "GPT-6.2-Sol" → family `gpt`, version 6.2; "Opus 5.5" → `opus`, 5.5; a name with no number is its own family. */
+/** Lower case, with runs of anything but letters and digits as one space: "-Sol" and " Sol" are both `sol`. */
+const normalise = (text: string): string =>
+  text
+    .toLowerCase()
+    .replaceAll(/[^\da-z]+/g, ' ')
+    .trim();
+
+/**
+ * A model's family is its name around the version: "GPT-6.2-Sol" is family `gpt|sol` at 6.2, "Opus 5.5" is
+ * `opus|` at 5.5, "Grok 4.7 Fast" is `grok|fast` at 4.7. A name with no number is a family of its own.
+ */
 const parseName = (name: string): ParsedName => {
-  const match = /^(.*?)(\d+(?:\.\d+)*)/.exec(name);
+  const match = /^(.*?)(\d+(?:\.\d+)*)(.*)$/.exec(name);
   if (match === null) {
-    return { family: name.toLowerCase(), version: undefined };
+    return { family: normalise(name), version: undefined };
   }
   return {
-    family: (match[1] ?? '').toLowerCase().replace(/[^\da-z]+$/, ''),
+    family: `${normalise(match[1] ?? '')}|${normalise(match[3] ?? '')}`,
     version: (match[2] ?? '').split('.').map(Number),
   };
 };
@@ -86,12 +96,9 @@ const compareVersions = (left: readonly number[], right: readonly number[]): num
 /**
  * Splits a model list into the newest version of each family and the rest, as
  * Claude Code's picker does: Opus 5.5 at the top, Opus 5 under More models. A
- * variant at the newest version ("Grok 4.7 Fast", "GPT-6.2-Astra") stays a row
- * of its own at the top. Both halves keep the listed order.
- *
- * ponytail: the family is the text before the first number, so a maker that names
- * tiers after the version ("Claude 3.5 Haiku") folds its tiers together; key on
- * the variant too if one ever does.
+ * variant is a family of its own, so GPT-6.1 Terra stays at the top beside
+ * GPT-6.2-Sol while GPT-6.1-Sol goes under More models. Both halves keep the
+ * listed order.
  *
  * @param items - The models, in the order to show them.
  * @param nameOf - The display name to parse.

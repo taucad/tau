@@ -32,6 +32,8 @@ const codex = [
   'GPT-6-Sol',
   'GPT-6-Luna',
   'GPT-5.6-Sol',
+  'GPT-5.6-Terra',
+  'GPT-5.6-Luna',
 ];
 const grok = ['Grok 4.7', 'Grok 4.7 Fast', 'Grok 4.6', 'Grok 4.5'];
 const names = <T extends { readonly name: string }>(items: readonly T[]): string[] => items.map((item) => item.name);
@@ -78,8 +80,11 @@ describe('latestInFamily', () => {
     expect(names(more)).toEqual(['Fable 5.1', 'Haiku 4.5', 'Sonnet 5', 'Opus 5', 'Fable 5', 'Opus 4.8']);
   });
 
-  it('should keep variants of the newest version at the top', () => {
-    expect(latestInFamily(codex, (name) => name)).toEqual({ top: codex.slice(0, 2), more: codex.slice(2) });
+  it('should treat each variant as a family of its own', () => {
+    expect(latestInFamily(codex, (name) => name)).toEqual({
+      top: ['GPT-6.2-Sol', 'GPT-6.2-Astra', 'GPT-6.1 Terra', 'GPT-6-Luna'],
+      more: ['GPT-6.1-Sol', 'GPT-6-Astra', 'GPT-6-Sol', 'GPT-5.6-Sol', 'GPT-5.6-Terra', 'GPT-5.6-Luna'],
+    });
     expect(latestInFamily(grok, (name) => name)).toEqual({ top: grok.slice(0, 2), more: grok.slice(2) });
   });
 

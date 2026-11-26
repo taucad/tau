@@ -3,7 +3,11 @@ import type { AcpAdapter, AcpAdapterRefusal, AcpAgentDiscovery, AcpAgentProfile 
 import { describe, expect, it, vi } from 'vitest';
 
 import type { DiagnosticsLog } from '#main/diagnostics.js';
-import { createExternalAgentDiscovery, externalAgentRediscoveryMilliseconds } from '#main/external-agent-discovery.js';
+import {
+  createExternalAgentDiscovery,
+  externalAgentRediscoveryMilliseconds,
+  externalAgentRefreshMilliseconds,
+} from '#main/external-agent-discovery.js';
 import type { ExternalAgentDiscoverOptions } from '#main/external-agent-discovery.js';
 
 const resolveFrom = 'file:///app/main.js';
@@ -156,17 +160,74 @@ describe('createExternalAgentDiscovery', () => {
     expect(harness.discovery.adapterOf('unknown')).toBeUndefined();
   });
 
-  it('should never probe a clean result again', async () => {
+  it('should not probe a clean result again within the refresh interval', async () => {
     const harness = createHarness();
     const initial = harness.discovery.list();
     await harness.settle({ agents: [adapterFor('claude'), adapterFor('codex')], refused: [] });
     await initial;
 
-    harness.advance(10 * externalAgentRediscoveryMilliseconds);
+    harness.advance(externalAgentRefreshMilliseconds - 1);
     const later = await harness.discovery.list();
 
     expect(harness.discover).toHaveBeenCalledOnce();
     expect(later.map((descriptor) => descriptor.id)).toEqual(['claude', 'codex']);
+  });
+
+  it('should refresh a clean result in the background once it is older than the refresh interval', async () => {
+    const harness = createHarness();
+    const initial = harness.discovery.list();
+    /* A boot under load: Claude Code answers its aliases alone. */
+    await harness.settle({
+      agents: [{ ...adapterFor('claude'), models: [{ id: 'opus', name: 'Opus' }] }],
+      refused: [],
+    });
+    await initial;
+
+    harness.advance(externalAgentRefreshMilliseconds);
+    const during = await harness.discovery.list();
+
+    expect(during[0]?.models.map((model) => model.name)).toEqual(['Opus']);
+    expect(harness.discover).toHaveBeenLastCalledWith({ resolveFrom });
+    /* A listing while the refresh runs waits for nothing either. */
+    const meanwhile = await harness.discovery.list();
+    expect(meanwhile[0]?.models).toHaveLength(1);
+
+    await harness.settle({
+      agents: [
+        {
+          ...adapterFor('claude'),
+          models: [
+            { id: 'opus', name: 'Opus 5.5' },
+            { id: 'claude-opus-5', name: 'Opus 5' },
+          ],
+        },
+      ],
+      refused: [],
+    });
+    const after = await harness.discovery.list();
+    expect(after[0]?.models.map((model) => model.name)).toEqual(['Opus 5.5', 'Opus 5']);
+    expect(harness.discover).toHaveBeenCalledTimes(2);
+  });
+
+  it('should keep the longer model list when a refresh answers a shorter one', async () => {
+    const harness = createHarness();
+    const full = [
+      { id: 'opus', name: 'Opus 5.5' },
+      { id: 'claude-opus-5', name: 'Opus 5' },
+    ];
+    const initial = harness.discovery.list();
+    await harness.settle({ agents: [{ ...adapterFor('claude'), models: full }], refused: [] });
+    await initial;
+
+    harness.advance(externalAgentRefreshMilliseconds);
+    await harness.discovery.list();
+    await harness.settle({
+      agents: [{ ...adapterFor('claude'), models: [{ id: 'opus', name: 'Opus' }] }],
+      refused: [],
+    });
+
+    const kept = await harness.discovery.list();
+    expect(kept[0]?.models).toEqual(full);
   });
 
   it('should not probe a refused agent again within the rediscovery interval', async () => {

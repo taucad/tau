@@ -27,6 +27,13 @@ import type { DiagnosticsLog } from '#main/diagnostics.js';
 /** Shortest wait between two discoveries of a refused or failed result. */
 export const externalAgentRediscoveryMilliseconds = 30_000;
 
+/**
+ * How old a clean result gets before a listing refreshes it in the background. An agent can answer a clean but
+ * degraded model list (Claude Code listed only its unversioned aliases on a boot under load, 2026-11-27) and add
+ * models later, and nothing in the answer tells those apart from its real list.
+ */
+export const externalAgentRefreshMilliseconds = 10 * 60_000;
+
 /** Longest refusal message one log line carries. */
 const refusalMessageCharacters = 300;
 
@@ -91,7 +98,8 @@ export type ExternalAgentDiscovery = {
   /**
    * Answer the descriptors, first running discovery again when the last answer
    * refused an agent or failed and the interval has passed. Concurrent calls
-   * share one discovery. Never rejects.
+   * share one discovery. A clean answer older than the refresh interval is
+   * answered at once and refreshed in the background. Never rejects.
    */
   list(): Promise<readonly ExternalAgentDescriptor[]>;
   /**
@@ -119,6 +127,24 @@ const merge = (previous: AcpAgentDiscovery, next: AcpAgentDiscovery): AcpAgentDi
     ...next.agents.filter((adapter) => !previous.agents.some(({ id }) => id === adapter.id)),
   ].toSorted((left, right) => profileOrder(left.id) - profileOrder(right.id)),
   refused: next.refused,
+});
+
+/**
+ * Take a full re-discovery, keeping for each agent the longer model list of the two answers.
+ *
+ * ponytail: a shorter list is read as degraded, never as models withdrawn; a withdrawn model stays listed until the
+ * app restarts, and the agent refuses it if chosen. Compare model ids if withdrawals ever matter.
+ *
+ * @param previous - The answer being refreshed.
+ * @param next - The full re-discovery.
+ * @returns The re-discovery, with each agent's model list no shorter than before.
+ */
+const refreshed = (previous: AcpAgentDiscovery, next: AcpAgentDiscovery): AcpAgentDiscovery => ({
+  ...next,
+  agents: next.agents.map((adapter) => {
+    const before = previous.agents.find(({ id }) => id === adapter.id);
+    return before && (before.models ?? []).length > (adapter.models ?? []).length ? before : adapter;
+  }),
 });
 
 /**
@@ -154,11 +180,13 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
   let settledAt: number | undefined;
   let failed = false;
   let inFlight: Promise<readonly ExternalAgentDescriptor[]> | undefined;
+  /** The discovery in flight is a background refresh, which no listing waits for. */
+  let isRefreshing = false;
 
-  const run = async (): Promise<readonly ExternalAgentDescriptor[]> => {
+  const run = async (isRefresh = false): Promise<readonly ExternalAgentDescriptor[]> => {
     const previous = failed ? undefined : current;
     const refusedIds = new Set(previous?.refused.map((refusal) => refusal.id));
-    const pins = previous ? acpAgentProfiles.filter((profile) => refusedIds.has(profile.id)) : undefined;
+    const pins = previous && !isRefresh ? acpAgentProfiles.filter((profile) => refusedIds.has(profile.id)) : undefined;
     try {
       const answer = await discover(pins ? { resolveFrom, pins } : { resolveFrom });
       log.log('info', 'agent-host.external-agents', {
@@ -167,7 +195,7 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
           (refusal) => `${refusal.id}: ${refusal.code}: ${refusal.message.slice(0, refusalMessageCharacters)}`,
         ),
       });
-      current = previous ? merge(previous, answer) : answer;
+      current = previous ? (isRefresh ? refreshed(previous, answer) : merge(previous, answer)) : answer;
       failed = false;
       configure(current.agents.map((adapter) => withMainAgentEnvironment(adapter, environment)));
       /* The one canonical descriptor (VSC1): the renderer draws its rows from
@@ -183,6 +211,7 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
     } finally {
       settledAt = now();
       inFlight = undefined;
+      isRefreshing = false;
     }
     return descriptors;
   };
@@ -190,16 +219,22 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
   return {
     async list() {
       if (inFlight) {
+        return isRefreshing ? descriptors : inFlight;
+      }
+      const age = settledAt === undefined ? Infinity : now() - settledAt;
+      if (
+        settledAt === undefined ||
+        ((failed || (current?.refused.length ?? 0) > 0) && age >= externalAgentRediscoveryMilliseconds)
+      ) {
+        inFlight = run();
         return inFlight;
       }
-      const due =
-        settledAt === undefined ||
-        ((failed || (current?.refused.length ?? 0) > 0) && now() - settledAt >= externalAgentRediscoveryMilliseconds);
-      if (!due) {
-        return descriptors;
+      if (age >= externalAgentRefreshMilliseconds) {
+        /* The listing answers what it has; the next one gets the refreshed lists. */
+        isRefreshing = true;
+        inFlight = run(true);
       }
-      inFlight = run();
-      return inFlight;
+      return descriptors;
     },
     adapterOf: (agentId) => current?.agents.find((adapter) => adapter.id === agentId),
   };

@@ -52,6 +52,29 @@ afterEach(() => {
 });
 
 describe('ChatTextareaAttachmentRail', () => {
+  it('should offer mark up on each image and show the numbers of the comments pinned on it', () => {
+    const onMarkUp = vi.fn();
+    render(
+      <ChatTextareaAttachmentRail
+        attachments={[images[0]!, pdf, images[1]!]}
+        directory={directory}
+        size='desktop'
+        onRemove={vi.fn()}
+        onMarkUp={onMarkUp}
+        pinNumbersByAttachment={new Map([[`attachments/${'2'.repeat(64)}.png`, [1, 3]]])}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Mark up bracket-spec/u })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark up uploaded image 2' }));
+    expect(onMarkUp).toHaveBeenCalledWith(2);
+    expect(screen.getByLabelText('Comments 1, 3')).toBeInTheDocument();
+  });
+
+  it('should offer no mark up while comment pins are off', () => {
+    render(<ChatTextareaAttachmentRail attachments={images} directory={directory} size='desktop' onRemove={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /^Mark up/u })).not.toBeInTheDocument();
+  });
+
   it('renders desktop attachments as a large horizontal image strip without text-chip labels', async () => {
     render(<ChatTextareaAttachmentRail attachments={images} directory={directory} size='desktop' onRemove={vi.fn()} />);
 

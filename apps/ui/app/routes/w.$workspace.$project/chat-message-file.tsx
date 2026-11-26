@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { FileUIPart } from 'ai';
 import { AttachmentFileChip, AttachmentImage } from '#components/chat/attachment-preview.js';
+import { useMarkUpCopy } from '#components/comments/copy-to-markup.js';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
 
@@ -27,6 +28,8 @@ function isImagePart(part: FileUIPart): boolean {
 
 export function ChatMessageFileAttachments({ parts, directory }: ChatMessageFileAttachmentsProperties): ReactNode {
   const [previewOpen, setPreviewOpen] = useState(false);
+  const markUpCopy = useMarkUpCopy();
+  const { markUp } = markUpCopy;
   const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
   const [failedImageUrls, setFailedImageUrls] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -155,7 +158,15 @@ export function ChatMessageFileAttachments({ parts, directory }: ChatMessageFile
           }
         }}
         onOpenChange={setPreviewOpen}
+        {...(markUp
+          ? {
+              onMarkUp(image: { readonly src: string; readonly mediaType: string }) {
+                void markUp(image);
+              },
+            }
+          : {})}
       />
+      {markUpCopy.dialog}
     </>
   );
 }

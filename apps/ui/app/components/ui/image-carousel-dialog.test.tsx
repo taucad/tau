@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import * as React from 'react';
 import { act, render as renderBare, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { mock } from 'vitest-mock-extended';
 import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
@@ -273,6 +274,38 @@ describe('ImageCarouselDialog', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('should hand the shown image to mark up and close, when mark up is offered', async () => {
+    const user = userEvent.setup();
+    const onMarkUp = vi.fn();
+    const onOpenChange = vi.fn();
+    render(
+      <ImageCarouselDialog
+        directory={attachmentDirectory}
+        initialIndex={1}
+        isOpen
+        items={items}
+        onOpenChange={onOpenChange}
+        onMarkUp={onMarkUp}
+      />,
+    );
+    await user.click(await screen.findByRole('button', { name: 'Mark up this image' }));
+    expect(onMarkUp).toHaveBeenCalledWith({ src: 'data:image/svg+xml,item-2', mediaType: 'image/svg+xml' });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('should offer no mark up when the host gives none', () => {
+    render(
+      <ImageCarouselDialog
+        directory={attachmentDirectory}
+        initialIndex={0}
+        isOpen
+        items={items}
+        onOpenChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Mark up this image' })).not.toBeInTheDocument();
   });
 
   it('stays open when focus moves outside, as when a launching menu returns focus to its trigger', async () => {

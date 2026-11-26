@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Download, Maximize2, Minus, Plus } from 'lucide-react';
+import { Download, Maximize2, Minus, Pencil, Plus } from 'lucide-react';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
+import { useMarkUpCopy } from '#components/comments/copy-to-markup.js';
 import type { FileViewerRenderRequest } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 import type { NativeImageFormat } from '@taucad/project-workspace/utils/native-image-format';
 import { sniffNativeImageFormat } from '@taucad/project-workspace/utils/native-image-format';
@@ -42,6 +43,9 @@ function NativeImageViewerContent({ name, format, readAll, renderPane }: NativeI
   const [resource, setResource] = useState<ImageResource>({ kind: 'loading' });
   const [dimensions, setDimensions] = useState<Dimensions>();
   const [zoom, setZoom] = useState<Zoom>('fit');
+  const markUpCopy = useMarkUpCopy();
+  // A drawing's vector source is not a picture a model reads, so only raster images are marked up.
+  const markUp = format.id === 'svg' ? undefined : markUpCopy.markUp;
 
   useEffect(() => {
     let active = true;
@@ -155,6 +159,17 @@ function NativeImageViewerContent({ name, format, readAll, renderPane }: NativeI
         >
           <Plus />
         </PaneButton>
+        {markUp ? (
+          <PaneButton
+            tooltip='Mark up this image'
+            aria-label='Mark up this image'
+            onClick={() => {
+              void markUp({ src: resource.url, mediaType: format.mimeType });
+            }}
+          >
+            <Pencil />
+          </PaneButton>
+        ) : null}
         <PaneButton tooltip='Download image' asChild>
           <a href={resource.url} download={name} aria-label='Download image'>
             <Download />
@@ -181,6 +196,7 @@ function NativeImageViewerContent({ name, format, readAll, renderPane }: NativeI
             />
           </div>
         </div>
+        {markUpCopy.dialog}
       </section>
     ),
   });

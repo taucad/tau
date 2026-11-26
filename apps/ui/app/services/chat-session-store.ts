@@ -4064,7 +4064,7 @@ export class ChatSessionStore {
     const draft = session.draftActorRef.getSnapshot().context;
     session.composerRecordRef.send({
       type: 'patch',
-      fields: { draft: buildDraftMessage(draft.draftText, draft.draftAttachments) },
+      fields: { draft: buildDraftMessage(draft.draftText, draft.draftAttachments, draft.draftAnnotations) },
     });
   }
 

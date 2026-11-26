@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from 'react';
-import { X } from 'lucide-react';
+import { Pencil, X } from 'lucide-react';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
 import { cn } from '@taucad/ui/utils/cn';
@@ -23,6 +23,10 @@ type ChatTextareaAttachmentRailProperties = {
   /** The block reason's element id, so Send can point at it. */
   readonly blockReasonId?: string;
   readonly onRemove: (index: number) => void;
+  /** Opens mark up on an image; without it, images have no pencil. */
+  readonly onMarkUp?: (index: number) => void;
+  /** The comment numbers pinned on each image, by attachment URL, drawn on its tile. */
+  readonly pinNumbersByAttachment?: ReadonlyMap<string, readonly number[]>;
   readonly size: ChatTextareaAttachmentRailSize;
 };
 
@@ -37,6 +41,38 @@ const removeButtonClassName = cn(
   'outline-none hover:text-foreground focus-visible:focus-outline',
 );
 
+const markUpButtonClassName = cn(
+  'absolute bottom-1 right-1 z-10 flex size-5 items-center justify-center',
+  'rounded-full border bg-background text-muted-foreground',
+  'outline-none hover:text-foreground focus-visible:focus-outline',
+);
+
+/** The numbers of the comments pinned on an image, at a fixed readable size, so a glance says which are where. */
+function TilePinNumbers({
+  numbers,
+}: {
+  readonly numbers: readonly number[] | undefined;
+}): React.JSX.Element | undefined {
+  if (numbers === undefined || numbers.length === 0) {
+    return undefined;
+  }
+  return (
+    <span
+      aria-label={`Comments ${numbers.join(', ')}`}
+      className='absolute bottom-1 left-1 z-10 flex max-w-[calc(100%-2rem)] flex-wrap gap-0.5'
+    >
+      {numbers.map((number) => (
+        <span
+          key={number}
+          className='flex size-4 items-center justify-center rounded-full border border-white bg-markup-ink text-[10px] leading-none font-semibold text-white'
+        >
+          {number}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /**
  * The composer's attachment rail: image thumbnails that open the preview
  * carousel, document chips with name and size, and the reason Send is
@@ -49,6 +85,8 @@ export const ChatTextareaAttachmentRail = memo(function ({
   blockReason,
   blockReasonId,
   onRemove,
+  onMarkUp,
+  pinNumbersByAttachment,
   size,
 }: ChatTextareaAttachmentRailProperties): React.JSX.Element | undefined {
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -174,6 +212,23 @@ export const ChatTextareaAttachmentRail = memo(function ({
                 >
                   <X className='size-3' />
                 </button>
+                {onMarkUp === undefined ? null : (
+                  <button
+                    type='button'
+                    className={markUpButtonClassName}
+                    aria-label={`Mark up uploaded image ${imageIndex + 1}`}
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onMarkUp(entry.index);
+                    }}
+                  >
+                    <Pencil className='size-3' />
+                  </button>
+                )}
+                <TilePinNumbers numbers={pinNumbersByAttachment?.get(entry.url)} />
               </div>
             );
           })}

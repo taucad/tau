@@ -114,7 +114,7 @@ const pickAt = (point: [number, number, number]): CommentSurfacePick => ({
 function Surface({ pick }: { readonly pick: CommentSurfacePick | undefined }): undefined {
   const pins = useCommentPins();
   if (pins) {
-    pins.heads.surface.current = { pick: () => pick, hover: vi.fn() };
+    pins.heads.surface.current = { pick: () => pick, hover: vi.fn(), pickRay: vi.fn() };
     pins.heads.place('1', { x: 5, y: 5, isOccluded: false, isOffscreen: false });
   }
   return undefined;

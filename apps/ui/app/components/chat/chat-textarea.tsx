@@ -19,6 +19,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useDraftActions } from '#hooks/use-chat.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { randomUuid } from '@taucad/utils/id';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
@@ -107,6 +108,43 @@ const paintedSendVerdictOf = (
  */
 const useTurnFilesArriving = (projectId: string | undefined, execution: CadAgentExecution): boolean =>
   useTauCloudIntent(projectId ?? '') === 'open' && daemonPlacementOf(execution) === undefined;
+
+/* Loaded when mark up first opens: most drafts are never marked up. */
+const DraftImageMarkup = lazyCode(async () => {
+  const module = await import('#components/comments/draft-image-markup.js');
+  return { default: module.DraftImageMarkup };
+});
+
+/**
+ * Mark up of a composer image, offered while the comment pins flag is on.
+ *
+ * @param options - The composer's mode, pin numbers by tile and attachment directory.
+ * @returns The tile strip's mark up props and the open dialog, if any.
+ */
+const useComposerMarkUp = ({
+  mode,
+  pinNumbersByAttachment,
+  directory,
+}: Readonly<{
+  mode: 'main' | 'edit';
+  pinNumbersByAttachment: ReturnType<typeof useChatTextareaLogic>['pinNumbersByAttachment'];
+  directory: ReturnType<typeof useChatTextareaLogic>['attachmentDirectory'];
+}>) => {
+  const isOffered = useFeatureState('commentPins') === 'on';
+  const [index, setIndex] = useState<number>();
+  const close = useCallback((): void => {
+    setIndex(undefined);
+  }, []);
+  return {
+    props: isOffered ? { markUpAttachment: setIndex, pinNumbersByAttachment } : {},
+    dialog:
+      index === undefined ? null : (
+        <Suspense fallback={null}>
+          <DraftImageMarkup mode={mode} attachmentIndex={index} directory={directory} onClose={close} />
+        </Suspense>
+      ),
+  };
+};
 
 /* Loaded when the draft first holds a comment: most drafts never do. */
 const DraftCommentList = lazyCode(async () => {
@@ -256,6 +294,11 @@ export const ChatTextarea = memo(function ({
     isSubmitDisabled: isSubmitDisabled || runElsewhere !== undefined || filesArriving,
     onViewerScreenshotDrop: handleViewerScreenshotDrop,
     onAddContextChips: handleAddContextChips,
+  });
+  const markUp = useComposerMarkUp({
+    mode,
+    pinNumbersByAttachment: logic.pinNumbersByAttachment,
+    directory: logic.attachmentDirectory,
   });
 
   const { treeService } = useFileManager();
@@ -583,6 +626,7 @@ export const ChatTextarea = memo(function ({
         handleTextareaFocus={handleFocus}
         handleTextareaBlur={logic.handleTextareaBlur}
         removeAttachment={logic.removeAttachment}
+        {...markUp.props}
         comments={
           logic.hasDraftComments ? (
             <Suspense fallback={null}>
@@ -591,6 +635,7 @@ export const ChatTextarea = memo(function ({
           ) : undefined
         }
       />
+      {markUp.dialog}
     </>
   );
   /* Three arrangements, and the host picks one. `adoptedEarlyInput` means a host above this

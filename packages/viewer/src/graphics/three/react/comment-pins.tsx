@@ -259,14 +259,8 @@ export function CommentPins(): React.JSX.Element | undefined {
   const clipping = (): ReturnType<typeof resolveSectionViewRaycastClip> =>
     resolveSectionViewRaycastClip(selectGraphicsContext(graphics), renderFrame);
 
-  /** The first visible surface under a point of the page. */
-  const pickAt = (at: CommentPointerAt): PickResult => {
-    const { camera } = getRootState();
-    const rect = gl.domElement.getBoundingClientRect();
-    scratch.ndc.set(((at.x - rect.left) / rect.width) * 2 - 1, -((at.y - rect.top) / rect.height) * 2 + 1);
-    const { raycaster } = scratch;
-    raycaster.layers.mask = camera.layers.mask;
-    setRaycasterFromCamera(raycaster, scratch.ndc, camera);
+  /** The first visible surface along the raycaster's ray. */
+  const pickAlong = (raycaster: THREE.Raycaster): PickResult => {
     const { hit, pending, whenReady } = raycastFirstVisibleMeshHit({
       raycaster,
       meshes: pickable(),
@@ -285,6 +279,17 @@ export function CommentPins(): React.JSX.Element | undefined {
       normal.negate();
     }
     return { hit: { point: hit.point.clone(), normal, componentId: getModelComponentIdInHierarchy(hit.object) } };
+  };
+
+  /** The first visible surface under a point of the page. */
+  const pickAt = (at: CommentPointerAt): PickResult => {
+    const { camera } = getRootState();
+    const rect = gl.domElement.getBoundingClientRect();
+    scratch.ndc.set(((at.x - rect.left) / rect.width) * 2 - 1, -((at.y - rect.top) / rect.height) * 2 + 1);
+    const { raycaster } = scratch;
+    raycaster.layers.mask = camera.layers.mask;
+    setRaycasterFromCamera(raycaster, scratch.ndc, camera);
+    return pickAlong(raycaster);
   };
 
   const toPick = (hit: SurfaceHit): CommentSurfacePick | undefined => {
@@ -364,6 +369,22 @@ export function CommentPins(): React.JSX.Element | undefined {
           return hit === undefined ? undefined : toPick(hit);
         },
         hover: host.hover,
+        pickRay(ray) {
+          const origin = toThreeRenderPoint({ renderFrame, pointMeters: [...ray.origin] });
+          const ahead = toThreeRenderPoint({
+            renderFrame,
+            pointMeters: [
+              ray.origin[0] + ray.direction[0],
+              ray.origin[1] + ray.direction[1],
+              ray.origin[2] + ray.direction[2],
+            ],
+          });
+          const { raycaster } = scratch;
+          raycaster.layers.mask = getRootState().camera.layers.mask;
+          raycaster.set(origin, ahead.sub(origin).normalize());
+          const { hit } = pickAlong(raycaster);
+          return hit === undefined ? undefined : toPick(hit);
+        },
       };
     }
     return () => {

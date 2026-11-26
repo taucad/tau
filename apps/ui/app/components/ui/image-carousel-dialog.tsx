@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Download, X } from 'lucide-react';
+import { Download, Pencil, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import {
   Carousel,
@@ -38,6 +38,8 @@ type ImageCarouselDialogProperties = {
   readonly onOpenChange: (open: boolean) => void;
   readonly onImageError?: (item: ImageCarouselDialogItem, index: number) => void;
   readonly contentClassName?: string;
+  /** Offers mark up of the shown image, given a URL the page can read now; the viewer closes as it opens. */
+  readonly onMarkUp?: (image: { readonly src: string; readonly mediaType: string }) => void;
   /** Additional props to spread onto the dialog backdrop and content (e.g., focus trap attributes). */
   readonly dialogProps?: React.HTMLAttributes<HTMLDivElement> & Record<`data-${string}`, string>;
 };
@@ -100,6 +102,35 @@ function DownloadLink({ directory, item, name }: DownloadLinkProperties): React.
   );
 }
 
+type MarkUpButtonProperties = {
+  readonly directory: AttachmentDirectories;
+  readonly item: ImageCarouselDialogItem;
+  readonly onMarkUp: (image: { readonly src: string; readonly mediaType: string }) => void;
+};
+
+/** Marks up the current image, once its bytes can be read. */
+function MarkUpButton({ directory, item, onMarkUp }: MarkUpButtonProperties): React.JSX.Element | undefined {
+  const source = useAttachmentSource(directory, { url: item.src, mediaType: item.mediaType });
+  if (source.status !== 'ready') {
+    return undefined;
+  }
+  return (
+    <Button
+      aria-label='Mark up this image'
+      className={imageCarouselControlClassName}
+      size='icon-lg'
+      type='button'
+      variant='outline'
+      onClick={(event) => {
+        event.stopPropagation();
+        onMarkUp({ src: source.src, mediaType: item.mediaType });
+      }}
+    >
+      <Pencil />
+    </Button>
+  );
+}
+
 type SlideImageProperties = {
   readonly directory: AttachmentDirectories;
   readonly item: ImageCarouselDialogItem;
@@ -149,6 +180,7 @@ function ImageCarouselDialog({
   onOpenChange,
   onImageError,
   contentClassName,
+  onMarkUp,
   dialogProps,
 }: ImageCarouselDialogProperties): React.JSX.Element | undefined {
   const [carouselApi, setCarouselApi] = React.useState<CarouselApi>();
@@ -242,6 +274,16 @@ function ImageCarouselDialog({
               data-shortcut-scope='image-carousel'
               {...dialogProps}
             >
+              {onMarkUp ? (
+                <MarkUpButton
+                  directory={directory}
+                  item={currentItem}
+                  onMarkUp={(image) => {
+                    onOpenChange(false);
+                    onMarkUp(image);
+                  }}
+                />
+              ) : null}
               <DownloadLink directory={directory} item={currentItem} name={currentDownloadName} />
               <DialogClose asChild>
                 <Button

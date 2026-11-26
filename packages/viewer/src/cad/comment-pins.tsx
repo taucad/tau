@@ -55,6 +55,11 @@ export type CommentPinSurface = Readonly<{
   pick: (at: Readonly<{ x: number; y: number }>) => CommentSurfacePick | undefined;
   /** Shows the ghost pin at a point, or hides it with `undefined`. */
   hover: (at: Readonly<{ x: number; y: number }> | undefined) => void;
+  /**
+   * The first visible surface along a ray in the Tau root frame (metres), whatever the live camera: how a picture of
+   * this scene finds the part under one of its points.
+   */
+  pickRay: (ray: Readonly<{ origin: CommentPinVector; direction: CommentPinVector }>) => CommentSurfacePick | undefined;
 }>;
 
 /**

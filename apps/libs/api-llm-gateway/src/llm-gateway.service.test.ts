@@ -70,7 +70,7 @@ describe('LlmGatewayService', () => {
     await expect(
       service.relay({
         provider: 'openai-responses',
-        body: { model: 'openai-gpt-5.6-luna' },
+        body: { model: 'openai-gpt-6-luna' },
         principalId: 'user',
         attemptId: 'attempt',
         reply: reply as unknown as FastifyReply,

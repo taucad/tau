@@ -27,6 +27,10 @@ vi.mock('#hooks/use-privacy-choices.js', () => ({ useCookieConsent: () => state.
 vi.mock('#environment.config.js', () => ({
   ENV: { POSTHOG_CLIENT_KEY: 'phc_test_key', POSTHOG_UI_HOST: 'https://posthog.example.invalid' },
 }));
+/* Replay's content decision reads the account's "Improve Tau for everyone" value; this suite does not. */
+vi.mock('#hooks/use-privacy-preferences.js', () => ({
+  usePrivacyPreferences: () => ({ preferences: undefined, isLoading: false, error: null }),
+}));
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('@better-auth-ui/react', () => ({
   useSession: () => ({ data: state.user ? { user: state.user } : undefined, isPending: state.isPending }),
@@ -184,7 +188,8 @@ const settle = async (): Promise<void> => {
 const pageviews = (calls: ReadonlyArray<readonly unknown[]>): number =>
   calls.filter((call) => call[0] === '$pageview').length;
 
-describe('WebAnalyticsProvider', () => {
+// The SDK singleton is loaded once per module graph, so these run in order.
+describe('WebAnalyticsProvider', { shuffle: false }, () => {
   // Must run first: the SDK singleton is loaded once per module graph.
   it('should clear stale PostHog storage on a declined cold load without starting the SDK', async () => {
     localStorage.setItem('ph_phc_test_key_posthog', '{"distinct_id":"stale"}');

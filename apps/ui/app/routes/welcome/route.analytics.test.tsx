@@ -26,6 +26,10 @@ vi.mock('#components/onboarding/setup-flow.js', () => ({
 }));
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ connectWorkspace: vi.fn() }) }));
 vi.mock('#components/tour/tour-menu.js', () => ({ useTourReplay: () => undefined }));
+/* Replay's content decision reads the account's "Improve Tau for everyone" value; this suite does not. */
+vi.mock('#hooks/use-privacy-preferences.js', () => ({
+  usePrivacyPreferences: () => ({ preferences: undefined, isLoading: false, error: null }),
+}));
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('@better-auth-ui/react', () => ({ useSession: () => ({ data: undefined, isPending: false }) }));
 vi.mock('#lib/posthog.lib.js', async (importOriginal) => ({
@@ -61,6 +65,8 @@ client.onFeatureFlags.mockImplementation((listener) => {
   };
 });
 Object.defineProperty(client, 'featureFlags', { value: { getFlagVariants: () => flags.variants ?? {} } });
+// eslint-disable-next-line @typescript-eslint/naming-convention -- `session_recording` is the SDK's config key.
+Object.defineProperty(client, 'config', { value: { session_recording: {} } });
 flags.client = client;
 vi.mock('posthog-js', () => ({
   get posthog() {

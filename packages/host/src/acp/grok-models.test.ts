@@ -74,7 +74,7 @@ describe('withGrokModels', () => {
       models: [
         { id: 'built-in-a', name: 'Built-in A' },
         { id: 'built-in-b', name: 'Built-in B' },
-        { id: 'account-a', name: 'Account A' },
+        { id: 'account-a', name: 'Account A', description: 'Signed-in only' },
         { id: 'account-b', name: 'Account B' },
       ],
       values: ['built-in-a', 'built-in-b', 'account-a', 'account-b'],

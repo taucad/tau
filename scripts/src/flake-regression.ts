@@ -24,9 +24,9 @@
  * n straight passes ({@link cleanAttempts}). n is chosen so that, if the commit's true failure rate is at least the
  * 95 % lower confidence bound from the first probe, it passes all n attempts at most 5 % of the time (attempts
  * assumed independent); the bound is not adjusted for picking the highest-rate mode, so the culprit is provisional.
- * A first probe in which no variant ran the test is retried once, no sooner than a day later. A last stable commit that reproduces moves the clean
- * end back by doubling the distance. A commit where the test does not exist yet is clean, and a culprit whose parent
- * lacks the test introduced it.
+ * A first probe in which no variant ran the test is retried once, no sooner than a day later. A last stable commit
+ * that reproduces moves the clean end back by doubling the distance. A commit where the test does not exist yet is
+ * clean, and a culprit whose parent lacks the test introduced it.
  *
  * **Bounds** ({@link bisectLimits}): at most 10 dispatches and 300 runner-minutes for one bisect, every dispatch
  * counted (a refused one, and one whose run could not be found, included),

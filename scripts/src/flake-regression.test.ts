@@ -294,10 +294,14 @@ describe('the bisect under stress', () => {
 
   it('should count every dispatch against the cap, refused ones included', async () => {
     const { prober, requests } = stubProber({ culprit: culpritCommit, rates: { 'repeat:alone': 0.5 } });
-    const thrice: typeof prober = async (request) => ({ ...(await prober(request)), dispatches: 3 });
+    // Each probe needs three dispatches (two refused by the gate) and, like the real prober, sends no more than allowed.
+    const thrice: typeof prober = async (request) => ({
+      ...(await prober(request)),
+      dispatches: Math.min(3, request.dispatches),
+    });
     const result = await bisectRegression({ history: historyTo(330, 81), good: 0, modes: 'repeat', prober: thrice });
     expect(requests.map((request) => request.dispatches)).toEqual([10, 7, 4, 1]);
-    expect(result).toMatchObject({ outcome: 'budget', dispatches: 12 });
+    expect(result).toMatchObject({ outcome: 'budget', dispatches: bisectLimits.probes });
   });
 
   it('should stop at the probe cap and report the narrowed range', async () => {

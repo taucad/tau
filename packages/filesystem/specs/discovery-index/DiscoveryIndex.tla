@@ -70,6 +70,9 @@
 \* directory's counter when it installed, so a slower reader that captured the old counter installed older bytes after
 \* a faster reader installed newer ones; `reset-on-install` records that as a witness of `CleanIsCurrent`, and the
 \* index now keeps every counter monotone. Every earlier configuration keeps its verdict with two readers.
+\* FW2 re-review (2026-11-26): a read repairs `lost` when no other read of the directory in flight holds an older
+\* capture, so overlapping audits that all read the disk as it is clear it, and `Quiescent` includes `lost = {}` again.
+\* `target-lost-wide` (nightly) checks `target-lost` with the own write and the repeated fact back in.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root
@@ -108,7 +111,7 @@ VARIABLES
   armed,    \* the observer, the notice subscription and the poll baseline are in place
   writing,  \* each directory's own write: "idle", "issued", or "landed" before it settles
   lost,     \* ghost: directories whose last change sent no fact and that no read has repaired; a read repairs it only
-            \* when no other read of the directory is in flight, since one that began before the loss may install after
+            \* when no other read of the directory in flight holds an older capture, which could install after it
   n         \* bounds
 
 vars == <<disk, idx, ver, dirty, transit, reading, armed, writing, lost, n>>
@@ -201,7 +204,8 @@ ReadEnd(d, r) ==
   /\ IF Installs(d, r)
        THEN /\ idx' = [idx EXCEPT ![d] = reading[d][r].val]
             /\ dirty' = dirty \ {d}
-            /\ lost' = IF reading[d][r].val = disk[d] /\ \A o \in Readers \ {r} : ~reading[d][o].on
+            /\ lost' = IF /\ reading[d][r].val = disk[d]
+                           /\ \A o \in Readers \ {r} : reading[d][o].on => reading[d][o].val = disk[d]
                         THEN lost \ {d} ELSE lost
             /\ ver' = IF InstallRule = "reset" THEN [ver EXCEPT ![d] = 0] ELSE ver
        ELSE UNCHANGED <<idx, dirty, lost, ver>>
@@ -276,9 +280,7 @@ CleanIsCurrent ==
 
 \* S12, second half (A4). Under weak fairness of delivery, the reads and the audit, once the bounded environment is
 \* quiet the index comes to hold storage, a lost fact included. Quiescence: `Quiescent`.
-\* `lost` is a safety exemption and not part of quiescence: overlapping audits may keep a read in flight for ever, while
-\* every read after the environment falls quiet captures what the disk holds.
-Quiescent == dirty = {} /\ transit = {}
+Quiescent == dirty = {} /\ transit = {} /\ lost = {}
 EventuallyCurrent == <>[](Quiescent /\ \A d \in Dirs : idx[d] = disk[d])
 
 =============================================================================

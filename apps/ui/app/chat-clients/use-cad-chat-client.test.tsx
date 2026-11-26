@@ -969,6 +969,35 @@ describe('useCadChatClient', () => {
     });
   });
 
+  it("should replace the message's comments with the edit's, clearing them when the edit holds none", async () => {
+    shownMessages = [{ id: 'msg_99', role: 'user', parts: [{ type: 'text', text: 'original' }] }];
+    const actions = buildActions();
+    installActions(actions);
+    installSessionStore({
+      promoteDraftAttachments,
+      get: sessionWithPersistedErrors,
+      draftAttachmentBytes: () => ({
+        read: async () => undefined,
+        put: async () => {
+          throw new Error('no image is flattened in this test');
+        },
+      }),
+    });
+
+    const { result } = renderClient();
+
+    act(() => {
+      result.current.edit('msg_99', { text: 'edited', annotations: { version: 1, comments: [], images: [] } });
+    });
+
+    await waitFor(() => {
+      expect(actions.editMessage).toHaveBeenCalledTimes(1);
+    });
+    expect(actions.editMessage).toHaveBeenCalledWith('msg_99', 'edited', {
+      annotations: { version: 1, comments: [], images: [] },
+    });
+  });
+
   it('should expose the displayed transcript and its status, and no stream error', () => {
     const messages: readonly MyUIMessage[] = [{ id: 'msg_1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }];
     shownMessages = messages;

@@ -86,7 +86,7 @@ import {
   sanitizeAgentPath,
   sanitizeAgentText,
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
-import { annotationsOf } from '@taucad/chat/annotations';
+import { annotationsOf, emptyAnnotations } from '@taucad/chat/annotations';
 import type { MessageAnnotations } from '@taucad/chat/annotations';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
@@ -103,8 +103,10 @@ const MessageCommentList = lazyCode(async () => {
 
 /** A sent message's comments, under its pictures. */
 function SentComments({
+  messageId,
   annotations,
 }: {
+  readonly messageId: string;
   readonly annotations: MessageAnnotations | undefined;
 }): React.JSX.Element | undefined {
   if (!annotations || annotations.comments.length === 0) {
@@ -112,7 +114,7 @@ function SentComments({
   }
   return (
     <Suspense fallback={null}>
-      <MessageCommentList annotations={annotations} />
+      <MessageCommentList messageId={messageId} annotations={annotations} />
     </Suspense>
   );
 }
@@ -1135,6 +1137,8 @@ export const ChatMessage = memo(function ({
                   text: event.content,
                   attachments: event.attachments,
                   ...(event.references === undefined ? {} : { references: event.references }),
+                  // Always named, so comments the edit removed leave the message.
+                  annotations: event.annotations ?? emptyAnnotations,
                 });
                 exitEditMode();
                 setIsEditing(false);
@@ -1165,7 +1169,9 @@ export const ChatMessage = memo(function ({
               {fileParts.length > 0 ? (
                 <ChatMessageFileAttachments parts={fileParts} directory={attachmentDirectories?.transcript} />
               ) : null}
-              {isUser ? <SentComments annotations={annotationsOf(displayMessage.metadata)} /> : null}
+              {isUser ? (
+                <SentComments messageId={messageId} annotations={annotationsOf(displayMessage.metadata)} />
+              ) : null}
               {isUser ? (
                 <div className={chatInputTextClassName}>
                   {collapsedUserRowsWithStableKeys.map(({ keyPrefix, row }) => (

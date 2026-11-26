@@ -4,6 +4,7 @@ import { Button } from '@taucad/ui/components/button';
 import type { MessageAnnotations } from '@taucad/chat/annotations';
 import { attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 import { partLabelOf, removeComments, setCommentText } from '#components/comments/draft-comments.js';
+import { useShownComments } from '#components/comments/shown-comments.js';
 import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
 
 const badgeClass =
@@ -33,14 +34,18 @@ function RemoveCommentButton({
 }
 
 /**
- * The new-message draft's comments, in the composer: each can be reworded or removed without the viewer.
+ * A draft's comments, in its composer: each can be reworded or removed without the viewer.
  *
+ * @param props - Which draft: the new message's, or the open edit's.
  * @returns The list, or nothing for a draft without comments.
  */
-export function DraftCommentList(): React.JSX.Element | undefined {
-  const annotations = useDraftSelector((state) => state.draftAnnotations);
-  const attachments = useDraftSelector((state) => state.draftAttachments);
-  const { setDraftAnnotations, removeDraftAttachment } = useDraftActions();
+export function DraftCommentList({ mode }: { readonly mode: 'main' | 'edit' }): React.JSX.Element | undefined {
+  const isEdit = mode === 'edit';
+  const annotations = useDraftSelector((state) => (isEdit ? state.editDraftAnnotations : state.draftAnnotations));
+  const attachments = useDraftSelector((state) => (isEdit ? state.editDraftAttachments : state.draftAttachments));
+  const actions = useDraftActions();
+  const setDraftAnnotations = isEdit ? actions.setEditDraftAnnotations : actions.setDraftAnnotations;
+  const removeDraftAttachment = isEdit ? actions.removeEditDraftAttachment : actions.removeDraftAttachment;
   if (!annotations || annotations.comments.length === 0) {
     return undefined;
   }
@@ -82,15 +87,52 @@ export function DraftCommentList(): React.JSX.Element | undefined {
   );
 }
 
+/** The last row of a sent message's comments: shows its pins on the model, in place of the draft's, or hides them. */
+function ShowInViewerRow({
+  messageId,
+  annotations,
+}: {
+  readonly messageId: string;
+  readonly annotations: MessageAnnotations;
+}): React.JSX.Element | undefined {
+  const shownComments = useShownComments();
+  if (!shownComments || !annotations.comments.some((comment) => comment.model !== undefined)) {
+    return undefined;
+  }
+  const isShown = shownComments.shown?.messageId === messageId;
+  return (
+    <li className='flex'>
+      <Button
+        variant='ghost'
+        size='sm'
+        aria-pressed={isShown}
+        onClick={(event) => {
+          // The bubble under it opens the edit; this only shows the pins.
+          event.stopPropagation();
+          if (isShown) {
+            shownComments.hide();
+          } else {
+            shownComments.show({ messageId, annotations });
+          }
+        }}
+      >
+        {isShown ? 'Hide from viewer' : 'Show in viewer'}
+      </Button>
+    </li>
+  );
+}
+
 /**
- * A sent message's comments, under its pictures.
+ * A sent message's comments, under its pictures, with a last row that shows them on the model.
  *
- * @param props - The message's annotations.
+ * @param props - The message and its annotations.
  * @returns The list, or nothing for a message without comments.
  */
 export function MessageCommentList({
+  messageId,
   annotations,
 }: {
+  readonly messageId: string;
   readonly annotations: MessageAnnotations | undefined;
 }): React.JSX.Element | undefined {
   if (!annotations || annotations.comments.length === 0) {
@@ -107,6 +149,7 @@ export function MessageCommentList({
           </span>
         </li>
       ))}
+      <ShowInViewerRow messageId={messageId} annotations={annotations} />
     </ol>
   );
 }

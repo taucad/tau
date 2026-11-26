@@ -153,20 +153,21 @@ describe('createWorkerEvidence', () => {
   });
 
   it('should only re-read the grants, and send nothing, when a chat starts a run', async () => {
+    /* The summaries' and ratings' grants share one read (chat performance plan WP-02). */
     const { evidence, fetchMock, sent, urls } = setup(['summary']);
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     evidence.onChatQuiescent('chat-1', false);
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
     await new Promise((resolve) => {
       setTimeout(resolve, 10);
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(urls.every((url) => url.includes('/v1/telemetry-purposes'))).toBe(true);
     expect(sent).toEqual([]);
   });
@@ -175,7 +176,7 @@ describe('createWorkerEvidence', () => {
     const rate = async (allowed: readonly string[]) => {
       const { evidence, sent, fetchMock } = setup(allowed);
       await vi.waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock).toHaveBeenCalledOnce();
       });
       evidence.onRated({ chatId: 'chat-1', runId: 'run-1', value: 'positive', at: Date.now() });
       return { evidence, sent };

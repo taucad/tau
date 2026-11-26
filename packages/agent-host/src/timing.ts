@@ -5,7 +5,7 @@
  */
 
 /** The host's timing entries. @public */
-export type HostTimingName = 'log-write' | 'model-request-sent';
+export type HostTimingName = 'log-write' | 'log-flush' | 'model-request-sent';
 
 /** Labels only: a row type, a byte count. Never ids or content. @public */
 export type HostTimingDetail = Readonly<Record<string, string | number>>;

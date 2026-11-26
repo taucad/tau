@@ -29,7 +29,27 @@ export type LoadCodeOptions = {
    * reloads the page for it; the caller degrades to its fallback.
    */
   readonly optional?: boolean;
+  /**
+   * Milliseconds the import may stay unsettled. A browser gives a module request that stopped answering no deadline of
+   * its own (a stalled agent-host worker chunk held a turn for 294 s, chat performance plan WP-03, launch audit
+   * PERF-9), and a realm never asks for the same module again, so past the deadline the load fails as a failed load
+   * does: the realm's recovery hears of it and the caller's error path runs. Omitted, the import is not bounded.
+   */
+  readonly deadline?: number;
 };
+
+/**
+ * A module that did not load within its caller's {@link LoadCodeOptions.deadline}: the request stalled. The realm's
+ * module map still holds the pending request, so this realm treats the module as failed, like any failed load.
+ */
+export class CodeLoadDeadlineError extends Error {
+  public override readonly name = 'CodeLoadDeadlineError';
+
+  /** @param milliseconds - The deadline that passed. */
+  public constructor(milliseconds: number) {
+    super(`The module did not load within ${String(milliseconds / 1000)} s.`);
+  }
+}
 
 const codeLoadMessages = [
   /Importing a module script failed/u,
@@ -50,6 +70,9 @@ const codeLoadMessages = [
 export const isCodeLoadFailure = (error: unknown): boolean => {
   // A wrapper (a worker's own load error, a test runner's mocked module) keeps the browser's failure as its cause.
   for (let current: unknown = error, depth = 0; current instanceof Error && depth < 4; depth += 1) {
+    if (current instanceof CodeLoadDeadlineError) {
+      return true;
+    }
     const { message } = current;
     if (codeLoadMessages.some((pattern) => pattern.test(message))) {
       return true;
@@ -131,12 +154,22 @@ const currentSink = (): CodeLoadFailureSink | undefined =>
  * ```
  *
  * @param importer - Calls `import()` with a literal specifier, so the bundler still splits the chunk.
- * @param options - Whether the caller can do without the code.
+ * @param options - Whether the caller can do without the code, and how long the import may take.
  * @returns The module.
  */
 export const loadCode = async <Module>(importer: () => Promise<Module>, options?: LoadCodeOptions): Promise<Module> => {
+  const deadline = options?.deadline;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await importer();
+    if (deadline === undefined) {
+      return await importer();
+    }
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new CodeLoadDeadlineError(deadline));
+      }, deadline);
+    });
+    return await Promise.race([importer(), expired]);
   } catch (error) {
     if (isCodeLoadFailure(error)) {
       try {
@@ -146,5 +179,7 @@ export const loadCode = async <Module>(importer: () => Promise<Module>, options?
       }
     }
     throw error;
+  } finally {
+    clearTimeout(timer);
   }
 };

@@ -881,17 +881,18 @@ describe('funded invocation HTTP boundary', () => {
           providerUrl,
           60_000,
           exactCount
-            ? new Map([
-                [
-                  'openai-gpt-5.6-luna',
+            ? new Map(
+                // The gateway routes and the name generator bill different models; both count exactly.
+                ['openai-gpt-5.6-luna', 'openai-gpt-6-luna'].map((model) => [
+                  model,
                   {
                     qualification: 'controlled-local-zero',
                     environment: 'development',
                     sourceRevision: 'c05-controlled-http',
                     url: `${providerUrl}/v1/responses/input_tokens`,
                   },
-                ],
-              ])
+                ]),
+              )
             : undefined,
         );
         const config = {

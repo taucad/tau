@@ -71,9 +71,9 @@ describe('Home chat composer', () => {
     });
   });
 
-  /* R2: the served composer has the rich one's shape — the box and its bar at rest, kernel pill included —
+  /* R2: the served composer has the rich one's shape — the box and its bar at rest —
    * so nothing below it moves when the rich composer arrives. R11: it asks for focus at first paint. */
-  it('should serve the composer bar at rest, with the Auto kernel pill, around an autofocusing input', () => {
+  it('should serve the composer bar at rest, with the kernel and location under +, around an autofocusing input', () => {
     const container = document.createElement('div');
     container.innerHTML = renderToString(
       <TooltipProvider>
@@ -84,8 +84,8 @@ describe('Home chat composer', () => {
     const bar = container.querySelector('[data-slot="composer-bar"]')!;
     expect(bar).toHaveAttribute('inert');
     expect(bar.querySelector('[aria-label="Add"]')).not.toBeNull();
-    expect(bar.querySelector('[aria-label="Create in Home"]')).not.toBeNull();
-    expect(bar.querySelector('[data-slot="kernel-pill"]')).toHaveAttribute('aria-label', 'Kernel: Auto');
+    expect(bar.querySelector('[aria-label="Create in Home"]')).toBeNull();
+    expect(bar.querySelector('[data-slot="kernel-pill"]')).toBeNull();
     expect(bar.querySelector('[data-slot="trigger-model"]')).toHaveTextContent('Haiku 5.5');
     expect(bar.querySelector('[aria-label="Send"]')).toHaveAttribute('aria-disabled', 'true');
   });
@@ -108,7 +108,6 @@ describe('Home chat composer', () => {
       container.querySelector('textarea')!,
       container.querySelector('[data-slot="composer-bar"]')!,
       container.querySelector('[data-slot="trigger-model"]')!,
-      container.querySelector('[data-slot="kernel-pill"]')!,
     ]) {
       expect(part.compareDocumentPosition(marker)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     }

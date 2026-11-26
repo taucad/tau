@@ -7,17 +7,18 @@ import { reply } from '#support/chat-admission.js';
 import { useFlagState } from '#support/flag-state-test.js';
 
 /*
- * The Auto wording, end to end, with every onboarding flag on: Home shows the composer's kernel pill reading `Auto`
- * and no row of kernel chips; no onboarding surface says "Automatic"; setup's
- * Design card carries the `Auto` badge; and in a first project the pill reads `Auto`, then `Auto · <kernel>` once the
- * model's entry exists, with tip 1 of the tour anchored to that composer.
+ * The Auto wording, end to end, with every onboarding flag on: Home's + menu shows the kernel reading `Auto` and no
+ * row of kernel chips; no onboarding surface says "Automatic"; setup's Design card carries the `Auto` badge; and in a
+ * first project the kernel reads `Auto`, then `Auto · <kernel>` once the model's entry exists, with tip 1 of the tour
+ * anchored to that composer.
  *
  * Auto is every person's default since AKS-11 (#1982), so nothing turns it on here; the onboarding flags come from
  * the flag-state harness. The chat turn is the scripted gateway fixture, so no provider is called.
  */
 
 const composer = '[aria-label="Ask Tau to build anything..."]';
-const kernelPill = () => selectors.getByCss('[data-slot="kernel-pill"]').first();
+const addButton = () => selectors.getByRole('button', { name: 'Add', exact: true }).first();
+const kernelRow = () => selectors.getByRole('option', { name: /^Kernel/u });
 const kernelChip = (name: string) => selectors.getByRole('button', { name, exact: true });
 const stepHeading = (name: string) => selectors.getByRole('heading', { level: 1, name });
 const continueButton = () => selectors.getByRole('button', { name: 'Continue', exact: true });
@@ -44,10 +45,13 @@ const openSeed = async (): Promise<void> => {
 /** The text of the page's main landmark, hidden text for assistive technology included. */
 const mainText = async (): Promise<string> => target.evaluate(() => document.querySelector('main')?.textContent ?? '');
 
-/** The kernel pill's text. */
+/** What the + menu's Kernel row says the kernel is, read with the menu open and closed again. */
 const pillText = async (): Promise<string | undefined> => {
-  const text = await target.textContent(kernelPill());
-  return text?.trim();
+  await target.click(addButton());
+  await target.expectVisible(kernelRow(), 30_000);
+  const text = await target.textContent(kernelRow());
+  await target.keyboardPress('Escape');
+  return text?.replace(/^Kernel/u, '').trim();
 };
 
 /**
@@ -69,13 +73,11 @@ const firstTurn = [
 ];
 
 describe('the Auto wording on onboarding surfaces', () => {
-  test('shows the Auto pill on Home and no kernel chip row', async () => {
+  test('shows Auto in the + menu on Home and no kernel chip row', async () => {
     await useFlagState('all-on');
     await target.setViewport({ width: 1440, height: 900 });
     await target.navigate('/');
     await target.expectVisible(selectors.getByCss(composer), 60_000);
-    await target.expectVisible(kernelPill(), 30_000);
-    expect(await target.getAttribute(kernelPill(), 'aria-label')).toBe('Kernel: Auto');
     expect(await pillText()).toBe('Auto');
     for (const name of ['OpenSCAD', 'Replicad', 'JSCAD', 'Manifold', 'tscircuit']) {
       expect(await target.isVisible(kernelChip(name)), `${name} chip`).toBe(false);
@@ -119,17 +121,14 @@ describe('the Auto wording on onboarding surfaces', () => {
     await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?(?:.*&)?chat=/u, 120_000);
 
     // The turn is parked before it writes anything: the project has no entry, so Auto names no kernel.
-    await target.expectVisible(kernelPill(), 60_000);
     await target.waitForAgentHostGatewayGate({ kind: 'stream' }, 120_000);
     expect(await pillText()).toBe('Auto');
-    expect(await target.getAttribute(kernelPill(), 'aria-label')).toBe('Kernel: Auto');
 
     await target.releaseAgentHostGatewayFixture();
     await expect.poll(pillText, { timeout: 120_000 }).toBe('Auto · OpenSCAD');
-    expect(await target.getAttribute(kernelPill(), 'aria-label')).toBe('Kernel: Auto, running OpenSCAD');
   });
 
-  test('anchors tip 1 to the composer that carries the Auto pill', async () => {
+  test('anchors tip 1 to the composer whose + menu carries the kernel', async () => {
     await useFlagState('all-on');
     await target.setViewport({ width: 1600, height: 1000 });
     await target.navigate('/');
@@ -147,7 +146,6 @@ describe('the Auto wording on onboarding surfaces', () => {
       selectors.getByRole('dialog', { name: 'Tour tip 1 of 5: Describe what you want' }),
       90_000,
     );
-    expect(await pillText()).toMatch(/^Auto(?: · \S.*)?$/u);
     const tipText = await target.textContent(selectors.getByTestId('tour-tip'));
     expect(tipText).toMatch(/You can pick a kernel yourself from the Auto menu\./u);
     expect(tipText).not.toMatch(/automatic/iu);
@@ -173,5 +171,7 @@ describe('the Auto wording on onboarding surfaces', () => {
       return { beside, tipBox, composerBox };
     }, composer);
     expect(anchor.beside, JSON.stringify(anchor)).toBe(true);
+    // Read last: opening + would take focus from the tip.
+    expect(await pillText()).toMatch(/^Auto(?: · \S.*)?$/u);
   });
 });

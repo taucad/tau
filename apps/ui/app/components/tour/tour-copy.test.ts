@@ -58,7 +58,7 @@ describe('tourTipCopy', () => {
   });
 
   it('swaps tip 1’s third sentence for people who make electronics or products', () => {
-    expect(tourTipCopy('ask', printer).text[2]).toBe('You can pick a kernel yourself from the Auto menu.');
+    expect(tourTipCopy('ask', printer).text[2]).toBe('You can pick a kernel yourself from the + menu.');
     expect(tourTipCopy('ask', electronics).text[2]).toBe(
       'A board and its enclosure can live in one project; each model has its own kernel.',
     );

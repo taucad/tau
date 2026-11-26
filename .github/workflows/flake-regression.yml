@@ -81,6 +81,7 @@ jobs:
             scripts/src/ci-flake-ledger-store.ts
             scripts/src/ci-github-client.ts
             scripts/src/ci-queue-health.ts
+            scripts/src/ci-shadow-rows.ts
             scripts/src/flake-repro.ts
             scripts/src/flake-regression.ts
             scripts/src/flake-regression-cli.ts

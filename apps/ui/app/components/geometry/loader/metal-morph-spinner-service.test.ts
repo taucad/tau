@@ -78,6 +78,7 @@ vi.mock('@taucad/ui-core/utils/graphics-backend-override', () => ({
 
 const { createMetalMorphSpinnerService } = await import('#components/geometry/loader/metal-morph-spinner-service.js');
 const { resetShowcaseContextAvailability } = await import('#components/geometry/loader/showcase-backend.js');
+const { readGraphicsBackendQueryOverride } = await import('@taucad/ui-core/utils/graphics-backend-override');
 
 type FakeContext = {
   clearRect: ReturnType<typeof vi.fn>;
@@ -176,6 +177,19 @@ describe('metalMorphSpinnerService', () => {
     expect(target.context.drawImage).not.toHaveBeenCalled();
     expect(target.firstFrames).toBe(0);
     expect(service.getDiagnostics()).toMatchObject({ rendererCount: 0, isLooping: false });
+  });
+
+  it('should still run the WebGL renderer when the page asks for WebGL', async () => {
+    vi.mocked(readGraphicsBackendQueryOverride).mockReturnValue('webgl');
+    try {
+      const service = createMetalMorphSpinnerService();
+      await service.warm('dark');
+
+      expect(hoisted.createOptions).toHaveLength(1);
+      expect(hoisted.createOptions[0]).toMatchObject({ backend: 'webgl' });
+    } finally {
+      vi.mocked(readGraphicsBackendQueryOverride).mockReturnValue(undefined);
+    }
   });
 
   it('should fall back to the flat stand-ins, not a WebGL copy, when its WebGPU canvas cannot present', async () => {

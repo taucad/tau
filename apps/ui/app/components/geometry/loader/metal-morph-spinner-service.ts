@@ -1,4 +1,5 @@
 import { isGraphicsContextUnavailableError } from '@taucad/viewer/graphics/graphics-backend';
+import { readGraphicsBackendQueryOverride } from '@taucad/ui-core/utils/graphics-backend-override';
 import { startShowcaseRenderer } from '#components/geometry/loader/showcase-backend.js';
 import { metalMorphSpinnerSpeed } from '#components/geometry/loader/metal-morph-sequence.js';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
@@ -142,7 +143,7 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
   let sourceSize = minimumSourceSize;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let hasLoggedStartFailure = false;
-  /** Set once a start resolved to a backend other than WebGPU: the page keeps its flat spinners from then on. */
+  /** Set once a start resolved to a backend other than WebGPU, unless WebGL was asked for: the page keeps its flat spinners from then on. */
   let isFlatOnly = false;
 
   const activeCount = (): number => {
@@ -290,8 +291,9 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
         // Everything unsubscribed while the adapter was being probed; do not open a context for nobody.
         return;
       }
-      if (backend !== 'webgpu') {
-        // No detached render and per-frame copy off WebGPU: the stand-ins are the composited flat spinner.
+      if (backend !== 'webgpu' && readGraphicsBackendQueryOverride() !== 'webgl') {
+        // No detached render and per-frame copy off WebGPU: the stand-ins are the composited flat spinner. An explicit
+        // `?graphicsBackend=webgl` still runs the WebGL renderer, for its browser suite and for diagnosis.
         isFlatOnly = true;
         return;
       }

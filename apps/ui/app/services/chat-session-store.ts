@@ -49,6 +49,7 @@ import { isWorkerCodeLoadFailure } from '@taucad/ui-core/lib/worker-factory';
 import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import { waitUnlessGone } from '@taucad/ui-core/lib/xstate.lib';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { chatReadReporter } from '#lib/chat-read-reporting.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type {
   ChatRequest,
@@ -856,6 +857,9 @@ const endsHere = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>, runI
 
 /** The two phases that OPEN a run and keep its project busy (I24); every other phase settles one. */
 const opensRun = (phase: ProjectedRunPhase): boolean => phase === 'admitted' || phase === 'running';
+
+/** The connection failures `sendHostCommand` retries; one thrown past its bound leaves a command's effect unknown. */
+const peerLossCodes: ReadonlySet<string> = new Set(['PEER_UNRESPONSIVE', 'PEER_GONE', 'PEER_CLOSED', 'CHANNEL_CLOSED']);
 const retainsLiveRun = (phase: ProjectedRunPhase): boolean => opensRun(phase) || phase === 'paused';
 
 /* The `revision` region's three facts, as the project's route last reported them. */
@@ -2747,20 +2751,42 @@ export class ChatSessionStore {
         session.queueHold = undefined;
         session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
         let acceptingPlacement: string | undefined;
+        const { commandId } = item.command;
+        const unknownEffect = (tags: Readonly<Record<string, string>>): void => {
+          chatReadReporter.report('outbox.unknown-effect', { chatId: session.chatId, occurrence: commandId, tags });
+        };
         try {
-          const answer = await sendHostCommand(
-            async () => {
-              const client = await this.#connectQueuedCommand(session, connector, { queueId: item.id, signal });
-              acceptingPlacement = connectionPlacement(client.placement);
-              return client;
-            },
-            item.command,
-            { signal },
-          );
+          let answer: Awaited<ReturnType<typeof sendHostCommand>>;
+          try {
+            answer = await sendHostCommand(
+              async () => {
+                const client = await this.#connectQueuedCommand(session, connector, { queueId: item.id, signal });
+                acceptingPlacement = connectionPlacement(client.placement);
+                return client;
+              },
+              item.command,
+              { signal },
+            );
+          } catch (error) {
+            /* U21: the connection kept failing past the command's bound, so whether it was applied is unknown. */
+            const code = getErrno(error);
+            if (code !== undefined && peerLossCodes.has(code)) {
+              unknownEffect({ reason: 'peer-lost', code });
+            }
+            throw error;
+          }
           const wait = ownerWaitOf(answer);
           if (wait !== undefined) {
+            /* A wait-class refusal holds the item for its host; its effect is not unknown. */
             this.#holdForHost(session, { queueId: item.id, command: item.command, refusal: wait });
             return this.#holdQueue(session, record.items, 'host-wait');
+          }
+          if (answer.effect === 'unknown') {
+            /* U8: the bounded re-send ran out with the effect still unknown. */
+            unknownEffect({ reason: 'unknown-effect', code: answer.code });
+          } else if (answer.status !== 'refused' && answer.effect !== 'durable') {
+            /* U20: applied, but not as a durable row. */
+            unknownEffect({ reason: 'not-durable', code: answer.status });
           }
           if (answer.status === 'refused') {
             throw new Error(`Delivery could not be confirmed: ${answer.message}`);
@@ -3763,6 +3789,28 @@ export class ChatSessionStore {
   }
 
   /**
+   * HA0: report what a lost or refused host read leaves the person with. A session that never displayed its own
+   * segment is a cold, hidden transcript (once per session); a caught-up own run still open is an unsettled orphan
+   * candidate (once per run). Reporting only: nothing here changes what the store does.
+   *
+   * @param chatId - The chat whose host read was lost or refused.
+   * @param session - The chat's open session, if any.
+   * @param status - How the read ended.
+   */
+  #reportUnreadable(chatId: string, session: InternalSession | undefined, status: 'lost' | 'refused'): void {
+    if (session !== undefined && session.displayedOwn === undefined) {
+      chatReadReporter.report('chat.read.cold-hidden', { chatId, occurrence: session, tags: { status } });
+    }
+    const projection = this.#projectionContext(chatId);
+    if (projection !== undefined && selectCaughtUp(projection) && opensRun(selectRunPhase(projection))) {
+      const run = selectCurrentRun(projection);
+      if (run !== undefined) {
+        chatReadReporter.report('run.unsettled.own', { chatId, occurrence: run.runId, tags: { status } });
+      }
+    }
+  }
+
+  /**
    * FP10: the host this chat reads from cannot load its code in this page, and the page has stopped replacing its
    * worker (the resident worker reports `WORKER_LOAD_FAILED` only past its bound). A held turn waits for that very read
    * (a seed starts only after one, {@link ChatSessionStore.startPendingSeed}), so it would wait unseen whenever the read
@@ -3838,6 +3886,7 @@ export class ChatSessionStore {
             return;
           }
           const session = this.#sessions.get(chatId);
+          this.#reportUnreadable(chatId, session, event.type === 'attachment.refused' ? 'refused' : 'lost');
           if (event.type === 'attachment.lost' && isWorkerCodeLoadFailure(event.error)) {
             observed.hostLoadFailure = event.error;
             if (session !== undefined) {
@@ -4539,6 +4588,7 @@ export class ChatSessionStore {
         return;
       }
       if (published !== undefined && published.resetVersion !== context.resetVersion) {
+        chatReadReporter.report('own.rewrite', { chatId, occurrence: `${chatId}:${String(context.resetVersion)}` });
         this.#answeredLogReads.delete(chatId);
         this.#validatedDisplays.delete(projection);
         const session = this.#sessions.get(chatId);

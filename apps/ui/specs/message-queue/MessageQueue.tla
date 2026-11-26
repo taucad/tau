@@ -297,7 +297,8 @@
 \* (HA-I4). Every `wait` code, and an answer lost past the command's bound, holds the item to send again by its key,
 \* as an owner wait already did; `never`, `resume` and `reauth` still fail it with its card. Only a durable answer
 \* acknowledges. The wait's line shows after `outboxWaitLineMilliseconds`. Holding is stuttering, never `Acknowledge`
-\* or a second id. No action or verdict changes.
+\* or a second id. A head that re-sends is one cause the "Reconnecting…" cue reads (HA-I8). No action or verdict
+\* changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -7,6 +7,7 @@ import {
   gatewayModelRoutes,
   isFundedGatewayProviderId,
   isGatewayProviderConfigured,
+  supplierFetch,
 } from '@taucad/api-llm-gateway';
 
 const routeProvider = new Map(
@@ -53,7 +54,7 @@ export const createBillableModelInputCounters = (input: {
 /** Creates the route-keyed, single-attempt production transport adapters. */
 export const createBillableModelProviderAdapters = (
   config: { get(key: string): unknown },
-  fetchOnce: typeof fetch = fetch,
+  fetchOnce: typeof fetch = supplierFetch,
 ): ReadonlyMap<string, BillableModelProviderAdapter> =>
   new Map(
     [...routeProvider].flatMap(([routeId, provider]) => {

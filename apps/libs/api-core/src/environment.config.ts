@@ -188,6 +188,18 @@ export const environmentSchemaBase = z.object({
     .max(3600)
     .default(60)
     .describe('Seconds an unused pooled connection is kept before it is returned to the database'),
+  // Chat performance WP-05 (server audit S-04): connections the request pool keeps open between turns, so the
+  // first model step after think time does not reconnect. They are inside DATABASE_POOL_MAX, so the pooler
+  // budget is unchanged.
+  DATABASE_POOL_WARM_CONNECTIONS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(10)
+    .default(0)
+    .describe(
+      'Request-pool connections kept open with a cheap statement every half idle timeout; 0 lets every idle connection close',
+    ),
   DATABASE_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(100).max(300_000).default(15_000),
   DATABASE_LOCK_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(5000),
   DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: z.coerce.number().int().min(100).max(300_000).default(15_000),

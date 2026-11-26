@@ -31,7 +31,7 @@ export type OracleState = {
 
 /** One writer, named by its ledger method. `stale` calls it with the generation before the row's current one. */
 export type OracleCommand =
-  | { readonly kind: 'admit' }
+  | { readonly kind: 'admit'; readonly intent?: boolean }
   | { readonly kind: 'resolve' }
   | { readonly kind: 'cancel' }
   | { readonly kind: 'intent'; readonly stale: boolean }
@@ -86,17 +86,19 @@ export const step = (
       if (state.voided) {
         return { state, answer: 'refused' };
       }
+      // T1 with T4 in the same transaction (chat performance WP-14): the row is born intent_recorded.
+      const intent = command.intent === true;
       return {
         state: {
           ...state,
           heldAtoms: oracleAuthorizedAtoms,
           row: {
-            dispatch: 'admitted',
+            dispatch: intent ? 'intent_recorded' : 'admitted',
             customer: 'pending',
             generation: 1,
             dueAt: now + oracleDeadline,
             leaseUntil: undefined,
-            intentAt: undefined,
+            intentAt: intent ? now : undefined,
             cancelledAt: undefined,
             evidence: new Set(),
           },
@@ -271,19 +273,34 @@ export const replayGatewayTraceStep = (state: GatewayTraceState, action: string)
         : [
             {
               ...state,
-              row: { ...row, ex: true, cust: 'pending', disp: 'admitted', gen: 1, due: state.now + 1 },
+              // AtomicAdmit: the dispatch intent is written with the row.
+              row: {
+                ...row,
+                ex: true,
+                cust: 'pending',
+                disp: 'intent_recorded',
+                gen: 1,
+                due: state.now + 1,
+                intent: state.now,
+                igen: 1,
+              },
               held: state.held + 1,
             },
           ];
     }
     case 'ApiMarkIntent': {
-      return row.cust === 'pending' && row.disp === 'admitted' && row.due > state.now
-        ? [{ ...state, row: { ...row, disp: 'intent_recorded', intent: state.now, igen: row.gen } }]
-        : unchanged;
+      // AtomicAdmit leaves only the in-process abort check, which writes no row in this slice.
+      return unchanged;
     }
     case 'ApiDispatch': {
+      // LateAccept: the dispatch writes nothing; markDispatchAccepted is ApiAccepted.
       return row.cust === 'pending' && row.disp === 'intent_recorded' && row.due > state.now
-        ? [{ ...state, row: { ...row, disp: 'accepted' }, supplier: 'generating' }]
+        ? [{ ...state, supplier: 'generating' }]
+        : unchanged;
+    }
+    case 'ApiAccepted': {
+      return row.gen === 1 && row.cust === 'pending' && row.disp === 'intent_recorded' && row.due > state.now
+        ? [{ ...state, row: { ...row, disp: 'accepted' } }]
         : unchanged;
     }
     case 'SupplierEnd': {

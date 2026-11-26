@@ -98,6 +98,7 @@ describe('flake ledger workflow', () => {
       'scripts/src/ci-flake-ledger-ingest-cli.ts',
       'scripts/src/ci-flake-quarantine-entry-cli.ts',
       'scripts/src/ci-flake-quarantine-release-cli.ts',
+      'scripts/src/ci-flake-metrics-cli.ts',
     ]);
     // A Set's iteration visits what is added during it, so this walks the whole import graph.
     for (const file of imported) {
@@ -147,5 +148,14 @@ describe('flake ledger workflow', () => {
     expect((steps[release] as { if?: string } | undefined)?.if).toBe(
       `\${{ !cancelled() && steps.ingest.outcome != 'skipped' }}`,
     );
+  });
+
+  it('should write the D9 metrics table to its summary last, on every run that ingested (FQ-11)', () => {
+    const steps = Object.values(workflow.jobs).flatMap((job) => job.steps);
+    const metrics = steps.at(-1) as (Step & { if?: string; env?: Record<string, string> }) | undefined;
+    expect(metrics?.run).toBe('node scripts/src/ci-flake-metrics-cli.ts');
+    expect(metrics?.if).toBe(`\${{ !cancelled() && steps.ingest.outcome != 'skipped' }}`);
+    expect(Object.keys(metrics?.env ?? {})).toEqual(['GITHUB_TOKEN']);
+    expect(metrics?.env?.['GITHUB_TOKEN']).toBe(`\${{ github.token }}`);
   });
 });

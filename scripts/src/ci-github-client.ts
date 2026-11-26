@@ -131,18 +131,19 @@ export const client = (options: {
 const searchLimit = 1000;
 export type RunQuery = {
   readonly workflow: string;
-  readonly event: string;
+  /** `merge_group`, say; every event when unset. */
+  readonly event?: string | undefined;
   readonly from: string;
   readonly to: string;
   /** `completed`, say; every status when unset. */
   readonly status?: string | undefined;
 };
 
-/** Every run of a workflow for one event created in the window, splitting the window past the search limit. */
+/** Every run of a workflow (of one event, when set) created in the window, splitting the window past the search limit. */
 export const listRuns = async (github: Client, query: RunQuery): Promise<WorkflowRun[]> => {
   const { workflow, event, status, ...window } = query;
-  const filter = status ? `&status=${encodeURIComponent(status)}` : '';
-  const base = `/repos/${github.repository}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=${encodeURIComponent(event)}${filter}&created=${window.from}..${window.to}&per_page=100`;
+  const filter = `${event ? `&event=${encodeURIComponent(event)}` : ''}${status ? `&status=${encodeURIComponent(status)}` : ''}`;
+  const base = `/repos/${github.repository}/actions/workflows/${encodeURIComponent(workflow)}/runs?created=${window.from}..${window.to}${filter}&per_page=100`;
   const first = await github.get<{
     total_count: number;
     workflow_runs: WorkflowRun[];

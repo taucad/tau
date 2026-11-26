@@ -508,6 +508,9 @@ const executions = (jobs: readonly WorkflowJob[]): TimedJob[] => [
 const runnerSeconds = (jobs: readonly WorkflowJob[]): number =>
   executions(jobs).reduce((total, job) => total + secondsBetween(job.started_at, job.completed_at), 0);
 
+/** Runner minutes of every attempt of a run, to a tenth: what its jobs used from start to completion. */
+export const runnerMinutesOf = (jobs: readonly WorkflowJob[]): number => Math.round(runnerSeconds(jobs) / 6) / 10;
+
 /** A finished run that was not cancelled: its jobs' waits are whole, not cut short by the cancellation. */
 const measurable = (run: WorkflowRun): boolean =>
   run.status === 'completed' && Boolean(run.conclusion) && run.conclusion !== 'cancelled';

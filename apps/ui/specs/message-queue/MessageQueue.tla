@@ -342,6 +342,8 @@
 \* acknowledgement are unchanged. No action or verdict changes.
 \* HA3 (2026-11-27): a lost remote read is retried inside the host attachment (D17), not by the store, and R6 is
 \* held as a fact beside it; the queue's delivery and persistence seam is unchanged. No action or verdict changes.
+\* HA3 review (2026-11-27): R6 is a revocation (4003) or a computer no longer paired; a 1008 is transient. Comments
+\* only in the store. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

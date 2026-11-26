@@ -280,6 +280,11 @@
 \* still `unknown`, an applied answer with no durable row, or a connection lost past the bound) to Sentry, and arms a
 \* report-only timer for a read that stays lost. A wait-class refusal still holds for its host. What is thrown, held and
 \* acknowledged is unchanged. No action or verdict changes.
+\* Host attachment HA1 (2026-11-27): a composer pick made while the chat's own run is unsettled waits, whole, for
+\* the run to settle (HA-I7); the outbox holds its head with a `pick-deferred` reason meanwhile, and the queue wakes
+\* only after the pick's writes and route restart. A chat this device holds reads its own segment from the file, and
+\* `attach` and the in-page route are new host commands. Dispatch, acknowledgement and the gate are untouched; the
+\* new hold refines `Ready`, as the gate's other holds do. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

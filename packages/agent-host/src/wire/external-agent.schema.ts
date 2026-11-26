@@ -109,6 +109,8 @@ export const externalAgentDescriptorSchema = z.strictObject({
       z.strictObject({
         id: z.string().min(1).max(128),
         name: z.string().min(1).max(128),
+        /** The agent's own line about the model; a default alias names the model it stands for here. */
+        description: z.string().min(1).max(256).optional(),
         /** This model's ACP reasoning choices, if its probe offered them. */
         thoughtLevel: externalAgentThoughtLevelSchema.optional(),
       }),

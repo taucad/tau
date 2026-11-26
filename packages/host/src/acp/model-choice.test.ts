@@ -36,6 +36,27 @@ describe('modelChoice', () => {
     });
   });
 
+  it('should carry a model description, so a default alias can name the model it stands for', () => {
+    const choice = modelChoice([
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'default',
+        options: [
+          { value: 'default', name: 'Default (recommended)', description: 'Opus 5.5' },
+          { value: 'opus', name: 'Opus 5.5' },
+        ],
+      },
+    ]);
+
+    expect(choice?.models).toEqual([
+      { id: 'default', name: 'Default (recommended)', description: 'Opus 5.5' },
+      { id: 'opus', name: 'Opus 5.5' },
+    ]);
+  });
+
   it('should append the model id to every model that shares a display name', () => {
     const choice = modelChoice(
       modelSelect([

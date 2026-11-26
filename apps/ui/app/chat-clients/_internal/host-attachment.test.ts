@@ -17,7 +17,7 @@ import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chunksOf, chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
-import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
+import { hostAttachment, remoteReadRetryMilliseconds } from '#chat-clients/_internal/host-attachment.js';
 
 const healthy = { historyIntact: true, newerHistory: false, quarantined: false };
 const lifecycleFact = (
@@ -616,7 +616,7 @@ describe('hostAttachment', () => {
         });
         expect(subscribe).not.toHaveBeenCalled();
         expect(catchUp).not.toHaveBeenCalled();
-        actor.send({ type: 'retry-read' });
+        /* A fenced reader reads again on its own backoff (D17, HA3); an unreadable log is terminal. */
         if (reason === 'owner-fenced') {
           await vi.waitFor(() => {
             expect(subscribe).toHaveBeenCalledOnce();
@@ -625,6 +625,9 @@ describe('hostAttachment', () => {
           expect(subscribeLive).toHaveBeenCalledOnce();
           expect(onStatus).toHaveBeenCalledWith({ type: 'attachment.attached' });
         } else {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 2 * remoteReadRetryMilliseconds.first);
+          });
           expect(read).toHaveBeenCalledOnce();
           expect(projection.getSnapshot().context.fault).toBe('unreadable');
           expect(onStatus).not.toHaveBeenCalledWith({ type: 'attachment.attached' });

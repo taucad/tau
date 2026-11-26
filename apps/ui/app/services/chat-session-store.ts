@@ -1021,8 +1021,11 @@ type ObservedChat = {
    * host carries only the live overlay ({@link ObservedChat.subscribed}).
    */
   status: 'unknown' | 'attached' | 'lost' | 'refused';
-  /** D17's backoff before the host read is attached again: the remote branch only (HA2 deleted the local one). */
-  retry?: ReturnType<typeof setTimeout>;
+  /**
+   * The remote read's last loss was residual R6 (a revoked computer or a refused grant), until a read attaches again.
+   * The attachment keeps retrying it (D17 lives there since HA3); this is only what the chat can say.
+   */
+  residual?: 'R6';
   /**
    * A local placement's live overlay is subscribed (`true`), or was and is now waiting (`false`); `undefined` before
    * its first subscription. The next own read past {@link ObservedChat.overlayRedialAt} starts a waiting one again.
@@ -1042,7 +1045,6 @@ type ObservedChat = {
   cue?: boolean;
   /** Armed by a loss that is not a leadership handoff; reports it if it outlasts {@link chatReadLossBoundMilliseconds}. */
   lossReport?: ReturnType<typeof setTimeout>;
-  attempts: number;
   /**
    * The agent host's code failed to load past the page's worker bound when this chat's read last met it (FP10). It
    * stays failed for the page's life, so the chat shows it whenever its session can ({@link ChatSessionStore}).
@@ -1443,7 +1445,7 @@ export class ChatSessionStore {
     if (existing !== undefined && existing.projectId !== projectId) {
       throw new Error(`Chat ${chatId} is already observed in project ${existing.projectId}.`);
     }
-    const observed: ObservedChat = existing ?? { projectId, refs: 0, attempts: 0, status: 'unknown' };
+    const observed: ObservedChat = existing ?? { projectId, refs: 0, status: 'unknown' };
     observed.refs += 1;
     if (existing === undefined) {
       this.#observed.set(chatId, observed);
@@ -1520,7 +1522,6 @@ export class ChatSessionStore {
       }
       this.#stopObservedAttachment(chatId, observed);
       this.#projectionTopics.get(chatId)?.emit();
-      observed.attempts = 0;
       this.#startObservedAttachment(chatId, observed);
     }
     for (const session of this.#sessions.values()) {
@@ -2115,6 +2116,16 @@ export class ChatSessionStore {
       return this.#logRead(chatId) ? 'attached' : 'unknown';
     }
     return observed?.status ?? 'unknown';
+  }
+
+  /**
+   * Residual R6 on a remote placement: its computer was revoked (4003) or its route's grant refused (1008 by reason),
+   * so only pairing it again lets the chat go on. Held from that loss until a read attaches; the read keeps retrying.
+   *
+   * @public
+   */
+  public getRemoteResidual(chatId: string): 'R6' | undefined {
+    return this.#observed.get(chatId)?.residual;
   }
 
   /**
@@ -4325,10 +4336,6 @@ export class ChatSessionStore {
       session.seedLocalLogEmpty = false;
       session.seedLocalLogCheck = undefined;
     }
-    if (observed.retry !== undefined) {
-      clearTimeout(observed.retry);
-    }
-    observed.retry = undefined;
     observed.attachment?.stop();
     observed.attachment = undefined;
     observed.placement = undefined;
@@ -4482,7 +4489,6 @@ export class ChatSessionStore {
     if (
       this.#observed.get(chatId) === observed &&
       observed.attachment === undefined &&
-      observed.retry === undefined &&
       observed.hostLoadFailure === undefined &&
       performance.now() >= (observed.overlayRedialAt ?? -Infinity)
     ) {
@@ -4490,7 +4496,7 @@ export class ChatSessionStore {
     }
   }
 
-  /** The chat is not local after all: its overlay is the remote host read, whose retry is D17's, not this backoff. */
+  /** The chat is not local after all: its overlay is the remote host read, whose retry is the attachment's (D17). */
   #overlayIsRemote(chatId: string, observed: ObservedChat): void {
     observed.overlayLosses = undefined;
     observed.subscribedAt = undefined;
@@ -4599,12 +4605,20 @@ export class ChatSessionStore {
           },
         },
         onStatus: (event) => {
-          if (observed.attachment !== attachment || this.#deletedProjections.has(this.#projectionOf(chatId))) {
+          if (observed.attachment !== attachment) {
             return;
           }
-          if (observed.retry !== undefined) {
-            clearTimeout(observed.retry);
-            observed.retry = undefined;
+          if (this.#deletedProjections.has(this.#projectionOf(chatId))) {
+            /* A deleted chat is read no more: its attachment stops rather than retry its loss. */
+            if (event.type !== 'attachment.attached') {
+              queueMicrotask(() => {
+                if (observed.attachment === attachment) {
+                  attachment.stop();
+                  observed.attachment = undefined;
+                }
+              });
+            }
+            return;
           }
           /* An own source running or deciding: the chat is (or may be) local, so this is the live overlay alone. */
           if (observed.ownStart !== undefined) {
@@ -4620,11 +4634,14 @@ export class ChatSessionStore {
           if (event.type !== 'attachment.attached') {
             this.#answeredLogReads.delete(chatId);
           }
+          if (event.residual !== undefined) {
+            observed.residual = event.residual;
+          }
           this.#projectionTopics.get(chatId)?.emit();
           if (event.type === 'attachment.attached') {
             clearTimeout(observed.lossReport);
             observed.lossReport = undefined;
-            observed.attempts = 0;
+            observed.residual = undefined;
             observed.hostLoadFailure = undefined;
             this.#syncProjection(chatId, 'none');
             return;
@@ -4655,36 +4672,8 @@ export class ChatSessionStore {
                 observed.attachment = undefined;
               }
             });
-            return;
           }
-          const retryDelayMilliseconds = Math.min(250 * 2 ** observed.attempts, 30_000);
-          observed.attempts += 1;
-          queueMicrotask(() => {
-            if (observed.attachment !== attachment) {
-              return;
-            }
-            const readerOnly = event.reason === 'owner-fenced';
-            if (!readerOnly) {
-              attachment.stop();
-              observed.attachment = undefined;
-            }
-            const retry = setTimeout(() => {
-              if (observed.retry !== retry) {
-                return;
-              }
-              observed.retry = undefined;
-              if (this.#observed.get(chatId) === observed) {
-                if (readerOnly) {
-                  if (observed.attachment === attachment) {
-                    attachment.send({ type: 'retry-read' });
-                  }
-                } else if (observed.attachment === undefined) {
-                  this.#startObservedAttachment(chatId, observed);
-                }
-              }
-            }, retryDelayMilliseconds);
-            observed.retry = retry;
-          });
+          /* A lost remote read retries inside the attachment (D17, `remoteReadRetryMilliseconds`), with no give-up. */
         },
       },
       ...this.#rootOptions,
@@ -6340,7 +6329,6 @@ export class ChatSessionStore {
                   observed.overlayRedialAt = undefined;
                   observed.overlayTerminal = undefined;
                   this.#projectionTopics.get(input.chatId)?.emit();
-                  observed.attempts = 0;
                   observed.local = this.#startOwnSource(input.chatId, observed);
                   this.#startObservedAttachment(input.chatId, observed);
                 }

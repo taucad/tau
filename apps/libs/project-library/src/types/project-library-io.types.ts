@@ -67,6 +67,8 @@ export type ProjectLibraryObjectStore = Readonly<{
   setProjectDisclosure: (projectId: string, expanded: boolean | undefined) => Promise<unknown>;
   resumePendingProjectOperationResources: (operationId: string) => Promise<readonly Chat[]>;
   completePendingProjectOperation: (operationId: string) => Promise<void>;
+  /** The journal as it is now, every tab's rows: a delete leaves out the directories other deletes are removing. */
+  getPendingProjectOperations: () => Promise<PendingProjectOperation[]>;
 }>;
 
 /**

@@ -4674,7 +4674,11 @@ describe('useProjectManager.createProject', () => {
     } as const;
     mockGetProjectFileSystemConfig.mockResolvedValue(configured);
     mockGetAllProjectFileSystemConfigs.mockResolvedValue([configured]);
-    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
+    mockGetPendingProjectOperations
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([pendingPermanentDelete])
+      .mockResolvedValueOnce([pendingPermanentDelete]);
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
@@ -4711,7 +4715,11 @@ describe('useProjectManager.createProject', () => {
       backend: 'opfs',
       providerBasePath: pendingPermanentDelete.storage.providerBasePath,
     });
-    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
+    mockGetPendingProjectOperations
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([pendingPermanentDelete])
+      .mockResolvedValueOnce([pendingPermanentDelete]);
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
@@ -4736,7 +4744,11 @@ describe('useProjectManager.createProject', () => {
       backend: 'opfs',
       providerBasePath: pendingPermanentDelete.storage.providerBasePath,
     });
-    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
+    mockGetPendingProjectOperations
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([pendingPermanentDelete])
+      .mockResolvedValueOnce([pendingPermanentDelete]);
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
@@ -4770,7 +4782,11 @@ describe('useProjectManager.createProject', () => {
         { status: 'valid', projectId: fakeProject.id, manifest: projectToManifest(fakeProject), locator: movedLocator },
       ],
     });
-    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([movedPending]);
+    mockGetPendingProjectOperations
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([movedPending])
+      .mockResolvedValueOnce([movedPending]);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await act(async () => result.current.permanentlyDeleteProject(fakeProject.id));
@@ -4843,7 +4859,11 @@ describe('useProjectManager.createProject', () => {
         storageRootKey: fakeLocator.storageRootKey,
         providerBasePath: fakeLocator.relativeDirectory,
       });
-      mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pending]);
+      mockGetPendingProjectOperations
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([pending])
+        .mockResolvedValueOnce([pending]);
       const rendered = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
       await act(async () => rendered.result.current.getProjectListing());
       mockSetProjectFileSystemConfig.mockClear();
@@ -5016,7 +5036,11 @@ describe('useProjectManager.createProject', () => {
       });
     /* The authority found the directory gone and read the id at another location under the same lock (FW3). */
     mockPermanentlyDeleteProjectDirectory.mockResolvedValueOnce({ status: 'absent', remaining: [movedLocator] });
-    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
+    mockGetPendingProjectOperations
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([pendingPermanentDelete])
+      .mockResolvedValueOnce([pendingPermanentDelete]);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await expect(result.current.permanentlyDeleteProject(fakeProject.id)).rejects.toThrow('identity-conflict');

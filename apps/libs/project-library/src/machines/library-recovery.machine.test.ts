@@ -193,6 +193,44 @@ describe('libraryRecovery', () => {
     });
   });
 
+  /* FW3, the operator's "cancel and say so": a permanent delete the authority cancelled removed nothing. */
+  describe('a cancelled delete', () => {
+    const cancellation = { operationId: 'o1', projectId: 'p1', unavailable: [] };
+
+    it('should hold nothing for a replayed cancel, never replay it again, and say so with the loop as its source', async () => {
+      const harness = start();
+      await ready(harness, [row('o1', 'p1')]);
+
+      await settleReplay(harness, { status: 'cancelled', cancellation });
+
+      expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'cancelled' }));
+      expect(selectRecoveries(harness.actor.getSnapshot())).toEqual([]);
+      expect(harness.of('rowCancelled')).toEqual([
+        { type: 'rowCancelled', operationId: 'o1', projectId: 'p1', via: 'journal', cancellation },
+      ]);
+      expect(harness.of('rowSettled')).toEqual([{ type: 'rowSettled', operationId: 'o1', projectId: 'p1' }]);
+      harness.send({ type: 'workspaceReturned' });
+      harness.send({ type: 'replayAsked', requestId: 'c1', row: row('o1', 'p1') });
+      expect(harness.replay.calls).toHaveLength(1);
+      expect(harness.of('replaySettled')).toEqual([{ type: 'replaySettled', requestId: 'c1', held: false }]);
+    });
+
+    it("should leave a mutation's own cancel ungated and unheld, told to its caller", async () => {
+      const harness = start();
+      await ready(harness, []);
+      harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p1' });
+      harness.send({ type: 'mutationJournaled', requestId: 'm1', row: row('o1', 'p1') });
+
+      harness.send({ type: 'mutationSettled', operationId: 'o1', outcome: { status: 'cancelled', cancellation } });
+
+      expect(harness.of('rowCancelled')).toEqual([
+        { type: 'rowCancelled', operationId: 'o1', projectId: 'p1', via: 'mutation', cancellation },
+      ]);
+      expect(selectRecoveries(harness.actor.getSnapshot())).toEqual([]);
+      expect(selectMutationGated(harness.actor.getSnapshot(), 'p1')).toBe(false);
+    });
+  });
+
   describe('RowAccounted', () => {
     it.each(['identity-conflict', 'filesystem-error', 'local-state-error'] as const)(
       'should stop at once on the terminal reason %s',

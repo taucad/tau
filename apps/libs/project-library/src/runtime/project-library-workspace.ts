@@ -32,7 +32,11 @@ import type {
 } from '@taucad/files-ui/filesystem/handle-store';
 import type { ScopedStorageClient } from '@taucad/fs-client/file-system-client';
 import { parseWorkspaceMarker, workspaceMarkerPath } from '@taucad/types';
-import { deriveWorkspaceBindingRepairs, routeConfigFor } from '#runtime/project-library-storage.js';
+import {
+  deriveWorkspaceBindingRepairs,
+  pendingDeleteExclusions,
+  routeConfigFor,
+} from '#runtime/project-library-storage.js';
 import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryFileManager } from '#types/project-library-io.types.js';
 import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
@@ -382,13 +386,33 @@ export class WorkspaceCommands {
     // folder that holds the id is bound (fast-path FW3, a probe of the chosen directory and no scan). Only the route
     // binding moves; no project file is written (R7).
     const fileManager = await this.#host.facade();
-    const { locations } = await fileManager.client.probeProjectDirectories({ projectId, locators: [locator] });
-    const chosen = locations.find(
-      (location) =>
-        location.status === 'held' &&
-        location.locator.storageRootKey === locator.storageRootKey &&
-        location.locator.relativeDirectory === locator.relativeDirectory,
-    );
+    /* A copy another delete is removing is not offered (FW3 review): it is left out of the probe, so it is not bound. */
+    const exclude = await pendingDeleteExclusions(await this.#host.readiedWorker());
+    const sameDirectory = (other: ProjectLocator): boolean =>
+      other.storageRootKey === locator.storageRootKey && other.relativeDirectory === locator.relativeDirectory;
+    let chosen: Readonly<{ locator: ProjectLocator }> | undefined;
+    try {
+      const { locations } = await fileManager.client.probeProjectDirectories({
+        projectId,
+        locators: [locator],
+        ...(exclude.length === 0 ? {} : { exclude }),
+      });
+      chosen = locations.find((location) => location.status === 'held' && sameDirectory(location.locator));
+    } catch {
+      /* An authority from before FW3 refuses the probe (review m3): a pass reads the folder, as before. */
+      const discovery = await this.#host.discover();
+      chosen = exclude.some(
+        (left) =>
+          left.storageRootKey === locator.storageRootKey && left.relativeDirectory === locator.relativeDirectory,
+      )
+        ? undefined
+        : discovery.entries.find(
+            (entry) =>
+              (entry.status === 'duplicate-id' || entry.status === 'valid') &&
+              entry.projectId === projectId &&
+              sameDirectory(entry.locator),
+          );
+    }
     if (!chosen) {
       throw new Error('This folder no longer holds that project.');
     }

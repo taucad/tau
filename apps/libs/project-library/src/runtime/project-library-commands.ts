@@ -55,10 +55,11 @@ import {
   rememberChatPlacement,
   resolveWorkspaceForWrite,
   routeBindsLocator,
+  pendingDeleteExclusions,
   routeLocatorOf,
   writeProjectLibraryFile,
 } from '#runtime/project-library-storage.js';
-import type { PersistentStorageRoot, ProjectOccurrence } from '#runtime/project-library-storage.js';
+import type { CommitOutcome, PersistentStorageRoot, ProjectOccurrence } from '#runtime/project-library-storage.js';
 import type {
   InitialEditorState,
   ProjectLibraryFileManager,
@@ -72,6 +73,16 @@ import { loadCode } from '@taucad/ui-core/lib/code-loading';
 const copySuffix = ' (Copy)';
 
 /** A draft attachment an initial message carries, already stored in its source directory. @public */
+
+/**
+ * What a permanent delete came to (FW3): `deleted`, or `cancelled` when the journal had waived the Trash for another
+ * copy and, under the lock of the removal, none held the id or the one that would could not be read. A cancelled delete
+ * removed nothing; `cancellation.unavailable` names the folder of a copy that could not be read.
+ *
+ * @public
+ */
+export type PermanentDeleteOutcome = Readonly<{ status: 'deleted' }> | Extract<CommitOutcome, { status: 'cancelled' }>;
+
 export type InitialMessageAttachment = Omit<StoredAttachmentRef, 'byteLength'>;
 
 /**
@@ -332,7 +343,7 @@ export type ProjectCommandsHost<
   ) => Promise<
     Readonly<{
       journaled: (operation: PendingProjectOperation) => void;
-      apply: (operation: PendingProjectOperation, worker: ObjectStore) => Promise<void>;
+      apply: (operation: PendingProjectOperation, worker: ObjectStore) => Promise<CommitOutcome>;
       abandon: () => void;
     }>
   >;
@@ -540,11 +551,14 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
      * directory, fast-path FW3): what they hold now is evidence for the index, so the pass below re-reads only them and
      * rebinds the route to a copy that holds the id. */
     const configured = await getProjectFileSystemConfig(projectId);
-    await fileManager.client.probeProjectDirectories({
-      projectId,
-      locators: configured === undefined || configured.backend === 'memory' ? [] : [routeLocatorOf(configured)],
-      known: true,
-    });
+    /* An authority from before FW3 refuses the probe; its pass reads storage as before (review m3). */
+    await fileManager.client
+      .probeProjectDirectories({
+        projectId,
+        locators: configured === undefined || configured.backend === 'memory' ? [] : [routeLocatorOf(configured)],
+        known: true,
+      })
+      .catch(() => undefined);
     await this.#host.discover();
     return read();
   };
@@ -745,8 +759,13 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
    *
    * @param projectId - The project.
    * @param locator - The copy to delete. While another directory carries the id, the project need not be in the Trash.
+   * @returns `deleted`, or `cancelled` when the authority found no other copy holding the id once the journal had waived
+   *   the Trash for one (FW3, the operator's "cancel and say so"): nothing was removed and the project stays as it was.
    */
-  public readonly permanentlyDeleteProject = async (projectId: string, locator?: ProjectLocator): Promise<void> => {
+  public readonly permanentlyDeleteProject = async (
+    projectId: string,
+    locator?: ProjectLocator,
+  ): Promise<PermanentDeleteOutcome> => {
     await this.#host.whenDiscoveryReady();
     const worker = await this.#host.readiedWorker();
     /* Rule 4: a row this tab replays for the project settles first, so the locator is read after it. */
@@ -769,7 +788,12 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
       throw error;
     }
     mutation.journaled(operation);
-    await mutation.apply(operation, worker);
+    const committed = await mutation.apply(operation, worker);
+    if (committed.status === 'cancelled') {
+      /* Nothing was removed: the project, its state and its route stay, and its queries are read again. */
+      this.#host.invalidateProject(projectId);
+      return committed;
+    }
     this.#host.noteLibraryChanged();
     /* The settled row moved the epoch and owes the pass that drops the card (fast-path blueprint FW1). */
     if (survives) {
@@ -778,6 +802,7 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     } else {
       this.#host.forgetProject(projectId);
     }
+    return { status: 'deleted' };
   };
 
   /**
@@ -970,15 +995,24 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     const pass = await this.#host.discover({ reuse: true });
     const target = this.#permanentDeleteTarget({ projectId, locator, configured }, pass);
     const routed = configured === undefined || configured.backend === 'memory' ? undefined : routeLocatorOf(configured);
-    const { locations } = await fileManager.client.probeProjectDirectories({
-      projectId,
-      locators: [
-        ...projectOccurrences(pass, projectId).map((occurrence) => occurrence.locator),
-        ...(routed === undefined ? [] : [routed]),
-      ],
-      known: true,
-      except: { storageRootKey: target.locator.storageRootKey, relativeDirectory: target.locator.relativeDirectory },
-    });
+    /* A copy another delete is removing proves nothing (review M2); an authority from before FW3 refuses the probe,
+     * which proves nothing either, so the Trash check applies (review m3). */
+    const exclude = await pendingDeleteExclusions(await this.#host.readiedWorker());
+    const locations = await fileManager.client
+      .probeProjectDirectories({
+        projectId,
+        locators: [
+          ...projectOccurrences(pass, projectId).map((occurrence) => occurrence.locator),
+          ...(routed === undefined ? [] : [routed]),
+        ],
+        known: true,
+        except: { storageRootKey: target.locator.storageRootKey, relativeDirectory: target.locator.relativeDirectory },
+        ...(exclude.length === 0 ? {} : { exclude }),
+      })
+      .then(
+        (probe) => probe.locations,
+        () => [],
+      );
     const survives = locations.some(
       ({ locator: other, status }) =>
         status === 'held' &&

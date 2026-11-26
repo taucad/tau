@@ -403,7 +403,16 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
             locators: request.locators ?? [],
             known: request.known === true,
             except: request.except,
-          }).map((locator) => probeAt(projectId, locator));
+          })
+            .filter(
+              (locator) =>
+                !(request.exclude ?? []).some(
+                  (left) =>
+                    left.storageRootKey === locator.storageRootKey &&
+                    left.relativeDirectory === locator.relativeDirectory,
+                ),
+            )
+            .map((locator) => probeAt(projectId, locator));
     return names === undefined ? { locations } : { locations, names };
   };
   /* What remains of the id once its directory went, read under the project's lock as the authority reads it. */
@@ -425,16 +434,22 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     scope,
     copy,
     locations,
+    exclude,
   }: Readonly<{
     projectId: string;
     providerBasePath: string;
     scope: Readonly<{ backend: string }>;
     copy?: boolean;
     locations?: readonly ProjectLocator[];
+    exclude?: ReadonlyArray<Readonly<{ storageRootKey: string; relativeDirectory: string }>>;
   }>) => {
     const root = rootOf(scope);
     const target = locatorOf(root, providerBasePath);
-    const others = nominations(projectId, { locators: locations ?? [], known: true, except: target });
+    /* A directory under another pending delete proves nothing (FW3 review M2). */
+    const excluded = new Set((exclude ?? []).map((left) => `${left.storageRootKey}\0${left.relativeDirectory}`));
+    const others = nominations(projectId, { locators: locations ?? [], known: true, except: target }).filter(
+      (locator) => !excluded.has(`${locator.storageRootKey}\0${locator.relativeDirectory}`),
+    );
     const index = directories.findIndex(
       (directory) =>
         directory.root === root &&
@@ -457,6 +472,7 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
           absence.status === 'present'
             ? absence.locators
                 .filter((locator) => locator.relativeDirectory !== providerBasePath || rootOfLocator(locator) !== root)
+                .filter((locator) => !excluded.has(`${locator.storageRootKey}\0${locator.relativeDirectory}`))
                 .map((locator) => probeAt(projectId, locator))
                 .filter((location) => location.status === 'held')
                 .map((location) => location.locator)
@@ -465,6 +481,8 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
       if (proven.length === 0) {
         return { status: 'copy-unproven', reason: 'absent' } as const;
       }
+      /* A proven copy counts once a fresh listing of its root names it (review M1): one listing per root. */
+      counts = { ...counts, listings: counts.listings + new Set(proven.map((locator) => locator.storageRootKey)).size };
     }
     const [removed] = directories.splice(index, 1);
     /* The delete installs what it verified: the directory is gone. */
@@ -649,6 +667,10 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     ) => {
       if (libraryOf(projectId).deletedAt === undefined && options?.copy !== true) {
         throw new Error('Permanent delete is available only for trashed projects');
+      }
+      /* One pending permanent delete per project, as the journal's transaction refuses a second. */
+      if (journal.some((operation) => operation.kind === 'permanent-delete' && operation.projectId === projectId)) {
+        throw new Error(`Permanent delete is already pending for ${projectId}`);
       }
       const operationId = nextOperationId();
       journal.push({

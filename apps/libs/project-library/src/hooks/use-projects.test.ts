@@ -51,9 +51,12 @@ const { projectManager, query, registry, useQuery, worker, chats } = vi.hoisted(
         operations.push(`trash:${projectId}`);
         return true;
       }),
-      permanentlyDeleteProject: vi.fn(async (projectId: string) => {
-        operations.push(`delete:${projectId}`);
-      }),
+      permanentlyDeleteProject: vi.fn(
+        async (projectId: string): Promise<{ status: 'deleted' } | { status: 'cancelled'; cancellation: unknown }> => {
+          operations.push(`delete:${projectId}`);
+          return { status: 'deleted' };
+        },
+      ),
     },
     query: queryState,
     registry: {
@@ -256,6 +259,22 @@ describe('useProjects deletion', () => {
     leases.releasedAfter = undefined;
     projectManager.getChatsForResource.mockResolvedValue([]);
     vi.clearAllMocks();
+  });
+
+  /* FW3, "cancel and say so": a cancelled delete removed nothing, so the project's view exceptions stay. */
+  it('keeps the view exceptions of a project whose delete was cancelled, and returns the outcome', async () => {
+    const drop = vi.spyOn(viewExceptions, 'dropProject');
+    const cancelled = {
+      status: 'cancelled',
+      cancellation: { operationId: 'req_x', projectId: 'proj_closed', unavailable: [] },
+    } as const;
+    projectManager.permanentlyDeleteProject.mockResolvedValueOnce(cancelled);
+    const { result } = renderHook(() => useProjects());
+
+    const outcome = await act(async () => result.current.permanentlyDeleteProject('proj_closed'));
+
+    expect(outcome).toEqual(cancelled);
+    expect(drop).not.toHaveBeenCalled();
   });
 
   /* #2303: a closed project's chats are read from their logs under a lease; it is never asked to be opened. */

@@ -15,6 +15,7 @@ import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import type { PendingProjectRecovery } from '@taucad/project-library/types/pending-project-operation.types';
+import type { PermanentDeleteOutcome } from '@taucad/project-library/runtime/project-library-commands';
 import {
   projectLocationDescriptor,
   projectLocationFullLabel,
@@ -72,12 +73,12 @@ const createUseProjectsResult = () => ({
   verifyProjectQuiescent: vi.fn(async () => undefined),
   duplicateProject: vi.fn(),
   restoreProject: vi.fn(),
-  permanentlyDeleteProject: vi.fn(),
+  permanentlyDeleteProject: vi.fn(async (): Promise<PermanentDeleteOutcome> => ({ status: 'deleted' })),
   updateName: vi.fn(),
   adoptProject: vi.fn(async () => undefined),
   repairProject: vi.fn(async () => undefined),
   chooseProjectDirectory: vi.fn(async () => undefined),
-  deleteProjectCopy: vi.fn(async () => undefined),
+  deleteProjectCopy: vi.fn(async (): Promise<PermanentDeleteOutcome> => ({ status: 'deleted' })),
 });
 let mockUseProjectsResult = createUseProjectsResult();
 /** Projects in this device's Trash: answered only to a listing whose scope holds them. */
@@ -98,23 +99,31 @@ vi.mock('#hooks/use-projects.js', () => ({
   },
 }));
 
-const { mockDiscardRecovery, mockRepairWorkspaceBindings } = vi.hoisted(() => ({
-  mockDiscardRecovery: vi.fn(async () => undefined),
-  mockRepairWorkspaceBindings: vi.fn(async () => ({
-    repairedProjectCount: 47,
-    removedWorkspaceIds: ['wsp_previous'],
-    skipped: [],
-  })),
-}));
+const { mockDiscardRecovery, mockRepairWorkspaceBindings, mockCancelled, mockDismissCancelledDelete } = vi.hoisted(
+  () => ({
+    mockDiscardRecovery: vi.fn(async () => undefined),
+    /* FW3: the deletes a replay cancelled, as the library publishes them. */
+    mockCancelled: { deletes: [] as unknown[] },
+    mockDismissCancelledDelete: vi.fn(),
+    mockRepairWorkspaceBindings: vi.fn(async () => ({
+      repairedProjectCount: 47,
+      removedWorkspaceIds: ['wsp_previous'],
+      skipped: [],
+    })),
+  }),
+);
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
     createProject: vi.fn(),
     discardRecovery: mockDiscardRecovery,
     repairWorkspaceBindings: mockRepairWorkspaceBindings,
+    cancelledDeletes: mockCancelled.deletes,
+    dismissCancelledDelete: mockDismissCancelledDelete,
   }),
 }));
 
-const { mockCloseProject, mockToastSuccess, mockToastError, mockToastWarning } = vi.hoisted(() => ({
+const { mockCloseProject, mockToastSuccess, mockToastError, mockToastWarning, mockToastInfo } = vi.hoisted(() => ({
+  mockToastInfo: vi.fn(),
   mockCloseProject: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockToastError: vi.fn(),
@@ -125,7 +134,7 @@ vi.mock('#hooks/use-sidebar-status.js', () => ({
   useSidebarCommands: () => ({ closeProject: mockCloseProject }),
 }));
 vi.mock('@taucad/ui/components/sonner', () => ({
-  toast: { success: mockToastSuccess, error: mockToastError, warning: mockToastWarning },
+  toast: { success: mockToastSuccess, error: mockToastError, warning: mockToastWarning, info: mockToastInfo },
 }));
 
 vi.mock('#hooks/use-kernel.js', () => ({
@@ -1169,6 +1178,105 @@ describe('ProjectLibrary', () => {
       expect(mockUseProjectsResult.deleteProjectCopy).toHaveBeenCalledExactlyOnceWith(manifest.id, copyLocator);
     });
     expect(mockUseProjectsResult.permanentlyDeleteProject).not.toHaveBeenCalled();
+  });
+
+  /* FW3, the operator's "cancel and say so": a delete that removed nothing because no other copy holds the project. */
+  describe('a cancelled delete', () => {
+    const cancellation = {
+      operationId: 'req_cancelled00000000000',
+      projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+      unavailable: [],
+    };
+
+    afterEach(() => {
+      mockCancelled.deletes.length = 0;
+    });
+
+    it('says this copy was not deleted and offers the Trash when a copy delete is cancelled', async () => {
+      const copyLocator = {
+        backend: 'webaccess',
+        storageRootKey: 'webaccess:wsp_alpha',
+        relativeDirectory: 'relief-copy',
+        workspaceId: 'wsp_alpha',
+      } as const;
+      const manifest = createProjectFixture({
+        id: 'proj_ccccccccccccccccccccc',
+        name: 'Relief',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'main.cs' } },
+      });
+      mockUseProjectsResult = {
+        ...createUseProjectsResult(),
+        projects: [makeProject(manifest.id, 'Relief', 'relief')],
+        conflicts: [
+          {
+            status: 'duplicate-id',
+            projectId: manifest.id,
+            manifest: projectToManifest(manifest),
+            locator: copyLocator,
+            workspaceName: 'Alpha',
+          },
+        ],
+      };
+      const cancelled = { ...cancellation, projectId: manifest.id };
+      mockUseProjectsResult.deleteProjectCopy.mockResolvedValueOnce({ status: 'cancelled', cancellation: cancelled });
+      render(
+        <TestRouter>
+          <TooltipProvider>
+            <ProjectLibrary />
+          </TooltipProvider>
+        </TestRouter>,
+      );
+
+      const card = within(screen.getByRole('group', { name: 'Project conflicts' }));
+      await userEvent.click(card.getByRole('button', { name: 'Delete this copy' }));
+      const dialog = within(await screen.findByRole('alertdialog'));
+      await userEvent.click(dialog.getByRole('button', { name: 'Delete this copy' }));
+
+      await vi.waitFor(() => {
+        expect(mockToastInfo).toHaveBeenCalledWith('Didn’t delete Relief', {
+          description: 'It’s now the only copy, so it wasn’t deleted. Move it to Trash to delete it.',
+          action: { label: 'Move to Trash', onClick: expect.any(Function) as unknown },
+        });
+      });
+      expect(mockToastSuccess).not.toHaveBeenCalledWith('Deleted this copy of Relief');
+      const [, { action }] = mockToastInfo.mock.calls.at(-1) as [string, { action: { onClick: () => void } }];
+      action.onClick();
+      await vi.waitFor(() => {
+        expect(mockUseProjectsResult.deleteProject).toHaveBeenCalledWith(manifest.id);
+      });
+    });
+
+    it('shows a replayed cancel where recoveries surface, naming the folder it could not read', async () => {
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [mockProjects[0]!] };
+      mockCancelled.deletes.push({
+        ...cancellation,
+        unavailable: [{ backend: 'indexeddb', storageRootKey: 'indexeddb:tau-', relativeDirectory: 'gearbox-copy' }],
+      });
+      render(
+        <TestRouter>
+          <TooltipProvider>
+            <ProjectLibrary />
+          </TooltipProvider>
+        </TestRouter>,
+      );
+
+      const group = within(screen.getByRole('group', { name: 'Deletes not finished' }));
+      const home = projectLocationFullLabel(projectLocationDescriptor({ kind: 'home' }));
+      expect(group.getByText('Didn’t delete Gearbox Alpha')).toBeInTheDocument();
+      expect(
+        group.getByText(
+          `Couldn’t confirm the other copy in ${home} · gearbox-copy, so this copy wasn’t deleted. Reconnect the folder and try again, or move it to Trash.`,
+        ),
+      ).toBeInTheDocument();
+      await userEvent.click(group.getByRole('button', { name: 'Dismiss' }));
+      expect(mockDismissCancelledDelete).toHaveBeenCalledWith(cancellation.operationId);
+      await userEvent.click(group.getByRole('button', { name: 'Move to Trash' }));
+      await vi.waitFor(() => {
+        expect(mockUseProjectsResult.deleteProject).toHaveBeenCalledWith(cancellation.projectId);
+      });
+    });
   });
 
   it('names a degraded manifest’s exact defect and repairs it on request', async () => {

@@ -117,16 +117,16 @@
     "writeStopEnded"
   ],
   "sources": {
-    "apps/libs/project-library/src/hooks/project-manager-provider.tsx": "07aa9e0a79d1fd42ba045f99a85457d1dcc49779fa1c9cfecbcafa42c25ea057",
+    "apps/libs/project-library/src/hooks/project-manager-provider.tsx": "566b216a4131225eebf7a33c1e35f733b64daeafcb3cd42a1ba2222133e7d897",
     "apps/libs/project-library/src/machines/library-access.machine.ts": "1227083a7798d63266441263049a45181d356931c98e5bee0a409cbc869cb539",
     "apps/libs/project-library/src/machines/library-discovery.machine.ts": "6a5cd1451c900aa184f254e719421363ef49b13834acf7f53f7bceea486b00fd",
-    "apps/libs/project-library/src/machines/library-recovery.machine.ts": "e7f87499e1b51743a3e54a058b8aee5d870a7ddf46c8e8eaf87926318996adea",
-    "apps/libs/project-library/src/runtime/project-library-commands.ts": "44bb25496b4ab511799404aafad2af8e66c1485b94eb4277d06e3872ed015f39",
-    "apps/libs/project-library/src/runtime/project-library-workspace.ts": "d9f039cef7800372e8af0d2bbb78456ce16e61417b2084df08b3c7d2b4c2e833",
-    "apps/libs/project-library/src/runtime/project-library.ts": "716f4055a5d624aa26454aafb427ed339e9344149e8495cbb265264ceb3e6481"
+    "apps/libs/project-library/src/machines/library-recovery.machine.ts": "d069d1455aed69058f5e98c08f24e3ae3630fd09cd610896e2e49d5524a6e005",
+    "apps/libs/project-library/src/runtime/project-library-commands.ts": "1f7f63973742d3616de3be4d9951e60a043b1300ece0ed02c6fa4cc5e45e5e5a",
+    "apps/libs/project-library/src/runtime/project-library-workspace.ts": "ffbbebcf065a2f69570a322f0dd003958a87def5eab8fae2d42a57463eb14b55",
+    "apps/libs/project-library/src/runtime/project-library.ts": "d8c7ee9564fd97c044e2e817116612bcb5a9b7674d43ba4cf65f18be3a036ed6"
   },
   "specs": {
-    "LibraryCatalog.tla": "e18444b0c32f0b63391cdfe9cb742cb9b976e0c77b8624f93053fdceaf59784f"
+    "LibraryCatalog.tla": "b171ad5c959303cc309929655aa41482f15c5d4849d66c0a4fc746ef6291a9fa"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "4e4fae3d1862a51a9087bdeac5cade75130afe63763c7bb6433104149105669c",

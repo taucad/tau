@@ -15,7 +15,10 @@ import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import type { ProjectLocator, ProjectDiscoveryIssue } from '@taucad/filesystem';
 import { describeProjectManifestIssue } from '@taucad/types';
 import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
-import type { PendingProjectRecovery } from '@taucad/project-library/types/pending-project-operation.types';
+import type {
+  PendingProjectRecovery,
+  SoleCopyCancellation,
+} from '@taucad/project-library/types/pending-project-operation.types';
 import { createColumns } from '#components/project-library/columns.js';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Card, CardHeader, CardFooter } from '@taucad/ui/components/card';
@@ -134,6 +137,21 @@ const copyFolderLabel = (
   return folder.modifiedAt === undefined ? place : `${place} · changed ${formatRelativeTime(folder.modifiedAt)}`;
 };
 
+/**
+ * What the person reads when a permanent delete was cancelled because no other copy holds the project (FW3, "cancel
+ * and say so"): nothing was deleted, why, and the Trash as the way to delete it.
+ */
+const soleCopyNotice = (
+  name: string,
+  folder: string | undefined,
+): Readonly<{ title: string; description: string }> => ({
+  title: `Didn’t delete ${name}`,
+  description:
+    folder === undefined
+      ? 'It’s now the only copy, so it wasn’t deleted. Move it to Trash to delete it.'
+      : `Couldn’t confirm the other copy in ${folder}, so this copy wasn’t deleted. Reconnect the folder and try again, or move it to Trash.`,
+});
+
 /** Why a discovered directory does not open, and what gets it open again. */
 const conflictSummary = (conflict: ProjectDiscoveryConflict): string => {
   switch (conflict.status) {
@@ -251,6 +269,24 @@ export function ProjectLibrary({
   /* Everything this device holds, the Trash included — one listing under the
      same query key — so a trashed project is never offered as Tau Cloud's alone. */
   const { projects: heldProjects } = useProjects({ scope: 'all' });
+  /* The folder of a copy a cancelled delete could not read, named as a project card names it (FW3). */
+  const unavailableFolderOf = useCallback(
+    (cancellation: SoleCopyCancellation): string | undefined => {
+      const [locator] = cancellation.unavailable;
+      if (locator === undefined) {
+        return undefined;
+      }
+      const workspaceName =
+        locator.backend === 'webaccess'
+          ? heldProjects.find(
+              (project) =>
+                project.locator.backend === 'webaccess' && project.locator.workspaceId === locator.workspaceId,
+            )?.workspaceName
+          : undefined;
+      return copyFolderLabel({ locator, ...(workspaceName === undefined ? {} : { workspaceName }) });
+    },
+    [heldProjects],
+  );
   const {
     projects,
     conflicts,
@@ -493,14 +529,47 @@ export function ProjectLibrary({
     [chooseProjectDirectory],
   );
 
+  /* FW3, "cancel and say so": a delete that removed nothing because no other copy holds the project says so where the
+   * person is looking, with the Trash as the way on. */
+  const moveCancelledToTrash = useCallback(
+    async (cancellation: SoleCopyCancellation): Promise<void> => {
+      const project = heldProjects.find((candidate) => candidate.id === cancellation.projectId);
+      projectManager.dismissCancelledDelete(cancellation.operationId);
+      if (project !== undefined) {
+        await trashProject(project);
+      }
+    },
+    [heldProjects, projectManager, trashProject],
+  );
+
+  const announceCancelledDelete = useCallback(
+    (name: string, cancellation: SoleCopyCancellation): void => {
+      const notice = soleCopyNotice(name, unavailableFolderOf(cancellation));
+      toast.info(notice.title, {
+        description: notice.description,
+        action: {
+          label: 'Move to Trash',
+          onClick: () => {
+            void moveCancelledToTrash(cancellation);
+          },
+        },
+      });
+    },
+    [moveCancelledToTrash, unavailableFolderOf],
+  );
+
   const confirmPermanentDelete = useCallback(async () => {
     const project = permanentDeleteTarget;
     if (!project) {
       return;
     }
     try {
-      await deleteProjectPermanently(project.id);
+      const outcome = await deleteProjectPermanently(project.id);
       setPermanentDeleteTarget(undefined);
+      if (outcome.status === 'cancelled') {
+        announceCancelledDelete(project.name, outcome.cancellation);
+        return;
+      }
       toast.success(`Permanently deleted ${project.name}`);
     } catch (error) {
       toast.error(`Could not permanently delete ${project.name}`, {
@@ -508,7 +577,7 @@ export function ProjectLibrary({
       });
       console.error('Error permanently deleting project:', error);
     }
-  }, [deleteProjectPermanently, permanentDeleteTarget]);
+  }, [announceCancelledDelete, deleteProjectPermanently, permanentDeleteTarget]);
 
   const confirmCopyDelete = useCallback(async () => {
     const copy = copyDeleteTarget;
@@ -516,8 +585,12 @@ export function ProjectLibrary({
       return;
     }
     try {
-      await deleteProjectCopy(copy.projectId, copy.locator);
+      const outcome = await deleteProjectCopy(copy.projectId, copy.locator);
       setCopyDeleteTarget(undefined);
+      if (outcome.status === 'cancelled') {
+        announceCancelledDelete(copy.manifest.name, outcome.cancellation);
+        return;
+      }
       toast.success(`Deleted this copy of ${copy.manifest.name}`);
     } catch (error) {
       toast.error(`Could not delete this copy of ${copy.manifest.name}`, {
@@ -525,7 +598,7 @@ export function ProjectLibrary({
       });
       console.error('Error deleting project copy:', error);
     }
-  }, [copyDeleteTarget, deleteProjectCopy]);
+  }, [announceCancelledDelete, copyDeleteTarget, deleteProjectCopy]);
 
   const confirmWorkspaceBindingRepair = useCallback(async (): Promise<void> => {
     const target = repairTarget;
@@ -640,7 +713,9 @@ export function ProjectLibrary({
   /* A host with its own empty content (Home) shows it in place of an empty section. The section stays
      whenever it has something to say: the Trash, a failure, a repair, Tau Cloud still listing, or the
      local listing still loading (its skeleton cards). */
-  const hasNotice = Boolean(listingError) || workspaceBindingRepairs.length + conflicts.length + recoveries.length > 0;
+  const hasNotice =
+    Boolean(listingError) ||
+    workspaceBindingRepairs.length + conflicts.length + recoveries.length + projectManager.cancelledDeletes.length > 0;
   if (
     emptyContent !== undefined &&
     rows.length === 0 &&
@@ -848,6 +923,36 @@ export function ProjectLibrary({
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {projectManager.cancelledDeletes.length > 0 && (
+        <div role='group' className='mb-6 space-y-2' aria-label='Deletes not finished'>
+          {projectManager.cancelledDeletes.map((cancellation) => {
+            const name = heldProjects.find((project) => project.id === cancellation.projectId)?.name ?? 'this project';
+            const notice = soleCopyNotice(name, unavailableFolderOf(cancellation));
+            return (
+              <div key={cancellation.operationId} className='flex items-center gap-3 rounded-md border p-3'>
+                <AlertCircle className='size-4 shrink-0 text-muted-foreground' />
+                <div className='min-w-0 flex-1'>
+                  <div className='truncate font-medium'>{notice.title}</div>
+                  <div className='text-sm text-muted-foreground'>{notice.description}</div>
+                </div>
+                <Button size='sm' variant='outline' onClick={async () => moveCancelledToTrash(cancellation)}>
+                  Move to Trash
+                </Button>
+                <Button
+                  size='sm'
+                  variant='ghost'
+                  onClick={() => {
+                    projectManager.dismissCancelledDelete(cancellation.operationId);
+                  }}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            );
+          })}
         </div>
       )}
 

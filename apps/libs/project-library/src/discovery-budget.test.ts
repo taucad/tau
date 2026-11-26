@@ -27,6 +27,7 @@ import {
 import type { LibraryProfile, LibraryProfileRoute } from '#runtime/project-library.fixture.js';
 import type { ProjectManagerWorker, ProjectLibraryRootFacade } from '#types/project-library-io.types.js';
 import type { ProjectListing } from '#runtime/project-library-storage.js';
+import { locatorToPendingStorage } from '#runtime/project-library-storage.js';
 import { ProjectManagerProvider } from '#hooks/project-manager-provider.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { ProjectManagerContextType } from '#hooks/use-project-manager.js';
@@ -233,6 +234,10 @@ const startLibrary = async (profile: LibraryProfile = createLibraryProfile()): P
   expect(queryClient.getQueryData(['projects'])).toBeDefined();
   return harness;
 };
+
+/** The ids the library's published listing shows. */
+const listedProjectIds = (harness: Pick<Harness, 'queryClient'>): string[] =>
+  harness.queryClient.getQueryData<ProjectListing>(['projects'])?.projects.map((project) => project.projectId) ?? [];
 
 /** The mutations of the blueprint's scan table (Finding 2), each on the profile. */
 const homeId = libraryProfileHomeId;
@@ -522,7 +527,9 @@ describe('a copy delete proves the other copy from disk', () => {
   /* FW3, copy proof held through the journal: the proof the journal waived the Trash on is taken again by the
    * authority under the project's lock with the removal. Another tab deleting the other copy after this tab's probe
    * and before its removal (here, as the journal row is written) leaves this copy where it is. */
-  it('should leave the copy and keep the project state when the other copy goes between the journal and the removal', async () => {
+  /* The operator's ruling, "cancel and say so" (FW3 review B1): the delete removed nothing, so its row completes, the
+   * project stays listed with its state and route, and the caller is told why with a typed outcome. */
+  it('should cancel the delete and keep the project listed when the other copy goes between the journal and the removal', async () => {
     const harness = await startLibrary();
     const { worker } = harness.profile;
     const projectId = homeId(0);
@@ -533,27 +540,234 @@ describe('a copy delete proves the other copy from disk', () => {
       harness.profile.removeDirectory('home', 'home-000');
       return operationId;
     });
-    harness.profile.reset();
+    const route = harness.profile.routes.get(projectId);
 
+    let outcome: unknown;
+    let routeAfter: unknown;
     await act(async () => {
-      await expect(
-        harness.library.commands.permanentlyDeleteProject(
-          projectId,
-          harness.profile.locatorOf('workspace', 'copy-000'),
-        ),
-      ).rejects.toMatchObject({ reason: 'identity-conflict' });
+      outcome = await harness.library.commands.permanentlyDeleteProject(
+        projectId,
+        harness.profile.locatorOf('workspace', 'copy-000'),
+      );
+      /* Read before the pass the settled row owes: that pass rebinds the route away from the copy the other tab
+       * deleted, which is discovery's work and not the cancelled delete's. */
+      routeAfter = harness.profile.routes.get(projectId);
       await settle(harness);
     });
 
-    /* The folder copy is still on disk: nothing was removed, and the id's device state stayed. The failed row hides it
-     * until the person discards the row (DF11). */
+    expect(outcome).toMatchObject({ status: 'cancelled', cancellation: { projectId, unavailable: [] } });
+    await expect(worker.getPendingProjectOperations()).resolves.toEqual([]);
+    expect(listedProjectIds(harness)).toContain(projectId);
+    await expect(worker.getProjectLibraryState(projectId)).resolves.toBeDefined();
+    expect(routeAfter).toEqual(route);
     await expect(harness.profile.rootFiles.get().client.verifyAbsent(projectId)).resolves.toEqual({
       status: 'present',
       locators: [harness.profile.locatorOf('workspace', 'copy-000')],
     });
-    await expect(worker.getProjectLibraryState(projectId)).resolves.toBeDefined();
-    const [row] = await worker.getPendingProjectOperations();
-    expect(row).toMatchObject({ kind: 'permanent-delete', projectId, copy: true });
+  });
+
+  it('should cancel and name the folder when the other copy could not be read', async () => {
+    const harness = await startLibrary();
+    const projectId = homeId(0);
+    const { client } = harness.profile.rootFiles.get();
+    const away = harness.profile.locatorOf('home', 'home-000');
+    vi.spyOn(client, 'permanentlyDeleteProjectDirectory').mockResolvedValueOnce({
+      status: 'copy-unproven',
+      reason: 'unknown',
+      unavailable: [away],
+    });
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await harness.library.commands.permanentlyDeleteProject(
+        projectId,
+        harness.profile.locatorOf('workspace', 'copy-000'),
+      );
+      await settle(harness);
+    });
+
+    expect(outcome).toMatchObject({ status: 'cancelled', cancellation: { projectId, unavailable: [away] } });
+    await expect(harness.profile.worker.getPendingProjectOperations()).resolves.toEqual([]);
+    expect(listedProjectIds(harness)).toContain(projectId);
+  });
+
+  /* Two tabs over one journal and one authority delete the last two copies: tab 2 proves tab 1's copy, and tab 1's
+   * whole delete lands before tab 2 journals (the race the copy proof held through the journal closes). Tab 1's copy
+   * is deleted, tab 2's delete is cancelled, and the project stays listed in both tabs. */
+  it('should cancel the second of two tabs deleting the last two copies, and keep the project listed in both', async () => {
+    const first = await startLibrary();
+    const second = await startLibrary(first.profile);
+    const projectId = homeId(0);
+    const { profile } = first;
+    const journal = profile.worker.beginPermanentDeleteProject.bind(profile.worker);
+    let firstOutcome: unknown;
+    vi.spyOn(profile.worker, 'beginPermanentDeleteProject').mockImplementationOnce(async (...args) => {
+      /* Tab 2 has proven tab 1's copy; tab 1's delete of it runs to the end before tab 2's row is written. */
+      firstOutcome = await first.library.commands.permanentlyDeleteProject(
+        projectId,
+        profile.locatorOf('home', 'home-000'),
+      );
+      return journal(...args);
+    });
+
+    let secondOutcome: unknown;
+    await act(async () => {
+      secondOutcome = await second.library.commands.permanentlyDeleteProject(
+        projectId,
+        profile.locatorOf('workspace', 'copy-000'),
+      );
+      await settle(first);
+      await settle(second);
+    });
+
+    expect(firstOutcome).toEqual({ status: 'deleted' });
+    expect(secondOutcome).toMatchObject({ status: 'cancelled', cancellation: { projectId } });
+    await expect(profile.worker.getPendingProjectOperations()).resolves.toEqual([]);
+    await expect(profile.rootFiles.get().client.verifyAbsent(projectId)).resolves.toEqual({
+      status: 'present',
+      locators: [profile.locatorOf('workspace', 'copy-000')],
+    });
+    await act(async () => {
+      await first.queryClient.refetchQueries({ queryKey: ['projects'] });
+      await second.queryClient.refetchQueries({ queryKey: ['projects'] });
+      await settle(first);
+      await settle(second);
+    });
+    expect(listedProjectIds(first)).toContain(projectId);
+    expect(listedProjectIds(second)).toContain(projectId);
+  });
+
+  /* Review M2 at the page: tab 1 is inside its removal of one copy (or died there); tab 2, already open, deletes the
+   * other copy. The copy under tab 1's pending delete proves nothing, so tab 2 asks for the Trash, and once tab 1's
+   * removal lands one copy is still there. */
+  it("should ask for the Trash when the only other copy is under another tab's unfinished delete", async () => {
+    const first = await startLibrary();
+    const { profile } = first;
+    const second = await startLibrary(profile);
+    const projectId = homeId(0);
+    const { client } = profile.rootFiles.get();
+    const remove = client.permanentlyDeleteProjectDirectory.bind(client);
+    const reached = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    vi.spyOn(client, 'permanentlyDeleteProjectDirectory').mockImplementationOnce(async (input) => {
+      reached.resolve();
+      await resume.promise;
+      return remove(input);
+    });
+    const firstDelete = first.library.commands.permanentlyDeleteProject(
+      projectId,
+      profile.locatorOf('workspace', 'copy-000'),
+    );
+    await reached.promise;
+    const begin = vi.spyOn(profile.worker, 'beginPermanentDeleteProject');
+
+    await act(async () => {
+      await expect(
+        second.library.commands.permanentlyDeleteProject(projectId, profile.locatorOf('home', 'home-000')),
+      ).rejects.toThrow('Permanent delete is available only for trashed projects');
+    });
+    resume.resolve();
+    await act(async () => {
+      await firstDelete;
+      await settle(first);
+      await settle(second);
+    });
+
+    expect(begin.mock.calls.map((call) => call[2])).toEqual([undefined]);
+    await expect(profile.rootFiles.get().client.verifyAbsent(projectId)).resolves.toEqual({
+      status: 'present',
+      locators: [profile.locatorOf('home', 'home-000')],
+    });
+  });
+
+  /* Review m3: an authority from before FW3 refuses the probe. Every caller degrades to what it did before. */
+  it('should create, bind and delete as before when the authority refuses the probe', async () => {
+    const harness = await startLibrary();
+    const { profile, library } = harness;
+    const { client } = profile.rootFiles.get();
+    vi.spyOn(client, 'probeProjectDirectories').mockRejectedValue(
+      new Error('Unknown workspace method: probeProjectDirectories'),
+    );
+    const listed = vi.spyOn(client, 'listProjectManifests');
+
+    await act(async () => {
+      await library.commands.createProject({
+        kernel: 'auto',
+        projectName: 'Older',
+        location: { kind: 'home' },
+        chat: false,
+      });
+      await library.workspaceCommands.chooseProjectDirectory(profile.locatorOf('workspace', 'copy-001'), homeId(1));
+      /* No proof of the other copy: the delete asks for the Trash. */
+      await expect(
+        library.commands.permanentlyDeleteProject(homeId(0), profile.locatorOf('workspace', 'copy-000')),
+      ).rejects.toThrow('Permanent delete is available only for trashed projects');
+      await settle(harness);
+    });
+
+    expect(listed).toHaveBeenCalled();
+    expect(profile.routes.get(homeId(1))?.providerBasePath).toBe('copy-001');
+  });
+
+  it("should settle a sole copy's delete from the sweep when the authority answers no remainder", async () => {
+    const harness = await startLibrary();
+    const { profile } = harness;
+    const projectId = homeId(3);
+    const { client } = profile.rootFiles.get();
+    const remove = client.permanentlyDeleteProjectDirectory.bind(client);
+    vi.spyOn(client, 'permanentlyDeleteProjectDirectory').mockImplementationOnce(async (input) => {
+      const result = await remove(input);
+      /* An authority from before FW3 answers the status alone. */
+      const older: Awaited<ReturnType<typeof remove>> =
+        result.status === 'deleted' || result.status === 'absent' ? { status: result.status } : result;
+      return older;
+    });
+
+    await act(async () => {
+      await harness.library.commands.permanentlyDeleteProject(projectId);
+      await settle(harness);
+    });
+
+    await expect(profile.worker.getPendingProjectOperations()).resolves.toEqual([]);
+    await expect(profile.worker.getProjectLibraryState(projectId)).resolves.toBeUndefined();
+  });
+
+  /* Review M1 at the page: a remaining copy that is the deleted directory under another spelling is a conflict. */
+  it('should not settle on a remaining copy that names the deleted folder in another case', async () => {
+    const harness = await startLibrary();
+    const { profile } = harness;
+    const projectId = homeId(0);
+    const { client } = profile.rootFiles.get();
+    vi.spyOn(client, 'permanentlyDeleteProjectDirectory').mockResolvedValueOnce({
+      status: 'deleted',
+      remaining: [profile.locatorOf('workspace', 'COPY-000')],
+    });
+
+    await act(async () => {
+      await expect(
+        harness.library.commands.permanentlyDeleteProject(projectId, profile.locatorOf('workspace', 'copy-000')),
+      ).rejects.toMatchObject({ reason: 'identity-conflict' });
+      await settle(harness);
+    });
+
+    await expect(profile.worker.getProjectLibraryState(projectId)).resolves.toBeDefined();
+  });
+
+  it('should not bind a folder whose copy is under a pending delete', async () => {
+    const harness = await startLibrary();
+    const { profile } = harness;
+    const projectId = homeId(1);
+    await profile.worker.beginPermanentDeleteProject(
+      projectId,
+      locatorToPendingStorage(profile.locatorOf('workspace', 'copy-001')),
+      {
+        copy: true,
+      },
+    );
+
+    await expect(
+      harness.library.workspaceCommands.chooseProjectDirectory(profile.locatorOf('workspace', 'copy-001'), projectId),
+    ).rejects.toThrow('This folder no longer holds that project.');
   });
 
   it('should reclaim nothing when the authority cannot tell what remains, and keep the row for the folder', async () => {
@@ -718,6 +932,34 @@ describe('a permanent delete across a reload after each row of the crash table (
       expected: { carrying: [], route: undefined, state: false },
     },
   ];
+
+  /* B1 after a reload: the row the crashed tab journaled with `copy` is replayed, the other copy has gone meanwhile, and
+   * the replay cancels: the row completes, the project stays listed, and the notice waits where recoveries surface. */
+  it('should cancel a replayed copy delete whose other copy went while the tab was away, and say so', async () => {
+    const first = await startLibrary();
+    const { profile } = first;
+    const projectId = homeId(0);
+    const crashed = hangAfter(clientOf(profile), 'permanentlyDeleteProjectDirectory', async () => undefined);
+    void first.library.commands.permanentlyDeleteProject(projectId, profile.locatorOf('workspace', 'copy-000'));
+    await crashed;
+    first.stop();
+    vi.restoreAllMocks();
+    profile.removeDirectory('home', 'home-000');
+
+    const second = await startLibrary(profile);
+    await act(async () => {
+      await settle(second);
+    });
+
+    await expect(profile.worker.getPendingProjectOperations()).resolves.toEqual([]);
+    expect(listedProjectIds(second)).toContain(projectId);
+    await expect(profile.worker.getProjectLibraryState(projectId)).resolves.toBeDefined();
+    expect(second.library.getSnapshot().cancelledDeletes).toEqual([
+      expect.objectContaining({ projectId, unavailable: [] }),
+    ]);
+    second.library.dismissCancelledDelete(second.library.getSnapshot().cancelledDeletes[0]!.operationId);
+    expect(second.library.getSnapshot().cancelledDeletes).toEqual([]);
+  });
 
   it.each(rows)('should recover a crash after $name', async ({ projectId, locator, crashAt, expected }) => {
     const first = await startLibrary();

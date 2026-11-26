@@ -219,6 +219,11 @@
 \* project, which the person is told about. `ReplaySettled` gains that outcome for a delete row (`Outcomes(r)`),
 \* `RowStates` and `Reasons` gain `cancelled`, and `CancelLeavesProjectReachable` is new, with the constant `CancelHolds`
 \* and its witness `cancel-holds`. Every earlier configuration sets `CancelHolds = FALSE`.
+\* FW3 sole-copy cancel code (2026-11-26): `library-recovery.machine` settles a `cancelled` outcome to its row state
+\* `cancelled`, which holds nothing, and emits `rowCancelled`; `project-library.ts` returns the outcome to the delete's
+\* caller and keeps a replay's cancel for the person until dismissed; the permanent-delete precheck and "Use this
+\* folder" leave out the directories other deletes in the journal are removing (review M2) and degrade to their earlier
+\* reads when the authority refuses the probe (review m3). `ReplaySettled`'s `cancelled` branch is the code's, as formatted.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

@@ -195,16 +195,16 @@ describe('live effort override', () => {
   };
 
   it('should send the Vertex thinking level the variable names', async () => {
-    process.env['TAU_LIVE_EFFORT'] = 'medium';
-    expect(await sentBody('google-gemini-4-hydrogen')).toContain('"thinking_level":"MEDIUM"');
+    process.env['TAU_LIVE_EFFORT'] = 'high';
+    expect(await sentBody('google-gemini-4-hydrogen')).toContain('"thinking_level":"HIGH"');
   });
 
   it('should send the Anthropic effort the variable names', async () => {
-    process.env['TAU_LIVE_EFFORT'] = 'medium';
-    expect(await sentBody('anthropic-claude-opus-5.5')).toMatch(/"output_config":\{"effort":"medium"\}/u);
+    process.env['TAU_LIVE_EFFORT'] = 'high';
+    expect(await sentBody('anthropic-claude-opus-5.5')).toMatch(/"output_config":\{"effort":"high"\}/u);
   });
 
   it('should keep the catalog effort when the variable is unset', async () => {
-    expect(await sentBody('google-gemini-4-hydrogen')).toContain('"thinking_level":"HIGH"');
+    expect(await sentBody('google-gemini-4-hydrogen')).toContain('"thinking_level":"MEDIUM"');
   });
 });

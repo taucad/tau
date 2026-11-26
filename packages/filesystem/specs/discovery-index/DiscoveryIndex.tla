@@ -46,6 +46,14 @@
 (*              heard only when it settles, as the change bus reports it   *)
 (*              (F2, own writes)                                           *)
 (*   AuditOn    the audit re-reads clean directories with no evidence (A4) *)
+(*   InstallRule "monotone": an install leaves the counter where it is;   *)
+(*              "reset": an install puts it back to its floor, so a slower *)
+(*              reader that took the old floor installs older bytes (the   *)
+(*              review's M1)                                               *)
+(*                                                                         *)
+(* Several readers may read one directory at once (`Readers`): a pass, a   *)
+(* probe, an operation's own check and the audit do not wait for each      *)
+(* other.                                                                  *)
 (*                                                                         *)
 (* Untimed: the poll period, the freshness window, the audit interval and  *)
 (* timestamps are below the model. The racy-timestamp guard is checked by  *)
@@ -58,6 +66,10 @@
 \* not its names are listed (A5), and orders its members; the protocol, every action and every verdict are unchanged.
 \* D5 boundary (2026-11-26): the index keeps an opaque reading and looks only at its `kind`; the reading types and
 \* their manifest vocabulary move back to `project-directories.ts`. Types only: every action and verdict is unchanged.
+\* FW2 review M1 (2026-11-26): several readers per directory (`Readers`), and `InstallRule`. The index lowered a
+\* directory's counter when it installed, so a slower reader that captured the old counter installed older bytes after
+\* a faster reader installed newer ones; `reset-on-install` records that as a witness of `CleanIsCurrent`, and the
+\* index now keeps every counter monotone. Every earlier configuration keeps its verdict with two readers.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root
@@ -69,7 +81,9 @@ CONSTANTS Dirs,         \* project directories: the immediate children of one ro
           ClearRule,    \* "versioned" or "unconditional"
           ArmOrder,     \* "arm-first" or "read-first"
           TapOrder,     \* "before" or "after"
-          AuditOn       \* the audit runs
+          AuditOn,      \* the audit runs
+          Readers,      \* readers that may read one directory at once
+          InstallRule   \* "monotone" or "reset"
 
 ASSUME /\ Dirs # {} /\ Cardinality(Values) >= 2
        /\ \A b \in {MaxChanges, MaxLost, MaxWrites, MaxRepeats} : b \in Nat
@@ -77,6 +91,8 @@ ASSUME /\ Dirs # {} /\ Cardinality(Values) >= 2
        /\ ArmOrder \in {"arm-first", "read-first"}
        /\ TapOrder \in {"before", "after"}
        /\ AuditOn \in BOOLEAN
+       /\ Readers # {}
+       /\ InstallRule \in {"monotone", "reset"}
 
 Unknown == "unknown"
 \* No read in flight. A read is a record either way, so TLC never compares a record with a string.
@@ -88,10 +104,11 @@ VARIABLES
   ver,      \* each directory's evidence counter
   dirty,    \* directories with evidence since they were read
   transit,  \* facts sent and not yet applied
-  reading,  \* each directory's read in flight: the value and counter it captured, or NoRead
+  reading,  \* each directory's reads in flight, one per reader: the value and counter each captured, or NoRead
   armed,    \* the observer, the notice subscription and the poll baseline are in place
   writing,  \* each directory's own write: "idle", "issued", or "landed" before it settles
-  lost,     \* ghost: directories whose last change sent no fact and that no read has repaired
+  lost,     \* ghost: directories whose last change sent no fact and that no read has repaired; a read repairs it only
+            \* when no other read of the directory is in flight, since one that began before the loss may install after
   n         \* bounds
 
 vars == <<disk, idx, ver, dirty, transit, reading, armed, writing, lost, n>>
@@ -102,7 +119,7 @@ Init ==
   /\ ver = [d \in Dirs |-> 0]
   /\ dirty = Dirs
   /\ transit = {}
-  /\ reading = [d \in Dirs |-> NoRead]
+  /\ reading = [d \in Dirs |-> [r \in Readers |-> NoRead]]
   /\ armed = FALSE
   /\ writing = [d \in Dirs |-> "idle"]
   /\ lost = {}
@@ -151,42 +168,45 @@ Arm ==
   /\ armed' = TRUE
   /\ UNCHANGED <<disk, idx, ver, dirty, transit, reading, writing, lost, n>>
 
-CanRead(d) == /\ armed \/ ArmOrder = "read-first"
-              /\ ~reading[d].on
+CanRead(d, r) == /\ armed \/ ArmOrder = "read-first"
+                 /\ ~reading[d][r].on
 
-Capture(d) == reading' = [reading EXCEPT ![d] = [on |-> TRUE, val |-> disk[d], ver |-> ver[d]]]
+Capture(d, r) == reading' = [reading EXCEPT ![d][r] = [on |-> TRUE, val |-> disk[d], ver |-> ver[d]]]
 
 \* A read of a directory with evidence: a pass, a probe, an operation's own check.
-ReadStart(d) ==
-  /\ CanRead(d)
+ReadStart(d, r) ==
+  /\ CanRead(d, r)
   /\ d \in dirty
-  /\ Capture(d)
+  /\ Capture(d, r)
   /\ UNCHANGED <<disk, idx, ver, dirty, transit, armed, writing, lost, n>>
 
 \* The audit: a read of a clean directory that no evidence asked for (A4).
-Audit(d) ==
+Audit(d, r) ==
   /\ AuditOn
-  /\ CanRead(d)
+  /\ CanRead(d, r)
   /\ d \notin dirty
-  /\ Capture(d)
+  /\ Capture(d, r)
   /\ UNCHANGED <<disk, idx, ver, dirty, transit, armed, writing, lost, n>>
 
 \* What the read captured is installed as clean only under the clear rule. A tap that hears a write only when it
 \* settles cannot know that one is in flight.
-Installs(d) ==
+Installs(d, r) ==
   \/ ClearRule = "unconditional"
-  \/ /\ reading[d].ver = ver[d]
+  \/ /\ reading[d][r].ver = ver[d]
      /\ TapOrder = "after" \/ writing[d] = "idle"
 
-ReadEnd(d) ==
-  /\ reading[d].on
-  /\ IF Installs(d)
-       THEN /\ idx' = [idx EXCEPT ![d] = reading[d].val]
+\* An install leaves the counter where it is; the "reset" rule puts it back to its floor, 0.
+ReadEnd(d, r) ==
+  /\ reading[d][r].on
+  /\ IF Installs(d, r)
+       THEN /\ idx' = [idx EXCEPT ![d] = reading[d][r].val]
             /\ dirty' = dirty \ {d}
-            /\ lost' = IF reading[d].val = disk[d] THEN lost \ {d} ELSE lost
-       ELSE UNCHANGED <<idx, dirty, lost>>
-  /\ reading' = [reading EXCEPT ![d] = NoRead]
-  /\ UNCHANGED <<disk, ver, transit, armed, writing, n>>
+            /\ lost' = IF reading[d][r].val = disk[d] /\ \A o \in Readers \ {r} : ~reading[d][o].on
+                        THEN lost \ {d} ELSE lost
+            /\ ver' = IF InstallRule = "reset" THEN [ver EXCEPT ![d] = 0] ELSE ver
+       ELSE UNCHANGED <<idx, dirty, lost, ver>>
+  /\ reading' = [reading EXCEPT ![d][r] = NoRead]
+  /\ UNCHANGED <<disk, transit, armed, writing, n>>
 
 \* This authority writes d through the provider the registry hands out. "before": the tap marks d before the call is
 \* issued; "after": nothing hears it yet.
@@ -218,8 +238,8 @@ EnvNext == \E d \in Dirs : Change(d) \/ ChangeLost(d) \/ Deliver(d)
 
 AuthorityNext ==
   \/ Arm
-  \/ \E d \in Dirs : \/ ReadStart(d) \/ Audit(d) \/ ReadEnd(d)
-                     \/ WriteIssued(d) \/ WriteLanded(d) \/ WriteSettled(d)
+  \/ \E d \in Dirs, r \in Readers : ReadStart(d, r) \/ Audit(d, r) \/ ReadEnd(d, r)
+  \/ \E d \in Dirs : \/ WriteIssued(d) \/ WriteLanded(d) \/ WriteSettled(d)
 
 Next == EnvNext \/ AuthorityNext
 
@@ -230,7 +250,7 @@ Spec == Init /\ [][Next]_vars
 Fairness ==
   /\ WF_vars(Arm)
   /\ \A d \in Dirs : /\ WF_vars(Deliver(d))
-                     /\ WF_vars(ReadStart(d)) /\ WF_vars(Audit(d)) /\ WF_vars(ReadEnd(d))
+                     /\ \A r \in Readers : WF_vars(ReadStart(d, r)) /\ WF_vars(Audit(d, r)) /\ WF_vars(ReadEnd(d, r))
                      /\ WF_vars(WriteLanded(d)) /\ WF_vars(WriteSettled(d))
 
 LiveSpec == Spec /\ Fairness
@@ -243,18 +263,22 @@ TypeOK ==
   /\ idx \in [Dirs -> Values \cup {Unknown}]
   /\ ver \in [Dirs -> Nat]
   /\ dirty \subseteq Dirs /\ transit \subseteq Dirs /\ lost \subseteq Dirs
-  /\ \A d \in Dirs : reading[d] = NoRead \/ (reading[d].on /\ reading[d].val \in Values /\ reading[d].ver \in Nat)
+  /\ \A d \in Dirs, r \in Readers :
+       reading[d][r] = NoRead \/ (reading[d][r].on /\ reading[d][r].val \in Values /\ reading[d][r].ver \in Nat)
   /\ armed \in BOOLEAN
   /\ writing \in [Dirs -> {"idle", "issued", "landed"}]
 
 \* S12, first half (index-contract review A2). A directory that is not dirty, not being read, has no fact in transit
 \* and whose last change was not lost holds in the index what storage holds.
 CleanIsCurrent ==
-  \A d \in Dirs : (d \notin dirty /\ ~reading[d].on /\ d \notin transit /\ d \notin lost) => idx[d] = disk[d]
+  \A d \in Dirs : (d \notin dirty /\ (\A r \in Readers : ~reading[d][r].on) /\ d \notin transit /\ d \notin lost)
+                   => idx[d] = disk[d]
 
 \* S12, second half (A4). Under weak fairness of delivery, the reads and the audit, once the bounded environment is
 \* quiet the index comes to hold storage, a lost fact included. Quiescence: `Quiescent`.
-Quiescent == dirty = {} /\ transit = {} /\ lost = {}
+\* `lost` is a safety exemption and not part of quiescence: overlapping audits may keep a read in flight for ever, while
+\* every read after the environment falls quiet captures what the disk holds.
+Quiescent == dirty = {} /\ transit = {}
 EventuallyCurrent == <>[](Quiescent /\ \A d \in Dirs : idx[d] = disk[d])
 
 =============================================================================

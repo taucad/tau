@@ -1,12 +1,12 @@
 import { EventLogError } from '#log/event-log-error.js';
-import { parseLogEvent } from '#log/event-schema.js';
-import { createEventLogReducer } from '#log/reducer.js';
+import { parseLogRow } from '#log/event-schema.js';
+import { admitParsedLogEvent, createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
 import { parseSegmentFrom, unsettledParsedRuns } from '#log/foreign-runs.js';
 import type { ForeignRun, SegmentParse } from '#log/foreign-runs.js';
 import { foreignClockAheadMilliseconds, mergeSegmentsUpTo, segmentRefreshMilliseconds } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
-import { parseEventLogBytes, serializeLogEventBytes } from '#log/serialization.js';
+import { parseEventLogBytes, serializeParsedLogEventBytes, serializedLogEventSize } from '#log/serialization.js';
 import type { AgentLogEvent, ProviderMessage, RowKey } from '#log/event-types.js';
 import { isAbandonedTurn } from '#log/event-types.js';
 
@@ -368,7 +368,7 @@ const byteBounded = (
   for (const event of window) {
     total += opaque.has(event)
       ? encoder.encode(`${JSON.stringify(event)}\n`).byteLength
-      : serializeLogEventBytes(event).byteLength;
+      : serializedLogEventSize(event);
     if (total > maxBytes && taken.length > 0) {
       break;
     }
@@ -1025,7 +1025,11 @@ export const createEventLogAppender = async (
     if (fenced) {
       throw fencedError();
     }
-    const event = parseLogEvent(candidate);
+    /* Parsed once here, at the boundary: the folds and the serializer take the parsed row as it is (HP-05). */
+    const { event, known } = parseLogRow(candidate);
+    if (known) {
+      admitParsedLogEvent(event);
+    }
     /* The term rules first, on this device's rows: a duplicate is answered before any history rule runs. */
     const term = terms.prepare(event);
     if (term.duplicate) {
@@ -1036,7 +1040,7 @@ export const createEventLogAppender = async (
     if (transition.duplicate) {
       return { appended: false, endCursor: events.length };
     }
-    const bytes = serializeLogEventBytes(event, needsSeparator);
+    const bytes = serializeParsedLogEventBytes(event, needsSeparator);
     await write(bytes);
     term.commit();
     transition.commit();

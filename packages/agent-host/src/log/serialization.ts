@@ -161,6 +161,41 @@ export const serializeLogEvent = (event: AgentLogEvent): string => `${JSON.strin
 export const serializeLogEventBytes = (event: AgentLogEvent, needsSeparator = false): Uint8Array<ArrayBuffer> =>
   encoder.encode(`${needsSeparator ? '\n' : ''}${serializeLogEvent(event)}`);
 
+/* A row's line length without a separator, kept once counted; rows are immutable once in a log. */
+const lineSizes = new WeakMap<AgentLogEvent, number>();
+
+/**
+ * The bytes of a row {@link parseLogEvent} returned, without parsing it again (WP-10 step A item 5): the appender
+ * parses each row once at its boundary. The line's size is kept for {@link serializedLogEventSize}.
+ *
+ * @internal
+ * @param event - A row exactly as `parseLogEvent` returned it.
+ * @param needsSeparator - Whether the file's last line lacks its newline.
+ * @returns One JSONL line, after a separator when one is needed.
+ */
+export const serializeParsedLogEventBytes = (event: AgentLogEvent, needsSeparator = false): Uint8Array<ArrayBuffer> => {
+  const bytes = encoder.encode(`${needsSeparator ? '\n' : ''}${JSON.stringify(event)}\n`);
+  lineSizes.set(event, bytes.byteLength - (needsSeparator ? 1 : 0));
+  return bytes;
+};
+
+/**
+ * The byte length of a known row's line as {@link serializeLogEventBytes} writes it, counted once per row (HP-12).
+ *
+ * @internal
+ * @param event - A known row.
+ * @returns Its line's bytes, newline included.
+ */
+export const serializedLogEventSize = (event: AgentLogEvent): number => {
+  const known = lineSizes.get(event);
+  if (known !== undefined) {
+    return known;
+  }
+  const size = serializeLogEventBytes(event).byteLength;
+  lineSizes.set(event, size);
+  return size;
+};
+
 /**
  * Parse a JSONL session log tolerantly: a malformed final line is a torn append and is dropped, any other line
  * without a row envelope is skipped, and a row this build cannot interpret is kept as it was written (D16).

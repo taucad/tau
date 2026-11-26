@@ -439,7 +439,7 @@ type CreateTransportStreamOptions = {
   /** The chat's committed turns (I2): each context rides before its user message, frozen (I1). */
   readonly committedTurns?: (() => Promise<readonly CommittedTurnContext[]>) | undefined;
   readonly systemPromptBlocks?: (() => TurnContextSnapshot['systemPromptBlocks']) | undefined;
-  readonly onLiveDelta?: ((event: AgentLiveEventPayload) => void | Promise<void>) | undefined;
+  readonly onLiveDelta?: ((event: AgentLiveEventPayload) => void) | undefined;
   readonly prestartTool?:
     // eslint-disable-next-line max-params -- The hook mirrors Pi's streamed tool-call lifecycle.
     | ((
@@ -792,13 +792,13 @@ export const createTransportStreamFunction =
         partial = { ...partial, content };
       };
 
-      const closeLegacyActive = async (): Promise<void> => {
+      const closeLegacyActive = (): void => {
         if (!legacyActive) {
           return;
         }
         const block = partial.content[legacyActive.index];
         if (legacyActive.kind === 'text' && block?.type === 'text') {
-          await options.onLiveDelta?.({
+          options.onLiveDelta?.({
             type: 'text-end',
             messageId,
             contentIndex: legacyActive.index,
@@ -812,7 +812,7 @@ export const createTransportStreamFunction =
           });
         } else if (legacyActive.kind === 'thinking' && block?.type === 'thinking') {
           const timestamp = endReasoning(legacyActive.index);
-          await options.onLiveDelta?.({
+          options.onLiveDelta?.({
             type: 'thinking-end',
             messageId,
             contentIndex: legacyActive.index,
@@ -908,7 +908,7 @@ export const createTransportStreamFunction =
           }
           if (event.type === 'text-start') {
             updateBlock(event.contentIndex, { type: 'text', text: '' });
-            await options.onLiveDelta?.({
+            options.onLiveDelta?.({
               type: 'text-start',
               messageId,
               contentIndex: event.contentIndex,
@@ -922,14 +922,14 @@ export const createTransportStreamFunction =
               if (legacyActive?.kind === 'text') {
                 index = legacyActive.index;
               } else {
-                await closeLegacyActive();
+                closeLegacyActive();
                 index = partial.content.length;
                 legacyActive = { kind: 'text', index };
               }
             }
             if (partial.content[index]?.type !== 'text') {
               updateBlock(index, { type: 'text', text: '' });
-              await options.onLiveDelta?.({ type: 'text-start', messageId, contentIndex: index });
+              options.onLiveDelta?.({ type: 'text-start', messageId, contentIndex: index });
               output.push({ type: 'text_start', contentIndex: index, partial });
             }
             const block = partial.content[index];
@@ -938,7 +938,7 @@ export const createTransportStreamFunction =
                 ...block,
                 text: block.text + event.text,
               });
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'text-delta',
                 messageId,
                 contentIndex: index,
@@ -959,7 +959,7 @@ export const createTransportStreamFunction =
               throw new Error(`Model transport ended missing text block ${event.contentIndex}.`);
             }
             updateBlock(event.contentIndex, { ...block, text: event.content });
-            await options.onLiveDelta?.({
+            options.onLiveDelta?.({
               type: 'text-end',
               messageId,
               contentIndex: event.contentIndex,
@@ -976,7 +976,7 @@ export const createTransportStreamFunction =
           if (event.type === 'thinking-start') {
             updateBlock(event.contentIndex, { type: 'thinking', thinking: '' });
             const timestamp = startReasoning(event.contentIndex);
-            await options.onLiveDelta?.({
+            options.onLiveDelta?.({
               type: 'thinking-start',
               messageId,
               contentIndex: event.contentIndex,
@@ -991,7 +991,7 @@ export const createTransportStreamFunction =
               if (legacyActive?.kind === 'thinking') {
                 index = legacyActive.index;
               } else {
-                await closeLegacyActive();
+                closeLegacyActive();
                 index = partial.content.length;
                 legacyActive = { kind: 'thinking', index };
               }
@@ -1002,7 +1002,7 @@ export const createTransportStreamFunction =
                 thinking: '',
               });
               const timestamp = startReasoning(index);
-              await options.onLiveDelta?.({ type: 'thinking-start', messageId, contentIndex: index, timestamp });
+              options.onLiveDelta?.({ type: 'thinking-start', messageId, contentIndex: index, timestamp });
               output.push({
                 type: 'thinking_start',
                 contentIndex: index,
@@ -1015,7 +1015,7 @@ export const createTransportStreamFunction =
                 ...block,
                 thinking: block.thinking + event.text,
               });
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'thinking-delta',
                 messageId,
                 contentIndex: index,
@@ -1037,7 +1037,7 @@ export const createTransportStreamFunction =
             }
             updateBlock(event.contentIndex, { ...block, thinking: event.content });
             const timestamp = endReasoning(event.contentIndex);
-            await options.onLiveDelta?.({
+            options.onLiveDelta?.({
               type: 'thinking-end',
               messageId,
               contentIndex: event.contentIndex,
@@ -1077,7 +1077,7 @@ export const createTransportStreamFunction =
                 arguments: {},
               };
               updateBlock(contentIndex, block);
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'tool-input-start',
                 messageId,
                 contentIndex,
@@ -1087,7 +1087,7 @@ export const createTransportStreamFunction =
               output.push({ type: 'toolcall_start', contentIndex, partial });
             }
             if (event.type === 'tool-input-delta') {
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'tool-input-delta',
                 messageId,
                 contentIndex,
@@ -1105,7 +1105,7 @@ export const createTransportStreamFunction =
             continue;
           }
           if (event.type === 'tool-input') {
-            await closeLegacyActive();
+            closeLegacyActive();
             const existingIndex = partial.content.findIndex(
               (block) => block.type === 'toolCall' && block.id === event.toolCallId,
             );
@@ -1120,7 +1120,7 @@ export const createTransportStreamFunction =
             };
             if (existing?.type !== 'toolCall') {
               updateBlock(contentIndex, { ...toolCall, arguments: {} });
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'tool-input-start',
                 messageId,
                 contentIndex,
@@ -1129,7 +1129,7 @@ export const createTransportStreamFunction =
               });
               output.push({ type: 'toolcall_start', contentIndex, partial });
               const delta = JSON.stringify(event.input);
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'tool-input-delta',
                 messageId,
                 contentIndex,
@@ -1140,7 +1140,7 @@ export const createTransportStreamFunction =
               output.push({ type: 'toolcall_delta', contentIndex, delta, partial });
             }
             updateBlock(contentIndex, toolCall);
-            await options.onLiveDelta?.({
+            options.onLiveDelta?.({
               type: 'tool-input-end',
               messageId,
               contentIndex,
@@ -1162,7 +1162,7 @@ export const createTransportStreamFunction =
             usageSettled = true;
             continue;
           }
-          await closeLegacyActive();
+          closeLegacyActive();
           terminalReason = event.stopReason;
         }
         const unbound = await bound;
@@ -1212,7 +1212,7 @@ export const createTransportStreamFunction =
         }
         /* The bound row lands before the failed attempt's message does; the stream's own failure is the one told. */
         await bound;
-        await closeLegacyActive();
+        closeLegacyActive();
         const reason = signal.aborted ? 'aborted' : 'error';
         const diagnostic = createTransportFailureDiagnostic(error, Date.now());
         const failure: AssistantMessage = {
@@ -2099,13 +2099,16 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       })();
       prestartedToolResults.set(toolCall.id, { toolName: toolCall.name, result });
     },
+    /* Handed over synchronously, never awaited per delta: the launcher conflates it (WP-08). */
     onLiveDelta: options.onLiveEvent
-      ? async (event) =>
-          options.onLiveEvent?.({
+      ? (event) => {
+          // async-iife: bootstrap -- a live subscriber is a preview and never paces the model stream.
+          void options.onLiveEvent?.({
             ...event,
             chatId: options.chatId,
             runId: options.runId,
-          })
+          });
+        }
       : undefined,
   });
   const agent = new Agent({

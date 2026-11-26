@@ -219,17 +219,10 @@ describe('Community explorer', () => {
     expect(semantics.firstListItemTop).toBeLessThanOrEqual(180);
   });
 
-  test('should open the remix location dialog from a card and cancel without creating a project', async () => {
+  test('should remix a card straight into Home without a location dialog', async () => {
     await openCommunity();
-    const remix = selectors.getByRole('button', { name: 'Remix BV-125 Bench Vice', exact: true });
-    await target.click(remix);
-    const dialog = selectors.getByRole('dialog', { name: 'Remix BV-125 Bench Vice' });
-    await target.expectVisible(dialog, 15_000);
-    await target.expectVisible(dialog.getByText('Choose where the project files will be persisted.'));
-    await target.click(dialog.getByRole('button', { name: 'Cancel', exact: true }));
-    await target.expectHidden(dialog);
-    await target.expectFocused(remix);
-    expect(new URL(await target.currentUrl()).pathname).toBe('/community');
+    await target.click(selectors.getByRole('button', { name: 'Remix BV-125 Bench Vice', exact: true }));
+    await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
   });
 
   test('should list the curated examples under Examples in the command palette', async () => {

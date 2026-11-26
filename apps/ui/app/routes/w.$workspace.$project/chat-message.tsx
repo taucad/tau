@@ -86,7 +86,7 @@ import {
   sanitizeAgentPath,
   sanitizeAgentText,
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
-import { annotationsOf } from '@taucad/chat/annotations';
+import { annotationsOf, emptyAnnotations } from '@taucad/chat/annotations';
 import type { MessageAnnotations } from '@taucad/chat/annotations';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
@@ -1135,6 +1135,8 @@ export const ChatMessage = memo(function ({
                   text: event.content,
                   attachments: event.attachments,
                   ...(event.references === undefined ? {} : { references: event.references }),
+                  // Always named, so comments the edit removed leave the message.
+                  annotations: event.annotations ?? emptyAnnotations,
                 });
                 exitEditMode();
                 setIsEditing(false);

@@ -1,6 +1,5 @@
 import type { ActorRefFrom, Subscription } from 'xstate';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
-import { selectPresentedRenderTier } from '@taucad/viewer/machines/canvas.machine';
 
 type GraphicsActor = ActorRefFrom<typeof graphicsMachine>;
 type CanvasSnapshot = ReturnType<
@@ -8,12 +7,14 @@ type CanvasSnapshot = ReturnType<
 >;
 
 /**
- * Whether background GPU work may start beside this canvas: it has presented a frame on its render tier, or it will
- * never draw again (lost, stopped, or a WebGL renderer that failed). A WebGPU canvas that failed is replaced by a
- * WebGL one, so that replacement is waited for.
+ * Whether background GPU work may start beside this canvas: it has presented a frame on its render tier (the canvas
+ * machine's `presented` state, which `selectPresentedRenderTier` reads), or it will never draw again (lost, stopped, or
+ * a WebGL renderer that failed). A WebGPU canvas that failed is replaced by a WebGL one, so that replacement is waited
+ * for. It reads the snapshot through types only: the thumbnail generator that waits here loads with the project
+ * route's interactive tier, and the canvas machine's module graph loads with the viewer.
  */
 const canvasSettled = (snapshot: CanvasSnapshot): boolean =>
-  selectPresentedRenderTier(snapshot) !== undefined ||
+  snapshot.matches('presented') ||
   snapshot.status !== 'active' ||
   snapshot.matches('lost') ||
   (snapshot.matches('failed') && snapshot.context.backend !== 'webgpu');

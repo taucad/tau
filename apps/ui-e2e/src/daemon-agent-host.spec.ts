@@ -175,10 +175,6 @@ describe('daemon agent host (AV-4, rung 1)', () => {
     await target.releaseTauServeGateway();
     await ensureChatOpen();
 
-    /* The transcript is back. On its own this proves little — the pre-drop text
-     * was already persisted in this browser's own chat row before the reload. */
-    await target.expectVisible(selectors.getByText(partialText).first(), 120_000);
-
     /* This is the reattach. The released turn's text was appended to the
      * daemon's log while the page had no client at all, so it exists nowhere in
      * this browser: rendering it means the reloaded page attached to the
@@ -186,6 +182,15 @@ describe('daemon agent host (AV-4, rung 1)', () => {
      * on a daemon writes no browser workspace claim, so nothing reload discovery
      * reads substantiates its run — the reattach rides the host registration. */
     await target.expectVisible(selectors.getByText(finalText).first(), 120_000);
+
+    /* The turn has finished, so its working narrative — the pre-drop sentence and
+     * the write — rests folded behind one "Worked for …" line above the answer.
+     * Open it: the pre-drop sentence is the one the duplicate check
+     * below needs on screen. */
+    const workedFold = selectors.getByRole('button', { name: /^Worked\b/u }).last();
+    await target.expectVisible(workedFold, 60_000);
+    await target.click(workedFold);
+    await target.expectVisible(selectors.getByText(partialText).first(), 10_000);
 
     /* FIX-REATTACH-DUP: once each, not twice. The replay rebuilds the run's own
      * message rather than being appended to the copy this browser had already
@@ -240,6 +245,10 @@ describe('daemon agent host (AV-4, rung 1)', () => {
      * transport ever publishes one. */
     await target.delay(3000);
     expect(await renderedCount(finalText)).toBe(2);
+    // A reload rests every finished turn folded again; the first turn's narrative holds the pre-drop sentence.
+    const firstTurnFold = selectors.getByRole('button', { name: /^Worked\b/u }).first();
+    await target.click(firstTurnFold);
+    await target.expectVisible(selectors.getByText(partialText).first(), 10_000);
     expect(await renderedCount(partialText)).toBe(1);
 
     /* PH19: the API is absent from the *data path*. The only `/v1/chat/*` calls

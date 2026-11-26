@@ -489,7 +489,11 @@ export const createMetadataObservation = (host: LibraryObservationHost): Library
           return source;
         };
         const disconnect = readOwner.connect(projectSource);
+        /* Which projects hold chats is unknown as a whole (a reset, a root-level change): every chat query reads again. */
         let membership = false;
+        /* Projects the listing gained or lost, or whose own directory changed: only their chat queries read again
+         * (fast-path blueprint FW1). */
+        const membershipChanges = new Set<string>();
         const metadata = new ObservationService<void>({
           resource: 'workspace/chat-metadata',
           refresh: () => {
@@ -516,7 +520,7 @@ export const createMetadataObservation = (host: LibraryObservationHost): Library
                 }
                 const projectId = segments[1]!;
                 if (segments.length === 2 || (segments[2] === '.tau' && segments.length === 3)) {
-                  membership = true;
+                  membershipChanges.add(projectId);
                   changed = true;
                 } else if (
                   segments[2] === '.tau' &&
@@ -545,8 +549,26 @@ export const createMetadataObservation = (host: LibraryObservationHost): Library
               if (next === listing) {
                 return;
               }
+              const previous = listing;
               listing = next;
-              membership = true;
+              if (previous === undefined || next === undefined) {
+                membership = true;
+                invalidate();
+                return;
+              }
+              /* A new listing of the same projects (a row's activity or Trash state moved) changes no membership. */
+              const before = new Set(previous.projects.map(({ projectId }) => projectId));
+              const after = new Set(next.projects.map(({ projectId }) => projectId));
+              const moved = [
+                ...[...before].filter((projectId) => !after.has(projectId)),
+                ...[...after].filter((projectId) => !before.has(projectId)),
+              ];
+              if (moved.length === 0) {
+                return;
+              }
+              for (const projectId of moved) {
+                membershipChanges.add(projectId);
+              }
               invalidate();
             };
             const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
@@ -576,6 +598,9 @@ export const createMetadataObservation = (host: LibraryObservationHost): Library
                   void queryClient.cancelQueries({ queryKey: ['chat', chatId] });
                 }
               }
+              for (const resourceId of membershipChanges) {
+                void queryClient.cancelQueries({ queryKey: ['chats', resourceId] });
+              }
             }
           },
           read: async (read) => {
@@ -592,7 +617,7 @@ export const createMetadataObservation = (host: LibraryObservationHost): Library
                 projectMetadata.delete(id);
               }
             }
-            const changed = membership || resources.size > 0;
+            const changed = membership || resources.size > 0 || membershipChanges.size > 0;
             const results = await Promise.allSettled([...ids].map(async (id) => read.observe(projectSource(id))));
             if (!isCurrent()) {
               return;
@@ -613,8 +638,16 @@ export const createMetadataObservation = (host: LibraryObservationHost): Library
             const pending: Array<Promise<void>> = [];
             if (membership) {
               membership = false;
+              membershipChanges.clear();
               pending.push(queryClient.invalidateQueries({ queryKey: ['chats'] }, { cancelRefetch: false }));
               pending.push(queryClient.invalidateQueries({ queryKey: ['chat'] }, { cancelRefetch: false }));
+            } else {
+              for (const resourceId of membershipChanges) {
+                pending.push(
+                  queryClient.invalidateQueries({ queryKey: ['chats', resourceId] }, { cancelRefetch: false }),
+                );
+              }
+              membershipChanges.clear();
             }
             pending.push(queryClient.invalidateQueries({ queryKey: ['all-chats'] }, { cancelRefetch: false }));
             await Promise.all(pending);

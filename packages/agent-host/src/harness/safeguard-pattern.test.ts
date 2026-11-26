@@ -6,6 +6,7 @@ describe('safeguardPatternOf', () => {
     ['read_file:abc123:def456', 'identical_error'],
     ['read_file:abc123:-', 'identical_error'],
     ['read_file:abc123:any-result', 'identical_call'],
+    ['read_file:abc123:ffe901:same-result', 'identical_call'],
     ['per_target_edit:main.ts:4', 'per_target_edit'],
     ['ping_pong:read_file:abc|edit_file:def', 'ping_pong'],
     ['empty_result:grep:abc123', 'empty_result'],

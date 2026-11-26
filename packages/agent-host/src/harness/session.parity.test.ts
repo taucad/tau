@@ -250,6 +250,88 @@ describe('pi full-turn parity fixture', () => {
     },
   );
 
+  // WP-10 step A item 3: the bound row is ordered when the gateway answers and awaited before the attempt settles.
+  it('should read the reply while the bound row is still being written, and land it before the reply', async () => {
+    const stored = await createMemoryEventLog();
+    const binding = Promise.withResolvers<void>();
+    const eventLog = {
+      ...stored,
+      append: async (event: AgentLogEvent) => {
+        if (event.type === 'model.invocation-bound') {
+          await binding.promise;
+        }
+        return stored.append(event);
+      },
+    };
+    const session = await createAgentSession({
+      chatId: 'chat-bound',
+      runId: 'run-bound',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: {
+        funding: fundedFacet(),
+        async *stream(request) {
+          /* Held until the body is read: were the bound row on the first-byte path, this would never return. */
+          await request.onInvocationBound?.({ operationId: 'operation-bound' });
+          yield { type: 'text-delta', text: 'hello' };
+          binding.resolve();
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog,
+    });
+
+    await session.prompt({ id: 'user-bound', role: 'user', content: 'hi' });
+
+    const events = await stored.read();
+    const bound = events.findIndex((event) => event.type === 'model.invocation-bound');
+    const reply = events.findIndex((event) => event.type === 'message.appended' && event.message.role === 'assistant');
+    expect(bound).toBeGreaterThan(events.findIndex((event) => event.type === 'model.invocation-prepared'));
+    expect(bound).toBeLessThan(reply);
+  });
+
+  it('should fail the attempt when its bound row cannot be written', async () => {
+    const stored = await createMemoryEventLog();
+    const eventLog = {
+      ...stored,
+      append: async (event: AgentLogEvent) => {
+        if (event.type === 'model.invocation-bound') {
+          throw new Error('simulated bound append failure');
+        }
+        return stored.append(event);
+      },
+    };
+    const session = await createAgentSession({
+      chatId: 'chat-unbound',
+      runId: 'run-unbound',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: {
+        funding: fundedFacet(),
+        async *stream(request) {
+          await request.onInvocationBound?.({ operationId: 'operation-unbound' });
+          yield { type: 'text-delta', text: 'hello' };
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog,
+    });
+
+    await session.prompt({ id: 'user-unbound', role: 'user', content: 'hi' });
+
+    const events = await stored.read();
+    expect(events.some((event) => event.type === 'model.invocation-bound')).toBe(false);
+    const reply = events.findLast((event) => event.type === 'message.appended' && event.message.role === 'assistant');
+    expect(reply?.type === 'message.appended' ? reply.message.metadata : undefined).toMatchObject({
+      stopReason: 'error',
+      errorMessage: 'simulated bound append failure',
+    });
+  });
+
   it('does not call the transport when the prepared marker cannot be durably appended', async () => {
     const stored = await createMemoryEventLog();
     const eventLog = {
@@ -622,6 +704,9 @@ describe('pi full-turn parity fixture', () => {
       modelTransport: transport,
       toolRegistry: tools,
       eventLog: log,
+      /* The seeded reads came before the person spoke, so they no longer count toward a nudge; the fixture still
+       * carries one safeguard row through the turn, fired by this turn's own read. */
+      safeguardThresholds: { identicalCall: 1 },
       substituteToolResult: async (invocation) => ({
         content: { source: 'cache', input: invocation.input },
         isError: false,
@@ -682,7 +767,8 @@ describe('pi full-turn parity fixture', () => {
     expect(safeguardMessage?.role).toBe('user');
     expect(JSON.stringify(safeguardMessage?.metadata?.tauInternal)).toContain('"kind":"safeguard"');
     expect(JSON.stringify(safeguardMessage?.metadata?.tauInternal)).toContain('"pruning":"preserve-until-compaction"');
-    expect(JSON.stringify(transport.requests[0]?.messages)).toContain('<system-reminder>');
+    /* The nudge answers this turn's read: the turn's first request carries none for what an earlier turn did. */
+    expect(JSON.stringify(transport.requests[0]?.messages)).not.toContain('<system-reminder>');
     expect(JSON.stringify(transport.requests[1]?.messages)).toContain('<system-reminder>');
     expect(compactions).toContain('tool_result_clearing');
     expect(new Set(transport.requests.map((request) => request.attemptId)).size).toBe(transport.requests.length);

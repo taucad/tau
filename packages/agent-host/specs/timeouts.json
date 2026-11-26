@@ -21,7 +21,8 @@
     "apps/ui/app/machines/github-credential-renewal.machine.ts",
     "apps/ui/app/workers/agent-host-projects.ts",
     "apps/libs/lsp-fs/src/sync/sync-fs-server.ts",
-    "apps/ui/app/machines/cad.machine.ts"
+    "apps/ui/app/machines/cad.machine.ts",
+    "apps/libs/agent-host-ui/src/workers/system-skills-overlay.ts"
   ],
   "rows": [
     {
@@ -623,6 +624,14 @@
       "owner": "W10"
     },
     {
+      "id": "E42",
+      "bound": "ACP lent turn drain: busy.flushing, then busy.recording, each bounded; past it the turn ends from closed after the close ladder (launch audit E-1)",
+      "site": "packages/host/src/acp/acp-session.machine.ts",
+      "token": "acpDrainTimeout",
+      "class": "External edge",
+      "owner": "launch audit E-1 (taucad/tau#2815)"
+    },
+    {
       "id": "E23",
       "bound": "ACP text checkpoint",
       "site": "packages/host/src/acp/session.ts",
@@ -866,12 +875,28 @@
       "owner": "W9"
     },
     {
-      "id": "D17b",
-      "bound": "Retry of a run watch or transcript read that failed on a dropped or replaced connection (250 ms doubling, three rounds per run, then latched)",
+      "id": "D-UI-10",
+      "bound": "Chat subscriber wake throttle, leading and trailing at most every 50 ms while the fold changes (the AI SDK throttled it before T2)",
       "site": "apps/ui/app/services/chat-session-store.ts",
-      "token": "const presentationRetry = setTimeout",
+      "token": "session.announceTimer = setTimeout",
+      "class": "Presentation",
+      "owner": "use_skill startup latency T2"
+    },
+    {
+      "id": "D-UI-11",
+      "bound": "A taken-back request's outbox write asked again while the composer holds new text (250 ms doubling, 3 retries), then the person is told",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "setTimeout(resolve, takeBackRetryDelay",
       "class": "Backoff",
-      "owner": "W9"
+      "owner": "chat UX F2"
+    },
+    {
+      "id": "D-UI-12",
+      "bound": "A prepared send its host refused with an owner wait (RH-R17) is sent again by its key after 250 ms, doubling to 30 s, for as long as the wait lasts",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "this.#hostWaitRanOut(session, timer)",
+      "class": "Backoff",
+      "owner": "PERF-5"
     },
     {
       "id": "D19",
@@ -1149,6 +1174,14 @@
       "owner": "filesystem-projection-performance-charter / N2 N3"
     },
     {
+      "id": "RH-DRIVERLESS-RETRY",
+      "bound": "Wait before the launcher asks again for the claim of a chat whose log still shows a run no driver holds: 1 s, doubling to at most 32 s (driverlessRetryMilliseconds, driverlessRetryCeiling); its end wakes the chat's parked reads, whose next pass asks; cleared when the run has a driver or an ending, and on close; unref'd",
+      "site": "packages/agent-host/src/launchers/agent-launcher.ts",
+      "token": "entry.waiting = setTimeout(",
+      "class": "Backoff",
+      "owner": "chat launch audit H-2 H-3"
+    },
+    {
       "id": "D26",
       "bound": "Viewer page long poll: a held app_sync answers unchanged after 20 s",
       "site": "packages/host/src/mcp-viewer-sessions.ts",
@@ -1413,6 +1446,38 @@
       "token": "workerReplacementDelay",
       "class": "Backoff",
       "owner": "PL7 staging defects FP10 (staging verification 2026-11-21)"
+    },
+    {
+      "id": "WORKER-IMPL-LOAD",
+      "bound": "The agent-host worker's implementation module load (30 s, implementationLoadDeadline): past it the load fails as a failed load does, the page replaces the worker (FP10) and the waiting turn starts on the new one; a stalled chunk request held a turn for 294 s on staging",
+      "site": "apps/ui/app/workers/agent-host.worker.ts",
+      "token": "implementationLoadDeadline",
+      "class": "External edge",
+      "owner": "chat performance WP-03 (PERF-9)"
+    },
+    {
+      "id": "SKILL-RESOURCE-ANSWER",
+      "bound": "A system skill resource request's answer (10 s, answerMilliseconds), then its body (60 s, bodyMilliseconds); a transient failure is asked again",
+      "site": "apps/libs/agent-host-ui/src/workers/system-skills-overlay.ts",
+      "token": "stop.abort();",
+      "class": "External edge",
+      "owner": "launch audit PERF-2 (#2815), chat performance WP-03"
+    },
+    {
+      "id": "SKILL-RESOURCE-RETRY",
+      "bound": "A system skill resource read makes at most three requests, 500 ms then 1 s apart (retryDelayMilliseconds), about 32 s in the worst case",
+      "site": "apps/libs/agent-host-ui/src/workers/system-skills-overlay.ts",
+      "token": "retryDelayMilliseconds * attempt",
+      "class": "Backoff",
+      "owner": "launch audit PERF-2 (#2815), chat performance WP-03"
+    },
+    {
+      "id": "LIVE-CONFLATION",
+      "bound": "Live conflation window: 16 ms (liveConflationMilliseconds). The first delta after a quiet window goes at once; later deltas of the same block inside it are merged and sent when it ends, per subscriber and for the leader's BroadcastChannel posts. Cleared on flush and close; unref'd",
+      "site": "packages/agent-host/src/launchers/live-conflater.ts",
+      "token": "timer = setTimeout(",
+      "class": "Presentation",
+      "owner": "chat performance plan WP-08"
     }
   ]
 }

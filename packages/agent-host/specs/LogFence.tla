@@ -14,6 +14,12 @@
 (* fences) refines this module; see FenceRefined there.                    *)
 (*                                                                         *)
 (* Conditional = FALSE is the mutant without the check (a witness).        *)
+(*                                                                         *)
+(* WP-10 step A: one write is a batch of 1..MaxBatch rows of the writer's  *)
+(* term under one fence check and one flush (`appendMany`). The argument   *)
+(* is the one for a single row: the fence is checked once per write, and a *)
+(* batch is one write. That a crash inside a batch leaves only a file per- *)
+(* row appends could leave is ChatLedger.lean's batch_crash_reachable.     *)
 (***************************************************************************)
 EXTENDS Integers, Sequences
 
@@ -21,7 +27,9 @@ CONSTANTS
     \* @type: Set(Str);
     Writers,
     \* @type: Bool;
-    Conditional
+    Conditional,
+    \* @type: Int;
+    MaxBatch
 
 VARIABLES
     \* @type: Seq({e: Int, w: Str});
@@ -37,6 +45,12 @@ vars == <<log, vlen, mine, claimed>>
 
 \* @type: (Str) => {e: Int, w: Str};
 Row(w) == [e |-> mine[w], w |-> w]
+
+\* The first k rows of a batch whose rows all carry row r (k is at most four).
+\* @type: ({e: Int, w: Str}, Int) => Seq({e: Int, w: Str});
+Batch(r, k) == SubSeq(<<r, r, r, r>>, 1, k)
+
+ASSUME MaxBatch \in 1..4
 
 Init ==
     /\ log = <<>>
@@ -55,22 +69,20 @@ Read(w) ==
     /\ claimed' = [claimed EXCEPT ![w] = TRUE]
     /\ UNCHANGED log
 
-\* One conditional append of one or two rows of the writer's term.
+\* One conditional append of a batch of 1..MaxBatch rows of the writer's term.
 Write(w) ==
     /\ claimed[w]
     /\ Conditional => vlen[w] = Len(log)
-    /\ \/ /\ log' = Append(log, Row(w))
-          /\ vlen' = [vlen EXCEPT ![w] = vlen[w] + 1]
-       \/ /\ log' = Append(Append(log, Row(w)), Row(w))
-          /\ vlen' = [vlen EXCEPT ![w] = vlen[w] + 2]
+    /\ \E k \in 1..MaxBatch :
+         /\ log' = log \o Batch(Row(w), k)
+         /\ vlen' = [vlen EXCEPT ![w] = vlen[w] + k]
     /\ UNCHANGED <<mine, claimed>>
 
 \* A read and a claiming append in one locked step (S4's follower SelfLead).
 ReadAppend(w) ==
     /\ \E t \in {0} \cup {log[i].e : i \in DOMAIN log} :
          /\ \A j \in DOMAIN log : log[j].e <= t
-         /\ \/ log' = Append(log, [e |-> t + 1, w |-> w])
-            \/ log' = Append(Append(log, [e |-> t + 1, w |-> w]), [e |-> t + 1, w |-> w])
+         /\ \E k \in 1..MaxBatch : log' = log \o Batch([e |-> t + 1, w |-> w], k)
     /\ UNCHANGED <<vlen, mine, claimed>>
 
 \* A refused append, a notice, a steal or a crash: the claim is gone.

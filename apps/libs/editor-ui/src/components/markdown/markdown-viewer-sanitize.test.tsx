@@ -22,4 +22,24 @@ describe('MarkdownViewer sanitizer', () => {
     expect(container.querySelector('[onerror]')).toBeNull();
     expect(container.querySelector('[href^="javascript:"]')).toBeNull();
   });
+
+  it('keeps no styling a reply could use to draw over the app or pass for one of its controls', async () => {
+    const markdown = [
+      'Reply.',
+      '<a href="https://elsewhere.example/p"><span style="position:fixed;inset:0;z-index:2147483647">Session expired: sign in again</span></a>',
+      '<svg style="position:fixed;inset:0"><path d="M0 0h10v10z"/></svg>',
+      '<div class="fixed inset-0 z-50">Allow once</div>',
+    ].join('\n\n');
+    const { container } = render(
+      <MemoryRouter>
+        <MarkdownViewer>{markdown}</MarkdownViewer>
+      </MemoryRouter>,
+    );
+    await screen.findByText('Reply.');
+
+    expect(screen.getByText('Session expired: sign in again')).toBeVisible();
+    expect(container.querySelector('[style]')).toBeNull();
+    expect(container.querySelector('svg path[d="M0 0h10v10z"]')).toBeNull();
+    expect(container.querySelector('.fixed')).toBeNull();
+  });
 });

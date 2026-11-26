@@ -111,9 +111,9 @@ describe('root shouldRevalidate on client navigation', () => {
     expect(shouldRevalidate(rootNavigation('/projects/abc', '/projects/abc', 'POST'))).toBe(true);
   });
 
-  it('keeps the default for an explicit revalidation of the same URL', () => {
-    expect(shouldRevalidate(rootNavigation('/projects/abc', '/projects/abc'))).toBe(true);
-    expect(shouldRevalidate(rootNavigation('/community?q=gear', '/community?q=gear'))).toBe(true);
+  it('does not revalidate for a navigation to the URL already shown (launch audit N-3)', () => {
+    expect(shouldRevalidate(rootNavigation('/projects/abc', '/projects/abc'))).toBe(false);
+    expect(shouldRevalidate(rootNavigation('/community?q=gear', '/community?q=gear'))).toBe(false);
   });
 
   it('treats /usage as any page: a click does not revalidate, a submission keeps the default (W12)', () => {

@@ -109,7 +109,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -155,7 +155,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -202,7 +202,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -249,7 +249,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -295,7 +295,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -341,7 +341,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -390,7 +390,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -435,7 +435,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           display: 'summarized',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -479,7 +479,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           type: 'adaptive',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -522,7 +522,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
           type: 'adaptive',
         },
         outputConfig: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -561,7 +561,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
@@ -601,7 +601,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
         temperature: 1,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
@@ -641,7 +641,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
         temperature: 1,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
@@ -680,172 +680,12 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
         temperature: 1,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
     },
 
-    'gpt-5.6-sol': {
-      enabled: true,
-      id: 'openai-gpt-5.6-sol',
-      providerKind: 'tau-hosted',
-      name: 'GPT-5.6 Sol',
-      slug: 'gpt-5.6-sol',
-      recommended: false,
-      description:
-        "OpenAI's frontier model for complex CAD design, strong at planning multi-part assemblies and verifying its own work.",
-      provider: {
-        id: 'openai',
-        name: 'OpenAI',
-      },
-      model: 'gpt-5.6-sol',
-      support: {
-        reasoning: { ...lowToHighReasoning, ...effortInTranscript },
-        modalities: pdfInputModalities,
-      },
-      details: {
-        family: 'gpt',
-        families: ['GPT-5.6'],
-        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
-        maxTokens: 128_000,
-        knowledgeCutoff: '2026-02',
-        // OpenAI's standard price; billing charges its promotional rate while that lasts.
-        cost: {
-          inputTokens: 5,
-          outputTokens: 30,
-          cacheReadTokens: 0.5,
-          cacheWriteTokens: 6.25,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 1,
-        reasoning: {
-          effort: 'high',
-          summary: 'auto',
-        },
-      },
-    },
-    'gpt-5.6-terra': {
-      enabled: true,
-      id: 'openai-gpt-5.6-terra',
-      providerKind: 'tau-hosted',
-      name: 'GPT-5.6 Terra',
-      slug: 'gpt-5.6-terra',
-      recommended: false,
-      description: 'Strong balance of intelligence and cost for everyday CAD design, iteration, and multi-file edits.',
-      provider: {
-        id: 'openai',
-        name: 'OpenAI',
-      },
-      model: 'gpt-5.6-terra',
-      support: {
-        reasoning: { ...lowToHighReasoning, ...effortInTranscript },
-        modalities: pdfInputModalities,
-      },
-      details: {
-        family: 'gpt',
-        families: ['GPT-5.6'],
-        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
-        maxTokens: 128_000,
-        knowledgeCutoff: '2026-02',
-        cost: {
-          inputTokens: 2,
-          outputTokens: 12,
-          cacheReadTokens: 0.2,
-          cacheWriteTokens: 2.5,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 1,
-        reasoning: {
-          effort: 'high',
-          summary: 'auto',
-        },
-      },
-    },
-
-    'gpt-5.6-luna': {
-      enabled: true,
-      id: 'openai-gpt-5.6-luna',
-      providerKind: 'tau-hosted',
-      name: 'GPT-5.6 Luna',
-      slug: 'gpt-5.6-luna',
-      recommended: false,
-      description: 'Fast, cost-efficient model for high-volume CAD iterations and small design changes.',
-      provider: {
-        id: 'openai',
-        name: 'OpenAI',
-      },
-      model: 'gpt-5.6-luna',
-      support: {
-        reasoning: { ...lowToHighReasoning, ...effortInTranscript },
-        modalities: pdfInputModalities,
-      },
-      details: {
-        family: 'gpt',
-        families: ['GPT-5.6'],
-        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
-        maxTokens: 128_000,
-        knowledgeCutoff: '2026-02',
-        cost: {
-          inputTokens: 0.2,
-          outputTokens: 1.2,
-          cacheReadTokens: 0.02,
-          cacheWriteTokens: 0.25,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 1,
-        reasoning: {
-          effort: 'high',
-          summary: 'auto',
-        },
-      },
-    },
-    'gpt-5.5': {
-      enabled: true,
-      id: 'openai-gpt-5.5',
-      providerKind: 'tau-hosted',
-      name: 'GPT-5.5',
-      slug: 'gpt-5.5',
-      recommended: false,
-      description:
-        "OpenAI's previous frontier model for complex CAD planning, multi-part assemblies, and design verification.",
-      provider: {
-        id: 'openai',
-        name: 'OpenAI',
-      },
-      model: 'gpt-5.5',
-      support: {
-        reasoning: lowToHighReasoning,
-        modalities: pdfInputModalities,
-      },
-      details: {
-        family: 'gpt',
-        families: ['GPT-5.5'],
-        contextWindow: 200_000, // Provider supports 1.05M tokens; Tau caps effective chat budget for cost and compaction reliability.
-        maxTokens: 128_000,
-        knowledgeCutoff: '2025-12',
-        cost: {
-          inputTokens: 5,
-          outputTokens: 30,
-          cacheReadTokens: 0.5,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 1,
-        reasoning: {
-          effort: 'high',
-          summary: 'auto',
-        },
-      },
-    },
     // Off-catalog metering row (AD14): the name/commit generators bill their
     // gpt-4o-mini calls through the credit ledger via getModelCost; never listed.
     'gpt-4o-mini': {
@@ -917,8 +757,8 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        // Google's own default for this model; it rejects MINIMAL outright.
-        thinkingLevel: 'HIGH',
+        // Medium default (docs/research/reasoning-effort-medium-default). Rejects MINIMAL.
+        thinkingLevel: 'MEDIUM',
       },
     },
     'gemini-4-argon': {
@@ -945,7 +785,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         families: ['gemini'],
         contextWindow: 200_000, // Provider shares 1,048,576 tokens across input, thinking, and output.
         maxTokens: 65_536, // Single-stream limit; longer output requires continuation support.
-        // Google's standard price; billing pins the introductory rate through November 30, 2026.
+        // Google's standard price, which billing charges.
         cost: {
           inputTokens: 4,
           outputTokens: 20,
@@ -955,7 +795,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        thinkingLevel: 'HIGH',
+        thinkingLevel: 'MEDIUM',
       },
     },
     'gemini-4-carbon': {
@@ -982,7 +822,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         families: ['gemini'],
         contextWindow: 200_000, // Provider shares 1,048,576 tokens across input, thinking, and output.
         maxTokens: 65_536, // Single-stream limit; longer output requires continuation support.
-        // Google's standard price; billing pins the introductory rate through November 30, 2026.
+        // Google's standard price, which billing charges.
         cost: {
           inputTokens: 4,
           outputTokens: 20,
@@ -992,7 +832,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        thinkingLevel: 'HIGH',
+        thinkingLevel: 'MEDIUM',
       },
     },
     'gemini-4-hydrogen': {
@@ -1030,8 +870,8 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       configuration: {
         streaming: true,
-        // Google's own default for this model; it rejects MINIMAL outright.
-        thinkingLevel: 'HIGH',
+        // Medium default (docs/research/reasoning-effort-medium-default). Rejects MINIMAL.
+        thinkingLevel: 'MEDIUM',
       },
     },
   },
@@ -1245,7 +1085,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },
@@ -1289,7 +1129,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
         maxOutputTokens: 64_000,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
@@ -1331,7 +1171,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         streaming: true,
         maxOutputTokens: 64_000,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
           summary: 'auto',
         },
       },
@@ -1372,7 +1212,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       configuration: {
         streaming: true,
         reasoning: {
-          effort: 'high',
+          effort: 'medium',
         },
       },
     },

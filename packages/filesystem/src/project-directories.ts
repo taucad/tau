@@ -91,6 +91,7 @@ import { importFactsPath } from '#importer/facts.js';
 import type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '#importer/facts.js';
 import { isReservedImportPath } from '#importer/path-policy.js';
 import { directoryConcurrency, mapConcurrent } from '#concurrency.js';
+import { workerTimings } from '#worker-timings.js';
 
 /** A provider whose host copies a person's chosen source into it (the desktop node client, W7.4). */
 /**
@@ -136,7 +137,18 @@ export type ResolvedProjectManifest = {
 
 /** Read-only verification of an already installed project binding. @public */
 export type ProjectRouteVerification =
-  | { readonly status: 'verified'; readonly project: ResolvedProjectManifest }
+  | {
+      readonly status: 'verified';
+      readonly project: ResolvedProjectManifest;
+      /**
+       * The root of the directory the bytes were read from: the one the route bound when it was read. An authority
+       * older than this field leaves it and `providerBasePath` out, so a caller that needs a particular copy proven
+       * treats their absence as no proof.
+       */
+      readonly storageRootKey?: string;
+      /** That directory under its root, as a discovery locator's `relativeDirectory` names it. */
+      readonly providerBasePath?: string;
+    }
   | { readonly status: 'discovery-required' }
   | { readonly status: 'unavailable' }
   | { readonly status: 'superseded' };
@@ -455,6 +467,7 @@ export class ProjectDirectories {
         // The workspace root exists by definition; a project is any immediate
         // child directory carrying `tau.json`. Entry kinds come from the listing
         // so files never cost a `stat`, and dotdirs are excluded by name alone.
+        workerTimings.count('discovery.listing');
         const entries = await readDirectoryEntries(provider, '');
         directories = entries
           .filter((entry) => entry.kind === 'dir' && !entry.name.startsWith('.'))
@@ -464,6 +477,7 @@ export class ProjectDirectories {
         roots.push({ status: 'inaccessible', root, reason: error instanceof Error ? error.message : String(error) });
         continue;
       }
+      workerTimings.count('discovery.fullRead');
       const probe = async (directory: string): Promise<ProjectDiscoveryEntry | undefined> => {
         const relativeDirectory = assertRootedPath(directory);
         const locator = projectLocatorFor(root, storageRootKey, relativeDirectory);
@@ -937,7 +951,12 @@ export class ProjectDirectories {
             return { status: 'discovery-required' };
           }
           return identity.projectId === input.projectId
-            ? { status: 'verified', project: { projectId: input.projectId, manifest: manifest.data } }
+            ? {
+                status: 'verified',
+                project: { projectId: input.projectId, manifest: manifest.data },
+                storageRootKey: input.storageRootKey,
+                providerBasePath: directory,
+              }
             : { status: 'discovery-required' };
         } catch (error) {
           return { status: isNotFoundError(error) ? 'discovery-required' : 'unavailable' };
@@ -1128,6 +1147,7 @@ export class ProjectDirectories {
 
   private async _readProjectDirectory(authority: DirectoryAuthority): Promise<ProjectDirectoryReading> {
     const { provider, directory } = authority;
+    workerTimings.count('discovery.directoryRead');
     const [manifestResult, identityResult] = await Promise.allSettled([
       provider.readFile(`${directory}/tau.json`),
       this._readIdentity(authority),
@@ -1139,6 +1159,7 @@ export class ProjectDirectories {
           issue: { code: 'manifest-unreadable', message: errorMessage(manifestResult.reason) },
         };
       }
+      workerTimings.count('discovery.listing');
       const entries = await readDirectoryEntries(provider, directory).catch(() => []);
       if (!entries.some((entry) => entry.kind === 'dir' && entry.name === '.tau')) {
         return { kind: 'not-a-project' };

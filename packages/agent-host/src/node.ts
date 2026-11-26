@@ -427,6 +427,13 @@ const openWriter = async (
       await file.appendFile(bytes);
       await file.sync();
     },
+    /* A batch's rows are appended back to back and synced once (WP-10 step A). */
+    write: async (bytes) => {
+      await file.appendFile(bytes);
+    },
+    sync: async () => {
+      await file.sync();
+    },
     truncate: async (size) => {
       await file.truncate(size);
       await file.sync();
@@ -463,7 +470,7 @@ const openWriter = async (
  * Open a Node filesystem event log.
  *
  * A write open holds the chat's kernel writer lock for the log's life (a writer that finds it held is refused
- * `WRITER_LOCKED`), appends with an fsync per line, and syncs the directory once after creating the file. A torn final
+ * `WRITER_LOCKED`), appends with an fsync per line (per batch for `appendMany`), and syncs the directory once after creating the file. A torn final
  * line is repaired by the first append, never at open. Every append is fenced: it lands only if the log is still the
  * log this writer read (`LOG_FENCED`, D5). A read open creates nothing, takes no lock and keeps no handle.
  *
@@ -529,7 +536,7 @@ export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore =>
   >();
   return createChatStore({
     platform: 'node',
-    /* `appendFile` then `sync()` per append, and the directory synced once at creation (W3 §11). */
+    /* `appendFile` then `sync()` per append or batch, and the directory synced once at creation (W3 §11). */
     durability: 'exclusive-append',
     attachments: createNodeAttachmentReader(options.workspaceRoot),
     readBytes: async (chatId) => readIfPresent(filePath(chatId)),

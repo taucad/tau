@@ -29,7 +29,7 @@ import type { CadAgentExecution, Chat } from '@taucad/chat';
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { chatPlacementOf } from '@taucad/chat-ui/utils/chat-execution';
 import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
-import { attachmentReferenceOf } from '@taucad/chat-ui/utils/attachment.utils';
+import { attachmentReferencesOf } from '@taucad/chat-ui/utils/message-attachments';
 import { createAttachmentStore, createChatAttachmentStore, isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import type { AttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import { WorkspaceDirectoryRequiredError } from '@taucad/ui-core/filesystem/workspace-errors';
@@ -413,12 +413,7 @@ const promoteDraftAttachments = async (
   await Promise.all(
     chats.map(async (chat) => {
       const target = createChatAttachmentStore(recordFiles, operation.projectId, chat.id);
-      const references = chat.messages.flatMap((message) =>
-        message.parts.flatMap((part) => {
-          const reference = part.type === 'file' ? attachmentReferenceOf(part) : undefined;
-          return reference === undefined ? [] : [reference];
-        }),
-      );
+      const references = chat.messages.flatMap((message) => attachmentReferencesOf(message));
       await Promise.all(references.map(async (reference) => source.copyTo(target, reference)));
     }),
   );

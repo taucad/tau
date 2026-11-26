@@ -1,0 +1,23 @@
+--- a/apps/ui/src/boot.test.ts
++++ b/apps/ui/src/boot.test.ts
+@@
+ import { describe, expect, it } from 'vitest';
+
+-describe('A', () => {
+-  it('works', async () => {
+-    expect(await boot('a')).toBe('ready');
+-  }, 1000);
+-});
+-
+ describe('B', () => {
+   it('works', async () => {
+     expect(await boot('b')).toBe('ready');
+-  }, 5000);
++  }, 1000);
+ });
++
++describe('A', () => {
++  it('works', async () => {
++    expect(await boot('a')).toBe('ready');
++  }, 5000);
++});

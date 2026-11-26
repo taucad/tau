@@ -223,6 +223,8 @@ export type SessionLogEvent = WithoutBase<AgentLogEvent>;
 export type SessionRecord = {
   readonly messages: MessageIdentities;
   append(event: SessionLogEvent): Promise<void>;
+  /** Append rows that go together as one batch: one write and one flush where the owner's writer batches (WP-10). */
+  appendAll(events: readonly SessionLogEvent[]): Promise<void>;
   events(): Promise<readonly AgentLogEvent[]>;
   /** The chat's rows across every device, in the order the history folds them (XD1); `events` is this device's. */
   rows(): Promise<readonly AgentLogEvent[]>;
@@ -308,6 +310,8 @@ type CreateSessionRecordOptions = {
    * decides nothing: position and legality belong to whoever owns the log.
    */
   readonly append?: ((event: SessionLogEvent) => Promise<void>) | undefined;
+  /** The owner's writer for a batch, with `append`; absent, a batch goes through `append` one row at a time. */
+  readonly appendAll?: ((events: readonly SessionLogEvent[]) => Promise<void>) | undefined;
   /**
    * Writes one attachment of the owning chat (D-UI-04). Given, each screenshot
    * capture is stored as `attachments/<sha256>.<ext>` before its row is
@@ -351,37 +355,58 @@ export const createSessionRecord = async (options: CreateSessionRecordOptions): 
   let pending: Promise<void> = Promise.resolve();
 
   const write = options.append;
-  const append = async (body: SessionLogEvent): Promise<void> => {
+  const queued = async (operation: () => Promise<void>): Promise<void> => {
     const prior = pending;
     const next = Promise.withResolvers<void>();
     pending = next.promise;
     await prior;
     try {
-      const stored = await storedBody(body, options.writeAttachment);
-      if (write) {
-        await write(stored);
-        return;
-      }
-      const event: AgentLogEvent = {
-        ...stored,
-        version: 1,
-        leaderEpoch: options.leaderEpoch,
-        sequence,
-        recordedAt: now(),
-        runId: options.runId,
-      };
-      const outcome = await options.log.append(event);
-      if (outcome.appended) {
-        sequence++;
-      }
+      await operation();
     } finally {
       next.resolve();
     }
   };
+  const appendOne = async (stored: SessionLogEvent): Promise<void> => {
+    if (write) {
+      await write(stored);
+      return;
+    }
+    const event: AgentLogEvent = {
+      ...stored,
+      version: 1,
+      leaderEpoch: options.leaderEpoch,
+      sequence,
+      recordedAt: now(),
+      runId: options.runId,
+    };
+    const outcome = await options.log.append(event);
+    if (outcome.appended) {
+      sequence++;
+    }
+  };
+  const append = async (body: SessionLogEvent): Promise<void> =>
+    queued(async () => appendOne(await storedBody(body, options.writeAttachment)));
+  const appendAll = async (bodies: readonly SessionLogEvent[]): Promise<void> =>
+    queued(async () => {
+      const stored: SessionLogEvent[] = [];
+      for (const body of bodies) {
+        // oxlint-disable-next-line no-await-in-loop -- each row's attachments are written before its row (D-UI-04).
+        stored.push(await storedBody(body, options.writeAttachment));
+      }
+      if (write && options.appendAll) {
+        await options.appendAll(stored);
+        return;
+      }
+      for (const body of stored) {
+        // oxlint-disable-next-line no-await-in-loop -- rows are appended in order (W1).
+        await appendOne(body);
+      }
+    });
 
   return {
     messages,
     append,
+    appendAll,
     events: async () => {
       await pending;
       return options.log.read();

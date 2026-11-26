@@ -21,7 +21,7 @@ const anthropicImage = (mediaType: string, data: string) => ({
   ],
 });
 const responsesImage = (url: string) => ({
-  model: 'gpt-5.6-luna',
+  model: 'gpt-6-luna',
   stream: true,
   max_output_tokens: 16,
   input: [

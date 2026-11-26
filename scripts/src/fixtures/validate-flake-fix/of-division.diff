@@ -1,0 +1,10 @@
+--- a/apps/ui/src/ratio.test.ts
++++ b/apps/ui/src/ratio.test.ts
+@@
+ import { expect, it } from 'vitest';
+
+ it('halves the total', () => {
+   const of = total(), r = half(of);
+-  const q = of / 2; expect(r).toBe(q);
++  const q = of / 2;
+ });

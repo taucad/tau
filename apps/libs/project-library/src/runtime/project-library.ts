@@ -382,6 +382,8 @@ export class ProjectLibrary<
   readonly #subscriptions: Array<() => void> = [];
   /** Request ids for the machines' questions; they count from 0 in each life of the tab. */
   #requests = 0;
+  /** Counts `refreshListingRows` calls, so only the latest one publishes the listing it built. */
+  #listingPublications = 0;
   /** What each scan read, by its pass's epoch, until that pass plans its writes. */
   readonly #scans = new Map<number, DiscoveryScan>();
   /*
@@ -612,8 +614,8 @@ export class ProjectLibrary<
       readiedWorker: async () => this.getReadiedWorker(),
       whenDiscoveryReady: async () => this.whenDiscoveryReady(),
       whenReplaysDrained: async () => this.whenReplaysDrained(),
-      discover: async () => {
-        const { result } = await this.discover();
+      discover: async (discoverOptions) => {
+        const { result } = await this.discover(discoverOptions);
         return result;
       },
       beginMutation: async (projectId, mutationOptions) => this.beginMutation(projectId, mutationOptions),
@@ -622,6 +624,7 @@ export class ProjectLibrary<
       invalidateListing: () => {
         this.invalidateListing();
       },
+      refreshListingRows: async () => this.refreshListingRows(),
       noteLibraryChanged: () => {
         this.noteLibraryChanged();
       },
@@ -805,7 +808,8 @@ export class ProjectLibrary<
     }
     this.invalidateChatQueries(result.resourceId, chatId);
     await this.touchProject(result.resourceId, getChatRecencyAt(result));
-    this.invalidateListing();
+    /* Only the project's library row moved: nothing on disk changed under the listing, so no epoch moves. */
+    void this.refreshListingRows();
     return result;
   };
 
@@ -892,6 +896,34 @@ export class ProjectLibrary<
   /** A project's chat listing changed. */
   public readonly invalidateChatListing = async (projectId: string): Promise<unknown> =>
     this.queryClient.invalidateQueries({ queryKey: ['chats', projectId] });
+
+  /**
+   * A library row moved and nothing on disk did (a project went in or out of the Trash, its activity moved): the
+   * listing is enriched again from the current pass and written while that pass's epoch is still current, as a
+   * workspace catalog is published (fast-path blueprint FW1). No epoch moves and no scan runs. With no current pass, one
+   * is owed already, and the listing is refetched to take it; so is one whose rows could not be read. It never rejects.
+   */
+  public readonly refreshListingRows = async (): Promise<void> => {
+    this.#listingPublications += 1;
+    const publication = this.#listingPublications;
+    const { snapshot } = this.discovery.getSnapshot().context;
+    if (snapshot === undefined || !selectEpochCurrent(this.discovery.getSnapshot(), snapshot.epoch)) {
+      await this.invalidateProjectListing();
+      return;
+    }
+    let listing: ProjectListing;
+    try {
+      listing = await this.#buildListing(snapshot.result);
+    } catch {
+      /* The listing query reads the rows again, and reports a failure where the listing is shown. */
+      await this.invalidateProjectListing();
+      return;
+    }
+    /* A later call read the rows after this one did: its listing is the newer, whichever finishes first. */
+    if (publication === this.#listingPublications && selectEpochCurrent(this.discovery.getSnapshot(), snapshot.epoch)) {
+      this.queryClient.setQueryData(['projects'], listing);
+    }
+  };
 
   /** Storage changed under the listing: the epoch moves, the last listing is dropped and the listing refetches. */
   public readonly invalidateListing = (): void => {

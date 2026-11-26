@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { memo, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -36,7 +37,6 @@ import type { CadAgentExecution } from '@taucad/chat';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
-import { prewarmChatSdk } from '@taucad/chat-ui/services/chat-sdk-loader';
 import { latestAcpSessionData } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
@@ -108,6 +108,12 @@ const paintedSendVerdictOf = (
 const useTurnFilesArriving = (projectId: string | undefined, execution: CadAgentExecution): boolean =>
   useTauCloudIntent(projectId ?? '') === 'open' && daemonPlacementOf(execution) === undefined;
 
+/* Loaded when the draft first holds a comment: most drafts never do. */
+const DraftCommentList = lazyCode(async () => {
+  const module = await import('#components/comments/comment-list.js');
+  return { default: module.DraftCommentList };
+});
+
 export const ChatTextarea = memo(function ({
   ref,
   onSubmit,
@@ -156,8 +162,6 @@ export const ChatTextarea = memo(function ({
   const [isFocused, setIsFocused] = useState(false);
   const handleFocus = useCallback((): void => {
     setIsFocused(true);
-    /* PL1: the AI SDK loads on demand; focus starts its fetch so the first send is not slowed by it. */
-    prewarmChatSdk();
   }, []);
   const handleBlur = useCallback((): void => {
     setIsFocused(false);
@@ -579,6 +583,13 @@ export const ChatTextarea = memo(function ({
         handleTextareaFocus={handleFocus}
         handleTextareaBlur={logic.handleTextareaBlur}
         removeAttachment={logic.removeAttachment}
+        comments={
+          logic.hasDraftComments ? (
+            <Suspense fallback={null}>
+              <DraftCommentList mode={mode} />
+            </Suspense>
+          ) : undefined
+        }
       />
     </>
   );

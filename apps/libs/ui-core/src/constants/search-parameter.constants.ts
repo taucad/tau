@@ -63,6 +63,8 @@ export const searchParameterName = {
   billingReturn: 'billing_return',
   // Consume-once marker that the desktop app opened the import route.
   desktopOpen: 'desktop-open',
+  // Consume-once marker that the person came back from the sign-in a paused turn sent them to.
+  chatResume: 'chatResume',
 
   /* Import */
   // The git ref to import, defaulting to the repository's main branch.

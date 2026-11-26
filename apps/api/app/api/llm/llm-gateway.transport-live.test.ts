@@ -7,7 +7,7 @@ describe('billable provider route map', () => {
       { get: (key) => (key === 'OPENAI_API_KEY' ? 'test' : undefined) },
       vi.fn(),
     );
-    expect([...adapters.keys()]).toEqual(expect.arrayContaining(['openai-gpt-5.6-luna']));
+    expect([...adapters.keys()]).toEqual(expect.arrayContaining(['openai-gpt-6-luna']));
     expect([...adapters.keys()].some((key) => key.startsWith('anthropic-'))).toBe(false);
   });
 });

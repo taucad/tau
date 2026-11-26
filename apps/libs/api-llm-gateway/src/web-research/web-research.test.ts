@@ -1,6 +1,18 @@
+import { createServer } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
+import type { AddressInfo } from 'node:net';
+import { brotliCompressSync, gzipSync } from 'node:zlib';
+
 import { describe, expect, it, vi } from 'vitest';
 
-import { htmlToText, isPublicAddress, browseWeb, searchWeb, maxPageCharacters } from '#web-research/web-research.js';
+import {
+  browseWeb,
+  fetchAtAddress,
+  htmlToText,
+  isPublicAddress,
+  maxPageCharacters,
+  searchWeb,
+} from '#web-research/web-research.js';
 import type { WebResearchDependencies } from '#web-research/web-research.js';
 
 const signal = (): AbortSignal => new AbortController().signal;
@@ -177,6 +189,51 @@ describe('browseWeb', () => {
     expect(outcome).toMatchObject({ success: false });
   });
 
+  it('should connect each hop to the address it checked, and ask the resolver once per hop', async () => {
+    /* A name that answers a public address, then a private one. */
+    const answers = ['93.184.216.34', '127.0.0.1'];
+    const lookup = vi.fn(async () => [{ address: answers.shift() ?? '127.0.0.1', family: 4 }]);
+    const fetch = vi.fn(async () => html('<p>Public</p>'));
+
+    const outcome = await browseWeb({ urls: ['http://changing.example/page'], signal: signal() }, { fetch, lookup });
+
+    expect(outcome).toMatchObject({ success: true, pages: [{ content: 'Public' }] });
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith('http://changing.example/page', expect.anything(), [
+      { address: '93.184.216.34', family: 4 },
+    ]);
+  });
+
+  it('should release the body of every response it does not read', async () => {
+    const released: string[] = [];
+    const tracked = (name: string, init: ResponseInit): Response =>
+      new Response(
+        new ReadableStream({
+          pull: (controller) => {
+            controller.enqueue(new TextEncoder().encode('unread'));
+          },
+          cancel: () => {
+            released.push(name);
+          },
+        }),
+        init,
+      );
+    const fetch = vi.fn(async (url: string) =>
+      url.endsWith('/start')
+        ? tracked('redirect', { status: 302, headers: { location: '/missing' } })
+        : url.endsWith('/missing')
+          ? tracked('not found', { status: 404 })
+          : tracked('binary', { status: 200, headers: { 'content-type': 'application/zip' } }),
+    );
+
+    await browseWeb(
+      { urls: ['https://example.com/start', 'https://example.com/archive.zip'], signal: signal() },
+      { fetch, lookup: publicLookup },
+    );
+
+    expect(released.toSorted()).toEqual(['binary', 'not found', 'redirect']);
+  });
+
   it('should refuse a non-http scheme', async () => {
     const fetch = vi.fn();
 
@@ -207,5 +264,152 @@ describe('browseWeb', () => {
     const content = outcome.success ? (outcome.pages[0]?.content ?? '') : '';
     expect(content.startsWith('x'.repeat(maxPageCharacters))).toBe(true);
     expect(content).toContain('[Truncated: 10 more characters]');
+  });
+});
+
+describe('fetchAtAddress', () => {
+  it('should connect to the given address, not to what the host name resolves to', async () => {
+    const server = createServer((request, response) => {
+      response.setHeader('content-type', 'text/plain');
+      response.end(`host ${request.headers.host ?? ''}`);
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      /* `.invalid` never resolves (RFC 6761): only a pinned connection reaches the server. */
+      const response = await fetchAtAddress(`http://pinned.invalid:${String(port)}/`, { signal: signal() }, [
+        { address: '127.0.0.1', family: 4 },
+      ]);
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(`host pinned.invalid:${String(port)}`);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('should fall back to the next checked address when the first refuses the connection', async () => {
+    const server = createServer((_request, response) => {
+      response.setHeader('content-type', 'text/plain');
+      response.end('reached');
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      /* 127.0.0.2 is loopback with nothing listening on this port. */
+      const response = await fetchAtAddress(`http://pinned.invalid:${String(port)}/`, { signal: signal() }, [
+        { address: '127.0.0.2', family: 4 },
+        { address: '127.0.0.1', family: 4 },
+      ]);
+
+      expect(await response.text()).toBe('reached');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('should answer a 205 with no body, and reject a status the Fetch API cannot carry', async () => {
+    /* A raw server: Node's own refuses to write a status outside 100 to 999's usual range. */
+    const server = createNetServer((socket) => {
+      socket.once('data', (chunk) => {
+        const status = chunk.toString().startsWith('GET /reset') ? '205 Reset Content' : '600 Odd';
+        socket.end(`HTTP/1.1 ${status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n`);
+      });
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    const at = [{ address: '127.0.0.1', family: 4 }] as const;
+    try {
+      const reset = await fetchAtAddress(`http://pinned.invalid:${String(port)}/reset`, { signal: signal() }, at);
+
+      expect(reset.status).toBe(205);
+      expect(reset.body).toBeNull();
+      await expect(
+        fetchAtAddress(`http://pinned.invalid:${String(port)}/odd`, { signal: signal() }, at),
+      ).rejects.toThrow();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('should decode a gzip or brotli body, and refuse a coding it cannot decode', async () => {
+    const page = 'compressed page text';
+    const server = createServer((request, response) => {
+      response.setHeader('content-type', 'text/plain');
+      if (request.url === '/gzip') {
+        response.setHeader('content-encoding', 'gzip');
+        response.end(gzipSync(page));
+      } else if (request.url === '/br') {
+        response.setHeader('content-encoding', 'br');
+        response.end(brotliCompressSync(page));
+      } else {
+        response.setHeader('content-encoding', 'zstd');
+        response.end('opaque');
+      }
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    const at = [{ address: '127.0.0.1', family: 4 }] as const;
+    const get = async (path: string) =>
+      fetchAtAddress(`http://pinned.invalid:${String(port)}${path}`, { signal: signal() }, at);
+    try {
+      for (const path of ['/gzip', '/br']) {
+        // oxlint-disable-next-line no-await-in-loop -- one request at a time against one server.
+        const response = await get(path);
+        expect(response.headers.get('content-encoding')).toBeNull();
+        // oxlint-disable-next-line no-await-in-loop -- one request at a time against one server.
+        expect(await response.text()).toBe(page);
+      }
+      await expect(get('/zstd')).rejects.toThrow('Unsupported content encoding: zstd');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('should close the connection of a compressed body the reader cancels', async () => {
+    let closed: () => void = () => undefined;
+    const socketClosed = new Promise<void>((resolve) => {
+      closed = resolve;
+    });
+    const server = createServer((_request, response) => {
+      response.socket?.once('close', () => {
+        closed();
+      });
+      response.writeHead(200, { 'content-type': 'text/html', 'content-encoding': 'gzip' });
+      /* The start of a body that never ends. */
+      response.write(gzipSync('<p>start</p>').subarray(0, 10));
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      const response = await fetchAtAddress(`http://pinned.invalid:${String(port)}/`, { signal: signal() }, [
+        { address: '127.0.0.1', family: 4 },
+      ]);
+
+      await response.body?.cancel();
+
+      await expect(socketClosed).resolves.toBeUndefined();
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  it('should reject at once when its signal is already aborted', async () => {
+    const aborted = AbortSignal.abort();
+
+    await expect(
+      fetchAtAddress('http://pinned.invalid/', { signal: aborted }, [{ address: '127.0.0.1', family: 4 }]),
+    ).rejects.toThrow();
   });
 });

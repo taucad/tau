@@ -25,6 +25,7 @@ import type { ChatRunHarness } from '#host/chat-run.fixture.js';
 import type { ChatRunRow, ChatRunOutcomeEvent } from '#host/chat-run-events.js';
 import { chatRunState, emptyChatLedger } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
+import type { RunLifecycleEvent } from '#log/event-types.js';
 import type { TurnAttemptKey, TurnPlacementPort } from '#waist/ports.js';
 
 type Context = Readonly<{
@@ -446,6 +447,142 @@ describe('chatRun races (W7.r1)', () => {
 
     expect(harness.actor.getSnapshot().value).toEqual({ running: 'tau' });
     expect(harness.log.ledger().runs['run-1']).toMatchObject({ attempt: 2, lifecycle: 'running' });
+  });
+});
+
+/* A cancel's `cancelled` row says whether the turn was kept, taken back, or neither (`retainsTurn`, `cancel.withdraw`). */
+describe('chatRun cancelled rows: kept, withdrawn or plain', () => {
+  const withdraw = (commandId: string) =>
+    ({ type: 'cancel', commandId, payload: { chatId, runId: 'run-1', withdraw: true } }) as const;
+  const committedTurn: ChatRunRow = row({
+    type: 'turn.history-projection-committed',
+    retainedMessageIds: [],
+    message: { id: 'turn-run-1', role: 'user', content: 'Hello.' },
+    context: { version: 1, systemPrompt: '', initialMessages: [], postCompactionMessages: [] },
+  });
+  const toRunning = async (harness: ChatRunHarness, kind: 'tau' | 'external' = 'tau'): Promise<void> => {
+    await harness.open();
+    await harness.send(commands.start('cmd-start'));
+    await harness.admit(kind);
+    await harness.commit();
+    await harness.commit();
+  };
+  const cancelledDetail = (harness: ChatRunHarness): unknown =>
+    harness.log.rows
+      .filter((event): event is RunLifecycleEvent => event.type === 'run.lifecycle')
+      .findLast((event) => event.state === 'cancelled')?.detail;
+  const stopped = { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' };
+  const withdrawn = { code: 'TURN_WITHDRAWN', message: 'You took this request back.' };
+
+  it('should write USER_STOPPED for a kept turn even when the cancel takes the request back', async () => {
+    const harness = createChatRunHarness();
+    await toRunning(harness);
+    await harness.driverWrites([committedTurn]);
+    await harness.send(withdraw('c1'));
+    await harness.report('aborted');
+    await harness.commit();
+
+    expect(cancelledDetail(harness)).toEqual(stopped);
+    expect(harness.log.ledger().runs['run-1']).toMatchObject({ lifecycle: 'cancelled', failure: stopped });
+  });
+
+  it('should write TURN_WITHDRAWN when the request is taken back before the turn is kept', async () => {
+    const harness = createChatRunHarness();
+    await toRunning(harness);
+    await harness.send(withdraw('c1'));
+    await harness.report('aborted');
+    await harness.commit();
+
+    expect(cancelledDetail(harness)).toEqual(withdrawn);
+    expect(harness.log.ledger().runs['run-1']).toMatchObject({ lifecycle: 'cancelled', failure: withdrawn });
+  });
+
+  it('should write TURN_WITHDRAWN for a withdrawing cancel held until the attempt launches', async () => {
+    const harness = createChatRunHarness();
+    await harness.open();
+    await harness.send(commands.start('cmd-start'));
+    await harness.send(withdraw('c1'));
+    await harness.admit();
+    await harness.commit();
+    await harness.commit();
+
+    expect(harness.log.rows.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
+      state: 'cancelled',
+      executed: false,
+      detail: withdrawn,
+    });
+  });
+
+  it('should write no detail for an unkept turn when the cancel does not take the request back', async () => {
+    const harness = createChatRunHarness();
+    await toRunning(harness);
+    await harness.send(commands.cancel('c1'));
+    await harness.report('aborted');
+    await harness.commit();
+
+    expect(harness.log.rows.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({ state: 'cancelled' });
+    expect(cancelledDetail(harness)).toBeUndefined();
+  });
+
+  it('should write TURN_WITHDRAWN for an external turn committed but never prompted', async () => {
+    const harness = createChatRunHarness();
+    await toRunning(harness, 'external');
+    await harness.driverWrites([externalMarker]);
+    await harness.send(withdraw('c1'));
+    await harness.report('aborted');
+    await harness.commit();
+
+    expect(harness.log.ledger().runs['run-1']).toMatchObject({ committed: true, kind: 'external' });
+    expect(cancelledDetail(harness)).toEqual(withdrawn);
+  });
+
+  it('should write TURN_WITHDRAWN when a paused, unkept turn is taken back', async () => {
+    const clock = new StepClock();
+    const harness = createChatRunHarness({ clock });
+    await toRunning(harness);
+    await harness.send(commands.interrupt('i1'));
+    await clock.advanceAsync(30_000);
+    await harness.commit();
+    expect(harness.actor.getSnapshot().value).toEqual({ idle: 'paused' });
+
+    await harness.send(withdraw('c1'));
+    await harness.commit();
+
+    expect(cancelledDetail(harness)).toEqual(withdrawn);
+  });
+
+  /* The paused cancel reads the ending's rule: an external turn committed but never prompted is not kept there either. */
+  it.each([
+    { name: 'a plain cancel', prompted: false, cancel: commands.cancel('c1'), detail: undefined },
+    { name: 'a withdrawing cancel', prompted: false, cancel: withdraw('c1'), detail: withdrawn },
+    { name: 'a plain cancel', prompted: true, cancel: commands.cancel('c1'), detail: stopped },
+  ])('should keep a paused external turn only once prompted ($name, prompted $prompted)', async (example) => {
+    const { prompted, cancel, detail } = example;
+    const marker = row({
+      type: 'message.appended',
+      message: {
+        id: 'turn-1',
+        role: 'user',
+        content: 'Hello.',
+        metadata: { tauInternal: { kind: 'external-agent', ...(prompted ? { acpPromptedRequestId: 'run-1:1' } : {}) } },
+      },
+    });
+    const ledger = ledgerOf([marker, admitted, runningRow, requested, row(lifecycle('paused'))]);
+    expect(ledger.runs['run-1']).toMatchObject({ kind: 'external', committed: true, lifecycle: 'paused' });
+    /* A paused external run is abandoned when a log opens (`isOrphaned`), so its paused rest is set by hand. */
+    const harness = createChatRunHarness();
+    await harness.open();
+    const paused = chatRunMachine.resolveState({
+      value: { idle: 'paused' },
+      context: { ...harness.actor.getSnapshot().context, ledger },
+    });
+
+    const effects = transition(chatRunMachine, paused, cancel)[1] as ReadonlyArray<
+      Readonly<{ type: string; args?: ReadonlyArray<Readonly<{ rows?: readonly ChatRunRow[] }>> }>
+    >;
+    const rows = effects.find((effect) => effect.type === 'appendRows')?.args?.[0]?.rows ?? [];
+
+    expect(rows.at(-1)?.body).toEqual(lifecycle('cancelled', detail === undefined ? {} : { detail }));
   });
 });
 

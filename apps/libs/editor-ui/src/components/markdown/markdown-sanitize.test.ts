@@ -3,13 +3,13 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import rehypeStringify from 'rehype-stringify';
-import { publicationRehypeSanitize } from '#components/markdown/markdown-sanitize.js';
+import { markdownRehypeSanitize } from '#components/markdown/markdown-sanitize.js';
 
 /* oxlint-disable typescript-eslint/no-explicit-any, typescript-eslint/no-unsafe-call, typescript-eslint/no-unsafe-assignment, typescript-eslint/no-unsafe-member-access -- bridging unified plugin tuple types across mdast/hast pipeline */
 async function renderHtml(markdown: string): Promise<string> {
   const processor: any = unified().use(remarkParse).use(remarkRehype, { allowDangerousHtml: true });
 
-  for (const entry of publicationRehypeSanitize) {
+  for (const entry of markdownRehypeSanitize) {
     const [plugin, options] = entry as readonly [unknown, unknown?];
     if (options === undefined) {
       processor.use(plugin);
@@ -23,7 +23,7 @@ async function renderHtml(markdown: string): Promise<string> {
 }
 /* oxlint-enable typescript-eslint/no-explicit-any, typescript-eslint/no-unsafe-call, typescript-eslint/no-unsafe-assignment, typescript-eslint/no-unsafe-member-access -- end unified pipeline window */
 
-describe('publicationRehypeSanitize', () => {
+describe('markdownRehypeSanitize', () => {
   it('strips <script> tags entirely', async () => {
     const html = await renderHtml('<script>alert(1)</script>\n\nhello');
     expect(html).not.toContain('<script');

@@ -93,5 +93,24 @@ describe('GatewayInvocation TLC to credit operation oracle (GI-A5)', () => {
       );
       expect(settles, `Missing final-evidence settlement via ${action}`).toBe(true);
     }
+    /* A supplier cut is absorbed by the live finish under the admitting generation, not left for the sweep. */
+    const absorbsLive = behaviours.some((behaviour) =>
+      behaviour.some((view, index) => {
+        const previous = behaviour[index - 1];
+        if (previous === undefined || view['act'] !== 'ApiFinish') {
+          return false;
+        }
+        const after = project(view);
+        return (
+          project(previous).row.cust === 'pending' &&
+          after.row.cust === 'absorbed' &&
+          after.row.ev.includes('unknown') &&
+          after.row.charged === 0 &&
+          after.row.tgen === 1 &&
+          after.held === 0
+        );
+      }),
+    );
+    expect(absorbsLive, 'Missing supplier-cut absorption via ApiFinish').toBe(true);
   });
 });

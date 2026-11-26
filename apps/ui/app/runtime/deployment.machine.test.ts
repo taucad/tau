@@ -100,8 +100,11 @@ const harness = (
     visible?: boolean;
     now?: number;
     seed?: DeploymentModeSnapshot;
+    /** The page reads offline at start (`navigator.onLine` is `false`). */
+    offline?: boolean;
   }> = {},
 ) => {
+  const network = { online: options.offline !== true };
   const clock = new StepClock();
   clock.set(options.now ?? start);
   const replies = [...(options.replies ?? [])];
@@ -143,6 +146,7 @@ const harness = (
         online = undefined;
       };
     },
+    isOnline: () => network.online,
   });
   const actor = createActor(logic, {
     clock,
@@ -160,7 +164,22 @@ const harness = (
   const reply = (...next: Reply[]) => {
     replies.push(...next);
   };
-  return { actor, clock, requests, storage, reports, mode, state, reply, online: () => online?.(), guard };
+  return {
+    actor,
+    clock,
+    requests,
+    storage,
+    reports,
+    mode,
+    state,
+    reply,
+    network,
+    online: () => {
+      network.online = true;
+      online?.();
+    },
+    guard,
+  };
 };
 
 const started = async (h: ReturnType<typeof harness>) => {
@@ -453,6 +472,23 @@ describe('deployment: failures and deadlines', () => {
       await flush();
       expect(h.requests).toHaveLength(before + 1);
     }
+  });
+
+  it('should send no ask while the page reads offline, and ask on online (onboarding DT3)', async () => {
+    const h = await started(harness({ offline: true }));
+    expect(h.state()).toBe('backoff');
+    expect(h.mode()).toEqual({ state: 'unknown', problem: 'unreachable' });
+    expect(h.requests).toEqual([]);
+    /* The backoff's own retries stay on the device while the page still reads offline. */
+    await h.clock.advanceAsync(deploymentBackoffMilliseconds(1));
+    await h.clock.advanceAsync(deploymentBackoffMilliseconds(2));
+    expect(h.requests).toEqual([]);
+    h.reply(funded('staging'));
+    h.online();
+    await flush();
+    await flush();
+    expect(h.requests).toHaveLength(1);
+    expect(h.mode()).toEqual({ state: 'funded', basis: 'confirmed', environment: 'staging' });
   });
 
   it('should treat an API URL with no origin as unreachable, never as an answer', async () => {

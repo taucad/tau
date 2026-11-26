@@ -343,6 +343,7 @@ catalog:
   fflate: 0.8.3
   portless: 0.15.6
   streamdown: ^2.6.0
+  remend: 1.4.0
   '@streamdown/math': ^1.0.2
   '@streamdown/cjk': ^1.0.3
   '@napi-rs/cli': 3.8.6

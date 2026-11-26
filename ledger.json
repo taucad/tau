@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-26T01:47:54.836Z",
+  "updatedAt": "2026-11-26T08:08:19.296Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -2523,6 +2523,19 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45780112845,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2865",
+      "sha": "afa809c8607b2a368ade4941425c993053e795d2",
+      "at": "2026-11-26T08:08:04Z",
+      "conclusion": "cancelled",
+      "artifacts": 1,
+      "counted": 1369,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -3535,12 +3548,12 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "scripts:test": {
-      "executions": 42,
-      "tests": 50645,
-      "failures": 4,
+      "executions": 43,
+      "tests": 52014,
+      "failures": 5,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T01:34:30Z"
+      "lastSeen": "2026-11-26T08:08:04Z"
     },
     "scripts:test:e2e": {
       "executions": 42,
@@ -4020,18 +4033,18 @@
       "targetKey": "test",
       "file": "src/flake-regression-workflow.test.ts",
       "firstSeen": "2026-11-25T23:53:17Z",
-      "lastSeen": "2026-11-26T00:04:53Z",
-      "lastFailure": "2026-11-26T00:04:53Z",
-      "executions": 4,
-      "failures": 4,
+      "lastSeen": "2026-11-26T08:08:04Z",
+      "lastFailure": "2026-11-26T08:08:04Z",
+      "executions": 5,
+      "failures": 5,
       "retriedPasses": 0,
       "passStreak": 0,
       "variants": {
         "linux-x64": {
-          "executions": 4,
-          "failures": 4,
+          "executions": 5,
+          "failures": 5,
           "events": 0,
-          "lastSeen": "2026-11-26T00:04:53Z"
+          "lastSeen": "2026-11-26T08:08:04Z"
         }
       },
       "events": [],
@@ -4083,6 +4096,18 @@
           "base": "68a9d82091844c74fc2cd79a223208642a10732d",
           "execution": 4,
           "error": "AssertionError: expected [ 'project.json', …(9) ] to include 'scripts/src/ci-shadow-rows.ts'"
+        },
+        {
+          "run": 45780112845,
+          "attempt": 1,
+          "at": "2026-11-26T08:08:04Z",
+          "hash": "16206124349804320208",
+          "variant": "linux-x64",
+          "sha": "afa809c8607b2a368ade4941425c993053e795d2",
+          "lineage": "pr-2865",
+          "base": "dccd460f0567a5e1444e276901dcd8718416e325",
+          "execution": 5,
+          "error": "AssertionError: expected [ 'project.json', …(9) ] to include 'scripts/src/ci-shadow-rows.ts'"
         }
       ],
       "passHashes": [],
@@ -4090,7 +4115,8 @@
         "fed01aadc523f2b1064a8638e1ed6403623eee65",
         "572abb1a7334ffcdbbfe9869202389f69c0d4171",
         "af932987937a77a97498fb746ab91d0b5a4ff51b",
-        "88ea4bad20f0475028addc05e4933d2044f7ab13"
+        "88ea4bad20f0475028addc05e4933d2044f7ab13",
+        "afa809c8607b2a368ade4941425c993053e795d2"
       ],
       "aliases": []
     },

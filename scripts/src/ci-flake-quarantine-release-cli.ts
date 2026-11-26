@@ -100,11 +100,6 @@ import type {
 type Ref = { readonly ref: string; readonly object: { readonly sha: string } };
 /** A pull request; `merged_at` is `null` until it merges. */
 type Pull = { readonly number: number; readonly state: string; readonly merged_at?: string };
-type BranchCommit = {
-  readonly commit?: { readonly message?: string };
-  readonly parents?: ReadonlyArray<{ readonly sha: string }>;
-  readonly files?: ReadonlyArray<{ readonly filename: string; readonly status: string }>;
-};
 type TimelineEvent = {
   readonly event?: string;
   readonly source?: {
@@ -145,31 +140,39 @@ export type LandedRemoval = {
 /** A closed pull request, as the list of closed pull requests gives it. */
 type ClosedPull = Pull & {
   readonly head?: { readonly ref?: string; readonly sha?: string };
-  readonly base?: { readonly ref?: string };
+  readonly base?: { readonly ref?: string; readonly sha?: string };
   // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
   readonly updated_at?: string;
 };
 
-/** The commit a removal branch pushed: its message and the entries it removes against the commit it was built on. */
+/**
+ * The change a removal branch makes against `base` (a branch or a commit): the entries its `quarantine.json` files lose
+ * between their merge base and the branch's head, whatever commits the branch holds, and its first commit's message.
+ */
 const readRemoval = async (
   github: Client,
-  sha: string,
+  change: { readonly base: string; readonly head: string },
 ): Promise<{ message: string | undefined; removed: Array<{ path: string; entry: unknown }> }> => {
   const repo = `/repos/${github.repository}`;
-  const commit = await github.get<BranchCommit>(`${repo}/commits/${sha}`);
-  const parent = commit.parents?.[0]?.sha;
+  const compare = await github.get<{
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
+    readonly merge_base_commit?: { readonly sha: string };
+    readonly files?: ReadonlyArray<{ readonly filename: string; readonly status: string }>;
+    readonly commits?: ReadonlyArray<{ readonly commit?: { readonly message?: string } }>;
+  }>(`${repo}/compare/${encodeURIComponent(change.base)}...${change.head}?per_page=100`);
+  const mergeBase = compare.merge_base_commit?.sha;
   const removed: Array<{ path: string; entry: unknown }> = [];
-  for (const file of commit.files ?? []) {
-    if (!isQuarantineFile(file.filename) || file.status !== 'modified' || parent === undefined) {
+  for (const file of compare.files ?? []) {
+    if (!isQuarantineFile(file.filename) || file.status !== 'modified' || mergeBase === undefined) {
       continue;
     }
     const read = async (ref: string): Promise<string> =>
       github.getText(`${repo}/contents/${encodePath(file.filename)}?ref=${ref}`, 'application/vnd.github.raw+json');
     // oxlint-disable-next-line no-await-in-loop -- a file or two per branch
-    const [before, after] = await Promise.all([read(parent), read(sha)]);
+    const [before, after] = await Promise.all([read(mergeBase), read(change.head)]);
     removed.push(...removedEntries(before, after).map((entry) => ({ path: file.filename, entry })));
   }
-  return { message: commit.commit?.message, removed };
+  return { message: compare.commits?.[0]?.commit?.message, removed };
 };
 
 /** The most pages of closed pull requests read for removals that landed: newest updated first. */
@@ -197,13 +200,13 @@ export const readRemovalBranches = async (
       const branch = reference.ref.slice('refs/heads/'.length);
       // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
       const pulls = await github.get<Pull[]>(
-        `${repo}/pulls?state=all&per_page=10&head=${encodeURIComponent(`${owner}:${branch}`)}`,
+        `${repo}/pulls?state=all&per_page=10&head=${encodeURIComponent(`${owner}:${branch}`)}&base=${encodeURIComponent(base)}`,
       );
       if (pulls.some((pull) => pull.state === 'closed')) {
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- one commit per branch
-      const { message, removed } = await readRemoval(github, reference.object.sha);
+      const { message, removed } = await readRemoval(github, { base, head: reference.object.sha });
       pending.push({ branch, kind, pull: pulls.find((pull) => pull.state === 'open')?.number, message, removed });
     }
   }
@@ -228,7 +231,7 @@ export const readRemovalBranches = async (
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- one commit per merged removal
-      const { removed } = await readRemoval(github, sha);
+      const { removed } = await readRemoval(github, { base: pull.base.sha ?? base, head: sha });
       landed.push({ kind, branch, mergedAt: pull.merged_at, removed });
     }
     // A pull request merged after `since` was updated after it too, so the list stops being of use there.
@@ -400,10 +403,19 @@ export const ensureOwnerNotes = async (github: Client, notes: readonly OwnerNote
         github.get<LabelledIssue>(`${repo}/issues/${issue}`),
         automationComments(github, issue),
       ]);
+      const key = returnKey(identityHashOf(note.removal.id), note.removal.entry.variant);
       const noted = markersIn(comments).some(
-        (marker) => marker.kind === note.kind && marker.record.branch === note.branch,
+        (marker) =>
+          marker.kind === note.kind &&
+          marker.record.branch === note.branch &&
+          returnKey(marker.record.identity, marker.record.variant) === key,
       );
+      // The label before the note: a written note means the label was added, and one a person removed since stays off.
       if (!noted) {
+        if (!labelNames(current.labels).includes(label)) {
+          // oxlint-disable-next-line no-await-in-loop -- one issue at a time, in order
+          await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [label] });
+        }
         const context = { identity: identityHashOf(note.removal.id), where: note.where, branch: note.branch };
         // oxlint-disable-next-line no-await-in-loop -- one issue at a time, in order
         await comment(
@@ -411,10 +423,6 @@ export const ensureOwnerNotes = async (github: Client, notes: readonly OwnerNote
           issue,
           note.kind === 'release' ? releaseComment(note.removal, context) : expiryComment(note.removal, context),
         );
-      }
-      if (!labelNames(current.labels).includes(label)) {
-        // oxlint-disable-next-line no-await-in-loop -- one issue at a time, in order
-        await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [label] });
       }
     } catch (error) {
       // One failed issue must not keep the other owners from the link; the next run tries it again.
@@ -613,10 +621,21 @@ const settleExpiry = async (
       github.get<LabelledIssue>(`${repo}/issues/${issue}`),
       automationComments(github, issue),
     ]);
+    const entryVariant = typeof variant === 'object' && variant !== null ? (variant as QuarantineVariant) : undefined;
+    const key = returnKey(identityHashOf(id), entryVariant);
     const noted = markersIn(comments).some(
-      (marker) => marker.kind === 'expiry' && marker.record.branch === context.release.branch,
+      (marker) =>
+        marker.kind === 'expiry' &&
+        marker.record.branch === context.release.branch &&
+        returnKey(marker.record.identity, marker.record.variant) === key,
     );
+    // The label before the note, as `ensureOwnerNotes` does: a written note means the handoff is done, and an operator
+    // who cleared the label since keeps it cleared.
     if (!noted) {
+      if (!labelNames(current.labels).includes(operatorLabel)) {
+        // oxlint-disable-next-line no-await-in-loop -- one issue at a time
+        await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [operatorLabel] });
+      }
       const record = {
         identity: identityHashOf(id),
         path,
@@ -632,12 +651,6 @@ const settleExpiry = async (
         issue,
         `${removalMarker('expiry', record)}\n**Expired** on ${expires}: the removal merged on ${context.release.mergedAt.slice(0, 10)} and the test gates again (testing policy § 16.3). It goes to the operator.`,
       );
-    }
-    if (!labelNames(current.labels).includes(operatorLabel)) {
-      // oxlint-disable-next-line no-await-in-loop -- one issue at a time
-      await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [operatorLabel] });
-    }
-    if (!noted || !labelNames(current.labels).includes(operatorLabel)) {
       outcome.push(`Finished the expiry note on #${issue}.`);
     }
   }

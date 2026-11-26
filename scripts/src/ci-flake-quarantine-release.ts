@@ -193,6 +193,11 @@ export const countQuarantineRun = (
     readonly rows: readonly OutcomeRow[];
     readonly tests: readonly QuarantinedTest[];
     readonly shadowTargets?: ReadonlySet<string> | undefined;
+    /**
+     * The run's outcome files held lines that are not valid rows: one may hide a failure, so the run ends the count of
+     * every open track (its passes are not counted) instead of adding to it.
+     */
+    readonly unreadable?: boolean | undefined;
   },
 ): string[] => {
   const { run, tests } = input;
@@ -200,6 +205,19 @@ export const countQuarantineRun = (
     return [];
   }
   const attempt = run.run_attempt ?? 1;
+  if (input.unreadable === true) {
+    const marker: StreakRun = { run: run.id, attempt, at: run.created_at, passes: 0 };
+    const ended: string[] = [];
+    for (const test of tests) {
+      const track = state.quarantineTracks?.[test.key];
+      if (track && Date.parse(run.created_at) >= Date.parse(track.since)) {
+        track.streakRuns = track.streakRuns.filter((entry) => runOrder(entry, marker) > 0);
+        track.streak = passesOf(track.streakRuns);
+        ended.push(test.key);
+      }
+    }
+    return ended;
+  }
   const done = new Set(state.ingested.filter((entry) => entry.run === run.id).map((entry) => entry.attempt));
   const byId = new Map<string, QuarantinedTest[]>();
   for (const test of tests) {

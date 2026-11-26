@@ -315,7 +315,10 @@ const main = async (args: readonly string[]): Promise<number> => {
       rejectedLines.push(...problems.slice(0, 20));
       // Before `ingestRun`, which records the attempt as ingested.
       countShadowRun(state, { run, rows, registry: shadow.rows });
-      countQuarantineRun(state, { run, rows, tests: quarantined, shadowTargets });
+      // Only the gating runs the discovery would list count toward a release bar: a `--runs` backfill may name others.
+      if (run.event === 'merge_group' || (run.event === 'push' && run.head_branch === values.branch)) {
+        countQuarantineRun(state, { run, rows, tests: quarantined, shadowTargets, unreadable: rejected > 0 });
+      }
       const result = ingestRun(state, { run, rows, artifacts, rejected, aliases });
       events.push(...result.events);
       for (const candidate of result.candidates) {

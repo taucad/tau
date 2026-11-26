@@ -416,6 +416,22 @@ describe('the count in run order', () => {
     expect(state.quarantineTracks?.[tests[0]?.key ?? '']).toMatchObject({ since: '2026-11-25T00:00:00Z', streak: 1 });
   });
 
+  it('should end the count at a run whose outcome files held unreadable lines', () => {
+    const tests = testsOf([entryOf()]);
+    const state = emptyState(new Date('2026-11-20T00:00:00Z'));
+    history(state, tests, { count: 10, from: '2026-11-21T01:00:00Z' });
+    // The run's passing row is not counted either: a line it could not read may have been a failure.
+    countQuarantineRun(state, {
+      run: runOf(5000, '2026-11-21T06:00:00Z'),
+      rows: [rowOf(5000)],
+      tests,
+      unreadable: true,
+    });
+    history(state, tests, { count: 2, from: '2026-11-21T07:00:00Z', firstRun: 6000 });
+
+    expect(state.quarantineTracks?.[tests[0]?.key ?? '']).toMatchObject({ streak: 2, failures: 0 });
+  });
+
   it('should give an entry that replaces another for the same test a track of its own', () => {
     const [first] = testsOf([entryOf()]);
     const [replacement] = testsOf([entryOf({ issue: 99, created: '2026-11-21', expires: '2026-12-05' })]);
@@ -743,8 +759,8 @@ describe('the release job', () => {
     const before = `${JSON.stringify({ entries: [entryOf(), entryOf({ issue: 14, test: 'src/a.test.ts > a > b' })] })}\n`;
     const after = removeFromQuarantine(before, [entryOf()]);
     const commit = {
-      commit: { message: 'test(host): Release 1 quarantined test\n\n- x (#12)\n' },
-      parents: [{ sha: 'parent-sha' }],
+      commits: [{ commit: { message: 'test(host): Release 1 quarantined test\n\n- x (#12)\n' } }],
+      merge_base_commit: { sha: 'parent-sha' },
       files: [{ filename: path, status: 'modified' }],
     };
     const { github } = fakeGitHub(
@@ -764,7 +780,7 @@ describe('the release job', () => {
                   merged_at: '2026-11-21T08:00:00Z',
                   updated_at: '2026-11-21T08:00:00Z',
                   head: { ref: 'flake-release/2026-11-20-merged00', sha: 'branch-sha' },
-                  base: { ref: 'main' },
+                  base: { ref: 'main', sha: 'main-at-merge' },
                 },
                 // Merged into another branch: it removed nothing from main.
                 {
@@ -793,7 +809,7 @@ describe('the release job', () => {
             : requested.includes('closed00')
               ? [{ number: 71, state: 'closed', merged_at: null }]
               : [],
-        '/commits/branch-sha': commit,
+        '/compare/': commit,
       },
       { texts: { 'ref=parent-sha': before, 'ref=branch-sha': after } },
     );
@@ -1184,22 +1200,32 @@ describe('the release job', () => {
     expect(outcome).toContain('Auto-merge left off: an owner issue was not updated; a later run retries it.');
   });
 
-  it('should comment once per removal branch and add a label a failed run left out', async () => {
+  it('should write the note once per branch and variant, label first, and leave a label removed since', async () => {
     const tests = testsOf([entryOf()], '2026-12-04');
     const [removal] = planOf(emptyState(new Date()), tests, { today: '2026-12-04' }).expiries;
     if (!removal) {
       throw new Error('expected an expiry');
     }
     const branch = 'flake-expiry/2026-12-04-aaaa';
-    const record = { identity: 'abcd', path, created: '2026-11-20', expires: '2026-12-04', branch };
-    const { github, requests } = fakeGitHub({
-      '/issues/12/comments': [{ body: removalMarker('expiry', record), user: { type: 'Bot' } }],
+    const identity = identityHashOf(`host › ${testName}`);
+    const noted = { identity, path, created: '2026-11-20', expires: '2026-12-04', branch };
+    // #12 has its note (the handoff is done; the operator has since removed the label): nothing is written.
+    const done = fakeGitHub({
+      '/issues/12/comments': [{ body: removalMarker('expiry', noted), user: { type: 'Bot' } }],
     });
+    await ensureOwnerNotes(done.github, [{ kind: 'expiry', removal, branch, where: 'There.' }]);
+    expect(done.requests.filter((request) => request.method !== 'GET')).toEqual([]);
 
-    await ensureOwnerNotes(github, [{ kind: 'expiry', removal, branch, where: 'There.' }]);
-
-    expect(requests.filter((request) => request.method === 'POST').map((request) => request.path)).toEqual([
+    // Another variant's note on the same branch is not this entry's: the label, then the note.
+    const other = fakeGitHub({
+      '/issues/12/comments': [
+        { body: removalMarker('expiry', { ...noted, variant: { browser: 'firefox' } }), user: { type: 'Bot' } },
+      ],
+    });
+    await ensureOwnerNotes(other.github, [{ kind: 'expiry', removal, branch, where: 'There.' }]);
+    expect(other.requests.filter((request) => request.method === 'POST').map((request) => request.path)).toEqual([
       '/repos/taucad/tau/issues/12/labels',
+      '/repos/taucad/tau/issues/12/comments',
     ]);
   });
 

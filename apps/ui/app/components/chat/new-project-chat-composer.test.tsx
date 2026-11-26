@@ -1,3 +1,4 @@
+import { arriveFirstMessage, departingFirstMessageOf } from '#lib/departing-first-message.js';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useImperativeHandle } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -179,6 +180,22 @@ describe('NewProjectChatComposer', () => {
     expect(mockConsumeDraft).toHaveBeenCalledOnce();
     expect(mockNavigate).toHaveBeenCalledWith('/w/workshop/bracket');
     expect(mockConsumeDraft.mock.invocationCallOrder[0]).toBeLessThan(mockNavigate.mock.invocationCallOrder[0]!);
+  });
+
+  /* WP-12 with WP-07 step 5: the project's chat lane draws a text-only first message from the frame's first paint. */
+  it('hands a text-only first message to the new project chat lane, and keeps one with images for its row', async () => {
+    render(<NewProjectChatComposer />);
+    await act(async () => {
+      await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
+    });
+    expect(departingFirstMessageOf('workshop/bracket')).toBe('Build a bracket');
+    arriveFirstMessage('workshop/bracket');
+
+    draftAttachments = [{ hash: 'a'.repeat(64), mediaType: 'image/png', byteLength: 3 }];
+    await act(async () => {
+      await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
+    });
+    expect(departingFirstMessageOf('workshop/bracket')).toBeUndefined();
   });
 
   /* C1: a name asked for while the prompt was written is the project's name, so the create asks for none; it is

@@ -20,6 +20,8 @@ import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { useProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
+import { DepartingFirstMessage } from '#components/chat/departing-first-message.js';
+import { arriveFirstMessage, useDepartingFirstMessage } from '#lib/departing-first-message.js';
 import { useTourAnchors } from '#components/tour/tour-anchors.js';
 import { ChatTodoList } from '#components/chat/chat-todo-list.js';
 import type { ChatTranscriptState } from '#services/chat-session-store.js';
@@ -393,6 +395,11 @@ const ExpandedChatHistory = memo(function ({
 
   const groups = useChatSelector((state) => state.turnGroups);
   const transcript = useChatSelector((state) => state.transcript);
+  /* A new project's first message on its way from Home (WP-12 with WP-07 step 5) holds the first row's place until
+   * the transcript draws a measured row: through the load, an empty answer before the seed, and Virtuoso's probe. */
+  const departingScope = composerHandOff.scope;
+  const departing = useDepartingFirstMessage(departingScope);
+  const isDepartingShown = departing !== undefined;
   const transcriptWait = useTranscriptWaitStart(transcript === 'loading');
   const reservesTaskList = useChatSelector((state) => state.rememberedComposerTrays.includes('todo'));
 
@@ -414,6 +421,23 @@ const ExpandedChatHistory = memo(function ({
   // Follow streaming output only while the user stays pinned to the bottom —
   // otherwise leave the scroll position alone so they can read earlier messages.
   const followLatestOutput = useFollowLatestOutput(virtuosoRef);
+
+  /* The first measured rows draw the message: the stand-in leaves in the same commit. */
+  const { totalListHeightChanged: followTotalListHeight } = followLatestOutput;
+  const handleTotalListHeightChanged = useCallback(
+    (height: number) => {
+      followTotalListHeight();
+      if (height > 0) {
+        /* Virtuoso shows a measured row a frame after it reports the height. */
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            arriveFirstMessage(departingScope);
+          });
+        });
+      }
+    },
+    [departingScope, followTotalListHeight],
+  );
 
   // Handler to scroll to the bottom of the chat
   const scrollToBottom = useCallback(() => {
@@ -464,7 +488,11 @@ const ExpandedChatHistory = memo(function ({
                  * the bars hang below the header over the empty feed, take no layout, and appear from 300 ms into the
                  * wait on its own clock, which a lane mounted during the open shares with the open. No words: the
                  * viewer is the open's one status, and the feed carries `aria-busy`. */}
-                {transcript === 'loading' ? (
+                {isDepartingShown ? (
+                  <div className='pointer-events-none absolute inset-x-0 top-full z-10'>
+                    <DepartingFirstMessage text={departing} />
+                  </div>
+                ) : transcript === 'loading' ? (
                   <div className='pointer-events-none absolute inset-x-0 top-full z-10'>
                     <WaitSkeleton
                       isActive
@@ -482,7 +510,8 @@ const ExpandedChatHistory = memo(function ({
                 <Virtuoso
                   ref={virtuosoRef}
                   data={groups}
-                  context={transcript}
+                  /* While the first message is on its way, the feed is still waiting for it: busy, no empty state. */
+                  context={isDepartingShown && groups.length === 0 ? 'loading' : transcript}
                   initialTopMostItemIndex={initialChatTurn}
                   itemContent={renderItem}
                   computeItemKey={computeItemKey}
@@ -493,7 +522,7 @@ const ExpandedChatHistory = memo(function ({
                    * from a short viewport (the phone sheet at half) is never followed, and its reply or failure stays
                    * folded away below (I5). */
                   increaseViewportBy={appendedTurnOverscan}
-                  totalListHeightChanged={followLatestOutput.totalListHeightChanged}
+                  totalListHeightChanged={handleTotalListHeightChanged}
                   className='mt-1 min-h-0 min-w-0 flex-1'
                   atBottomStateChange={handleAtBottomStateChange}
                   components={virtuosoComponents}

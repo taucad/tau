@@ -1,4 +1,5 @@
 import { holdFirstTurnBackup } from '#lib/first-turn-backup-gate.js';
+import { departFirstMessage } from '#lib/departing-first-message.js';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -130,8 +131,18 @@ export function NewProjectChatComposer({
         });
         /* WP-12 step 5: the first cloud backup waits for the first turn to stream, or 5 s. */
         holdFirstTurnBackup(created.id);
-        await consumeDraft();
-        await navigate(projectUrl(created.slugs));
+        /* WP-12 with WP-07 step 5: the project's chat lane draws the message at its first row's place from the frame's
+         * first paint until the transcript draws it, so Enter never blanks the person's words. A message with images
+         * waits for its row: a text-only stand-in would grow when they arrive. */
+        if (attachments.length === 0) {
+          departFirstMessage(`${created.slugs.workspaceSlug}/${created.slugs.projectSlug}`, content);
+        }
+        /* The draft is consumed before the project route reads anything, and the navigation starts in the same task,
+         * so Home's composer clears as the frame is drawn ahead of the route, not a beat before. */
+        const consumed = consumeDraft();
+        const navigation = navigate(projectUrl(created.slugs));
+        await consumed;
+        await navigation;
       } catch (error) {
         if (presentLocationError(error)) {
           if (location.hasWebAccessCapability) {

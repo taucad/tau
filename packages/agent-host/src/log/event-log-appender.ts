@@ -203,6 +203,12 @@ export type EventLogAppender = {
   historyUnknown?(): Promise<boolean>;
   /** What the open kept but could not use: quarantined lines, broken term rules, conflicting copies, history. */
   anomalies(): Promise<readonly EventLogAnomaly[]>;
+  /**
+   * Mark this writer alive on its lock marker (HA-I10): the Node binding refreshes the marker's modification time
+   * through the handle it holds, so only its own marker's inode, never a successor's. Not queued behind appends, so a
+   * held chain never delays it. Absent where the writer keeps no marker (OPFS, provider).
+   */
+  touch?(): Promise<void>;
   /** Flush pending operations and release the underlying file handle. */
   close(): Promise<void>;
 };
@@ -271,6 +277,8 @@ export type EventLogStorage = {
    * the staleness bound comes back empty with `unreadable` set; one that may still hold a live run rejects the read.
    */
   segments?(): Promise<readonly ChatLogSegment[]>;
+  /** Refresh the writer's lock marker modification time ({@link EventLogAppender.touch}); absent without a marker. */
+  touch?(): Promise<void>;
 };
 
 /** Options for {@link createEventLogAppender}. @internal */
@@ -1313,6 +1321,8 @@ export const createEventLogAppender = async (
               return foreignUnsettled.filter((run) => !ownRunIds.has(run.runId));
             }),
         }),
+    /* Outside the chain on purpose (HA-I10): a liveness mark never waits behind a held append. */
+    ...(storage.touch === undefined ? {} : { touch: storage.touch }),
     close: async () =>
       enqueue(async () => {
         if (closed) {

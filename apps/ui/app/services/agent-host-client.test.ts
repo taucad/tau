@@ -1488,3 +1488,23 @@ describe('the session read', () => {
     await second.close();
   });
 });
+
+/* WP-12 step 3: a new project's first turn boots the worker while the project is created, with no project host. */
+describe('prewarming the resident worker', () => {
+  it('starts the worker and answers its init once, providing no host, and the first client reuses it', async () => {
+    const worker = new FakeResidentWorker();
+    const createWorker = vi.fn(workerOf(worker));
+
+    await residentAgentWorker(createWorker).prewarm();
+    await residentAgentWorker(createWorker).prewarm();
+
+    expect(createWorker).toHaveBeenCalledOnce();
+    expect(requestsNamed(worker, 'init')).toHaveLength(1);
+    expect(requestsNamed(worker, 'provide')).toHaveLength(0);
+    const client = createTestClient(createWorker);
+    await startRun(client, 'chat-prewarmed', 'run-1', 'Build.');
+    expect(createWorker).toHaveBeenCalledOnce();
+    expect(requestsNamed(worker, 'provide')).toHaveLength(1);
+    await client.close();
+  });
+});

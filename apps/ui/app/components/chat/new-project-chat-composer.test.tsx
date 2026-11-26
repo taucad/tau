@@ -79,6 +79,8 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   }),
 }));
 vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: vi.fn() } }));
+const mockPrewarmBrowserAgentHost = vi.fn(async () => undefined);
+vi.mock('#services/agent-host-client.js', () => ({ prewarmBrowserAgentHost: mockPrewarmBrowserAgentHost }));
 vi.mock('#components/chat/use-project-name-ahead.js', () => ({
   useProjectNameAhead: () => ({ take: mockTakeName, onPasteCapture: vi.fn() }),
 }));
@@ -180,6 +182,23 @@ describe('NewProjectChatComposer', () => {
     expect(mockConsumeDraft).toHaveBeenCalledOnce();
     expect(mockNavigate).toHaveBeenCalledWith('/w/workshop/bracket');
     expect(mockConsumeDraft.mock.invocationCallOrder[0]).toBeLessThan(mockNavigate.mock.invocationCallOrder[0]!);
+  });
+
+  /* WP-12 step 3: a turn this browser hosts boots its worker while the project is created; another host's does not. */
+  it("boots this browser's agent-host worker for a browser turn, and none for a daemon's", async () => {
+    const view = render(<NewProjectChatComposer />);
+    await act(async () => {
+      await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
+    });
+    expect(mockPrewarmBrowserAgentHost).toHaveBeenCalledOnce();
+
+    mockPrewarmBrowserAgentHost.mockClear();
+    composerExecution = { kind: 'tau', model: 'gpt-test', hostId: 'hst_daemon' };
+    view.rerender(<NewProjectChatComposer />);
+    await act(async () => {
+      await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
+    });
+    expect(mockPrewarmBrowserAgentHost).not.toHaveBeenCalled();
   });
 
   /* WP-12 with WP-07 step 5: the project's chat lane draws a text-only first message from the frame's first paint. */

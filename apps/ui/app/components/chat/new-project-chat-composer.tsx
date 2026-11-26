@@ -1,5 +1,7 @@
 import { holdFirstTurnBackup } from '#lib/first-turn-backup-gate.js';
 import { departFirstMessage } from '#lib/departing-first-message.js';
+import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -23,6 +25,16 @@ type NewProjectChatComposerProperties = {
   /** An early edit the route already adopted, when the route owns the native input. */
   readonly adoptedEarlyInput?: EarlyChatInput;
   readonly className?: string;
+};
+
+/** Loads the agent-host client with the first send's chunks, off Home's own graph, and boots its worker. */
+const prewarmAgentHost = async (): Promise<void> => {
+  try {
+    const { prewarmBrowserAgentHost } = await loadCode(async () => import('#services/agent-host-client.js'));
+    await prewarmBrowserAgentHost();
+  } catch {
+    /* `loadCode` handed a failed load to the page's recovery; the turn's own load reports it. */
+  }
 };
 
 /** Shared direct-create composer rendered inside an existing chat provider. */
@@ -108,6 +120,11 @@ export function NewProjectChatComposer({
       const attachments = draftActorRef
         .getSnapshot()
         .context.draftAttachments.map(({ byteLength: _byteLength, ...stored }) => stored);
+      /* WP-12 step 3: a turn this browser hosts boots its agent-host worker while the project is created and its route
+       * opens, not after the route mounts. Another host's turn needs no worker here. */
+      if (execution.kind === 'tau' && daemonPlacementOf(execution) === undefined) {
+        void prewarmAgentHost();
+      }
       try {
         /* C1, WP-12 step 1: the latest name generated while the prompt was written, or one from its first words; the
          * create never waits on naming. */

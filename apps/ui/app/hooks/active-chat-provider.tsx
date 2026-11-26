@@ -60,7 +60,6 @@ import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
-import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import { selectCaughtUp, selectCurrentRun, selectRunElsewhere } from '#machines/chat-projection.logic.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
 import type { chatPersistenceMachine } from '@taucad/chat-ui/hooks/chat-persistence.machine';
@@ -813,16 +812,24 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
 }
 
 /**
- * One visible status for both composer controls: host projection takes precedence when a reattached run outlives the
- * SDK request. Returns `'ready'` while the session is mounting (and under the composer-only provider).
+ * One visible status for both composer controls: the run phase, else the command in flight (T3). Returns `'ready'`
+ * while the session is mounting (and under the composer-only provider).
  */
 function useSessionStatus(chatId: string): ChatInstance['status'] {
-  const sdkStatus = useChatSessionSnapshot(chatId, (s) => s?.chat.status ?? 'ready');
   const store = useChatSessionStore();
-  const subscribe = useCallback((listener: () => void) => store.subscribeProjection(chatId, listener), [chatId, store]);
-  const snapshot = useCallback(() => store.getProjection(chatId), [chatId, store]);
-  const projection = useSyncExternalStore(subscribe, snapshot, snapshot);
-  return selectVisibleChatStatus(sdkStatus, projection);
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const unsubscribeChat = store.subscribeChat(chatId, listener);
+      const unsubscribeProjection = store.subscribeProjection(chatId, listener);
+      return () => {
+        unsubscribeChat();
+        unsubscribeProjection();
+      };
+    },
+    [chatId, store],
+  );
+  const snapshot = useCallback(() => store.getChatStatus(chatId), [chatId, store]);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /**
@@ -885,8 +892,7 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
       turn === undefined &&
       persistence.matches({ requestLifecycle: 'idle', chatLoading: 'idle' }) &&
       !persistence.context.isLoadingChat &&
-      session.chat.status !== 'submitted' &&
-      session.chat.status !== 'streaming'
+      store.getChatStatus(chatId) === 'ready'
     );
   };
   const resume = useCallback(() => {

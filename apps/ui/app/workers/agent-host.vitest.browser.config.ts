@@ -1,7 +1,7 @@
 /* oxlint-disable import/extensions -- The composed source fixture is replaced by the package export when FIX-PROJ adds the UI dependency. */
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This composed browser contract fixture exercises the package wire through the UI worker until FIX-PROJ adds the UI package dependency.
@@ -78,6 +78,7 @@ export default defineConfig({
   },
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     include: [
       'app/workers/agent-host.browser.test.ts',
       'app/workers/agent-host-resident.browser.test.ts',

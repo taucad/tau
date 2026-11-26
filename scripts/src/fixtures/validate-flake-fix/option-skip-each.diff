@@ -1,0 +1,9 @@
+--- a/apps/ui/src/boot.test.ts
++++ b/apps/ui/src/boot.test.ts
+@@
+ import { expect, it } from 'vitest';
+
+-it.each([1, 2])('mounts worker %i', async (id) => {
++it.each([1, 2])('mounts worker %i', { skip: process.env['CI'] === 'true' }, async (id) => {
+   expect((await boot(id)).state).toBe('ready');
+ });

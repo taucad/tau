@@ -1,7 +1,7 @@
 import { frameHintKey } from '#lib/frame-hint.js';
 import { chatComposerTrayClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
-import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { useLocation } from 'react-router';
@@ -52,8 +52,10 @@ import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { ArchivedChats } from '#routes/w.$workspace.$project/archived-chats.js';
-import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import { isInOpen, openWaitContext } from '#hooks/use-wait-start.js';
+import type { OpenWait } from '#hooks/use-wait-start.js';
+import { WaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import type { WaitClock } from '@taucad/ui/hooks/use-wait-clock';
 
 // One conversational turn per virtual row, sized only by its content.
@@ -197,13 +199,24 @@ const endedDocumentOpens = new WeakSet<WaitClock>();
  */
 const isDocumentOpen = (clock: WaitClock): boolean => !endedDocumentOpens.has(clock) && isOnDocumentProject();
 
-const startTranscriptWait = (clock: WaitClock, isFirst: boolean): Omit<TranscriptWait, 'active'> => {
+const startTranscriptWait = (
+  clock: WaitClock,
+  isFirst: boolean,
+  open: OpenWait | undefined,
+): Omit<TranscriptWait, 'active'> => {
   if (isFirst && isDocumentOpen(clock)) {
     return { startedAt: 0, isGesture: false };
   }
   const { navigator } = globalThis;
   const activation = 'userActivation' in navigator ? navigator.userActivation : undefined;
-  return { startedAt: clock.now(), isGesture: activation?.isActive ?? false };
+  const isGesture = activation?.isActive ?? false;
+  const startedAt = clock.now();
+  /* A lane that mounts loading during a later project open is part of that open (`isInOpen`): its wait counts from
+   * the open's start, as the frame's bars it takes over did. */
+  if (isFirst && open !== undefined && isInOpen(open, { startedAt })) {
+    return { startedAt: open.startedAt, isGesture: false };
+  }
+  return { startedAt, isGesture };
 };
 
 /**
@@ -217,7 +230,11 @@ const startTranscriptWait = (clock: WaitClock, isFirst: boolean): Omit<Transcrip
  */
 function useTranscriptWaitStart(active: boolean): Omit<TranscriptWait, 'active'> {
   const clock = useWaitClockSource();
-  const [tracked, setTracked] = useState<TranscriptWait>(() => ({ active, ...startTranscriptWait(clock, true) }));
+  const open = useContext(openWaitContext);
+  const [tracked, setTracked] = useState<TranscriptWait>(() => ({
+    active,
+    ...startTranscriptWait(clock, true, open),
+  }));
   /* A lane unmounted once the page has left the document's project (to Home, to another project) ends the open. */
   useEffect(
     () => () => {
@@ -236,7 +253,7 @@ function useTranscriptWaitStart(active: boolean): Omit<TranscriptWait, 'active'>
   }, [active, clock]);
   let current = tracked;
   if (tracked.active !== active) {
-    current = active ? { active, ...startTranscriptWait(clock, false) } : { ...tracked, active };
+    current = active ? { active, ...startTranscriptWait(clock, false, open) } : { ...tracked, active };
     setTracked(current);
   }
   return { startedAt: current.startedAt, isGesture: current.isGesture };
@@ -435,20 +452,21 @@ const ExpandedChatHistory = memo(function ({
                     />
                   }
                 />
-                {/* The header's indicator slot (U7, F6): words from 1,000 ms into the transcript's wait, kept 500 ms. The
-                 * slot hangs below the header over the empty feed and takes no layout, so no header control moves when
-                 * the words appear. The feed carries `aria-busy`; a load that is part of the route open is seen, not
-                 * announced. */}
-                <div className='pointer-events-none absolute inset-x-0 top-full z-10 flex justify-center pt-2'>
-                  <WaitIndicator
-                    active={transcript === 'loading'}
-                    label='Loading chat'
-                    slowLabel='Still loading chat'
-                    startedAt={transcriptWait.startedAt}
-                    live={transcriptWait.isGesture}
-                    variant='pill'
-                  />
-                </div>
+                {/* While the transcript loads the feed below draws its shape (Progressive Loading Policy rules 15 and 17):
+                 * the bars hang below the header over the empty feed, take no layout, and appear from 300 ms into the
+                 * wait on its own clock, which a lane mounted during the open shares with the open. No words: the
+                 * viewer is the open's one status, and the feed carries `aria-busy`. */}
+                {transcript === 'loading' ? (
+                  <div className='pointer-events-none absolute inset-x-0 top-full z-10'>
+                    <WaitSkeleton
+                      isActive
+                      startedAt={transcriptWait.startedAt}
+                      shape='transcript'
+                      label='Chat'
+                      className='h-auto'
+                    />
+                  </div>
+                ) : null}
               </FloatingPanelContentHeader>
 
               {/* Main chat content area */}

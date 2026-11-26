@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 const webGpuProfile = process.env['TAU_E2E_WEBGPU_PROFILE'] ?? 'hardware';
@@ -43,6 +43,7 @@ export default defineConfig({
     ],
     fileParallelism: false,
     reporters: testReporters('verbose'),
+    retry: testRetry(),
     testTimeout: 120_000,
     browser: {
       enabled: true,

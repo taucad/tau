@@ -125,4 +125,5 @@ Review round 3 re-pinned the drift after a withdrawn or refused send became park
 
 use_skill startup latency T2 re-pinned the drift after `chat-session-store.ts`, `chat-turn-host.tsx`, `use-cad-chat-client.ts` and `use-chat.tsx` began reading the displayed transcript as the fold of the projection; no action changed.
 
-Chat UX F1/F2 merged with T2 re-pinned the drift: the departing send is shown on the fold until the host accepts it, and the accepted gesture shows it from then until its run folds, so a handed-over send no longer keeps its own copy. No action changed.
+use_skill startup latency T3 re-pins the drift after `chat-session-store.ts`, `use-chat.tsx` and `use-cad-chat-client.ts` began reading the chat's status from the run phase and the command in flight, with no SDK stream armed; no action changed.
+Chat UX F1/F2 merged with T2 re-pinned the drift: the departing send is shown on the fold until the host accepts it, and the accepted gesture shows it from then until its run folds, so a handed-over send no longer keeps its own copy. No action changed. Merged with T3, it re-pins again: the store's status reads the run phase, and dispatch still lets go of a Stop left from an earlier turn. No action changed.

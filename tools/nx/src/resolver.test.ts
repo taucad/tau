@@ -245,13 +245,13 @@ describe('validateTags()', () => {
           project('desktop-app', ['scope:ui', 'type:app', 'release:app', 'ci:desktop'], undefined),
           project('two-lanes', ['scope:ui', 'type:app-lib', 'layer:feature', 'ci:shell', 'ci:desktop'], undefined),
           project('browser-app', ['scope:ui', 'type:app', 'ci:browser', 'ci:standalone'], undefined),
-          project('quarantined-e2e', ['scope:ui', 'type:e2e', 'ci:standalone', 'ci:quarantined'], undefined),
+          project('nightly-only-e2e', ['scope:ui', 'type:e2e', 'ci:standalone', 'ci:nightly-only'], undefined),
           project('unknown-lane', ['scope:ui', 'type:app', 'ci:desktop', 'ci:packaged'], undefined),
           project('repeated-lane', ['scope:ui', 'type:app', 'ci:desktop', 'ci:desktop'], undefined),
         ],
       }),
     ).toEqual([
-      'fixture/unknown-lane: unknown tag "ci:packaged" (ci: must be one of browser, standalone, quarantined, shell, desktop, native-hosts)',
+      'fixture/unknown-lane: unknown tag "ci:packaged" (ci: must be one of browser, standalone, nightly-only, shell, desktop, native-hosts)',
       'fixture/repeated-lane: duplicate tag "ci:desktop"',
     ]);
   });

@@ -298,9 +298,17 @@ function EntryParameters({
     );
   }
   if (parameterManifest === undefined || parameterEdit === undefined) {
+    /* The entry's rows are still on their way: the body keeps its box and draws the host's shape for them, with no
+       sentence (Tau's Progressive Loading Policy rule 15). A host without one draws the box alone, busy. */
+    const { ManifestWait } = source;
     return (
-      <div className={cn(paneviewAttachedBodyClassName, 'p-3 text-sm text-muted-foreground')}>
-        Loading parameter metadata…
+      <div
+        role='group'
+        aria-label={`${entryPath} parameters`}
+        aria-busy='true'
+        className={cn(paneviewAttachedBodyClassName, 'min-h-24')}
+      >
+        {ManifestWait === undefined ? null : <ManifestWait entryPath={entryPath} />}
       </div>
     );
   }

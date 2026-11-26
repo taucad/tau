@@ -613,7 +613,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     }
   });
 
-  it('should reopen the transcript watch when an external approval resumes the same attempt', async () => {
+  it('should show an external run streaming again when its approval resumes the same attempt, arming no SDK stream', async () => {
     const store = createStore();
     const chatId = 'chat_external_approval';
     const runId = 'run_external_approval';
@@ -627,19 +627,20 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       lifecycleRow(1, 'running', runId),
     ]);
     const chat = harness.created.find((entry) => entry.id === chatId)!;
-    await vi.waitFor(() => {
-      expect(chat.resumeStream).toHaveBeenCalledTimes(1);
-    });
+    expect(store.getChatStatus(chatId)).toBe('streaming');
+    expect(session.messages.map((shown) => shown.id)).toContain(message.id);
     publishLogRows(store, chatId, [lifecycleRow(2, 'paused', runId)], 2);
+    expect(store.getChatStatus(chatId)).toBe('ready');
     publishLogRows(store, chatId, [lifecycleRow(3, 'running', runId)], 3);
-    await vi.waitFor(() => {
-      expect(chat.resumeStream).toHaveBeenCalledTimes(2);
-    });
+    expect(store.getChatStatus(chatId)).toBe('streaming');
     publishLogRows(store, chatId, [lifecycleRow(4, 'completed', runId)], 4);
+    expect(store.getChatStatus(chatId)).toBe('ready');
+    await settle();
+    expect(chat.resumeStream).not.toHaveBeenCalled();
     store.release(chatId);
   });
 
-  it('reopens a projected run watch after live delivery drops without another durable row or command', async () => {
+  it('should keep a projected run streaming after live delivery drops, rereading without another durable row or command', async () => {
     const store = createStore();
     const chatId = 'chat_live_drop';
     const projectId = 'project_live_drop';
@@ -692,7 +693,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     const unpublish = store.publishProjectHostConnector(projectId, connect);
     const chat = harness.created.find((entry) => entry.id === chatId)!;
     await vi.waitFor(() => {
-      expect(chat.resumeStream).toHaveBeenCalledTimes(1);
+      expect(store.getChatStatus(chatId)).toBe('streaming');
     });
     deliverLive?.(chatId, {
       sourceGeneration: 'writer-live-drop',
@@ -715,12 +716,13 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       { timeout: 2000 },
     );
     await vi.waitFor(() => {
-      expect(chat.resumeStream).toHaveBeenCalledTimes(2);
+      expect(subscribe.mock.calls.map(([input]) => input.cursor)).toEqual([0, 2]);
     });
-    expect(subscribe.mock.calls.map(([input]) => input.cursor)).toEqual([0, 2]);
     expect(store.getProjection(chatId)?.ledger.runs['run_live_drop']?.lifecycle).toBe('running');
+    expect(store.getChatStatus(chatId)).toBe('streaming');
+    expect(session.messages.some((shown) => shown.role === 'user')).toBe(true);
     expect(hostCommand).not.toHaveBeenCalled();
-    expect(session.chat).toBeDefined();
+    expect(chat.resumeStream).not.toHaveBeenCalled();
     unpublish();
     unobserve();
     store.release(chatId);
@@ -1672,11 +1674,10 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     await settle();
     await store.refreshRemoteSegments(chatId, projectId);
     await vi.waitFor(() => {
-      expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+      expect(session.messages.some((message) => message.role === 'assistant')).toBe(true);
     });
-    const fake = harness.created.find((entry) => entry.id === chatId)!;
-    fake.status = 'streaming';
-    fake.emitStatusChange();
+    publishLogRows(store, chatId, runningRows('run_local_mid_run'));
+    expect(store.getChatStatus(chatId)).toBe('streaming');
     await client.writeFile(
       segmentPath,
       new TextEncoder().encode(
@@ -1685,12 +1686,11 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     );
 
     await store.refreshFromStorage(chatId);
-    expect(JSON.stringify(session.chat.messages)).not.toContain('Browser host verified the workspace change.');
+    expect(JSON.stringify(session.messages)).not.toContain('Browser host verified the workspace change.');
 
-    fake.status = 'ready';
-    fake.emitStatusChange();
+    publishLogRows(store, chatId, [lifecycleRow(2, 'completed', 'run_local_mid_run')], 2);
     await vi.waitFor(() => {
-      expect(JSON.stringify(session.chat.messages)).toContain('Browser host verified the workspace change.');
+      expect(JSON.stringify(session.messages)).toContain('Browser host verified the workspace change.');
     });
     store.release(chatId);
   });
@@ -1881,7 +1881,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     unpublishAdmission();
   });
 
-  it('dispatches one admitted Start before the SDK watches its projected run', async () => {
+  it('should show one admitted Start as submitted from dispatch until its run folds, arming no SDK stream (T3)', async () => {
     const store = createStore();
     const chatId = 'chat_live_command';
     const projectId = 'project_live_command';
@@ -1921,13 +1921,20 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     await vi.waitFor(() => {
       expect(hostCommand).toHaveBeenCalledExactlyOnceWith(command);
     });
-    const chat = harness.created.find((entry) => entry.id === chatId)!;
-    expect(chat.sendMessage).not.toHaveBeenCalled();
+    expect(store.getChatStatus(chatId)).toBe('submitted');
     reply.resolve({ commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 1 });
     await requested;
-    await vi.waitFor(() => {
-      expect(chat.sendMessage).toHaveBeenCalledTimes(1);
-    });
+    await settle();
+    /* Accepted, and its run not folded yet: still submitted, and the accepted message is shown. */
+    expect(store.getChatStatus(chatId)).toBe('submitted');
+    expect(store.get(chatId)?.messages.map((message) => message.id)).toEqual(['msg_live_command']);
+    publishLogRows(store, chatId, runningRows('req_live_command'));
+    expect(store.getChatStatus(chatId)).toBe('streaming');
+    publishLogRows(store, chatId, [lifecycleRow(2, 'completed', 'req_live_command')], 2);
+    expect(store.getChatStatus(chatId)).toBe('ready');
+    const chat = harness.created.find((entry) => entry.id === chatId)!;
+    expect(chat.sendMessage).not.toHaveBeenCalled();
+    expect(chat.resumeStream).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
     unpublish();
   });
@@ -2010,9 +2017,9 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         if (successor === 'watching') {
           acknowledgeSecond();
           await vi.waitFor(() => {
-            expect(chat.regenerate).toHaveBeenCalledOnce();
+            expect(close).toHaveBeenCalledOnce();
           });
-          expect(unsubscribeWatches).toHaveLength(1);
+          expect(store.getChatStatus(chatId)).toBe('submitted');
         }
         if (outcome === 'acknowledgement') {
           firstReply.resolve({
@@ -2051,8 +2058,10 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           );
           expect(unsubscribeWatches).toEqual([]);
         } else {
-          expect(unsubscribeWatches).toHaveLength(1);
-          expect(unsubscribeWatches[0]).not.toHaveBeenCalled();
+          /* B's run is still awaited: A's late answer neither ends it nor arms a stream. */
+          expect(store.getChatStatus(chatId)).toBe('submitted');
+          expect(chat.regenerate).not.toHaveBeenCalled();
+          expect(unsubscribeWatches).toEqual([]);
           expect(hostCommand).toHaveBeenCalledTimes(2);
         }
       } finally {
@@ -2073,7 +2082,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
   );
 
   for (const runningBeforeAck of [false, true]) {
-    it(`should watch a resumed attempt only after its running row ${runningBeforeAck ? 'already folded' : 'arrives later'}`, async () => {
+    it(`should show a resumed attempt streaming only once its running row ${runningBeforeAck ? 'already folded' : 'arrives later'}`, async () => {
       const store = createStore();
       const chatId = `chat_retry_watch_${runningBeforeAck}`;
       const projectId = `project_retry_watch_${runningBeforeAck}`;
@@ -2119,12 +2128,11 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         await new Promise<void>((resolve) => {
           setTimeout(resolve, 0);
         });
-        expect(chat.resumeStream).not.toHaveBeenCalled();
+        expect(store.getChatStatus(chatId)).toBe('ready');
         publishLogRows(store, chatId, [reopened], 3);
       }
-      await vi.waitFor(() => {
-        expect(chat.resumeStream).toHaveBeenCalledOnce();
-      });
+      expect(store.getChatStatus(chatId)).toBe('streaming');
+      expect(chat.resumeStream).not.toHaveBeenCalled();
       expect(hostCommand).toHaveBeenCalledOnce();
       unpublishAdmission();
       unpublish();
@@ -2294,7 +2302,6 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       });
       const visibleError = () =>
         selectVisibleChatError({
-          error: session.chat.error,
           persistedError: session.persistenceActorRef.getSnapshot().context.persistedError,
           projection: store.getProjection(chatId),
           attachmentStatus: store.getAttachmentStatus(chatId),
@@ -2445,7 +2452,6 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     });
     const visibleError = () =>
       selectVisibleChatError({
-        error: undefined,
         persistedError: undefined,
         projection: store.getProjection(chatId),
         attachmentStatus: store.getAttachmentStatus(chatId),
@@ -3822,30 +3828,27 @@ describe('ChatSessionStore', () => {
       expect(store.getProjection(chatId)).toBeUndefined();
     });
 
-    it('refuses an obsolete usage summary without clearing a reacquired summary', async () => {
+    it('should answer usage from the fold as of its call, and a reacquired chat from its own log (T3)', async () => {
       const store = createStore();
       const release = store.observe('usage_replaced', 'project_retention');
       publishLogRows(store, 'usage_replaced', completedRows('Old answer'));
-      const oldSummary = store.getHistoricalUsage('usage_replaced');
-      const rejected = expect(oldSummary).rejects.toThrow(/superseded/iu);
+      const oldSummary = await store.getHistoricalUsage('usage_replaced');
       release();
       const releaseCurrent = store.observe('usage_replaced', 'project_retention');
       publishLogRows(store, 'usage_replaced', [logRow(4, { type: 'unrecognized.future-event' })], 4);
-      const current = store.getHistoricalUsage('usage_replaced');
-      await rejected;
-      const summary = await current;
+      const summary = await store.getHistoricalUsage('usage_replaced');
+      expect(summary).toEqual(oldSummary);
       expect(await store.getHistoricalUsage('usage_replaced')).toBe(summary);
       releaseCurrent();
     });
 
-    it('refuses an in-flight usage summary when its observed chat is deleted', async () => {
+    it('should refuse usage once its observed chat is deleted', async () => {
       const store = createStore();
       const release = store.observe('usage_deleted', 'project_retention');
       publishLogRows(store, 'usage_deleted', completedRows());
-      const pending = store.getHistoricalUsage('usage_deleted');
-      const rejected = expect(pending).rejects.toThrow(/superseded/iu);
+      await expect(store.getHistoricalUsage('usage_deleted')).resolves.toMatchObject({ parts: 0 });
       await store.removeChat('usage_deleted');
-      await rejected;
+      await expect(store.getHistoricalUsage('usage_deleted')).rejects.toThrow(/superseded/iu);
       release();
       expect(store.getProjection('usage_deleted')).toBeUndefined();
     });
@@ -4638,15 +4641,24 @@ describe('ChatSessionStore', () => {
       expect(listener).toHaveBeenCalledTimes(1);
     });
 
-    it('fires when the underlying chat status changes', () => {
+    it('should fire when the chat status moves with its run phase', () => {
       const store = createStore();
       store.acquire('chat_a', 'project_test');
-      const fake = harness.created[0]!;
       const listener = vi.fn();
       store.subscribeChat('chat_a', listener);
+      expect(store.getChatStatus('chat_a')).toBe('ready');
 
-      fake.emitStatusChange();
-      expect(listener).toHaveBeenCalledTimes(1);
+      publishLogRows(store, 'chat_a', [lifecycleRow(0, 'admitted')]);
+      expect(store.getChatStatus('chat_a')).toBe('submitted');
+      const heard = listener.mock.calls.length;
+      expect(heard).toBeGreaterThan(0);
+
+      publishLogRows(store, 'chat_a', [lifecycleRow(1, 'running')], 1);
+      expect(store.getChatStatus('chat_a')).toBe('streaming');
+      expect(listener.mock.calls.length).toBeGreaterThan(heard);
+
+      publishLogRows(store, 'chat_a', [lifecycleRow(2, 'completed')], 2);
+      expect(store.getChatStatus('chat_a')).toBe('ready');
     });
 
     it('does not wake subscribers from a different chatId', () => {

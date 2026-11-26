@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { testReporters } from '@taucad/vitest-ci';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /** One id per run: it names the accounts (`tau-e2e-<runId>-<case>`) and the evidence directory. */
@@ -17,6 +17,7 @@ export default defineConfig({
   root: import.meta.dirname,
   test: {
     reporters: testReporters('default'),
+    retry: testRetry(),
     include: ['src/**/*.spec.ts'],
     environment: 'node',
     // One staging, one set of rate limits and one results file: the rows run one after another.

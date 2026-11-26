@@ -1029,13 +1029,9 @@ describe('useCadChatClient', () => {
     });
   });
 
-  it('should expose messages and status from the displayed transcript, and error from the bound chat instance', () => {
-    const chat = mock<Chat<MyUIMessage>>();
+  it('should expose the displayed transcript and its status, and no stream error', () => {
     const messages: readonly MyUIMessage[] = [{ id: 'msg_1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }];
     shownMessages = messages;
-    const error = new Error('network');
-    Object.defineProperty(chat, 'error', { get: () => error });
-    useActiveChatInstanceMock.mockReturnValue(chat);
     chatStatus = 'streaming';
     const actions = buildActions();
     installActions(actions);
@@ -1044,7 +1040,7 @@ describe('useCadChatClient', () => {
 
     expect(result.current.messages).toBe(messages);
     expect(result.current.status).toBe('streaming');
-    expect(result.current.error).toBe(error);
+    expect(result.current).not.toHaveProperty('error');
   });
 
   it('should keep the agent snapshot reference stable across renders when its identity does not change', () => {

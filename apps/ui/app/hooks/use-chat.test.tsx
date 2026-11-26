@@ -579,36 +579,44 @@ describe('hooks resolution rules', () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it('does not re-render a status selector for message-only streaming updates', async () => {
+  it('should not re-render a status selector for message-only streaming updates', () => {
     let renderCount = 0;
     const { result } = renderHook(
       () => {
         renderCount++;
-        return useChatSelector((state) => state.status);
+        return { status: useChatSelector((state) => state.status), store: useChatSessionStore() };
       },
       { wrapper: createWrapper('chat_selector_stability') },
     );
-    await waitFor(() => {
-      expect(result.current).toBe('ready');
+    act(() => {
+      publishLogRows(result.current.store, 'chat_selector_stability', runningRows());
     });
-    const fake = getFake('chat_selector_stability');
+    expect(result.current.status).toBe('streaming');
     const beforeMessageUpdate = renderCount;
 
     act(() => {
-      fake.messages = [makeAssistantMessage('assistant_1', 'streaming')];
-      fake.emitMessages();
+      publishLogRows(
+        result.current.store,
+        'chat_selector_stability',
+        [
+          logRow(2, {
+            type: 'message.appended',
+            message: { id: 'assistant_1', role: 'assistant', content: [{ type: 'text', text: 'Streaming' }] },
+          }),
+        ],
+        2,
+      );
     });
     expect(renderCount).toBe(beforeMessageUpdate);
 
     act(() => {
-      fake.status = 'streaming';
-      fake.emitStatus();
+      publishLogRows(result.current.store, 'chat_selector_stability', [lifecycleRow(3, 'completed')], 3);
     });
-    expect(result.current).toBe('streaming');
+    expect(result.current.status).toBe('ready');
     expect(renderCount).toBe(beforeMessageUpdate + 1);
   });
 
-  it('shows Stop status for a reattached host run when the SDK is ready', () => {
+  it('shows Stop status for a reattached host run', () => {
     const { result } = renderHook(
       () => ({ status: useChatSelector((state) => state.status), store: useChatSessionStore() }),
       { wrapper: createWrapper('chat_reattached_stop') },

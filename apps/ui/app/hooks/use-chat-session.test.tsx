@@ -120,6 +120,7 @@ const { useChatSessionStore } = await import('#hooks/chat-session-store-provider
 const { MirroredChatSessionStoreProvider: ChatSessionStoreProvider } =
   await import('#hooks/chat-session-store.fixture.js');
 const { useChatSession, useChatSessionSnapshot } = await import('#hooks/use-chat-session.js');
+const { publishLogRows, runningRows } = await import('#machines/chat-projection.fixture.js');
 
 function createWrapper() {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
@@ -389,21 +390,22 @@ describe('useChatSessionSnapshot', () => {
     expect(harness.created).toHaveLength(1);
   });
 
-  it('re-renders when the underlying chat status changes', () => {
+  it('should re-render when the chat status moves with its run phase', () => {
+    const captured: { store?: ChatSessionStore } = {};
     const { result } = renderHook(
       () => {
         useChatSession('chat_a', 'proj_a');
-        return useChatSessionSnapshot('chat_a', (session) => session?.chat.status);
+        const store = useChatSessionStore();
+        captured.store = store;
+        return useChatSessionSnapshot('chat_a', () => store.getChatStatus('chat_a'));
       },
       { wrapper: createWrapper() },
     );
 
-    const fake = harness.created[0]!;
     expect(result.current).toBe('ready');
 
     act(() => {
-      fake.status = 'streaming';
-      fake.emitStatusChange();
+      publishLogRows(captured.store!, 'chat_a', runningRows());
     });
 
     expect(result.current).toBe('streaming');

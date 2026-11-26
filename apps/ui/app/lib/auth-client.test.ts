@@ -34,4 +34,21 @@ describe('authClient runtime environment', () => {
 
     expect(fetch).toHaveBeenCalledWith('https://api.host.test/v1/auth/get-session', expect.any(Object));
   });
+
+  it('sends nothing while the page reads offline, and asks again once it reads online (onboarding DT3)', async () => {
+    globalThis.window.ENV = {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- browser environment keys are uppercase by contract.
+      TAU_API_URL: 'https://api.host.test',
+    };
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ user: null, session: null }));
+    const onLine = vi.spyOn(globalThis.navigator, 'onLine', 'get').mockReturnValue(false);
+    const { authClient } = await import('#lib/auth-client.js');
+
+    await expect(authClient.getSession()).rejects.toThrow(TypeError);
+    expect(fetch).not.toHaveBeenCalled();
+
+    onLine.mockReturnValue(true);
+    await authClient.getSession();
+    expect(fetch).toHaveBeenCalledWith('https://api.host.test/v1/auth/get-session', expect.any(Object));
+  });
 });

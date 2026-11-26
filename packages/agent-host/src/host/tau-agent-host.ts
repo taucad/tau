@@ -1244,6 +1244,15 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     store.outbox = slot.mine;
   };
 
+  /** Until no delivery to M1 waits on a flush for this chat ({@link inOrder}); a failed flush drops, never rejects. */
+  const drained = async (chatId: string): Promise<void> => {
+    const pending = (): Promise<void> | undefined => stores.get(chatId)?.outbox;
+    for (let waiting = pending(); waiting !== undefined; waiting = pending()) {
+      // oxlint-disable-next-line no-await-in-loop -- a delivery queued meanwhile is waited for too.
+      await waiting;
+    }
+  };
+
   const serial = async <Result>(chatId: string, work: () => Promise<Result>): Promise<Result> => {
     const store = storeOf(chatId);
     const previous = store.chain;
@@ -3339,6 +3348,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       try {
         if (ahead !== undefined) {
           await ahead;
+        }
+        /* WP-10 step B: M1 decides on every row a reader could already see, so the deliveries still waiting on a flush
+         * land first; a client that saw a paused row and approved at once is not refused for M1 not knowing it yet. */
+        if (stores.get(ordered)?.outbox !== undefined) {
+          await drained(ordered);
         }
         /*
          * Round 22: a copy of a command this host already sent on (in flight, or applied durably) is a replay. It is

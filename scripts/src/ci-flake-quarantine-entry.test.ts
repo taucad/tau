@@ -12,6 +12,7 @@ import {
   applyPlan,
   mayAutoMerge,
   proposedFiles,
+  readReturns,
   reconcileEntryBranches,
   validatePlan,
 } from '#ci-flake-quarantine-entry-cli.js';
@@ -21,12 +22,15 @@ import {
   failsEveryAttempt,
   issueBody,
   pullRequestBody,
+  identityHashOf,
   narrowVariant,
   offenders,
   planEntries,
   renderQuarantine,
 } from '#ci-flake-quarantine-entry.js';
 import { identityMarker } from '#flake-regression.js';
+import { removalMarker } from '#ci-flake-quarantine-release.js';
+import type { ReturnRecord } from '#ci-flake-quarantine-release.js';
 import type { EntryPlan, PlanInput, WorkspaceProject } from '#ci-flake-quarantine-entry.js';
 import { GitHubError } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
@@ -732,5 +736,160 @@ describe('the entry helpers', () => {
 
     expect(body).toContain("`see 'x' @octocat`");
     expect(body.startsWith(identityMarker(offender.id))).toBe(true);
+  });
+});
+
+describe('the 30-day return (FQ-9)', () => {
+  const record: ReturnRecord = {
+    identity: identityHashOf(id.order),
+    path: 'packages/host/quarantine.json',
+    created: '2026-11-10',
+    expires: '2026-11-24',
+    renewal: { by: 'rifont', on: '2026-11-12' },
+    issue: 77,
+    released: '2026-11-14',
+  };
+
+  it('should re-enter a test released in the last 30 days as the same entry, for the operator', () => {
+    const result = plan(replayWeek(), { returns: new Map([[record.identity, record]]) });
+    const returned = result.admitted.find((planned) => planned.id === id.order);
+
+    expect(returned).toMatchObject({
+      linkedIssue: 77,
+      returned: record,
+      entry: { issue: 77, created: '2026-11-10', expires: '2026-11-24', renewal: { by: 'rifont', on: '2026-11-12' } },
+    });
+    expect(returned?.entry.evidence).toMatch(/^returned within 30 days of its release on 2026-11-14; 2 flake events/u);
+    expect(
+      readQuarantine(
+        JSON.stringify({ entries: [{ ...returned?.entry }] }),
+        { projectRoot: 'packages/host' },
+        '2026-11-22',
+      ).problems,
+    ).toEqual([]);
+  });
+
+  it('should refuse a return whose entry has expired: it keeps gating and goes to the operator', () => {
+    const expired = { ...record, expires: '2026-11-21' };
+    const result = plan(replayWeek(), { returns: new Map([[record.identity, expired]]) });
+
+    expect(result.refused.find((refusal) => refusal.id === id.order)).toMatchObject({
+      kind: 'returned',
+      linkedIssue: 77,
+      returned: expired,
+    });
+  });
+
+  it('should reopen the owner issue of a return for the operator, whether it re-enters or not', async () => {
+    const returns = new Map([[record.identity, record]]);
+    const checked = validatePlan(plan(replayWeek(), { returns }), {
+      workspace,
+      readTracked: (path) => testFiles.get(path),
+      today: '2026-11-22',
+    });
+    const { github, requests } = fakeGitHub();
+
+    await applyPlan(github, checked.plan, {
+      base: 'main',
+      baseSha: sha(1),
+      quarantines: [],
+      problems: checked.problems,
+      today: '2026-11-22',
+    });
+
+    expect(requests.find((request) => request.method === 'PATCH' && request.path.endsWith('/issues/77'))?.body).toEqual(
+      { state: 'open', state_reason: 'reopened' },
+    );
+    expect(requests.find((request) => request.path.endsWith('/issues/77/labels'))?.body).toEqual({
+      labels: ['flake:needs-operator'],
+    });
+    const tree = requests.find((request) => request.path.endsWith('/git/trees'))?.body as {
+      tree: Array<{ path: string; content: string }>;
+    };
+    const entries = tree.tree.flatMap(
+      (file) => (JSON.parse(file.content) as { entries: Array<{ issue: number }> }).entries,
+    );
+    expect(entries.map((entry) => entry.issue)).toContain(77);
+
+    const refusedOnly = await applyPlan(
+      fakeGitHub().github,
+      {
+        admitted: [],
+        held: [],
+        refused: plan(replayWeek(), {
+          returns: new Map([[record.identity, { ...record, expires: '2026-11-21' }]]),
+        }).refused.filter((refusal) => refusal.kind === 'returned'),
+      },
+      { base: 'main', baseSha: sha(1), quarantines: [], problems: [], today: '2026-11-22' },
+    );
+    expect(refusedOnly.outcome).toEqual(['Reopened #77 for the operator: a return that is not quarantined again.']);
+  });
+
+  it('should not reopen or comment again on a return an earlier run handed to the operator', async () => {
+    const open = { ...record, expires: '2026-11-21', open: true };
+    const refused = plan(replayWeek(), { returns: new Map([[record.identity, open]]) }).refused.filter(
+      (refusal) => refusal.kind === 'returned',
+    );
+    const { github, requests } = fakeGitHub();
+
+    const result = await applyPlan(
+      github,
+      { admitted: [], held: [], refused },
+      { base: 'main', baseSha: sha(1), quarantines: [], problems: [], today: '2026-11-22' },
+    );
+
+    expect(result.outcome).toEqual(['#77 is already open for the operator: a return that is not quarantined again.']);
+    expect(requests.filter((request) => request.method !== 'GET')).toEqual([]);
+  });
+
+  it('should read the releases of the last 30 days from the owner issues', async () => {
+    const requests: string[] = [];
+    const answer = (path: string): unknown => {
+      if (path.includes('/issues?')) {
+        return [
+          { number: 77, state: 'closed' },
+          { number: 78, state: 'closed' },
+          { number: 79, state: 'closed', pull_request: {} },
+          { number: 80, state: 'open' },
+        ];
+      }
+      if (path.includes('/issues/77/comments')) {
+        return [
+          { body: removalMarker('release', record) },
+          { body: removalMarker('released', { ...record, released: '2026-11-14' }) },
+        ];
+      }
+      if (path.includes('/issues/78/comments')) {
+        // Released more than 30 days ago.
+        return [{ body: removalMarker('released', { ...record, identity: 'old', released: '2026-10-01' }) }];
+      }
+      if (path.includes('/issues/80/comments')) {
+        // Reopened by an earlier run: still the same entry.
+        return [{ body: removalMarker('released', { ...record, identity: 'reopened', released: '2026-11-18' }) }];
+      }
+      throw new Error(`unexpected GET ${path}`);
+    };
+    const github: Client = {
+      repository: 'taucad/tau',
+      budget: () => 100,
+      async get<T>(path: string): Promise<T> {
+        requests.push(path);
+        return answer(path) as T;
+      },
+      getText: async () => '',
+      getBytes: async () => new Uint8Array(),
+      send: async () => {
+        throw new Error('unexpected write');
+      },
+    };
+
+    const returns = await readReturns(github, '2026-11-22');
+
+    expect([...returns.values()]).toEqual([
+      { ...record, issue: 77, released: '2026-11-14', open: false },
+      { ...record, identity: 'reopened', issue: 80, released: '2026-11-18', open: true },
+    ]);
+    expect(requests[0]).toContain('state=all&labels=flake%3Areleased&since=2026-10-23T00:00:00Z');
+    expect(requests.some((path) => path.includes('/issues/79/'))).toBe(false);
   });
 });

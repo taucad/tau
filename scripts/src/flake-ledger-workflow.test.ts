@@ -97,6 +97,7 @@ describe('flake ledger workflow', () => {
     const imported = new Set<string>([
       'scripts/src/ci-flake-ledger-ingest-cli.ts',
       'scripts/src/ci-flake-quarantine-entry-cli.ts',
+      'scripts/src/ci-flake-quarantine-release-cli.ts',
     ]);
     // A Set's iteration visits what is added during it, so this walks the whole import graph.
     for (const file of imported) {
@@ -120,9 +121,21 @@ describe('flake ledger workflow', () => {
     }
     // The entry reads every project and quarantine file, and links the one workspace package as pnpm would.
     expect(sparse).toEqual(expect.arrayContaining(['project.json', 'quarantine.json']));
+    // The quarantine module is linked before the ingestion, which reads the entries to count their release bar.
+    const link = steps.findIndex((step) =>
+      step.run?.includes('ln -sfn ../../tools/vitest-ci node_modules/@taucad/vitest-ci'),
+    );
+    const ingest = steps.findIndex((step) => step.run?.startsWith('node scripts/src/ci-flake-ledger-ingest-cli.ts'));
+    expect(link).toBeGreaterThan(-1);
+    expect(link).toBeLessThan(ingest);
     const entry = steps.find((step) => step.run?.includes('node scripts/src/ci-flake-quarantine-entry-cli.ts'));
-    expect(entry?.run).toContain('ln -sfn ../../tools/vitest-ci node_modules/@taucad/vitest-ci');
     // Entries are planned only from a complete ingestion.
     expect((entry as { if?: string } | undefined)?.if).toBe(`\${{ steps.ingest.outcome == 'success' }}`);
+    // Release and expiry too, and an expiry is due on its day even when the entry step failed.
+    const release = steps.findIndex((step) => step.run === 'node scripts/src/ci-flake-quarantine-release-cli.ts');
+    expect(release).toBeGreaterThan(steps.indexOf(entry ?? {}));
+    expect((steps[release] as { if?: string } | undefined)?.if).toBe(
+      `\${{ !cancelled() && steps.ingest.outcome == 'success' }}`,
+    );
   });
 });

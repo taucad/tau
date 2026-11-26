@@ -6,7 +6,8 @@
  * pushes to `--branch` from the last `--lookback-hours` that it has not ingested at their current attempt (or the
  * runs named by `--runs`), downloads each run's `test-outcomes-*` artifacts, counts their outcome rows into the state,
  * confirms lineage pairs through compares, counts the shadow rows' runs (FQ-13, `ci-shadow-rows.ts`; the rows are read
- * from the `project.json` files under `--root`), and writes the state back as one commit on the branch. A run it did not
+ * from the `project.json` files under `--root`), counts each quarantined test's gating executions toward its release
+ * bar (FQ-9, `ci-flake-quarantine-release.ts`; the entries are the `quarantine.json` files under `--root`), and writes the state back as one commit on the branch. A run it did not
  * reach (`--max-runs`, the request budget) is left for the next invocation, which looks back over the same hours, so
  * a `workflow_run` the concurrency group dropped is caught up by the next one or by the daily schedule.
  *
@@ -50,6 +51,8 @@ import {
 } from '#ci-flake-ledger-state.js';
 import type { FlakeEvent, IngestRun, LedgerState, LineageCandidate, OutcomeRow } from '#ci-flake-ledger-state.js';
 import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
+import { readWorkspace } from '#ci-flake-quarantine-entry-cli.js';
+import { countQuarantineRun, quarantinedTests, retainQuarantineTracks } from '#ci-flake-quarantine-release.js';
 import { countShadowRun, readShadowRegistry, renderShadowMarkdown, retainShadowRows } from '#ci-shadow-rows.js';
 
 /** The outcome artifacts FQ-1's test lanes upload: `test-outcomes-<lane>`. */
@@ -248,6 +251,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   }
   const aliases = ledger.aliases ?? [];
   const shadow = await readShadowRegistry(resolve(values.root));
+  const shadowTargets = new Set(shadow.rows.map((row) => `${row.project}:${row.target}`));
   const repository = process.env['GITHUB_REPOSITORY'] ?? 'taucad/tau';
   const api = process.env['GITHUB_API_URL'] ?? 'https://api.github.com';
   const github = client({ api, token, repository, maxRequests });
@@ -255,6 +259,8 @@ const main = async (args: readonly string[]): Promise<number> => {
     ? fileStore(resolve(values['state-file']))
     : branchStore(github, values['state-branch']);
   const now = new Date();
+  // The entries on `main` whose gating executions count toward the release bar (FQ-9).
+  const quarantined = quarantinedTests(await readWorkspace(resolve(values.root)), now.toISOString().slice(0, 10));
 
   const existing = await store.read();
   const state = existing ?? emptyState(now);
@@ -300,6 +306,7 @@ const main = async (args: readonly string[]): Promise<number> => {
       rejectedLines.push(...problems.slice(0, 20));
       // Before `ingestRun`, which records the attempt as ingested.
       countShadowRun(state, { run, rows, registry: shadow.rows });
+      countQuarantineRun(state, { run, rows, tests: quarantined, shadowTargets });
       const result = ingestRun(state, { run, rows, artifacts, rejected, aliases });
       events.push(...result.events);
       for (const candidate of result.candidates) {
@@ -321,6 +328,7 @@ const main = async (args: readonly string[]): Promise<number> => {
 
   pruneState(state, now);
   retainShadowRows(state, shadow.rows);
+  retainQuarantineTracks(state, quarantined);
   if (!existing || ingested.length > 0 || folded.length > 0) {
     state.updatedAt = now.toISOString();
     const message = [

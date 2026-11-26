@@ -6,6 +6,7 @@ import {
   candidateRunNumber,
   judge,
   judgeCandidates,
+  judgeQuarantine,
   judgeRuns,
   maxAge,
   scheduledWorkflows,
@@ -260,6 +261,45 @@ describe('nightly watchdog', () => {
         now,
       });
       expect(verdicts).toEqual([]);
+    });
+  });
+
+  describe('flake quarantine expiry (FQ-9)', () => {
+    const entry = (expiryDay: string, renewed = false): Record<string, unknown> => ({
+      test: 'src/store.test.ts > store > should keep the order',
+      issue: 12,
+      expires: expiryDay,
+      ...(renewed ? { renewal: { by: 'rifont', on: '2026-12-01' } } : {}),
+    });
+    const file = (entries: unknown[]): { path: string; text: string } => ({
+      path: 'packages/host/quarantine.json',
+      text: JSON.stringify({ entries }),
+    });
+
+    it('should page for an entry on its expiry day and every day after, and not before', () => {
+      const verdicts = judgeQuarantine(
+        [file([entry('2026-12-04'), entry('2026-12-01', true), entry('2026-12-05'), 'not an entry'])],
+        '2026-12-04',
+      );
+
+      expect(verdicts.map((verdict) => [verdict.state, verdict.detail])).toEqual([
+        [
+          'failed',
+          'src/store.test.ts > store > should keep the order (owner issue #12) expires today: the flake ledger removes the entry and the test gates again; the operator may renew it once, to 28 days',
+        ],
+        [
+          'failed',
+          'src/store.test.ts > store > should keep the order (owner issue #12) expired on 2026-12-01: the flake ledger removes the entry and the test gates again',
+        ],
+      ]);
+      expect(verdicts[0]).toMatchObject({
+        workflow: { file: 'packages/host/quarantine.json', name: 'Flake quarantine expiry' },
+        url: 'https://github.com/taucad/tau/issues/12',
+      });
+    });
+
+    it('should read nothing from a malformed quarantine.json', () => {
+      expect(judgeQuarantine([{ path: 'a/quarantine.json', text: 'not json' }], '2026-12-04')).toEqual([]);
     });
   });
 });

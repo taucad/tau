@@ -69,6 +69,14 @@ import type {
   Refusal,
   WorkspaceProject,
 } from '#ci-flake-quarantine-entry.js';
+import {
+  isRecentRelease,
+  lastLanded,
+  operatorLabel,
+  releasedLabel,
+  returnWindowDays,
+} from '#ci-flake-quarantine-release.js';
+import type { ReturnRecord } from '#ci-flake-quarantine-release.js';
 import { readShadowRegistry } from '#ci-shadow-rows.js';
 import { quarantineProblems } from '#validate-quarantine.js';
 import type { QuarantineSource } from '#validate-quarantine.js';
@@ -79,7 +87,8 @@ export type Workspace = {
   readonly quarantines: readonly QuarantineText[];
 };
 
-const encodePath = (path: string): string =>
+/** A path in an API URL: each segment encoded, the slashes kept. */
+export const encodePath = (path: string): string =>
   path
     .split('/')
     .map((segment) => encodeURIComponent(segment))
@@ -192,6 +201,14 @@ const withFiles = (base: readonly QuarantineText[], changed: readonly Quarantine
   ...changed,
 ];
 
+/** `validate-quarantine`'s problems on the workspace's quarantine files with `changed` written over them. */
+export const treeProblems = (
+  workspace: Workspace,
+  changed: readonly QuarantineText[],
+  context: { readonly readTracked: (path: string) => string | undefined; readonly today: string },
+): string[] =>
+  quarantineProblems(sources(workspace, withFiles(workspace.quarantines, changed)), context.readTracked, context.today);
+
 /**
  * Check the plan with `validate-quarantine`'s rules, one admitted entry at a time: an entry that adds a problem the
  * tree on `main` does not have is refused. Returns the checked plan and the problems left on the proposed tree.
@@ -264,6 +281,38 @@ export const trackedPaths = (workspace: Workspace, admitted: readonly PlannedEnt
   return [...paths].sort();
 };
 
+/**
+ * The test files the validator reads: from disk when the checkout has them (a sparse checkout does not), else at
+ * `ref` through the API, unless offline. A file that does not exist is left out.
+ */
+export const readTestFiles = async (
+  github: Client | undefined,
+  files: { readonly root: string; readonly paths: readonly string[]; readonly ref: string },
+): Promise<Map<string, string | undefined>> => {
+  const contents = new Map<string, string | undefined>();
+  for (const path of files.paths) {
+    const local = join(files.root, path);
+    if (existsSync(local)) {
+      // oxlint-disable-next-line no-await-in-loop -- a few files
+      contents.set(path, await readFile(local, 'utf8'));
+    } else if (github) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- a few files
+        const text = await github.getText(
+          `/repos/${github.repository}/contents/${encodePath(path)}?ref=${files.ref}`,
+          'application/vnd.github.raw+json',
+        );
+        contents.set(path, text);
+      } catch (error) {
+        if (!(error instanceof GitHubError) || error.status !== 404) {
+          throw error;
+        }
+      }
+    }
+  }
+  return contents;
+};
+
 type Issue = { readonly number: number; readonly body?: string; readonly pull_request?: unknown };
 
 /** Open owner issues by their identity marker. */
@@ -325,7 +374,8 @@ export type ApplyResult = {
 export const mayAutoMerge = (paths: readonly string[], problems: readonly string[]): boolean =>
   paths.length > 0 && problems.length === 0 && paths.every((path) => baseName(path) === 'quarantine.json');
 
-const enableAutoMerge = async (github: Client, nodeId: string): Promise<string | undefined> => {
+/** Request squash auto-merge on a pull request; the refusal's message when GitHub refuses. */
+export const enableAutoMerge = async (github: Client, nodeId: string): Promise<string | undefined> => {
   const response = await github.send<{ errors?: Array<{ message?: string }> }>('POST', '/graphql', {
     query:
       'mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) { clientMutationId } }',
@@ -334,8 +384,105 @@ const enableAutoMerge = async (github: Client, nodeId: string): Promise<string |
   return response.errors?.map((error) => error.message ?? 'unknown error').join('; ');
 };
 
-const comment = async (github: Client, issue: number, body: string): Promise<void> => {
+/** Comment on an issue. */
+export const comment = async (github: Client, issue: number, body: string): Promise<void> => {
   await github.send('POST', `/repos/${github.repository}/issues/${issue}/comments`, { body });
+};
+
+/** Whether a branch exists. */
+export const branchExists = async (github: Client, branch: string): Promise<boolean> => {
+  try {
+    await github.get(`/repos/${github.repository}/git/ref/heads/${encodePath(branch)}`);
+    return true;
+  } catch (error) {
+    if (!(error instanceof GitHubError) || error.status !== 404) {
+      throw error;
+    }
+    return false;
+  }
+};
+
+/** Push one commit on `baseSha` that writes `files`, as a new branch, through the Git data API. */
+export const pushFiles = async (
+  github: Client,
+  push: {
+    readonly baseSha: string;
+    readonly branch: string;
+    readonly files: readonly QuarantineText[];
+    readonly message: string;
+  },
+): Promise<void> => {
+  const repo = `/repos/${github.repository}`;
+  const baseCommit = await github.get<{ tree: { sha: string } }>(`${repo}/git/commits/${push.baseSha}`);
+  const tree = await github.send<{ sha: string }>('POST', `${repo}/git/trees`, {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- the Git data API's field name
+    base_tree: baseCommit.tree.sha,
+    tree: push.files.map((file) => ({ path: file.path, mode: '100644', type: 'blob', content: file.text })),
+  });
+  const commit = await github.send<{ sha: string }>('POST', `${repo}/git/commits`, {
+    message: push.message,
+    tree: tree.sha,
+    parents: [push.baseSha],
+  });
+  await github.send('POST', `${repo}/git/refs`, { ref: `refs/heads/${push.branch}`, sha: commit.sha });
+};
+
+/**
+ * Hand an owner issue to the operator: reopen it, label it `flake:needs-operator` and say why. A return within 30
+ * days of release goes to the operator, not the agent (FQ-9, D5).
+ */
+export const reopenForOperator = async (github: Client, issue: number, note: string): Promise<void> => {
+  const repo = `/repos/${github.repository}`;
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
+  await github.send('PATCH', `${repo}/issues/${issue}`, { state: 'open', state_reason: 'reopened' });
+  await github.send('POST', `${repo}/issues/${issue}/labels`, { labels: [operatorLabel] });
+  await comment(github, issue, note);
+};
+
+type ReleasedIssue = {
+  readonly number: number;
+  readonly state?: string;
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- the REST API's field name
+  readonly pull_request?: unknown;
+};
+
+/**
+ * The releases of the last 30 days, by identity hash: each owner issue labelled `flake:released` and the entry its
+ * newest landed-release comment records, with the day it landed (FQ-9). A test that meets the entry rule again
+ * re-enters as that entry. An issue an earlier run reopened stays in the list, so the return stays the same entry.
+ */
+export const readReturns = async (github: Client, today: string): Promise<Map<string, ReturnRecord>> => {
+  const repo = `/repos/${github.repository}`;
+  const since = `${addDays(today, -returnWindowDays)}T00:00:00Z`;
+  const returns = new Map<string, ReturnRecord>();
+  for (let page = 1; page <= 3; page += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- pages are read in order
+    const issues = await github.get<ReleasedIssue[]>(
+      `${repo}/issues?state=all&labels=${encodeURIComponent(releasedLabel)}&since=${since}&per_page=100&page=${page}`,
+    );
+    for (const issue of issues) {
+      if (issue.pull_request !== undefined) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one issue's comments at a time
+      const comments = await github.get<Array<{ body?: string }>>(
+        `${repo}/issues/${issue.number}/comments?per_page=100`,
+      );
+      const landed = lastLanded(comments.map((entry) => entry.body ?? ''));
+      const known = landed ? returns.get(landed.identity) : undefined;
+      if (
+        landed &&
+        isRecentRelease(landed.released, today) &&
+        (known === undefined || known.released < landed.released)
+      ) {
+        returns.set(landed.identity, { ...landed, issue: issue.number, open: issue.state === 'open' });
+      }
+    }
+    if (issues.length < 100) {
+      break;
+    }
+  }
+  return returns;
 };
 
 /** Open or link the owner issues, push the entry branch, open its pull request and enable auto-merge. */
@@ -344,7 +491,11 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
   const outcome: string[] = [];
   const issues = new Map<string, number>();
   const neverQuarantine = plan.refused.filter((refusal) => refusal.kind === 'never-quarantine');
-  if (plan.admitted.length === 0 && neverQuarantine.length === 0) {
+  if (
+    plan.admitted.length === 0 &&
+    neverQuarantine.length === 0 &&
+    !plan.refused.some((refusal) => refusal.returned !== undefined)
+  ) {
     return { issues, autoMerge: false, outcome: ['Nothing to enter.'] };
   }
   const existing = await openIssues(github);
@@ -378,6 +529,22 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
     const issue = await ownerIssue(refusal, body);
     issues.set(refusal.id, issue);
   }
+  // A return within 30 days of release goes to the operator, whether it re-enters or not (FQ-9, D5).
+  for (const refusal of plan.refused.filter((entry) => entry.returned !== undefined)) {
+    const issue = refusal.returned?.issue ?? 0;
+    issues.set(refusal.id, issue);
+    if (refusal.returned?.open === true) {
+      outcome.push(`#${issue} is already open for the operator: a return that is not quarantined again.`);
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- issues are updated one at a time
+    await reopenForOperator(
+      github,
+      issue,
+      `**Returned** within ${returnWindowDays} days of its release on ${refusal.returned?.released ?? ''}: not quarantined again, ${refusal.reason.replaceAll('`', "'")}. It goes to the operator, not the agent.`,
+    );
+    outcome.push(`Reopened #${issue} for the operator: a return that is not quarantined again.`);
+  }
   const admitted: PlannedEntry[] = [];
   for (const planned of plan.admitted) {
     // oxlint-disable-next-line no-await-in-loop -- issues are opened one at a time
@@ -386,6 +553,15 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
       issueBody(planned, { repository: github.repository, entry: planned.entry }),
     );
     issues.set(planned.id, issue);
+    if (planned.returned && planned.returned.open !== true) {
+      // oxlint-disable-next-line no-await-in-loop -- issues are updated one at a time
+      await reopenForOperator(
+        github,
+        issue,
+        `**Returned** within ${returnWindowDays} days of its release on ${planned.returned.released}: it re-enters as the same entry (created ${planned.entry.created}, expires ${planned.entry.expires}) and goes to the operator, not the agent (testing policy § 16.3).`,
+      );
+      outcome.push(`Reopened #${issue} for the operator: a return re-enters as the same entry.`);
+    }
     admitted.push({ ...planned, entry: { ...planned.entry, issue } });
   }
   if (admitted.length === 0) {
@@ -398,33 +574,22 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
     .digest('hex')
     .slice(0, 8);
   const branch = `${entryBranchPrefix}${context.today}-${key}`;
-  try {
-    await github.get(`${repo}/git/ref/heads/${encodePath(branch)}`);
+  if (await branchExists(github, branch)) {
     outcome.push(`Branch \`${branch}\` already exists; nothing pushed.`);
     return { issues, branch, autoMerge: false, outcome };
-  } catch (error) {
-    if (!(error instanceof GitHubError) || error.status !== 404) {
-      throw error;
-    }
   }
-  const baseCommit = await github.get<{ tree: { sha: string } }>(`${repo}/git/commits/${context.baseSha}`);
-  const tree = await github.send<{ sha: string }>('POST', `${repo}/git/trees`, {
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- the Git data API's field name
-    base_tree: baseCommit.tree.sha,
-    tree: files.map((file) => ({ path: file.path, mode: '100644', type: 'blob', content: file.text })),
-  });
   const title = pullRequestTitle(admitted);
   const autoMerge = mayAutoMerge(
     files.map((file) => file.path),
     context.problems,
   );
   const body = pullRequestBody(admitted, { autoMerge, problems: context.problems });
-  const commit = await github.send<{ sha: string }>('POST', `${repo}/git/commits`, {
+  await pushFiles(github, {
+    baseSha: context.baseSha,
+    branch,
+    files,
     message: `${title}\n\n${admitted.map((planned) => `- ${planned.entry.test} (#${planned.entry.issue})`).join('\n')}\n`,
-    tree: tree.sha,
-    parents: [context.baseSha],
   });
-  await github.send('POST', `${repo}/git/refs`, { ref: `refs/heads/${branch}`, sha: commit.sha });
   outcome.push(`Pushed \`${branch}\` (${files.map((file) => `\`${file.path}\``).join(', ')}).`);
 
   let pull: { number: number; node_id: string } | undefined;
@@ -608,6 +773,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   const shadowTargets = new Set(registry.rows.map((row) => `${row.project}:${row.target}`));
   const reconciled = write ? await reconcileEntryBranches(github, values.base, values.today) : [];
   const pending = offline ? [] : await readPending(github, baseSha);
+  const returns = offline ? undefined : await readReturns(github, values.today);
   const planned = planEntries({
     state,
     projects: workspace.projects,
@@ -617,30 +783,15 @@ const main = async (args: readonly string[]): Promise<number> => {
     today: values.today,
     owner: values.owner || undefined,
     shadowTargets,
+    returns,
   });
 
   // The validator reads the test files: from disk when the checkout has them, else at the checkout's commit.
-  const contents = new Map<string, string | undefined>();
-  for (const path of trackedPaths(workspace, planned.admitted)) {
-    const local = join(root, path);
-    if (existsSync(local)) {
-      // oxlint-disable-next-line no-await-in-loop -- a few files
-      contents.set(path, await readFile(local, 'utf8'));
-    } else if (!offline) {
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- a few files
-        const text = await github.getText(
-          `/repos/${repository}/contents/${encodePath(path)}?ref=${baseSha}`,
-          'application/vnd.github.raw+json',
-        );
-        contents.set(path, text);
-      } catch (error) {
-        if (!(error instanceof GitHubError) || error.status !== 404) {
-          throw error;
-        }
-      }
-    }
-  }
+  const contents = await readTestFiles(offline ? undefined : github, {
+    root,
+    paths: trackedPaths(workspace, planned.admitted),
+    ref: baseSha,
+  });
   const { plan, problems: left } = validatePlan(planned, {
     workspace,
     readTracked: (path) => contents.get(path),

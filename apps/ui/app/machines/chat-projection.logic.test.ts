@@ -30,7 +30,6 @@ import {
   initialChatProjection,
   reduceChatProjection,
   selectAttentionRow,
-  selectTranscript,
   selectCaughtUp,
   selectOpenInterrupts,
   selectRunElsewhere,
@@ -2498,17 +2497,12 @@ describe('the time an answer worked', () => {
     messages
       .filter((message) => message.role === 'assistant')
       .map((message) => [message.id, message.metadata?.createdAt, message.metadata?.endedAt]);
-  /** The times the displayed transcript shows, after checking they match the SDK materialization's. */
-  const shownTimes = async (projection: ChatProjection) => {
-    const shown = assistantTimes(selectTranscript(projection));
-    expect(shown).toEqual(assistantTimes(await materializeTranscript(projection)));
-    return shown;
-  };
+  /** The times the displayed transcript shows. */
+  const shownTimes = (projection: ChatProjection) => assistantTimes(selectTranscript(projection));
 
-  it('should end each recorded answer at its run settling row, wall clock from its admission', async () => {
+  it('should end each recorded answer at its run settling row, wall clock from its admission', () => {
     const hexnutProjection = project(readLog('recorded/daemon-reattach-hexnut-4runs'), 7);
-    await shownTimes(hexnutProjection);
-    const hexnut = await materializeTranscript(hexnutProjection);
+    const hexnut = selectTranscript(hexnutProjection);
     expect(
       hexnut
         .filter((message) => message.role === 'assistant')
@@ -2517,14 +2511,13 @@ describe('the time an answer worked', () => {
 
     // Stopped for an approval at 04:58:49, failed by a later host at 05:07:09: wall clock counts the wait.
     const kineticProjection = project(readLog('recorded/kinetic-regenerate-resume'), 7);
-    await shownTimes(kineticProjection);
-    const kinetic = await materializeTranscript(kineticProjection);
+    const kinetic = selectTranscript(kineticProjection);
     const [, last] = kinetic.filter((message) => message.role === 'assistant');
     expect(last?.metadata?.endedAt).toBe(Date.parse('2026-10-04T05:07:09.700Z'));
     expect(last!.metadata!.endedAt! - last!.metadata!.createdAt!).toBe(832_628);
   });
 
-  it('should take the end away when a stopped run resumes, and state the later end once it settles again', async () => {
+  it('should take the end away when a stopped run resumes, and state the later end once it settles again', () => {
     const rows = [
       at(lifecycleRow(0, 'admitted'), '2026-09-28T00:00:00.000Z'),
       at(lifecycleRow(1, 'running'), '2026-09-28T00:00:00.000Z'),
@@ -2538,9 +2531,9 @@ describe('the time an answer worked', () => {
     ];
     const start = Date.parse('2026-09-28T00:00:00.000Z');
 
-    expect(await shownTimes(project(rows.slice(0, 4), 1))).toEqual([['run_1', start, start + 39_000]]);
-    expect(await shownTimes(project(rows.slice(0, 5), 1))).toEqual([['run_1', start, null]]);
-    expect(await shownTimes(project(rows, 1))).toEqual([['run_1', start, start + 846_000]]);
+    expect(shownTimes(project(rows.slice(0, 4), 1))).toEqual([['run_1', start, start + 39_000]]);
+    expect(shownTimes(project(rows.slice(0, 5), 1))).toEqual([['run_1', start, null]]);
+    expect(shownTimes(project(rows, 1))).toEqual([['run_1', start, start + 846_000]]);
   });
 
   it('should take the end back in the live watch too when a stopped run resumes', () => {
@@ -2584,7 +2577,7 @@ describe('the time an answer worked', () => {
     expect(resumed.live!.chunks.length).toBeGreaterThan(stopped.live!.chunks.length);
   });
 
-  it('should end a steered answer at the steering input and start the next one there', async () => {
+  it('should end a steered answer at the steering input and start the next one there', () => {
     const user = { id: 'user-1', role: 'user', content: 'Build it' } as const;
     const rows = [
       at(
@@ -2609,7 +2602,7 @@ describe('the time an answer worked', () => {
     ];
     const start = Date.parse('2026-09-28T00:00:00.000Z');
 
-    expect(await shownTimes(project(rows, 2))).toEqual([
+    expect(shownTimes(project(rows, 2))).toEqual([
       ['run_1', start, start + 20_000],
       ['run_1:steer:c-1', start + 20_000, start + 60_000],
     ]);

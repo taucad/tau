@@ -29,7 +29,7 @@ import {
   workspaceIdentityConflictCopy,
 } from '@taucad/ui-core/filesystem/workspace-errors';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useRootStatuses } from '@taucad/files-ui/components/filesystem/folder-status';
+import { claimOncePerFileManager, useRootStatuses } from '@taucad/files-ui/components/filesystem/folder-status';
 
 export type HomeLocationOption = {
   readonly location: HomeProjectCreationLocation;
@@ -105,9 +105,6 @@ const loadingState: ProjectCreationLocationState = {
   options: [],
   canCreate: false,
 };
-
-/** The Home fallback's notice shows once per page load, however many composers mount (B9). */
-let hasShownUnavailableFallback = false;
 
 const isAbortError = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
@@ -284,8 +281,11 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
         restorePreference
           ? getProjectCreationLocation({ webAccessSupported: true, rootStatuses: rootStatusesRef.current }).then(
               ({ location, repaired }) => {
-                if (repaired === 'workspace-unavailable' && !hasShownUnavailableFallback) {
-                  hasShownUnavailableFallback = true;
+                /* The Home fallback's notice shows once per page load, however many composers mount (B9). */
+                if (
+                  repaired === 'workspace-unavailable' &&
+                  claimOncePerFileManager(fileManager.fileManagerRef, 'notice:creation-location-unavailable')
+                ) {
                   toast.info(
                     'Your chosen folder can’t be found right now, so new projects go to Home. Tau uses that folder again when it is back.',
                   );
@@ -327,7 +327,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
         refresh: async () => undefined,
       });
     },
-    [getSelectedWorkspaceRecovery, select],
+    [fileManager.fileManagerRef, getSelectedWorkspaceRecovery, select],
   );
   useEffect(() => {
     loadRef.current = load;

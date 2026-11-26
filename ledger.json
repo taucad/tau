@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-26T19:02:49.870Z",
+  "updatedAt": "2026-11-26T19:58:27.402Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -3147,6 +3147,19 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45885734128,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2868",
+      "sha": "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa",
+      "at": "2026-11-26T19:58:13Z",
+      "conclusion": "success",
+      "artifacts": 40,
+      "counted": 17144,
+      "replayed": 1513,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -3239,14 +3252,14 @@
       }
     },
     "api-agent-observability:test": {
-      "executions": 36,
-      "tests": 5063,
+      "executions": 38,
+      "tests": 5344,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 16
+        "test linux-x64": 18
       }
     },
     "api-auth:test": {
@@ -3261,36 +3274,36 @@
       }
     },
     "api-billing:test": {
-      "executions": 36,
-      "tests": 8286,
+      "executions": 38,
+      "tests": 8746,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 16
+        "test linux-x64": 18
       }
     },
     "api-chat:test": {
-      "executions": 38,
-      "tests": 2635,
+      "executions": 40,
+      "tests": 2774,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 16
+        "test linux-x64": 18
       }
     },
     "api-contracts:test": {
-      "executions": 20,
-      "tests": 40,
+      "executions": 21,
+      "tests": 42,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 8
+        "test linux-x64": 9
       }
     },
     "api-core:test": {
@@ -3316,25 +3329,25 @@
       }
     },
     "api-e2e:test:git": {
-      "executions": 29,
-      "tests": 696,
+      "executions": 30,
+      "tests": 720,
       "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:git linux-x64": 10
+        "test:git linux-x64": 11
       }
     },
     "api-e2e:test:server-modes": {
-      "executions": 31,
-      "tests": 62,
+      "executions": 32,
+      "tests": 64,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:server-modes linux-x64": 11
+        "test:server-modes linux-x64": 12
       }
     },
     "api-email:test": {
@@ -3360,25 +3373,25 @@
       }
     },
     "api-git-core:test": {
-      "executions": 36,
-      "tests": 8820,
+      "executions": 38,
+      "tests": 9310,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 16
+        "test linux-x64": 18
       }
     },
     "api-git-mirror:test": {
-      "executions": 36,
-      "tests": 3456,
+      "executions": 38,
+      "tests": 3648,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 16
+        "test linux-x64": 18
       }
     },
     "api-hosts:test": {
@@ -3404,25 +3417,25 @@
       }
     },
     "api-llm-gateway:test": {
-      "executions": 36,
-      "tests": 6360,
+      "executions": 38,
+      "tests": 6719,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 16
+        "test linux-x64": 18
       }
     },
     "api-object-storage:test": {
-      "executions": 36,
-      "tests": 2322,
+      "executions": 38,
+      "tests": 2451,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 16
+        "test linux-x64": 18
       }
     },
     "api-observability:test": {
@@ -3437,14 +3450,14 @@
       }
     },
     "api-projects:test": {
-      "executions": 36,
-      "tests": 5850,
+      "executions": 38,
+      "tests": 6175,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 16
+        "test linux-x64": 18
       }
     },
     "api-redis:test": {
@@ -3470,25 +3483,25 @@
       }
     },
     "api:test": {
-      "executions": 38,
-      "tests": 23561,
+      "executions": 40,
+      "tests": 24802,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 16
+        "test linux-x64": 18
       }
     },
     "api:test:models": {
-      "executions": 30,
-      "tests": 150,
+      "executions": 31,
+      "tests": 155,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:models linux-x64": 11
+        "test:models linux-x64": 12
       }
     },
     "apps-runtime-e2e:vitest": {
@@ -3533,14 +3546,14 @@
       }
     },
     "billing-e2e:test": {
-      "executions": 40,
-      "tests": 2040,
+      "executions": 41,
+      "tests": 2091,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 11
+        "test linux-x64": 12
       }
     },
     "billing-ui:test": {
@@ -4529,14 +4542,14 @@
       }
     },
     "scripts:test:e2e": {
-      "executions": 69,
-      "tests": 4002,
+      "executions": 70,
+      "tests": 4060,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e linux-x64": 24
+        "test:e2e linux-x64": 25
       }
     },
     "settings-ui:test": {
@@ -4704,331 +4717,331 @@
       }
     },
     "ui-e2e:test": {
-      "executions": 12,
-      "tests": 1188,
+      "executions": 13,
+      "tests": 1287,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test linux-x64": 12
+        "test linux-x64": 13
       }
     },
     "ui-e2e:test:e2e:adaptive": {
-      "executions": 50,
-      "tests": 750,
+      "executions": 51,
+      "tests": 765,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T08:23:55Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:adaptive linux-x64 browser=chromium": 15
+        "test:e2e:adaptive linux-x64 browser=chromium": 16
       }
     },
     "ui-e2e:test:e2e:browser-host-chat": {
-      "executions": 4,
-      "tests": 12,
-      "failures": 4,
+      "executions": 5,
+      "tests": 15,
+      "failures": 5,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T17:03:39Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:browser-host-chat linux-x64 browser=chromium": 4
+        "test:e2e:browser-host-chat linux-x64 browser=chromium": 5
       }
     },
     "ui-e2e:test:e2e:daemon-host": {
-      "executions": 63,
-      "tests": 201,
+      "executions": 65,
+      "tests": 208,
       "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:daemon-host linux-x64 browser=chromium": 14,
-        "test:e2e:daemon-host linux-x64": 12
+        "test:e2e:daemon-host linux-x64 browser=chromium": 15,
+        "test:e2e:daemon-host linux-x64": 13
       }
     },
     "ui-e2e:test:e2e:deploy-skew": {
-      "executions": 12,
-      "tests": 420,
+      "executions": 13,
+      "tests": 455,
       "failures": 2,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:deploy-skew linux-x64": 12
+        "test:e2e:deploy-skew linux-x64": 13
       }
     },
     "ui-e2e:test:e2e:development": {
-      "executions": 50,
-      "tests": 500,
+      "executions": 51,
+      "tests": 510,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:development linux-x64 browser=chromium": 14
+        "test:e2e:development linux-x64 browser=chromium": 15
       }
     },
     "ui-e2e:test:e2e:filesystem-scenarios": {
-      "executions": 67,
-      "tests": 2737,
+      "executions": 69,
+      "tests": 2811,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:filesystem-scenarios linux-x64 browser=chromium": 16,
-        "test:e2e:filesystem-scenarios linux-x64": 12
+        "test:e2e:filesystem-scenarios linux-x64 browser=chromium": 17,
+        "test:e2e:filesystem-scenarios linux-x64": 13
       }
     },
     "ui-e2e:test:e2e:journey-chat-1": {
-      "executions": 10,
-      "tests": 170,
-      "failures": 10,
+      "executions": 11,
+      "tests": 187,
+      "failures": 11,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-chat-1 linux-x64 browser=chromium": 9
+        "test:e2e:journey-chat-1 linux-x64 browser=chromium": 10
       }
     },
     "ui-e2e:test:e2e:journey-chat-2": {
-      "executions": 28,
-      "tests": 238,
+      "executions": 30,
+      "tests": 255,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-chat-2 linux-x64 browser=chromium": 13,
-        "test:e2e:journey-chat-2 linux-x64 project=chromium-no-webgpu browser=chromium": 13
+        "test:e2e:journey-chat-2 linux-x64 browser=chromium": 14,
+        "test:e2e:journey-chat-2 linux-x64 project=chromium-no-webgpu browser=chromium": 14
       }
     },
     "ui-e2e:test:e2e:journey-chat-3": {
-      "executions": 12,
-      "tests": 48,
+      "executions": 13,
+      "tests": 52,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-chat-3 linux-x64 browser=chromium": 11
+        "test:e2e:journey-chat-3 linux-x64 browser=chromium": 12
       }
     },
     "ui-e2e:test:e2e:journey-chat-4": {
-      "executions": 3,
-      "tests": 33,
+      "executions": 4,
+      "tests": 44,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T18:01:52Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-chat-4 linux-x64 browser=chromium": 3
+        "test:e2e:journey-chat-4 linux-x64 browser=chromium": 4
       }
     },
     "ui-e2e:test:e2e:journey-chat-5": {
-      "executions": 3,
-      "tests": 30,
+      "executions": 4,
+      "tests": 40,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T18:01:52Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-chat-5 linux-x64 browser=chromium": 3
+        "test:e2e:journey-chat-5 linux-x64 browser=chromium": 4
       }
     },
     "ui-e2e:test:e2e:journey-mobile-1": {
-      "executions": 11,
-      "tests": 110,
-      "failures": 0,
-      "otherFailures": 0,
-      "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "targets": {
-        "test:e2e:journey-mobile-1 linux-x64 browser=chromium": 10
-      }
-    },
-    "ui-e2e:test:e2e:journey-mobile-2": {
-      "executions": 11,
-      "tests": 231,
-      "failures": 2,
-      "otherFailures": 0,
-      "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "targets": {
-        "test:e2e:journey-mobile-2 linux-x64 browser=chromium": 10
-      }
-    },
-    "ui-e2e:test:e2e:journey-mobile-3": {
-      "executions": 13,
-      "tests": 299,
-      "failures": 0,
-      "otherFailures": 0,
-      "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "targets": {
-        "test:e2e:journey-mobile-3 linux-x64 browser=chromium": 12
-      }
-    },
-    "ui-e2e:test:e2e:journey-project-1": {
-      "executions": 11,
-      "tests": 154,
-      "failures": 0,
-      "otherFailures": 0,
-      "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "targets": {
-        "test:e2e:journey-project-1 linux-x64 browser=chromium": 10
-      }
-    },
-    "ui-e2e:test:e2e:journey-project-2": {
       "executions": 12,
       "tests": 120,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-project-2 linux-x64 browser=chromium": 11
+        "test:e2e:journey-mobile-1 linux-x64 browser=chromium": 11
+      }
+    },
+    "ui-e2e:test:e2e:journey-mobile-2": {
+      "executions": 12,
+      "tests": 252,
+      "failures": 2,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "targets": {
+        "test:e2e:journey-mobile-2 linux-x64 browser=chromium": 11
+      }
+    },
+    "ui-e2e:test:e2e:journey-mobile-3": {
+      "executions": 14,
+      "tests": 322,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "targets": {
+        "test:e2e:journey-mobile-3 linux-x64 browser=chromium": 13
+      }
+    },
+    "ui-e2e:test:e2e:journey-project-1": {
+      "executions": 12,
+      "tests": 168,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "targets": {
+        "test:e2e:journey-project-1 linux-x64 browser=chromium": 11
+      }
+    },
+    "ui-e2e:test:e2e:journey-project-2": {
+      "executions": 13,
+      "tests": 130,
+      "failures": 0,
+      "otherFailures": 0,
+      "firstSeen": "2026-11-26T09:18:47Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "targets": {
+        "test:e2e:journey-project-2 linux-x64 browser=chromium": 12
       }
     },
     "ui-e2e:test:e2e:journey-project-3": {
-      "executions": 10,
-      "tests": 200,
-      "failures": 13,
+      "executions": 11,
+      "tests": 220,
+      "failures": 15,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-project-3 linux-x64 browser=chromium": 9
+        "test:e2e:journey-project-3 linux-x64 browser=chromium": 10
       }
     },
     "ui-e2e:test:e2e:journey-project-4": {
-      "executions": 12,
-      "tests": 276,
+      "executions": 13,
+      "tests": 299,
       "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-project-4 linux-x64 browser=chromium": 11
+        "test:e2e:journey-project-4 linux-x64 browser=chromium": 12
       }
     },
     "ui-e2e:test:e2e:journey-shell-1": {
-      "executions": 7,
-      "tests": 252,
-      "failures": 21,
+      "executions": 8,
+      "tests": 288,
+      "failures": 24,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-shell-1 linux-x64 browser=chromium": 6
+        "test:e2e:journey-shell-1 linux-x64 browser=chromium": 7
       }
     },
     "ui-e2e:test:e2e:journey-shell-2": {
-      "executions": 15,
-      "tests": 495,
+      "executions": 16,
+      "tests": 528,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-shell-2 linux-x64 browser=chromium": 14
+        "test:e2e:journey-shell-2 linux-x64 browser=chromium": 15
       }
     },
     "ui-e2e:test:e2e:journey-viewer-1": {
-      "executions": 20,
-      "tests": 160,
+      "executions": 22,
+      "tests": 176,
       "failures": 7,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-viewer-1 linux-x64 browser=chromium": 9,
-        "test:e2e:journey-viewer-1 linux-x64 project=webkit-smoke browser=webkit": 9
+        "test:e2e:journey-viewer-1 linux-x64 browser=chromium": 10,
+        "test:e2e:journey-viewer-1 linux-x64 project=webkit-smoke browser=webkit": 10
       }
     },
     "ui-e2e:test:e2e:journey-viewer-2": {
-      "executions": 9,
-      "tests": 180,
-      "failures": 0,
+      "executions": 10,
+      "tests": 200,
+      "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-viewer-2 linux-x64 browser=chromium": 8
+        "test:e2e:journey-viewer-2 linux-x64 browser=chromium": 9
       }
     },
     "ui-e2e:test:e2e:journey-viewer-3": {
-      "executions": 10,
-      "tests": 250,
+      "executions": 11,
+      "tests": 275,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-viewer-3 linux-x64 browser=chromium": 9
+        "test:e2e:journey-viewer-3 linux-x64 browser=chromium": 10
       }
     },
     "ui-e2e:test:e2e:journey-viewer-4": {
-      "executions": 33,
-      "tests": 121,
+      "executions": 36,
+      "tests": 132,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-viewer-4 linux-x64 browser=chromium": 10,
-        "test:e2e:journey-viewer-4 linux-x64 browser=firefox": 10,
-        "test:e2e:journey-viewer-4 linux-x64 project=webkit-smoke browser=webkit": 10
+        "test:e2e:journey-viewer-4 linux-x64 browser=chromium": 11,
+        "test:e2e:journey-viewer-4 linux-x64 browser=firefox": 11,
+        "test:e2e:journey-viewer-4 linux-x64 project=webkit-smoke browser=webkit": 11
       }
     },
     "ui-e2e:test:e2e:journey-viewer-5": {
-      "executions": 10,
-      "tests": 150,
+      "executions": 11,
+      "tests": 165,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-viewer-5 linux-x64 browser=chromium": 9
+        "test:e2e:journey-viewer-5 linux-x64 browser=chromium": 10
       }
     },
     "ui-e2e:test:e2e:journey-viewer-6": {
-      "executions": 45,
-      "tests": 225,
+      "executions": 48,
+      "tests": 240,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T10:48:06Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:journey-viewer-6 linux-x64 browser=chromium": 15,
-        "test:e2e:journey-viewer-6 linux-x64 browser=firefox": 15,
-        "test:e2e:journey-viewer-6 linux-x64 project=webkit-smoke browser=webkit": 15
+        "test:e2e:journey-viewer-6 linux-x64 browser=chromium": 16,
+        "test:e2e:journey-viewer-6 linux-x64 browser=firefox": 16,
+        "test:e2e:journey-viewer-6 linux-x64 project=webkit-smoke browser=webkit": 16
       }
     },
     "ui-e2e:test:e2e:non-isolated": {
-      "executions": 113,
-      "tests": 113,
+      "executions": 115,
+      "tests": 115,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:non-isolated linux-x64 browser=chromium": 17,
-        "test:e2e:non-isolated linux-x64 browser=firefox": 17
+        "test:e2e:non-isolated linux-x64 browser=chromium": 18,
+        "test:e2e:non-isolated linux-x64 browser=firefox": 18
       }
     },
     "ui-e2e:test:e2e:service-worker": {
-      "executions": 12,
-      "tests": 96,
+      "executions": 13,
+      "tests": 104,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:service-worker linux-x64": 12
+        "test:e2e:service-worker linux-x64": 13
       }
     },
     "ui-kit:test": {
@@ -5040,141 +5053,141 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "ui:test": {
-      "executions": 241,
-      "tests": 483573,
+      "executions": 247,
+      "tests": 495812,
       "failures": 1,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:shard-6 linux-x64": 11,
-        "test:shard-2 linux-x64": 11,
-        "test:shard-4 linux-x64": 11,
-        "test:shard-3 linux-x64": 11,
-        "test:shard-1 linux-x64": 11,
-        "test:shard-5 linux-x64": 11
+        "test:shard-6 linux-x64": 12,
+        "test:shard-2 linux-x64": 12,
+        "test:shard-4 linux-x64": 12,
+        "test:shard-3 linux-x64": 12,
+        "test:shard-1 linux-x64": 12,
+        "test:shard-5 linux-x64": 12
       }
     },
     "ui:test:e2e:agent-host": {
-      "executions": 11,
-      "tests": 803,
+      "executions": 12,
+      "tests": 876,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:agent-host linux-x64 browser=chromium": 10
+        "test:e2e:agent-host linux-x64 browser=chromium": 11
       }
     },
     "ui:test:e2e:attachment-image-engines": {
-      "executions": 94,
-      "tests": 5734,
+      "executions": 96,
+      "tests": 5856,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:attachment-image-engines linux-x64 browser=webkit": 12,
-        "test:e2e:attachment-image-engines linux-x64 browser=firefox": 12
+        "test:e2e:attachment-image-engines linux-x64 browser=webkit": 13,
+        "test:e2e:attachment-image-engines linux-x64 browser=firefox": 13
       }
     },
     "ui:test:e2e:chat-message-queue": {
-      "executions": 11,
-      "tests": 462,
+      "executions": 12,
+      "tests": 504,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:chat-message-queue linux-x64 browser=chromium": 10
+        "test:e2e:chat-message-queue linux-x64 browser=chromium": 11
       }
     },
     "ui:test:e2e:chat-print": {
-      "executions": 10,
-      "tests": 759,
+      "executions": 11,
+      "tests": 835,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:chat-print linux-x64 browser=chromium": 9
+        "test:e2e:chat-print linux-x64 browser=chromium": 10
       }
     },
     "ui:test:e2e:chat-viewer": {
-      "executions": 14,
-      "tests": 196,
+      "executions": 15,
+      "tests": 210,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:chat-viewer linux-x64 browser=chromium": 13
+        "test:e2e:chat-viewer linux-x64 browser=chromium": 14
       }
     },
     "ui:test:e2e:editor-layout": {
-      "executions": 11,
-      "tests": 110,
+      "executions": 12,
+      "tests": 120,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:editor-layout linux-x64 browser=chromium": 10
+        "test:e2e:editor-layout linux-x64 browser=chromium": 11
       }
     },
     "ui:test:e2e:follow-latest-output": {
-      "executions": 10,
-      "tests": 20,
+      "executions": 11,
+      "tests": 22,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:follow-latest-output linux-x64 browser=chromium": 9
+        "test:e2e:follow-latest-output linux-x64 browser=chromium": 10
       }
     },
     "ui:test:e2e:history-lanes": {
-      "executions": 10,
-      "tests": 440,
+      "executions": 11,
+      "tests": 484,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:history-lanes linux-x64 browser=chromium": 9
+        "test:e2e:history-lanes linux-x64 browser=chromium": 10
       }
     },
     "ui:test:e2e:terminal-renderer": {
-      "executions": 10,
-      "tests": 240,
+      "executions": 11,
+      "tests": 264,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:terminal-renderer linux-x64 browser=chromium": 9
+        "test:e2e:terminal-renderer linux-x64 browser=chromium": 10
       }
     },
     "ui:test:e2e:viewer-resize": {
-      "executions": 10,
-      "tests": 40,
+      "executions": 11,
+      "tests": 44,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T08:47:22Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "test:e2e:viewer-resize linux-x64 browser=chromium": 9
+        "test:e2e:viewer-resize linux-x64 browser=chromium": 10
       }
     },
     "ui:verify-browser": {
-      "executions": 49,
-      "tests": 6468,
+      "executions": 50,
+      "tests": 6600,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "targets": {
-        "verify-browser linux-x64 browser=chromium": 12
+        "verify-browser linux-x64 browser=chromium": 13
       }
     },
     "units:test": {
@@ -5462,18 +5475,18 @@
       "targetKey": "test:git",
       "file": "src/git/tau-publish.spec.ts",
       "firstSeen": "2026-11-25T23:08:01Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-25T23:08:01Z",
-      "executions": 18,
+      "executions": 19,
       "failures": 1,
       "retriedPasses": 0,
-      "passStreak": 17,
+      "passStreak": 18,
       "variants": {
         "linux-x64": {
-          "executions": 18,
+          "executions": 19,
           "failures": 1,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         }
       },
       "events": [],
@@ -5492,14 +5505,14 @@
         }
       ],
       "passHashes": [
-        "linux-x64 11631708320021556834",
         "linux-x64 17452796299990156034",
         "linux-x64 11817485527791330946",
         "linux-x64 2614259252480476739",
         "linux-x64 13418047268147551051",
         "linux-x64 12654011935540704248",
         "linux-x64 1241968838133284171",
-        "linux-x64 6622610245399255138"
+        "linux-x64 6622610245399255138",
+        "linux-x64 1288645201735438061"
       ],
       "failureShas": [
         "ad6a2532d452cea0cafe2e483aa7b341f6f5c576"
@@ -5733,18 +5746,18 @@
       "targetKey": "test",
       "file": "app/routes/w.$workspace.$project/chat-workbench-dockview.test.tsx",
       "firstSeen": "2026-11-26T00:03:34Z",
-      "lastSeen": "2026-11-26T18:43:27Z",
-      "lastFailure": "2026-11-26T18:43:27Z",
-      "executions": 19,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "lastFailure": "2026-11-26T19:58:13Z",
+      "executions": 20,
       "failures": 0,
-      "retriedPasses": 19,
+      "retriedPasses": 20,
       "passStreak": 0,
       "variants": {
         "linux-x64": {
-          "executions": 19,
+          "executions": 20,
           "failures": 0,
-          "events": 19,
-          "lastSeen": "2026-11-26T18:43:27Z"
+          "events": 20,
+          "lastSeen": "2026-11-26T19:58:13Z"
         }
       },
       "events": [
@@ -5967,18 +5980,30 @@
           "hash": "12939963173018264241",
           "execution": 19,
           "variantExecution": 19
+        },
+        {
+          "kind": "retry",
+          "at": "2026-11-26T19:58:13Z",
+          "run": 45885734128,
+          "attempt": 1,
+          "failedRun": 45885734128,
+          "failedAttempt": 1,
+          "variant": "linux-x64",
+          "hash": "11701451425916307887",
+          "execution": 20,
+          "variantExecution": 20
         }
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 18271422841595941918",
         "linux-x64 17250204578490133798",
         "linux-x64 1633997883643787625",
         "linux-x64 18383947477706541872",
         "linux-x64 1588558743982401242",
         "linux-x64 1244242025164941549",
         "linux-x64 6151784264952307122",
-        "linux-x64 12939963173018264241"
+        "linux-x64 12939963173018264241",
+        "linux-x64 11701451425916307887"
       ],
       "failureShas": [],
       "aliases": [],
@@ -5989,18 +6014,18 @@
       "targetKey": "test:e2e:journey-shell-1",
       "file": "src/analytics-consent.spec.ts",
       "firstSeen": "2026-11-26T11:28:14Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T11:28:14Z",
-      "executions": 6,
+      "executions": 7,
       "failures": 0,
       "retriedPasses": 1,
-      "passStreak": 5,
+      "passStreak": 6,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 6,
+          "executions": 7,
           "failures": 0,
           "events": 1,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 0
         }
       },
@@ -6026,7 +6051,8 @@
         "linux-x64 browser=chromium 3309870578075704952",
         "linux-x64 browser=chromium 6503908236765174985",
         "linux-x64 browser=chromium 16711389643734674960",
-        "linux-x64 browser=chromium 6043840083305430634"
+        "linux-x64 browser=chromium 6043840083305430634",
+        "linux-x64 browser=chromium 13387535866734833265"
       ],
       "failureShas": [],
       "aliases": [],
@@ -6037,18 +6063,18 @@
       "targetKey": "test:e2e:journey-chat-1",
       "file": "src/chat-compaction.spec.ts",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "lastFailure": "2026-11-26T18:58:53Z",
-      "executions": 10,
-      "failures": 10,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "lastFailure": "2026-11-26T19:58:13Z",
+      "executions": 11,
+      "failures": 11,
       "retriedPasses": 0,
       "passStreak": 0,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 10,
-          "failures": 10,
+          "executions": 11,
+          "failures": 11,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         }
       },
       "events": [],
@@ -6190,6 +6216,20 @@
           "variantExecution": 10,
           "error": "AssertionError: expected false to be true // Object.is equality",
           "shadow": true
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "hash": "4384324187221714348",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa",
+          "lineage": "pr-2868",
+          "base": "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+          "execution": 11,
+          "variantExecution": 11,
+          "error": "AssertionError: expected false to be true // Object.is equality",
+          "shadow": true
         }
       ],
       "passHashes": [],
@@ -6203,7 +6243,8 @@
         "a591c949836b14edb16b06b632796f1004f97c6c",
         "7bedcc32e321897fc2711ccafaeae443ab02e0f7",
         "11eda583db5422d807e24c29f9f0134f6e76bf25",
-        "9f8dc6f4090b33e8796f83aa42495ec4466339ac"
+        "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+        "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa"
       ],
       "aliases": [],
       "lastOutcome": "failed"
@@ -6213,18 +6254,18 @@
       "targetKey": "test:e2e:browser-host-chat",
       "file": "src/chat-todo-list.spec.ts",
       "firstSeen": "2026-11-26T17:03:39Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "lastFailure": "2026-11-26T18:58:53Z",
-      "executions": 4,
-      "failures": 4,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "lastFailure": "2026-11-26T19:58:13Z",
+      "executions": 5,
+      "failures": 5,
       "retriedPasses": 0,
       "passStreak": 0,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 4,
-          "failures": 4,
+          "executions": 5,
+          "failures": 5,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 0
         }
       },
@@ -6285,6 +6326,20 @@
           "variantExecution": 4,
           "error": "AssertionError: expected +0 to be 1 // Object.is equality",
           "shadow": true
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "hash": "9124064432985279696",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa",
+          "lineage": "pr-2868",
+          "base": "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+          "execution": 5,
+          "variantExecution": 5,
+          "error": "AssertionError: expected +0 to be 1 // Object.is equality",
+          "shadow": true
         }
       ],
       "passHashes": [],
@@ -6292,7 +6347,8 @@
         "7bedcc32e321897fc2711ccafaeae443ab02e0f7",
         "c1cc0039659eb954b51c07299e1f69d1695b373c",
         "11eda583db5422d807e24c29f9f0134f6e76bf25",
-        "9f8dc6f4090b33e8796f83aa42495ec4466339ac"
+        "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+        "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa"
       ],
       "aliases": [],
       "lastOutcome": "failed"
@@ -6302,31 +6358,31 @@
       "targetKey": "test:e2e:daemon-host",
       "file": "src/daemon-agent-host.spec.ts",
       "firstSeen": "2026-11-25T23:43:08Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-25T23:43:08Z",
-      "executions": 25,
+      "executions": 26,
       "failures": 1,
       "retriedPasses": 0,
-      "passStreak": 24,
+      "passStreak": 25,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 25,
+          "executions": 26,
           "failures": 1,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         }
       },
       "events": [],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 browser=chromium 2962931341690215850",
         "linux-x64 browser=chromium 12346442184165736826",
         "linux-x64 browser=chromium 5986520068649962076",
         "linux-x64 browser=chromium 2938005223026037867",
         "linux-x64 browser=chromium 13335214636597767587",
         "linux-x64 browser=chromium 5289314870112143175",
         "linux-x64 browser=chromium 9971434388605318651",
-        "linux-x64 browser=chromium 6509301934518601579"
+        "linux-x64 browser=chromium 6509301934518601579",
+        "linux-x64 browser=chromium 10894195523599567382"
       ],
       "failureShas": [
         "9cbd73c836f0bf6a394e6526ff1220a80bc8569a"
@@ -6339,18 +6395,18 @@
       "targetKey": "test:e2e:journey-project-4",
       "file": "src/filesystem-projection-metadata.spec.ts",
       "firstSeen": "2026-11-26T16:11:43Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T16:11:43Z",
-      "executions": 3,
+      "executions": 4,
       "failures": 1,
       "retriedPasses": 0,
-      "passStreak": 2,
+      "passStreak": 3,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 3,
+          "executions": 4,
           "failures": 1,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 8
         }
       },
@@ -6372,7 +6428,8 @@
         }
       ],
       "passHashes": [
-        "linux-x64 browser=chromium 3524876174953751201"
+        "linux-x64 browser=chromium 3524876174953751201",
+        "linux-x64 browser=chromium 669136345417515589"
       ],
       "failureShas": [
         "a591c949836b14edb16b06b632796f1004f97c6c"
@@ -6385,18 +6442,18 @@
       "targetKey": "test:e2e:journey-project-4",
       "file": "src/filesystem-projection-retained.spec.ts",
       "firstSeen": "2026-11-26T18:58:53Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T18:58:53Z",
-      "executions": 1,
+      "executions": 2,
       "failures": 0,
       "retriedPasses": 1,
-      "passStreak": 0,
+      "passStreak": 1,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 1,
+          "executions": 2,
           "failures": 0,
           "events": 1,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 10
         }
       },
@@ -6418,7 +6475,8 @@
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 browser=chromium 3524876174953751201"
+        "linux-x64 browser=chromium 3524876174953751201",
+        "linux-x64 browser=chromium 669136345417515589"
       ],
       "failureShas": [],
       "aliases": [],
@@ -6429,18 +6487,18 @@
       "targetKey": "test:e2e:journey-project-3",
       "file": "src/home-storage.spec.ts",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "lastFailure": "2026-11-26T18:58:53Z",
-      "executions": 10,
-      "failures": 10,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "lastFailure": "2026-11-26T19:58:13Z",
+      "executions": 11,
+      "failures": 11,
       "retriedPasses": 0,
       "passStreak": 0,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 10,
-          "failures": 10,
+          "executions": 11,
+          "failures": 11,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         }
       },
       "events": [],
@@ -6582,6 +6640,20 @@
           "variantExecution": 10,
           "error": "TimeoutError: locator.click: Timeout 10000ms exceeded.",
           "shadow": true
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "hash": "8630325209457162113",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa",
+          "lineage": "pr-2868",
+          "base": "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+          "execution": 11,
+          "variantExecution": 11,
+          "error": "TimeoutError: locator.click: Timeout 10000ms exceeded.",
+          "shadow": true
         }
       ],
       "passHashes": [],
@@ -6595,7 +6667,52 @@
         "84698890a62ce59dc63058500562b636ccad778d",
         "a591c949836b14edb16b06b632796f1004f97c6c",
         "11eda583db5422d807e24c29f9f0134f6e76bf25",
-        "9f8dc6f4090b33e8796f83aa42495ec4466339ac"
+        "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+        "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa"
+      ],
+      "aliases": [],
+      "lastOutcome": "failed"
+    },
+    "ui-e2e › src/kinematics-pane.spec.ts > Kinematics pane > should play the authored clip, pause it and reset every link to the as-built pose": {
+      "project": "ui-e2e",
+      "targetKey": "test:e2e:journey-viewer-2",
+      "file": "src/kinematics-pane.spec.ts",
+      "firstSeen": "2026-11-26T19:58:13Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "lastFailure": "2026-11-26T19:58:13Z",
+      "executions": 1,
+      "failures": 1,
+      "retriedPasses": 0,
+      "passStreak": 0,
+      "variants": {
+        "linux-x64 browser=chromium": {
+          "executions": 1,
+          "failures": 1,
+          "events": 0,
+          "lastSeen": "2026-11-26T19:58:13Z",
+          "stableBefore": 8
+        }
+      },
+      "events": [],
+      "openFailures": [
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "hash": "4066373246796201832",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa",
+          "lineage": "pr-2868",
+          "base": "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+          "execution": 1,
+          "variantExecution": 1,
+          "error": "TimeoutError: locator.click: Timeout 10000ms exceeded.",
+          "shadow": true
+        }
+      ],
+      "passHashes": [],
+      "failureShas": [
+        "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa"
       ],
       "aliases": [],
       "lastOutcome": "failed"
@@ -6605,18 +6722,18 @@
       "targetKey": "test:e2e:journey-mobile-2",
       "file": "src/mobile-project-top-bar.spec.ts",
       "firstSeen": "2026-11-26T11:31:44Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T11:31:44Z",
-      "executions": 9,
+      "executions": 10,
       "failures": 0,
       "retriedPasses": 1,
-      "passStreak": 8,
+      "passStreak": 9,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 9,
+          "executions": 10,
           "failures": 0,
           "events": 1,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 1
         }
       },
@@ -6638,14 +6755,14 @@
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 browser=chromium 14492004920334894331",
         "linux-x64 browser=chromium 9630353240409007477",
         "linux-x64 browser=chromium 7187221513943437347",
         "linux-x64 browser=chromium 9018620156900429401",
         "linux-x64 browser=chromium 5697943301865305918",
         "linux-x64 browser=chromium 5253270851500071207",
         "linux-x64 browser=chromium 5033301207688671528",
-        "linux-x64 browser=chromium 17826257830487669963"
+        "linux-x64 browser=chromium 17826257830487669963",
+        "linux-x64 browser=chromium 2774616653747754706"
       ],
       "failureShas": [],
       "aliases": [],
@@ -6656,18 +6773,18 @@
       "targetKey": "test:e2e:journey-mobile-2",
       "file": "src/mobile-project-top-bar.spec.ts",
       "firstSeen": "2026-11-26T16:11:43Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T18:43:27Z",
-      "executions": 4,
+      "executions": 5,
       "failures": 1,
       "retriedPasses": 1,
-      "passStreak": 1,
+      "passStreak": 2,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 4,
+          "executions": 5,
           "failures": 1,
           "events": 1,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 6
         }
       },
@@ -6705,7 +6822,8 @@
       ],
       "passHashes": [
         "linux-x64 browser=chromium 5033301207688671528",
-        "linux-x64 browser=chromium 17826257830487669963"
+        "linux-x64 browser=chromium 17826257830487669963",
+        "linux-x64 browser=chromium 2774616653747754706"
       ],
       "failureShas": [
         "a591c949836b14edb16b06b632796f1004f97c6c"
@@ -6718,18 +6836,18 @@
       "targetKey": "test:e2e:journey-mobile-2",
       "file": "src/mobile-project-top-bar.spec.ts",
       "firstSeen": "2026-11-26T12:12:53Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T16:11:43Z",
-      "executions": 8,
+      "executions": 9,
       "failures": 1,
       "retriedPasses": 2,
-      "passStreak": 3,
+      "passStreak": 4,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 8,
+          "executions": 9,
           "failures": 1,
           "events": 2,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 2
         }
       },
@@ -6785,7 +6903,8 @@
         "linux-x64 browser=chromium 5697943301865305918",
         "linux-x64 browser=chromium 5253270851500071207",
         "linux-x64 browser=chromium 5033301207688671528",
-        "linux-x64 browser=chromium 17826257830487669963"
+        "linux-x64 browser=chromium 17826257830487669963",
+        "linux-x64 browser=chromium 2774616653747754706"
       ],
       "failureShas": [
         "6fc9cb54b1fa57ec21b127043d7c1ad73c8623c7"
@@ -6798,30 +6917,30 @@
       "targetKey": "test:e2e:development",
       "file": "src/picovoxel-multi.spec.ts",
       "firstSeen": "2026-11-25T13:44:58Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T00:15:59Z",
-      "executions": 177,
+      "executions": 183,
       "failures": 0,
       "retriedPasses": 3,
-      "passStreak": 105,
+      "passStreak": 111,
       "variants": {
         "linux-x64 browser=firefox": {
-          "executions": 61,
+          "executions": 63,
           "failures": 0,
           "events": 3,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         },
         "linux-x64 browser=chromium": {
-          "executions": 105,
+          "executions": 108,
           "failures": 0,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         },
         "linux-x64 project=webkit-smoke browser=webkit": {
-          "executions": 11,
+          "executions": 12,
           "failures": 0,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         }
       },
       "events": [
@@ -6864,14 +6983,14 @@
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 browser=chromium 14747387267089098370",
-        "linux-x64 browser=firefox 14747387267089098370",
-        "linux-x64 browser=firefox 2137735726381382407",
-        "linux-x64 project=webkit-smoke browser=webkit 2137735726381382407",
-        "linux-x64 browser=chromium 2137735726381382407",
-        "linux-x64 browser=chromium 6854701893009094121",
         "linux-x64 browser=firefox 6854701893009094121",
-        "linux-x64 browser=chromium 15463413117108107802"
+        "linux-x64 browser=chromium 15463413117108107802",
+        "linux-x64 browser=firefox 11208563374890509553",
+        "linux-x64 project=webkit-smoke browser=webkit 11208563374890509553",
+        "linux-x64 browser=chromium 11208563374890509553",
+        "linux-x64 browser=chromium 4171845686812319664",
+        "linux-x64 browser=firefox 4171845686812319664",
+        "linux-x64 browser=chromium 12744876368256727131"
       ],
       "failureShas": [],
       "aliases": [],
@@ -6882,18 +7001,18 @@
       "targetKey": "test:e2e:journey-project-2",
       "file": "src/project-lifecycle.spec.ts",
       "firstSeen": "2026-11-26T18:43:27Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T18:58:53Z",
-      "executions": 2,
+      "executions": 3,
       "failures": 0,
       "retriedPasses": 2,
-      "passStreak": 0,
+      "passStreak": 1,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 2,
+          "executions": 3,
           "failures": 0,
           "events": 2,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 9
         }
       },
@@ -6929,7 +7048,8 @@
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 browser=chromium 4960867289720749235"
+        "linux-x64 browser=chromium 4960867289720749235",
+        "linux-x64 browser=chromium 12261550400138140767"
       ],
       "failureShas": [],
       "aliases": [],
@@ -6940,18 +7060,18 @@
       "targetKey": "test:e2e:deploy-skew",
       "file": "src/stale-deploy-recovery.test.ts",
       "firstSeen": "2026-11-26T12:50:51Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T13:11:15Z",
-      "executions": 9,
+      "executions": 10,
       "failures": 2,
       "retriedPasses": 0,
-      "passStreak": 7,
+      "passStreak": 8,
       "variants": {
         "linux-x64": {
-          "executions": 9,
+          "executions": 10,
           "failures": 2,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 3
         }
       },
@@ -6963,7 +7083,8 @@
         "linux-x64 7884787692779780184",
         "linux-x64 12732139693830994687",
         "linux-x64 3744780279263498185",
-        "linux-x64 17628593861075978302"
+        "linux-x64 17628593861075978302",
+        "linux-x64 8878660205224038745"
       ],
       "failureShas": [
         "3cd7b3696de2e937cf67305f9026e125d553b352",
@@ -6977,18 +7098,18 @@
       "targetKey": "test:e2e:journey-shell-1",
       "file": "src/usage-offline.spec.ts",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "lastFailure": "2026-11-26T18:58:53Z",
-      "executions": 7,
-      "failures": 7,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "lastFailure": "2026-11-26T19:58:13Z",
+      "executions": 8,
+      "failures": 8,
       "retriedPasses": 0,
       "passStreak": 0,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 7,
-          "failures": 7,
+          "executions": 8,
+          "failures": 8,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         }
       },
       "events": [],
@@ -7088,6 +7209,20 @@
           "variantExecution": 7,
           "error": "AssertionError: expected 'Showing saved usage; unable to refres…' to be 'Offline — saved usage for usage-e2e-o…' // Object.is equality",
           "shadow": true
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "hash": "13387535866734833265",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa",
+          "lineage": "pr-2868",
+          "base": "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+          "execution": 8,
+          "variantExecution": 8,
+          "error": "AssertionError: expected 'Showing saved usage; unable to refres…' to be 'Offline — saved usage for usage-e2e-o…' // Object.is equality",
+          "shadow": true
         }
       ],
       "passHashes": [],
@@ -7098,7 +7233,8 @@
         "84698890a62ce59dc63058500562b636ccad778d",
         "a591c949836b14edb16b06b632796f1004f97c6c",
         "11eda583db5422d807e24c29f9f0134f6e76bf25",
-        "9f8dc6f4090b33e8796f83aa42495ec4466339ac"
+        "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+        "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa"
       ],
       "aliases": [],
       "lastOutcome": "failed"
@@ -7108,18 +7244,18 @@
       "targetKey": "test:e2e:journey-shell-1",
       "file": "src/usage-offline.spec.ts",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "lastFailure": "2026-11-26T18:58:53Z",
-      "executions": 7,
-      "failures": 7,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "lastFailure": "2026-11-26T19:58:13Z",
+      "executions": 8,
+      "failures": 8,
       "retriedPasses": 0,
       "passStreak": 0,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 7,
-          "failures": 7,
+          "executions": 8,
+          "failures": 8,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         }
       },
       "events": [],
@@ -7219,6 +7355,20 @@
           "variantExecution": 7,
           "error": "AssertionError: expected 'No saved usage for this viewRetry' to be 'Sign in to see your Tau usage.' // Object.is equality",
           "shadow": true
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "hash": "13387535866734833265",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa",
+          "lineage": "pr-2868",
+          "base": "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+          "execution": 8,
+          "variantExecution": 8,
+          "error": "AssertionError: expected 'No saved usage for this viewRetry' to be 'Sign in to see your Tau usage.' // Object.is equality",
+          "shadow": true
         }
       ],
       "passHashes": [],
@@ -7229,7 +7379,8 @@
         "84698890a62ce59dc63058500562b636ccad778d",
         "a591c949836b14edb16b06b632796f1004f97c6c",
         "11eda583db5422d807e24c29f9f0134f6e76bf25",
-        "9f8dc6f4090b33e8796f83aa42495ec4466339ac"
+        "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+        "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa"
       ],
       "aliases": [],
       "lastOutcome": "failed"
@@ -7239,18 +7390,18 @@
       "targetKey": "test:e2e:journey-shell-1",
       "file": "src/usage-offline.spec.ts",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "lastFailure": "2026-11-26T18:58:53Z",
-      "executions": 7,
-      "failures": 7,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "lastFailure": "2026-11-26T19:58:13Z",
+      "executions": 8,
+      "failures": 8,
       "retriedPasses": 0,
       "passStreak": 0,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 7,
-          "failures": 7,
+          "executions": 8,
+          "failures": 8,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         }
       },
       "events": [],
@@ -7350,6 +7501,20 @@
           "variantExecution": 7,
           "error": "AssertionError: expected 'Showing saved usage; unable to refres…' to be 'Offline — saved usage for usage-e2e-o…' // Object.is equality",
           "shadow": true
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "hash": "13387535866734833265",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa",
+          "lineage": "pr-2868",
+          "base": "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+          "execution": 8,
+          "variantExecution": 8,
+          "error": "AssertionError: expected 'Showing saved usage; unable to refres…' to be 'Offline — saved usage for usage-e2e-o…' // Object.is equality",
+          "shadow": true
         }
       ],
       "passHashes": [],
@@ -7360,7 +7525,8 @@
         "84698890a62ce59dc63058500562b636ccad778d",
         "a591c949836b14edb16b06b632796f1004f97c6c",
         "11eda583db5422d807e24c29f9f0134f6e76bf25",
-        "9f8dc6f4090b33e8796f83aa42495ec4466339ac"
+        "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+        "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa"
       ],
       "aliases": [],
       "lastOutcome": "failed"
@@ -7370,18 +7536,18 @@
       "targetKey": "test:e2e:journey-viewer-1",
       "file": "src/viewer-camera-persistence.spec.ts",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T18:58:53Z",
-      "executions": 10,
+      "executions": 11,
       "failures": 7,
       "retriedPasses": 0,
-      "passStreak": 0,
+      "passStreak": 1,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 10,
+          "executions": 11,
           "failures": 7,
           "events": 0,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         }
       },
       "events": [],
@@ -7486,7 +7652,8 @@
       "passHashes": [
         "linux-x64 browser=chromium 3209801044628595090",
         "linux-x64 browser=chromium 13579647132421417192",
-        "linux-x64 browser=chromium 11881150721799720293"
+        "linux-x64 browser=chromium 11881150721799720293",
+        "linux-x64 browser=chromium 7936826956610771846"
       ],
       "failureShas": [
         "15d25560401faab42c0dcfd0abdac7ecc299042e",
@@ -7498,25 +7665,25 @@
         "9f8dc6f4090b33e8796f83aa42495ec4466339ac"
       ],
       "aliases": [],
-      "lastOutcome": "failed"
+      "lastOutcome": "passed"
     },
     "ui-e2e › src/workbench-records.spec.ts > adopts a valid external WebAccess layout edit without a reload": {
       "project": "ui-e2e",
       "targetKey": "test:e2e:journey-project-3",
       "file": "src/workbench-records.spec.ts",
       "firstSeen": "2026-11-26T11:28:14Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T18:58:53Z",
-      "executions": 9,
+      "executions": 10,
       "failures": 1,
       "retriedPasses": 2,
-      "passStreak": 0,
+      "passStreak": 1,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 9,
+          "executions": 10,
           "failures": 1,
           "events": 2,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 0
         }
       },
@@ -7573,7 +7740,8 @@
         "linux-x64 browser=chromium 9654752890604573598",
         "linux-x64 browser=chromium 7703741409477093296",
         "linux-x64 browser=chromium 2149060473375571163",
-        "linux-x64 browser=chromium 17820185902883825915"
+        "linux-x64 browser=chromium 17820185902883825915",
+        "linux-x64 browser=chromium 8630325209457162113"
       ],
       "failureShas": [
         "a643c214010a62564d3c73e8c08475f0e3afa36d"
@@ -7586,18 +7754,18 @@
       "targetKey": "test:e2e:journey-project-3",
       "file": "src/workbench-records.spec.ts",
       "firstSeen": "2026-11-26T11:28:14Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T15:37:37Z",
-      "executions": 9,
+      "executions": 10,
       "failures": 2,
       "retriedPasses": 3,
-      "passStreak": 3,
+      "passStreak": 4,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 9,
+          "executions": 10,
           "failures": 2,
           "events": 3,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 0
         }
       },
@@ -7681,7 +7849,8 @@
         "linux-x64 browser=chromium 9654752890604573598",
         "linux-x64 browser=chromium 7703741409477093296",
         "linux-x64 browser=chromium 2149060473375571163",
-        "linux-x64 browser=chromium 17820185902883825915"
+        "linux-x64 browser=chromium 17820185902883825915",
+        "linux-x64 browser=chromium 8630325209457162113"
       ],
       "failureShas": [
         "0e2ca356c5f993ba148bcf8c0bd839c34d33658f",
@@ -7695,18 +7864,18 @@
       "targetKey": "test:e2e:journey-project-3",
       "file": "src/workbench-records.spec.ts",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "lastFailure": "2026-11-26T12:16:18Z",
-      "executions": 10,
-      "failures": 0,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "lastFailure": "2026-11-26T19:58:13Z",
+      "executions": 11,
+      "failures": 1,
       "retriedPasses": 2,
-      "passStreak": 5,
+      "passStreak": 0,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 10,
-          "failures": 0,
+          "executions": 11,
+          "failures": 1,
           "events": 2,
-          "lastSeen": "2026-11-26T18:58:53Z"
+          "lastSeen": "2026-11-26T19:58:13Z"
         }
       },
       "events": [
@@ -7737,7 +7906,22 @@
           "shadow": true
         }
       ],
-      "openFailures": [],
+      "openFailures": [
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "hash": "8630325209457162113",
+          "variant": "linux-x64 browser=chromium",
+          "sha": "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa",
+          "lineage": "pr-2868",
+          "base": "9f8dc6f4090b33e8796f83aa42495ec4466339ac",
+          "execution": 11,
+          "variantExecution": 11,
+          "error": "Error: page.evaluate: NotFoundError: A requested file or directory could not be found at the time an operation was processed.",
+          "shadow": true
+        }
+      ],
       "passHashes": [
         "linux-x64 browser=chromium 7560554905184751552",
         "linux-x64 browser=chromium 6789280966452575080",
@@ -7748,27 +7932,29 @@
         "linux-x64 browser=chromium 2149060473375571163",
         "linux-x64 browser=chromium 17820185902883825915"
       ],
-      "failureShas": [],
+      "failureShas": [
+        "66ca9bb224d5e79c14cc26bf41bf97c4981a29aa"
+      ],
       "aliases": [],
-      "lastOutcome": "passed"
+      "lastOutcome": "failed"
     },
     "ui-e2e › src/workbench-records.spec.ts > reloads authored records and preserves invalid and newer bytes": {
       "project": "ui-e2e",
       "targetKey": "test:e2e:journey-project-3",
       "file": "src/workbench-records.spec.ts",
       "firstSeen": "2026-11-26T12:12:53Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
+      "lastSeen": "2026-11-26T19:58:13Z",
       "lastFailure": "2026-11-26T15:37:37Z",
-      "executions": 7,
+      "executions": 8,
       "failures": 0,
       "retriedPasses": 2,
-      "passStreak": 3,
+      "passStreak": 4,
       "variants": {
         "linux-x64 browser=chromium": {
-          "executions": 7,
+          "executions": 8,
           "failures": 0,
           "events": 2,
-          "lastSeen": "2026-11-26T18:58:53Z",
+          "lastSeen": "2026-11-26T19:58:13Z",
           "stableBefore": 2
         }
       },
@@ -7809,7 +7995,8 @@
         "linux-x64 browser=chromium 9654752890604573598",
         "linux-x64 browser=chromium 7703741409477093296",
         "linux-x64 browser=chromium 2149060473375571163",
-        "linux-x64 browser=chromium 17820185902883825915"
+        "linux-x64 browser=chromium 17820185902883825915",
+        "linux-x64 browser=chromium 8630325209457162113"
       ],
       "failureShas": [],
       "aliases": [],
@@ -7960,8 +8147,8 @@
       "project": "ui-e2e",
       "target": "test:e2e:browser-host-chat",
       "firstSeen": "2026-11-26T17:03:39Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 4,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 5,
       "streak": 0,
       "streakRetried": 0,
       "history": [
@@ -8008,12 +8195,23 @@
           "failed": [
             "ui-e2e › src/chat-todo-list.spec.ts > keeps the task list above the composer in step with update_todos"
           ]
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": false,
+          "tests": 3,
+          "retried": 0,
+          "failed": [
+            "ui-e2e › src/chat-todo-list.spec.ts > keeps the task list above the composer in step with update_todos"
+          ]
         }
       ],
       "lastFailure": {
-        "run": 45878272843,
+        "run": 45885734128,
         "attempt": 1,
-        "at": "2026-11-26T18:58:53Z",
+        "at": "2026-11-26T19:58:13Z",
         "passed": false,
         "tests": 3,
         "retried": 0,
@@ -8026,8 +8224,8 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-chat-1",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 10,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 11,
       "streak": 0,
       "streakRetried": 0,
       "history": [
@@ -8140,12 +8338,23 @@
           "failed": [
             "ui-e2e › src/chat-compaction.spec.ts > compacts a turn in flight, is summarized over the same gateway, and finishes the turn"
           ]
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": false,
+          "tests": 17,
+          "retried": 0,
+          "failed": [
+            "ui-e2e › src/chat-compaction.spec.ts > compacts a turn in flight, is summarized over the same gateway, and finishes the turn"
+          ]
         }
       ],
       "lastFailure": {
-        "run": 45878272843,
+        "run": 45885734128,
         "attempt": 1,
-        "at": "2026-11-26T18:58:53Z",
+        "at": "2026-11-26T19:58:13Z",
         "passed": false,
         "tests": 17,
         "retried": 0,
@@ -8158,9 +8367,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-chat-2",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 14,
-      "streak": 14,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 15,
+      "streak": 15,
       "streakRetried": 0,
       "history": [
         {
@@ -8288,6 +8497,15 @@
           "tests": 17,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 17,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -8295,9 +8513,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-chat-3",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 12,
-      "streak": 12,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 13,
+      "streak": 13,
       "streakRetried": 0,
       "history": [
         {
@@ -8407,6 +8625,15 @@
           "tests": 4,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 4,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -8414,9 +8641,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-chat-4",
       "firstSeen": "2026-11-26T18:01:52Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 3,
-      "streak": 3,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 4,
+      "streak": 4,
       "streakRetried": 0,
       "history": [
         {
@@ -8441,6 +8668,15 @@
           "run": 45878272843,
           "attempt": 1,
           "at": "2026-11-26T18:58:53Z",
+          "passed": true,
+          "tests": 11,
+          "retried": 0,
+          "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
           "passed": true,
           "tests": 11,
           "retried": 0,
@@ -8452,9 +8688,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-chat-5",
       "firstSeen": "2026-11-26T18:01:52Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 3,
-      "streak": 3,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 4,
+      "streak": 4,
       "streakRetried": 0,
       "history": [
         {
@@ -8483,6 +8719,15 @@
           "tests": 10,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 10,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -8490,9 +8735,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-mobile-1",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 11,
-      "streak": 11,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 12,
+      "streak": 12,
       "streakRetried": 0,
       "history": [
         {
@@ -8593,6 +8838,15 @@
           "tests": 10,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 10,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -8600,9 +8854,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-mobile-2",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 11,
-      "streak": 3,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 12,
+      "streak": 4,
       "streakRetried": 1,
       "history": [
         {
@@ -8707,6 +8961,15 @@
           "tests": 21,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 21,
+          "retried": 0,
+          "failed": []
         }
       ],
       "lastFailure": {
@@ -8725,9 +8988,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-mobile-3",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 13,
-      "streak": 13,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 14,
+      "streak": 14,
       "streakRetried": 0,
       "history": [
         {
@@ -8846,6 +9109,15 @@
           "tests": 23,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 23,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -8853,9 +9125,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-project-1",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 11,
-      "streak": 11,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 12,
+      "streak": 12,
       "streakRetried": 0,
       "history": [
         {
@@ -8956,6 +9228,15 @@
           "tests": 14,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 14,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -8963,9 +9244,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-project-2",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 12,
-      "streak": 12,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 13,
+      "streak": 13,
       "streakRetried": 2,
       "history": [
         {
@@ -9075,6 +9356,15 @@
           "tests": 10,
           "retried": 1,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 10,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -9082,8 +9372,8 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-project-3",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 10,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 11,
       "streak": 0,
       "streakRetried": 0,
       "history": [
@@ -9199,17 +9489,30 @@
           "failed": [
             "ui-e2e › src/home-storage.spec.ts > Home storage when the handle database cannot be opened > offers Reset folder list with Home's engine mirror, and the reset keeps Home on the same engine"
           ]
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": false,
+          "tests": 20,
+          "retried": 0,
+          "failed": [
+            "ui-e2e › src/home-storage.spec.ts > Home storage when the handle database cannot be opened > offers Reset folder list with Home's engine mirror, and the reset keeps Home on the same engine",
+            "ui-e2e › src/workbench-records.spec.ts > drops unshipped Jobs and Browser panes from an adopted layout record"
+          ]
         }
       ],
       "lastFailure": {
-        "run": 45878272843,
+        "run": 45885734128,
         "attempt": 1,
-        "at": "2026-11-26T18:58:53Z",
+        "at": "2026-11-26T19:58:13Z",
         "passed": false,
         "tests": 20,
-        "retried": 1,
+        "retried": 0,
         "failed": [
-          "ui-e2e › src/home-storage.spec.ts > Home storage when the handle database cannot be opened > offers Reset folder list with Home's engine mirror, and the reset keeps Home on the same engine"
+          "ui-e2e › src/home-storage.spec.ts > Home storage when the handle database cannot be opened > offers Reset folder list with Home's engine mirror, and the reset keeps Home on the same engine",
+          "ui-e2e › src/workbench-records.spec.ts > drops unshipped Jobs and Browser panes from an adopted layout record"
         ]
       }
     },
@@ -9217,9 +9520,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-project-4",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 12,
-      "streak": 2,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 13,
+      "streak": 3,
       "streakRetried": 1,
       "history": [
         {
@@ -9331,6 +9634,15 @@
           "tests": 23,
           "retried": 1,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 23,
+          "retried": 0,
+          "failed": []
         }
       ],
       "lastFailure": {
@@ -9349,8 +9661,8 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-shell-1",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 7,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 8,
       "streak": 0,
       "streakRetried": 0,
       "history": [
@@ -9444,12 +9756,25 @@
             "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should leave no saved usage behind after a sign-out",
             "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should render the saved snapshot with its server instant when a cold page cannot reach the API"
           ]
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": false,
+          "tests": 36,
+          "retried": 0,
+          "failed": [
+            "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should keep serving a saved view and never show an uncached one as zero usage",
+            "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should leave no saved usage behind after a sign-out",
+            "ui-e2e › src/usage-offline.spec.ts > Offline usage contract > should render the saved snapshot with its server instant when a cold page cannot reach the API"
+          ]
         }
       ],
       "lastFailure": {
-        "run": 45878272843,
+        "run": 45885734128,
         "attempt": 1,
-        "at": "2026-11-26T18:58:53Z",
+        "at": "2026-11-26T19:58:13Z",
         "passed": false,
         "tests": 36,
         "retried": 0,
@@ -9464,9 +9789,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-shell-2",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 15,
-      "streak": 15,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 16,
+      "streak": 16,
       "streakRetried": 0,
       "history": [
         {
@@ -9603,6 +9928,15 @@
           "tests": 33,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 33,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -9610,9 +9944,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-viewer-1",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 10,
-      "streak": 0,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 11,
+      "streak": 1,
       "streakRetried": 0,
       "history": [
         {
@@ -9718,6 +10052,15 @@
           "failed": [
             "ui-e2e › src/viewer-camera-persistence.spec.ts > Viewer camera persistence > keeps the second orbit drag pose with a 400 ms gap requested between the drags"
           ]
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 16,
+          "retried": 0,
+          "failed": []
         }
       ],
       "lastFailure": {
@@ -9736,9 +10079,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-viewer-2",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 9,
-      "streak": 9,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 10,
+      "streak": 0,
       "streakRetried": 0,
       "history": [
         {
@@ -9821,16 +10164,38 @@
           "tests": 20,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": false,
+          "tests": 20,
+          "retried": 0,
+          "failed": [
+            "ui-e2e › src/kinematics-pane.spec.ts > Kinematics pane > should play the authored clip, pause it and reset every link to the as-built pose"
+          ]
         }
-      ]
+      ],
+      "lastFailure": {
+        "run": 45885734128,
+        "attempt": 1,
+        "at": "2026-11-26T19:58:13Z",
+        "passed": false,
+        "tests": 20,
+        "retried": 0,
+        "failed": [
+          "ui-e2e › src/kinematics-pane.spec.ts > Kinematics pane > should play the authored clip, pause it and reset every link to the as-built pose"
+        ]
+      }
     },
     "ui-e2e:test:e2e:journey-viewer-3": {
       "project": "ui-e2e",
       "target": "test:e2e:journey-viewer-3",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 10,
-      "streak": 10,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 11,
+      "streak": 11,
       "streakRetried": 0,
       "history": [
         {
@@ -9918,6 +10283,15 @@
           "run": 45878272843,
           "attempt": 1,
           "at": "2026-11-26T18:58:53Z",
+          "passed": true,
+          "tests": 25,
+          "retried": 0,
+          "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
           "passed": true,
           "tests": 25,
           "retried": 0,
@@ -9929,9 +10303,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-viewer-4",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 11,
-      "streak": 11,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 12,
+      "streak": 12,
       "streakRetried": 0,
       "history": [
         {
@@ -10032,6 +10406,15 @@
           "tests": 11,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 11,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -10039,9 +10422,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-viewer-5",
       "firstSeen": "2026-11-26T09:18:47Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 10,
-      "streak": 10,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 11,
+      "streak": 11,
       "streakRetried": 0,
       "history": [
         {
@@ -10133,6 +10516,15 @@
           "tests": 15,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 15,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -10140,9 +10532,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:journey-viewer-6",
       "firstSeen": "2026-11-26T10:48:06Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 15,
-      "streak": 15,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 16,
+      "streak": 16,
       "streakRetried": 0,
       "history": [
         {
@@ -10279,6 +10671,15 @@
           "tests": 15,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 15,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -10286,9 +10687,9 @@
       "project": "ui-e2e",
       "target": "test:e2e:service-worker",
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-26T18:58:53Z",
-      "runs": 12,
-      "streak": 12,
+      "lastSeen": "2026-11-26T19:58:13Z",
+      "runs": 13,
+      "streak": 13,
       "streakRetried": 0,
       "history": [
         {
@@ -10398,6 +10799,15 @@
           "tests": 8,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:58:13Z",
+          "passed": true,
+          "tests": 8,
+          "retried": 0,
+          "failed": []
         }
       ]
     }
@@ -10407,9 +10817,9 @@
       "path": "apps/ui-e2e/quarantine.json",
       "id": "ui-e2e › src/picovoxel-multi.spec.ts > renders PicoVoxel on the variant its isolation allows and exports the pinned exact STL and GLB",
       "since": "2026-11-26T14:59:37.936Z",
-      "executions": 6,
+      "executions": 7,
       "failures": 0,
-      "streak": 6,
+      "streak": 7,
       "streakRuns": [
         {
           "run": 45847035103,
@@ -10445,6 +10855,12 @@
           "run": 45878272843,
           "attempt": 1,
           "at": "2026-11-26T18:44:10Z",
+          "passes": 1
+        },
+        {
+          "run": 45885734128,
+          "attempt": 1,
+          "at": "2026-11-26T19:43:18Z",
           "passes": 1
         }
       ]

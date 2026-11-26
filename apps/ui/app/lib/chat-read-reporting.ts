@@ -13,15 +13,16 @@ import { reportUiError } from '#lib/error-reporting.js';
 
 /** The failure families HA0 reports. */
 export const chatReadCodes = [
-  /* A chat was opened cold and its transcript stayed hidden while its host could not answer (U1–U3, U14). */
+  /* A chat opened cold and its transcript stayed hidden while its host read stayed lost (U1–U3, U14). */
   'chat.read.cold-hidden',
   /* This device's own segment holds an unsettled run while its host cannot answer: an orphan candidate (RC3). */
   'run.unsettled.own',
   /* A claim on an orphaned run was refused (Finding 5, H22). */
   'claim.refused',
-  /* A queued command ended without a durable effect: it may or may not have reached the log (U8, U20, U21). */
+  /* A queued command ended not knowing its effect: refused `unknown` (U8), applied but not durable (U20), or the
+   * connection lost past its bound (U21). */
   'outbox.unknown-effect',
-  /* This device's own projection was reset: its log was rewritten or its reader identity changed (Finding 4). */
+  /* A host answer reset this device's own projection: cursor ahead, identity mismatch or a clamp (Finding 4). */
   'own.rewrite',
 ] as const;
 
@@ -90,7 +91,7 @@ export const createChatReadReporter = (
       // async-iife: bootstrap -- reporting never rejects, and nothing waits on it.
       void report(new ChatReadFailure(code), {
         level: 'warning',
-        tags: { 'chat.read': code, ...observation.tags },
+        tags: { ...observation.tags, 'chat.read': code },
         contexts: { chat: { chatId: observation.chatId } },
         fingerprint: ['chat-read', code],
       });

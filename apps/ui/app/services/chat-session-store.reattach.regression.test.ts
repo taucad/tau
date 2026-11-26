@@ -12,10 +12,10 @@ import type { Chat as ChatEntity } from '@taucad/chat';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { chatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
-import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
+import { lifecycleRow, logRow, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
-import { ChatSessionStore } from '#services/chat-session-store.js';
+import { ChatSessionStore, chatReadLossBoundMilliseconds } from '#services/chat-session-store.js';
 import { chatReadReporter } from '#lib/chat-read-reporting.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirror the environment module's fixed exported names.
@@ -108,13 +108,58 @@ const deadHost = (code: 'PEER_GONE' | 'WORKER_LOAD_FAILED') => async (): Promise
 };
 
 /** A host that is up and takes commands, but whose read never answers. */
-const silentHost = (hostCommand: (command: HostCommand) => unknown) => async (): Promise<AgentHostClient> =>
+const silentHost =
+  (hostCommand: (command: HostCommand) => unknown, subscribed: () => void = () => undefined) =>
+  async (): Promise<AgentHostClient> =>
+    ({
+      hostCommand: vi.fn(async (command: HostCommand) => hostCommand(command)),
+      catchUp: writerOwnedCatchUp,
+      read: async () =>
+        new Promise<never>(() => {
+          /* The read never settles. */
+        }),
+      subscribe: () => {
+        subscribed();
+        return vi.fn();
+      },
+      close: vi.fn(async () => undefined),
+    }) as unknown as AgentHostClient;
+
+/** A host that answers the read with `rows`: what T4 needs to show a chat. */
+const liveHost = (rows: readonly unknown[]) => async (): Promise<AgentHostClient> =>
   ({
-    hostCommand: vi.fn(async (command: HostCommand) => hostCommand(command)),
+    hostCommand: vi.fn(),
+    catchUp: writerOwnedCatchUp,
     read: vi.fn(),
-    subscribe: () => vi.fn(),
+    subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+      queueMicrotask(() =>
+        parameters[3]?.({
+          status: 'batch',
+          sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+          chatId,
+          cursor: 0,
+          nextCursor: rows.length,
+          endCursor: rows.length,
+          events: [...rows],
+        }),
+      );
+      return vi.fn();
+    },
     close: vi.fn(async () => undefined),
   }) as unknown as AgentHostClient;
+
+const recordedRows = recordedTurn
+  .trim()
+  .split('\n')
+  .map((line) => JSON.parse(line) as unknown);
+
+/** An own log whose run is still open: admitted and running, never settled. */
+const unsettledLog = `${[
+  logRow(0, { ...lifecycleRow(0, 'admitted'), admission: { kind: 'tau', turnId: 'user_1' } }),
+  lifecycleRow(1, 'running'),
+]
+  .map((row) => JSON.stringify(row))
+  .join('\n')}\n`;
 
 type Opened = Readonly<{ store: Store; text: () => string; close: () => void }>;
 
@@ -169,30 +214,12 @@ describe('host attachment regression harness (HA0, red on T4)', () => {
     }
   });
 
-  /* Row 5 (U1): the byte-source observation (the other devices' segment scan) fails. The own turn still shows. HA1. */
-  // Expected-failure: @rifont until 2026-12-15
-  it.fails('row 5: shows the own log cold when the segment scan fails', async () => {
-    const disk = createDisk({ [ownLog]: recordedTurn }, new Set([`${chatDirectory}/events`]));
-    const chat = open(createStore(disk), deadHost('PEER_GONE'));
-    try {
-      await vi.waitFor(() => {
-        expect(chat.text()).toContain(recordedText);
-      }, coldBound);
-    } finally {
-      chat.close();
-    }
-  });
-
   /* Row 8a: a run killed mid-turn is reopened. Its own segment shows it unsettled, so the page must send `attach`
    * (HA-I5); T4 never sends `attach` for a chat and settles only through a host read. HA1. */
   // Expected-failure: @rifont until 2026-12-15
   it.fails('row 8a: sends attach for an unsettled own run when no host read answers', async () => {
-    const rows = [
-      logRow(0, { ...lifecycleRow(0, 'admitted'), admission: { kind: 'tau', turnId: 'user_1' } }),
-      lifecycleRow(1, 'running'),
-    ];
     const commands: HostCommand[] = [];
-    const disk = createDisk({ [ownLog]: `${rows.map((row) => JSON.stringify(row)).join('\n')}\n` });
+    const disk = createDisk({ [ownLog]: unsettledLog });
     const chat = open(
       createStore(disk),
       silentHost((command) => {
@@ -211,23 +238,115 @@ describe('host attachment regression harness (HA0, red on T4)', () => {
 });
 
 // ===========================================================================
+// Stand-in controls (green): each red row fails for its documented reason
+// ===========================================================================
+
+describe('host attachment harness stand-ins (HA0 controls)', () => {
+  it('should show the recorded turn once a live host answers the read', async () => {
+    const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), liveHost(recordedRows));
+    try {
+      await vi.waitFor(() => {
+        expect(chat.text()).toContain(recordedText);
+      }, coldBound);
+    } finally {
+      chat.close();
+    }
+  });
+
+  /* Row 5 (U1) is green on T4 at this tier: a failed segment scan does not hide the own turn a host answered. */
+  it('should show the own turn a live host answered while the segment scan fails', async () => {
+    const disk = createDisk({ [ownLog]: recordedTurn }, new Set([`${chatDirectory}/events`]));
+    const chat = open(createStore(disk), liveHost(recordedRows));
+    try {
+      await vi.waitFor(() => {
+        expect(chat.text()).toContain(recordedText);
+      }, coldBound);
+    } finally {
+      chat.close();
+    }
+  });
+
+  it.each(['PEER_GONE', 'WORKER_LOAD_FAILED'] as const)(
+    'should leave the read lost with nothing shown when the host fails %s',
+    async (code) => {
+      const connect = vi.fn(deadHost(code));
+      const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), connect);
+      try {
+        await vi.waitFor(() => {
+          expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');
+        }, coldBound);
+        expect(connect).toHaveBeenCalled();
+        expect(chat.text()).not.toContain(recordedText);
+      } finally {
+        chat.close();
+      }
+    },
+  );
+
+  it('should connect a silent host whose read never answers, and send it no command', async () => {
+    const subscribed = vi.fn();
+    const commands: HostCommand[] = [];
+    const disk = createDisk({ [ownLog]: unsettledLog });
+    const chat = open(
+      createStore(disk),
+      silentHost((command) => {
+        commands.push(command);
+      }, subscribed),
+    );
+    try {
+      await vi.waitFor(() => {
+        expect(subscribed).toHaveBeenCalled();
+      }, coldBound);
+      expect(chat.store.getAttachmentStatus(chatId)).not.toBe('attached');
+      expect(commands).toEqual([]);
+    } finally {
+      chat.close();
+    }
+  });
+});
+
+// ===========================================================================
 // Sink calls (HA0 telemetry, green)
 // ===========================================================================
 
 describe('host attachment reporting (HA0)', () => {
-  it('should report a cold, hidden chat once per open while its host stays gone', async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should report own.rewrite with its reason when a host answer resets the own projection', async () => {
     const report = vi.spyOn(chatReadReporter, 'report');
+    const chat = open(
+      createStore(createDisk({})),
+      silentHost(() => undefined),
+    );
+    try {
+      chat.store.receiveHostReadAnswer(chatId, { status: 'refused', chatId, reason: 'cursor-ahead' });
+
+      expect(report.mock.calls.filter(([code]) => code === 'own.rewrite')).toEqual([
+        ['own.rewrite', expect.objectContaining({ chatId, tags: { reason: 'cursor-ahead' } })],
+      ]);
+    } finally {
+      chat.close();
+    }
+  });
+
+  it('should report a cold, hidden chat once, only after the loss outlasts its bound', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const report = vi.spyOn(chatReadReporter, 'report');
+    const coldHidden = (): unknown[] =>
+      report.mock.calls.filter(([code]) => code === 'chat.read.cold-hidden').map(([, observation]) => observation);
     const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), deadHost('PEER_GONE'));
     try {
-      /* The attachment retries at 250 ms, 500 ms, …: wait for a second loss, which must not report again. */
       await vi.waitFor(() => {
-        expect(report.mock.calls.filter(([code]) => code === 'chat.read.cold-hidden').length).toBeGreaterThan(0);
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');
       }, coldBound);
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 900);
-      });
-      const coldHidden = report.mock.calls.filter(([code]) => code === 'chat.read.cold-hidden');
-      expect(new Set(coldHidden.map(([, observation]) => observation.occurrence)).size).toBe(1);
+      expect(coldHidden()).toEqual([]);
+
+      /* Past the bound, through several retried losses: one report. */
+      await vi.advanceTimersByTimeAsync(chatReadLossBoundMilliseconds * 2);
+
+      expect(coldHidden()).toEqual([expect.objectContaining({ chatId, tags: { reason: 'PEER_GONE' } })]);
     } finally {
       chat.close();
     }

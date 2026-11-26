@@ -858,6 +858,9 @@ const endsHere = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>, runI
 /** The two phases that OPEN a run and keep its project busy (I24); every other phase settles one. */
 const opensRun = (phase: ProjectedRunPhase): boolean => phase === 'admitted' || phase === 'running';
 
+/** How long a lost or refused host read may last before HA0 reports what it leaves the person with. Milliseconds. */
+export const chatReadLossBoundMilliseconds = 10_000;
+
 /** The connection failures `sendHostCommand` retries; one thrown past its bound leaves a command's effect unknown. */
 const peerLossCodes: ReadonlySet<string> = new Set(['PEER_UNRESPONSIVE', 'PEER_GONE', 'PEER_CLOSED', 'CHANNEL_CLOSED']);
 const retainsLiveRun = (phase: ProjectedRunPhase): boolean => opensRun(phase) || phase === 'paused';
@@ -939,6 +942,8 @@ type ObservedChat = {
   placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
   status: 'unknown' | 'attached' | 'lost' | 'refused';
   retry?: ReturnType<typeof setTimeout>;
+  /** Armed by a loss that is not a leadership handoff; reports it if it outlasts {@link chatReadLossBoundMilliseconds}. */
+  lossReport?: ReturnType<typeof setTimeout>;
   attempts: number;
   /**
    * The agent host's code failed to load past the page's worker bound when this chat's read last met it (FP10). It
@@ -1923,7 +1928,7 @@ export class ChatSessionStore {
         this.#releaseRefusedRun(session);
       }
     }
-    this.#projectionOf(chatId).send({ type: 'batch', answer });
+    this.#foldHostAnswer(chatId, answer);
     this.#latchIfForeignScanLost(chatId);
     // A verified empty batch can leave the reducer unchanged while establishing read authority.
     if (answer.status === 'batch' && answer.events.length === 0) {
@@ -3772,6 +3777,8 @@ export class ChatSessionStore {
   }
 
   #stopObservedAttachment(chatId: string, observed: ObservedChat): void {
+    clearTimeout(observed.lossReport);
+    observed.lossReport = undefined;
     this.#answeredLogReads.delete(chatId);
     const session = this.#sessions.get(chatId);
     if (session !== undefined) {
@@ -3789,25 +3796,69 @@ export class ChatSessionStore {
   }
 
   /**
-   * HA0: report what a lost or refused host read leaves the person with. A session that never displayed its own
-   * segment is a cold, hidden transcript (once per session); a caught-up own run still open is an unsettled orphan
-   * candidate (once per run). Reporting only: nothing here changes what the store does.
+   * Fold one host read answer, reporting `own.rewrite` when the fold resets the own projection (HA0): the host said
+   * the reader is ahead or of another identity, or a version-1 host clamped. Every host read answer reaches the
+   * projection here (facts pages fold inside the attachment's capture, which keeps the reset version); a reset the
+   * store sends itself does not pass here, so it is not reported.
+   *
+   * @param chatId - The chat the answer is for.
+   * @param answer - The host's read answer.
+   */
+  #foldHostAnswer(chatId: string, answer: ChatProjectionReadAnswer): void {
+    const before = this.#projectionContext(chatId);
+    this.#projectionOf(chatId).send({ type: 'batch', answer });
+    const after = this.#projectionContext(chatId);
+    if (before === undefined || after === undefined || after.resetVersion === before.resetVersion) {
+      return;
+    }
+    const reason =
+      answer.status === 'refused'
+        ? answer.reason
+        : before.ledger.position.sourceGeneration !== undefined &&
+            'sourceGeneration' in answer &&
+            answer.sourceGeneration !== before.ledger.position.sourceGeneration
+          ? 'identity-mismatch'
+          : 'clamped';
+    chatReadReporter.report('own.rewrite', {
+      chatId,
+      occurrence: `${chatId}:${String(after.resetVersion)}`,
+      tags: { reason },
+    });
+  }
+
+  /**
+   * HA0: report what a lost or refused host read leaves the person with, once the loss has lasted
+   * {@link chatReadLossBoundMilliseconds}; the caller passes no leadership handoff (`owner-fenced`). A session that never
+   * displayed its own segment is a cold, hidden transcript (once per session); a caught-up own run still open is an
+   * unsettled orphan candidate (once per run). Reporting only: nothing here changes what the store does.
    *
    * @param chatId - The chat whose host read was lost or refused.
-   * @param session - The chat's open session, if any.
-   * @param status - How the read ended.
+   * @param observed - Its observation, whose attachment met the loss.
+   * @param reason - Why the read ended, as a bounded tag.
    */
-  #reportUnreadable(chatId: string, session: InternalSession | undefined, status: 'lost' | 'refused'): void {
-    if (session !== undefined && session.displayedOwn === undefined) {
-      chatReadReporter.report('chat.read.cold-hidden', { chatId, occurrence: session, tags: { status } });
+  #armLossReport(chatId: string, observed: ObservedChat, reason: string): void {
+    if (observed.lossReport !== undefined) {
+      return;
     }
-    const projection = this.#projectionContext(chatId);
-    if (projection !== undefined && selectCaughtUp(projection) && opensRun(selectRunPhase(projection))) {
-      const run = selectCurrentRun(projection);
-      if (run !== undefined) {
-        chatReadReporter.report('run.unsettled.own', { chatId, occurrence: run.runId, tags: { status } });
+    const tags = { reason };
+    observed.lossReport = setTimeout(() => {
+      observed.lossReport = undefined;
+      if (this.#observed.get(chatId) !== observed || (observed.status !== 'lost' && observed.status !== 'refused')) {
+        return;
       }
-    }
+      const session = this.#sessions.get(chatId);
+      if (session !== undefined && session.displayedOwn === undefined) {
+        chatReadReporter.report('chat.read.cold-hidden', { chatId, occurrence: session, tags });
+      }
+      const projection = this.#projectionContext(chatId);
+      const run =
+        projection !== undefined && selectCaughtUp(projection) && opensRun(selectRunPhase(projection))
+          ? selectCurrentRun(projection)
+          : undefined;
+      if (run !== undefined) {
+        chatReadReporter.report('run.unsettled.own', { chatId, occurrence: run.runId, tags });
+      }
+    }, chatReadLossBoundMilliseconds); // Bound: chatReadLossBoundMilliseconds.
   }
 
   /**
@@ -3880,13 +3931,22 @@ export class ChatSessionStore {
           }
           this.#projectionTopics.get(chatId)?.emit();
           if (event.type === 'attachment.attached') {
+            clearTimeout(observed.lossReport);
+            observed.lossReport = undefined;
             observed.attempts = 0;
             observed.hostLoadFailure = undefined;
             this.#syncProjection(chatId, 'none');
             return;
           }
           const session = this.#sessions.get(chatId);
-          this.#reportUnreadable(chatId, session, event.type === 'attachment.refused' ? 'refused' : 'lost');
+          if (event.reason !== 'owner-fenced') {
+            /* A bounded tag: a refusal's reason, a failure's code, or a fixed sentence; never an error's message. */
+            const reason =
+              event.type === 'attachment.refused'
+                ? `refused:${event.reason ?? 'unknown'}`
+                : (getErrno(event.error) ?? (event.error === undefined ? (event.reason ?? 'lost') : 'error'));
+            this.#armLossReport(chatId, observed, reason);
+          }
           if (event.type === 'attachment.lost' && isWorkerCodeLoadFailure(event.error)) {
             observed.hostLoadFailure = event.error;
             if (session !== undefined) {
@@ -4588,7 +4648,6 @@ export class ChatSessionStore {
         return;
       }
       if (published !== undefined && published.resetVersion !== context.resetVersion) {
-        chatReadReporter.report('own.rewrite', { chatId, occurrence: `${chatId}:${String(context.resetVersion)}` });
         this.#answeredLogReads.delete(chatId);
         this.#validatedDisplays.delete(projection);
         const session = this.#sessions.get(chatId);

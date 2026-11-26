@@ -39,6 +39,17 @@ describe('chat read reporting (HA0)', () => {
     expect(report).toHaveBeenCalledTimes(chatReadCodes.length);
   });
 
+  it('should keep its code tag over a caller tag of the same name', () => {
+    const report = vi.fn();
+    createChatReadReporter(report).report('own.rewrite', {
+      chatId: 'chat',
+      occurrence: 'reset_1',
+      tags: { 'chat.read': 'forged' },
+    });
+
+    expect(report.mock.calls[0]?.[1]).toMatchObject({ tags: { 'chat.read': 'own.rewrite' } });
+  });
+
   it('should cap each code per page load', () => {
     const report = vi.fn();
     const sink = createChatReadReporter(report);

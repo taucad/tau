@@ -1,5 +1,6 @@
 import type { CadReference } from '@taucad/chat/references';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
+import { emptyAnnotations } from '@taucad/chat/annotations';
 import type { MessageAnnotations } from '@taucad/chat/annotations';
 import type { AnnotatedSend } from '#components/comments/prepare-annotated-send.js';
 import { useCallback, useEffect, useRef } from 'react';
@@ -91,6 +92,13 @@ export type CadChatClient = {
 /** Stable, so a retried send replaces its toast instead of stacking another. */
 const promotionToastId = 'chat-attachment-promotion';
 
+/** What a message without annotations is sent with: its attachments as they are. */
+const plainSend = (input: CadChatSubmitInput): AnnotatedSend => ({
+  attachments: input.attachments ?? [],
+  annotations: undefined,
+  originals: [],
+});
+
 /**
  * Profile-scoped chat client for the CAD agent.
  *
@@ -177,27 +185,44 @@ export const useCadChatClient = (): CadChatClient => {
     [activeChatId, agent.execution, store, surfaceDispatchFailure],
   );
 
+  /**
+   * What a message is sent with: its commented images flattened into new attachments, their originals kept beside
+   * them.
+   *
+   * @returns `undefined` when the images could not be drawn; the person was told and nothing is sent.
+   */
+  const prepareSend = useCallback(
+    async (input: CadChatSubmitInput): Promise<AnnotatedSend | undefined> => {
+      const plain = plainSend(input);
+      if (input.annotations === undefined) {
+        return plain;
+      }
+      try {
+        // Loaded when a message first carries comments, so the composer's first paint does not pay for the painter.
+        const { sendAnnotated } = await loadCode(async () => import('#components/comments/annotated-send.js'));
+        return await sendAnnotated({
+          attachments: plain.attachments,
+          annotations: input.annotations,
+          store: store.draftAttachmentBytes(activeChatId),
+        });
+      } catch (error) {
+        console.error('[useCadChatClient] annotated images could not be prepared', error);
+        toast.error("Your comments couldn't be drawn on their images, so the message wasn't sent.", {
+          id: promotionToastId,
+        });
+        return undefined;
+      }
+    },
+    [activeChatId, store],
+  );
+
   const submit = useCallback(
     async (input: CadChatSubmitInput): Promise<void> => {
       const queueIntent = store.captureMessageQueueIntent(activeChatId);
-      // A message without annotations is sent as it always was, with no step before it.
-      let send: AnnotatedSend = { attachments: input.attachments ?? [], annotations: undefined, originals: [] };
-      if (input.annotations !== undefined) {
-        try {
-          // Loaded when a message first carries comments, so the composer's first paint does not pay for the painter.
-          const { sendAnnotated } = await loadCode(async () => import('#components/comments/annotated-send.js'));
-          send = await sendAnnotated({
-            attachments: send.attachments,
-            annotations: input.annotations,
-            store: store.draftAttachmentBytes(activeChatId),
-          });
-        } catch (error) {
-          console.error('[useCadChatClient] annotated images could not be prepared', error);
-          toast.error("Your comments couldn't be drawn on their images, so the message wasn't sent.", {
-            id: promotionToastId,
-          });
-          return;
-        }
+      // A message without annotations takes no step, and no tick, before it is sent.
+      const send = input.annotations === undefined ? plainSend(input) : await prepareSend(input);
+      if (send === undefined) {
+        return;
       }
       const attachments = input.attachments === undefined ? undefined : send.attachments;
       const userMessage = buildUserMessage({
@@ -215,20 +240,29 @@ export const useCadChatClient = (): CadChatClient => {
         }),
       );
     },
-    [actions, activeChatId, agent.execution, store, withAttachments],
+    [actions, activeChatId, agent.execution, prepareSend, store, withAttachments],
   );
 
   const edit = useCallback(
     (messageId: string, input: CadChatSubmitInput) => {
       // async-iife: bootstrap — the edit composer closes at once; failures surface on the banner or a toast.
-      void withAttachments('edit', input.attachments ?? [], () => {
-        actions.editMessage(messageId, input.text, {
-          ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
-          ...(input.references === undefined ? {} : { references: input.references }),
+      void (async () => {
+        const send = input.annotations === undefined ? plainSend(input) : await prepareSend(input);
+        if (send === undefined) {
+          return;
+        }
+        // The originals stay with the chat beside the edited message, as a send's do.
+        await withAttachments('edit', [...send.attachments, ...send.originals], () => {
+          actions.editMessage(messageId, input.text, {
+            ...(input.attachments === undefined ? {} : { attachments: send.attachments }),
+            ...(input.references === undefined ? {} : { references: input.references }),
+            // An edit that names its comments replaces the message's, so an empty record clears them.
+            ...(input.annotations === undefined ? {} : { annotations: send.annotations ?? emptyAnnotations }),
+          });
         });
-      });
+      })();
     },
-    [actions, withAttachments],
+    [actions, prepareSend, withAttachments],
   );
 
   const respondToToolApproval = useCallback(

@@ -204,6 +204,12 @@
 \* T4 review round 3 (2026-11-26): a command answered on a refused read releases its run, and a gesture's admission
 \* in `use-chat.tsx` reads the current fold rather than the throttled transcript, and `chat-turn-host.tsx` builds
 \* its command from the fold read after its admission waits. No action or verdict changes.
+\* Comment pins S1 review (2026-11-26): `use-cad-chat-client.ts` flattens a message's commented images before it
+\* builds the message, only for a submit that carries annotations and after the gesture's queue intent is captured, as
+\* attachment promotion already waits there; a failed flatten sends nothing. `chat-session-store.ts` gains a reader of
+\* the draft's attachment bytes, `use-chat.tsx` the draft's annotations and their setter, and `chat-textarea.tsx` a
+\* slot for the draft's comment list. Dispatch, acknowledgement and the queue are untouched. No action or verdict
+\* changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

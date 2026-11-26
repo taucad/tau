@@ -1,8 +1,7 @@
 import type { CadReference } from '@taucad/chat/references';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 import type { MessageAnnotations } from '@taucad/chat/annotations';
-import { prepareAnnotatedSend } from '#components/comments/prepare-annotated-send.js';
 import type { AnnotatedSend } from '#components/comments/prepare-annotated-send.js';
-import { flattenImage } from '#components/comments/flatten-image.js';
 import { useCallback, useEffect, useRef } from 'react';
 import type { ChatStatus } from 'ai';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
@@ -180,6 +179,11 @@ export const useCadChatClient = (): CadChatClient => {
       let send: AnnotatedSend = { attachments: input.attachments ?? [], annotations: undefined, originals: [] };
       if (input.annotations !== undefined) {
         try {
+          // Loaded when a message first carries comments, so the composer's first paint does not pay for the painter.
+          const [{ prepareAnnotatedSend }, { flattenImage }] = await Promise.all([
+            loadCode(async () => import('#components/comments/prepare-annotated-send.js')),
+            loadCode(async () => import('#components/comments/flatten-image.js')),
+          ]);
           send = await prepareAnnotatedSend({
             attachments: send.attachments,
             annotations: input.annotations,

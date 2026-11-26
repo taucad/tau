@@ -295,6 +295,8 @@ export function useChatTextareaLogic({
   handlePointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   focusInput: () => void;
   removeAttachment: (index: number) => void;
+  /** The new-message draft holds at least one comment. */
+  hasDraftComments: boolean;
   setDraftToolChoice: (choice: ToolSelection) => void;
   setShowContextMenu: (show: boolean) => void;
   setAtSymbolPosition: (position: number) => void;
@@ -931,6 +933,7 @@ export function useChatTextareaLogic({
     handlePointerDown,
     focusInput,
     removeAttachment,
+    hasDraftComments: (annotations?.comments.length ?? 0) > 0,
     setDraftToolChoice,
     setShowContextMenu,
     setAtSymbolPosition,

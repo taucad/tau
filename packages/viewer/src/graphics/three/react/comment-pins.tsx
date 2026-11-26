@@ -11,7 +11,7 @@ import { addAfterEffect, useFrame, useThree } from '@react-three/fiber';
 import type { EventManager } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
 import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
-import { commentPinsStore, useCommentPins } from '#cad/comment-pins.store.js';
+import { commentPinsStore, pinsInScope, useCommentPins } from '#cad/comment-pins.store.js';
 import type { CommentPin, CommentPinView, CommentSurfacePick } from '#cad/comment-pins.store.js';
 import { useGraphics, useGraphicsSelector, useModelInteractionSelector, useRenderFrame } from '#hooks/use-graphics.jsx';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
@@ -329,8 +329,13 @@ export function CommentPins(): React.JSX.Element {
     unitId ? getModelInteractionUnitState(state.context, unitId).manifest : undefined,
   );
   const isActive = useCommentPins((state) => state.isActive);
-  const pins = useCommentPins((state) => state.pins);
-  const historyPins = useCommentPins((state) => state.historyPins);
+  const scope = useCommentPins((state) => state.scope);
+  const allPins = useCommentPins((state) => state.pins);
+  const allHistoryPins = useCommentPins((state) => state.historyPins);
+  // Only the pins of the model this viewer shows are drawn; an earlier message replaces the draft while it shows.
+  const pins = useMemo(() => pinsInScope(allPins, scope), [allPins, scope]);
+  const historyPins = useMemo(() => pinsInScope(allHistoryPins, scope), [allHistoryPins, scope]);
+  const isHistoryShown = allHistoryPins.length > 0;
   const movingPinId = useCommentPins((state) => state.movingPinId);
   const [ghost, setGhost] = useState<SurfaceHit>();
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
@@ -506,7 +511,7 @@ export function CommentPins(): React.JSX.Element {
   return (
     <>
       {/* An earlier message's pins replace the draft's while they are shown: one set of numbers at a time. */}
-      {(historyPins.length > 0 ? [] : pins).map((pin, index) => (
+      {(isHistoryShown ? [] : pins).map((pin, index) => (
         <PinMarker key={pin.id} pin={pin} number={index + 1} variant='draft' />
       ))}
       {historyPins.map((pin, index) => (

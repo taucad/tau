@@ -32,6 +32,8 @@ export type CommentPin = {
   /** The geometry the pin was placed on; a different presented key means the model changed underneath it. */
   geometryKey: string;
   view: CommentPinView;
+  /** The model this pin stands on (its file and kernel view). A viewer draws only the pins of the model it shows. */
+  scope?: string;
 };
 
 /** Where a pin's head sits on screen this frame, in CSS pixels of the viewer surface. */
@@ -84,7 +86,19 @@ type CommentPinsState = {
   historyPins: readonly CommentPin[];
   /** The saved pin being moved without a drag: the next surface click re-anchors it. */
   movingPinId: string | undefined;
+  /** The model this viewer is showing. Pins of other models are kept and not drawn. */
+  scope: string | undefined;
 };
+
+/**
+ * The pins a viewer showing `scope` draws.
+ *
+ * @param pins - Every pin of the draft or the shown message.
+ * @param scope - The model the viewer shows.
+ * @returns The pins that stand on that model.
+ */
+export const pinsInScope = (pins: readonly CommentPin[], scope: string | undefined): readonly CommentPin[] =>
+  pins.filter((pin) => pin.scope === scope);
 
 type Listener = () => void;
 
@@ -93,6 +107,8 @@ export type CommentPinsStore = {
   getState: () => CommentPinsState;
   subscribe: (listener: Listener) => () => void;
   setActive: (isActive: boolean) => void;
+  /** The viewer now shows another model: its own pins are drawn, the others wait. */
+  setScope: (scope: string | undefined) => void;
   addPin: (pin: CommentPin) => void;
   updateComment: (id: string, comment: string) => void;
   /** Re-anchors a pin on another surface point. Its comment and number are unchanged. */
@@ -126,6 +142,7 @@ export function createCommentPinsStore(): CommentPinsStore {
     openPinId: undefined,
     historyPins: [],
     movingPinId: undefined,
+    scope: undefined,
   };
   const listeners = new Set<Listener>();
   const heads = new Map<string, HTMLElement>();
@@ -165,8 +182,13 @@ export function createCommentPinsStore(): CommentPinsStore {
         movingPinId: undefined,
       });
     },
+    setScope(scope) {
+      if (scope !== state.scope) {
+        set({ scope, openPinId: undefined, movingPinId: undefined });
+      }
+    },
     addPin(pin) {
-      set({ pins: [...state.pins, pin], openPinId: pin.id, historyPins: [] });
+      set({ pins: [...state.pins, { ...pin, scope: pin.scope ?? state.scope }], openPinId: pin.id, historyPins: [] });
     },
     updateComment(id, comment) {
       set({ pins: state.pins.map((pin) => (pin.id === id ? { ...pin, comment } : pin)) });

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import {
   createSettingsCatalogue,
   searchSettings as searchCatalogue,
@@ -15,7 +15,7 @@ import { useFeatureState } from '#flags/use-feature.js';
 import { initialDeploymentMode } from '#cloud/deployment-mode.js';
 import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { useHasFolderAccess } from '#hooks/use-has-folder-access.js';
+import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
 
 /*
  * The catalogue itself is pure and lives in `@taucad/settings-ui`. This module owns what this deployment offers:
@@ -103,6 +103,23 @@ const flaggedEntries: ReadonlyMap<string, FeatureFlagName> = new Map<SettingId, 
   ['use-setup-answers', 'onboarding'],
   ['setup-answers', 'onboarding'],
 ]);
+
+const subscribeToNothing = (): (() => void) => () => undefined;
+
+/**
+ * Whether this host can connect a folder on disk: always on desktop, and on the web only where the File System Access
+ * API exists (Chromium; not Safari, Firefox or Brave by default). The server cannot tell, so it assumes folders, which is
+ * what every desktop build and Chromium browser shows. Kept in this module, which the shell already loads, so the gate
+ * adds no chunk to the critical path (docs/research/remix-home-only-location-blueprint.md, folder-access hazard class).
+ *
+ * @returns Whether folders can be connected here.
+ */
+export const useHasFolderAccess = (): boolean =>
+  useSyncExternalStore(
+    subscribeToNothing,
+    () => directoryPicker().available,
+    () => true,
+  );
 
 /**
  * Leaves out Workspaces where no folder can be connected (Safari, Brave): its panel would be empty, yet navigation and

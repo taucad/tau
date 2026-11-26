@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { SettingsSectionsProvider } from '@taucad/settings-ui/components/settings/settings-item';
-import { settingsSectionsFor, withFolderAccess } from '#components/settings/settings-registry.js';
-import { useHasFolderAccess } from '#hooks/use-has-folder-access.js';
+import { settingsSectionsFor, useHasFolderAccess, withFolderAccess } from '#components/settings/settings-registry.js';
 import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
 
 /**

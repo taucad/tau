@@ -5,7 +5,7 @@ import { WorkspaceConnections } from '#components/filesystem/workspace-connectio
 import { BrowserStorageStatus } from '@taucad/settings-ui/components/settings/browser-storage-status';
 import { usePersistentStorageStatus } from '@taucad/files-ui/filesystem/use-persistent-storage-status';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { useHasFolderAccess } from '#hooks/use-has-folder-access.js';
+import { useHasFolderAccess } from '#components/settings/settings-registry.js';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 
 export function FileSystemSettings(): React.JSX.Element {

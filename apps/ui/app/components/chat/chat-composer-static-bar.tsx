@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import { ChevronDown, Plus } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
@@ -12,7 +13,7 @@ import {
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import { WorkspaceSelectorPlaceholder } from '#components/filesystem/workspace-selector.js';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
-import { useHasFolderAccess } from '#hooks/use-has-folder-access.js';
+import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
 import { kernelPillFace } from '#components/chat/kernel-picker-layout.js';
 import { KernelPillContent, kernelPillStyles } from '#components/chat/kernel-pill.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
@@ -27,6 +28,21 @@ export const staticReasoningLevelNames = {
   xhigh: 'Extra high',
   max: 'Max',
 } as const;
+
+const subscribeToNothing = (): (() => void) => () => undefined;
+
+/**
+ * Whether the composer will offer a location chip: only where folders can be picked. The server
+ * cannot tell, so it draws the chip, which is what every desktop build and Chromium browser shows.
+ *
+ * @returns Whether to draw the location chip.
+ */
+const useLocationChipShown = (): boolean =>
+  useSyncExternalStore(
+    subscribeToNothing,
+    () => directoryPicker().available,
+    () => true,
+  );
 
 /**
  * Whether the model's name is still unknown (no catalog row yet), so the trigger holds its width
@@ -106,7 +122,7 @@ const noop = (): void => undefined;
  * and the accessibility tree so nothing can act on them early.
  */
 export function ChatComposerStaticBar({ isEmpty }: { readonly isEmpty: boolean }): React.JSX.Element {
-  const isLocationShown = useHasFolderAccess();
+  const isLocationShown = useLocationChipShown();
   return (
     <div inert data-slot='composer-bar' className={chatComposerBarClassName}>
       <div data-slot='composer-left' className={chatComposerBarLeftClassName}>

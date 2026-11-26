@@ -17,18 +17,18 @@
   },
   "mutations": {
     "delete-copy": {
-      "scans": 3,
-      "verifications": 0,
+      "scans": 2,
+      "verifications": 1,
       "recordReads": 0,
-      "discoveryReads": 2322,
-      "browserCalls": 6972
+      "discoveryReads": 1550,
+      "browserCalls": 4656
     },
     "permanent-delete": {
-      "scans": 3,
+      "scans": 2,
       "verifications": 0,
       "recordReads": 0,
-      "discoveryReads": 2322,
-      "browserCalls": 6972
+      "discoveryReads": 1548,
+      "browserCalls": 4648
     },
     "use-this-folder": {
       "scans": 2,
@@ -59,53 +59,53 @@
       "browserCalls": 2324
     },
     "trash": {
-      "scans": 1,
+      "scans": 0,
       "verifications": 0,
       "recordReads": 0,
-      "discoveryReads": 774,
-      "browserCalls": 2324
+      "discoveryReads": 0,
+      "browserCalls": 0
     },
     "restore": {
-      "scans": 1,
+      "scans": 0,
       "verifications": 0,
       "recordReads": 0,
-      "discoveryReads": 774,
-      "browserCalls": 2324
+      "discoveryReads": 0,
+      "browserCalls": 0
     },
     "chat-create": {
-      "scans": 1,
+      "scans": 0,
       "verifications": 0,
       "recordReads": 0,
-      "discoveryReads": 774,
-      "browserCalls": 2324
+      "discoveryReads": 0,
+      "browserCalls": 0
     },
     "chat-soft-delete": {
-      "scans": 1,
+      "scans": 0,
       "verifications": 0,
       "recordReads": 0,
-      "discoveryReads": 774,
-      "browserCalls": 2324
+      "discoveryReads": 0,
+      "browserCalls": 0
     },
     "chat-delete": {
-      "scans": 1,
+      "scans": 0,
       "verifications": 0,
       "recordReads": 0,
-      "discoveryReads": 774,
-      "browserCalls": 2324
+      "discoveryReads": 0,
+      "browserCalls": 0
     },
     "chat-purge": {
-      "scans": 1,
+      "scans": 0,
       "verifications": 0,
       "recordReads": 0,
-      "discoveryReads": 774,
-      "browserCalls": 2324
+      "discoveryReads": 0,
+      "browserCalls": 0
     },
     "chat-recency": {
-      "scans": 1,
+      "scans": 0,
       "verifications": 0,
       "recordReads": 0,
-      "discoveryReads": 774,
-      "browserCalls": 2324
+      "discoveryReads": 0,
+      "browserCalls": 0
     },
     "window-focus": {
       "scans": 1,

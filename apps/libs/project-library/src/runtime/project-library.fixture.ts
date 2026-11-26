@@ -121,6 +121,13 @@ export type LibraryProfile = Readonly<{
   locatorOf: (root: 'home' | 'workspace', relativeDirectory: string) => ProjectLocator;
   /** The authority's scope of the folder. */
   workspaceScope: StorageRootConfig;
+  /** Remove a directory behind the library's back, as another program would: no event reaches the library. */
+  removeDirectory: (root: 'home' | 'workspace', relativeDirectory: string) => void;
+  /**
+   * Run `hook` as each route verification starts, before it reads the route: another tab or an ungated command acting
+   * between the library's own reads. `undefined` removes it.
+   */
+  onVerification: (hook: ((projectId: string) => void) | undefined) => void;
   /** What the library asked of the authority since the last reset. */
   counts: () => LibraryProfileCounts;
   reset: () => void;
@@ -243,13 +250,20 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     };
   };
 
+  let beforeVerification: ((projectId: string) => void) | undefined;
   const verifyProjectRoute = async ({ projectId }: Readonly<{ projectId: string }>) => {
     counts = { ...counts, verifications: counts.verifications + 1 };
+    beforeVerification?.(projectId);
     const directory = routedDirectory(projectId);
     return (
       directory === undefined
         ? { status: 'discovery-required' }
-        : { status: 'verified', project: { projectId, manifest: directory.manifest } }
+        : {
+            status: 'verified',
+            project: { projectId, manifest: directory.manifest },
+            storageRootKey: locatorOf(directory.root, directory.relativeDirectory).storageRootKey,
+            providerBasePath: directory.relativeDirectory,
+          }
     ) satisfies ProjectRouteVerification;
   };
 
@@ -521,6 +535,17 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     routes,
     locatorOf,
     workspaceScope,
+    removeDirectory: (root, relativeDirectory) => {
+      const index = directories.findIndex(
+        (directory) => directory.root === root && directory.relativeDirectory === relativeDirectory,
+      );
+      if (index !== -1) {
+        directories.splice(index, 1);
+      }
+    },
+    onVerification: (hook) => {
+      beforeVerification = hook;
+    },
     counts: () => counts,
     reset: () => {
       counts = { scans: 0, verifications: 0, rootSyncs: 0, recordReads: 0 };

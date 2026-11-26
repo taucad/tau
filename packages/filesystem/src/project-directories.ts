@@ -137,7 +137,18 @@ export type ResolvedProjectManifest = {
 
 /** Read-only verification of an already installed project binding. @public */
 export type ProjectRouteVerification =
-  | { readonly status: 'verified'; readonly project: ResolvedProjectManifest }
+  | {
+      readonly status: 'verified';
+      readonly project: ResolvedProjectManifest;
+      /**
+       * The root of the directory the bytes were read from: the one the route bound when it was read. An authority
+       * older than this field leaves it and `providerBasePath` out, so a caller that needs a particular copy proven
+       * treats their absence as no proof.
+       */
+      readonly storageRootKey?: string;
+      /** That directory under its root, as a discovery locator's `relativeDirectory` names it. */
+      readonly providerBasePath?: string;
+    }
   | { readonly status: 'discovery-required' }
   | { readonly status: 'unavailable' }
   | { readonly status: 'superseded' };
@@ -940,7 +951,12 @@ export class ProjectDirectories {
             return { status: 'discovery-required' };
           }
           return identity.projectId === input.projectId
-            ? { status: 'verified', project: { projectId: input.projectId, manifest: manifest.data } }
+            ? {
+                status: 'verified',
+                project: { projectId: input.projectId, manifest: manifest.data },
+                storageRootKey: input.storageRootKey,
+                providerBasePath: directory,
+              }
             : { status: 'discovery-required' };
         } catch (error) {
           return { status: isNotFoundError(error) ? 'discovery-required' : 'unavailable' };

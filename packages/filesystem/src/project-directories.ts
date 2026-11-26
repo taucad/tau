@@ -91,6 +91,7 @@ import { importFactsPath } from '#importer/facts.js';
 import type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '#importer/facts.js';
 import { isReservedImportPath } from '#importer/path-policy.js';
 import { directoryConcurrency, mapConcurrent } from '#concurrency.js';
+import { workerTimings } from '#worker-timings.js';
 
 /** A provider whose host copies a person's chosen source into it (the desktop node client, W7.4). */
 /**
@@ -455,6 +456,7 @@ export class ProjectDirectories {
         // The workspace root exists by definition; a project is any immediate
         // child directory carrying `tau.json`. Entry kinds come from the listing
         // so files never cost a `stat`, and dotdirs are excluded by name alone.
+        workerTimings.count('discovery.listing');
         const entries = await readDirectoryEntries(provider, '');
         directories = entries
           .filter((entry) => entry.kind === 'dir' && !entry.name.startsWith('.'))
@@ -464,6 +466,7 @@ export class ProjectDirectories {
         roots.push({ status: 'inaccessible', root, reason: error instanceof Error ? error.message : String(error) });
         continue;
       }
+      workerTimings.count('discovery.fullRead');
       const probe = async (directory: string): Promise<ProjectDiscoveryEntry | undefined> => {
         const relativeDirectory = assertRootedPath(directory);
         const locator = projectLocatorFor(root, storageRootKey, relativeDirectory);
@@ -1128,6 +1131,7 @@ export class ProjectDirectories {
 
   private async _readProjectDirectory(authority: DirectoryAuthority): Promise<ProjectDirectoryReading> {
     const { provider, directory } = authority;
+    workerTimings.count('discovery.directoryRead');
     const [manifestResult, identityResult] = await Promise.allSettled([
       provider.readFile(`${directory}/tau.json`),
       this._readIdentity(authority),
@@ -1139,6 +1143,7 @@ export class ProjectDirectories {
           issue: { code: 'manifest-unreadable', message: errorMessage(manifestResult.reason) },
         };
       }
+      workerTimings.count('discovery.listing');
       const entries = await readDirectoryEntries(provider, directory).catch(() => []);
       if (!entries.some((entry) => entry.kind === 'dir' && entry.name === '.tau')) {
         return { kind: 'not-a-project' };

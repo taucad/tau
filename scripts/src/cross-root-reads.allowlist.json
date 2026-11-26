@@ -125,6 +125,11 @@
     "reason": "test fixture read from another project"
   },
   {
+    "file": "apps/libs/project-library/src/discovery-budget.test.ts",
+    "target": "packages/filesystem/src/testing/discovery-unit-cost.json",
+    "reason": "holds the library budget's per-call rows to the unit costs the filesystem cost test measures"
+  },
+  {
     "file": "apps/ui/app/runtime/attachment-transcode-sources.test.ts",
     "target": "packages/plugins/heif/src/fixtures/small.heic",
     "reason": "test fixture read from another project: the heif package owns the HEIC fixtures its parity tests share"

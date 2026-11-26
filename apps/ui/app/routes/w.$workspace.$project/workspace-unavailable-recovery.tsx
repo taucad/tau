@@ -40,6 +40,7 @@ import { webAccessDirectoryPicker } from '@taucad/files-ui/constants/browser.con
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { Label } from '@taucad/ui/components/label';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useHasFolderAccess } from '#hooks/use-has-folder-access.js';
 
 type WorkspaceUnavailableRecoveryProps = {
   readonly reason: WorkspaceUnavailableReason;
@@ -60,6 +61,9 @@ export function WorkspaceUnavailableRecovery({
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [pickedWorkspaceId, setPickedWorkspaceId] = useState<string | undefined>(workspaceId);
   const [isBusy, setIsBusy] = useState(false);
+  /* Without folder access (Safari, Brave) no folder can be connected, granted or switched to here, so the panel says
+   * Home is the only location rather than offering commands that do nothing. */
+  const hasFolderAccess = useHasFolderAccess();
 
   useEffect(() => {
     // async-iife: bootstrap
@@ -187,7 +191,7 @@ export function WorkspaceUnavailableRecovery({
 
               <WorkspaceDirectoryPanel
                 variant='inline'
-                status={reason === 'missing' ? 'none' : reason}
+                status={hasFolderAccess ? (reason === 'missing' ? 'none' : reason) : 'unsupported'}
                 workspaceId={workspaceId}
                 workspaceName={workspaceName}
                 isBusy={isBusy}
@@ -195,7 +199,7 @@ export function WorkspaceUnavailableRecovery({
                 onGrantAccess={reason === 'permission' ? handleGrantAccess : undefined}
               />
 
-              {workspaces.length > 1 ? (
+              {hasFolderAccess && workspaces.length > 1 ? (
                 <div className='flex flex-col gap-1.5'>
                   <Label className='text-xs text-muted-foreground'>Or switch to another workspace</Label>
                   <div className='flex items-center gap-2'>

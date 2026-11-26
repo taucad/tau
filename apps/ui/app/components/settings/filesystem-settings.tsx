@@ -5,10 +5,12 @@ import { WorkspaceConnections } from '#components/filesystem/workspace-connectio
 import { BrowserStorageStatus } from '@taucad/settings-ui/components/settings/browser-storage-status';
 import { usePersistentStorageStatus } from '@taucad/files-ui/filesystem/use-persistent-storage-status';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { useHasFolderAccess } from '#hooks/use-has-folder-access.js';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 
 export function FileSystemSettings(): React.JSX.Element {
   const persistenceStatus = usePersistentStorageStatus();
+  const hasFolderAccess = useHasFolderAccess();
   const [storageUsage, setStorageUsage] = useState<{ used: number; quota: number } | undefined>(undefined);
 
   useEffect(() => {
@@ -34,9 +36,12 @@ export function FileSystemSettings(): React.JSX.Element {
     storageUsage !== undefined && storageUsage.quota > 0 && storageUsage.used / storageUsage.quota > 0.8;
   return (
     <div className='flex flex-col gap-6 pb-6'>
-      <SettingsItem settingId='workspaces'>
-        <WorkspaceConnections />
-      </SettingsItem>
+      {/* Without folder access the connections list renders nothing, which would leave an empty Workspaces section. */}
+      {hasFolderAccess ? (
+        <SettingsItem settingId='workspaces'>
+          <WorkspaceConnections />
+        </SettingsItem>
+      ) : undefined}
 
       {/* Desktop's Home is a folder on disk, so the origin's storage quota says nothing about it. */}
       {isDesktopTarget() ? undefined : (

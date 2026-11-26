@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isCodeLoadFailure, loadCode, setCodeLoadFailureSink, workerCodeLoadFailureType } from '#lib/code-loading.js';
+import {
+  CodeLoadDeadlineError,
+  isCodeLoadFailure,
+  loadCode,
+  setCodeLoadFailureSink,
+  workerCodeLoadFailureType,
+} from '#lib/code-loading.js';
 
 const chromium = (): TypeError =>
   new TypeError('Failed to fetch dynamically imported module: https://tau.new/assets/metal-morph-spinner-D7Jh-ODB.js');
@@ -23,6 +29,7 @@ describe('isCodeLoadFailure', () => {
     ['Firefox', new TypeError('error loading dynamically imported module: https://tau.new/assets/a-1.js')],
     ['a Vite stylesheet preload', new Error('Unable to preload CSS for /assets/editor-Bq7x.css')],
     ['a wrapper that keeps it as its cause', new Error('Agent host failed', { cause: chromium() })],
+    ['a load past its deadline', new CodeLoadDeadlineError(30_000)],
   ])('should recognise %s', (_label, error) => {
     expect(isCodeLoadFailure(error)).toBe(true);
   });
@@ -96,6 +103,36 @@ describe('loadCode', () => {
     expect(outer).toHaveBeenCalledOnce();
     expect(inner).not.toHaveBeenCalled();
     restoreOuter();
+  });
+});
+
+describe('loadCode with a deadline (WP-03, PERF-9)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should fail a load that stays unsettled past its deadline as a failed load, and tell the recovery', async () => {
+    vi.useFakeTimers();
+    const sink = vi.fn();
+    restore = setCodeLoadFailureSink(sink);
+    const stalled = Promise.withResolvers<never>();
+    const loading = loadCode(async () => stalled.promise, { deadline: 30_000 });
+    const settled = expect(loading).rejects.toThrow(new CodeLoadDeadlineError(30_000));
+
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(sink).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    await settled;
+    expect(sink).toHaveBeenCalledExactlyOnceWith(expect.any(CodeLoadDeadlineError), 'required');
+  });
+
+  it('should resolve a load that settles within its deadline and leave no timer behind', async () => {
+    vi.useFakeTimers();
+    const module = { value: 1 };
+
+    await expect(loadCode(async () => module, { deadline: 30_000 })).resolves.toBe(module);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

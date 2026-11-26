@@ -101,7 +101,7 @@ const readAll = (handle: SyncAccessHandle): Uint8Array<ArrayBuffer> => {
   return bytes;
 };
 
-const appendAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>): void => {
+const writeAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>): void => {
   const start = handle.getSize();
   let offset = 0;
   while (offset < bytes.byteLength) {
@@ -114,6 +114,10 @@ const appendAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>): vo
     }
     offset += written;
   }
+};
+
+const appendAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>): void => {
+  writeAll(handle, bytes);
   handle.flush();
 };
 
@@ -136,8 +140,8 @@ const readerOf = (read: () => Promise<Uint8Array<ArrayBuffer>>): BrowserEventLog
  * Open an OPFS positional-append event log in a dedicated browser worker.
  *
  * A write open holds the exclusive sync access handle for the log's life: every JSONL line is written at
- * `getSize()` and flushed before its append resolves, and every append is fenced on the log's length (`LOG_FENCED`,
- * D5). While another worker holds the handle the open is refused `WRITER_LOCKED`, whose recovery is to wait (CL-Q1).
+ * `getSize()` and flushed before its append resolves (a batch's lines once, after the last), and every append is
+ * fenced on the log's length (`LOG_FENCED`, D5). While another worker holds the handle the open is refused `WRITER_LOCKED`, whose recovery is to wait (CL-Q1).
  * A read open reads the file without a handle. OPFS is unavailable on null origins, so tests must use a real origin.
  *
  * @param options - Exact OPFS file handle owned by the elected worker leader, and the access mode.
@@ -210,6 +214,13 @@ const openOpfsWriter = async (
     read: async () => readAll(handle),
     append: async (bytes) => {
       appendAll(handle, bytes);
+    },
+    /* A batch's rows are written back to back and flushed once (WP-10 step A). */
+    write: async (bytes) => {
+      writeAll(handle, bytes);
+    },
+    sync: async () => {
+      handle.flush();
     },
     truncate: async (size) => {
       handle.truncate(size);

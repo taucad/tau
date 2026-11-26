@@ -76,9 +76,17 @@ const capabilityOf = async (
   return probe;
 };
 
+/**
+ * How long the implementation module may take to load (chat performance plan WP-03; launch audit PERF-9). Its chunk
+ * is about 500 KB from the app's own static host and normally arrives within a second or two; a browser gives a stalled
+ * module request no deadline, and one held a turn for 294 s on staging. Past this the load fails like any failed
+ * load: the page replaces the worker (FP10), and the turn waiting on it starts on the new one. Milliseconds.
+ */
+const implementationLoadDeadline = 30_000;
+
 const loadImplementationModule = async () => {
   try {
-    return await loadCode(async () => import('./agent-host.impl.js'));
+    return await loadCode(async () => import('./agent-host.impl.js'), { deadline: implementationLoadDeadline });
   } catch (error) {
     throw Object.assign(
       new Error(`Agent host worker failed to load: ${error instanceof Error ? error.message : String(error)}`),

@@ -80,6 +80,13 @@ const recordFor = (
       await append(event);
       journaled.push(event);
     },
+    appendAll: async (events) => {
+      for (const event of events) {
+        // oxlint-disable-next-line no-await-in-loop -- rows are journaled in order.
+        await append(event);
+        journaled.push(event);
+      }
+    },
     events: async () => journaled as unknown as readonly AgentLogEvent[],
     rows: async () => journaled as unknown as readonly AgentLogEvent[],
     history: async () => history,
@@ -769,6 +776,7 @@ describe('Compaction', () => {
       record: {
         messages: identities,
         append: async () => undefined,
+        appendAll: async () => undefined,
         events: async () => durable as unknown as readonly AgentLogEvent[],
         rows: async () => durable as unknown as readonly AgentLogEvent[],
         history: async () => second.map((message) => piMessageToProvider(message, identities)),
@@ -1622,6 +1630,7 @@ describe('Compaction', () => {
       record: {
         messages: identities,
         append: async () => undefined,
+        appendAll: async () => undefined,
         events: async () => [],
         rows: async () => [],
         history: async () => durable,

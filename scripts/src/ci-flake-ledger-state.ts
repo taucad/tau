@@ -95,6 +95,11 @@ export type OutcomeRow = {
   readonly run?: number | undefined;
   readonly attempt?: number | undefined;
   readonly job?: string | undefined;
+  /**
+   * The row came from a non-gating shadow row (a `test-outcomes-shadow-*` artifact, DC-25). Set by the reader from the
+   * artifact's name, never by the row; its events are recorded but do not count toward the entry rule (FQ-6).
+   */
+  readonly shadow?: boolean | undefined;
 };
 
 export type ParsedOutcomes = {
@@ -244,6 +249,8 @@ export type FlakeEvent = {
   readonly variantExecution?: number | undefined;
   /** The first line of the first error. */
   readonly error?: string | undefined;
+  /** Seen only in a non-gating shadow row: recorded, but not counted toward the entry rule. */
+  readonly shadow?: true | undefined;
 };
 
 /** A failed execution still waiting for a pass on its hash or in its lineage. */
@@ -263,6 +270,8 @@ export type OpenFailure = {
   /** The variant's execution count at the failure. */
   readonly variantExecution?: number | undefined;
   readonly error?: string | undefined;
+  /** The failure came from a non-gating shadow row. */
+  readonly shadow?: true | undefined;
 };
 
 export type VariantState = {
@@ -653,6 +662,7 @@ const countFailure = (counting: Counting): void => {
       execution: identity.executions,
       variantExecution: variantState?.executions,
       error: firstError(row),
+      ...(row.shadow ? { shadow: true } : {}),
     });
     return;
   }
@@ -669,6 +679,7 @@ const countFailure = (counting: Counting): void => {
     execution: identity.executions,
     variantExecution: variantState?.executions,
     error: firstError(row),
+    ...(row.shadow ? { shadow: true } : {}),
   });
 };
 
@@ -694,6 +705,7 @@ const countPass = (counting: Counting): LineageCandidate | undefined => {
       execution: identity.executions,
       variantExecution: identity.variants[variant]?.executions,
       error: firstError(row),
+      ...(row.shadow ? { shadow: true } : {}),
     });
   } else {
     identity.passStreak += 1;
@@ -717,6 +729,7 @@ const countPass = (counting: Counting): LineageCandidate | undefined => {
       execution: failure.execution,
       variantExecution: failure.variantExecution,
       error: failure.error,
+      ...(failure.shadow ? { shadow: true } : {}),
     });
   }
   identity.openFailures = identity.openFailures.filter((failure) => !sameHash.includes(failure));
@@ -953,6 +966,7 @@ export const confirmLineage = (state: LedgerState, candidate: LineageCandidate):
     execution: candidate.failure.execution,
     variantExecution: candidate.failure.variantExecution,
     error: candidate.failure.error,
+    ...(candidate.failure.shadow ? { shadow: true } : {}),
   };
   const all = [...identity.events, event];
   keepEvents(identity, all, all.slice(-maximumEvents));
@@ -989,7 +1003,7 @@ export const pruneState = (state: LedgerState, now: Date): void => {
 export const eventsInLast = (identity: IdentityState, executions: number): number =>
   identity.events.filter((event) => event.execution > identity.executions - executions).length;
 
-/** Whether an identity meets D3's entry rule today (reported only; acting on it is FQ-6). */
+/** Whether an identity meets D3's entry rule today (`ci-flake-quarantine-entry.ts` acts on it). */
 export const meetsEntryRule = (identity: IdentityState): boolean =>
   entryRule.some((rule) => eventsInLast(identity, rule.executions) >= rule.events);
 
@@ -1073,7 +1087,7 @@ export const renderLedgerMarkdown = (summary: LedgerSummary, limit = 50): string
     return lines.join('\n');
   }
   lines.push(
-    'Events: `retry` failed and passed inside one task; `same-hash` failed and passed on one Nx task hash; `lineage` passed on the next run of the same unchanged pull request or push. Executions count from the first failure. "2 in 80 / 3 in 230" is the entry rule of D3, reported only.',
+    'Events: `retry` failed and passed inside one task; `same-hash` failed and passed on one Nx task hash; `lineage` passed on the next run of the same unchanged pull request or push. Executions count from the first failure. "2 in 80 / 3 in 230" is the entry rule of D3; the entry job quarantines such a test unless its newest execution failed every attempt.',
     '',
     '| Test | Events (retry / same-hash / lineage) | All events | Executions | Failures | Retried passes | Variants | First seen | Last seen | 2 in 80 / 3 in 230 |',
     '| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |',

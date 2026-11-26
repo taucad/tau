@@ -427,6 +427,43 @@ const inactiveProjectionLimit = 4;
 const inactiveProjectionWeightLimit = 16 * 1024 * 1024;
 /** Milliseconds between chat message notifications while a stream writes (D-UI-10). */
 const chatMessagesThrottle = 50;
+/** How long a hidden document waits to publish live-only changes, which no animation frame would publish. */
+const hiddenLiveInterval = 1000;
+
+/** The next animation frame while the document is visible; a timer while it is hidden or has no frames. */
+const nextFrame = (callback: () => void): (() => void) => {
+  if (
+    typeof requestAnimationFrame === 'undefined' ||
+    (globalThis.document as Document | undefined)?.visibilityState === 'hidden'
+  ) {
+    const timer = setTimeout(callback, hiddenLiveInterval);
+    return () => {
+      clearTimeout(timer);
+    };
+  }
+  const handle = requestAnimationFrame(callback);
+  return () => {
+    cancelAnimationFrame(handle);
+  };
+};
+
+/** Whether a projection snapshot differs from the last published one only in its live preview. */
+const changesOnlyLive = (previous: ChatProjection, next: ChatProjection): boolean => {
+  if (previous.live === next.live) {
+    return false;
+  }
+  for (const key of Object.keys(next) as (keyof ChatProjection)[]) {
+    if (key !== 'live' && previous[key] !== next[key]) {
+      return false;
+    }
+  }
+  for (const key of Object.keys(previous) as (keyof ChatProjection)[]) {
+    if (key !== 'live' && !(key in next)) {
+      return false;
+    }
+  }
+  return true;
+};
 /** How often, and from how long a first wait, a taken-back request asks the outbox again before the person is told. */
 const takeBackRetries = 3;
 const takeBackRetryDelay = 250;
@@ -840,6 +877,11 @@ export type ChatSessionStoreOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
   Readonly<{
     chatSession?: typeof chatSessionMachine;
     /**
+     * Schedules the frame that publishes live-only projection changes (WP-06 frame clock, `LiveOverlay.tla`
+     * `FrameClock`); returns a cancel. Defaults to the next animation frame, or a 1 s timer while the document is hidden.
+     */
+    frame?: (callback: () => void) => () => void;
+    /**
      * The closures the store calls, given at construction (A2): the app runtime passes the project library's ports.
      * Without them the store's defaults throw until `setDependencies`.
      */
@@ -1032,6 +1074,9 @@ export class ChatSessionStore {
   readonly #composerDrains = new Map<string, Promise<void>>();
   /** Live owners pin projections; a bounded inactive cache preserves recent warm navigation. */
   readonly #projections = new Map<string, Actor<typeof chatProjectionLogic>>();
+  /** The pending frame of each chat whose projection holds a live-only change not yet published (WP-06). */
+  readonly #projectionFrames = new Map<string, () => void>();
+  readonly #frame: (callback: () => void) => () => void;
   readonly #inactiveProjections = new Map<
     string,
     { projectId: string; actor: Actor<typeof chatProjectionLogic>; weight: number }
@@ -1106,7 +1151,8 @@ export class ChatSessionStore {
   };
 
   public constructor(options: ChatSessionStoreOptions = {}) {
-    const { chatSession, dependencies, files, focusedProject, projectSessions, ...rootOptions } = options;
+    const { chatSession, dependencies, files, focusedProject, frame, projectSessions, ...rootOptions } = options;
+    this.#frame = frame ?? nextFrame;
     if (dependencies !== undefined) {
       this.#deps = { ...this.#deps, ...dependencies };
     }
@@ -4480,7 +4526,15 @@ export class ChatSessionStore {
     let presentedAttempt: Readonly<{ runId: string; attempt: number }> | undefined;
     let attention: RowKey | undefined;
     let published: ChatProjection | undefined;
-    projection.subscribe(({ context }) => {
+    /* The frame clock (WP-06, `LiveOverlay.tla` `FrameClock`): a snapshot that changes only the live preview is
+     * published from the next frame, so a burst of port messages handled behind a busy main thread wakes readers once.
+     * Any other change publishes at once, with whatever live change was waiting (`DurableAtOnce`, `FrameAtomic`). */
+    const publish = (context: ChatProjection): void => {
+      const pendingFrame = this.#projectionFrames.get(chatId);
+      if (pendingFrame !== undefined) {
+        pendingFrame();
+        this.#projectionFrames.delete(chatId);
+      }
       if (published === context) {
         return;
       }
@@ -4515,6 +4569,27 @@ export class ChatSessionStore {
       presentedAttempt = run === undefined ? presentedAttempt : { runId: run.runId, attempt: run.attempt };
       this.#syncProjection(chatId, reopened ? 'reopened' : moved ? 'moved' : 'none');
       this.#projectionTopics.get(chatId)?.emit();
+    };
+    projection.subscribe(({ context }) => {
+      if (published === undefined || !changesOnlyLive(published, context)) {
+        publish(context);
+        return;
+      }
+      if (this.#projectionFrames.has(chatId)) {
+        return;
+      }
+      /* A scheduler may run the callback before it returns (tests publish at once); nothing is left to cancel then. */
+      const frame = { ran: false };
+      const cancel = this.#frame(() => {
+        frame.ran = true;
+        this.#projectionFrames.delete(chatId);
+        if (this.#projections.get(chatId) === projection) {
+          publish(projection.getSnapshot().context);
+        }
+      });
+      if (!frame.ran) {
+        this.#projectionFrames.set(chatId, cancel);
+      }
     });
     projection.start();
     return projection;
@@ -5805,6 +5880,8 @@ export class ChatSessionStore {
     }
     this.#inactiveProjections.delete(chatId);
     actor.stop();
+    this.#projectionFrames.get(chatId)?.();
+    this.#projectionFrames.delete(chatId);
     this.#projections.delete(chatId);
     this.#answeredLogReads.delete(chatId);
     this.#validatedDisplays.delete(actor);

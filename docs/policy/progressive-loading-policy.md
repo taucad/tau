@@ -59,7 +59,7 @@ Rules marked _pending_ state the target; the named work package lands their enfo
 
 ### 1. Put every route in one route class
 
-Every entry under `app/routes` belongs to exactly one class in `apps/ui/app/lib/route-classes.ts`. A class states its delivery (`static-shell`, `prerendered`, `function` or `cdn-ssr`); a guarded class also states its `interactive` roots, and its budgets live under its id in `apps/ui/critical-budget.json`. The registry is the one source for the prerender list (`static-paths.ts`), the function's `excludedPaths` and the generated routing block of `netlify.toml` (`renderNetlifyShellRouting`), the roots of the critical-path guards (`scripts/critical-path.mts`) and the shell checks. Never hand-edit the generated `netlify.toml` block or add a shell path elsewhere.
+Every entry under `app/routes` belongs to exactly one class in `apps/ui/app/lib/route-classes.ts`. A class states its delivery (`static-shell`, `prerendered`, `function` or `cdn-ssr`); a guarded class also states its `interactive` roots, and its budgets live under its id in `apps/ui/critical-budget.json`. The registry is the one source for the prerender list (`static-paths.ts`), the static shell edge function's paths (`staticShellEdgePaths`) and the generated routing block of `netlify.toml` (`renderNetlifyShellRouting`), the roots of the critical-path guards (`scripts/critical-path.mts`) and the shell checks. Never hand-edit the generated `netlify.toml` block or add a shell path elsewhere.
 
 **Why**: before the registry six files had to agree on how a route was delivered.
 

@@ -20,7 +20,8 @@
     "apps/ui/app/machines/file-manager.machine.ts",
     "apps/ui/app/workers/agent-host-projects.ts",
     "apps/libs/lsp-fs/src/sync/sync-fs-server.ts",
-    "apps/ui/app/machines/cad.machine.ts"
+    "apps/ui/app/machines/cad.machine.ts",
+    "apps/libs/agent-host-ui/src/workers/system-skills-overlay.ts"
   ],
   "rows": [
     {
@@ -1444,6 +1445,30 @@
       "token": "workerReplacementDelay",
       "class": "Backoff",
       "owner": "PL7 staging defects FP10 (staging verification 2026-11-21)"
+    },
+    {
+      "id": "WORKER-IMPL-LOAD",
+      "bound": "The agent-host worker's implementation module load (30 s, implementationLoadDeadline): past it the load fails as a failed load does, the page replaces the worker (FP10) and the waiting turn starts on the new one; a stalled chunk request held a turn for 294 s on staging",
+      "site": "apps/ui/app/workers/agent-host.worker.ts",
+      "token": "implementationLoadDeadline",
+      "class": "External edge",
+      "owner": "chat performance WP-03 (PERF-9)"
+    },
+    {
+      "id": "SKILL-RESOURCE-ANSWER",
+      "bound": "A system skill resource request's answer (10 s, answerMilliseconds), then its body (60 s, bodyMilliseconds); a transient failure is asked again",
+      "site": "apps/libs/agent-host-ui/src/workers/system-skills-overlay.ts",
+      "token": "stop.abort();",
+      "class": "External edge",
+      "owner": "launch audit PERF-2 (#2815), chat performance WP-03"
+    },
+    {
+      "id": "SKILL-RESOURCE-RETRY",
+      "bound": "A system skill resource read makes at most three requests, 500 ms then 1 s apart (retryDelayMilliseconds), about 32 s in the worst case",
+      "site": "apps/libs/agent-host-ui/src/workers/system-skills-overlay.ts",
+      "token": "retryDelayMilliseconds * attempt",
+      "class": "Backoff",
+      "owner": "launch audit PERF-2 (#2815), chat performance WP-03"
     },
     {
       "id": "LIVE-CONFLATION",

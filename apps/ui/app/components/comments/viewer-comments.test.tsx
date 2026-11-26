@@ -159,16 +159,16 @@ describe('ViewerComments', () => {
   it("should move a draft pin from its card's Move and the next click on the model", async () => {
     const user = userEvent.setup();
     renderViewer();
-    await user.click(screen.getByRole('button', { name: 'Comment 1: Taller' }));
+    await user.click(await screen.findByRole('button', { name: 'Comment 1: Taller' }));
     expect(screen.getByRole('button', { name: 'Dictate' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Move' }));
     expect(screen.getByRole('status')).toHaveTextContent('Click the model where comment 1 goes');
     expect(graphics.actor.send).toHaveBeenCalledWith({ type: 'setCommentActive', payload: true });
   });
 
-  it('should move a draft pin when its head is dragged onto the model', () => {
+  it('should move a draft pin when its head is dragged onto the model', async () => {
     renderViewer(pickAt([0.02, 0, 0]));
-    const head = screen.getByRole('button', { name: 'Comment 1: Taller' });
+    const head = await screen.findByRole('button', { name: 'Comment 1: Taller' });
     act(() => {
       fireEvent.pointerDown(head, { button: 0, isPrimary: true, pointerId: 1, clientX: 10, clientY: 10 });
       fireEvent.pointerMove(head, { pointerId: 1, clientX: 40, clientY: 30 });
@@ -181,9 +181,9 @@ describe('ViewerComments', () => {
     expect(moved?.images).toHaveLength(1);
   });
 
-  it('should leave a pin where it was when a drag ends over nothing', () => {
+  it('should leave a pin where it was when a drag ends over nothing', async () => {
     renderViewer(undefined);
-    const head = screen.getByRole('button', { name: 'Comment 1: Taller' });
+    const head = await screen.findByRole('button', { name: 'Comment 1: Taller' });
     act(() => {
       fireEvent.pointerDown(head, { button: 0, isPrimary: true, pointerId: 1, clientX: 10, clientY: 10 });
       fireEvent.pointerMove(head, { pointerId: 1, clientX: 40, clientY: 30 });
@@ -197,8 +197,8 @@ describe('ViewerComments', () => {
     draft.state.snapshot = { context: { draftAnnotations: undefined, draftAttachments: [] } };
     renderViewer(pickAt([0.02, 0, 0]));
     await user.click(screen.getByRole('button', { name: 'Show sent' }));
-    expect(screen.getByRole('status')).toHaveTextContent('Showing comments from an earlier message');
-    const head = screen.getByRole('button', { name: 'Comment 1: Taller' });
+    expect(await screen.findByRole('status')).toHaveTextContent('Showing comments from an earlier message');
+    const head = await screen.findByRole('button', { name: 'Comment 1: Taller' });
     expect(head).toHaveAttribute('data-sent', 'true');
     await user.click(head);
     expect(screen.queryByRole('button', { name: 'Move' })).not.toBeInTheDocument();

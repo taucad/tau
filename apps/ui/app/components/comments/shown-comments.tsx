@@ -8,7 +8,12 @@ type ShownCommentsValue = Readonly<{
   shown: ShownComments | undefined;
   show: (shown: ShownComments) => void;
   hide: () => void;
+  /** Lists a viewer to be told, as the person asks, which comments are shown; returns its removal. */
+  addViewer: (reveal: RevealComments) => () => void;
 }>;
+
+/** A viewer's answer to Show in viewer, run in the person's click: it frames the shown pins when it must. */
+export type RevealComments = (annotations: MessageAnnotations) => void;
 
 const ShownCommentsContext = createContext<ShownCommentsValue | undefined>(undefined);
 
@@ -27,6 +32,8 @@ export function ShownCommentsProvider({
   readonly children: React.ReactNode;
 }): React.JSX.Element {
   const [held, setHeld] = useState<{ chatId: string; shown: ShownComments }>();
+  // oxlint-disable-next-line react/hook-use-state -- created once for the provider's life; never replaced.
+  const [viewers] = useState(() => new Set<RevealComments>());
   // Another chat's sent comments are never shown over this one's model.
   const shown = held?.chatId === chatId ? held.shown : undefined;
   const value = useMemo<ShownCommentsValue>(
@@ -34,12 +41,21 @@ export function ShownCommentsProvider({
       shown,
       show(next) {
         setHeld({ chatId, shown: next });
+        for (const reveal of viewers) {
+          reveal(next.annotations);
+        }
       },
       hide() {
         setHeld(undefined);
       },
+      addViewer(reveal) {
+        viewers.add(reveal);
+        return () => {
+          viewers.delete(reveal);
+        };
+      },
     }),
-    [chatId, shown],
+    [chatId, shown, viewers],
   );
   return <ShownCommentsContext.Provider value={value}>{children}</ShownCommentsContext.Provider>;
 }

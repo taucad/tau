@@ -2,6 +2,7 @@ import { createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
 import type { SourceLiveEvent } from '@taucad/agent-host';
 import { agentWireLimits } from '@taucad/agent-host/wire';
+import { getErrno } from '@taucad/utils/error';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   initialChatProjection,
@@ -125,10 +126,15 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
   let retryRedial = false;
   let retries = 0;
   let scheduleRetry = (_again: boolean): void => undefined;
-  const report = (event: HostAttachmentStatus): void => {
+  const report = (status: HostAttachmentStatus): void => {
     if (closed) {
       return;
     }
+    /* A dial the API refused because the computer is no longer paired (`HOST_NOT_PAIRED`, `reauth`) is R6 too. */
+    const event: HostAttachmentStatus =
+      remote && status.residual === undefined && getErrno(status.error) === 'HOST_NOT_PAIRED'
+        ? { ...status, residual: 'R6' }
+        : status;
     sendBack(event);
     input.onStatus?.(event);
     if (event.type === 'attachment.attached') {

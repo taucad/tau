@@ -1591,6 +1591,9 @@ const callSchemas = {
       z.object({
         status: z.literal('verified'),
         project: z.object({ projectId: projectIdSchema, manifest: projectManifestSchema }),
+        /* Optional on the wire: an authority from before they were sent still answers, and its proof names no copy. */
+        storageRootKey: z.string().optional(),
+        providerBasePath: projectDirectoryPathSchema.optional(),
       }),
       z.object({ status: z.literal('discovery-required') }),
       z.object({ status: z.literal('unavailable') }),

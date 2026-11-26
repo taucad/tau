@@ -99,7 +99,7 @@ export function ProjectManagerProvider<
     getProjectListing,
     getReadiedWorker,
     invalidateChatQueries,
-    invalidateListing,
+    refreshListingRows,
     listingQuery: projectListingQuery,
     refreshObservations: refreshFilesystemObservations,
     routeAccess: getProjectRouteAccess,
@@ -221,10 +221,11 @@ export function ProjectManagerProvider<
       /* W9: the new chat copies the Settings default; one never seeded reads Ask. */
       await seedChatPermission(resourceId, chat.id);
       await touchProject(resourceId);
-      invalidateListing();
+      /* Only the project's activity moved: the listing's rows are read again from the current pass, with no scan. */
+      void refreshListingRows();
       return chat;
     },
-    [chatStoreOf, invalidateListing, library, seedChatPermission, touchProject],
+    [chatStoreOf, refreshListingRows, library, seedChatPermission, touchProject],
   );
 
   const updateChat = useCallback(
@@ -244,12 +245,12 @@ export function ProjectManagerProvider<
       const result = await chatStoreOf().softDeleteChat(chatId);
       if (result) {
         await touchProject(result.resourceId);
-        invalidateListing();
+        void refreshListingRows();
       }
 
       return result;
     },
-    [chatStoreOf, invalidateListing, touchProject],
+    [chatStoreOf, refreshListingRows, touchProject],
   );
 
   /* The provider's reads are not asked again (the library's own ports are). */
@@ -294,9 +295,9 @@ export function ProjectManagerProvider<
         await removeChatPermission(chat.resourceId, chatId);
         await touchProject(chat.resourceId);
       }
-      invalidateListing();
+      void refreshListingRows();
     },
-    [chatStoreOf, invalidateListing, removeChatPermission, touchProject],
+    [chatStoreOf, refreshListingRows, removeChatPermission, touchProject],
   );
 
   const purgeChat = useCallback(
@@ -308,9 +309,9 @@ export function ProjectManagerProvider<
         await removeChatPermission(chat.resourceId, chatId);
         await touchProject(chat.resourceId);
       }
-      invalidateListing();
+      void refreshListingRows();
     },
-    [chatStoreOf, invalidateListing, removeChatPermission, touchProject],
+    [chatStoreOf, refreshListingRows, removeChatPermission, touchProject],
   );
 
   /* A newcomer's first project asks for the product tour: decided before the project exists, stored once it does. */

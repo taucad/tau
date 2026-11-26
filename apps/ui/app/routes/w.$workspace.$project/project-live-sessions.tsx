@@ -8,7 +8,6 @@
  */
 import { ProjectSyncAnnouncement } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { usePublishCloudProjectPreview } from '#hooks/use-publish-cloud-project-preview.js';
-import { useMarkReplayForeignContent } from '#lib/replay-content.lib.js';
 import { useEffect } from 'react';
 import { useSelector } from '@xstate/react';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
@@ -84,8 +83,6 @@ function ProjectSessionBinding({
     }
   }, [cloudIntent, retryManifestObservation, status?.entryManifest]);
   const role = useProjectRole();
-  /* A collaborator's own switch does not reach the owner's chats and code: replay blocks them here. */
-  useMarkReplayForeignContent(isFocused && (role === 'read' || role === 'write'));
   usePublishCloudProjectPreview({
     projectId,
     enabled:

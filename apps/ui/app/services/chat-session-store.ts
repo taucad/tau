@@ -429,14 +429,14 @@ const inactiveProjectionWeightLimit = 16 * 1024 * 1024;
 const chatMessagesThrottle = 50;
 /** How long a hidden document waits to publish live-only changes, which no animation frame would publish. */
 const hiddenLiveInterval = 1000;
+/** One frame's wait where there are no animation frames at all (a test document, a server render). */
+const frameInterval = 16;
 
 /** The next animation frame while the document is visible; a timer while it is hidden or has no frames. */
 const nextFrame = (callback: () => void): (() => void) => {
-  if (
-    typeof requestAnimationFrame === 'undefined' ||
-    (globalThis.document as Document | undefined)?.visibilityState === 'hidden'
-  ) {
-    const timer = setTimeout(callback, hiddenLiveInterval);
+  const hidden = (globalThis.document as Document | undefined)?.visibilityState === 'hidden';
+  if (hidden || typeof requestAnimationFrame === 'undefined') {
+    const timer = setTimeout(callback, hidden ? hiddenLiveInterval : frameInterval);
     return () => {
       clearTimeout(timer);
     };

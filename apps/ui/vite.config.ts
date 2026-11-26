@@ -208,6 +208,14 @@ const desktopSourceOverrides = new Map([
 export const cloudCoreModulePattern =
   /[\\/](?:apps[\\/]ui[\\/]app[\\/](?:runtime[\\/]deployment(?:\.machine)?|cloud[\\/]deployment-mode)|libs[\\/](?:types[\\/]src[\\/]deployment|utils[\\/]src[\\/](?:deployment-mode|origin-answer)\.utils))\.ts$/u;
 
+/**
+ * The modules of the `chat-shared` chunk: the composer and transcript helpers that the eager shell and the lazy image
+ * mark up both import. Without the group, each lazy importer changes these modules' importer set and automatic
+ * splitting gives each its own small chunk, about ten more requests on Home and the project route.
+ */
+export const chatSharedModulePattern =
+  /[\\/](?:apps[\\/]ui[\\/]app[\\/](?:components[\\/](?:chat[\\/]attachment-preview|dictation[\\/][^\\/]+|comments[\\/](?:viewer-surfaces|image-projection))|hooks[\\/]use-file-manager)|apps[\\/]libs[\\/](?:chat-ui[\\/]src[\\/](?:db[\\/]attachment-store|hooks[\\/]use-attachment-source)|ui-core[\\/]src[\\/]contexts[\\/]file-manager-context)|libs[\\/]utils[\\/]src[\\/](?:hash|keyed-mutex)\.utils)\.tsx?$/u;
+
 const normalizeProvenancePath = (moduleId: string): string => {
   const normalized = moduleId.replaceAll('\\', '/');
   const workspaceRoot = `${path.resolve(__dirname, '../..').replaceAll('\\', '/')}/`;
@@ -706,6 +714,7 @@ export default defineConfig(({ command, mode }) => {
                    * gives them: a group around them took the app runtime with it.
                    */
                   { name: 'cloud-core', test: cloudCoreModulePattern },
+                  { name: 'chat-shared', test: chatSharedModulePattern, maxSize: 650_000 },
                 ],
               },
             },

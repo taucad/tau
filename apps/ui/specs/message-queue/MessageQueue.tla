@@ -269,6 +269,9 @@
 \* re-retained with its parts and the draft bytes reader falls back to the chat's directory (`chat-session-store.ts`);
 \* the edit composer shows its comment list (`chat-textarea.tsx`). A send without annotations still takes no tick
 \* before it is sent. No action or verdict changes.
+\* Comment pins S5 review (2026-11-26): an edit's comments also reach the host's edited transcript
+\* (`chat-turn-host.tsx`), a draft loaded into the composer keeps its comments in the composer record
+\* (`chat-session-store.ts`), and the composer opens image mark up (`chat-textarea.tsx`). No action or verdict changes.
 \* Chat performance WP-06a (2026-11-26): `useChatSelector` (`use-chat.tsx`) reads each field on demand and wakes a
 \* selector only for the sources its last evaluation read; it sends nothing to the queue. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC

@@ -152,3 +152,5 @@ Comment pins S1 re-pins the drift after `use-cad-chat-client.ts` flattened a mes
 The launch audit merged with PERF-8 re-pinned the drift after `chat-session-store.ts` began matching a restored draft to an outbox entry in the composed form, as it already compared a sent draft, so a restored draft with trailing whitespace is let go too; no action changed.
 
 Comment pins S2 re-pins the drift after an edit named its comments and was flattened like a send before its turn is requested (`use-cad-chat-client.ts`, `chat-turn-host.tsx`, `use-chat.tsx`), a returned message's originals were re-retained with its parts and the draft bytes reader fell back to the chat's directory (`chat-session-store.ts`), and the edit composer showed its comment list (`chat-textarea.tsx`); no action changed.
+
+Comment pins S5 re-pins the drift after an edit's comments reached the host's edited transcript (`chat-turn-host.tsx`), a draft loaded into the composer kept its comments in the composer record (`chat-session-store.ts`), and the composer opened image mark up (`chat-textarea.tsx`); no action changed.

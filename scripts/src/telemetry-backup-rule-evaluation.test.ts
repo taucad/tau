@@ -16,7 +16,9 @@ type Series = ConstructorParameters<Oracle['SeriesStore']>[0][number];
  *
  * - F1: `backup-first-refused` is a Prometheus rule on its own, so it fires with no log data at all; its log twin is
  *   a separate rule whose empty query cannot mask it.
- * - F2: every log rule parses Fly's envelope before reading the app's fields.
+ * - F2 (corrected by M1-fix-2): every log rule reads the app's fields with one `| json`. The log shipper merges the
+ *   app's JSON into the top level of the shipped line, so the fields are top-level and `message` is a plain string;
+ *   a second parse of `message` is a `JSONParserErr` on a real staging line.
  * - F4: a first backup refused by a terminal guard pages; quota and ceiling only warn; a single check-failed warns
  *   and three in 15 minutes page.
  */
@@ -28,7 +30,13 @@ type RuleJson = Readonly<{
   for: string;
   noDataState: AlertRule['noDataState'];
   labels: Readonly<Record<string, string>>;
-  data: ReadonlyArray<Readonly<{ refId: string; datasourceUid: string; model: Readonly<{ expr?: string }> }>>;
+  data: ReadonlyArray<
+    Readonly<{
+      refId: string;
+      datasourceUid: string;
+      model: Readonly<{ expr?: string }>;
+    }>
+  >;
 }>;
 // oxlint-disable-next-line tau-lint/no-bare-time-identifier -- Grafana's rule-group key, in seconds
 type Group = Readonly<{ interval: number; rules: readonly RuleJson[] }>;
@@ -94,11 +102,135 @@ const refusals = (
 };
 
 const fires = (uid: string, series: readonly Series[]): boolean =>
-  simulateAlert(new SeriesStore(series), ruleOf(uid), { from: start, to: end, evaluationInterval }).some(
-    ({ to }) => to === 'Alerting',
-  );
+  simulateAlert(new SeriesStore(series), ruleOf(uid), {
+    from: start,
+    to: end,
+    evaluationInterval,
+  }).some(({ to }) => to === 'Alerting');
 
 const at = start + 20 * minute;
+
+/**
+ * A hook-refusal line as Loki stores it: the shipper's `loki_json` transform merges the app's JSON into the top
+ * level beside Fly's own fields, so `message` is the app's plain-string message (the staging line observed by the
+ * Principal on 2026-11-27 had `context`, `message`, `outcome`, `projectId`, `req_*` and `time` at the top level).
+ *
+ * @param fields - The app fields that differ per case.
+ * @returns The stored line, as an object.
+ */
+const refusalLine = (fields: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => ({
+  event: { provider: 'app' },
+  fly: {
+    app: { instance: 'm1', name: 'tau-api-staging', process_group: 'app' },
+    region: 'syd',
+  },
+  host: 'h1',
+  level: 40,
+  context: 'GitController',
+  message: 'A push was refused',
+  projectId: 'proj_fixture',
+  pusher: 'user_fixture',
+  codes: [{ code: 'GIT_PUSH_FILE_TOO_LARGE' }],
+  first_backup: 'false',
+  client_rules: 'none',
+  durationMs: 12,
+  req: { method: 'POST', url: '/v1/git/proj_fixture.git/git-receive-pack' },
+  time: 1_795_652_208_547,
+  ...fields,
+});
+const refRefusalMessage = 'A push was refused for some refs';
+/** Stream labels the shipper sets on every app line; a label filter on one of these reads the stream, not the body. */
+const streamLabels: Readonly<Record<string, string>> = {
+  event_provider: 'app',
+};
+
+/**
+ * Loki's `| json` with no parameters: nested objects flatten with `_`, arrays are skipped, scalars become strings.
+ *
+ * @param value - The JSON value to flatten.
+ * @param prefix - The label prefix of `value`.
+ * @returns The extracted labels.
+ */
+const jsonLabels = (value: unknown, prefix = ''): Record<string, string> => {
+  if (value === null || typeof value !== 'object') {
+    return prefix === '' ? {} : { [prefix]: String(value) };
+  }
+  if (Array.isArray(value)) {
+    return {};
+  }
+  return Object.assign(
+    {},
+    ...Object.entries(value).map(([key, child]) => jsonLabels(child, prefix === '' ? key : `${prefix}_${key}`)),
+  ) as Record<string, string>;
+};
+
+type PipelineState = Readonly<{ line: string; labels: Readonly<Record<string, string>>; error: string }>;
+
+/**
+ * One `| stage` of a log pipeline: `json`, `line_format` of one field, `__error__=""` or an equality label filter.
+ *
+ * @param state - The line, its extracted labels and its parse error so far.
+ * @param stage - The stage's text after the pipe.
+ * @returns The state after the stage, or `undefined` when the stage drops the line.
+ */
+const pipeStage = (state: PipelineState, stage: string): PipelineState | undefined => {
+  if (stage === 'json') {
+    try {
+      return { ...state, labels: { ...state.labels, ...jsonLabels(JSON.parse(state.line) as unknown) } };
+    } catch {
+      return { ...state, error: 'JSONParserErr' };
+    }
+  }
+  const format = /^line_format\s+"\{\{\.(?<field>\w+)\}\}"$/u.exec(stage)?.groups?.['field'];
+  if (format !== undefined) {
+    return { ...state, line: state.labels[format] ?? '' };
+  }
+  const filter = /^(?<label>\w+)="(?<value>[^"]*)"$/u.exec(stage)?.groups;
+  if (!filter) {
+    throw new Error(`unmodelled LogQL stage: ${stage}`);
+  }
+  const label = filter['label']!;
+  const actual = label === '__error__' ? state.error : (streamLabels[label] ?? state.labels[label]);
+  return actual === filter['value'] ? state : undefined;
+};
+
+/**
+ * One line filter (`|=`, `!=`, `|~`) of a log pipeline.
+ *
+ * @param operator - The filter operator.
+ * @param text - The filter's string or pattern.
+ * @param line - The line it reads.
+ * @returns Whether the line passes.
+ */
+const lineFilterKeeps = (operator: string, text: string, line: string): boolean =>
+  operator === '|=' ? line.includes(text) : operator === '!=' ? !line.includes(text) : new RegExp(text, 'u').test(line);
+
+/**
+ * Whether a LogQL log pipeline keeps one line, modelling exactly the stages the backup rules use; any other stage
+ * throws, so a rule that adds one must extend this model rather than pass by omission.
+ *
+ * @param expr - The rule's LogQL, with or without its metric wrapper.
+ * @param stored - The line as Loki stores it.
+ * @returns Whether the line reaches the range aggregation.
+ */
+const pipelineKeeps = (expr: string, stored: Readonly<Record<string, unknown>>): boolean => {
+  const pipeline = /\}(?<stages>.*?)(?:\[\d+[smhd]\]|$)/u.exec(expr)?.groups?.['stages'] ?? '';
+  let state: PipelineState | undefined = { line: JSON.stringify(stored), labels: {}, error: '' };
+  for (const match of pipeline.matchAll(/(?<operator>\|=|!=|\|~|\|)\s*(?<operand>"(?:[^"\\]|\\.)*"|[^|]+)/gu)) {
+    const operator = match.groups?.['operator'] ?? '';
+    const operand = (match.groups?.['operand'] ?? '').trim();
+    const text = operand.startsWith('"') ? (JSON.parse(operand) as string) : operand;
+    if (operator === '|') {
+      state = pipeStage(state, text);
+    } else if (!lineFilterKeeps(operator, text, state.line)) {
+      state = undefined;
+    }
+    if (state === undefined) {
+      return false;
+    }
+  }
+  return state.error === '';
+};
 
 describe('backup admission rules (WP2a review fixes)', () => {
   it('F1: backup-first-refused reads Prometheus only, and its log twin is a rule of its own', () => {
@@ -167,7 +299,15 @@ describe('backup admission rules (WP2a review fixes)', () => {
     expect(fires('backup-check-repeat', one)).toBe(false);
     const three = [
       refusals({ code: 'GIT_PUSH_CHECK_FAILED', firstBackup: 'false' }, 2, at),
-      refusals({ code: 'GIT_PUSH_CHECK_FAILED', firstBackup: 'true', rules: 'current' }, 1, at),
+      refusals(
+        {
+          code: 'GIT_PUSH_CHECK_FAILED',
+          firstBackup: 'true',
+          rules: 'current',
+        },
+        1,
+        at,
+      ),
     ];
     expect(fires('backup-check-repeat', three)).toBe(true);
   });
@@ -179,7 +319,7 @@ describe('backup admission rules (WP2a review fixes)', () => {
     expect(fires('backup-unknown-refusal', [refusals({ code: 'unknown', firstBackup: 'false' }, 1, at)])).toBe(true);
   });
 
-  it('F2: every log rule parses the Fly envelope before it reads an app field', () => {
+  it('F2: every log rule reads the top-level fields of a real-shaped line with a single json parse', () => {
     const logRules = rules.filter(
       ({ uid, data }) => uid.startsWith('backup-') && data.some(({ datasourceUid }) => datasourceUid === 'loki'),
     );
@@ -188,12 +328,41 @@ describe('backup admission rules (WP2a review fixes)', () => {
       'backup-retired-logs',
       'backup-terminal-loop',
     ]);
+    const counted = (uid: string, line: Readonly<Record<string, unknown>>): boolean =>
+      pipelineKeeps(ruleJson(uid).data.find(({ datasourceUid }) => datasourceUid === 'loki')?.model.expr ?? '', line);
     for (const rule of logRules) {
       const expr = rule.data.find(({ datasourceUid }) => datasourceUid === 'loki')?.model.expr ?? '';
       expect(expr, rule.uid).toContain('|= "A push was refused" != "A push was refused for"');
-      if (/\| (?:first_backup|terminal)=/u.test(expr)) {
-        expect(expr, rule.uid).toContain('| json | line_format "{{.message}}" | json |');
-      }
+      expect(expr, rule.uid).not.toContain('line_format');
+      expect(expr.match(/\| json\b/gu)?.length ?? 0, rule.uid).toBeLessThanOrEqual(1);
     }
+    expect(counted('backup-first-logs', refusalLine({ first_backup: 'true', terminal: true }))).toBe(true);
+    expect(counted('backup-first-logs', refusalLine({ first_backup: 'false', terminal: true }))).toBe(false);
+    expect(counted('backup-first-logs', refusalLine({ first_backup: 'true', terminal: false }))).toBe(false);
+    expect(counted('backup-terminal-loop', refusalLine({ first_backup: 'false', terminal: true }))).toBe(true);
+    expect(
+      counted(
+        'backup-retired-logs',
+        refusalLine({
+          codes: [{ code: 'GIT_PUSH_RECORD_UNREADABLE' }],
+          terminal: true,
+        }),
+      ),
+    ).toBe(true);
+    expect(counted('backup-retired-logs', refusalLine({ terminal: true }))).toBe(false);
+    /* The per-ref line (the one on staging at 2026-11-26T00:16:48Z) is not the hook-refusal line. */
+    expect(
+      counted('backup-terminal-loop', {
+        ...refusalLine({ terminal: true }),
+        message: refRefusalMessage,
+      }),
+    ).toBe(false);
+    /* The F2 form, a second parse of `message`, drops every real line. */
+    expect(
+      pipelineKeeps(
+        '{service_name="tau-api"} | event_provider="app" |= "A push was refused" | json | line_format "{{.message}}" | json | __error__="" | terminal="true"',
+        refusalLine({ terminal: true }),
+      ),
+    ).toBe(false);
   });
 });

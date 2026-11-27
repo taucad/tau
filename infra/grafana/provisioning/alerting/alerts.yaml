@@ -2355,7 +2355,7 @@ groups:
               to: 0
             datasourceUid: loki
             model:
-              expr: sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "A push was refused" != "A push was refused for" | json | line_format "{{.message}}" | json | first_backup="true" | terminal="true" [5m]))
+              expr: sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "A push was refused" != "A push was refused for" | json | __error__="" | first_backup="true" | terminal="true" [5m]))
               intervalMs: 15000
               maxDataPoints: 43200
               queryType: range
@@ -3334,7 +3334,7 @@ groups:
               to: 0
             datasourceUid: loki
             model:
-              expr: sum by (projectId) (count_over_time({service_name="tau-api"} | event_provider="app" |= "A push was refused" != "A push was refused for" | json | line_format "{{.message}}" | json | terminal="true" [1h])) >= 5
+              expr: sum by (projectId) (count_over_time({service_name="tau-api"} | event_provider="app" |= "A push was refused" != "A push was refused for" | json | __error__="" | terminal="true" [1h])) >= 5
               intervalMs: 15000
               maxDataPoints: 43200
               queryType: range

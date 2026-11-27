@@ -2560,6 +2560,23 @@ jobs:
           docker logs tau-api-smoke || true
           exit 1
 
+      # The built image, not the source tests, decides which copy of each package the bundle loads: on 2026-11-27
+      # staging answered 500 on every `/oauth2/*` route because the bundle inlined `@better-auth/oauth-provider` and
+      # resolved its `zod` to the app's older copy. A signed-out Tau Desktop authorization must reach the sign-in page.
+      - name: Answer a Tau Desktop authorization
+        run: |
+          challenge=$(printf 'smoke-verifier-0123456789-0123456789-abcdef' | openssl dgst -sha256 -binary | basenc --base64url | tr -d '=')
+          location=$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code} %{redirect_url}' \
+            "http://localhost:3000/v1/auth/oauth2/authorize?response_type=code&client_id=tau-desktop&redirect_uri=http%3A%2F%2F127.0.0.1%3A53682%2Fcb%2Fsmoke0123456789abcdefghij&scope=openid+profile+email+offline_access&state=smoke-state-0123456789abcdef&code_challenge=${challenge}&code_challenge_method=S256&prompt=consent")
+          case "$location" in
+            "302 http://localhost/auth/sign-in?"*) echo "Authorization reached the sign-in page" ;;
+            *)
+              echo "::error::Tau Desktop authorization answered '${location%% *}' instead of a redirect to the sign-in page"
+              docker logs tau-api-smoke 2>&1 | tail -50 || true
+              exit 1
+              ;;
+          esac
+
       - name: Cleanup
         if: always()
         run: docker rm -f tau-api-smoke || true

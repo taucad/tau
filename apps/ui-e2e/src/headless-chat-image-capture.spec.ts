@@ -3,6 +3,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { useFlagState } from '#support/flag-state-test.js';
 import type { CaptureEvidence } from '#support/headless-capture.js';
 import {
   hasDarkGrayBackground,
@@ -149,6 +150,26 @@ const attachmentSource = async (index: number): Promise<string> => {
       reader.readAsDataURL(blob);
     });
   }, source);
+};
+
+/**
+ * Open the viewer in Free orbit, the orbit style a person picks in viewer settings. Roll ruling E: Turntable, the
+ * default, keeps the scene up as its orbit axis and straightens any rolled pose it did not make itself (#2686), so only
+ * Free orbit holds the roll a capture must carry. The orbit style is a viewer preference behind `viewerControls`.
+ * Call it before the test's first navigation.
+ */
+const openInFreeOrbit = async (): Promise<void> => {
+  await useFlagState('viewer-controls');
+  await target.addInitScript(() => {
+    // The stored `viewer-preferences` section (`@taucad/preferences`), as the settings' orbit style choice writes it.
+    const key = 'tau-viewer-preferences';
+    if (localStorage.getItem(key) === null) {
+      localStorage.setItem(
+        key,
+        JSON.stringify({ value: { version: 1, controls: { orbitStyle: 'free' }, gizmo: {}, viewDefaults: {} } }),
+      );
+    }
+  });
 };
 
 const setViewerCamera = async (camera: ViewerCamera): Promise<void> => {
@@ -406,6 +427,8 @@ const openSecondaryViewer = async (): Promise<void> => {
 
 test('GLTF toolbar and @ actions use one annotated headless camera path', async () => {
   const eventsBefore = await eventOffsets();
+  // The rolled-camera capture below needs a viewer that keeps a roll.
+  await openInFreeOrbit();
   await seedVisionModel();
   await target.setViewport({ width: 1440, height: 960 });
   await target.navigate('/__e2e/headless-chat-image-capture');

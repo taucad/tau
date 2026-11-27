@@ -436,7 +436,15 @@ describe('getBetterAuthConfig abuse gates', () => {
   it('pins the same plugin order in both lockstep plugin lists', async () => {
     const { config } = createConfig();
     const { staticAuthConfig } = await import('#config/auth-static.config.js');
-    const expected = ['api-key', 'magic-link', 'one-time-token', 'device-authorization', 'bearer'];
+    const expected = [
+      'api-key',
+      'magic-link',
+      'one-time-token',
+      'device-authorization',
+      'oauth-provider',
+      'tau-desktop-token-policy',
+      'bearer',
+    ];
 
     expect(config.plugins?.map((plugin) => plugin.id)).toEqual(expected);
     expect(staticAuthConfig.plugins.map((plugin) => plugin.id)).toEqual(expected);
@@ -1043,5 +1051,27 @@ describe('getBetterAuthConfig session cookie cache', () => {
 
   it('should default AUTH_SESSION_CACHE_MAX_AGE_SECONDS to 0', () => {
     expect(environmentSchemaBase.shape.AUTH_SESSION_CACHE_MAX_AGE_SECONDS.parse(undefined)).toBe(0);
+  });
+});
+
+describe('getBetterAuthConfig prefixed ids for the OAuth provider models', () => {
+  it.each([
+    ['oauthClient', 'oac_'],
+    ['oauthRefreshToken', 'ort_'],
+    ['oauthAccessToken', 'oat_'],
+    ['oauthConsent', 'ocs_'],
+    ['oauthResource', 'ores_'],
+    ['oauthClientResource', 'ocr_'],
+    ['oauthClientAssertion', 'oca_'],
+    ['deviceCode', 'ver_'],
+    ['session', 'sess_'],
+  ])('should give a %s row an id starting %s', (model, prefix) => {
+    const { config } = createConfig();
+    const generateId = config.advanced?.database?.generateId;
+    if (typeof generateId !== 'function') {
+      throw new TypeError('generateId is not configured');
+    }
+
+    expect(generateId({ model } as unknown as Parameters<typeof generateId>[0])).toMatch(new RegExp(`^${prefix}`, 'u'));
   });
 });

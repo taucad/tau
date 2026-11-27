@@ -10,6 +10,7 @@ import { validateCapturedLogs } from '#logs.js';
 import type { MutantShard } from '#mutant-shard.js';
 import { parseMutantShard } from '#mutant-shard.js';
 import { setup } from '#setup.js';
+import { migrateReviewNotes } from '#reviews.js';
 import { parseShard } from '#shard.js';
 import type { FormalContext } from '#toolchain.js';
 import { defaultContext, locateTools, toolchainId } from '#toolchain.js';
@@ -49,6 +50,8 @@ const main = async (argv: readonly string[]): Promise<number> => {
       'without-check': { type: 'boolean' },
       'without-mutants': { type: 'boolean' },
       'mutants-only': { type: 'boolean' },
+      slug: { type: 'string' },
+      date: { type: 'string' },
     },
   });
   const context = defaultContext();
@@ -116,13 +119,30 @@ const main = async (argv: readonly string[]): Promise<number> => {
       }
       return validateCapturedLogs(context, { project });
     }
+    case 'review-notes': {
+      const [spec] = positionals;
+      if (!spec || (values.slug !== undefined && !/^[\da-z]+(?:-[\da-z]+)*$/.test(values.slug))) {
+        out('usage: formal review-notes [--slug <kebab-slug>] [--date <yyyy-mm-dd>] <path/to/Module.tla>');
+        return 2;
+      }
+      const moved = migrateReviewNotes(path.resolve(context.root, spec), {
+        slug: values.slug ?? 'notes',
+        date: values.date ?? new Date().toISOString().slice(0, 10),
+      });
+      out(
+        moved.review === undefined
+          ? `nothing to move from ${spec}`
+          : `${path.relative(context.root, moved.review)}: ${moved.notes} note lines, ${moved.sources} source pins`,
+      );
+      return 0;
+    }
     case 'toolchain-id': {
       out(toolchainId(locateTools(context)));
       return 0;
     }
     default: {
       out(
-        `usage: formal <setup|check|logs|update|mutants|nightly|known|toolchain-id> …; got ${String(command)} ${positionals.join(' ')}`,
+        `usage: formal <setup|check|logs|update|mutants|nightly|known|review-notes|toolchain-id> …; got ${String(command)} ${positionals.join(' ')}`,
       );
       return 2;
     }

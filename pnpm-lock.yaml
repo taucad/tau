@@ -1068,9 +1068,6 @@ importers:
       '@better-auth/api-key':
         specifier: 'catalog:'
         version: 1.7.7(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.5))(@better-auth/utils@0.4.2)(better-auth@1.7.7(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@4.1.1))(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(sass@1.105.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@4.1.11))(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
-      '@better-auth/oauth-provider':
-        specifier: 'catalog:'
-        version: 1.7.7(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.5))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-auth@1.7.7(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@4.1.1))(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(sass@1.105.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@4.1.11))(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@cfworker/json-schema':
         specifier: 'catalog:'
         version: 4.1.1
@@ -1831,6 +1828,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: 'catalog:'
         version: 3.1150.0
+      '@better-auth/oauth-provider':
+        specifier: 'catalog:'
+        version: 1.7.7(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.5))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-auth@1.7.7(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@4.1.1))(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(sass@1.105.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@4.1.11))(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@pyroscope/nodejs':
         specifier: 'catalog:'
         version: 0.4.13(express@5.3.0)(fastify@5.12.5)
@@ -30391,16 +30391,6 @@ snapshots:
     dependencies:
       '@better-auth/core': 1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.5)
       '@better-auth/utils': 0.4.2
-
-  '@better-auth/oauth-provider@1.7.7(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.5))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-auth@1.7.7(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@4.1.1))(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(sass@1.105.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@4.1.11))(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))':
-    dependencies:
-      '@better-auth/core': 1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.5)
-      '@better-auth/utils': 0.4.2
-      '@better-fetch/fetch': 1.3.2
-      better-auth: 1.7.7(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@4.1.1))(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(babel-plugin-macros@3.1.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(sass@1.105.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@4.1.11)
-      better-call: 1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
-      jose: 6.2.12
-      zod: 4.6.7
 
   '@better-auth/oauth-provider@1.7.7(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.5))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-auth@1.7.7(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@4.1.1))(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(sass@1.105.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@4.1.11))(better-call@1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))':
     dependencies:

@@ -78,6 +78,17 @@
         "cwd": "{projectRoot}",
         "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=3/3"
       }
+    },
+    "check-writer-corpus": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "G2 (testing policy 13.1, revisions rule 21): every ui@* and desktop@* release tag and the working tree have their writer pinned in src/provenance/corpus/writers/ as that writer writes. Needs the release tags and full history (the release gate's writer-corpus lane checks out with fetch-depth 0)."
+      },
+      "options": {
+        "command": "node packages/revisions/scripts/pin-writer-corpus.ts --check",
+        "cwd": "{workspaceRoot}"
+      }
     }
   }
 }

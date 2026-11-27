@@ -13,6 +13,7 @@ name: Release gate
 # - Formal matrix: `formal-nightly.yml` for every `formal:nightly` project and target, seeded by this run's
 #   id, so each gate run explores a fresh seed and prints it for replay.
 # - Cross-root reads: `scripts:validate-cross-root-reads`, which also runs in every `ci.yml` workspace job.
+# - Writer corpus: `revisions:check-writer-corpus`, every `ui@*` and `desktop@*` release's writer pinned (G2).
 # - API tests (C2a): every `tag:scope:api` project's `test` (without `tag:ci:nightly-only`) against the PostgreSQL,
 #   Redis and MinIO containers `ci.yml`'s API job starts, after the protected migration job. Their credentials
 #   are the local development values in `apps/api/.env.example`; no secret is read.
@@ -143,13 +144,29 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [lint, typecheck, build, pkgcheck-1, pkgcheck-2, pkgcheck-3, test-1, test-2, test-3, cross-root-reads]
+        lane:
+          [
+            lint,
+            typecheck,
+            build,
+            pkgcheck-1,
+            pkgcheck-2,
+            pkgcheck-3,
+            test-1,
+            test-2,
+            test-3,
+            cross-root-reads,
+            writer-corpus,
+          ]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.reuse.outputs.ref }}
           persist-credentials: false
+          # The writer-corpus lane archives every ui@* and desktop@* release tree, so it needs every tag and commit.
+          fetch-depth: ${{ matrix.lane == 'writer-corpus' && '0' || '1' }}
+          fetch-tags: ${{ matrix.lane == 'writer-corpus' }}
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
@@ -241,6 +258,8 @@ jobs:
               pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=static
               ;;
             cross-root-reads) pnpm nx run scripts:validate-cross-root-reads ;;
+            # G2: a client release adds its writer's pin (revisions rule 21); a desktop candidate without one fails here.
+            writer-corpus) pnpm nx run revisions:check-writer-corpus ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
 

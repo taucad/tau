@@ -196,7 +196,7 @@ describe('release-gate.yml', () => {
     });
   });
 
-  it('should sweep every project in the ci.yml lanes plus the cross-root read lint', () => {
+  it('should sweep every project in the ci.yml lanes plus the cross-root read lint and the writer corpus', () => {
     const { sweep } = gate.jobs;
     expect(sweep?.strategy?.matrix?.lane).toEqual([
       'lint',
@@ -209,15 +209,23 @@ describe('release-gate.yml', () => {
       'test-2',
       'test-3',
       'cross-root-reads',
+      'writer-corpus',
     ]);
     const checkout = sweep?.steps?.find((step) => step.uses?.startsWith('actions/checkout@'));
-    expect(checkout?.with).toEqual({ ref: expression('needs.reuse.outputs.ref'), 'persist-credentials': false });
+    /* Full history and tags only for the writer-corpus lane, which archives every client release tree (G2). */
+    expect(checkout?.with).toEqual({
+      ref: expression('needs.reuse.outputs.ref'),
+      'persist-credentials': false,
+      'fetch-depth': expression("matrix.lane == 'writer-corpus' && '0' || '1'"),
+      'fetch-tags': expression("matrix.lane == 'writer-corpus'"),
+    });
     const run = sweep?.steps?.find((step) => step.name === "Run the lane's tasks")?.run ?? '';
     expect(run).toContain('lint) pnpm nx run-many -t lint --parallel=1 ;;');
     expect(run).toContain('typecheck) pnpm nx run-many -t typecheck --parallel=1 ;;');
     expect(run).toContain('build) pnpm nx run-many -t build size check-desktop-payload --parallel=1 ;;');
     expect(run).toContain('pnpm nx run-many -t test --exclude tag:scope:api,tag:ci:nightly-only');
     expect(run).toContain('cross-root-reads) pnpm nx run scripts:validate-cross-root-reads ;;');
+    expect(run).toContain('writer-corpus) pnpm nx run revisions:check-writer-corpus ;;');
     expect(sweep?.if).toBe("needs.reuse.result == 'success' && needs.reuse.outputs.run-id == ''");
   });
 

@@ -268,6 +268,8 @@ const fakeWindow = {
     isDestroyed: vi.fn(() => false),
     on: vi.fn<(event: string, listener: (...args: unknown[]) => void) => void>(),
     setWindowOpenHandler: vi.fn(),
+    /* A probe launch polls the page for its save handler; this page always reports one. */
+    executeJavaScript: vi.fn(async (_code: string): Promise<unknown> => true),
   },
   isDestroyed: vi.fn(() => false),
   isMinimized: vi.fn(() => false),
@@ -2879,14 +2881,21 @@ describe('desktop main boot health and safe mode (WP6)', () => {
   it(
     'should neither read nor write the ledger in a probe launch (T-R12.4)',
     async () => {
+      const complete = vi.fn();
       vi.doMock('#main/ota-probe.js', () => ({
-        admitOtaProbe: vi.fn(() => ({ candidateTag: 'v0.0.0', complete: vi.fn() })),
+        admitOtaProbe: vi.fn(() => ({ candidateTag: 'v0.0.0', complete })),
       }));
       try {
         await booted(seedLedger(2));
+        /* Let the probe finish inside this case: a bootstrap still running would end in a later one. */
+        await vi.waitFor(() => {
+          expect(complete).toHaveBeenCalledOnce();
+          expect(state.prepareToInstall).toBeDefined();
+        });
       } finally {
         vi.doUnmock('#main/ota-probe.js');
       }
+      expect(state.log).not.toHaveBeenCalledWith('error', 'main.bootstrap-failed', expect.anything());
       expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
       const ledger = await readLedger();
       expect(ledger.last).toEqual(expect.objectContaining({ launchId: 'previous' }));

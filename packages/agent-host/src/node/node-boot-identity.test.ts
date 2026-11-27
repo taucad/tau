@@ -4,13 +4,14 @@
  */
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as FilesystemNode from '@taucad/filesystem/backend/node';
 import { createNodeEventLog } from '#node.js';
+import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 import type { ToolRegistry } from '#waist/ports.js';
 
 const roots: string[] = [];
@@ -23,12 +24,14 @@ const model = { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 20
 const emptyTools: ToolRegistry = { list: () => [], invoke: async () => ({ content: 'no tools', isError: true }) };
 
 /** A workspace whose chat holds a run left `running`. */
-const seedRunningChat = async (): Promise<{ readonly root: string; readonly logPath: string }> => {
+const seedRunningChat = async (
+  recordedAt = new Date(),
+): Promise<{ readonly root: string; readonly logPath: string }> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-boot-identity-'));
   roots.push(root);
   const directory = join(root, '.tau', 'chats', 'chat');
   await mkdir(directory, { recursive: true });
-  const base = { version: 1, leaderEpoch: 'previous-term', recordedAt: new Date().toISOString(), runId: 'run-1' };
+  const base = { version: 1, leaderEpoch: 'previous-term', recordedAt: recordedAt.toISOString(), runId: 'run-1' };
   const rows = [
     { ...base, sequence: 0, epoch: 1, type: 'run.lifecycle', state: 'admitted' },
     {
@@ -81,14 +84,29 @@ describe('Node writer marker boot identity (H33)', () => {
     }
   });
 
-  it('should take over a marker whose pid is alive now but was recorded under an earlier boot', async () => {
+  /* Past the XD3 bound by both its touch and its newest row: the writer has been gone at least that long. */
+  const stale = new Date(Date.now() - foreignRunStaleMilliseconds - 60_000);
+
+  it('should take over a stale marker whose pid is alive now but was recorded under an earlier boot', async () => {
     const boot = await thisBoot();
-    const { logPath } = await seedRunningChat();
+    const { logPath } = await seedRunningChat(stale);
     // After a reboot the recorded pid names some unrelated live process: here, this one.
     await writeFile(`${logPath}.lock`, `${process.pid}\n${logPath}\n${otherBoot(boot)}\n`);
+    await utimes(`${logPath}.lock`, stale, stale);
 
     const log = await createNodeEventLog({ filePath: logPath, access: 'write' });
     await log.close();
+  });
+
+  /* A wall-clock step of an hour moves a derived boot start; the live writer that touched its marker is still held. */
+  it('should fence a live pid under another boot while its marker is fresh', async () => {
+    const boot = await thisBoot();
+    const { logPath } = await seedRunningChat(stale);
+    await writeFile(`${logPath}.lock`, `${process.pid}\n${logPath}\n${otherBoot(boot)}\n`);
+
+    await expect(createNodeEventLog({ filePath: logPath, access: 'write' })).rejects.toMatchObject({
+      code: 'WRITER_LOCKED',
+    });
   });
 
   it('should still fence a live pid recorded under this boot, or with no or an unrecognised boot', async () => {

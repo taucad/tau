@@ -225,20 +225,32 @@ const isOtherBoot = (recorded: string | undefined, current: string): boolean => 
     : recorded !== current;
 };
 
-// A lock whose recorded writer pid no longer exists, or ran under an earlier boot, was left behind by a crashed or
-// killed host; nothing will ever release it, so it may be taken over. Unreadable or non-numeric content counts as held.
+/**
+ * Whether a marker is fresh by HA-I10: the newer of its touch and the log's newest row is within the XD3 bound.
+ *
+ * @param path - The marker.
+ * @param logPath - The log it guards.
+ * @returns Whether its writer must be honoured.
+ */
+const isLockFresh = async (path: string, logPath: string): Promise<boolean> => {
+  const touchedAt = await stat(path).then(
+    ({ mtimeMs }) => mtimeMs,
+    () => undefined,
+  );
+  const log = await readFile(logPath).catch(() => undefined);
+  return isMarkerFresh(Date.now(), touchedAt, newestRowAt(log === undefined ? undefined : new Uint8Array(log)));
+};
+
+// A lock whose recorded writer pid no longer exists was left behind by a crashed or killed host; nothing will ever
+// release it, so it may be taken over. One recorded under another boot is taken over only once it is also stale by
+// HA-I10, since a wall-clock step moves a derived boot start. Unreadable or non-numeric content counts as held.
 // ponytail: a pid reused within one boot still reads as live until that process exits; a process start time would
 // catch it, at the cost of a per-platform process query.
 const isStaleLock = async (path: string, logPath: string): Promise<boolean> => {
   const contents = await readFile(path, 'utf8').catch(() => '');
   /* A browser writer's marker names no process: it is stale past the XD3 bound by its touch or newest row (HA-I10). */
   if (isProviderMarker(contents)) {
-    const touchedAt = await stat(path).then(
-      ({ mtimeMs }) => mtimeMs,
-      () => undefined,
-    );
-    const log = await readFile(logPath).catch(() => undefined);
-    return !isMarkerFresh(Date.now(), touchedAt, newestRowAt(log === undefined ? undefined : new Uint8Array(log)));
+    return !(await isLockFresh(path, logPath));
   }
   const [pidLine = '', recordedPath, recordedBoot] = contents.split('\n');
   const pid = Number.parseInt(pidLine, 10);
@@ -251,8 +263,8 @@ const isStaleLock = async (path: string, logPath: string): Promise<boolean> => {
   if (recordedPath !== undefined && recordedPath !== '' && recordedPath !== logPath) {
     return true;
   }
-  // After a reboot the pid may name an unrelated live process (H33).
-  if (isOtherBoot(recordedBoot, await currentBoot())) {
+  // After a reboot the pid may name an unrelated live process (H33); a live writer whose clock stepped stays fresh.
+  if (isOtherBoot(recordedBoot, await currentBoot()) && !(await isLockFresh(path, logPath))) {
     return true;
   }
   try {

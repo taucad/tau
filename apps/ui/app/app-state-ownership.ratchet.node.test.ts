@@ -18,7 +18,8 @@
  * count above or below its line fails, so a lane that removes a site lowers its line (and deletes it at 0) in the
  * same PR. A listed file that does not exist fails, and so does a non-test file under `apps/ui/app/runtime/` that is
  * in neither set, and a `.tsx` or `use-*.ts` file listed in `modules`, where its actors would go uncounted. Test files
- * are never scanned. Lanes edit the manifest, never this test.
+ * are never scanned. Lanes edit the manifest, never this test, except that retiring or adding an end-state line below
+ * also edits `endStateCounts`.
  *
  * End state (A10, reached): `.start()` at 1 in `apps/ui/app/runtime/app-runtime-provider.tsx`, in `components`: the
  * runtime's one start after hydration (charter D5, D15 boundary 2). One accepted line arrived on main after the

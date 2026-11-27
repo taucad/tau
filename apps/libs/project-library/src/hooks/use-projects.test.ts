@@ -147,6 +147,7 @@ const projectManagerDouble = await (async () => {
   });
   const built = new commandsModule.ProjectCommands<ProjectLibraryWorker, Projection>({
     services: mock<ProjectCommandsServices<Projection>>({ isCaughtUp }),
+    failedDeletes: () => new Set(),
     facade: notCalled,
     chatStore: () => undefined,
     readChats: async (operation) => operation(chatSource),

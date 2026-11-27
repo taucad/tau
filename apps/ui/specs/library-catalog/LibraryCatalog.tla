@@ -224,6 +224,9 @@
 \* caller and keeps a replay's cancel for the person until dismissed; the permanent-delete precheck and "Use this
 \* folder" leave out the directories other deletes in the journal are removing (review M2) and degrade to their earlier
 \* reads when the authority refuses the probe (review m3). `ReplaySettled`'s `cancelled` branch is the code's, as formatted.
+\* FW3 re-review (2026-11-27): a cancel carries whether no other copy holds the id or none could be counted (N1); a row
+\* this tab saw fail is not left out of a delete's proof (N2); only the probe's not-served refusal degrades (N3). Every
+\* change sits before `MutationJournaled` or inside the authority's answer; no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

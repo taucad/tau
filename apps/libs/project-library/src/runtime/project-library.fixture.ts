@@ -466,6 +466,11 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
         .map((locator) => probeAt(projectId, locator))
         .filter((location) => location.status === 'held')
         .map((location) => location.locator);
+      /* A nominated copy in the target's own root counts once a fresh listing of that root names it (review M1); one in
+       * another root, or one the sweep found, needs no listing. */
+      if (proven.some((locator) => rootOfLocator(locator) === root)) {
+        counts = { ...counts, listings: counts.listings + 1 };
+      }
       if (proven.length === 0) {
         const absence = await verifyAbsent(projectId);
         proven =
@@ -479,10 +484,8 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
             : [];
       }
       if (proven.length === 0) {
-        return { status: 'copy-unproven', reason: 'absent' } as const;
+        return { status: 'copy-unproven', reason: excluded.size > 0 ? 'unknown' : 'absent' } as const;
       }
-      /* A proven copy counts once a fresh listing of its root names it (review M1): one listing per root. */
-      counts = { ...counts, listings: counts.listings + new Set(proven.map((locator) => locator.storageRootKey)).size };
     }
     const [removed] = directories.splice(index, 1);
     /* The delete installs what it verified: the directory is gone. */

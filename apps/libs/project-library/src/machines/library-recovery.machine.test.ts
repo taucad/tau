@@ -195,7 +195,7 @@ describe('libraryRecovery', () => {
 
   /* FW3, the operator's "cancel and say so": a permanent delete the authority cancelled removed nothing. */
   describe('a cancelled delete', () => {
-    const cancellation = { operationId: 'o1', projectId: 'p1', unavailable: [] };
+    const cancellation = { operationId: 'o1', projectId: 'p1', reason: 'absent', unavailable: [] } as const;
 
     it('should hold nothing for a replayed cancel, never replay it again, and say so with the loop as its source', async () => {
       const harness = start();

@@ -660,6 +660,7 @@ export class ProjectLibrary<
       forgetProject: (projectId) => {
         this.forgetProject(projectId);
       },
+      failedDeletes: () => this.#failedDeletes(),
     });
     this.workspaceCommands = new WorkspaceCommands({
       workspaceConnection: this.workspaceConnection,
@@ -677,6 +678,7 @@ export class ProjectLibrary<
       invalidateProject: (projectId) => {
         this.invalidateProject(projectId);
       },
+      failedDeletes: () => this.#failedDeletes(),
       telemetry: workspaceTelemetry,
     });
     this.listingQuery = {
@@ -1327,6 +1329,13 @@ export class ProjectLibrary<
     this.recovery.start();
   }
 
+  /** The journal rows this tab saw fail (review N2): a delete does not leave their directories out of its proof. */
+  #failedDeletes(): ReadonlySet<string> {
+    return new Set(
+      this.#snapshot.recoveries.flatMap((recovery) => (recovery.status === 'failed' ? [recovery.operationId] : [])),
+    );
+  }
+
   #recoveries(): readonly PendingProjectRecovery[] {
     return this.#snapshot.recoveries;
   }
@@ -1532,7 +1541,7 @@ export class ProjectLibrary<
       this.#currentRecords(),
     ]);
     const committed = await commitPendingProjectOperation(
-      { fileManager, worker, chatStore, queryClient: this.queryClient },
+      { fileManager, worker, chatStore, queryClient: this.queryClient, failedOperationIds: this.#failedDeletes() },
       operation,
     );
     await this.#passSettled();

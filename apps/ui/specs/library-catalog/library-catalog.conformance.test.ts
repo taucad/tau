@@ -278,7 +278,7 @@ const outcomeOf = (next: SpecState, operationId: string): ReplayOutcome => {
   }
   if (row?.st === 'cancelled') {
     /* FW3: a delete the authority cancelled, nothing removed. */
-    return { status: 'cancelled', cancellation: { operationId, projectId: 'p', unavailable: [] } };
+    return { status: 'cancelled', cancellation: { operationId, projectId: 'p', reason: 'absent', unavailable: [] } };
   }
   if (row?.st === 'failed' && row.why === 'terminal') {
     return { status: 'failed', reason: 'identity-conflict' };

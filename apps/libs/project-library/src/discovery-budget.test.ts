@@ -555,7 +555,10 @@ describe('a copy delete proves the other copy from disk', () => {
       await settle(harness);
     });
 
-    expect(outcome).toMatchObject({ status: 'cancelled', cancellation: { projectId, unavailable: [] } });
+    expect(outcome).toMatchObject({
+      status: 'cancelled',
+      cancellation: { projectId, reason: 'absent', unavailable: [] },
+    });
     await expect(worker.getPendingProjectOperations()).resolves.toEqual([]);
     expect(listedProjectIds(harness)).toContain(projectId);
     await expect(worker.getProjectLibraryState(projectId)).resolves.toBeDefined();
@@ -586,9 +589,92 @@ describe('a copy delete proves the other copy from disk', () => {
       await settle(harness);
     });
 
-    expect(outcome).toMatchObject({ status: 'cancelled', cancellation: { projectId, unavailable: [away] } });
+    expect(outcome).toMatchObject({
+      status: 'cancelled',
+      cancellation: { projectId, reason: 'unknown', unavailable: [away] },
+    });
     await expect(harness.profile.worker.getPendingProjectOperations()).resolves.toEqual([]);
     expect(listedProjectIds(harness)).toContain(projectId);
+  });
+
+  /* Review N1: after a restart a picked folder waits on its permission prompt and the index is empty; the authority
+   * cannot tell whether another copy exists, and the cancel says so instead of "the only copy". */
+  it('should cancel with an unknown reason when the authority could not tell, naming no folder', async () => {
+    const harness = await startLibrary();
+    const projectId = homeId(0);
+    const { client } = harness.profile.rootFiles.get();
+    vi.spyOn(client, 'permanentlyDeleteProjectDirectory').mockResolvedValueOnce({
+      status: 'copy-unproven',
+      reason: 'unknown',
+    });
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await harness.library.commands.permanentlyDeleteProject(
+        projectId,
+        harness.profile.locatorOf('workspace', 'copy-000'),
+      );
+      await settle(harness);
+    });
+
+    expect(outcome).toMatchObject({
+      status: 'cancelled',
+      cancellation: { projectId, reason: 'unknown', unavailable: [] },
+    });
+  });
+
+  /* Review N2: a row this tab saw fail proves nothing either way, and is not left out of the proof: after M2 its
+   * directory is whole (it failed before the manifest went) or has no manifest, which a probe reads vacant. */
+  it('should not leave out of the proof a directory whose delete row failed in this tab', async () => {
+    const harness = await startLibrary();
+    const { profile } = harness;
+    const { client } = profile.rootFiles.get();
+    vi.spyOn(client, 'permanentlyDeleteProjectDirectory').mockResolvedValueOnce({ status: 'unidentifiable' });
+    await act(async () => {
+      await expect(
+        harness.library.commands.permanentlyDeleteProject(homeId(1), profile.locatorOf('workspace', 'copy-001')),
+      ).rejects.toMatchObject({ reason: 'identity-conflict' });
+      await settle(harness);
+    });
+    const probe = vi.spyOn(client, 'probeProjectDirectories');
+
+    await act(async () => {
+      await harness.library.commands.permanentlyDeleteProject(homeId(0), profile.locatorOf('workspace', 'copy-000'));
+      await settle(harness);
+    });
+
+    const excluded = probe.mock.calls.flatMap(([request]) => request.exclude ?? []);
+    expect(excluded.map((left) => left.relativeDirectory)).not.toContain('copy-001');
+  });
+
+  /* Review N3: only the refusal of an authority from before FW3 degrades; any other probe failure fails the command. */
+  it('should fail, not fall back, when the probe fails for another reason', async () => {
+    const harness = await startLibrary();
+    const { profile, library } = harness;
+    const { client } = profile.rootFiles.get();
+    vi.spyOn(client, 'probeProjectDirectories').mockRejectedValue(new Error('The folder is busy.'));
+    const discover = vi.spyOn(client, 'listProjectManifests');
+    const route = profile.routes.get(homeId(1));
+
+    await act(async () => {
+      await expect(
+        library.workspaceCommands.chooseProjectDirectory(profile.locatorOf('workspace', 'copy-001'), homeId(1)),
+      ).rejects.toThrow('The folder is busy.');
+      await expect(
+        library.commands.permanentlyDeleteProject(homeId(0), profile.locatorOf('workspace', 'copy-000')),
+      ).rejects.toThrow('The folder is busy.');
+      await expect(
+        library.commands.createProject({
+          kernel: 'auto',
+          projectName: 'Busy',
+          location: { kind: 'home' },
+          chat: false,
+        }),
+      ).rejects.toThrow('The folder is busy.');
+    });
+
+    expect(profile.routes.get(homeId(1))).toEqual(route);
+    expect(discover).not.toHaveBeenCalled();
   });
 
   /* Two tabs over one journal and one authority delete the last two copies: tab 2 proves tab 1's copy, and tab 1's
@@ -685,9 +771,8 @@ describe('a copy delete proves the other copy from disk', () => {
     const harness = await startLibrary();
     const { profile, library } = harness;
     const { client } = profile.rootFiles.get();
-    vi.spyOn(client, 'probeProjectDirectories').mockRejectedValue(
-      new Error('Unknown workspace method: probeProjectDirectories'),
-    );
+    /* What the bridge answers for a method the authority does not serve. */
+    vi.spyOn(client, 'probeProjectDirectories').mockRejectedValue(new Error('Unknown method: probeProjectDirectories'));
     const listed = vi.spyOn(client, 'listProjectManifests');
 
     await act(async () => {

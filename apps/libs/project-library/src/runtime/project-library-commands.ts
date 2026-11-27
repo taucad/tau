@@ -15,7 +15,12 @@ import type { Project, ProjectManifest, ProjectManifestReadResult } from '@tauca
 import { idPrefix } from '@taucad/types/constants';
 import type { KernelProvider } from '@taucad/runtime';
 import type { KernelConfiguration } from '@taucad/types/constants';
-import type { ProjectDiscoveryResult, ProjectLocator, StorageRootConfig } from '@taucad/filesystem';
+import type {
+  ProjectDiscoveryResult,
+  ProjectLocator,
+  ProjectProbeLocation,
+  StorageRootConfig,
+} from '@taucad/filesystem';
 import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -55,6 +60,7 @@ import {
   rememberChatPlacement,
   resolveWorkspaceForWrite,
   routeBindsLocator,
+  isProbeNotServed,
   pendingDeleteExclusions,
   routeLocatorOf,
   writeProjectLibraryFile,
@@ -359,6 +365,8 @@ export type ProjectCommandsHost<
   invalidateProject: (projectId: string) => void;
   /** A project is gone for good: its own queries are dropped. */
   forgetProject: (projectId: string) => void;
+  /** The journal rows this tab saw fail, which a delete does not leave out of its proof (review N2). */
+  failedDeletes: () => ReadonlySet<string>;
 }>;
 
 /** The operation field naming where a created chat's attachments are copied from, when not Home. */
@@ -551,14 +559,18 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
      * directory, fast-path FW3): what they hold now is evidence for the index, so the pass below re-reads only them and
      * rebinds the route to a copy that holds the id. */
     const configured = await getProjectFileSystemConfig(projectId);
-    /* An authority from before FW3 refuses the probe; its pass reads storage as before (review m3). */
-    await fileManager.client
-      .probeProjectDirectories({
+    /* An authority from before FW3 does not serve the probe; its pass reads storage as before (review m3, N3). */
+    try {
+      await fileManager.client.probeProjectDirectories({
         projectId,
         locators: configured === undefined || configured.backend === 'memory' ? [] : [routeLocatorOf(configured)],
         known: true,
-      })
-      .catch(() => undefined);
+      });
+    } catch (error) {
+      if (!isProbeNotServed(error)) {
+        throw error;
+      }
+    }
     await this.#host.discover();
     return read();
   };
@@ -997,9 +1009,12 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     const routed = configured === undefined || configured.backend === 'memory' ? undefined : routeLocatorOf(configured);
     /* A copy another delete is removing proves nothing (review M2); an authority from before FW3 refuses the probe,
      * which proves nothing either, so the Trash check applies (review m3). */
-    const exclude = await pendingDeleteExclusions(await this.#host.readiedWorker());
-    const locations = await fileManager.client
-      .probeProjectDirectories({
+    const exclude = await pendingDeleteExclusions(await this.#host.readiedWorker(), {
+      failed: this.#host.failedDeletes(),
+    });
+    let locations: readonly ProjectProbeLocation[] = [];
+    try {
+      ({ locations } = await fileManager.client.probeProjectDirectories({
         projectId,
         locators: [
           ...projectOccurrences(pass, projectId).map((occurrence) => occurrence.locator),
@@ -1008,11 +1023,13 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
         known: true,
         except: { storageRootKey: target.locator.storageRootKey, relativeDirectory: target.locator.relativeDirectory },
         ...(exclude.length === 0 ? {} : { exclude }),
-      })
-      .then(
-        (probe) => probe.locations,
-        () => [],
-      );
+      }));
+    } catch (error) {
+      /* Only an authority from before FW3, which does not serve the probe, proves nothing here (review N3). */
+      if (!isProbeNotServed(error)) {
+        throw error;
+      }
+    }
     const survives = locations.some(
       ({ locator: other, status }) =>
         status === 'held' &&

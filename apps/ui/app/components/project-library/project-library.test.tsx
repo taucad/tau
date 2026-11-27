@@ -1185,8 +1185,9 @@ describe('ProjectLibrary', () => {
     const cancellation = {
       operationId: 'req_cancelled00000000000',
       projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+      reason: 'absent',
       unavailable: [],
-    };
+    } as const;
 
     afterEach(() => {
       mockCancelled.deletes.length = 0;
@@ -1248,10 +1249,30 @@ describe('ProjectLibrary', () => {
       });
     });
 
+    /* Review N1: when the authority could not tell and names no folder, the notice does not claim the only copy. */
+    it('says another copy could not be confirmed, not that this is the only copy, when the reason is unknown', async () => {
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [mockProjects[0]!] };
+      mockCancelled.deletes.push({ ...cancellation, reason: 'unknown' });
+      render(
+        <TestRouter>
+          <TooltipProvider>
+            <ProjectLibrary />
+          </TooltipProvider>
+        </TestRouter>,
+      );
+
+      const group = within(screen.getByRole('group', { name: 'Deletes not finished' }));
+      expect(
+        group.getByText('Couldn’t confirm another copy, so this copy wasn’t deleted. Move it to Trash, or try again.'),
+      ).toBeInTheDocument();
+      expect(group.queryByText(/only copy/u)).toBeNull();
+    });
+
     it('shows a replayed cancel where recoveries surface, naming the folder it could not read', async () => {
       mockUseProjectsResult = { ...createUseProjectsResult(), projects: [mockProjects[0]!] };
       mockCancelled.deletes.push({
         ...cancellation,
+        reason: 'unknown',
         unavailable: [{ backend: 'indexeddb', storageRootKey: 'indexeddb:tau-', relativeDirectory: 'gearbox-copy' }],
       });
       render(

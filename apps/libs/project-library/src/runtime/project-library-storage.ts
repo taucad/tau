@@ -276,11 +276,16 @@ export const allocateProjectBasePath = async (
   const storageRootKey = persistentStorageRootKey(root);
   /* One fresh listing of the root's child names, files and plain folders included (fast-path FW3). A root the
    * authority cannot list answers none, and the names discovery last listed there stand in, as before. */
-  const names = await client.probeProjectDirectories({ root: storageRootKey }).then(
-    (probe) => probe.names,
-    /* An authority from before FW3 refuses the probe (review m3): the names discovery listed stand in, as before. */
-    () => undefined,
-  );
+  let names: readonly string[] | undefined;
+  try {
+    ({ names } = await client.probeProjectDirectories({ root: storageRootKey }));
+  } catch (error) {
+    /* An authority from before FW3 does not serve the probe (review m3, N3): the names discovery listed stand in, as
+     * before. Any other failure is the create's. */
+    if (!isProbeNotServed(error)) {
+      throw error;
+    }
+  }
   if (names !== undefined) {
     return allocateProjectDirectorySlug(name, new Set(names));
   }
@@ -471,24 +476,42 @@ export const routeLocatorOf = (config: Exclude<ProjectFileSystemConfig, { backen
   }
 };
 
+/**
+ * Whether a probe failed only because the authority predates it (review N3): the bridge answers a method its peer does
+ * not serve with `Unknown method: <name>`, and a client built without the method has none to call.
+ *
+ * @param error - What the probe threw.
+ * @returns Whether it is that refusal and nothing else.
+ */
+export const isProbeNotServed = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error.message === 'Unknown method: probeProjectDirectories' ||
+    (error instanceof TypeError && /probeProjectDirectories is not a function/u.test(error.message)));
+
 /** A directory as the authority names it in `except` and `exclude`. */
 export type DirectoryKey = Readonly<{ storageRootKey: string; relativeDirectory: string }>;
 
 /**
  * The directories other permanent deletes in the journal are removing, every tab's (FW3 review M2): a copy whose
- * removal may be under way proves nothing, so a probe and a delete leave these out.
+ * removal may be under way proves nothing, so a probe and a delete leave these out. A row this tab saw fail is not left
+ * out (review N2): since the removal takes the manifest first, a failed delete's directory is either whole, because it
+ * failed before the manifest went, and so a copy, or has no manifest, which a probe reads vacant. Leaving it out adds
+ * no safety, and a failed row nobody discards would block the other copy's proof for good.
  *
  * @param worker - The journal.
- * @param exceptOperationId - The delete asking, whose own target is not an exclusion.
+ * @param options - The delete asking, whose own target is not an exclusion, and the rows this tab saw fail.
  * @returns The directories under a pending delete.
  */
 export const pendingDeleteExclusions = async (
   worker: Readonly<{ getPendingProjectOperations: () => Promise<readonly PendingProjectOperation[]> }>,
-  exceptOperationId?: string,
+  options: Readonly<{ exceptOperationId?: string; failed?: ReadonlySet<string> }> = {},
 ): Promise<DirectoryKey[]> => {
+  const { exceptOperationId, failed } = options;
   const operations = await worker.getPendingProjectOperations();
   return operations.flatMap((operation) =>
-    operation.kind === 'permanent-delete' && operation.operationId !== exceptOperationId
+    operation.kind === 'permanent-delete' &&
+    operation.operationId !== exceptOperationId &&
+    failed?.has(operation.operationId) !== true
       ? [
           {
             storageRootKey: persistentStorageRootKey(operation.storage),
@@ -576,6 +599,8 @@ export type CommitIo = Readonly<{
   worker: ProjectLibraryObjectStore;
   chatStore: ProjectLibraryChatRecords;
   queryClient: QueryClient;
+  /** The journal rows this tab saw fail, which a delete does not leave out of its proof (review N2). */
+  failedOperationIds?: ReadonlySet<string>;
 }>;
 
 /** Commit one pending operation's directory and its local state; a failure carries its recovery reason. */
@@ -588,7 +613,7 @@ export type CommitOutcome =
   | Readonly<{ status: 'cancelled'; cancellation: SoleCopyCancellation }>;
 
 export const commitPendingProjectOperation = async (
-  { fileManager, worker, chatStore, queryClient }: CommitIo,
+  { fileManager, worker, chatStore, queryClient, failedOperationIds }: CommitIo,
   operation: PendingProjectOperation,
 ): Promise<CommitOutcome> => {
   if (operation.kind === 'permanent-delete') {
@@ -599,7 +624,10 @@ export const commitPendingProjectOperation = async (
        * deletes are removing prove nothing and are left out (review M2). */
       const config = await getProjectFileSystemConfig(operation.projectId);
       const routed = config === undefined || config.backend === 'memory' ? undefined : routeLocatorOf(config);
-      const exclude = await pendingDeleteExclusions(worker, operation.operationId);
+      const exclude = await pendingDeleteExclusions(worker, {
+        exceptOperationId: operation.operationId,
+        failed: failedOperationIds,
+      });
       result = await fileManager.client.permanentlyDeleteProjectDirectory({
         projectId: operation.projectId,
         providerBasePath: operation.storage.providerBasePath,
@@ -631,6 +659,7 @@ export const commitPendingProjectOperation = async (
         cancellation: {
           operationId: operation.operationId,
           projectId: operation.projectId,
+          reason: result.reason,
           unavailable: result.unavailable ?? [],
         },
       };

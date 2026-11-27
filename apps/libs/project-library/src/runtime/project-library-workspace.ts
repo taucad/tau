@@ -34,6 +34,7 @@ import type { ScopedStorageClient } from '@taucad/fs-client/file-system-client';
 import { parseWorkspaceMarker, workspaceMarkerPath } from '@taucad/types';
 import {
   deriveWorkspaceBindingRepairs,
+  isProbeNotServed,
   pendingDeleteExclusions,
   routeConfigFor,
 } from '#runtime/project-library-storage.js';
@@ -238,6 +239,8 @@ export type WorkspaceCommandsHost = Readonly<{
   invalidateProject: (projectId: string) => void;
   /** The connection's telemetry; a library built without it reports none. */
   telemetry: Pick<WorkspaceTelemetry, 'workspaceConnection'> | undefined;
+  /** The journal rows this tab saw fail, which are not left out of a probe (review N2). */
+  failedDeletes: () => ReadonlySet<string>;
 }>;
 
 /**
@@ -387,7 +390,9 @@ export class WorkspaceCommands {
     // binding moves; no project file is written (R7).
     const fileManager = await this.#host.facade();
     /* A copy another delete is removing is not offered (FW3 review): it is left out of the probe, so it is not bound. */
-    const exclude = await pendingDeleteExclusions(await this.#host.readiedWorker());
+    const exclude = await pendingDeleteExclusions(await this.#host.readiedWorker(), {
+      failed: this.#host.failedDeletes(),
+    });
     const sameDirectory = (other: ProjectLocator): boolean =>
       other.storageRootKey === locator.storageRootKey && other.relativeDirectory === locator.relativeDirectory;
     let chosen: Readonly<{ locator: ProjectLocator }> | undefined;
@@ -398,8 +403,12 @@ export class WorkspaceCommands {
         ...(exclude.length === 0 ? {} : { exclude }),
       });
       chosen = locations.find((location) => location.status === 'held' && sameDirectory(location.locator));
-    } catch {
-      /* An authority from before FW3 refuses the probe (review m3): a pass reads the folder, as before. */
+    } catch (error) {
+      /* Only an authority from before FW3, which does not serve the probe, falls back to a pass (review m3, N3); a probe
+       * that failed for another reason binds nothing. */
+      if (!isProbeNotServed(error)) {
+        throw error;
+      }
       const discovery = await this.#host.discover();
       chosen = exclude.some(
         (left) =>

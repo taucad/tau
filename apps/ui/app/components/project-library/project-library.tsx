@@ -143,12 +143,16 @@ const copyFolderLabel = (
  */
 const soleCopyNotice = (
   name: string,
+  reason: SoleCopyCancellation['reason'],
   folder: string | undefined,
 ): Readonly<{ title: string; description: string }> => ({
   title: `Didn’t delete ${name}`,
+  /* Only an answer that no other copy holds the project says "the only copy" (review N1). */
   description:
     folder === undefined
-      ? 'It’s now the only copy, so it wasn’t deleted. Move it to Trash to delete it.'
+      ? reason === 'absent'
+        ? 'It’s now the only copy, so it wasn’t deleted. Move it to Trash to delete it.'
+        : 'Couldn’t confirm another copy, so this copy wasn’t deleted. Move it to Trash, or try again.'
       : `Couldn’t confirm the other copy in ${folder}, so this copy wasn’t deleted. Reconnect the folder and try again, or move it to Trash.`,
 });
 
@@ -544,7 +548,7 @@ export function ProjectLibrary({
 
   const announceCancelledDelete = useCallback(
     (name: string, cancellation: SoleCopyCancellation): void => {
-      const notice = soleCopyNotice(name, unavailableFolderOf(cancellation));
+      const notice = soleCopyNotice(name, cancellation.reason, unavailableFolderOf(cancellation));
       toast.info(notice.title, {
         description: notice.description,
         action: {
@@ -930,7 +934,7 @@ export function ProjectLibrary({
         <div role='group' className='mb-6 space-y-2' aria-label='Deletes not finished'>
           {projectManager.cancelledDeletes.map((cancellation) => {
             const name = heldProjects.find((project) => project.id === cancellation.projectId)?.name ?? 'this project';
-            const notice = soleCopyNotice(name, unavailableFolderOf(cancellation));
+            const notice = soleCopyNotice(name, cancellation.reason, unavailableFolderOf(cancellation));
             return (
               <div key={cancellation.operationId} className='flex items-center gap-3 rounded-md border p-3'>
                 <AlertCircle className='size-4 shrink-0 text-muted-foreground' />

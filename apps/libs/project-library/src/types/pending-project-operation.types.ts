@@ -103,7 +103,12 @@ export type PendingProjectRecoveryReason =
 export type SoleCopyCancellation = {
   readonly operationId: string;
   readonly projectId: string;
-  /** The locations of another copy that could not be read (an unavailable folder); empty when the other copy is gone. */
+  /**
+   * `absent`: no other copy holds the id now. `unknown`: one could not be read or counted (an unavailable folder, a
+   * permission not granted after a restart), so the authority could not tell (review N1).
+   */
+  readonly reason: 'absent' | 'unknown';
+  /** The locations of another copy that could not be read, when the authority could name one. */
   readonly unavailable: readonly ProjectLocator[];
 };
 

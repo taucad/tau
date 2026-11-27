@@ -57,10 +57,19 @@ import type {
 } from '#mount-table.js';
 /* The project-directory lifecycle is its own module (D5/W7); the authority
  * keeps the four public calls and owns nothing of the manifest. */
-import { ProjectDirectories } from '#project-directories.js';
+import { ProjectDirectories, discoveryAuditIntervalMilliseconds } from '#project-directories.js';
+import { ProjectDirectoryIndex } from '#project-directory-index.js';
 import type { ImportStagingPort } from '#importer/staging.js';
 import type { HostImportSourcePort } from '#importer/sources.js';
-import type { ProjectDiscoveryResult, ProjectRouteVerification, ResolvedDiscoveryRoot } from '#project-directories.js';
+import type {
+  ProjectAbsence,
+  ProjectDirectoryProbe,
+  ProjectDirectoryProbeRequest,
+  ProjectDirectoryReading,
+  ProjectDiscoveryResult,
+  ProjectRouteVerification,
+  ResolvedDiscoveryRoot,
+} from '#project-directories.js';
 import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPath } from '@taucad/utils/path';
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields } from '#content-metadata.js';
@@ -71,6 +80,9 @@ import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#proj
 
 /** Milliseconds. */
 const kernelCoalescingWindow = 75;
+
+/** How often the discovery audit re-reads its share of every warm directory (A4). */
+const auditTickMilliseconds = 15_000;
 
 /** One project or checkout route staged for installation, before its provider is resolved. */
 type StagedRouteMount = {
@@ -246,6 +258,12 @@ export class WorkspaceFileService {
   private readonly _projectDirectories: ProjectDirectories;
   private readonly _externalChanges: ExternalChangeIngest;
   private readonly _remoteChanges: RemoteChanges;
+  /** The discovery index (FW2): a listing cache that nominates; storage decides. */
+  private readonly _discoveryIndex: ProjectDirectoryIndex<ProjectDirectoryReading>;
+  /** The audit's timer, started by the first discovery pass. */
+  private _auditTimer: ReturnType<typeof setInterval> | undefined;
+  /** When the audit last ran, and when it last finished a whole cycle. */
+  private readonly _audit = { tickedAt: 0, cycledAt: 0, running: false };
 
   /**
    * Create a {@link WorkspaceFileService} with injected dependencies.
@@ -267,7 +285,10 @@ export class WorkspaceFileService {
     policy?: PathPolicy;
     /** How long a read of a pending entry waits for its object; see {@link pendingStallMilliseconds}. */
     pendingStallMilliseconds?: number;
+    /** The discovery index, for a test that drives it; a fresh one by default. @internal */
+    discoveryIndex?: ProjectDirectoryIndex<ProjectDirectoryReading>;
   }) {
+    this._discoveryIndex = options.discoveryIndex ?? new ProjectDirectoryIndex<ProjectDirectoryReading>();
     this._registry = options.providerRegistry;
     this._pendingStallMilliseconds = options.pendingStallMilliseconds;
     this._resourceQueue = options.resourceQueue;
@@ -323,6 +344,18 @@ export class WorkspaceFileService {
         }
         return this._externalChanges.isProbePending(storageRootKey) ? 'pending' : (state ?? 'pending');
       },
+      index: this._discoveryIndex,
+      rootChannels: (storageRootKey) => this._externalChanges.channels(storageRootKey),
+      validateRoot: async (storageRootKey) => this._externalChanges.validate(storageRootKey),
+      channelsArmed: async (storageRootKey) => this._externalChanges.armed(storageRootKey),
+      onAuditChange: (storageRootKey) => {
+        /* What the audit found moves the page's epoch like any discovery change (A4). */
+        this._pipeline.emitChangeEvent({
+          type: 'directoryChanged',
+          path: '/',
+          backend: this._discoveryRoots.find((root) => root.storageRootKey === storageRootKey)?.scope.backend ?? 'opfs',
+        });
+      },
       revokeProjectRoute: (path, notifyPeers, boundTo) => {
         const mount = this._mountTable.getExactMount(path);
         if (
@@ -351,6 +384,7 @@ export class WorkspaceFileService {
         // async-iife: bootstrap -- a late admission arrives on the ingest's own settlement, not a caller's.
         void this._enqueueTopologyFollowUp(async () => this._attachLateRoots());
       },
+      discovery: this._discoveryIndex,
     });
     this._remoteChanges = new RemoteChanges({
       registry: this._registry,
@@ -362,7 +396,10 @@ export class WorkspaceFileService {
       revokeProjectRoute: (path, notifyPeers) => {
         this._revokeProjectRoute(path, notifyPeers);
       },
+      discovery: this._discoveryIndex,
     });
+    /* This authority's own writes, tapped where the bytes move (A2 a). */
+    this._registry.setWriteTap((storageRootKey, paths) => this._discoveryIndex.beginWrite(storageRootKey, paths));
     this._crossTabCoordinator.onRemoteChange((notification) => {
       this._remoteChanges.apply(notification);
     });
@@ -1169,6 +1206,10 @@ export class WorkspaceFileService {
    */
   public async pollExternalChanges(root?: string): Promise<boolean> {
     const nativelyObserved = await this._externalChanges.poll(root);
+    if (root === undefined) {
+      /* The same moments run the audit at once when its last whole cycle is older than its interval (A4). */
+      this._auditTick(true);
+    }
     /* The same moments — a poll, a tab regaining visibility — compare the warm
      * Project Indexes of the roots other programs edit (D5); a root only Tau
      * writes learns every change from its own hooks and is never compared here. */
@@ -1273,7 +1314,31 @@ export class WorkspaceFileService {
    * @returns Manifests and per-root completeness from the configured physical roots.
    */
   public async listProjectManifests(): Promise<ProjectDiscoveryResult> {
+    this._startAudit();
     return this._projectDirectories.listProjectManifests();
+  }
+
+  /**
+   * Prove from storage whether any configured root still carries a project id: every root available, every
+   * directory's identity record read, under the project's lock. The discovery index is never asked (A1).
+   *
+   * @param projectId - The id.
+   * @returns `absent`, `present` with the directories that carry it, or `unknown`.
+   */
+  public async verifyAbsent(projectId: string): Promise<ProjectAbsence> {
+    return this._projectDirectories.verifyAbsent(projectId);
+  }
+
+  /**
+   * Read known locations of a project id from storage under its locks (fast-path FW3, `probe`): the caller's locators
+   * and the discovery index's, each answered `held`, `vacant` or `unknown`; and, with `root`, that root's child names
+   * listed afresh. The index only nominates.
+   *
+   * @param request - The id, its nominations and the location to leave out; the root whose names to list.
+   * @returns Each location's answer, and the root's names when they could be listed.
+   */
+  public async probeProjectDirectories(request: ProjectDirectoryProbeRequest): Promise<ProjectDirectoryProbe> {
+    return this._projectDirectories.probeProjectDirectories(request);
   }
 
   /**
@@ -1433,6 +1498,7 @@ export class WorkspaceFileService {
         changed.push(mount.prefix);
       }
     }
+    this._discoveryIndex.drop(storageRootKey);
     const retainedDiscoveryRoots = this._discoveryRoots.filter((root) => root.storageRootKey !== storageRootKey);
     if (retainedDiscoveryRoots.length !== this._discoveryRoots.length) {
       this._discoveryRoots = retainedDiscoveryRoots;
@@ -1465,6 +1531,8 @@ export class WorkspaceFileService {
 
   /** Release all resources: watches, providers, caches, and event bus. */
   public dispose(): void {
+    clearInterval(this._auditTimer);
+    this._auditTimer = undefined;
     this._projectDirectories.dispose();
     this._externalChanges.dispose();
     this._projectIndexes.dispose();
@@ -1476,6 +1544,55 @@ export class WorkspaceFileService {
     this._watchRegistry.dispose();
     this._registry.disposeAll();
     this._eventBus.dispose();
+  }
+
+  /** Start the discovery audit's timer once a pass has warmed the index: one rolling cycle per interval (A4). */
+  private _startAudit(): void {
+    if (this._auditTimer !== undefined) {
+      return;
+    }
+    this._audit.tickedAt = Date.now();
+    this._audit.cycledAt = Date.now();
+    this._auditTimer = setInterval(() => {
+      this._auditTick(false);
+    }, auditTickMilliseconds);
+    /* A Node host must not stay alive for the audit alone. */
+    (this._auditTimer as { unref?: () => void }).unref?.();
+  }
+
+  /**
+   * One audit tick: a share of every warm directory, so one whole cycle takes the interval; a whole cycle at once when
+   * the last one is older than the interval, as after a freeze or a hidden page. Background work: never awaited.
+   */
+  private _auditTick(onlyWhenOverdue: boolean): void {
+    const now = Date.now();
+    /* One and a half intervals: the rolling cycle wraps within one, so its wrap never meets the threshold (review N3). */
+    const overdue = now - this._audit.cycledAt > 1.5 * discoveryAuditIntervalMilliseconds;
+    if (this._audit.running || this._auditTimer === undefined || (onlyWhenOverdue && !overdue)) {
+      return;
+    }
+    const share = Math.min(1, Math.max(0, now - this._audit.tickedAt) / discoveryAuditIntervalMilliseconds);
+    this._audit.tickedAt = now;
+    this._audit.running = true;
+    // async-iife: bootstrap -- the audit is background work on its own timer, never a caller's.
+    void (async () => {
+      try {
+        /* The audit reports when every warm root last completed a whole cycle, rolling or not, so an overdue cycle runs
+         * only when the rolling one fell behind (review M3). */
+        const cycledAt = await this._projectDirectories.auditDiscovery(overdue ? undefined : share);
+        if (cycledAt !== undefined) {
+          this._audit.cycledAt = Math.max(this._audit.cycledAt, cycledAt);
+        }
+        /* An overdue whole cycle runs at most once per interval, whatever a root that keeps failing reports (review N1). */
+        if (overdue) {
+          this._audit.cycledAt = Math.max(this._audit.cycledAt, now);
+        }
+      } catch {
+        /* A failed audit leaves its directories as they were; the next tick tries again. */
+      } finally {
+        this._audit.running = false;
+      }
+    })();
   }
 
   /* A row as a rooted view's stat answers it: settled as its mount's marks say, a pending entry as its object (D9). */
@@ -1627,6 +1744,11 @@ export class WorkspaceFileService {
       /* Same reason as `disposeStorageRoot`: a changed discovery-root set can
        * have moved any route's physical bytes, so no index is trustworthy. */
       changed.push('/');
+    }
+    for (const storageRootKey of this._discoveryIndex.storageRootKeys()) {
+      if (!stagedRoots.some((root) => root.storageRootKey === storageRootKey)) {
+        this._discoveryIndex.drop(storageRootKey);
+      }
     }
     this._discoveryRoots = stagedRoots;
     this._rootEntries = rootEntries;

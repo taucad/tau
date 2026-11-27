@@ -1,8 +1,8 @@
 import { rmSync } from 'node:fs';
 import type * as NodeFileSystemModule from 'node:fs';
-import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { preflight, versionOf } from '#preflight.js';
@@ -116,15 +116,33 @@ describe('preflight', () => {
   });
 });
 
-describe.skipIf(process.platform === 'win32')('versionOf', () => {
+/**
+ * Write an executable stand-in that the current Node.js runs. Windows has no shebang, so there it is an
+ * npm-style `.cmd` shim beside a `.cjs` script, as `npm install -g` writes for `tau`, and the returned path
+ * names the shim.
+ *
+ * @param path - The executable's path, without an extension.
+ * @param source - CommonJS source; its arguments are `process.argv.slice(2)`.
+ * @returns The path to start.
+ */
+const writeExecutable = async (path: string, source: string): Promise<string> => {
+  await mkdir(dirname(path), { recursive: true });
+  if (process.platform === 'win32') {
+    await writeFile(`${path}.cjs`, source);
+    await writeFile(`${path}.cmd`, `@"${process.execPath}" "%~dpn0.cjs" %*\r\n`);
+    return `${path}.cmd`;
+  }
+  await writeFile(path, `#!${process.execPath}\n${source}`);
+  await chmod(path, 0o755);
+  return path;
+};
+
+describe('versionOf', () => {
   let directory: string;
 
   /** An executable stand-in for `tau`, run by the current Node.js. */
   const fakeCli = async (body: string): Promise<string> => {
-    const path = join(directory, 'tau');
-    await writeFile(path, `#!${process.execPath}\n${body}\n`);
-    await chmod(path, 0o755);
-    return path;
+    return writeExecutable(join(directory, 'tau'), `${body}\n`);
   };
 
   beforeEach(async () => {

@@ -1569,6 +1569,99 @@ describe('cash disposition foundation', () => {
     await expectCollectionAdmitted(await freshAccount());
   });
 
+  it('should keep an operator-resolved unattributed payment resolved when a later scan reads it again', async () => {
+    const value = await fixture();
+    serveOwnSources(value.purchase);
+    // The daily windows overlap by a day, so the next day's scan reads the same foreign payment again.
+    const triggered = `pi_cli_held_${randomUUID()}`;
+    strangerPayments = [{ paymentIntentId: triggered, customerId: null, shape: { created: 1_764_000_000 } }];
+    const reconciliation = reconciliationService('sk_test_cash_operator_held');
+    let closed: typeof schema.billingFinancialCase.$inferSelect | undefined;
+    try {
+      await scanPass(reconciliation);
+      const [opened] = await casesFor('missing_local_payment', triggered);
+      expect(opened).toEqual(expect.objectContaining({ accountId: null, state: 'open' }));
+      await reconciliation.resolveCaseByOperator({
+        environment: 'development',
+        caseId: opened?.id ?? '',
+        disposition: 'resolved',
+        reviewActorId: 'operator',
+        reason: 'Foreign cash: Stripe CLI trigger; no Tau customer',
+      });
+      [closed] = await casesFor('missing_local_payment', triggered);
+      await scanPass(reconciliation, 1000);
+    } finally {
+      resetServedSources();
+    }
+    const cases = await casesFor('missing_local_payment', triggered);
+    expect(cases).toEqual([
+      expect.objectContaining({ accountId: null, state: 'resolved', resolvedAt: closed?.resolvedAt }),
+    ]);
+    expect(cases[0]?.resolutionEvidence).toMatchObject({ disposition: 'resolved', reviewActorId: 'operator' });
+    expect(cases[0]?.lastSeenAt.getTime()).toBeGreaterThan(closed?.lastSeenAt.getTime() ?? Number.POSITIVE_INFINITY);
+  });
+
+  it('should reopen an operator-resolved unattributed payment when the source changes', async () => {
+    const value = await fixture();
+    serveOwnSources(value.purchase);
+    const triggered = `pi_cli_changed_${randomUUID()}`;
+    strangerPayments = [{ paymentIntentId: triggered, customerId: null, shape: { created: 1_764_000_000 } }];
+    const reconciliation = reconciliationService('sk_test_cash_operator_changed');
+    try {
+      await scanPass(reconciliation);
+      const [opened] = await casesFor('missing_local_payment', triggered);
+      await reconciliation.resolveCaseByOperator({
+        environment: 'development',
+        caseId: opened?.id ?? '',
+        disposition: 'resolved',
+        reviewActorId: 'operator',
+        reason: 'Foreign cash: Stripe CLI trigger; no Tau customer',
+      });
+      strangerPayments = [
+        { paymentIntentId: triggered, customerId: null, shape: { created: 1_764_000_000, amount: 900 } },
+      ];
+      await scanPass(reconciliation, 1000);
+    } finally {
+      resetServedSources();
+    }
+    const cases = await casesFor('missing_local_payment', triggered);
+    expect(cases).toEqual([expect.objectContaining({ accountId: null, state: 'open', resolutionEvidence: null })]);
+    expect(cases[0]?.evidence).toHaveProperty('amount', 900);
+  });
+
+  it('should reopen an operator-resolved account-named case while its condition persists', async () => {
+    const accountId = await freshAccount();
+    // A Tau payment Stripe has and the local write never recorded: the customer is owed until it is credited.
+    const purchase = await seedPaidPurchase({
+      database,
+      accountId,
+      environment: 'development',
+      atoms: 1000n,
+      prepared: true,
+      stripeAccountId: cashStripeAccountId,
+    });
+    serveOwnSources(purchase);
+    const reconciliation = reconciliationService('sk_test_cash_operator_owned');
+    try {
+      await scanPass(reconciliation);
+      const [opened] = await casesFor('missing_local_payment', purchase.proof.paymentIntentId);
+      expect(opened).toEqual(expect.objectContaining({ accountId, state: 'open' }));
+      await reconciliation.resolveCaseByOperator({
+        environment: 'development',
+        caseId: opened?.id ?? '',
+        disposition: 'resolved',
+        reviewActorId: 'operator',
+        reason: 'Closed in error',
+      });
+      await scanPass(reconciliation, 1000);
+    } finally {
+      resetServedSources();
+    }
+    expect(await casesFor('missing_local_payment', purchase.proof.paymentIntentId)).toEqual([
+      expect.objectContaining({ accountId, state: 'open', resolutionEvidence: null }),
+    ]);
+  });
+
   it('should treat a live-mode stranger payment as unattributed operator work', async () => {
     const value = await fixture();
     serveOwnSources(value.purchase);

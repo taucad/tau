@@ -761,37 +761,44 @@ export const rendererGeneration = async (): Promise<number> => (await presentedR
  * Every mounted viewport has presented and framed its geometry. Each bridge answers for its own canvas incarnation, so
  * a bridge whose canvas has not presented yet keeps the wait open.
  */
-export const expectGeometryFramed = async (): Promise<void> => {
+export const expectGeometryFramed = async (surface?: TargetSurface): Promise<void> => {
   try {
     await expect
       .poll(
         async () =>
-          evaluate(async () => {
-            const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__;
-            if (!bridges || bridges.length === 0) {
-              return false;
-            }
-            // A bridge whose canvas has not presented keeps the wait open; one that never will answers `undefined`.
-            const presented = await Promise.race([
-              Promise.all(bridges.map(async (bridge) => bridge.whenPresented())),
-              new Promise<undefined>((resolve) => {
-                setTimeout(resolve, 1000);
-              }),
-            ]);
-            return Boolean(presented?.every(Boolean)) && bridges.every((bridge) => bridge.isGeometryFramed());
-          }),
+          evaluate(
+            async () => {
+              const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__;
+              if (!bridges || bridges.length === 0) {
+                return false;
+              }
+              // A bridge whose canvas has not presented keeps the wait open; one that never will answers `undefined`.
+              const presented = await Promise.race([
+                Promise.all(bridges.map(async (bridge) => bridge.whenPresented())),
+                new Promise<undefined>((resolve) => {
+                  setTimeout(resolve, 1000);
+                }),
+              ]);
+              return Boolean(presented?.every(Boolean)) && bridges.every((bridge) => bridge.isGeometryFramed());
+            },
+            undefined,
+            surface,
+          ),
         { timeout: 60_000 },
       )
       .toBe(true);
   } catch (error) {
     const [diagnostics, targetEvents] = await Promise.all([
-      evaluate(() =>
-        globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.map((bridge) => ({
-          actorError: bridge.getCamera().actorError,
-          actorStatus: bridge.getCamera().actorStatus,
-          backend: bridge.getGraphicsBackend(),
-          isGeometryFramed: bridge.isGeometryFramed(),
-        })),
+      evaluate(
+        () =>
+          globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.map((bridge) => ({
+            actorError: bridge.getCamera().actorError,
+            actorStatus: bridge.getCamera().actorStatus,
+            backend: bridge.getGraphicsBackend(),
+            isGeometryFramed: bridge.isGeometryFramed(),
+          })),
+        undefined,
+        surface,
       ),
       events(),
     ]);

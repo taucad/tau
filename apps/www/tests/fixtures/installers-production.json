@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 2,
+  "channel": "production",
+  "promoted": true,
+  "platforms": [
+    {
+      "lane": "macos",
+      "catalog": {
+        "schemaVersion": 1,
+        "tag": "desktop@0.4.0",
+        "channel": "production",
+        "version": "0.4.0",
+        "sourceCommit": "c560ed79834523d813db80632c5652622bc7a346",
+        "promoted": true,
+        "routes": [
+          {
+            "route": "macos-zip",
+            "target": "darwin-arm64",
+            "qualification": {
+              "ci": true,
+              "vm": "pending",
+              "trust": "release"
+            },
+            "artifacts": [
+              {
+                "kind": "macos-zip",
+                "name": "Tau-macos-arm64.zip",
+                "sha256": "8e676853d985b8ad017c27bc685ec175369d4dfc8a45bd400e4b9d4c12956ff1",
+                "size": 387022301
+              },
+              {
+                "kind": "macos-dmg",
+                "name": "Tau-macos-arm64.dmg",
+                "sha256": "030bbccead31faab90b0905a193fef47d9df9db83df1723fb77287fdefbca924",
+                "size": 421548515
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lane": "linux",
+      "catalog": {
+        "schemaVersion": 1,
+        "tag": "desktop@0.4.0",
+        "channel": "production",
+        "version": "0.4.0",
+        "sourceCommit": "c560ed79834523d813db80632c5652622bc7a346",
+        "promoted": true,
+        "routes": [
+          {
+            "route": "linux-apt",
+            "target": "linux-x64",
+            "qualification": { "ci": true, "vm": true, "trust": "release" },
+            "artifacts": [
+              {
+                "kind": "linux-tar",
+                "name": "Tau-linux-x64.tar.gz",
+                "sha256": "24f98fd2c1fff6bbad86b3e3166ea66fd62bc207e38b37f48b17ca5ad1292d20",
+                "size": 321425857
+              },
+              {
+                "kind": "linux-deb-runtime",
+                "name": "tau-runtime-0.4.0_0.4.0_amd64.deb",
+                "sha256": "595408055005b237d0c94b3e2c20b35efc210846f696c7c02505cdbe69aa202f",
+                "size": 242225838
+              },
+              {
+                "kind": "linux-deb-selector",
+                "name": "tau_0.4.0_amd64.deb",
+                "sha256": "d7988e68cd0e0c3cb2b6a187b84686bc1360f6bc30041edbf79fda3d7a7199d6",
+                "size": 83142
+              }
+            ]
+          },
+          {
+            "route": "linux-appimage",
+            "target": "linux-x64",
+            "qualification": { "ci": true, "vm": true, "trust": "release" },
+            "artifacts": [
+              {
+                "kind": "linux-tar",
+                "name": "Tau-linux-x64.tar.gz",
+                "sha256": "24f98fd2c1fff6bbad86b3e3166ea66fd62bc207e38b37f48b17ca5ad1292d20",
+                "size": 321425857
+              },
+              {
+                "kind": "linux-appimage-deb-runtime",
+                "name": "tau-appimage-runtime-0.4.0_0.4.0_amd64.deb",
+                "sha256": "0f8e8439a4aec1692c4126b6c21222a4d045658fcfef5e2f55510d097375c70b",
+                "size": 322600724
+              },
+              {
+                "kind": "linux-appimage-deb-selector",
+                "name": "tau-appimage_0.4.0_amd64.deb",
+                "sha256": "45e9c891170b963163840fce668dce070fa3526d4ceaa29d7a776a8d6f597dec",
+                "size": 83230
+              },
+              {
+                "kind": "linux-appimage",
+                "name": "Tau-linux-x64.AppImage",
+                "sha256": "ffc073c405e92a62bdb7bf50035a246f225f88739db938cfc15d8d8a8b70fa11",
+                "size": 324562561
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

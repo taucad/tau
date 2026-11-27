@@ -67,6 +67,9 @@ const qualification = (): QualifiedBillableInvocation => ({
     }),
     executeOnce: vi.fn(async () => new Response('ok')),
   },
+  withInputMaximum() {
+    return this;
+  },
 });
 
 /** The gen_ai instruments the funded terminal records on every invocation. */
@@ -603,6 +606,163 @@ describe('BillableModelInvocationService', () => {
     await expect(service.invoke(intent(abort.signal))).resolves.toEqual({ state: 'pending', operationId: 'operation' });
     expect(ledger.recordCancellation).toHaveBeenCalledOnce();
     expect(ledger.markDispatchIntent).not.toHaveBeenCalled();
+  });
+
+  /* Chat performance WP-14 (`AtomicAdmit` in GatewayInvocation.tla): the admit returns the intent-recorded row. */
+  it('dispatches from the atomic admit without re-reading the row, marking intent or reading the deadline', async () => {
+    const qualified = qualification();
+    qualified.adapter.executeOnce = vi.fn(async () => {
+      throw new Error('provider failed');
+    });
+    const row = {
+      ...qualified,
+      id: 'operation',
+      accountId: 'account',
+      environment: 'development',
+      activity: 'agent',
+      requestDigest: '',
+      customerState: 'pending',
+      dueAt: new Date(Date.now() + 30_000),
+    };
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({
+        status: 'admitted',
+        operationId: 'operation',
+        generation: 1n,
+        dispatch: { operation: row },
+      })),
+      markDispatchIntent: vi.fn(),
+      getDispatchTimeRemaining: vi.fn(async () => 12_345),
+      recordInvocationEvidence: vi.fn(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+    );
+    row.requestDigest = (
+      service as unknown as {
+        requestDigest(value: ReturnType<typeof intent>, pins: QualifiedBillableInvocation): string;
+      }
+    ).requestDigest(intent(), qualified);
+    const invocationTimeout = vi.spyOn(AbortSignal, 'timeout');
+
+    await expect(service.invoke(intent())).rejects.toBeInstanceOf(LlmGatewayError);
+
+    expect(ledger.admitOperation).toHaveBeenCalledWith(expect.anything(), { recordIntent: true });
+    expect(ledger.getOperationForAttempt).toHaveBeenCalledOnce();
+    expect(ledger.markDispatchIntent).not.toHaveBeenCalled();
+    expect(ledger.getDispatchTimeRemaining).toHaveBeenCalledWith('operation', 1n);
+    expect(qualified.adapter.executeOnce).toHaveBeenCalledOnce();
+    expect(invocationTimeout).toHaveBeenCalledWith(12_345);
+    expect(ledger.terminalizeOperation).toHaveBeenCalledOnce();
+  });
+
+  /* Chat performance WP-15 step 6 (O-6). */
+  it.each([
+    [
+      'read',
+      vi.fn(async () => ({
+        modelId: 'm',
+        providerId: 'p',
+        prefix: { version: 'input-prefix-v1', digest: `sha256:${'a'.repeat(64)}`, items: 1 },
+        inputTokens: 10n,
+      })),
+    ],
+    [
+      'failed',
+      vi.fn(async () => {
+        throw new Error('pool exhausted');
+      }),
+    ],
+  ])("qualifies with the chat's previous settled step when the lookup %s", async (outcome, previousSettledInput) => {
+    const qualified = qualification();
+    qualified.adapter.executeOnce = vi.fn(async () => {
+      throw new Error('provider failed');
+    });
+    const resolve = vi.fn((_intent: unknown, _previous?: unknown) => qualified);
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      previousSettledInput,
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'denied', reason: 'debt' })),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+    );
+
+    await expect(service.invoke({ ...intent(), chatHint: 'chat-hash' })).rejects.toBeInstanceOf(LlmGatewayError);
+
+    expect(previousSettledInput).toHaveBeenCalledWith({
+      environment: 'development',
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- asymmetric matcher
+      authUserId: expect.any(String),
+      chatHint: 'chat-hash',
+    });
+    expect(resolve.mock.calls[0]?.[1]).toEqual(
+      outcome === 'read' ? expect.objectContaining({ inputTokens: 10n }) : undefined,
+    );
+  });
+
+  it('ends an atomically admitted step at zero when the caller left before dispatch', async () => {
+    const abort = new AbortController();
+    const qualified = qualification();
+    qualified.adapter.executeOnce = vi.fn();
+    const row = {
+      ...qualified,
+      id: 'operation',
+      accountId: 'account',
+      environment: 'development',
+      activity: 'agent',
+      requestDigest: '',
+      customerState: 'pending',
+      dueAt: new Date(Date.now() + 30_000),
+    };
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => {
+        abort.abort();
+        return {
+          status: 'admitted',
+          operationId: 'operation',
+          generation: 1n,
+          dispatch: { operation: row },
+        };
+      }),
+      recordCancellation: vi.fn(),
+      markDispatchIntent: vi.fn(),
+      recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+    );
+    row.requestDigest = (
+      service as unknown as {
+        requestDigest(value: ReturnType<typeof intent>, pins: QualifiedBillableInvocation): string;
+      }
+    ).requestDigest(intent(abort.signal), qualified);
+
+    await expect(service.invoke(intent(abort.signal))).resolves.toEqual({
+      state: 'terminal',
+      operationId: 'operation',
+    });
+    expect(ledger.recordCancellation).toHaveBeenCalledOnce();
+    expect(ledger.markDispatchIntent).not.toHaveBeenCalled();
+    expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+    expect(ledger.terminalizeOperation).toHaveBeenCalledOnce();
+    expect(ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0].evidence).toMatchObject({ kind: 'absorbed_unknown' });
   });
 
   it('uses database-clock remaining time despite an apparently expired process clock', async () => {
@@ -2252,7 +2412,11 @@ describe('BillableModelInvocationService Together admission', () => {
   /* A real ledger whose first database read is the account binding: reaching it means admission validation passed. */
   const validatingLedger = new CreditLedgerService(
     {
+      // Every first database call refuses: the binding read, or the transaction when a caller skips it.
       database: {
+        select: () => {
+          throw new Error('database reached');
+        },
         transaction: async () => {
           throw new Error('database reached');
         },
@@ -2355,6 +2519,7 @@ describe('BillableModelInvocationService Together admission', () => {
         providerId: 'together',
         sku: 'model:together-kimi-k3.1-pro',
       }),
+      { recordIntent: true },
     );
     expect(fetchOnce.mock.lastCall?.[1]?.body).toContain('"model":"moonshotai/Kimi-K3.1-Pro"');
     expect(ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0]).toMatchObject({

@@ -38,6 +38,7 @@ import type {
   WireModelEstimates,
   WireOpenHolds,
   WireOperationReceipt,
+  WireOperationReceiptBatch,
 } from '@taucad/billing';
 import { serializeEntitlements } from '@taucad/billing';
 import type { AuthUser } from '@taucad/api-auth';
@@ -89,6 +90,15 @@ export class BillingController {
   @Header('Cache-Control', 'private, no-store')
   public async getUsage(@User() user: AuthUser, @Query() rawQuery: unknown): Promise<WireUsageSnapshot> {
     return this.usageService.getUsage({ authUserId: user.id, rawQuery });
+  }
+
+  @Get('operations')
+  @Header('Cache-Control', 'private, no-store')
+  public async getOperationReceipts(
+    @User() user: AuthUser,
+    @Query() rawQuery: unknown,
+  ): Promise<WireOperationReceiptBatch> {
+    return this.usageService.getOperationReceipts({ authUserId: user.id, rawQuery });
   }
 
   @Get('operations/:operationId')

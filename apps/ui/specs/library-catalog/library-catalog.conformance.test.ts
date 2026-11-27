@@ -15,7 +15,7 @@
  *   PassStarted       the listing query asks for the owed pass (`passRequested`); the scan captures storage now
  *   PassSettled       the held scan returns what it captured, and the plan finds nothing to write
  *   ReplayStarted     the bootstrap pass is announced to recovery (`discoveryReady`); the loop starts its replay
- *   ReplaySettled     the held replay settles as the model's next state says: recovered, or failed terminally
+ *   ReplaySettled     the held replay settles as the model's next state says: recovered, cancelled, or failed terminally
  *   MutationJournaled a mutation on the project asks the gate, is admitted, and journals its row
  *   MutationApplied   the mutation's own apply settles as the model's next state says
  *   PersonDiscarded   the person discards the failed row; the held discard completes
@@ -276,6 +276,10 @@ const outcomeOf = (next: SpecState, operationId: string): ReplayOutcome => {
   if (row?.st === 'recovered') {
     return { status: 'recovered' };
   }
+  if (row?.st === 'cancelled') {
+    /* FW3: a delete the authority cancelled, nothing removed. */
+    return { status: 'cancelled', cancellation: { operationId, projectId: 'p', reason: 'absent', unavailable: [] } };
+  }
   if (row?.st === 'failed' && row.why === 'terminal') {
     return { status: 'failed', reason: 'identity-conflict' };
   }
@@ -295,6 +299,11 @@ const settled = (
   { operationId, outcome, next }: Readonly<{ operationId: string; outcome: ReplayOutcome; next: SpecState }>,
 ): void => {
   const { held } = harness;
+  if (outcome.status === 'cancelled') {
+    /* The row leaves the journal and storage is unchanged (FW3). */
+    held.journal = held.journal.filter((id) => id !== operationId);
+    return;
+  }
   if (outcome.status !== 'recovered') {
     return;
   }
@@ -461,6 +470,9 @@ const rowView = (row: RecoveryRow | undefined, waiting: boolean): RowView => {
       return row.reason === 'workspace-unavailable'
         ? { st: 'failed', att: row.attempts, why: 'workspace', via: 'journal' }
         : { st: 'failed', att: 0, why: 'terminal', via: 'journal' };
+    }
+    case 'cancelled': {
+      return { st: 'cancelled', att: 0, why: 'cancelled', via: 'journal' };
     }
     default: {
       return { st: row.status, att: 0, why: 'none', via: 'journal' };

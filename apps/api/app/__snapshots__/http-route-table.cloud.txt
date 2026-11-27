@@ -17,6 +17,7 @@ GET /billing/credits | v1 | AuthGuard | required | BillingController.getCredits
 GET /billing/entitlements | v1 | AuthGuard | required | BillingController.getEntitlements
 GET /billing/holds | v1 | AuthGuard | required | BillingController.getOpenHolds
 GET /billing/model-estimates | v1 | AuthGuard | required | BillingController.getModelEstimates
+GET /billing/operations | v1 | AuthGuard | required | BillingController.getOperationReceipts
 GET /billing/operations/:operationId | v1 | AuthGuard | required | BillingController.getOperationReceipt
 GET /billing/payment-actions | v1 | AuthGuard | required | BillingController.listPaymentActions
 GET /billing/payment-actions/:actionId | v1 | AuthGuard | required | BillingController.getPaymentAction

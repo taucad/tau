@@ -812,6 +812,10 @@ export class BillingCashReconciliationService {
       accountId === undefined || !attributedCaseKinds.has(kind)
         ? `${kind}:${sourceId}`
         : `${kind}:${sourceId}:${accountId}`;
+    const operatorHeld = sql`(${billingFinancialCase.state} = 'resolved'
+      AND ${billingFinancialCase.accountId} IS NULL
+      AND (${billingFinancialCase.resolutionEvidence} ->> 'reviewActorId') IS NOT NULL
+      AND ${billingFinancialCase.evidence} = excluded.evidence)`;
     await this.databaseService.database.transaction(async (tx) => {
       if (accountId !== undefined) {
         const [account] = await tx
@@ -863,13 +867,17 @@ export class BillingCashReconciliationService {
             billingFinancialCase.kind,
             billingFinancialCase.dedupeKey,
           ],
+          // An operator's review of an unattributed row is final while the source reads the same: foreign cash
+          // never gains a local payment, so the condition re-read by the overlapping daily windows never clears.
+          // A changed source (amount, status, Customer) reopens it, as does any row the scan resolved itself or
+          // one that names an account, where reopening while the condition persists protects the customer.
           set: {
-            state: 'open',
+            state: sql`CASE WHEN ${operatorHeld} THEN ${billingFinancialCase.state} ELSE 'open' END`,
             lastSeenAt: sql`clock_timestamp()`,
-            resolvedAt: null,
-            resolutionEvidence: null,
+            resolvedAt: sql`CASE WHEN ${operatorHeld} THEN ${billingFinancialCase.resolvedAt} ELSE NULL END`,
+            resolutionEvidence: sql`CASE WHEN ${operatorHeld} THEN ${billingFinancialCase.resolutionEvidence} ELSE NULL END`,
             evidence,
-            nextStep: 'qualify_source_and_resolve',
+            nextStep: sql`CASE WHEN ${operatorHeld} THEN ${billingFinancialCase.nextStep} ELSE 'qualify_source_and_resolve' END`,
           },
         });
       if (accountId !== undefined && attributedCaseKinds.has(kind)) {

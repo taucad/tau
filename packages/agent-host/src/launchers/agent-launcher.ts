@@ -780,6 +780,8 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
   const claiming = new Map<string, ReturnType<TauAgentHost['claim']>>();
   /** HA4 (H32): the chats whose last claim here was refused; a claim that opens clears it. */
   const refusedClaims = new Set<string>();
+  /* Review round 2: a refused term retries its claim each second; only its first refusal is reported. */
+  const reportedRefusals = new Set<string>();
   /** The runs this launcher admitted, by chat (T3). ponytail: kept for the launcher's life; a drain re-reads them. */
   const admitted = new Map<string, Set<string>>();
   /** The counted admissions not yet answered, which `admittedRuns` waits for (W6.r1 round 5). */
@@ -874,7 +876,8 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       const refusedWith = (code: string, message: string): string => {
         refusedClaims.add(chatId);
         /* The binding retries a closing incarnation's refusal and lets the lock go on any other (HA4). */
-        if (code !== 'HOST_CLOSED') {
+        if (code !== 'HOST_CLOSED' && !reportedRefusals.has(chatId)) {
+          reportedRefusals.add(chatId);
           console.error('[agent-launcher] a claim was refused', chatId, code, message);
           try {
             options.onClaimRefused?.(chatId, code);
@@ -898,6 +901,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       }
       if (!('refused' in claim)) {
         refusedClaims.delete(chatId);
+        reportedRefusals.delete(chatId);
         return undefined;
       }
       const { refused: answered } = claim;
@@ -906,6 +910,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         : refusedWith('HOST_FAULT', 'The claim was refused without a code.');
     },
     relinquish: async (chatId) => {
+      reportedRefusals.delete(chatId);
       await host.relinquish(chatId);
       wakeReads(chatId, 'reroute');
     },

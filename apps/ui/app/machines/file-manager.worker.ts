@@ -36,6 +36,7 @@ import {
   reservedIndexPaths,
   WorkspaceFileService,
   workerTimings,
+  forwardWorkerTimings,
 } from '@taucad/filesystem';
 import type { MountEntry, RootedFileSystem, WorkspaceScope } from '@taucad/filesystem';
 import type { MachineSettingsService } from '@taucad/types';
@@ -73,6 +74,14 @@ import {
   servicesUnavailableCode,
 } from '@taucad/files-ui/machines/file-manager-worker-node-port';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
+
+/*
+ * Tau #2014: this worker's timeline is its own, so the page cannot read the spans it records. Post each one to the
+ * page from the first, which writes it as the same `tau.worker.<span>` measure on its own clock.
+ */
+forwardWorkerTimings((message) => {
+  self.postMessage(message);
+});
 
 /**
  * Handshake for the node filesystem backend (desktop only).

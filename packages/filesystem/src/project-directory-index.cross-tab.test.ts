@@ -190,7 +190,7 @@ describe('a sibling tab, with no observer (S5)', () => {
         providerBasePath: 'p-2',
         scope: { backend: 'opfs' },
       }),
-    ).resolves.toEqual({ status: 'deleted' });
+    ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
     const pass = await nextPass(b);
 
     expect(pass.ids.has('p-2')).toBe(false);

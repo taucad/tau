@@ -180,6 +180,9 @@ const config: KnipConfig = {
         // Imported by the source-consumed `api-observability`, `api-email` and `api-object-storage` libraries
         // the server bundle inlines; they stay external, so `pnpm deploy` must install them beside the app.
         '@aws-sdk/s3-request-presigner',
+        // Imported by the source-consumed `api-auth`; external so it loads its own zod 4.6 (an inlined copy took the
+        // app's 4.4 and every `/oauth2/*` route answered 500 on staging, 2026-11-27).
+        '@better-auth/oauth-provider',
         '@pyroscope/nodejs',
         '@sentry/node',
         'react-email',

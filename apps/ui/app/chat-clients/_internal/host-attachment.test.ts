@@ -699,6 +699,84 @@ describe('hostAttachment', () => {
     }
   });
 
+  it('recaptures a followed backlog larger than the held rows instead of replaying it one page at a time', async () => {
+    const projection = createActor(chatProjectionLogic).start();
+    const catchUp = vi.fn(async function* (): AsyncIterable<CatchUpFrame> {
+      if (catchUp.mock.calls.length === 1) {
+        yield {
+          type: 'validated',
+          health: healthy,
+          position: { cursor: 0, sourceGeneration: 'grown' },
+          observedEndCursor: 0,
+        };
+        return;
+      }
+      yield {
+        type: 'page',
+        answer: {
+          status: 'batch',
+          chatId: 'chat_1',
+          sourceGeneration: 'grown',
+          cursor: 0,
+          nextCursor: 2,
+          endCursor: 2,
+          facts: [lifecycleFact(0, 'admitted'), lifecycleFact(1, 'completed')],
+        },
+      };
+      yield {
+        type: 'validated',
+        health: healthy,
+        position: { cursor: 2, sourceGeneration: 'grown', last: { leaderEpoch: 'g1', sequence: 1 } },
+        observedEndCursor: 2,
+      };
+    });
+    const subscribe = vi.fn<AgentHostClient['subscribe']>(() => vi.fn());
+    const farPage: ReadAnswer = {
+      status: 'batch',
+      chatId: 'chat_1',
+      sourceGeneration: 'grown',
+      sourceHealth: healthy,
+      cursor: 0,
+      nextCursor: 16,
+      endCursor: 100,
+      events: [
+        lifecycleRow(0, 'admitted'),
+        ...Array.from({ length: 15 }, (_, index) => lifecycleRow(index + 1, 'running')),
+      ],
+    };
+    const read = vi.fn(async (): Promise<ReadAnswer> => farPage);
+    const published: number[] = [];
+    projection.subscribe((snapshot) => {
+      published.push(snapshot.context.ledger.position.cursor);
+    });
+    const actor = createActor(hostAttachment, {
+      input: {
+        chatId: 'chat_1',
+        projection,
+        connect: async () => ({ read, catchUp, subscribe, close: async () => undefined }),
+      },
+    }).start();
+    try {
+      await vi.waitFor(() => {
+        expect(subscribe).toHaveBeenCalledOnce();
+      });
+      // Another writer grew the empty log by far more than this reader holds: its first page is 16 of 100 rows.
+      subscribe.mock.calls[0]?.[3]?.(farPage);
+      await vi.waitFor(() => {
+        expect(subscribe).toHaveBeenCalledTimes(2);
+      });
+      expect(catchUp).toHaveBeenCalledTimes(2);
+      expect(projection.getSnapshot().context.ledger.position.cursor).toBe(2);
+      expect(projection.getSnapshot().context.ledger.runs['run_1']?.lifecycle).toBe('completed');
+      expect(subscribe.mock.calls[1]?.[0]).toMatchObject({ chatId: 'chat_1', cursor: 2, sourceGeneration: 'grown' });
+      // The first page ended inside a turn; it was never published, so the chat never showed that turn running.
+      expect(published).not.toContain(16);
+    } finally {
+      actor.stop();
+      projection.stop();
+    }
+  });
+
   for (const retirement of ['reset', 'detach'] as const) {
     it(`discards a retained probe after ${retirement}`, async () => {
       const projection = createActor(chatProjectionLogic).start();

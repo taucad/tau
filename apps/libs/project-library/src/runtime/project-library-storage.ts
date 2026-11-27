@@ -25,6 +25,7 @@ import type {
   StorageRootConfig,
 } from '@taucad/filesystem';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
+import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
 import { consumableBytes } from '@taucad/fs-bridge';
 import type { CadAgentExecution, Chat } from '@taucad/chat';
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
@@ -62,6 +63,7 @@ import type {
   PendingProjectOperation,
   PendingProjectRecovery,
   PendingProjectRecoveryReason,
+  SoleCopyCancellation,
   PendingProjectStorage,
 } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
@@ -261,17 +263,32 @@ export const routeBindsLocator = (config: ProjectFileSystemConfig | undefined, l
 
 /**
  * Allocate the physical directory for a new project at `root`: the name slug,
- * suffixed until it is free against everything discovery can see there
- * (blueprint D3). Commit-time exactness — the service creates the named target
+ * suffixed until it is free against every child name the root holds now
+ * (blueprint D3; fast-path FW3). Commit-time exactness — the service creates the named target
  * or fails — plus the post-commit `tau.json` read-back remain the authority; a
  * listing raced by another tab can only cost a retry, never a wrong identity.
  */
 export const allocateProjectBasePath = async (
-  client: { listProjectManifests: () => Promise<ProjectDiscoveryResult> },
+  client: Pick<FileSystemClient, 'listProjectManifests' | 'probeProjectDirectories'>,
   root: PersistentStorageRoot,
   name: string,
 ): Promise<string> => {
   const storageRootKey = persistentStorageRootKey(root);
+  /* One fresh listing of the root's child names, files and plain folders included (fast-path FW3). A root the
+   * authority cannot list answers none, and the names discovery last listed there stand in, as before. */
+  let names: readonly string[] | undefined;
+  try {
+    ({ names } = await client.probeProjectDirectories({ root: storageRootKey }));
+  } catch (error) {
+    /* An authority from before FW3 does not serve the probe (review m3, N3): the names discovery listed stand in, as
+     * before. Any other failure is the create's. */
+    if (!isProbeNotServed(error)) {
+      throw error;
+    }
+  }
+  if (names !== undefined) {
+    return allocateProjectDirectorySlug(name, new Set(names));
+  }
   const discovery = await client.listProjectManifests();
   const taken = new Set(
     discovery.entries
@@ -443,7 +460,7 @@ const removeProjectComposerRecords = async (
 };
 
 /** The directory a persisted route binds, as a discovery locator names it. */
-const routeLocatorOf = (config: Exclude<ProjectFileSystemConfig, { backend: 'memory' }>): ProjectLocator => {
+export const routeLocatorOf = (config: Exclude<ProjectFileSystemConfig, { backend: 'memory' }>): ProjectLocator => {
   const storageRootKey = persistentStorageRootKey(config);
   const relativeDirectory = config.providerBasePath;
   switch (config.backend) {
@@ -460,49 +477,91 @@ const routeLocatorOf = (config: Exclude<ProjectFileSystemConfig, { backend: 'mem
 };
 
 /**
- * The other directories that still carry a permanently deleted directory's project id, read from storage once it is
- * gone (fast-path blueprint FW2, index-contract review A1); the discovery index is never asked. When the route binds
- * another directory, `verifyProjectRoute` proves it with two reads under the project's locks, and counts only for the
- * directory it names, that one and not the deleted one. Otherwise `verifyAbsent` reads every directory's identity
- * record under the project's lock: `present` names the copies, and `unknown` (a root not available, a read that
- * failed) waits for the folder as a root this pass did not see did. The id back at the deleted locator is a conflict,
- * and so is the id found only elsewhere after a delete that found its directory already gone, unless another copy
- * carried the id when the delete was journaled: a sole copy's delete must not finish over a project that moved.
+ * Whether a probe failed only because the authority predates it (review N3): the bridge answers a method its peer does
+ * not serve with `Unknown method: <name>`, and a client built without the method has none to call.
+ *
+ * @param error - What the probe threw.
+ * @returns Whether it is that refusal and nothing else.
  */
-const remainingCopiesAfterDelete = async (
+export const isProbeNotServed = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error.message === 'Unknown method: probeProjectDirectories' ||
+    (error instanceof TypeError && /probeProjectDirectories is not a function/u.test(error.message)));
+
+/** A directory as the authority names it in `except` and `exclude`. */
+export type DirectoryKey = Readonly<{ storageRootKey: string; relativeDirectory: string }>;
+
+/**
+ * The directories other permanent deletes in the journal are removing, every tab's (FW3 review M2): a copy whose
+ * removal may be under way proves nothing, so a probe and a delete leave these out. A row this tab saw fail is not left
+ * out (review N2): since the removal takes the manifest first, a failed delete's directory is either whole, because it
+ * failed before the manifest went, and so a copy, or has no manifest, which a probe reads vacant. Leaving it out adds
+ * no safety, and a failed row nobody discards would block the other copy's proof for good.
+ *
+ * @param worker - The journal.
+ * @param options - The delete asking, whose own target is not an exclusion, and the rows this tab saw fail.
+ * @returns The directories under a pending delete.
+ */
+export const pendingDeleteExclusions = async (
+  worker: Readonly<{ getPendingProjectOperations: () => Promise<readonly PendingProjectOperation[]> }>,
+  options: Readonly<{ exceptOperationId?: string; failed?: ReadonlySet<string> }> = {},
+): Promise<DirectoryKey[]> => {
+  const { exceptOperationId, failed } = options;
+  const operations = await worker.getPendingProjectOperations();
+  return operations.flatMap((operation) =>
+    operation.kind === 'permanent-delete' &&
+    operation.operationId !== exceptOperationId &&
+    failed?.has(operation.operationId) !== true
+      ? [
+          {
+            storageRootKey: persistentStorageRootKey(operation.storage),
+            relativeDirectory: operation.storage.providerBasePath,
+          },
+        ]
+      : [],
+  );
+};
+
+/** Whether a locator names the deleted directory, in any spelling a case-folding volume resolves to it (review M1). */
+const namesDeleted = (locator: DirectoryKey, deleted: DirectoryKey): boolean =>
+  locator.storageRootKey === deleted.storageRootKey &&
+  locator.relativeDirectory.normalize('NFC').toLowerCase() === deleted.relativeDirectory.normalize('NFC').toLowerCase();
+
+/**
+ * The other directories that still hold a permanently deleted directory's project id, as the authority read them under
+ * the same hold of `project:<id>` as the removal (fast-path FW3, step 5): its probes of the id's known locations, or,
+ * when none held it, its identity sweep, whose finds it probes in turn. The discovery index is never asked. With none
+ * remaining, `absence` decides: `absent` reclaims the id's device state; `unknown` (a root not available, a read that
+ * failed, the id only in a husk) waits for the folder. An authority from before FW3 answers neither: the sweep is then
+ * asked here, as FW2 did (review m3), and one that cannot answer it either fails the row rather than leaving it to wait.
+ * The id back at the deleted locator, in any spelling, is a conflict, and so is the id found only elsewhere after a
+ * delete that found its directory already gone, unless another copy carried the id when the delete was journaled: a
+ * sole copy's delete must not finish over a project that moved.
+ */
+const remainingAfterDelete = async (
   fileManager: ProjectLibraryFileManager,
   operation: Extract<PendingProjectOperation, { kind: 'permanent-delete' }>,
-  status: 'deleted' | 'absent',
-): Promise<ProjectLocator[]> => {
-  const { projectId, storage } = operation;
-  const storageRootKey = persistentStorageRootKey(storage);
-  const isDeleted = (locator: Readonly<{ storageRootKey?: string; relativeDirectory?: string }>): boolean =>
-    locator.storageRootKey === storageRootKey && locator.relativeDirectory === storage.providerBasePath;
-  const config = await getProjectFileSystemConfig(projectId);
-  let remaining: ProjectLocator[] | undefined;
-  if (config !== undefined && config.backend !== 'memory') {
-    const routed = routeLocatorOf(config);
-    if (!isDeleted(routed)) {
-      const verification = await fileManager.client.verifyProjectRoute({ projectId });
-      if (
-        verification.status === 'verified' &&
-        verification.storageRootKey === routed.storageRootKey &&
-        verification.providerBasePath === routed.relativeDirectory
-      ) {
-        remaining = [routed];
-      }
-    }
-  }
+  result: Readonly<{ status: 'deleted' | 'absent'; remaining?: readonly ProjectLocator[]; absence?: string }>,
+): Promise<readonly ProjectLocator[]> => {
+  const { storage } = operation;
+  const deleted = { storageRootKey: persistentStorageRootKey(storage), relativeDirectory: storage.providerBasePath };
+  let { remaining, absence } = result;
   if (remaining === undefined) {
-    const absence = await fileManager.client.verifyAbsent(projectId);
-    if (absence.status === 'unknown') {
-      throw new PendingProjectRecoveryError('workspace-unavailable');
+    let proof;
+    try {
+      proof = await fileManager.client.verifyAbsent(operation.projectId);
+    } catch (error) {
+      throw new PendingProjectRecoveryError('filesystem-error', { cause: error });
     }
-    remaining = absence.status === 'present' ? [...absence.locators] : [];
+    remaining = proof.status === 'present' ? proof.locators : [];
+    absence = proof.status === 'present' ? undefined : proof.status;
+  }
+  if (remaining.length === 0 && absence !== 'absent') {
+    throw new PendingProjectRecoveryError('workspace-unavailable');
   }
   if (
-    remaining.some((locator) => isDeleted(locator)) ||
-    (status === 'absent' && remaining.length > 0 && operation.copy !== true)
+    remaining.some((locator) => namesDeleted(locator, deleted)) ||
+    (result.status === 'absent' && remaining.length > 0 && operation.copy !== true)
   ) {
     throw new PendingProjectRecoveryError('identity-conflict');
   }
@@ -540,20 +599,42 @@ export type CommitIo = Readonly<{
   worker: ProjectLibraryObjectStore;
   chatStore: ProjectLibraryChatRecords;
   queryClient: QueryClient;
+  /** The journal rows this tab saw fail, which a delete does not leave out of its proof (review N2). */
+  failedOperationIds?: ReadonlySet<string>;
 }>;
 
 /** Commit one pending operation's directory and its local state; a failure carries its recovery reason. */
+/**
+ * What committing a pending operation came to: committed, or (FW3, the operator's "cancel and say so") a permanent delete
+ * the authority cancelled because no other copy holds the id, whose row is complete with nothing removed.
+ */
+export type CommitOutcome =
+  | Readonly<{ status: 'committed' }>
+  | Readonly<{ status: 'cancelled'; cancellation: SoleCopyCancellation }>;
+
 export const commitPendingProjectOperation = async (
-  { fileManager, worker, chatStore, queryClient }: CommitIo,
+  { fileManager, worker, chatStore, queryClient, failedOperationIds }: CommitIo,
   operation: PendingProjectOperation,
-): Promise<void> => {
+): Promise<CommitOutcome> => {
   if (operation.kind === 'permanent-delete') {
     let result;
     try {
+      /* The route's directory is one known location the authority's index may not hold (after a reload it holds none);
+       * the authority adds the index's and reads each under the project's lock (fast-path FW3). The directories other
+       * deletes are removing prove nothing and are left out (review M2). */
+      const config = await getProjectFileSystemConfig(operation.projectId);
+      const routed = config === undefined || config.backend === 'memory' ? undefined : routeLocatorOf(config);
+      const exclude = await pendingDeleteExclusions(worker, {
+        exceptOperationId: operation.operationId,
+        failed: failedOperationIds,
+      });
       result = await fileManager.client.permanentlyDeleteProjectDirectory({
         projectId: operation.projectId,
         providerBasePath: operation.storage.providerBasePath,
         scope: await pendingStorageToScope(operation.storage),
+        ...(operation.copy === true ? { copy: true } : {}),
+        ...(routed === undefined ? {} : { locations: [routed] }),
+        ...(exclude.length === 0 ? {} : { exclude }),
       });
     } catch (error) {
       throw new PendingProjectRecoveryError(
@@ -564,14 +645,33 @@ export const commitPendingProjectOperation = async (
     if (result.status === 'identity-mismatch' || result.status === 'unidentifiable') {
       throw new PendingProjectRecoveryError('identity-conflict');
     }
-    const remaining = await remainingCopiesAfterDelete(fileManager, operation, result.status);
+    /* The journal waived the Trash for a copy that no longer holds the id, or could not be read: the authority removed
+     * nothing. The delete is cancelled, not failed (the operator's "cancel and say so"): its row completes, the route,
+     * device state and listing stay as they are, and the person is told why (fast-path FW3). */
+    if (result.status === 'copy-unproven') {
+      try {
+        await worker.completePendingProjectOperation(operation.operationId);
+      } catch (error) {
+        throw new PendingProjectRecoveryError('local-state-error', { cause: error });
+      }
+      return {
+        status: 'cancelled',
+        cancellation: {
+          operationId: operation.operationId,
+          projectId: operation.projectId,
+          reason: result.reason,
+          unavailable: result.unavailable ?? [],
+        },
+      };
+    }
+    const remaining = await remainingAfterDelete(fileManager, operation, result);
     if (remaining.length > 0) {
       try {
         await settleCopyDelete({ fileManager, worker }, operation, remaining);
       } catch (error) {
         throw new PendingProjectRecoveryError('local-state-error', { cause: error });
       }
-      return;
+      return { status: 'committed' };
     }
     try {
       await worker.deleteProjectResources(operation.projectId);
@@ -586,7 +686,7 @@ export const commitPendingProjectOperation = async (
     } catch (error) {
       throw new PendingProjectRecoveryError('local-state-error', { cause: error });
     }
-    return;
+    return { status: 'committed' };
   }
 
   let result;
@@ -638,6 +738,7 @@ export const commitPendingProjectOperation = async (
   if (operation.backend === 'indexeddb' || operation.backend === 'opfs') {
     void requestHomeStoragePersistence();
   }
+  return { status: 'committed' };
 };
 
 /** A commit's failure as the recovery machine counts it. */

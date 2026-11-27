@@ -368,8 +368,7 @@ function CommandPaletteTrigger({
   isOpen,
   onOpenChange,
   items,
-  formattedKeyCombination,
-}: CommandPaletteTriggerProperties): React.JSX.Element {
+}: Omit<CommandPaletteTriggerProperties, 'formattedKeyCombination'>): React.JSX.Element {
   /*
    * `CommandDialog` has no Radix trigger, so on close it would leave focus on the page body. The
    * opener is the Search row, or whatever had focus when the shortcut fired.
@@ -409,7 +408,7 @@ function CommandPaletteTrigger({
       >
         <Search aria-hidden className='size-4 shrink-0' />
         <span className='flex-1 whitespace-nowrap'>Search</span>
-        <KeyShortcut className='ml-2 shrink-0'>{formattedKeyCombination}</KeyShortcut>
+        <KeyShortcut className='ml-2 shrink-0' combination={commandKeyCombination} />
       </SidebarMenuButton>
       <CommandPalette isOpen={isOpen} items={items} onContentUnmount={returnFocus} onOpenChange={onOpenChange} />
     </>
@@ -588,12 +587,7 @@ export function Commands(): React.JSX.Element {
         />
       ) : (
         <div className='flex items-center gap-2'>
-          <CommandPaletteTrigger
-            isOpen={open}
-            items={allItems}
-            formattedKeyCombination={formattedKeyCombination}
-            onOpenChange={setOpen}
-          />
+          <CommandPaletteTrigger isOpen={open} items={allItems} onOpenChange={setOpen} />
         </div>
       )}
     </>

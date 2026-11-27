@@ -472,6 +472,40 @@ theorem batch_crash_reachable {raw : Bool} {s : Sys} (h : Reach raw s) (i : Nat)
   rw [appendBatch_eq_appendSeq]
   exact ⟨reach_appendSeq _ i hi h, Reach.tearStep (reach_appendSeq _ i hi h)⟩
 
+/-- Pipelined batches are reachable steps of the system: each batch is its rows appended one at a time. -/
+theorem reach_appendPiped {raw : Bool} (bs : List (List Row)) : ∀ {s : Sys} (i : Nat) (hi : i < s.apps.length),
+    Reach raw s → Reach raw ⟨(appendPiped s.file s.apps[i] bs).1, s.apps.set i (appendPiped s.file s.apps[i] bs).2⟩ := by
+  induction bs with
+  | nil => intro s i hi h; simpa [appendPiped] using h
+  | cons b bs ih =>
+    intro s i hi h
+    have h1 := (batch_crash_reachable h i hi b b.length).1
+    rw [List.take_length] at h1
+    have hi1 : i < (s.apps.set i (appendBatch s.file s.apps[i] b).2.1).length := by simpa using hi
+    have ih1 := ih (s := ⟨(appendBatch s.file s.apps[i] b).1, s.apps.set i (appendBatch s.file s.apps[i] b).2.1⟩)
+      i hi1 h1
+    simp only [List.getElem_set_self, List.set_set] at ih1
+    simpa [appendPiped] using ih1
+
+/-- **The durability barrier allows no new crash outcome** (WP-10 step B): a crash while rows past the synced
+watermark are unflushed leaves a file that per-row appends, each flushed, with a crash between two rows could already
+leave. Which rows an effect may act on is the barrier's part, modelled in `ChatRunSlot.tla` (`Synced`). -/
+theorem piped_crash_reachable {raw : Bool} {s : Sys} (h : Reach raw s) (i : Nat) (hi : i < s.apps.length)
+    (bs : List (List Row)) {F' : File} (hc : PipedCrash s.file s.apps[i] bs F') :
+    ∃ apps : List App, Reach raw ⟨F', apps⟩ := by
+  have pre_reach : ∀ pre : List (List Row), ∀ b : List Row, ∀ k : Nat,
+      Reach raw ⟨(appendBatch (appendPiped s.file s.apps[i] pre).1 (appendPiped s.file s.apps[i] pre).2 (b.take k)).1,
+        (s.apps.set i (appendPiped s.file s.apps[i] pre).2).set i
+          (appendBatch (appendPiped s.file s.apps[i] pre).1 (appendPiped s.file s.apps[i] pre).2 (b.take k)).2.1⟩ := by
+    intro pre b k
+    have h1 := reach_appendPiped pre i hi h
+    have hi1 : i < (s.apps.set i (appendPiped s.file s.apps[i] pre).2).length := by simpa using hi
+    have h2 := (batch_crash_reachable h1 i hi1 b k).1
+    simpa only [List.getElem_set_self] using h2
+  cases hc with
+  | at_ pre b post k _ => exact ⟨_, pre_reach pre b k⟩
+  | torn pre b post k _ => exact ⟨_, Reach.tearStep (pre_reach pre b k)⟩
+
 /-! ## T2: the term rules on a log written only through the appenders -/
 
 theorem snoc_induction {α : Type} {motive : List α → Prop} (nil : motive [])

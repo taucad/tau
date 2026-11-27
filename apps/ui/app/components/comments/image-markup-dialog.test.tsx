@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MessageAnnotations } from '@taucad/chat/annotations';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -29,6 +29,8 @@ const store = vi.hoisted(() => {
 vi.mock('@taucad/chat-ui/hooks/use-attachment-source', () => ({
   useAttachmentSource: () => ({ status: 'ready', src: 'data:image/png;base64,AAAA' }),
 }));
+const phone = vi.hoisted(() => ({ isPhone: false }));
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => phone.isPhone }));
 vi.mock('#components/dictation/use-dictation.js', () => ({
   useDictation: () => ({ available: false, phase: 'idle', transcript: '', waveform: [] }),
 }));
@@ -93,6 +95,7 @@ const marks = () => store.state.annotations?.images[0]?.marks ?? [];
 
 describe('ImageMarkupDialog', () => {
   beforeEach(() => {
+    phone.isPhone = false;
     store.set(blank());
     HTMLElement.prototype.setPointerCapture = vi.fn();
     // The painter is tested on its own; here the canvas has no context to draw on.
@@ -187,5 +190,32 @@ describe('ImageMarkupDialog', () => {
     const at = store.state.annotations?.comments[0]?.at;
     expect(at?.[0]).toBeCloseTo(0.51);
     expect(at?.[1]).toBeCloseTo(0.55);
+  });
+
+  it('should dock the open card under the picture on a phone, with its own Done', async () => {
+    phone.isPhone = true;
+    const user = userEvent.setup();
+    const surface = renderDialog();
+    click(surface, [0.25, 0.5]);
+    const card = screen.getByRole('group', { name: 'Comment 1' });
+    expect(card).toContainElement(screen.getByRole('textbox', { name: 'Comment 1' }));
+    await user.click(within(card).getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('group', { name: 'Comment 1' })).not.toBeInTheDocument();
+  });
+
+  it('should zoom by a two finger pinch, which neither draws nor pins', () => {
+    const surface = renderDialog();
+    const touch = { pointerType: 'touch', button: 0 } as const;
+    act(() => {
+      fireEvent.pointerDown(surface, { ...touch, pointerId: 1, clientX: 400, clientY: 250 });
+      fireEvent.pointerDown(surface, { ...touch, pointerId: 2, isPrimary: false, clientX: 600, clientY: 250 });
+      fireEvent.pointerMove(surface, { ...touch, pointerId: 2, clientX: 800, clientY: 250 });
+      fireEvent.pointerUp(surface, { ...touch, pointerId: 2, clientX: 800, clientY: 250 });
+      fireEvent.pointerUp(surface, { ...touch, pointerId: 1, clientX: 400, clientY: 250 });
+    });
+    expect(store.state.annotations?.comments).toEqual([]);
+    expect(marks()).toEqual([]);
+    // The fingers spread from 200 to 400 pixels apart: twice the size.
+    expect(surface.parentElement?.style.width).toMatch(/^calc\(2 \*/u);
   });
 });

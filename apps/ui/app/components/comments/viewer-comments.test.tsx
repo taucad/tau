@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AnnotationCamera, MessageAnnotations } from '@taucad/chat/annotations';
 import { useCommentPins } from '@taucad/viewer/cad/comment-pins';
@@ -52,6 +52,8 @@ const graphics = vi.hoisted(() => ({
   actor: { send: vi.fn(), getSnapshot: () => ({ context: {} }), subscribe: () => ({ unsubscribe: vi.fn() }) },
 }));
 
+const phone = vi.hoisted(() => ({ isPhone: false }));
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => phone.isPhone }));
 vi.mock('#flags/use-feature.js', () => ({ useFeatureState: () => 'on' }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useOptionalChatComposer: () => ({
@@ -150,6 +152,7 @@ describe('ViewerComments', () => {
   beforeEach(() => {
     // The jsdom environment has no pointer capture.
     HTMLElement.prototype.setPointerCapture = vi.fn();
+    phone.isPhone = false;
     draft.actor.send.mockClear();
     graphics.actor.send.mockClear();
     const context: DraftContext = { draftAnnotations: annotations, draftAttachments: [] };
@@ -164,6 +167,20 @@ describe('ViewerComments', () => {
     await user.click(screen.getByRole('button', { name: 'Move' }));
     expect(screen.getByRole('status')).toHaveTextContent('Click the model where comment 1 goes');
     expect(graphics.actor.send).toHaveBeenCalledWith({ type: 'setCommentActive', payload: true });
+  });
+
+  it("should open a pin's card as a sheet on a phone, which Done and Escape close", async () => {
+    phone.isPhone = true;
+    const user = userEvent.setup();
+    renderViewer();
+    await user.click(await screen.findByRole('button', { name: 'Comment 1: Taller' }));
+    const sheet = screen.getByRole('dialog', { name: 'Comment 1' });
+    expect(sheet.parentElement).toBe(document.body);
+    await user.click(within(sheet).getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('dialog', { name: 'Comment 1' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Comment 1: Taller' }));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Comment 1' })).not.toBeInTheDocument();
   });
 
   it('should move a draft pin when its head is dragged onto the model', async () => {

@@ -13,7 +13,13 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { annotationLimits } from '@taucad/chat/annotations';
-import type { AnnotatedImage, AnnotationMark, AnnotationVec2, MessageAnnotations } from '@taucad/chat/annotations';
+import type {
+  AnnotatedImage,
+  AnnotationComment,
+  AnnotationMark,
+  AnnotationVec2,
+  MessageAnnotations,
+} from '@taucad/chat/annotations';
 import { useAttachmentSource } from '@taucad/chat-ui/hooks/use-attachment-source';
 import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { Button } from '@taucad/ui/components/button';
@@ -21,10 +27,12 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@taucad/u
 import { Separator } from '@taucad/ui/components/separator';
 import { toast } from '@taucad/ui/components/sonner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
 import { randomUuid } from '@taucad/utils/id';
 import { drawAnnotations, pinsOnImage } from '#components/comments/annotation-painter.js';
 import { CommentCard } from '#components/comments/comment-card.js';
+import { useKeyboardInset } from '#components/comments/comment-sheet.js';
 import { removeComments, setCommentText } from '#components/comments/draft-comments.js';
 import {
   addPictureComment,
@@ -69,6 +77,9 @@ const toolKeys: Readonly<Record<string, Tool>> = {
 
 /** How far a press travels, in CSS pixels, before it draws or drags (D23). */
 const travel = 4;
+
+/** Mark up's zoom stays between the fitted image and four times it. */
+const clampZoom = (zoom: number): number => Math.min(4, Math.max(1, zoom));
 
 /** The grab distance, in CSS pixels, whatever the zoom (D23). */
 const grabDistance = (pointerType: string): number => (pointerType === 'mouse' ? 8 : 16);
@@ -448,7 +459,85 @@ function MarkupSurface({
   /** Image pixels per CSS pixel. */
   const scale = (): number => (image?.width ?? 1) / (surface.current?.getBoundingClientRect().width ?? 1);
 
+  /*
+   * Two fingers pan and zoom, and never draw: the second finger down drops whatever the first began. Pinch is the
+   * only zoom on a phone, where the zoom buttons are hidden; ctrl-wheel (a trackpad pinch) zooms on a desktop.
+   */
+  const touches = useRef(new Map<number, AnnotationVec2>());
+  const pinch = useRef<{ distance: number; zoom: number; mid: AnnotationVec2; scroll: AnnotationVec2 }>(undefined);
+  const scroller = useRef<HTMLDivElement>(undefined);
+  const attachScroller = useCallback((element: HTMLDivElement): (() => void) => {
+    scroller.current = element;
+    const onWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey) {
+        return;
+      }
+      event.preventDefault();
+      setZoom((previous) => clampZoom(previous * Math.exp(-event.deltaY / 100)));
+    };
+    element.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      element.removeEventListener('wheel', onWheel);
+      scroller.current = undefined;
+    };
+  }, []);
+  const pinchFrame = (): { distance: number; mid: AnnotationVec2 } | undefined => {
+    const [first, second] = [...touches.current.values()];
+    return first && second
+      ? {
+          distance: Math.max(1, Math.hypot(first[0] - second[0], first[1] - second[1])),
+          mid: [(first[0] + second[0]) / 2, (first[1] + second[1]) / 2],
+        }
+      : undefined;
+  };
+  const startPinch = (event: React.PointerEvent<HTMLDivElement>): boolean => {
+    if (event.pointerType !== 'touch') {
+      return false;
+    }
+    touches.current.set(event.pointerId, [event.clientX, event.clientY]);
+    const frame = pinchFrame();
+    if (touches.current.size !== 2 || !frame) {
+      return false;
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onPointerCancel();
+    const view = scroller.current;
+    pinch.current = { ...frame, zoom, scroll: [view?.scrollLeft ?? 0, view?.scrollTop ?? 0] };
+    return true;
+  };
+  const movePinch = (event: React.PointerEvent<HTMLDivElement>): boolean => {
+    if (!touches.current.has(event.pointerId)) {
+      return false;
+    }
+    touches.current.set(event.pointerId, [event.clientX, event.clientY]);
+    const start = pinch.current;
+    const frame = pinchFrame();
+    if (!start || !frame) {
+      return false;
+    }
+    setZoom(clampZoom((start.zoom * frame.distance) / start.distance));
+    const view = scroller.current;
+    if (view) {
+      view.scrollLeft = start.scroll[0] - (frame.mid[0] - start.mid[0]);
+      view.scrollTop = start.scroll[1] - (frame.mid[1] - start.mid[1]);
+    }
+    return true;
+  };
+  const endPinch = (event: React.PointerEvent<HTMLDivElement>): boolean => {
+    touches.current.delete(event.pointerId);
+    if (pinch.current === undefined) {
+      return false;
+    }
+    if (touches.current.size < 2) {
+      pinch.current = undefined;
+    }
+    return true;
+  };
+
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (startPinch(event)) {
+      return;
+    }
     if (!image || event.button !== 0 || !event.isPrimary) {
       return;
     }
@@ -482,6 +571,9 @@ function MarkupSurface({
   };
 
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (movePinch(event)) {
+      return;
+    }
     const { current } = gestureRef;
     if (!image || !current) {
       return;
@@ -521,6 +613,9 @@ function MarkupSurface({
   };
 
   const onPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (endPinch(event)) {
+      return;
+    }
     const { current } = gestureRef;
     if (!image || !current || current.kind === 'anchored' || current.pointerId !== event.pointerId) {
       return;
@@ -560,13 +655,44 @@ function MarkupSurface({
     }
   };
 
-  const onPointerCancel = (): void => {
+  const onPointerCancel = (event?: React.PointerEvent<HTMLDivElement>): void => {
+    if (event) {
+      endPinch(event);
+    }
     const { current } = gestureRef;
     if (current?.kind === 'movePin' && current.hasTravelled) {
       setRecord(current.base);
     }
     setGesture(undefined);
   };
+
+  const isPhone = useIsMobile();
+  const keyboardInset = useKeyboardInset();
+  const cardOf = (comment: AnnotationComment, isMovable: boolean): React.JSX.Element => (
+    <CommentCard
+      comment={comment}
+      isOutdated={false}
+      hasDoneButton={isPhone}
+      onText={(text) => {
+        if (annotations) {
+          setRecord(setCommentText(annotations, comment.number, text));
+        }
+      }}
+      onRemove={() => {
+        removeComment(comment.number);
+      }}
+      onDone={closeCard}
+      {...(isMovable
+        ? {
+            onMove() {
+              setOpenNumber(undefined);
+              setRelocating(comment.number);
+            },
+          }
+        : {})}
+    />
+  );
+  const phoneCard = isPhone ? comments.find((comment) => comment.number === openNumber) : undefined;
 
   const ActiveShape = shapeTools.find((entry) => entry.tool === shape)!;
   const relocatingLabel = relocating === undefined ? undefined : `Click the new place for comment ${relocating}.`;
@@ -575,6 +701,8 @@ function MarkupSurface({
     <DialogContent
       scroll='contained'
       className='flex h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] flex-col gap-0 p-0 sm:max-w-[calc(100vw-2rem)]'
+      // A phone's keyboard covers the bottom of the screen: the docked card and the toolbar stay above it.
+      style={keyboardInset > 0 ? { paddingBottom: Math.max(0, keyboardInset - 16) } : undefined}
       onEscapeKeyDown={(event) => {
         // Escape order (I8): a gesture, then a move, then the open card, then the dialog.
         if (gestureRef.current) {
@@ -596,7 +724,7 @@ function MarkupSurface({
       <DialogDescription className='sr-only'>
         Pin comments on the image and draw on it. The marks are sent with your next message.
       </DialogDescription>
-      <div className='@container-[size] min-h-0 flex-1 overflow-auto'>
+      <div ref={attachScroller} className='@container-[size] min-h-0 flex-1 overflow-auto'>
         <div className='flex min-h-full min-w-full items-center justify-center p-6'>
           {image && imageSource ? (
             <div
@@ -654,7 +782,7 @@ function MarkupSurface({
                       type='button'
                       aria-label={`Comment ${pin.number}${comment.text ? `: ${comment.text}` : ''}`}
                       aria-expanded={isOpen}
-                      className='flex size-6 touch-none items-center justify-center rounded-full border-2 border-white bg-markup-ink text-xs font-semibold text-white shadow-sm outline-none focus-visible:focus-outline'
+                      className='relative flex size-6 touch-none items-center justify-center rounded-full border-2 border-white bg-markup-ink text-xs font-semibold text-white shadow-sm outline-none focus-visible:focus-outline pointer-coarse:before:absolute pointer-coarse:before:-inset-2.5'
                       onPointerDown={(event) => {
                         event.stopPropagation();
                         if (!isMovable || event.button !== 0 || !annotations) {
@@ -698,7 +826,7 @@ function MarkupSurface({
                     >
                       {pin.number}
                     </button>
-                    {isOpen ? (
+                    {isOpen && !isPhone ? (
                       <div
                         className={cn(
                           'absolute z-20 w-72 rounded-lg border bg-popover p-3 shadow-md',
@@ -709,27 +837,7 @@ function MarkupSurface({
                           event.stopPropagation();
                         }}
                       >
-                        <CommentCard
-                          comment={comment}
-                          isOutdated={false}
-                          onText={(text) => {
-                            if (annotations) {
-                              setRecord(setCommentText(annotations, comment.number, text));
-                            }
-                          }}
-                          onRemove={() => {
-                            removeComment(comment.number);
-                          }}
-                          onDone={closeCard}
-                          {...(isMovable
-                            ? {
-                                onMove() {
-                                  setOpenNumber(undefined);
-                                  setRelocating(comment.number);
-                                },
-                              }
-                            : {})}
-                        />
+                        {cardOf(comment, isMovable)}
                       </div>
                     ) : null}
                   </div>
@@ -743,6 +851,11 @@ function MarkupSurface({
           )}
         </div>
       </div>
+      {phoneCard === undefined ? null : (
+        <div role='group' aria-label={`Comment ${phoneCard.number}`} className='border-t border-border bg-popover p-3'>
+          {cardOf(phoneCard, phoneCard.model === undefined || lift !== undefined)}
+        </div>
+      )}
       {relocatingLabel === undefined ? null : (
         <div role='status' className='flex items-center justify-center gap-2 border-t px-3 py-1.5 text-xs'>
           {relocatingLabel}
@@ -825,7 +938,7 @@ function MarkupSurface({
           className='max-sm:hidden'
           disabled={zoom <= 1}
           onClick={() => {
-            setZoom(Math.max(1, zoom / 1.5));
+            setZoom(clampZoom(zoom / 1.5));
           }}
         >
           <ZoomOut />
@@ -835,7 +948,7 @@ function MarkupSurface({
           className='max-sm:hidden'
           disabled={zoom >= 4}
           onClick={() => {
-            setZoom(Math.min(4, zoom * 1.5));
+            setZoom(clampZoom(zoom * 1.5));
           }}
         >
           <ZoomIn />

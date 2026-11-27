@@ -29,7 +29,7 @@ import type {
   RevisionUserActor,
   RevisionVia,
 } from '#revision-authority.js';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import { encodeCommit, parseChangeId } from '#git-objects.js';
 import type { GitSignature } from '#git-objects.js';
@@ -1622,7 +1622,8 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       let root: string;
       let head: RevisionId;
 
-      beforeAll(async () => {
+      /* Each row has its own store and its own remote, so it holds in whatever order the rows run. */
+      beforeEach(async () => {
         harness = await adapter.create();
         port = harness.withTransport();
         root = await mkdtemp(join(tmpdir(), 'tau-revisions-remote-'));
@@ -1640,11 +1641,21 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         await port.setRemote({ name: 'tau', url: fixture.url });
       }, 180_000);
 
-      afterAll(async () => {
+      afterEach(async () => {
         await fixture.close();
         await harness.dispose();
         await rm(root, { force: true, recursive: true });
       });
+
+      /** Puts `main`, a kept chat record and version 2 on the remote, as a first push does. */
+      const publish = async (): Promise<void> => {
+        await harness.writeRawRef('refs/tau/chats/kept', head);
+        const published = await port.push({
+          remote: 'tau',
+          refs: [{ name: 'refs/tau/chats/kept' }, { name: 'refs/tags/v2' }, { name: 'refs/heads/main' }],
+        });
+        expect(published.refs.map((entry) => entry.status)).toStrictEqual(['updated', 'updated', 'updated']);
+      };
 
       it('records the remote in git’s own remotes list', async () => {
         expect(await port.listRemotes()).toStrictEqual([{ name: 'tau', url: fixture.url, kind: 'tau' }]);
@@ -1695,6 +1706,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       }, 180_000);
 
       it('reads an address not recorded yet, under the name it would have, and records nothing (R2)', async () => {
+        await publish();
         const advertised = await port.listRemoteRefs({ name: 'candidate', url: fixture.url });
 
         expect(advertised.find((entry) => entry.name === 'refs/heads/main')?.head).toBe(head);
@@ -1702,6 +1714,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       }, 180_000);
 
       it('lists the remote’s refs and re-offers an unchanged one as up to date', async () => {
+        await publish();
         const advertised = await port.listRemoteRefs('tau');
 
         expect(advertised.find((entry) => entry.name === 'refs/heads/main')?.head).toBe(head);
@@ -1710,6 +1723,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       }, 180_000);
 
       it('fetches into refs/remotes/<remote>/* and leaves every branch where it was', async () => {
+        await publish();
         const second = await adapter.create();
         try {
           const reader = second.withTransport();
@@ -1732,6 +1746,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       }, 180_000);
 
       it('enforces a browser fetch ceiling and refuses native budgets before remote contact', async () => {
+        await publish();
         const second = await adapter.create();
         try {
           const reader = second.withTransport();
@@ -1766,6 +1781,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       it.runIf(adapter.name === 'isomorphic-git')(
         'fetches every wanted ref in one upload-pack, and sends none when nothing is new',
         async () => {
+          await publish();
           const second = await adapter.create();
           const requests = (from: number, to?: number): string[] =>
             fixture
@@ -1799,9 +1815,10 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         180_000,
       );
 
-      /* The lease, on both legs (A32, S24, D14 `push(expected)`). It runs last
-       * because the held half deliberately moves the remote's `main`. */
+      /* The lease, on both legs (A32, S24, D14 `push(expected)`). The held half
+       * deliberately moves the remote's `main`. */
       it('refuses a stale lease without touching the remote ref, and takes a held one', async () => {
+        await publish();
         const receipt = await port.writeRevision({
           parents: [head],
           tree: tree({ 'a.txt': 'b\n' }),
@@ -1836,6 +1853,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
        * the remote as an update of `refs/tags/v2` under the lease on what the
        * remote holds there; without the lease it is a tag that already exists. */
       it('pushes a renamed version to the same ref under its lease, never unleased', async () => {
+        await publish();
         await port.push({ remote: 'tau', refs: [{ name: 'refs/tags/v2' }] });
         const pushed = await fixture.git(['rev-parse', 'refs/tags/v2']);
         await port.tag({ number: 2, name: 'Ready for print', revisionId: head });
@@ -1857,6 +1875,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
        * per push, whatever the ref count — every extra request is a whole
        * lease hydrate on the Tau API. Counted off the server's own trail. */
       it('makes one advertisement and one receive-pack for a three-ref push', async () => {
+        await publish();
         const names = ['refs/heads/w13-a', 'refs/heads/w13-b', 'refs/tau/chats/w13'] as const;
         const advance = async (parent: RevisionId | undefined, body: string): Promise<RevisionId> => {
           const receipt = await port.writeRevision({
@@ -1911,6 +1930,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       /* R6: a fetch handed the listing it follows reuses that advertisement on
        * the browser leg; any other value is ignored and the port asks again. */
       it('fetches against the listing it is handed, with no second advertisement', async () => {
+        await publish();
         const name = 'refs/heads/r6-shared';
         const receipt = await port.writeRevision({
           parents: [head],
@@ -1943,6 +1963,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
        * the disk leg: one stale lease refuses every ref, and a rewind without a
        * lease is refused per ref, before anything is sent. */
       it('refuses an atomic set whole on one stale lease, and a rewind without a lease', async () => {
+        await publish();
         const mint = async (parents: RevisionId[], body: string): Promise<RevisionId> => {
           const receipt = await port.writeRevision({
             parents,
@@ -1984,6 +2005,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
 
       /* B3 (O5 inverted): a commit Tau did not write reads as its own git author, with no identity standing in. */
       it('reads a commit Tau did not record as its git author', async () => {
+        await publish();
         const cwd = fixture.repositoryPath;
         const env = {
           ...process.env,
@@ -2026,6 +2048,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
 
       /* A commit made with stock git under the identity Tau gives a person names that person's account. */
       it('reads a commit made with git under a Tau no-reply address as that account', async () => {
+        await publish();
         const cwd = fixture.repositoryPath;
         const address = 'usr_git@users.noreply.tau.new';
         const env = {

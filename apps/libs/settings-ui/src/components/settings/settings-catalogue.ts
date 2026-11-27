@@ -116,6 +116,12 @@ const baseSections = [
         description: 'Review devices and revoke sessions',
         keywords: ['logout', 'sign out'],
       },
+      {
+        id: 'desktop-sign-ins',
+        label: 'Tau Desktop',
+        description: 'Review where Tau Desktop is signed in and sign it out',
+        keywords: ['desktop', 'app', 'logout', 'sign out', 'revoke'],
+      },
     ],
   },
   {

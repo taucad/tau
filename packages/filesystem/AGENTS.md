@@ -1,6 +1,6 @@
 # Filesystem
 
-`packages/filesystem` owns virtual paths, mount routing, provider composition, rooted views, mutations, and watch semantics. `apps/libs/fs-client` owns UI file-manager facades. Follow `docs/policy/filesystem-policy.md`, `docs/policy/filesystem-authority-policy.md`, and `docs/policy/event-fanout-policy.md`.
+`packages/filesystem` owns virtual paths, mount routing, provider composition, rooted views, mutations, and watch semantics. `apps/libs/fs-client` owns UI file-manager facades. Follow `docs/policy/filesystem-policy.md`, `docs/policy/filesystem-authority-policy.md`, and `docs/policy/event-fanout-policy.md`; `pathRegistry` rows also `docs/policy/project-git-policy.md`.
 
 ## Owners
 
@@ -29,4 +29,4 @@ Revision algorithms are not here: `@taucad/revisions/algorithms`. Revision effec
 - Normalize provider quirks at the provider boundary. `FileSystemAccessProvider` filters Chromium `.crswap` atomic-write artifacts before directory snapshots reach generic consumers.
 - Use `FileStat` from `@taucad/types` as the one stat result shape; provider adapters normalize their metadata into it. Stat and listings never read content; use `facts()`.
 
-Validate with `pnpm nx lint filesystem`, `pnpm nx test filesystem --watch=false`, `pnpm nx typecheck filesystem`, and `pnpm nx build filesystem`.
+Validate with `pnpm nx run-many -t lint test typecheck build -p filesystem`.

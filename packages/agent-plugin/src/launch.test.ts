@@ -12,6 +12,8 @@ const { version: pluginVersion } = JSON.parse(
   readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
 ) as { readonly version: string };
 
+const windows = process.platform === 'win32';
+
 type Run = { readonly stdout: string; readonly stderr: string; readonly code: number | undefined };
 
 /** What a fake CLI or `npx` prints when started: its arguments and the launch descriptor it was given. */
@@ -36,10 +38,13 @@ const launch = async (
     entry = launcher,
     args = [],
     stopWhen,
+    stop = 'SIGTERM',
   }: {
     readonly entry?: string;
     readonly args?: readonly string[];
+    /** Called with stdout so far; true stops the launcher, with SIGTERM, or by closing its stdin with `stop: 'stdin'`. */
     readonly stopWhen?: (stdout: string) => boolean;
+    readonly stop?: 'SIGTERM' | 'stdin';
   } = {},
 ): Promise<Run> =>
   new Promise((resolve, reject) => {
@@ -49,7 +54,11 @@ const launch = async (
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       stdout += chunk;
       if (stopWhen?.(stdout)) {
-        child.kill('SIGTERM');
+        if (stop === 'stdin') {
+          child.stdin.end();
+        } else {
+          child.kill('SIGTERM');
+        }
       }
     });
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
@@ -70,7 +79,7 @@ const baseEnvironment = (): NodeJS.ProcessEnv => {
   environment['PATH'] = process.env['PATH'];
   environment['HOME'] = process.env['HOME'];
   /* Windows processes, `cmd.exe` and Node.js among them, need the system root a host always passes. */
-  if (process.platform === 'win32') {
+  if (windows) {
     environment['SystemRoot'] = process.env['SystemRoot'];
   }
   return environment;
@@ -94,7 +103,7 @@ const explicitEnvironment = (tauCli: string, base: NodeJS.ProcessEnv = process.e
  */
 const writeExecutable = async (path: string, source: string): Promise<string> => {
   await mkdir(dirname(path), { recursive: true });
-  if (process.platform === 'win32') {
+  if (windows) {
     await writeFile(`${path}.cjs`, source);
     await writeFile(`${path}.cmd`, `@"${process.execPath}" "%~dpn0.cjs" %*\r\n`);
     return `${path}.cmd`;
@@ -149,6 +158,26 @@ describe('launch', () => {
         stderr: '',
         code: 0,
       });
+    });
+
+    it('should pass arguments through verbatim, the characters `cmd.exe` gives a meaning to among them', async () => {
+      /* On Windows the CLI is a `.cmd` shim that `cmd.exe` parses twice; none of these may split, vanish or run. */
+      const tricky = [
+        String.raw`C:\work dir\a&b`,
+        'say "hi"',
+        String.raw`a\"b`,
+        'trailing\\',
+        '100% %PATH% !x!',
+        'x|y <z> (w) ^caret, a;b',
+        '',
+      ];
+      const cli = await fakeCli(
+        "process.stdin.resume().on('end', () => { process.stdout.write(JSON.stringify(process.argv.slice(2))); process.exit(0); });",
+      );
+
+      const run = await launch(explicitEnvironment(cli), { args: tricky });
+
+      expect(run).toEqual({ stdout: JSON.stringify(['mcp', ...tricky]), stderr: '', code: 0 });
     });
 
     it('should tell the CLI in TAU_LAUNCH that TAU_CLI chose it, with the version it printed', async () => {
@@ -210,7 +239,10 @@ describe('launch', () => {
       expect(JSON.parse(explicit.stdout)).toMatchObject({ envProxy: '0' });
     });
 
-    it('should forward SIGTERM to the CLI and exit once it has stopped', async () => {
+    /* Windows delivers no SIGTERM a process can handle: `kill` there is TerminateProcess, which ends the launcher
+     * before any handler runs, so there is nothing to forward. A Windows host stops the server by closing stdin,
+     * which the next test proves on every platform. */
+    it.skipIf(windows)('should forward SIGTERM to the CLI and exit once it has stopped', async () => {
       const cli = await fakeCli(
         [
           "process.on('SIGTERM', () => { process.stdout.write(' stopped'); process.exit(0); });",
@@ -224,6 +256,19 @@ describe('launch', () => {
         stderr: '',
         code: 0,
       });
+    });
+
+    it('should exit with the CLI once it stops at the end of stdin, as a host closing the session ends it', async () => {
+      const cli = await fakeCli(
+        [
+          "process.stdin.resume().on('end', () => { process.stdout.write(' stopped'); process.exit(0); });",
+          "process.stdout.write('serving');",
+        ].join('\n'),
+      );
+
+      await expect(
+        launch(explicitEnvironment(cli), { stopWhen: (stdout) => stdout === 'serving', stop: 'stdin' }),
+      ).resolves.toEqual({ stdout: 'serving stopped', stderr: '', code: 0 });
     });
 
     it('should report a CLI that cannot start on one stderr line and exit 1', async () => {
@@ -315,6 +360,17 @@ describe('launch', () => {
     });
 
     it('should report a CLI that spawn refuses to start on one stderr line and exit 1', async () => {
+      const cli = await fakeCli(reportStart);
+      if (windows) {
+        /* Windows takes a variable of any size but no command line past 32,767 characters, which CreateProcess
+         * refuses (ERROR_FILENAME_EXCED_RANGE, ENAMETOOLONG to libuv). 9,000 `&` reach the launcher as 9,000 and leave
+         * it, escaped twice for the `.cmd` shim as `^^^&`, as 36,000. */
+        const run = await launch(explicitEnvironment(cli, baseEnvironment()), { entry, args: ['&'.repeat(9000)] });
+
+        expect(run).toMatchObject({ stdout: '', code: 1 });
+        expect(run.stderr).toMatch(/^tau: cannot start .*tau\.cmd: spawn ENAMETOOLONG\n$/u);
+        return;
+      }
       /* A plugin version that takes TAU_LAUNCH past every cap makes `spawn` throw E2BIG rather than emit an error:
        * Linux limits one variable to 32 pages (128 KiB with 4 KiB pages, 2 MiB with the 64 KiB pages of some
        * aarch64 kernels) and macOS all of them to 1 MiB. */
@@ -322,7 +378,6 @@ describe('launch', () => {
         join(directory, 'plugin', 'package.json'),
         JSON.stringify({ name: '@taucad/agent-plugin', version: '9'.repeat(2_200_000) }),
       );
-      const cli = await fakeCli(reportStart);
 
       const run = await launch(explicitEnvironment(cli, baseEnvironment()), { entry });
 
@@ -401,11 +456,9 @@ describe('launch', () => {
 
       const run = await launch(pathEnvironment(tools), { entry });
 
-      expect(run).toEqual({
-        stdout: '',
-        stderr: `tau: npm cache ${cache} is not writable; run: sudo chown -R ${process.getuid?.()}:${process.getgid?.()} "${cache}"\n`,
-        code: 3,
-      });
+      /* Windows has no owner for `chown` to restore, so its line names no fix. */
+      const fix = windows ? '' : `; run: sudo chown -R ${process.getuid?.()}:${process.getgid?.()} "${cache}"`;
+      expect(run).toEqual({ stdout: '', stderr: `tau: npm cache ${cache} is not writable${fix}\n`, code: 3 });
       expect(run.stderr).toMatch(/^tau: .*\n$/u);
     });
   });

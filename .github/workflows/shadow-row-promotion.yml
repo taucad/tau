@@ -5,12 +5,15 @@
 # not gate. The flake ledger (`flake-ledger.yml`) counts each row's consecutive passing runs from the same outcome rows
 # as every test; once a row reaches the Q1 bar (100), this opens one pull request that moves the suite to the
 # project's `test:e2e:queue`, so it gates. Promotion changes the gate, so the pull request is only proposed: nothing
-# here merges it or enables auto-merge. A pull request opened with the workflow token starts no CI; its body asks the
-# reviewer to close and reopen it.
+# here merges it or enables auto-merge, whichever token opens it.
 #
-# It reads the ledger state from the `flake-ledger` branch and `project.json` files from `main`, uses no environment
-# and no secret: `contents: write` pushes the proposal's branch (the `main` ruleset keeps `main` out of its reach),
-# `pull-requests: write` opens it. Nothing from a pull request runs here.
+# It reads the ledger state from the `flake-ledger` branch and `project.json` files from `main`. It writes with a
+# `tau-flake-bot` App token when the main-only `flake-bot` environment holds the App's secrets (`FLAKE_BOT_APP_ID`,
+# `FLAKE_BOT_APP_PRIVATE_KEY`; tau-cloud `stacks/repo/tau`), minted for `tau` alone with `contents: write` (the
+# proposal's branch; the `main` ruleset keeps `main` out of its reach) and `pull-requests: write` (the pull request),
+# so the pull request starts CI. Without the secrets it falls back to the workflow token with the same permissions,
+# as before the App: that pull request starts no CI, and its body asks the reviewer to close and reopen it. Deleting
+# either secret is the kill switch. Nothing from a pull request runs here.
 name: Shadow-row promotion
 
 on:
@@ -32,9 +35,18 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Main only (tau-cloud `stacks/repo/tau`, `can_admins_bypass = false`): the `tau-flake-bot` key. No deployment
+    # record: the job only reads the environment's secrets.
+    environment:
+      name: flake-bot
+      deployment: false
+    # The workflow token stays the fallback, so it keeps both permissions.
     permissions:
       contents: write
       pull-requests: write
+    env:
+      # Whether the App's two secrets are set, without exposing either to a step that does not mint the token.
+      FLAKE_BOT_CONFIGURED: ${{ secrets.FLAKE_BOT_APP_ID != '' && secrets.FLAKE_BOT_APP_PRIVATE_KEY != '' }}
     steps:
       - name: Checkout the promotion scripts and project files
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -57,7 +69,24 @@ jobs:
         with:
           node-version: '26.13.1'
 
+      # Skipped while the `flake-bot` environment lacks the App's secrets: the proposal then uses the workflow token.
+      - name: Mint the tau-flake-bot token
+        id: flake-bot
+        if: ${{ env.FLAKE_BOT_CONFIGURED == 'true' }}
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.FLAKE_BOT_APP_ID }}
+          private-key: ${{ secrets.FLAKE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: tau
+          permission-contents: write
+          permission-pull-requests: write
+
+      # A mint that fails (the App uninstalled, a revoked key) turns the job red; the proposal still runs with the
+      # workflow token.
       - name: Propose promotions
+        if: ${{ !cancelled() }}
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ steps.flake-bot.outputs.token || github.token }}
+          PULL_REQUEST_STARTS_CI: ${{ steps.flake-bot.outputs.token && 'true' || 'false' }}
         run: node scripts/src/ci-shadow-rows-promote-cli.ts --base main

@@ -38,8 +38,10 @@ describe('createAuthService — custody', () => {
     const bytes = readFileSync(credentialPath);
     expect(bytes.toString('utf8')).toBe('enc:bearer-from-verify');
     expect(bytes.toString('utf8')).not.toBe('bearer-from-verify');
+    /* Owner-only on macOS and Linux. Windows has no POSIX mode: Node reports 0o666 for any writable file
+     * (measured on windows-2025, run 43999226627), and the file is fenced by the profile directory's ACL. */
     // oxlint-disable-next-line eslint/no-bitwise -- the POSIX mode is a bit field
-    expect(statSync(credentialPath).mode & 0o777).toBe(0o600);
+    expect(statSync(credentialPath).mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o600);
     service.dispose();
 
     const relaunched = createAuthService(options);

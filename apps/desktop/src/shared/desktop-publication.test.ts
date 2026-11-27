@@ -3,12 +3,15 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { availableUpdate } from '#main/updater.js';
+
+// oxlint-disable-next-line no-restricted-imports -- The executable-stub fixture has no package import mapping.
+import { writeExecutableStub } from '../../scripts/executable-stub.mjs';
 
 const workspace = resolve(import.meta.dirname, '../../../..');
 const roots: string[] = [];
@@ -95,17 +98,16 @@ describe('desktop publication', () => {
     expect(wrongArchitecture.stderr).toContain('darwin-x64');
   });
 
-  it('should prevent an older promotion after a newer partial feed write', { timeout: 30_000 }, () => {
+  it('should prevent an older promotion after a newer partial feed write', { timeout: 30_000 }, async () => {
     const { root, assets, sourceCommit, run } = fixture();
     const bin = join(root, 'bin');
     const store = join(root, 'store');
     mkdirSync(bin);
     mkdirSync(store);
     // Exercise the real publisher with a file-backed S3 boundary. Fail after its first feed write.
-    writeFileSync(
+    await writeExecutableStub(
       join(bin, 'aws'),
-      `#!/usr/bin/env node
-const fs = require('node:fs'); const path = require('node:path');
+      `const fs = require('node:fs'); const path = require('node:path');
 const args = process.argv.slice(2); const op = args[args.indexOf('s3api') + 1];
 const value = (key) => args[args.indexOf(key) + 1];
 const key = value('--key'); const target = path.join(process.env.TEST_S3_ROOT, key);
@@ -117,11 +119,12 @@ if (op === 'get-object') {
   fs.mkdirSync(path.dirname(target), {recursive:true}); fs.copyFileSync(value('--body'), target);
 } else if (op !== 'copy-object') { throw Error('unexpected S3 operation: ' + op); }
 `,
-      { mode: 0o755 },
     );
+    /* Windows spells the variable `Path`; a second `PATH` beside it would leave which one wins to chance. */
+    const pathName = Object.keys(process.env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH';
     const environment = {
       ...process.env,
-      PATH: `${bin}:${process.env['PATH'] ?? ''}`,
+      [pathName]: [bin, process.env[pathName] ?? ''].join(delimiter),
       TEST_S3_ROOT: store,
       DESKTOP_R2_BUCKET: 'test-bucket',
       DESKTOP_R2_ENDPOINT: 'https://unused.invalid',

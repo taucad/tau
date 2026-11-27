@@ -741,5 +741,12 @@ export const withBillableEvidenceCollector = (
       wire,
       new Set(qualification.invocation.supplierRates.map((rateEntry) => rateEntry.dimension)),
       qualification.providerId,
+      {
+        rates: qualification.invocation.supplierRates,
+        countedInputTokens:
+          qualification.invocation.inputCount === undefined
+            ? undefined
+            : BigInt(qualification.invocation.inputCount.inputTokens),
+      },
     ),
 });

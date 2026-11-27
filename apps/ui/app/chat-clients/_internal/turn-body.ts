@@ -1,6 +1,6 @@
 import type { CadAgentConfigInput, CadAgentExecution, TauAgentHostId } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
-import { getCadSystemPrompt, getChatStateNote } from '@taucad/chat/prompts';
+import { getCadSystemPrompt, getChatStateNote, getConversationLogNote } from '@taucad/chat/prompts';
 import { getProviderFacingToolGrant } from '@taucad/chat/schemas';
 import type { ChatExecutionTarget } from '@taucad/chat/schemas';
 import { modelSupportsInput } from '@taucad/chat';
@@ -123,14 +123,13 @@ const kernelFacts = (
  */
 const hostPrompt = (
   agent: TauAgentConfigInput,
-  chatId: string,
   model: ResolvedModel['model'],
 ): Pick<BrowserHostAdmissionConfig, 'systemPrompt' | 'systemPromptBlocks'> => {
   const prompt = getCadSystemPrompt(agent.kernel, 'agent', true, {
     ...kernelFacts(agent),
     /* Only Tau's own agent is told about the person; an external agent's context below never carries it. */
     ...(agent.person === undefined ? {} : { person: agent.person }),
-    chatId,
+    /* No chatId: the log path rides in the turn's context message, so every chat shares one cached prefix. */
     modelId: agent.execution.model,
     contextWindow: model?.details.contextWindow,
     knowledgeCutoff: model?.details.knowledgeCutoff,
@@ -196,7 +195,7 @@ export const agentHostClientConfig = (input: {
   requireTauExecution(agent);
   const model = hostModel(agent, input.resolvedModel.model);
   return {
-    ...hostPrompt(agent, input.chatId, input.resolvedModel.model),
+    ...hostPrompt(agent, input.resolvedModel.model),
     ...(model === undefined ? {} : { model }),
     testingEnabled: agent.testingEnabled,
   };
@@ -223,17 +222,15 @@ export const agentHostConfig = (input: {
     throw new Error('The Tau agent host requires resolved model provider metadata.');
   }
   const snapshotContext = buildBrowserAgentHostSnapshotContext(agent.snapshot, input.references);
-  const snapshotMessages: NonNullable<BrowserHostAdmissionConfig['contextMessages']> =
-    snapshotContext === undefined
-      ? []
-      : [
-          {
-            id: `tau:snapshot-context:${input.runId}`,
-            role: 'user',
-            content: snapshotContext,
-            metadata: { tauInternal: { kind: 'snapshot-context', anchorId: input.chatId, pruning: 'replace-by-id' } },
-          },
-        ];
+  const turnContext = [getConversationLogNote(input.chatId), snapshotContext].filter(Boolean).join('\n\n');
+  const snapshotMessages: NonNullable<BrowserHostAdmissionConfig['contextMessages']> = [
+    {
+      id: `tau:snapshot-context:${input.runId}`,
+      role: 'user',
+      content: turnContext,
+      metadata: { tauInternal: { kind: 'snapshot-context', anchorId: input.chatId, pruning: 'replace-by-id' } },
+    },
+  ];
   /* Every tool this model can be given is declared on every turn; what the chat's settings turn off is masked where
    * a call is made, so the tool list is the same bytes whatever the settings are. */
   const grant = getProviderFacingToolGrant({
@@ -242,7 +239,7 @@ export const agentHostConfig = (input: {
     modelSupport: model?.support,
   });
   return {
-    ...hostPrompt(agent, input.chatId, model),
+    ...hostPrompt(agent, model),
     model: hostedModel,
     ...grant,
     snapshot: agent.snapshot === undefined ? undefined : toStrictJson(agent.snapshot),

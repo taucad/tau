@@ -274,7 +274,7 @@ describe('funded journey', () => {
   });
 
   it(
-    'should refuse a design turn with no credits before it runs, with the shortfall [FD-01 P0]',
+    'should refuse a design turn with no credits before it runs, with the price [FD-01 P0]',
     matrixRow('FD-01', 'P0', async (evidence) => {
       const { page } = browsing;
       const chat = projectChat(page);
@@ -297,11 +297,12 @@ describe('funded journey', () => {
         `open holds ${holds.holds.length}`,
         await screenshot(page, 'fd-01-credits-card'),
       );
-      expect(title).toBe('You’re out of credits');
-      // The preflight card has no run behind it: it offers Add credits and Switch model and no Resume, and says
-      // "Add credits, then send your message again."; a resumable gateway 402 offers Resume instead.
-      expect(text).toMatch(/This turn needs \d+ more credits? on Haiku 5\.5\./u);
-      expect(buttons).toEqual(expect.arrayContaining(['Add credits', 'Switch model']));
+      expect(title).toBe('Add credits to send this');
+      // A new account has nothing to spend: the preflight card gives the price, not a shortfall, and Add credits is
+      // its one action, since no model runs on a zero balance; a resumable gateway 402 offers Resume instead (N-4).
+      expect(text).toMatch(/\$10 adds 1,000 credits\./u);
+      expect(text).not.toMatch(/needs \d+ more credit/u);
+      expect(buttons).toEqual(['Add credits']);
       expect(holds.holds).toHaveLength(0);
       return { outcome: 'pass', evidence };
     }),

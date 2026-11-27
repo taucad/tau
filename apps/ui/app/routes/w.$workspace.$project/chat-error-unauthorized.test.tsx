@@ -17,6 +17,16 @@ vi.mock('#hooks/use-identity.js', () => ({
   useIdentity: () => ({ state: identity.state, user: undefined }),
 }));
 
+const standing = vi.hoisted(() => ({ value: undefined as { isEmpty: boolean } | undefined }));
+vi.mock('#hooks/use-credit-standing.js', () => ({ useCreditStanding: () => standing.value }));
+
+/* The credits card has its own suite; here it only has to be the card shown. */
+vi.mock('#routes/w.$workspace.$project/chat-error-credits.js', () => ({
+  ChatErrorCredits: (props: Readonly<Record<string, unknown>>) => (
+    <p data-testid='credits-card' data-resumable={String(props['resumable'])} />
+  ),
+}));
+
 /* The paused-turn card's model picker is not this suite's subject. */
 vi.mock('#components/chat/chat-model-selector.js', () => ({ ChatModelSelector: () => null }));
 
@@ -46,6 +56,26 @@ describe('ChatErrorUnauthorized', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     identity.state = 'signed-out';
+    standing.value = undefined;
+  });
+
+  /* N-4: back from sign-up with a zero balance, the send would be refused, so the card says what it takes now. */
+  it('should show the credits card at once for a new account with no credits', () => {
+    identity.state = 'verified';
+    standing.value = { isEmpty: true };
+    renderAt('/w/home/p?chat=chat_1', false);
+
+    expect(screen.getByTestId('credits-card')).toHaveAttribute('data-resumable', 'false');
+    expect(screen.queryByText('You’re signed in')).not.toBeInTheDocument();
+  });
+
+  it('should invite the send once signed in with credits to spend', () => {
+    identity.state = 'verified';
+    standing.value = { isEmpty: false };
+    renderAt('/w/home/p?chat=chat_1', false);
+
+    expect(screen.getByText('You’re signed in')).toBeInTheDocument();
+    expect(screen.queryByTestId('credits-card')).not.toBeInTheDocument();
   });
 
   it('should offer sign-in first and account creation second', () => {
@@ -124,11 +154,14 @@ describe('ChatErrorUnauthorized', () => {
   it('should promise no resume and arm none for a turn that never started', () => {
     renderAt('/w/home/p?chat=chat_1&chatResume=1', false);
 
-    expect(screen.getByText('Nothing has run yet. Sign in, then send your message.')).toBeInTheDocument();
+    expect(screen.getByText('Create an account to send this')).toBeInTheDocument();
+    expect(screen.getByText('Your message stays here. Sign up free, then send it.')).toBeInTheDocument();
     expect(screen.queryByText(/resumes where it stopped/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/credit/iu)).not.toBeInTheDocument();
+    // A first prompt is almost always a new person's: Create account leads.
     const links = screen.getAllByRole('link');
-    expect(links[0]).toHaveAttribute('href', '/auth/sign-in?redirectTo=/w/home/p?chat=chat_1');
-    expect(links[1]).toHaveAttribute('href', '/auth/sign-up?redirectTo=/w/home/p?chat=chat_1');
+    expect(links[0]).toHaveAttribute('href', '/auth/sign-up?redirectTo=/w/home/p?chat=chat_1');
+    expect(links[1]).toHaveAttribute('href', '/auth/sign-in?redirectTo=/w/home/p?chat=chat_1');
   });
 
   it.each(['unknown', 'unverified'] as const)('should keep offering sign-in while the identity is %s', (state) => {

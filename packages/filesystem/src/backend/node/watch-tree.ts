@@ -28,6 +28,8 @@ export type TreeWatcher = {
 export type TreeWatchListener = {
   /**
    * Something at `path` changed: its content, or its kind, or it appeared or went away.
+   * A directory's path stands for everything under it: a directory moved in is reported by its
+   * own path on every platform, and on Linux by each entry in it as well.
    *
    * @param path - The path relative to the root, `/`-separated; `''` is the root itself, and
    * `undefined` means the platform could not say what changed.

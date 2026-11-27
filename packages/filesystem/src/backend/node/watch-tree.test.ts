@@ -83,7 +83,7 @@ describe('watchTree', () => {
     expect(watch.changes).toContain('parts/deep/gear.ts');
   });
 
-  it('should report each entry of a directory found after the watch started', async () => {
+  it('should report a directory moved in after the watch started, and on Linux each entry in it', async () => {
     watch = watched(root);
     const staged = await mkdtemp(join(tmpdir(), 'tau-watch-tree-staged-'));
     mkdirSync(join(staged, 'nested'));
@@ -91,7 +91,13 @@ describe('watchTree', () => {
     renameSync(staged, join(root, 'moved'));
     await watch.barrier();
 
-    expect(watch.changes).toEqual(expect.arrayContaining(['moved', 'moved/nested', 'moved/nested/a.ts']));
+    /*
+     * The directory's own path stands for everything under it on every platform. On Linux the
+     * per-directory watches also report each entry, since writes may land before a new
+     * directory's watch does; the platforms' own recursive watches report the directory alone.
+     */
+    const expected = process.platform === 'linux' ? ['moved', 'moved/nested', 'moved/nested/a.ts'] : ['moved'];
+    expect(watch.changes).toEqual(expect.arrayContaining(expected));
   });
 
   it('should keep reporting writes in a directory that replaced a file, and in one that replaced that directory', async () => {

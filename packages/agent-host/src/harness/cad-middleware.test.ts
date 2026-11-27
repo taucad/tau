@@ -103,11 +103,11 @@ describe('ToolResultTrimmer', () => {
   // WP-11 item 2: every step sends the whole history; a recorded result is trimmed once in its life.
   it('should trim a recorded result once and give every later step the same message', () => {
     const content = { failures: [], passes: [{ huge: 'x' }], total: 1 };
-    const result = {
-      role: 'toolResult' as const,
+    const result: Parameters<typeof trimToolResultContext>[0][number] = {
+      role: 'toolResult',
       toolCallId: 'call-1',
       toolName: 'test_model',
-      content: [{ type: 'text' as const, text: JSON.stringify(content) }],
+      content: [{ type: 'text', text: JSON.stringify(content) }],
       details: { content, isError: false, substituted: false },
       isError: false,
       timestamp: 0,
@@ -256,7 +256,21 @@ describe('ClientContext', () => {
     expect(context.systemPrompt).toContain('**How to Use Skills (Progressive Disclosure):**');
     expect(context.initialMessages[0]?.role).toBe('user');
     expect(JSON.stringify(context.initialMessages)).toContain('Use millimetres.');
-    expect(JSON.stringify(context.initialMessages)).toContain('<memory_guidelines>');
+    expect(JSON.stringify(context.initialMessages)).toContain(String.raw`<agent_memory>\nAGENTS.md\nUse millimetres.`);
+  });
+
+  /* Operator ruling U4: the reminder describes the file; when to update it is the agent's judgement. */
+  it('describes the instruction file without telling the agent when to write to it', async () => {
+    const context = await createTurnContextSnapshot({
+      chatId: 'chat-1',
+      systemPrompt: 'static',
+      clientContext: { memory: { 'AGENTS.md': 'Use millimetres.' } },
+    });
+
+    const reminder = JSON.stringify(context.initialMessages);
+    expect(reminder).toContain("the project's instruction file as it reads now");
+    expect(reminder).not.toContain('<memory_guidelines>');
+    expect(reminder).not.toMatch(/\bmust\b|IMMEDIATE|MAIN PRIORIT/u);
   });
 });
 

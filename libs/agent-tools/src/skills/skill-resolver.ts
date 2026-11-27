@@ -24,6 +24,7 @@ import {
   fingerprintSkillContent,
   mergeSkillMetadata,
   parseSkillFrontmatter,
+  readSkillFrontmatter,
 } from '#skills/skill-metadata.js';
 import { tauStoreSkills as defaultStoreSkills } from '#skills/store-catalog.js';
 import type { TauStoreSkill } from '#skills/store-catalog.js';
@@ -188,7 +189,7 @@ export function createSkillResolver(deps: SkillResolverDependencies): SkillResol
           ...(skill.version !== undefined && { version: skill.version }),
           ...(skill.whenToUse !== undefined && { whenToUse: skill.whenToUse }),
           fingerprint: fingerprintSkillContent(content),
-          frontmatter: parseFrontmatterRecord(content),
+          frontmatter: readSkillFrontmatter(content) ?? {},
           content,
           supportingFiles: await listSupportingFiles(deps, baseDirectory),
           ...(skill.shadowedSources !== undefined && {
@@ -204,8 +205,13 @@ export function createSkillResolver(deps: SkillResolverDependencies): SkillResol
       }
     },
     async getPromptSkillListing(): Promise<SkillMetadata[]> {
+      /* A skill switched off (`metadata.enabled: "false"`) is left out of what the model is told about, rather than
+       * listed and refused at activation, as the Agent Skills client guide asks of a filtered skill. */
       const discovered = await listSkills();
-      return discovered.slice(0, promptSkillLimit).map((skill) => normalizePromptSkillMetadata(skill));
+      return discovered
+        .filter((skill) => skill.enabled !== false)
+        .slice(0, promptSkillLimit)
+        .map((skill) => normalizePromptSkillMetadata(skill));
     },
   };
 }
@@ -273,7 +279,7 @@ async function discoverFilesystemSkills(
 
         return {
           ...metadata,
-          source: defaultSource === 'legacy' ? 'legacy' : (metadata.source ?? defaultSource),
+          source: metadata.source ?? defaultSource,
         };
       } catch {
         return undefined;
@@ -319,7 +325,7 @@ async function discoverTauStoreManifestSkills(
             source: 'tau-store',
             resourceUri: `tau-store:skills/${slug}/SKILL.md`,
           });
-          return metadata ? { ...metadata, source: 'tau-store' } : undefined;
+          return metadata ? { ...metadata, source: 'tau-store', whenToUse: storeSkill.whenToUse } : undefined;
         }
       }),
   );
@@ -391,7 +397,7 @@ function resolveSystemSkill(skill: SkillMetadata, systemSkills: readonly SystemS
     version: systemSkill.version,
     whenToUse: systemSkill.whenToUse,
     fingerprint: systemSkill.fingerprint ?? fingerprintSkillContent(systemSkill.skillMarkdown),
-    frontmatter: parseFrontmatterRecord(systemSkill.skillMarkdown),
+    frontmatter: readSkillFrontmatter(systemSkill.skillMarkdown) ?? {},
     content: systemSkill.skillMarkdown,
     supportingFiles:
       systemSkill.files?.filter(({ path }) => path !== skillFileName).map(({ path }) => `${baseDirectory}/${path}`) ??
@@ -405,41 +411,6 @@ function resolveSystemSkill(skill: SkillMetadata, systemSkills: readonly SystemS
 async function listSupportingFiles(deps: SkillResolverDependencies, baseDirectory: string): Promise<string[]> {
   const entries = await deps.listDirectory(baseDirectory).catch(() => []);
   return entries.filter((entry) => entry.name !== skillFileName).map((entry) => `${baseDirectory}/${entry.name}`);
-}
-
-function parseFrontmatterRecord(content: string): Record<string, unknown> {
-  const match = /^---\n([\S\s]*?)\n---/.exec(content);
-  if (!match?.[1]) {
-    return {};
-  }
-
-  const parsed: Record<string, unknown> = {};
-  for (const line of match[1].split('\n')) {
-    const separator = line.indexOf(':');
-    if (separator === -1) {
-      continue;
-    }
-
-    const key = line.slice(0, separator).trim();
-    const rawValue = line
-      .slice(separator + 1)
-      .trim()
-      .replace(/^["']/, '')
-      .replace(/["']$/, '');
-    if (!key) {
-      continue;
-    }
-
-    if (rawValue === 'true') {
-      parsed[key] = true;
-    } else if (rawValue === 'false') {
-      parsed[key] = false;
-    } else {
-      parsed[key] = rawValue;
-    }
-  }
-
-  return parsed;
 }
 
 function normalizePromptSkillMetadata(skill: SkillMetadata): SkillMetadata {

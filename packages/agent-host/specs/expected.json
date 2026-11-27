@@ -1424,12 +1424,12 @@
         "kind": "witness",
         "ref": "W3 CL-S9 PrepareOnlyWhenResolved (gateCode, EQ1, RV1-F3): the compaction prepare is exempt and history.compacted closes it, but the generation it interrupted is still unresolved, so the next generation prepare is refused"
       },
-      "ChatLog/seeded/compact-rows.jsonl": {
+      "ChatLog/compact/compact-rows.jsonl": {
         "tier": "pr",
         "expect": "pass",
         "ref": "WP-17: a context written once and named by digest, and a metadata-only rewrite (replacement.contentKept), resolve in the same file"
       },
-      "ChatLog/seeded/context-unresolved.jsonl": {
+      "ChatLog/compact/context-unresolved.jsonl": {
         "tier": "pr",
         "expect": {
           "rejected": {
@@ -1440,7 +1440,7 @@
         "kind": "witness",
         "ref": "ContextResolves: one seeded log per rule (FM-A6)"
       },
-      "ChatLog/seeded/content-kept-unresolved.jsonl": {
+      "ChatLog/compact/content-kept-unresolved.jsonl": {
         "tier": "pr",
         "expect": {
           "rejected": {
@@ -1451,7 +1451,7 @@
         "kind": "witness",
         "ref": "ContentKeptResolves: one seeded log per rule (FM-A6)"
       },
-      "ChatLog/seeded/prompt-unresolved.jsonl": {
+      "ChatLog/compact/prompt-unresolved.jsonl": {
         "tier": "pr",
         "expect": {
           "rejected": {
@@ -1462,10 +1462,10 @@
         "kind": "witness",
         "ref": "PromptResolves: one seeded log per rule (FM-A6)"
       },
-      "ChatLog/seeded/compact-in-project-ping-pong-turn.jsonl": {
+      "ChatLog/compact/compact-in-project-ping-pong-turn.jsonl": {
         "tier": "pr",
         "expect": "pass",
-        "ref": "WP-17: the recorded in-project-ping-pong-turn log as the writer encodes it (compactLogRow); compact-rows.test.ts restores it to the recorded rows"
+        "ref": "WP-17: the recorded in-project-ping-pong-turn log as the writer encodes it (compactLogRow); compact-rows.test.ts restores it to the recorded rows; kept out of seeded/ so the UI parity corpus reads only logical rows"
       }
     },
     "SeamDeliveryTrace": {

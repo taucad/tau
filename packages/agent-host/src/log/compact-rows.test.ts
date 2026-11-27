@@ -25,7 +25,7 @@ import { canonicalJson } from '#log/canonical-json.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 const corpus = path.resolve(import.meta.dirname, '../../specs/ChatLog');
-const logs = ['recorded', 'seeded'].flatMap((folder) =>
+const logs = ['recorded', 'seeded', 'compact'].flatMap((folder) =>
   readdirSync(path.join(corpus, folder))
     .filter((name) => name.endsWith('.jsonl'))
     .map((name) => path.join(folder, name)),
@@ -112,7 +112,7 @@ describe('compact rows (WP-17)', () => {
   it('should match the compact fixture the formal model validates', () => {
     const recorded = parseEventLogBytes(read('recorded/in-project-ping-pong-turn.jsonl'));
     expect(new TextDecoder().decode(encode(recorded.rows))).toBe(
-      readFileSync(path.join(corpus, 'seeded/compact-in-project-ping-pong-turn.jsonl'), 'utf8'),
+      readFileSync(path.join(corpus, 'compact/compact-in-project-ping-pong-turn.jsonl'), 'utf8'),
     );
   });
 
@@ -150,7 +150,7 @@ describe('compact rows (WP-17)', () => {
       ),
     ).toEqual({ status: 'unresolved' });
     for (const name of ['context-unresolved', 'prompt-unresolved', 'content-kept-unresolved']) {
-      const parsed = parseEventLogBytes(read(`seeded/${name}.jsonl`));
+      const parsed = parseEventLogBytes(read(`compact/${name}.jsonl`));
       expect(parsed.quarantined, name).toHaveLength(1);
     }
   });

@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/filesystem",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"],
+  "tags": ["scope:shared", "type:package", "ci:windows-unit"],
   "targets": {
     "test:authority-writer": {
       "executor": "nx:run-commands",

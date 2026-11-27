@@ -59,7 +59,7 @@ import {
 import type { StorageReceiptFacts } from '@taucad/api-git-core/forwarding/contract/receipt';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 import { MetricsService } from '@taucad/api-observability/metrics';
-import type { GitAccess, ReceiptVerification } from '#api/git/git.service.js';
+import type { GitAccess, ReceivePackReply, ReceiptVerification } from '#api/git/git.service.js';
 import { commitLease } from '@taucad/api-git-core/store/commit';
 import { RepositoryStoreError } from '@taucad/api-git-core/store/errors';
 import { hydrateLease } from '@taucad/api-git-core/store/lease';
@@ -430,7 +430,7 @@ const fetchOnce = async (service: GitRepositoryService, who: GitAccess): Promise
 };
 
 /** The flush-only `git-receive-pack` RPC `git push` authenticates with: a lease, and no commit. */
-const pushProbe = async (service: GitRepositoryService, who: GitAccess): Promise<Uint8Array<ArrayBuffer>> =>
+const pushProbe = async (service: GitRepositoryService, who: GitAccess): Promise<ReceivePackReply> =>
   service.receivePack({
     access: who,
     committedBy: who.callerId,

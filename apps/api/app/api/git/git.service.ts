@@ -181,6 +181,13 @@ const compactedOver = (receipt: StorageReceipt, manifest: Manifest): boolean =>
   onlyCompactedSince(manifest, receipt) &&
   receipt.movedRefs.every((moved) => manifest.refs[moved.ref]?.oid === moved.after);
 
+/** A push's answer: git's report-status, verbatim, and whether a branch or tag was backed up before it. */
+export type ReceivePackReply = Readonly<{
+  report: Uint8Array<ArrayBuffer>;
+  /** `undefined` when the worker did not say: a tau-storage below WP2a (contracts § 3). */
+  historyBefore: boolean | undefined;
+}>;
+
 /** What the removal verb answered (D24): the conflict line it removed and the tip it held. */
 export type RefRemoval = { readonly ref: string; readonly tip: string };
 
@@ -733,7 +740,8 @@ export class GitRepositoryService implements PublicationRepositoryLeases {
    * compacted manifest ({@link applyReceipt}).
    *
    * @param args - The access, the pusher, the request body and the abort signal.
-   * @returns Git's report-status, verbatim (NI13).
+   * @returns Git's report-status, verbatim (NI13), and whether the manifest the push was prepared against held a
+   *   branch or tag (`undefined` when the worker did not say), which tells a first backup's refusal apart.
    */
   public async receivePack(args: {
     access: GitAccess;
@@ -742,7 +750,7 @@ export class GitRepositoryService implements PublicationRepositoryLeases {
     body: Readable;
     gzipped: boolean;
     abort?: AbortSignal;
-  }): Promise<Uint8Array<ArrayBuffer>> {
+  }): Promise<ReceivePackReply> {
     const { access } = args;
     const release = await this.admitRpc(access, 'receive_pack');
     try {
@@ -761,7 +769,7 @@ export class GitRepositoryService implements PublicationRepositoryLeases {
       if (result.bodyBytes > flushPacketBytes || result.receipt !== undefined) {
         await this.applyReceipt(result.receipt, access);
       }
-      return result.report;
+      return { report: result.report, historyBefore: result.historyBefore };
     } catch (error) {
       throw refusalFor(error, this.#logger);
     } finally {

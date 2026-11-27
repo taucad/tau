@@ -27,11 +27,13 @@ import type { Readable } from 'node:stream';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Environment } from '@taucad/api-core';
 import { hostDeviceOf, UseAuth, User } from '@taucad/api-auth';
+import type { OnModuleInit } from '@nestjs/common';
 import {
   ceilingRefusalMarker,
   gitRequestWindowSeconds,
   gitRequestsPerUserPerWindow,
   gitRequestsPerWindow,
+  hookRulesRevision,
   isGitService,
   noCacheHeaders,
   projectIdFromRepository,
@@ -44,13 +46,16 @@ import type { LfsBatchResponse, LfsQuotaRefusal } from '#api/git/git-lfs.service
 import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filter.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { gitRetryAfterSeconds } from '@taucad/api-git-core/git-refusals';
-import type { RefRemoval } from '#api/git/git.service.js';
+import { countedHookRefusalCodes, readHookRefusal } from '@taucad/api-git-core/hook-refusals';
+import type { HookRefusal } from '@taucad/api-git-core/hook-refusals';
+import type { ReceivePackReply, RefRemoval } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { gitExecutionKey } from '@taucad/api-git-core/forwarding/git-execution';
 import type { GitExecution } from '@taucad/api-git-core/forwarding/git-execution';
 import { AttributeKey, TauMetrics } from '@taucad/telemetry';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import type {
+  SyncHookRefusalAttributes,
   SyncOperationAttributes,
   SyncOperationDurationAttributes,
   SyncRefusalAttributes,
@@ -189,6 +194,40 @@ export const syncOutcomeOf = (error: unknown): SyncOutcome => {
   return typeof code === 'string' && busyRefusalCodes.has(code) ? 'busy' : 'error';
 };
 
+type HookRefusalCode = SyncHookRefusalAttributes['tau.sync.refusal.code'];
+type ClientRules = SyncHookRefusalAttributes['tau.sync.client_rules'];
+type FirstBackup = SyncHookRefusalAttributes['tau.sync.first_backup'];
+
+/** The header a client names the kept guards its preflight checked with (blueprint D7; WP6 sends it). */
+export const clientRulesHeader = 'tau-client-rules';
+
+/**
+ * Whether a push's client checked the server's current kept guards before it sent (`Tau-Client-Rules`).
+ *
+ * @param header - The header's value, if any.
+ * @returns `current`, `older`, or `none` when the client sent none (every build released before WP6).
+ */
+export const clientRulesOf = (header: string | string[] | undefined): ClientRules => {
+  const value = Array.isArray(header) ? header[0] : header;
+  if (value === undefined || value.trim() === '') {
+    return 'none';
+  }
+  return value.trim() === hookRulesRevision ? 'current' : 'older';
+};
+
+/**
+ * `tau.sync.first_backup` for a refused push: whether its manifest held no branch and no tag.
+ *
+ * @param historyBefore - What the worker answered; `undefined` from a worker below WP2a.
+ * @returns The label.
+ */
+export const firstBackupOf = (historyBefore: boolean | undefined): FirstBackup =>
+  historyBefore === undefined ? 'unknown' : historyBefore ? 'false' : 'true';
+
+/** The client leg a push came from, from its user agent's first product token: never a version string longer than a build. */
+const clientOf = (userAgent: string | undefined): string | undefined =>
+  userAgent === undefined ? undefined : printable(userAgent.split(/\s/u)[0] ?? '').slice(0, 40) || undefined;
+
 const applyHeaders = (reply: FastifyReply, headers: Readonly<Record<string, string>>): void => {
   for (const [name, value] of Object.entries(headers)) {
     void reply.header(name, value);
@@ -210,7 +249,7 @@ const applyHeaders = (reply: FastifyReply, headers: Readonly<Record<string, stri
  */
 @Controller({ path: 'git', version: '1' })
 @UseAuth()
-export class GitController {
+export class GitController implements OnModuleInit {
   /**
    * This API's own browser-facing origin, which is where a git-lfs `verify`
    * action has to point. Never `request.protocol`/`request.host`: behind Fly
@@ -373,12 +412,12 @@ export class GitController {
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
     await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc', operation: 'push' });
     const startedAt = performance.now();
-    let output: Uint8Array<ArrayBuffer>;
+    let answer: ReceivePackReply;
     try {
       /* D21/EQ11: a cloud host's push is the owner's, via that device. */
       const access = await this.repositories.authorize({ projectId, userId, mode: 'write', viaDevice });
       applyHeaders(reply, noCacheHeaders);
-      output = await this.withRetryAfter(reply, async () =>
+      answer = await this.withRetryAfter(reply, async () =>
         this.repositories.receivePack({
           access,
           // D28/NI16: the pusher is the authenticated session, never the body.
@@ -392,11 +431,24 @@ export class GitController {
       this.recordFailure('push', error, startedAt);
       throw error;
     }
+    const output = answer.report;
     const outcome = receivePackOutcome(output);
     if (outcome !== undefined) {
       this.recordSync('push', outcome, startedAt);
     }
-    this.logPushRefs(projectId, outcome, receivePackRefResults(output));
+    const refusal = readHookRefusal(output);
+    if (refusal === undefined) {
+      this.logPushRefs(projectId, outcome, receivePackRefResults(output));
+    } else {
+      this.recordHookRefusal(refusal, {
+        projectId,
+        userId,
+        firstBackup: firstBackupOf(answer.historyBefore),
+        clientRules: clientRulesOf(request.headers[clientRulesHeader]),
+        client: clientOf(request.headers['user-agent']),
+        startedAt,
+      });
+    }
     return new StreamableFile(Buffer.from(output), { type: 'application/x-git-receive-pack-result' });
   }
 
@@ -509,6 +561,23 @@ export class GitController {
   }
 
   /**
+   * Starts every series `backup-first-refused` reads at zero (cloud backup admission D12, R3-1): every hook code,
+   * `unknown` and `other` on a first backup, for each client-rules value. `increase()` cannot see a counter's
+   * first sample, so without this the first refused first backup after a restart would not page.
+   */
+  public onModuleInit(): void {
+    for (const code of countedHookRefusalCodes) {
+      for (const rules of ['current', 'older', 'none'] as const) {
+        this.metrics.syncHookRefusals.add(0, {
+          'tau.sync.refusal.code': code,
+          'tau.sync.first_backup': 'true',
+          'tau.sync.client_rules': rules,
+        } satisfies SyncHookRefusalAttributes);
+      }
+    }
+  }
+
+  /**
    * Spends one request of this caller's account-wide budget and of its budget
    * on this project (D22, I11).
    *
@@ -604,6 +673,46 @@ export class GitController {
     } else {
       this.#logger.log(fields, 'A push updated its refs');
     }
+  }
+
+  /**
+   * A push the hook or git's receive refused (cloud backup admission D12): one `tau.sync.hook_refusals`
+   * increment per distinct code, and one `A push was refused` line naming the codes, never a sentence, ref name,
+   * path or commit id. `backup-first-refused`'s Loki twin and `backup-terminal-loop` read the line.
+   */
+  private recordHookRefusal(
+    refusal: HookRefusal,
+    push: Readonly<{
+      projectId: string;
+      userId: string;
+      firstBackup: FirstBackup;
+      clientRules: ClientRules;
+      client: string | undefined;
+      startedAt: number;
+    }>,
+  ): void {
+    for (const { code } of refusal.codes) {
+      this.metrics.syncHookRefusals.add(1, {
+        'tau.sync.refusal.code': code satisfies HookRefusalCode,
+        'tau.sync.first_backup': push.firstBackup,
+        'tau.sync.client_rules': push.clientRules,
+      } satisfies SyncHookRefusalAttributes);
+    }
+    this.#logger.warn(
+      {
+        /* eslint-disable @typescript-eslint/naming-convention -- log fields the Loki rules read by these names */
+        projectId: push.projectId,
+        pusher: push.userId,
+        codes: refusal.codes,
+        terminal: refusal.terminal,
+        first_backup: push.firstBackup,
+        client_rules: push.clientRules,
+        durationMs: Math.round(performance.now() - push.startedAt),
+        ...(push.client === undefined ? {} : { client: push.client }),
+        /* eslint-enable @typescript-eslint/naming-convention -- end of the log fields */
+      },
+      'A push was refused',
+    );
   }
 
   /** One sync request's count and latency, recorded once where its answer is decided; the latency says where git ran. */

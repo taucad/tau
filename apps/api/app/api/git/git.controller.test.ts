@@ -13,12 +13,16 @@ import {
   quotaRefusalMarker,
 } from '@taucad/api-git-core/git.constants';
 import {
+  clientRulesOf,
+  firstBackupOf,
   GitController,
   loggedPushRefLimit,
   receivePackOutcome,
   receivePackRefResults,
   syncOutcomeOf,
 } from '#api/git/git.controller.js';
+import { countedHookRefusalCodes } from '@taucad/api-git-core/hook-refusals';
+import { TauMetrics } from '@taucad/telemetry';
 import type { GitExecution } from '@taucad/api-git-core/forwarding/git-execution';
 import type { GitLfsService } from '#api/git/git-lfs.service.js';
 import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
@@ -185,7 +189,7 @@ describe('GitController cloud host attribution (W10, D21)', () => {
             storageLimitBytes: 1,
           };
         },
-        receivePack: async () => new Uint8Array(),
+        receivePack: async () => ({ report: new Uint8Array(), historyBefore: false }),
       } as unknown as GitRepositoryService,
       {} as unknown as GitLfsService,
       new PublicationRateLimiterService(countingRedis()),
@@ -361,6 +365,7 @@ describe('GitController sync telemetry', () => {
     syncOperationDuration: { record: vi.fn() },
     syncPackBytes: { record: vi.fn() },
     syncRefusals: { add: vi.fn() },
+    syncHookRefusals: { add: vi.fn() },
   });
   const controllerWith = (
     repositories: Partial<GitRepositoryService>,
@@ -389,7 +394,10 @@ describe('GitController sync telemetry', () => {
     const controller = controllerWith(
       {
         authorize: async () => access as unknown as GitAccess,
-        receivePack: async () => Buffer.from('000eunpack ok\n0028ng refs/heads/main non-fast-forward\n0000'),
+        receivePack: async () => ({
+          report: Buffer.from('000eunpack ok\n0028ng refs/heads/main non-fast-forward\n0000'),
+          historyBefore: true,
+        }),
       },
       recorded,
     );
@@ -416,7 +424,7 @@ describe('GitController sync telemetry', () => {
       const controller = controllerWith(
         {
           authorize: async () => access as unknown as GitAccess,
-          receivePack: async () => answers.shift() ?? Buffer.from('0000'),
+          receivePack: async () => ({ report: answers.shift() ?? Buffer.from('0000'), historyBefore: true }),
         },
         metrics(),
       );
@@ -486,7 +494,10 @@ describe('GitController sync telemetry', () => {
     const controller = controllerWith(
       {
         authorize: async () => access as unknown as GitAccess,
-        receivePack: async () => Buffer.from('000eunpack ok\n0017ok refs/heads/main\n0000'),
+        receivePack: async () => ({
+          report: Buffer.from('000eunpack ok\n0017ok refs/heads/main\n0000'),
+          historyBefore: true,
+        }),
       },
       recorded,
       execution,
@@ -630,6 +641,135 @@ describe('GitController sync telemetry', () => {
       'tau.sync.operation': 'push',
       'tau.sync.refusal.code': 'GIT_RATE_LIMITED',
       'http.response.status_code': HttpStatus.TOO_MANY_REQUESTS,
+    });
+  });
+
+  /* Cloud backup admission D12 (WP2a, R3-1): hook codes on their own counter, with the first-backup flag. */
+  describe('hook refusals', () => {
+    const pkt = (line: string): string => `${(line.length + 4).toString(16).padStart(4, '0')}${line}`;
+    /** A side-band push answer: the hook's lines on band 2, the report-status inside band 1. */
+    const refusedReport = (messages: string): Uint8Array<ArrayBuffer> =>
+      Buffer.from(
+        `${pkt(`\u0002${messages}`)}${pkt(`\u0001${pkt('unpack ok\n')}${pkt('ng refs/heads/main pre-receive hook declined\n')}0000`)}0000`,
+        'latin1',
+      );
+    const pushWith = (headers: Record<string, string>) =>
+      ({ raw: mock<IncomingMessage>(), headers }) as unknown as FastifyRequest;
+
+    it('declares in the registry exactly the codes the report reader counts under', () => {
+      expect(TauMetrics.syncHookRefusals.attributes.shape['tau.sync.refusal.code'].options).toEqual([
+        ...countedHookRefusalCodes,
+      ]);
+    });
+
+    it('seeds every first-backup series at zero at boot, so the first refusal after a restart is an increase', () => {
+      const recorded = metrics();
+      controllerWith({}, recorded).onModuleInit();
+      expect(recorded.syncHookRefusals.add).toHaveBeenCalledTimes(countedHookRefusalCodes.length * 3);
+      expect(countedHookRefusalCodes).toHaveLength(22);
+      expect(recorded.syncHookRefusals.add).toHaveBeenCalledWith(0, {
+        'tau.sync.refusal.code': 'GIT_PUSH_FILE_TOO_LARGE',
+        'tau.sync.first_backup': 'true',
+        'tau.sync.client_rules': 'none',
+      });
+      expect(
+        recorded.syncHookRefusals.add.mock.calls.every(
+          ([value, attributes]) =>
+            value === 0 && (attributes as Record<string, string>)['tau.sync.first_backup'] === 'true',
+        ),
+      ).toBe(true);
+    });
+
+    /* The reported incident recurring after WP2a: a kept guard refuses `main` on a first backup. */
+    it('counts a refused first backup once per code and logs codes, never the sentence, ref or commit', async () => {
+      const recorded = metrics();
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      try {
+        const controller = controllerWith(
+          {
+            authorize: async () => access as unknown as GitAccess,
+            receivePack: async () => ({
+              report: refusedReport(
+                'Tau-Code: GIT_PUSH_FILE_TOO_LARGE 1\nTau: refused commit history — individual project files must be 100 MiB or smaller.\nTau:   crank.stl (120000000 bytes)\nTau: nothing was written.\n',
+              ),
+              historyBefore: false,
+            }),
+          },
+          recorded,
+        );
+        const { reply: stub } = replyStub();
+        const reply = { header: stub.header, raw: { once: vi.fn() } } as unknown as FastifyReply;
+        await controller.receivePack('proj_d1.git', 'user-owner', pushWith({ 'user-agent': 'git/2.55.0' }), reply);
+
+        expect(recorded.syncHookRefusals.add).toHaveBeenCalledExactlyOnceWith(1, {
+          'tau.sync.refusal.code': 'GIT_PUSH_FILE_TOO_LARGE',
+          'tau.sync.first_backup': 'true',
+          'tau.sync.client_rules': 'none',
+        });
+        expect(warn).toHaveBeenCalledExactlyOnceWith(
+          {
+            projectId: 'proj_d1',
+            pusher: 'user-owner',
+            codes: [{ code: 'GIT_PUSH_FILE_TOO_LARGE', count: 1 }],
+            terminal: true,
+            /* eslint-disable @typescript-eslint/naming-convention -- the log fields the Loki rules read */
+            first_backup: 'true',
+            client_rules: 'none',
+            /* eslint-enable @typescript-eslint/naming-convention -- end of the log fields */
+            durationMs: expect.any(Number) as unknown as number,
+            client: 'git/2.55.0',
+          },
+          'A push was refused',
+        );
+        const logged = JSON.stringify(warn.mock.calls);
+        expect(logged).not.toContain('crank.stl');
+        expect(logged).not.toContain('refs/heads/main');
+        expect(logged).not.toContain('100 MiB');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('labels an older worker unknown, and reads the client rules header', async () => {
+      const recorded = metrics();
+      const controller = controllerWith(
+        {
+          authorize: async () => access as unknown as GitAccess,
+          receivePack: async () => ({ report: refusedReport('Tau: refused for a reason\n'), historyBefore: undefined }),
+        },
+        recorded,
+      );
+      const { reply: stub } = replyStub();
+      const reply = { header: stub.header, raw: { once: vi.fn() } } as unknown as FastifyReply;
+      await controller.receivePack('proj_d1.git', 'user-owner', pushWith({ 'tau-client-rules': '1' }), reply);
+      expect(recorded.syncHookRefusals.add).toHaveBeenCalledExactlyOnceWith(1, {
+        'tau.sync.refusal.code': 'unknown',
+        'tau.sync.first_backup': 'unknown',
+        'tau.sync.client_rules': 'current',
+      });
+      expect(firstBackupOf(true)).toBe('false');
+      expect(clientRulesOf(undefined)).toBe('none');
+      expect(clientRulesOf(' ')).toBe('none');
+      expect(clientRulesOf('0')).toBe('older');
+      expect(clientRulesOf(['1'])).toBe('current');
+    });
+
+    it('counts nothing for a ref git refused itself, and keeps that push on its own log line', async () => {
+      const recorded = metrics();
+      const controller = controllerWith(
+        {
+          authorize: async () => access as unknown as GitAccess,
+          receivePack: async () => ({
+            report: Buffer.from('000eunpack ok\n0028ng refs/heads/main non-fast-forward\n0000'),
+            historyBefore: true,
+          }),
+        },
+        recorded,
+      );
+      const { reply: stub } = replyStub();
+      const reply = { header: stub.header, raw: { once: vi.fn() } } as unknown as FastifyReply;
+      await controller.receivePack('proj_d1.git', 'user-owner', push, reply);
+      expect(recorded.syncHookRefusals.add).not.toHaveBeenCalled();
     });
   });
 });

@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,6 +17,7 @@ import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { recordedBy } from '#test/identity.js';
+import { writeShellExecutable } from '#test/script-executable.js';
 
 const roots: string[] = [];
 
@@ -75,20 +76,13 @@ describe.runIf(gitToolchainOnPath)('native push tracking refs', () => {
     const mintedDuringPush = await revision([pushedHead], '{"turn":1}\n');
     await setup.updateRef({ name: 'refs/tau/chats/c1', expectedHead: undefined, head: pushedHead });
     /* A mint that lands the moment `git push` returns, before the port reads anything back. */
-    const gitExecutable = join(root, 'git-racing-mint');
-    await writeFile(
-      gitExecutable,
-      [
-        '#!/bin/sh',
-        'git "$@"; status=$?',
-        'for argument in "$@"; do',
-        `  if [ "$argument" = push ]; then git update-ref refs/tau/chats/c1 ${mintedDuringPush}; break; fi`,
-        'done',
-        'exit $status',
-        '',
-      ].join('\n'),
-      { mode: 0o755 },
-    );
+    const gitExecutable = await writeShellExecutable(join(root, 'git-racing-mint'), [
+      'git "$@"; status=$?',
+      'for argument in "$@"; do',
+      `  if [ "$argument" = push ]; then git update-ref refs/tau/chats/c1 ${mintedDuringPush}; break; fi`,
+      'done',
+      'exit $status',
+    ]);
     const port = createNativeGitRevisionPort({ repositoryPath, gitExecutable });
 
     const pushed = await port.push({ remote: 'origin', refs: [{ name: 'refs/tau/chats/c1' }] });

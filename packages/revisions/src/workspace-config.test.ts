@@ -566,7 +566,9 @@ describe('attributes as git reads them (W11.2 review)', () => {
       ];
       const others = ['models/a1.note', 'models/starry.note', 'models/whatx.note', 'models/backslash.note'];
       const files = { '.gitattributes': generatedGitattributesContent(undefined, named) };
-      const paths = [...named, ...others];
+      /* Git for Windows reads a backslash in a path as a separator, and no Windows file name holds one, so Git is
+       * asked only where it can answer; Tau's own verdict on every path is checked below. */
+      const paths = [...named, ...others].filter((path) => process.platform !== 'win32' || !path.includes('\\'));
 
       expect(verdicts(files, paths, false)).toStrictEqual(await checkAttribute(files, paths, false));
       expect(verdicts(files, named, false)).toStrictEqual(named.map(() => true));

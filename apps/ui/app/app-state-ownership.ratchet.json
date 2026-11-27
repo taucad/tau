@@ -117,6 +117,8 @@
       "apps/ui/app/runtime/ui-runtime.schema.ts",
       "apps/ui/app/runtime/usdz-runtime.definition.ts",
       "apps/ui/app/runtime/usdz-runtime.worker.ts",
+      "apps/ui/app/services/focused-project.fixture.ts",
+      "apps/ui/app/services/project-sessions.fixture.ts",
       "apps/ui/app/services/sessions-store.ts",
       "apps/ui/app/types/project-route-state.types.ts",
       "apps/ui/app/utils/remote-host-harness.ts",

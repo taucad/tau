@@ -27,8 +27,8 @@
  * desktop resilient startup WP2), a page-time bound kept off the runtime's clock. The close keeps one more:
  * `setTimeout` at 1 in `apps/libs/revisions-ui/src/hooks/use-revision-status.ts`, the GitHub credential lease's re-mint
  * wait, a module timer outside the runtime handed back to the revisions owner as I15 debt (A10 D21 ruling); and
- * `setTimeout` at 3 in `workbench-records/record-health.ts`, the record health read and slow-read bounds (#1767), which
- * predate the programme and were first counted when the zero scope's files all joined a scan set (A10 D21 round 4),
+ * `setTimeout` at 3 in `workbench-records/record-health.ts` (#1767): the failed-read retry backoff, the slow-write
+ * "unconfirmed" notice and `confirmFlush`'s close-time flush deadline, which predate the programme and were first counted when the zero scope's files all joined a scan set (A10 D21 round 4),
  * handed back to the record stores owner as I15 debt. Another line needs a ruling.
  *
  * Every non-test file in the event-layer zero scope under `apps/ui/app` is in a scan set (`.tsx` and `use-*.ts` files

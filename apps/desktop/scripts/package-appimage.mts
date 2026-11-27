@@ -10,7 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, createPublicKey } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { chmod, cp, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -19,6 +19,9 @@ import { build, Platform } from 'electron-builder';
 import { z } from 'zod';
 
 import { desktopArtifactName, desktopReleaseIdentity } from '#shared/desktop-release.js';
+
+// oxlint-disable-next-line no-restricted-imports -- Use sibling packaging check.
+import { desktopEntryProblems } from './appimage-desktop-entry.mjs';
 
 const required = (name: string): string => {
   const value = process.env[name];
@@ -179,6 +182,17 @@ const main = async (): Promise<void> => {
     inputHash !== actualHash
   ) {
     throw new Error('AppImage changed the launcher, installation identity, updater configuration or finalized app');
+  }
+  // D4=C: integration tools install this entry; it is the portable build's only route for `tau://` links.
+  const rootEntries = await readdir(appDirectory);
+  const entries = rootEntries.filter((entry) => entry.endsWith('.desktop'));
+  if (entries.length !== 1) {
+    throw new Error(`AppImage must embed exactly one desktop entry, found ${String(entries.length)}`);
+  }
+  const scheme = identity.channel === 'staging' ? 'tau-staging' : 'tau';
+  const entryProblems = desktopEntryProblems(await readFile(join(appDirectory, entries[0] ?? ''), 'utf8'), scheme);
+  if (entryProblems.length > 0) {
+    throw new Error(`AppImage desktop entry cannot open ${scheme}:// links: ${entryProblems.join('; ')}`);
   }
   await writeFile(
     join(output, 'appimage-assembly.json'),

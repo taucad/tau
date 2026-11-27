@@ -49,11 +49,13 @@
     "better-auth": "catalog:",
     "fastify": "catalog:",
     "ollama": "^0.5.18",
-    "pdf-parse": "catalog:"
+    "pdf-parse": "catalog:",
+    "undici": "catalog:"
   },
   "devDependencies": {
     "@nestjs/testing": "catalog:",
     "dotenv": "catalog:",
+    "fast-check": "catalog:",
     "reflect-metadata": "^0.2.2",
     "vitest-mock-extended": "catalog:",
     "zod": "catalog:"

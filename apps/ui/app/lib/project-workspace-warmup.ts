@@ -1,3 +1,4 @@
+import { use } from 'react';
 import type * as ProjectWorkspace from '#routes/w.$workspace.$project/project-live-sessions.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
@@ -27,26 +28,46 @@ const tagSettlement = async (pending: ProjectWorkspaceLoad): Promise<void> => {
     pending.status = 'fulfilled';
     pending.value = module;
   } catch (error) {
+    /* A failed import stays settled: a render that reads it again must not start another. Only an ask (an open, a
+     * person's intent) imports again, never a render: React re-renders the reader as soon as the import fails, so a
+     * forgotten failure restarted the import as fast as each one failed (staging QA 2026-11-27, about 630 a second
+     * offline, each with a build probe). */
     pending.status = 'rejected';
     pending.reason = error;
-    // A failed import is forgotten so the next caller retries it.
-    if (load === pending) {
-      load = undefined;
-    }
   }
 };
 
-/** The one workspace shell import, shared by link warming, the project route and `use`. */
 // oxlint-disable-next-line @typescript-eslint/promise-function-async -- `use` must receive the tagged promise itself, which an async function would wrap.
-export const loadProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
-  if (load) {
-    return load;
-  }
+const startProjectWorkspace = (): ProjectWorkspaceLoad => {
   const pending: ProjectWorkspaceLoad = importProjectWorkspace();
   pending.status = 'pending';
   load = pending;
   void tagSettlement(pending);
   return pending;
+};
+
+/**
+ * The one workspace shell import, shared by link warming, the project route and `use`. Reading it never imports again
+ * once an import has settled, failed included: see {@link askProjectWorkspace}.
+ */
+// oxlint-disable-next-line @typescript-eslint/promise-function-async -- `use` must receive the tagged promise itself, which an async function would wrap.
+export const loadProjectWorkspace = (): Promise<ProjectWorkspaceModule> => load ?? startProjectWorkspace();
+
+/** An ask for the import (an open, a person's intent): the settled one, or a new one after a failure. */
+// oxlint-disable-next-line @typescript-eslint/promise-function-async -- the shared tagged promise itself.
+const askProjectWorkspace = (): Promise<ProjectWorkspaceModule> =>
+  load === undefined || load.status === 'rejected' ? startProjectWorkspace() : load;
+
+/**
+ * The workspace shell module in a render: suspends while it loads, and `undefined` once its import failed, so the
+ * reader draws nothing rather than throwing to the app's error boundary. The failure was reported when it happened
+ * (`loadCode`), and the project route shows the open's failure with its one action.
+ *
+ * @returns The module, or `undefined` after a failed import.
+ */
+export const useProjectWorkspace = (): ProjectWorkspaceModule | undefined => {
+  const pending = loadProjectWorkspace();
+  return (pending as ProjectWorkspaceLoad).status === 'rejected' ? undefined : use(pending);
 };
 
 /**
@@ -59,7 +80,7 @@ export const loadProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
  */
 // oxlint-disable-next-line @typescript-eslint/promise-function-async -- the shared tagged promise itself, as `loadProjectWorkspace` returns it.
 export const openProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
-  const shell = loadProjectWorkspace();
+  const shell = askProjectWorkspace();
   // async-iife: bootstrap -- a hint after the shell; focus waits on the shell alone and the route reports its failure.
   void (async () => {
     try {
@@ -81,9 +102,9 @@ export const warmProjectWorkspace = (): void => {
   // async-iife: bootstrap -- warming only starts the import; the route owns the load and shows its failure.
   void (async () => {
     try {
-      await loadProjectWorkspace();
+      await askProjectWorkspace();
     } catch {
-      // The route's `use` reports it and retries with a fresh import.
+      // Reported where it failed (`loadCode`); the next ask imports again, a render never does.
     }
   })();
 };

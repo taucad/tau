@@ -185,6 +185,8 @@ export type CombinedChatState = {
   activeEditMessageId: string | undefined;
   editDraftText: string;
   editDraftAttachments: readonly DraftAttachment[];
+  /** The open edit's comments and annotated pictures. */
+  editDraftAnnotations: MessageAnnotations | undefined;
 };
 
 function shallowEqual<T>(a: T, b: T): boolean {
@@ -214,26 +216,210 @@ function shallowEqual<T>(a: T, b: T): boolean {
   return aKeys.every((key) => Object.is(aRecord[key], bRecord[key]));
 }
 
+/** Which sources a selector read on its last evaluation; a source it did not read cannot change its result. */
+type SelectorReads = { store: boolean; draft: boolean; persistence: boolean };
+
+type DraftActorRef = ActorRefFrom<typeof draftMachine>;
+type PersistenceActorRef = ActorRefFrom<typeof chatPersistenceMachine>;
+type DraftContext = ReturnType<DraftActorRef['getSnapshot']>['context'];
+type PersistenceContext = ReturnType<PersistenceActorRef['getSnapshot']>['context'];
+type ChatSessionStore = ReturnType<typeof useChatSessionStore>;
+
 /**
- * Primary hook for reading chat + draft state. Combines the live AI SDK
- * snapshot from the store with the draft state from `<ActiveChatProvider>`.
+ * One evaluation's view of a chat for {@link useChatSelector}: each field is read on demand and records which source it
+ * read (WP-06a, D3). The accessors live on the prototype, so a view is a small fast-mode object; an object literal with
+ * this many accessors is built in dictionary mode on every call, which cost more than the selectors it served.
+ */
+class ChatStateView implements CombinedChatState {
+  public readonly reads: SelectorReads = { store: false, draft: false, persistence: false };
+  readonly #store: ChatSessionStore;
+  readonly #chatId: string;
+  readonly #session: ChatSession | undefined;
+  readonly #draftActorRef: DraftActorRef;
+  readonly #persistenceActorRef: PersistenceActorRef | undefined;
+
+  public constructor(
+    sources: Readonly<{
+      store: ChatSessionStore;
+      chatId: string;
+      draftActorRef: DraftActorRef;
+      persistenceActorRef: PersistenceActorRef | undefined;
+    }>,
+  ) {
+    this.#store = sources.store;
+    this.#chatId = sources.chatId;
+    this.#session = sources.store.get(sources.chatId);
+    this.#draftActorRef = sources.draftActorRef;
+    this.#persistenceActorRef = sources.persistenceActorRef;
+  }
+
+  public get messages() {
+    return this.#fromStore(() => this.#session?.messages ?? emptyMessages);
+  }
+
+  public get messagesById() {
+    return this.#fromStore(() => this.#store.getMessagePresentation(this.#chatId).messagesById);
+  }
+
+  public get messageOrder() {
+    return this.#fromStore(() => this.#store.getMessagePresentation(this.#chatId).order);
+  }
+
+  public get turnGroups() {
+    return this.#fromStore(() => this.#store.getMessagePresentation(this.#chatId).groups);
+  }
+
+  public get agentInvocations() {
+    return this.#fromStore(() => this.#store.getMessagePresentation(this.#chatId).agentInvocations);
+  }
+
+  public get transcript() {
+    return this.#fromStore(() => selectChatTranscript(this.#session));
+  }
+
+  public get departingMessageId() {
+    return this.#fromStore(() => this.#store.departingSendOf(this.#chatId));
+  }
+
+  public get hostWait() {
+    return this.#fromStore(() => this.#store.hostWaitOf(this.#chatId));
+  }
+
+  public get rememberedComposerTrays() {
+    return this.#fromStore(() => this.#session?.rememberedComposerTrays ?? noComposerTrays);
+  }
+
+  public get status() {
+    return this.#status();
+  }
+
+  public get persistedError() {
+    return this.#persistence()?.persistedError;
+  }
+
+  public get projection() {
+    return this.#fromStore(() => this.#store.getProjection(this.#chatId));
+  }
+
+  public get attachmentStatus() {
+    return this.#fromStore(() => this.#store.getAttachmentStatus(this.#chatId));
+  }
+
+  public get attachedHostId() {
+    return this.#fromStore(() => this.#store.getAttachedHostId(this.#chatId));
+  }
+
+  public get isLoading() {
+    return this.#status() === 'streaming';
+  }
+
+  public get activeExecution() {
+    return this.#persistence()?.activeExecution;
+  }
+
+  public get activeKernel() {
+    return this.#persistence()?.activeKernel;
+  }
+
+  public get draftText() {
+    return this.#draft().draftText;
+  }
+
+  public get draftAttachments() {
+    return this.#draft().draftAttachments;
+  }
+
+  public get draftAnnotations() {
+    return this.#draft().draftAnnotations;
+  }
+
+  public get draftToolChoice() {
+    return this.#draft().draftToolChoice;
+  }
+
+  public get draftMode() {
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
+    return this.#draft().draftMode as ChatMode;
+  }
+
+  public get messageEdits() {
+    return this.#draft().messageEdits;
+  }
+
+  public get activeEditMessageId() {
+    return this.#draft().activeEditMessageId;
+  }
+
+  public get editDraftText() {
+    return this.#draft().editDraftText;
+  }
+
+  public get editDraftAttachments() {
+    return this.#draft().editDraftAttachments;
+  }
+
+  public get editDraftAnnotations() {
+    return this.#draft().editDraftAnnotations;
+  }
+
+  #fromStore<V>(read: () => V): V {
+    this.reads.store = true;
+    return read();
+  }
+
+  #draft(): DraftContext {
+    this.reads.draft = true;
+    return this.#draftActorRef.getSnapshot().context;
+  }
+
+  #persistence(): PersistenceContext | undefined {
+    this.reads.persistence = true;
+    return this.#persistenceActorRef?.getSnapshot().context;
+  }
+
+  #status(): ChatStatus {
+    return this.#fromStore(() => this.#store.getChatStatus(this.#chatId));
+  }
+}
+
+/**
+ * Primary hook for reading chat + draft state. Combines the chat's transcript
+ * and projection from the store with the draft state from `<ActiveChatProvider>`.
  * Session-required — composer-only subtrees should call
  * {@link useDraftSelector} instead.
  *
- * The combined external-store subscription caches the selected value, so a
- * token update only re-renders consumers whose selected data changed.
+ * Every field is read on demand, and a selector is woken only by the sources it
+ * read on its last evaluation (WP-06a, D3): a selector of the transcript does
+ * not run on a draft keystroke, and a selector of the draft does not run on a
+ * streamed delta. The selected value is cached, so a wake only re-renders
+ * consumers whose selected data changed.
  */
 export function useChatSelector<T>(selector: (state: CombinedChatState) => T, chatId?: string): T {
   const { activeChatId, persistenceActorRef, draftActorRef } = useChatContext(chatId);
   const store = useChatSessionStore();
   const cacheRef = useRef<{ readonly value: T } | undefined>(undefined);
+  /* Before the first evaluation every source counts as read. */
+  const readsRef = useRef<SelectorReads>({ store: true, draft: true, persistence: true });
 
   const subscribe = useCallback(
     (listener: () => void) => {
-      const unsubscribeChat = store.subscribeChat(activeChatId, listener);
-      const unsubscribeProjection = store.subscribeProjection(activeChatId, listener);
-      const draftSubscription = draftActorRef.subscribe(listener);
-      const persistenceSubscription = persistenceActorRef?.subscribe(listener);
+      const fromStore = (): void => {
+        if (readsRef.current.store) {
+          listener();
+        }
+      };
+      const unsubscribeChat = store.subscribeChat(activeChatId, fromStore);
+      const unsubscribeProjection = store.subscribeProjection(activeChatId, fromStore);
+      const draftSubscription = draftActorRef.subscribe(() => {
+        if (readsRef.current.draft) {
+          listener();
+        }
+      });
+      const persistenceSubscription = persistenceActorRef?.subscribe(() => {
+        if (readsRef.current.persistence) {
+          listener();
+        }
+      });
       return () => {
         unsubscribeChat();
         unsubscribeProjection();
@@ -244,50 +430,9 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
     [activeChatId, draftActorRef, persistenceActorRef, store],
   );
   const getSnapshot = useCallback((): T => {
-    const session = store.get(activeChatId);
-    const messages = session?.messages ?? emptyMessages;
-    const projection = store.getProjection(activeChatId);
-    const status = store.getChatStatus(activeChatId);
-    const draftContext = draftActorRef.getSnapshot().context;
-    const persistenceContext = persistenceActorRef?.getSnapshot().context;
-    const state: CombinedChatState = {
-      messages,
-      get messagesById() {
-        return store.getMessagePresentation(activeChatId).messagesById;
-      },
-      get messageOrder() {
-        return store.getMessagePresentation(activeChatId).order;
-      },
-      get turnGroups() {
-        return store.getMessagePresentation(activeChatId).groups;
-      },
-      get agentInvocations() {
-        return store.getMessagePresentation(activeChatId).agentInvocations;
-      },
-      transcript: selectChatTranscript(session),
-      departingMessageId: store.departingSendOf(activeChatId),
-      hostWait: store.hostWaitOf(activeChatId),
-      rememberedComposerTrays: session?.rememberedComposerTrays ?? noComposerTrays,
-      status,
-      persistedError: persistenceContext?.persistedError,
-      projection,
-      attachmentStatus: store.getAttachmentStatus(activeChatId),
-      attachedHostId: store.getAttachedHostId(activeChatId),
-      isLoading: status === 'streaming',
-      activeExecution: persistenceContext?.activeExecution,
-      activeKernel: persistenceContext?.activeKernel,
-      draftText: draftContext.draftText,
-      draftAttachments: draftContext.draftAttachments,
-      draftAnnotations: draftContext.draftAnnotations,
-      draftToolChoice: draftContext.draftToolChoice,
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
-      draftMode: draftContext.draftMode as ChatMode,
-      messageEdits: draftContext.messageEdits,
-      activeEditMessageId: draftContext.activeEditMessageId,
-      editDraftText: draftContext.editDraftText,
-      editDraftAttachments: draftContext.editDraftAttachments,
-    };
+    const state = new ChatStateView({ store, chatId: activeChatId, draftActorRef, persistenceActorRef });
     const next = selector(state);
+    readsRef.current = state.reads;
     const cached = cacheRef.current;
     if (cached && shallowEqual(cached.value, next)) {
       return cached.value;
@@ -335,6 +480,8 @@ export type DraftState = {
   activeEditMessageId: string | undefined;
   editDraftText: string;
   editDraftAttachments: readonly DraftAttachment[];
+  /** The open edit's comments and annotated pictures. */
+  editDraftAnnotations: MessageAnnotations | undefined;
   /** An attachment for the main draft is still resizing or storing, so it is not in `draftAttachments` yet. */
   attachingMain: boolean;
   /** The same for the open edit. */
@@ -374,6 +521,7 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
       activeEditMessageId: draftContext.activeEditMessageId,
       editDraftText: draftContext.editDraftText,
       editDraftAttachments: draftContext.editDraftAttachments,
+      editDraftAnnotations: draftContext.editDraftAnnotations,
       attachingMain: draftContext.attachmentQueue.some((entry) => entry.target === 'main'),
       attachingEdit: draftContext.attachmentQueue.some((entry) => entry.target === 'edit'),
       pendingMain: pending.main,
@@ -436,6 +584,8 @@ export type DraftActions = {
    */
   addEditDraftAttachment: (source: DraftAttachmentSource, options: DraftAttachmentOptions) => void;
   removeEditDraftAttachment: (index: number) => void;
+  /** Replace the open edit's comments and annotated pictures; a record over a limit is refused. */
+  setEditDraftAnnotations: (annotations: MessageAnnotations | undefined) => void;
   clearMessageEdit: (messageId: string) => void;
 };
 
@@ -481,6 +631,9 @@ export function useDraftActions(): DraftActions {
       removeEditDraftAttachment(index: number) {
         draftActorRef.send({ type: 'removeEditDraftAttachment', index });
       },
+      setEditDraftAnnotations(annotations: MessageAnnotations | undefined) {
+        draftActorRef.send({ type: 'setEditDraftAnnotations', annotations });
+      },
       clearMessageEdit(messageId: string) {
         draftActorRef.send({ type: 'clearMessageEdit', messageId });
       },
@@ -520,7 +673,11 @@ export type ChatActions = DraftActions & {
   editMessage: (
     messageId: string,
     content: string,
-    options?: { attachments?: readonly StoredAttachmentRef[]; references?: readonly CadReference[] },
+    options?: {
+      attachments?: readonly StoredAttachmentRef[];
+      references?: readonly CadReference[];
+      annotations?: MessageAnnotations;
+    },
   ) => void;
 };
 
@@ -635,6 +792,7 @@ export function useChatActions(chatId?: string): ChatActions {
           text: content,
           ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
           ...(options?.references === undefined ? {} : { references: options.references }),
+          ...(options?.annotations === undefined ? {} : { annotations: options.annotations }),
         });
       },
     };

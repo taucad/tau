@@ -264,6 +264,28 @@
 \* The flatten step and its painter load on demand as one module (`annotated-send.ts`), in the same place and order.
 \* Launch audit merged with PERF-8 (2026-11-26): the restored draft is matched to an outbox entry in the composed form,
 \* as a sent draft is, so a draft with trailing whitespace is let go too. No action or verdict changes.
+\* Comment pins S2 review (2026-11-26): an edit names its comments and is flattened like a send before its turn is
+\* requested (`use-cad-chat-client.ts`, `chat-turn-host.tsx`, `use-chat.tsx`); a returned message's originals are
+\* re-retained with its parts and the draft bytes reader falls back to the chat's directory (`chat-session-store.ts`);
+\* the edit composer shows its comment list (`chat-textarea.tsx`). A send without annotations still takes no tick
+\* before it is sent. No action or verdict changes.
+\* Chat performance WP-06a (2026-11-26): `useChatSelector` (`use-chat.tsx`) reads each field on demand and wakes a
+\* selector only for the sources its last evaluation read; it sends nothing to the queue. No action or verdict changes.
+\* Its per-evaluation view is a class instance (`ChatStateView`), not an object literal of accessors. No action or verdict
+\* changes.
+\* Chat performance WP-06 (2026-11-26): `ChatSessionStore` publishes a projection change that touches only the live
+\* preview from the next animation frame (`LiveOverlay.tla` `FrameClock`); ledger and durable changes, which this
+\* model reads, still publish at once. No action or verdict changes.
+\* HA0 review (2026-11-27): `chat-session-store.ts` reports a replayed command whose effect stays unknown (a refusal
+\* still `unknown`, an applied answer with no durable row, or a connection lost past the bound) to Sentry, and arms a
+\* report-only timer for a read that stays lost. A wait-class refusal still holds for its host. What is thrown, held and
+\* acknowledged is unchanged. No action or verdict changes.
+\* Connecting attachment placement (2026-11-27, #2297): `chat-session-store.ts` no longer reads an attachment still
+\* connecting as observing another host. A placement change waits for that connect's answer and rebinds the log
+\* reader only when the answered placement differs, which is the `Observe` guard of `QueuePlacement.tla`
+\* (`s.observed # s.selected`); before, it restarted a reader already on the selected host and dropped the live text
+\* of the run under way. The grant, the prepared-command marking and delivery are unchanged. No action or verdict
+\* changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

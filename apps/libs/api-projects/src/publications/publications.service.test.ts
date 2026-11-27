@@ -676,6 +676,15 @@ describe('publication tree rules', () => {
     expect(isPublishableTreePath('')).toBe(false);
   });
 
+  /* A remix starts from what was published, so the project's instructions and skills have to travel with it:
+   * `AGENTS.md` and `.agents/skills` sit at the conventional paths, outside `.tau`, for exactly that. */
+  it('publishes the agent files a remix continues from', () => {
+    expect(isPublishableTreePath('AGENTS.md')).toBe(true);
+    expect(isPublishableTreePath('lib/gears/AGENTS.md')).toBe(true);
+    expect(isPublishableTreePath('.agents/skills/sheet-metal/SKILL.md')).toBe(true);
+    expect(isPublishableTreePath('.agents/skills/sheet-metal/references/bend-table.md')).toBe(true);
+  });
+
   it('reads a named version out of git, skipping what a viewer never sees', async () => {
     const repositoryPath = seedRepository(
       new Map([

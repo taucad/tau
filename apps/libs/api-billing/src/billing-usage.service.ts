@@ -15,10 +15,16 @@ import {
   supplierModelIdSchema,
   unsignedIntegerStringSchema,
   wireBalanceExplanationSchema,
+  wireOperationReceiptBatchSchema,
   wireOperationReceiptSchema,
   wireUsageSnapshotSchema,
 } from '@taucad/billing';
-import type { WireBalanceExplanation, WireOperationReceipt, WireUsageSnapshot } from '@taucad/billing';
+import type {
+  WireBalanceExplanation,
+  WireOperationReceipt,
+  WireOperationReceiptBatch,
+  WireUsageSnapshot,
+} from '@taucad/billing';
 import { CreditLedgerService, recoveryGraceMinutes } from '#credit-ledger.service.js';
 import type { BillingEnvironment } from '@taucad/api-database/schema/billing.types';
 import { MetricsService } from '@taucad/api-observability/metrics';
@@ -57,6 +63,7 @@ export type RawUsageQuery = {
   historyCursor?: unknown;
   correctionCursor?: unknown;
   snapshotRevision?: unknown;
+  operationIds?: unknown;
 };
 
 type CanonicalQuery = {
@@ -824,6 +831,32 @@ export class BillingUsageService {
   }): Promise<WireOperationReceipt> {
     const { receipt } = await this.readOperationReceipt(input);
     return receipt;
+  }
+
+  /**
+   * Reads the receipt of each distinct named operation (at most the usage filters' item bound), in id order, so a chat
+   * surface showing many turns asks once instead of once per turn (chat performance WP-13 step 6). Each receipt is the
+   * same owner-scoped snapshot {@link getOperationReceipt} answers, with its first correction page.
+   *
+   * ponytail: one read-only snapshot per operation, in series. One shared snapshot is the upgrade path if a batch's
+   * database time ever shows.
+   */
+  public async getOperationReceipts(input: {
+    authUserId: string;
+    rawQuery: unknown;
+  }): Promise<WireOperationReceiptBatch> {
+    const raw = this.parseRawObject(input.rawQuery, ['operationIds']);
+    const operationIds = parseList(raw.operationIds, 'operationIds');
+    if (operationIds.length === 0) {
+      throw new BadRequestException('Invalid operationIds');
+    }
+    const receipts: WireOperationReceipt[] = [];
+    for (const operationId of operationIds) {
+      // oxlint-disable-next-line no-await-in-loop -- one snapshot at a time bounds the batch's database connections.
+      const { receipt } = await this.readOperationReceipt({ authUserId: input.authUserId, operationId, rawQuery: {} });
+      receipts.push(receipt);
+    }
+    return wireOperationReceiptBatchSchema.parse({ receipts });
   }
 
   /**

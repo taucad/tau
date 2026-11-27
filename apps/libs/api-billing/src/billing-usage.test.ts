@@ -312,4 +312,42 @@ describe('BillingUsageService attempt receipts (W2)', () => {
     expect(receipt).toMatchObject({ state: 'pending', operationId: 'operation_1' });
     expect(receipt).not.toHaveProperty('settlesBy');
   });
+
+  it('should answer a receipt batch with one receipt per distinct operation, in id order', async () => {
+    const { service, transaction } = pendingService();
+    const pendingRow = {
+      customer_state: 'pending',
+      admitted_at: admittedAt,
+      dispatch_state: 'accepted',
+      authorized_atoms: '900',
+      settles_by: settlesBy,
+    };
+    transaction.execute
+      .mockResolvedValueOnce(queryRows([]))
+      .mockResolvedValueOnce(queryRows([authority]))
+      .mockResolvedValueOnce(queryRows([pendingRow]));
+
+    const batch = await service.getOperationReceipts({
+      authUserId: 'user_1',
+      rawQuery: { operationIds: ['operation_2', 'operation_1', 'operation_2'] },
+    });
+
+    expect(batch.receipts.map((receipt) => [receipt.operationId, receipt.state])).toEqual([
+      ['operation_1', 'pending'],
+      ['operation_2', 'pending'],
+    ]);
+    expect(batch.receipts[0]).not.toHaveProperty('settlesBy');
+  });
+
+  it('should refuse an empty, oversized or unknown receipt batch before touching PostgreSQL', async () => {
+    const { service } = pendingService();
+    const tooMany = Array.from({ length: 33 }, (_, index) => `operation_${String(index)}`);
+
+    for (const rawQuery of [{}, { operationIds: tooMany }, { operationIds: 'operation_1', pageSize: '1' }]) {
+      // oxlint-disable-next-line no-await-in-loop -- each refusal is checked on its own.
+      await expect(service.getOperationReceipts({ authUserId: 'user_1', rawQuery })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    }
+  });
 });

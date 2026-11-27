@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { AnnotationCamera, MessageAnnotations } from '@taucad/chat/annotations';
 import {
+  isAnyPinOutOfFrame,
+  movePin,
   nextCommentNumber,
+  outdatedComments,
   placePin,
   removeComments,
   sendableAnnotations,
@@ -66,7 +69,7 @@ describe('placePin', () => {
     const first = placePin(undefined, placement({ newImageId: 'img-1' }));
     const moved = placePin(
       first.annotations,
-      placement({ newImageId: 'img-2', camera: { ...camera, position: [2, 1, 1] } }),
+      placement({ newImageId: 'img-2', camera: { ...camera, position: [-1, 1, 1] } }),
     );
     const rebuilt = placePin(
       first.annotations,
@@ -79,6 +82,57 @@ describe('placePin', () => {
 
     expect([moved.imageId, rebuilt.imageId, hidden.imageId]).toEqual(['img-2', 'img-3', 'img-4']);
     expect([moved.needsPicture, rebuilt.needsPicture, hidden.needsPicture]).toEqual([true, true, true]);
+  });
+
+  it('should take the newest pin picture again after a small orbit, and carry its pins onto it', () => {
+    const first = placePin(undefined, placement({ newImageId: 'img-1' }));
+    const drafted = stored(first.annotations, 'img-1', 'attachments/a.webp');
+    const orbited = placePin(
+      drafted,
+      placement({ newImageId: 'img-2', point: [0.05, 0, 0], camera: { ...camera, position: [1.2, 1, 1] } }),
+    );
+
+    expect(orbited).toMatchObject({ number: 2, imageId: 'img-2', needsPicture: true });
+    expect(orbited.retakenAttachment).toBe('attachments/a.webp');
+    expect(orbited.annotations.images.map(({ id }) => id)).toEqual(['img-2']);
+    expect(orbited.annotations.comments.map(({ number, image }) => [number, image])).toEqual([
+      [1, 'img-2'],
+      [2, 'img-2'],
+    ]);
+  });
+
+  it('should keep the earlier picture when one of its pins would leave the frame or face away', () => {
+    const first = placePin(undefined, placement({ newImageId: 'img-1' }));
+    const panned = placePin(
+      first.annotations,
+      placement({
+        newImageId: 'img-2',
+        camera: { ...camera, position: [6, -4, 1], target: [5, -5, 0] },
+        point: [5, -5, 0],
+      }),
+    );
+    const below = placePin(
+      placePin(undefined, placement({ newImageId: 'img-1', normal: [0, 0, -1] })).annotations,
+      placement({ newImageId: 'img-3', camera: { ...camera, position: [1.2, 1, 1] } }),
+    );
+
+    expect(panned.retakenAttachment).toBeUndefined();
+    expect(panned.annotations.images.map(({ id }) => id)).toEqual(['img-1', 'img-2']);
+    expect(below.annotations.images.map(({ id }) => id)).toEqual(['img-1', 'img-3']);
+  });
+
+  it('should not retake a picture the person drew on', () => {
+    const first = placePin(undefined, placement({ newImageId: 'img-1' }));
+    const marked: MessageAnnotations = {
+      ...first.annotations,
+      images: first.annotations.images.map((image) => ({
+        ...image,
+        marks: [{ kind: 'rectangle', from: [0, 0], to: [1, 1] }],
+      })),
+    };
+    const orbited = placePin(marked, placement({ newImageId: 'img-2', camera: { ...camera, position: [1.2, 1, 1] } }));
+
+    expect(orbited.annotations.images.map(({ id }) => id)).toEqual(['img-1', 'img-2']);
   });
 
   it('should never give a number twice, even after its comment was removed', () => {
@@ -112,7 +166,7 @@ describe('sendableAnnotations', () => {
     const first = placePin(undefined, placement({ newImageId: 'img-1' }));
     const second = placePin(
       first.annotations,
-      placement({ newImageId: 'img-2', camera: { ...camera, position: [2, 1, 1] } }),
+      placement({ newImageId: 'img-2', camera: { ...camera, position: [-1, 1, 1] } }),
     );
     const drafted = stored(
       stored(setCommentText(second.annotations, 1, '  Round this edge  '), 'img-1', 'attachments/a.webp'),
@@ -128,5 +182,93 @@ describe('sendableAnnotations', () => {
     expect(sent.annotations.images.map(({ id }) => id)).toEqual(['img-1']);
     expect(sent.annotations.nextNumber).toBeUndefined();
     expect(sent.orphanedAttachments).toEqual(['attachments/b.webp']);
+  });
+});
+
+describe('outdatedComments', () => {
+  const placed = placePin(undefined, placement()).annotations;
+  const annotations: MessageAnnotations = {
+    ...placed,
+    comments: [...placed.comments, { number: 2, text: 'On the picture', image: 'img-new', at: [0.5, 0.5] }],
+  };
+
+  it('marks every comment on a picture of other geometry', () => {
+    expect([...outdatedComments(annotations, annotations.comments, 'r2')]).toEqual([1, 2]);
+  });
+
+  it('marks none on the geometry the picture was taken of', () => {
+    expect(outdatedComments(annotations, annotations.comments, 'r1').size).toBe(0);
+  });
+
+  it('marks none before any geometry is on screen', () => {
+    expect(outdatedComments(annotations, annotations.comments, '').size).toBe(0);
+  });
+});
+
+describe('isAnyPinOutOfFrame', () => {
+  const pinned = (point: [number, number, number]) => [{ number: 1, text: '', image: 'img-new', model: { point } }];
+
+  it('keeps the camera when every pin is in frame', () => {
+    expect(isAnyPinOutOfFrame(camera, pinned([0, 0, 0]))).toBe(false);
+  });
+
+  it('asks for a fit when a pin is beside the frame', () => {
+    expect(isAnyPinOutOfFrame(camera, pinned([5, -5, 0]))).toBe(true);
+  });
+
+  it('asks for a fit when a pin is behind the camera', () => {
+    expect(isAnyPinOutOfFrame(camera, pinned([3, 3, 3]))).toBe(true);
+  });
+
+  it('never fits for a comment on the picture alone', () => {
+    expect(isAnyPinOutOfFrame(camera, [{ number: 1, text: '', image: 'img-new', at: [2, 2] }])).toBe(false);
+  });
+});
+
+describe('movePin', () => {
+  const twoPins = (): MessageAnnotations => {
+    const first = placePin(undefined, placement()).annotations;
+    const second = placePin(first, placement({ point: [0.05, 0, 0], newImageId: 'img-2' })).annotations;
+    return setCommentText(setCommentText(second, 1, 'Taller'), 2, 'Round this');
+  };
+
+  it('keeps the picture when the camera has not moved', () => {
+    const moved = movePin(twoPins(), 1, placement({ point: [0.04, 0.04, 0], newImageId: 'img-unused' }))!;
+    expect(moved.needsPicture).toBe(false);
+    expect(moved.imageId).toBe('img-new');
+    expect(moved.annotations.comments.map(({ number, text }) => [number, text])).toEqual([
+      [1, 'Taller'],
+      [2, 'Round this'],
+    ]);
+    expect(moved.annotations.comments[0]?.model?.point).toEqual([0.04, 0.04, 0]);
+    expect(moved.annotations.images).toHaveLength(1);
+  });
+
+  it('takes a new picture from a far view and keeps the number and words', () => {
+    const turned: AnnotationCamera = { ...camera, position: [-1, 1, -1] };
+    const moved = movePin(twoPins(), 1, placement({ camera: turned, newImageId: 'img-far' }))!;
+    expect(moved.needsPicture).toBe(true);
+    expect(moved.imageId).toBe('img-far');
+    expect(moved.annotations.comments.map(({ number, text, image }) => [number, text, image])).toEqual([
+      [1, 'Taller', 'img-far'],
+      [2, 'Round this', 'img-new'],
+    ]);
+    expect(moved.annotations.nextNumber).toBe(3);
+  });
+
+  it('drops the old picture when the moved pin was the last on it', () => {
+    const one = stored(
+      setCommentText(placePin(undefined, placement()).annotations, 1, 'Taller'),
+      'img-new',
+      'blob:old',
+    );
+    const turned: AnnotationCamera = { ...camera, position: [-1, 1, -1] };
+    const moved = movePin(one, 1, placement({ camera: turned, newImageId: 'img-far' }))!;
+    expect(moved.orphanedAttachments).toEqual(['blob:old']);
+    expect(moved.annotations.images.map(({ id }) => id)).toEqual(['img-far']);
+  });
+
+  it('has nothing to move for an unknown number', () => {
+    expect(movePin(twoPins(), 9, placement())).toBeUndefined();
   });
 });

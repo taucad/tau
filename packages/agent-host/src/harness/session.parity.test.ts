@@ -250,6 +250,163 @@ describe('pi full-turn parity fixture', () => {
     },
   );
 
+  // WP-10 step A item 3: the bound row is ordered when the gateway answers and awaited before the attempt settles.
+  it('should read the reply while the bound row is still being written, and land it before the reply', async () => {
+    const stored = await createMemoryEventLog();
+    const binding = Promise.withResolvers<void>();
+    const eventLog = {
+      ...stored,
+      append: async (event: AgentLogEvent) => {
+        if (event.type === 'model.invocation-bound') {
+          await binding.promise;
+        }
+        return stored.append(event);
+      },
+    };
+    const session = await createAgentSession({
+      chatId: 'chat-bound',
+      runId: 'run-bound',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: {
+        funding: fundedFacet(),
+        async *stream(request) {
+          /* Held until the body is read: were the bound row on the first-byte path, this would never return. */
+          await request.onInvocationBound?.({ operationId: 'operation-bound' });
+          yield { type: 'text-delta', text: 'hello' };
+          binding.resolve();
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog,
+    });
+
+    await session.prompt({ id: 'user-bound', role: 'user', content: 'hi' });
+
+    const events = await stored.read();
+    const bound = events.findIndex((event) => event.type === 'model.invocation-bound');
+    const reply = events.findIndex((event) => event.type === 'message.appended' && event.message.role === 'assistant');
+    expect(bound).toBeGreaterThan(events.findIndex((event) => event.type === 'model.invocation-prepared'));
+    expect(bound).toBeLessThan(reply);
+  });
+
+  // WP-10 step B: the request leaves only once the rows before it are durable, and the outcome waits for its rows.
+  it('should send no model request until the rows before it are durable', async () => {
+    const eventLog = await createMemoryEventLog();
+    const flush = Promise.withResolvers<void>();
+    let flushed = false;
+    const durable = vi.fn(async () => {
+      await flush.promise;
+      flushed = true;
+    });
+    const sent: boolean[] = [];
+    const session = await createAgentSession({
+      chatId: 'chat-barrier',
+      runId: 'run-barrier',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: {
+        funding: fundedFacet(),
+        async *stream() {
+          sent.push(flushed);
+          yield { type: 'text-delta', text: 'hello' };
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog,
+      durable,
+    });
+
+    const ended = session.prompt({ id: 'user-barrier', role: 'user', content: 'hi' });
+    await vi.waitFor(() => {
+      expect(durable).toHaveBeenCalled();
+    });
+    expect(sent).toEqual([]);
+    flush.resolve();
+
+    await expect(ended).resolves.toEqual({ outcome: 'completed' });
+    expect(sent).toEqual([true]);
+    /* Once before the request, once before the outcome is told. */
+    expect(durable.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('should fail an attempt whose rows cannot be made durable', async () => {
+    const eventLog = await createMemoryEventLog();
+    let calls = 0;
+    const session = await createAgentSession({
+      chatId: 'chat-undurable',
+      runId: 'run-undurable',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: {
+        funding: fundedFacet(),
+        async *stream() {
+          yield { type: 'text-delta', text: 'hello' };
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog,
+      /* The request's barrier passes; the flush after the reply fails. */
+      durable: async () => {
+        calls += 1;
+        if (calls > 1) {
+          throw Object.assign(new Error('flush failed'), { code: 'LOG_POISONED' });
+        }
+      },
+    });
+
+    await expect(session.prompt({ id: 'user-undurable', role: 'user', content: 'hi' })).resolves.toMatchObject({
+      outcome: 'failed',
+      failure: { code: 'LOG_POISONED' },
+    });
+  });
+
+  it('should fail the attempt when its bound row cannot be written', async () => {
+    const stored = await createMemoryEventLog();
+    const eventLog = {
+      ...stored,
+      append: async (event: AgentLogEvent) => {
+        if (event.type === 'model.invocation-bound') {
+          throw new Error('simulated bound append failure');
+        }
+        return stored.append(event);
+      },
+    };
+    const session = await createAgentSession({
+      chatId: 'chat-unbound',
+      runId: 'run-unbound',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: {
+        funding: fundedFacet(),
+        async *stream(request) {
+          await request.onInvocationBound?.({ operationId: 'operation-unbound' });
+          yield { type: 'text-delta', text: 'hello' };
+          yield { type: 'completed', stopReason: 'stop' };
+        },
+      },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog,
+    });
+
+    await session.prompt({ id: 'user-unbound', role: 'user', content: 'hi' });
+
+    const events = await stored.read();
+    expect(events.some((event) => event.type === 'model.invocation-bound')).toBe(false);
+    const reply = events.findLast((event) => event.type === 'message.appended' && event.message.role === 'assistant');
+    expect(reply?.type === 'message.appended' ? reply.message.metadata : undefined).toMatchObject({
+      stopReason: 'error',
+      errorMessage: 'simulated bound append failure',
+    });
+  });
+
   it('does not call the transport when the prepared marker cannot be durably appended', async () => {
     const stored = await createMemoryEventLog();
     const eventLog = {

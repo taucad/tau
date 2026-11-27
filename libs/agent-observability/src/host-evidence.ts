@@ -90,18 +90,24 @@ const presentedLimit = 256;
 const clockSlackMilliseconds = 5000;
 
 /**
- * The server's grant for one purpose, this account and project, read now. A
+ * How long an answer that granted something serves later reads by the same account (chat performance plan WP-02).
+ * Long enough to cover one turn's start and end; short enough that a withdrawal purges what is held soon after.
+ * Milliseconds.
+ */
+const grantReuseMilliseconds = 10_000;
+
+/** The server's answer for this account and project, dated on this host's clock; `undefined` when signed out. */
+type PurposesRead = Readonly<{ answer: EffectivePurposesAnswer; principal: string; receivedAt: number }> | undefined;
+
+/**
+ * Read the server's purposes answer for this account and project now. A
  * signed-out credential grants nothing; any other failure rejects, which the
  * reporter treats as unknown: it reports nothing and keeps what is held.
  *
  * @param options - The API, account, project and transport.
- * @param purpose - The purpose the reporter asking answers to.
- * @returns The grant, or `undefined`.
+ * @returns The answer, or `undefined`.
  */
-const readGrant = async (
-  options: HostEvidenceOptions,
-  purpose: ReportingPurpose,
-): Promise<ReportingGrant | undefined> => {
+const readPurposes = async (options: HostEvidenceOptions): Promise<PurposesRead> => {
   const principal = options.principal();
   if (principal === undefined) {
     return undefined;
@@ -118,12 +124,30 @@ const readGrant = async (
   if (!response.ok) {
     throw new Error(`The agent-observability purposes could not be read: ${response.status}`);
   }
-  const answer = (await response.json()) as EffectivePurposesAnswer;
-  /* An account switched while the answer was in flight is not the account it answered for. */
-  return options.principal() === principal
-    ? purposeGrantOf(answer, { principal, project: options.project, receivedAt }, purpose)
-    : undefined;
+  return { answer: (await response.json()) as EffectivePurposesAnswer, principal, receivedAt };
 };
+
+/**
+ * One purpose's grant from an answer. An account switched while the answer was
+ * in flight is not the account it answered for.
+ *
+ * @param options - The account and project.
+ * @param read - The answer read.
+ * @param purpose - The purpose the reporter asking answers to.
+ * @returns The grant, or `undefined`.
+ */
+const grantOf = (
+  options: HostEvidenceOptions,
+  read: PurposesRead,
+  purpose: ReportingPurpose,
+): ReportingGrant | undefined =>
+  options.principal() === read?.principal && read !== undefined
+    ? purposeGrantOf(
+        read.answer,
+        { principal: read.principal, project: options.project, receivedAt: read.receivedAt },
+        purpose,
+      )
+    : undefined;
 
 /**
  * Compose one host's evidence reporter. It reads the grant at once, so a run
@@ -137,6 +161,42 @@ const readGrant = async (
 export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence => {
   const now = options.now ?? Date.now;
   const transport = { fetch: options.fetch, baseUrl: options.apiBaseUrl };
+  /* One answer serves both purposes and every moment close together (chat performance plan WP-02). The summary and
+   * feedback reporters read the grant at the same moments (a run's start, each quiescence, a rating), and one turn
+   * brings several such moments within a second or two: each asked again, about six requests per turn. A read joins
+   * the request in flight, and an answer that granted something is reused for `grantReuseMilliseconds` by the same
+   * account. An answer that granted nothing is never reused, so a grant given after the host opened binds at the next
+   * moment. A withdrawal purges what this host holds within that window; the server refuses evidence under a withheld
+   * purpose or a stale policy epoch meanwhile, so nothing withdrawn is admitted. */
+  let reading: Promise<PurposesRead> | undefined;
+  let reusable: PurposesRead;
+  const readShared = async (): Promise<PurposesRead> => {
+    if (
+      reusable !== undefined &&
+      reusable.principal === options.principal() &&
+      now() - reusable.receivedAt < grantReuseMilliseconds
+    ) {
+      return reusable;
+    }
+    reading ??= (async () => {
+      try {
+        const read = await readPurposes(options);
+        reusable =
+          read !== undefined &&
+          Array.isArray(read.answer.purposes) &&
+          read.answer.purposes.some((state) => state.allowed)
+            ? read
+            : undefined;
+        return read;
+      } catch (error) {
+        reusable = undefined;
+        throw error;
+      } finally {
+        reading = undefined;
+      }
+    })();
+    return reading;
+  };
   const reporterFor = (purpose: ReportingPurpose, store: PendingEvidenceStore): EvidenceReporter =>
     createEvidenceReporter({
       outbox: createEvidenceOutbox({
@@ -144,7 +204,7 @@ export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence =
         submit: async (evidence, signal) => submitEvidence(transport, evidence, signal),
         now,
       }),
-      grant: async () => readGrant(options, purpose),
+      grant: async () => grantOf(options, await readShared(), purpose),
       uploader: options.uploader,
       hostBuild:
         options.hostBuild !== undefined && contractIdPattern.test(options.hostBuild) ? options.hostBuild : undefined,

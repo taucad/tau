@@ -24,7 +24,7 @@
  */
 export const tauInlineScriptHashes = {
   /** `clientFactsScript` (`#lib/client-facts`), in every document's `<head>`. */
-  clientFacts: "'sha256-Yl19/+h6oYwSCWRY7fIIxP9vj3vRybeWQdeam3SUmNg='",
+  clientFacts: "'sha256-kzYmJkp26aW5o7NUGjpG/YTWLXPIakUd9wx+L9C0cYo='",
   /** `buildFrameHintScript()` (`#lib/frame-hint`), in every document's `<head>`. */
   frameHint: "'sha256-c1yuMu36JC6Rjm5i9FWflnZafwYOl3izf/jvtkgs8WE='",
   /** The hand-off recorder served in a `HandOffSlot` of the `project-composer` surface. */

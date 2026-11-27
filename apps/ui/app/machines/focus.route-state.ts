@@ -129,9 +129,15 @@ export const selectProjectRouteState = (
   if (!focused) {
     return resolving;
   }
-  // `editor` only for a session that is live; a session gone, closing or failed shows the reopen offer.
-  return registry.status[projectId]?.state === 'live'
-    ? { kind: 'editor', projectId, project }
+  // `editor` only for a session that is live; a session gone or closing shows the reopen offer.
+  const sessionState = registry.status[projectId]?.state;
+  if (sessionState === 'live') {
+    return { kind: 'editor', projectId, project };
+  }
+  // A session that failed was not closed by anyone (its open failed offline, say, when its code did not arrive), so the
+  // notice can say why rather than "closed".
+  return sessionState === 'failed'
+    ? { kind: 'session-failed', projectId, project }
     : { kind: 'closed', projectId, project, reason: registry.closed[projectId]?.reason };
 };
 

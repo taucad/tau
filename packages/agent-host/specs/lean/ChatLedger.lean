@@ -332,6 +332,61 @@ def append (F : File) (A : App) (e : Row) : File × App × Outcome :=
          { A with red := R', view := A.view ++ [e], lines := A.lines + 1, torn := 0 }, .appended)
       else (F, { A with fenced := true }, .refused .fenced)
 
+/-- A batch appended one `append` at a time, each flushed before the next (`appendChatRows` before WP-10): the first
+refusal ends it, and the rows before it stay written. -/
+def appendSeq : File → App → List Row → File × App × List Outcome
+  | F, A, [] => (F, A, [])
+  | F, A, e :: es =>
+    match append F A e with
+    | (F1, A1, .refused r) => (F1, A1, [.refused r])
+    | (F1, A1, o) =>
+      let r := appendSeq F1 A1 es
+      (r.1, r.2.1, o :: r.2.2)
+
+/-- `appendMany` (WP-10 step A): one guarded section and one flush for a batch. Each row passes `append`'s rules in
+order; the fence is checked at the batch's first write only (`checked` after it), because this appender's own write
+keeps its view current. A refused row ends the batch; the rows before it stay written. -/
+def appendBatchFrom (checked : Bool) : File → App → List Row → File × App × List Outcome
+  | F, A, [] => (F, A, [])
+  | F, A, e :: es =>
+    if A.fenced then (F, A, [.refused .fenced])
+    else if e.invalid then (F, A, [.refused .invalid])
+    else
+      match A.red.prepare e with
+      | .error r => (F, A, [.refused r])
+      | .ok none =>
+        let r := appendBatchFrom checked F A es
+        (r.1, r.2.1, .duplicate :: r.2.2)
+      | .ok (some R') =>
+        if checked || current F A then
+          let r := appendBatchFrom true { lines := F.lines ++ [.row e], torn := 0 }
+            { A with red := R', view := A.view ++ [e], lines := A.lines + 1, torn := 0 } es
+          (r.1, r.2.1, .appended :: r.2.2)
+        else (F, { A with fenced := true }, [.refused .fenced])
+
+/-- `appendMany` over a batch, before its first write. -/
+def appendBatch (F : File) (A : App) (es : List Row) : File × App × List Outcome := appendBatchFrom false F A es
+
+/-- Pipelined writes (WP-10 step B): batches written one after another with no flush between them (storage `write`
+without `sync`). The synced watermark stays at the file this starts from, where the last `sync` left it; the rows
+after it are in order, and become durable together at the next `sync`. -/
+def appendPiped : File → App → List (List Row) → File × App
+  | F, A, [] => (F, A)
+  | F, A, b :: bs =>
+    let r := appendBatch F A b
+    appendPiped r.1 r.2.1 bs
+
+/-- A crash with rows past the synced watermark: the file as it stood after any row written since the last `sync`
+(the whole batches `pre`, then `k` rows of the next batch `b`), whole or with a torn fragment after it. Nothing before
+the watermark is lost, because `sync` returned for it. -/
+inductive PipedCrash (F : File) (A : App) (bs : List (List Row)) : File → Prop
+  | at_ (pre : List (List Row)) (b : List Row) (post : List (List Row)) (k : Nat) :
+      bs = pre ++ b :: post →
+      PipedCrash F A bs (appendBatch (appendPiped F A pre).1 (appendPiped F A pre).2 (b.take k)).1
+  | torn (pre : List (List Row)) (b : List Row) (post : List (List Row)) (k : Nat) :
+      bs = pre ++ b :: post →
+      PipedCrash F A bs (appendBatch (appendPiped F A pre).1 (appendPiped F A pre).2 (b.take k)).1.tear
+
 /-- One read's answer: a batch, or a refusal (`ahead` is `cursor-ahead`, else `identity-mismatch`). -/
 inductive Answer where
   | batch (cursor next finish : Nat) (events : List Row)

@@ -1,5 +1,6 @@
 import { sign } from 'node:crypto';
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import { Agent } from 'undici';
 import { isModelListEntryEnabled, modelList } from '#models/model.constants.js';
 import type { ModelProviderWire } from '#model-invocation.types.js';
 import type { Model } from '@taucad/chat/model-catalog';
@@ -289,6 +290,29 @@ export const vertexUpstreamBody = (body: unknown): unknown => {
   return { ...body, messages: rewritten };
 };
 
+/**
+ * Supplier connections stay open between model steps (chat performance WP-05, server audit S-07).
+ *
+ * Node's built-in fetch keeps an idle connection about 4 s unless the server hints longer, and the steps of a
+ * turn are a median 4.8 s apart, so most steps after a tool call paid a new TCP and TLS handshake to the
+ * supplier. One process-wide agent, so every route to an origin shares its sockets; 60 s covers a tool call
+ * and a human's quick reply, and a server's own shorter hint still wins.
+ */
+export const supplierConnectionAgent = new Agent({
+  keepAliveTimeout: 60_000,
+  keepAliveMaxTimeout: 120_000,
+});
+
+/**
+ * `fetch` through {@link supplierConnectionAgent}: the default transport for every supplier request.
+ *
+ * @param input - The request target.
+ * @param init - The request options.
+ * @returns The supplier's response.
+ */
+export const supplierFetch: typeof fetch = async (input, init) =>
+  fetch(input, { ...init, dispatcher: supplierConnectionAgent } as RequestInit);
+
 export const executeGatewayProviderRequest = async (input: {
   readonly config: GatewayConfig;
   readonly providerId: ProviderTargetId;
@@ -297,7 +321,7 @@ export const executeGatewayProviderRequest = async (input: {
   readonly signal: AbortSignal;
   readonly fetch?: typeof fetch;
 }): Promise<Response> => {
-  const fetchOnce = input.fetch ?? globalThis.fetch.bind(globalThis);
+  const fetchOnce = input.fetch ?? supplierFetch;
   const target = providerTargets[input.providerId];
   const configured = input.config.get(target.key);
   if (localProviderIds.has(input.providerId)) {

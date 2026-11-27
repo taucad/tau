@@ -1,17 +1,29 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, Suspense, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useSelector } from '@xstate/react';
+import type { ActorRefFrom } from 'xstate';
 import type { Rendering } from '@taucad/runtime';
 import { annotationLimits } from '@taucad/chat/annotations';
 import type { AnnotationCamera, AnnotationComment, MessageAnnotations } from '@taucad/chat/annotations';
 import { attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
-import { Button } from '@taucad/ui/components/button';
-import { Popover, PopoverAnchor, PopoverContent } from '@taucad/ui/components/popover';
 import { toast } from '@taucad/ui/components/sonner';
 import { randomUuid } from '@taucad/utils/id';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 import { CommentPinsProvider, useCommentPins } from '@taucad/viewer/cad/comment-pins';
 import type { CommentPinsHost, CommentSurfacePick, ViewerCommentPin } from '@taucad/viewer/cad/comment-pins';
-import { useOptionalGraphics } from '@taucad/viewer/hooks/use-graphics';
-import { partLabelOf, placePin, removeComments, setCommentText } from '#components/comments/draft-comments.js';
+import { getGraphicsCameraState } from '@taucad/viewer/graphics/graphics-camera';
+import { useOptionalGraphics, useOptionalGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
+import { selectPresentedGeometryKey } from '@taucad/viewer/machines/graphics.machine';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import {
+  isAnyPinOutOfFrame,
+  movePin,
+  outdatedComments,
+  placePin,
+  removeComments,
+  setCommentText,
+} from '#components/comments/draft-comments.js';
+import type { PinPlacement } from '#components/comments/draft-comments.js';
+import { useShownComments } from '#components/comments/shown-comments.js';
 import { useFeatureState } from '#flags/use-feature.js';
 import { useOptionalChatComposer } from '#hooks/active-chat-provider.js';
 import { useCad } from '#hooks/use-cad.js';
@@ -31,6 +43,8 @@ import { attachmentModelForExecution } from '#utils/chat.utils.js';
  * stage, draws each pin's numbered head and the card its comment is written in.
  */
 
+type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
+
 /** Which model a viewer shows: a pin belongs to the viewer that shows the model it was placed on. */
 type ViewerScope = Readonly<{
   entryPath: string;
@@ -38,7 +52,7 @@ type ViewerScope = Readonly<{
   instance: string | undefined;
 }>;
 
-type ViewerCommentsValue = Readonly<{
+export type ViewerCommentsValue = Readonly<{
   /** The draft's comments pinned on this viewer's model. */
   comments: readonly AnnotationComment[];
   /** The comment whose card is open. */
@@ -48,7 +62,24 @@ type ViewerCommentsValue = Readonly<{
   close: () => void;
   setText: (number: number, text: string) => void;
   remove: (number: number) => void;
+  /** Moves a draft pin to the surface picked under it (charter D14). */
+  move: (number: number, pick: CommentSurfacePick) => void;
+  /** The pin the next click on the model moves, after its card's Move. */
+  movingNumber: number | undefined;
+  startMove: (number: number) => void;
+  /** The pins are a sent message's or an open edit's: shown here, changed elsewhere. */
+  isReadOnly: boolean;
+  /** Ends the look at a sent message's comments, when that is what the viewer shows. */
+  hideShown: (() => void) | undefined;
+  /** The comments whose model has changed since their picture was taken (charter I5). */
+  outdated: ReadonlySet<number>;
 }>;
+
+/* The heads and cards, loaded when the viewer first has a comment: most viewers never do. */
+const CommentHeads = lazyCode(async () => {
+  const module = await import('#components/comments/comment-heads.js');
+  return { default: module.CommentHeads };
+});
 
 const ViewerCommentsContext = createContext<ViewerCommentsValue | undefined>(undefined);
 
@@ -79,6 +110,28 @@ const scopedComments = (
 /** The camera as the annotations record keeps it: plain JSON. */
 const cameraRecord = (pick: CommentSurfacePick): AnnotationCamera => structuredClone(pick.camera) as AnnotationCamera;
 
+/** A surface pick as a pin's placement: where, what the viewer showed, and the picture it would take. */
+const placementOf = (pick: CommentSurfacePick, graphicsRef: GraphicsActorRef, scope: ViewerScope): PinPlacement => {
+  const [width, height] = pinPictureSize(pick.camera.aspect);
+  return {
+    point: [...pick.point],
+    normal: [...pick.normal],
+    ...(pick.componentId === undefined
+      ? {}
+      : { part: { componentId: pick.componentId, label: pick.componentLabel ?? '' } }),
+    camera: cameraRecord(pick),
+    scene: {
+      path: scope.entryPath,
+      ...(scope.kernelView === undefined ? {} : { kernelView: scope.kernelView }),
+      ...(scope.instance === undefined ? {} : { instance: scope.instance }),
+      revision: pick.geometryKey,
+      scene: presentedSceneHash(graphicsRef),
+    },
+    size: { width, height },
+    newImageId: randomUuid(),
+  };
+};
+
 type ViewerCommentsProps = ViewerScope &
   Readonly<{
     /** Comment pins are offered here: the editor's own viewer, not a shared one. */
@@ -106,13 +159,25 @@ export function ViewerComments({
   const isFlagOn = useFeatureState('commentPins') === 'on';
   const composer = useOptionalChatComposer();
   const draftRef = composer?.draftActorRef;
-  const annotations = useSelector(draftRef, (state) => state?.context.draftAnnotations);
+  /*
+   * One set of numbers at a time (charter D18). An open edit's pins come first, then a sent message's the person asked
+   * to see, then the new message's own. Only the last can be changed from the viewer.
+   */
+  const isEditing = useSelector(draftRef, (state) => state?.context.activeEditMessageId !== undefined);
+  const draft = useSelector(draftRef, (state) => state?.context.draftAnnotations);
+  const edited = useSelector(draftRef, (state) => state?.context.editDraftAnnotations);
+  const shownComments = useShownComments();
+  const shown = isEditing ? undefined : shownComments?.shown;
+  const hideShown = shownComments?.hide;
+  const annotations = isEditing ? edited : (shown?.annotations ?? draft);
+  const isReadOnly = isEditing || shown !== undefined;
   const attachments = useSelector(draftRef, (state) => state?.context.draftAttachments);
   const graphicsRef = useOptionalGraphics();
   const cadRef = useCad();
   const { projectRef } = useProject();
   const imageService = useOptionalHeadlessImageService();
   const [openNumber, setOpenNumber] = useState<number>();
+  const [movingNumber, setMovingNumber] = useState<number>();
   const model = composer ? attachmentModelForExecution(composer.execution.execution, composer.model.model) : undefined;
   const isEnabled =
     isOffered &&
@@ -125,6 +190,31 @@ export function ViewerComments({
 
   const scope = useMemo(() => ({ entryPath, kernelView, instance }), [entryPath, instance, kernelView]);
   const comments = useMemo(() => scopedComments(annotations, scope), [annotations, scope]);
+  const geometryKey = useOptionalGraphicsSelector(selectPresentedGeometryKey, '');
+  const outdated = useMemo(
+    () => outdatedComments(annotations, comments, geometryKey),
+    [annotations, comments, geometryKey],
+  );
+
+  /*
+   * Showing a sent message's comments never turns the camera. Only when one of its pins is out of the frame is the
+   * model fitted, which keeps the direction the person is looking from. It runs in the person's click on Show.
+   */
+  const reveal = useCallback(
+    (next: MessageAnnotations): void => {
+      const camera = graphicsRef && !isEditing ? getGraphicsCameraState(graphicsRef) : undefined;
+      if (
+        graphicsRef &&
+        camera &&
+        isAnyPinOutOfFrame(structuredClone(camera) as AnnotationCamera, scopedComments(next, scope))
+      ) {
+        graphicsRef.send({ type: 'fitView' });
+      }
+    },
+    [graphicsRef, isEditing, scope],
+  );
+  const addViewer = shownComments?.addViewer;
+  useEffect(() => addViewer?.(reveal), [addViewer, reveal]);
   const pins = useMemo<readonly ViewerCommentPin[]>(
     () =>
       comments.flatMap((comment) =>
@@ -174,41 +264,88 @@ export function ViewerComments({
     [cadRef, captureRendering, draftRef, entryPath, graphicsRef, imageService, model, projectRef],
   );
 
-  const handlePlace = useCallback(
-    (pick: CommentSurfacePick): void => {
-      if (!draftRef || !graphicsRef) {
+  /** Drops the draft's tiles for pictures the record no longer has, the highest index first so none shifts. */
+  const dropTiles = useCallback(
+    (urls: readonly string[]): void => {
+      const indices = urls
+        .map((url) => (attachments ?? []).findIndex((attachment) => attachmentUrl(attachment) === url))
+        .filter((index) => index !== -1)
+        .toSorted((a, b) => b - a);
+      for (const index of indices) {
+        draftRef?.send({ type: 'removeDraftAttachment', index });
+      }
+    },
+    [attachments, draftRef],
+  );
+
+  const move = useCallback(
+    (number: number, pick: CommentSurfacePick): void => {
+      if (!draftRef || !graphicsRef || !draft || isReadOnly) {
         return;
       }
-      if ((annotations?.comments.length ?? 0) >= annotationLimits.comments) {
+      const moved = movePin(draft, number, placementOf(pick, graphicsRef, scope));
+      if (!moved) {
+        return;
+      }
+      if (moved.annotations.images.length > annotationLimits.images) {
+        toast.error(`A message holds up to ${annotationLimits.images} commented pictures. Move from an earlier view.`);
+        return;
+      }
+      // Tiles go first: removing a tile drops its image, and the record set next has none of the dropped ones.
+      dropTiles([
+        ...moved.orphanedAttachments,
+        ...(moved.retakenAttachment === undefined ? [] : [moved.retakenAttachment]),
+      ]);
+      draftRef.send({ type: 'setDraftAnnotations', annotations: moved.annotations });
+      if (moved.needsPicture) {
+        void takePicture(moved.imageId, pick);
+      }
+    },
+    [draft, draftRef, dropTiles, graphicsRef, isReadOnly, scope, takePicture],
+  );
+
+  const startMove = useCallback(
+    (number: number): void => {
+      if (!graphicsRef || isReadOnly) {
+        return;
+      }
+      setOpenNumber(undefined);
+      setMovingNumber(number);
+      // The next click on the model is the pin's new place, so the Comment tool takes it.
+      graphicsRef.send({ type: 'setCommentActive', payload: true });
+    },
+    [graphicsRef, isReadOnly],
+  );
+
+  const handlePlace = useCallback(
+    (pick: CommentSurfacePick): void => {
+      // An edit's pins are shown, not changed, from the viewer: the edit closes when the person turns to it.
+      if (!draftRef || !graphicsRef || isEditing) {
+        return;
+      }
+      // Pinning again ends the look at an earlier message's comments: the new pin joins the new message.
+      hideShown?.();
+      if ((draft?.comments.length ?? 0) >= annotationLimits.comments) {
         toast.error(`A message holds up to ${annotationLimits.comments} comments.`);
         return;
       }
-      const [width, height] = pinPictureSize(pick.camera.aspect);
-      const placed = placePin(annotations, {
-        point: [...pick.point],
-        normal: [...pick.normal],
-        ...(pick.componentId === undefined
-          ? {}
-          : {
-              part: {
-                componentId: pick.componentId,
-                label: pick.componentLabel ?? '',
-              },
-            }),
-        camera: cameraRecord(pick),
-        scene: {
-          path: entryPath,
-          ...(kernelView === undefined ? {} : { kernelView }),
-          ...(instance === undefined ? {} : { instance }),
-          revision: pick.geometryKey,
-          scene: presentedSceneHash(graphicsRef),
-        },
-        size: { width, height },
-        newImageId: randomUuid(),
-      });
+      if (movingNumber !== undefined) {
+        setMovingNumber(undefined);
+        move(movingNumber, pick);
+        return;
+      }
+      const placed = placePin(draft, placementOf(pick, graphicsRef, scope));
       if (placed.annotations.images.length > annotationLimits.images) {
         toast.error(`A message holds up to ${annotationLimits.images} commented pictures. Pin from an earlier view.`);
         return;
+      }
+      // A retaken picture's old tile goes first: removing a tile drops its image, and the record set next has none.
+      const retakenIndex =
+        placed.retakenAttachment === undefined
+          ? -1
+          : (attachments ?? []).findIndex((attachment) => attachmentUrl(attachment) === placed.retakenAttachment);
+      if (retakenIndex !== -1) {
+        draftRef.send({ type: 'removeDraftAttachment', index: retakenIndex });
       }
       draftRef.send({
         type: 'setDraftAnnotations',
@@ -219,15 +356,15 @@ export function ViewerComments({
         void takePicture(placed.imageId, pick);
       }
     },
-    [annotations, draftRef, entryPath, graphicsRef, instance, kernelView, takePicture],
+    [attachments, draft, draftRef, graphicsRef, hideShown, isEditing, move, movingNumber, scope, takePicture],
   );
 
   const remove = useCallback(
     (number: number): void => {
-      if (!draftRef || !annotations) {
+      if (!draftRef || !draft || isReadOnly) {
         return;
       }
-      const removed = removeComments(annotations, (comment) => comment.number === number);
+      const removed = removeComments(draft, (comment) => comment.number === number);
       draftRef.send({
         type: 'setDraftAnnotations',
         annotations: removed.annotations,
@@ -241,93 +378,91 @@ export function ViewerComments({
       }
       setOpenNumber((current) => (current === number ? undefined : current));
     },
-    [annotations, attachments, draftRef],
+    [attachments, draft, draftRef, isReadOnly],
   );
 
   const close = useCallback((): void => {
     const comment = comments.find(({ number }) => number === openNumber);
-    if (comment?.text.trim() === '') {
+    if (!isReadOnly && comment?.text.trim() === '') {
       remove(comment.number);
     }
     setOpenNumber(undefined);
-  }, [comments, openNumber, remove]);
+  }, [comments, isReadOnly, openNumber, remove]);
 
   const setText = useCallback(
     (number: number, text: string): void => {
-      if (draftRef && annotations) {
+      if (draftRef && draft && !isReadOnly) {
         draftRef.send({
           type: 'setDraftAnnotations',
-          annotations: setCommentText(annotations, number, text),
+          annotations: setCommentText(draft, number, text),
         });
       }
     },
-    [annotations, draftRef],
+    [draft, draftRef, isReadOnly],
   );
 
+  // A move started from a card ends at the next click: on nothing, or Escape, the pin stays where it was.
+  useEffect(() => {
+    if (movingNumber === undefined) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setMovingNumber(undefined);
+      }
+    };
+    globalThis.addEventListener('keydown', onKey);
+    return () => {
+      globalThis.removeEventListener('keydown', onKey);
+    };
+  }, [movingNumber]);
+  const cancelMove = useCallback((): void => {
+    setMovingNumber(undefined);
+  }, []);
+
   const host = useMemo<CommentPinsHost | undefined>(
-    () => (isEnabled ? { pins, onPlace: handlePlace } : undefined),
-    [handlePlace, isEnabled, pins],
+    () => (isEnabled ? { pins, onPlace: handlePlace, onMiss: cancelMove } : undefined),
+    [cancelMove, handlePlace, isEnabled, pins],
   );
   const value = useMemo<ViewerCommentsValue | undefined>(
-    () => (isEnabled ? { comments, openNumber, open: setOpenNumber, close, setText, remove } : undefined),
-    [close, comments, isEnabled, openNumber, remove, setText],
+    () =>
+      isEnabled
+        ? {
+            comments,
+            openNumber,
+            open: setOpenNumber,
+            close,
+            setText,
+            remove,
+            move,
+            movingNumber,
+            startMove,
+            isReadOnly,
+            hideShown: shown === undefined ? undefined : hideShown,
+            outdated,
+          }
+        : undefined,
+    [
+      close,
+      comments,
+      hideShown,
+      isEnabled,
+      isReadOnly,
+      move,
+      movingNumber,
+      openNumber,
+      outdated,
+      remove,
+      setText,
+      shown,
+      startMove,
+    ],
   );
 
   return (
     <ViewerCommentsContext.Provider value={value}>
       <CommentPinsProvider host={host}>{children}</CommentPinsProvider>
     </ViewerCommentsContext.Provider>
-  );
-}
-
-const headClass =
-  'pointer-events-auto absolute top-0 left-0 flex size-6 items-center justify-center rounded-full border-2 border-white bg-markup-ink text-xs font-semibold text-white shadow-sm outline-none focus-visible:focus-outline data-[occluded=true]:opacity-40';
-
-function CommentCard({
-  comment,
-  onText,
-  onRemove,
-  onDone,
-}: {
-  readonly comment: AnnotationComment;
-  readonly onText: (text: string) => void;
-  readonly onRemove: () => void;
-  readonly onDone: () => void;
-}): React.JSX.Element {
-  return (
-    <div className='flex flex-col gap-2' data-comment-ui=''>
-      <div className='flex items-center gap-2'>
-        <span className='flex size-5 shrink-0 items-center justify-center rounded-full bg-markup-ink text-xs font-semibold text-white'>
-          {comment.number}
-        </span>
-        <span className='min-w-0 flex-1 truncate text-xs text-muted-foreground'>
-          {partLabelOf(comment) ?? 'Comment'}
-        </span>
-        <Button variant='ghost' size='sm' onClick={onRemove}>
-          Remove
-        </Button>
-      </div>
-      <textarea
-        // oxlint-disable-next-line jsx-a11y/no-autofocus -- the card opens from the person's own click, to be typed in.
-        autoFocus
-        rows={3}
-        maxLength={annotationLimits.commentCharacters}
-        value={comment.text}
-        aria-label={`Comment ${comment.number}`}
-        placeholder='What should change here?'
-        className='w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none focus-visible:focus-outline'
-        onChange={(event) => {
-          onText(event.target.value);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            onDone();
-          }
-        }}
-      />
-      <p className='text-xs text-muted-foreground'>Sent with your next message. Enter to finish.</p>
-    </div>
   );
 }
 
@@ -343,60 +478,9 @@ export function ViewerCommentHeads(): React.JSX.Element | undefined {
   if (!value || !pins || value.comments.length === 0) {
     return undefined;
   }
-  const { comments, openNumber, open, close, setText, remove } = value;
   return (
-    <div className='pointer-events-none absolute inset-0 z-10' data-comment-ui=''>
-      {comments.map((comment) => {
-        const id = pinId(comment.number);
-        const isOpen = comment.number === openNumber;
-        const head = (
-          <button
-            ref={(element) => {
-              pins.heads.register(id, element ?? undefined);
-            }}
-            type='button'
-            data-comment-ui=''
-            aria-label={`Comment ${comment.number}${comment.text ? `: ${comment.text}` : ''}`}
-            aria-expanded={isOpen}
-            className={headClass}
-            style={{ visibility: 'hidden' }}
-            onClick={() => {
-              if (isOpen) {
-                close();
-              } else {
-                open(comment.number);
-              }
-            }}
-          >
-            {comment.number}
-          </button>
-        );
-        return (
-          <Popover
-            key={id}
-            open={isOpen}
-            onOpenChange={(next) => {
-              if (!next && isOpen) {
-                close();
-              }
-            }}
-          >
-            <PopoverAnchor asChild>{head}</PopoverAnchor>
-            <PopoverContent side='right' align='start' className='w-72 p-3' updatePositionStrategy='always'>
-              <CommentCard
-                comment={comment}
-                onText={(text) => {
-                  setText(comment.number, text);
-                }}
-                onRemove={() => {
-                  remove(comment.number);
-                }}
-                onDone={close}
-              />
-            </PopoverContent>
-          </Popover>
-        );
-      })}
-    </div>
+    <Suspense fallback={null}>
+      <CommentHeads value={value} heads={pins.heads} />
+    </Suspense>
   );
 }

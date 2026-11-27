@@ -129,6 +129,37 @@
       "expect": "pass",
       "ref": "W7: M1 with an abstract gateway, charge and proceed (EQ1), lostReplyRetries 1"
     },
+    "ChatRunSlot.target-pipelined.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "WP-10 step B (F-3): pipelined writes with the gateway; the model request waits for its prepared row, a crash keeps any written prefix"
+    },
+    "ChatRunSlot.target-pipelined-commands.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "WP-10 step B (F-3): cancel, interrupt, resume and steer with pipelined writes; AckAfterDurable and NoTransientTerminal hold"
+    },
+    "ChatRunSlot.target-pipelined-placement.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "WP-10 step B (F-3): placement and settlement with pipelined writes; complete, acknowledge and quiescent wait for a flush (AckAfterTurnRow)"
+    },
+    "ChatRunSlot.target-pipelined-extpause.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "WP-10 step B (F-3): an external pause with pipelined writes; a crash between the request and the pause is recovered (orphanRows)"
+    },
+    "ChatRunSlot.liveness-pipelined.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "WP-10 step B (F-3): ResumeAnswered, I35, I15 with the gateway and pipelined writes"
+    },
+    "ChatRunSlot.pipelined-nobarrier-NeverResendKnownAttempt.cfg": {
+      "tier": "pr",
+      "expect": { "violated": "NeverResendKnownAttempt" },
+      "kind": "witness",
+      "ref": "WP-10 step B (F-3): without the dispatch barrier a request leaves, a crash drops its prepared row, and the retry cannot know the attempt"
+    },
     "ChatRunSlot.target-interrupt.cfg": {
       "tier": "pr",
       "expect": "pass",
@@ -1087,7 +1118,7 @@
     {
       "tier": "nightly",
       "expect": "NoError",
-      "ref": "W3 CL-S13, FM-Q12: LogFence IndInv is inductive (three writers, logs of up to six rows, unbounded epochs and view lengths)",
+      "ref": "W3 CL-S13, FM-Q12: LogFence IndInv is inductive (three writers, logs of up to six rows, batch writes of up to four rows, unbounded epochs and view lengths)",
       "args": ["check", "--cinit=ConstInit", "--init=IndInit", "--inv=IndInv", "--length=1", "MC_LogFence.tla"]
     },
     {

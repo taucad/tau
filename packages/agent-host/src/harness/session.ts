@@ -439,7 +439,7 @@ type CreateTransportStreamOptions = {
   /** The chat's committed turns (I2): each context rides before its user message, frozen (I1). */
   readonly committedTurns?: (() => Promise<readonly CommittedTurnContext[]>) | undefined;
   readonly systemPromptBlocks?: (() => TurnContextSnapshot['systemPromptBlocks']) | undefined;
-  readonly onLiveDelta?: ((event: AgentLiveEventPayload) => void | Promise<void>) | undefined;
+  readonly onLiveDelta?: ((event: AgentLiveEventPayload) => void) | undefined;
   readonly prestartTool?:
     // eslint-disable-next-line max-params -- The hook mirrors Pi's streamed tool-call lifecycle.
     | ((
@@ -467,6 +467,8 @@ type CreateTransportStreamOptions = {
   readonly kernel?: (() => string | undefined) | undefined;
   /** E9: the longest silence between transport events before the call fails `MODEL_STREAM_STALLED`. */
   readonly stallBound?: StreamStallBound | undefined;
+  /** WP-10 step B: resolves once every row written so far is durable; the request is sent only after it. */
+  readonly durable?: (() => Promise<void>) | undefined;
 };
 
 /** The timers a stall bound runs on: an actor's clock, so the incarnation's (or a `StepClock`) fits. @public */
@@ -746,6 +748,13 @@ export const createTransportStreamFunction =
       let terminalReason: StopReason | undefined;
       let transportMetadata: ProviderMessageMetadata | undefined;
       let invocationMetadata: ProviderMessageMetadata | undefined;
+      /*
+       * WP-10 step A item 3: the attempt's `model.invocation-bound` row, queued in order when the gateway answers and
+       * awaited before the attempt's message settles, not before the body's first read. The ledger needs only prepared
+       * before bound (`chat-ledger.ts`, `reducer.ts`); a crash before it lands leaves a prepared attempt, which the next
+       * generation step resolves by its deterministic key, as it resolves any attempt whose reply was lost.
+       */
+      let bound: Promise<Error | undefined> | undefined;
       let usageSettled = false;
       const reasoningTimings = new Map<number, { startedAtMs: number; endedAt?: number }>();
       output.push({ type: 'start', partial });
@@ -785,13 +794,13 @@ export const createTransportStreamFunction =
         partial = { ...partial, content };
       };
 
-      const closeLegacyActive = async (): Promise<void> => {
+      const closeLegacyActive = (): void => {
         if (!legacyActive) {
           return;
         }
         const block = partial.content[legacyActive.index];
         if (legacyActive.kind === 'text' && block?.type === 'text') {
-          await options.onLiveDelta?.({
+          options.onLiveDelta?.({
             type: 'text-end',
             messageId,
             contentIndex: legacyActive.index,
@@ -805,7 +814,7 @@ export const createTransportStreamFunction =
           });
         } else if (legacyActive.kind === 'thinking' && block?.type === 'thinking') {
           const timestamp = endReasoning(legacyActive.index);
-          await options.onLiveDelta?.({
+          options.onLiveDelta?.({
             type: 'thinking-end',
             messageId,
             contentIndex: legacyActive.index,
@@ -845,6 +854,10 @@ export const createTransportStreamFunction =
         const kernel = options.kernel?.();
         signal.throwIfAborted();
         const documents = options.documents?.();
+        /* WP-10 step B, the dispatch barrier: the prepared row, and every row before it, is durable before the request
+         * leaves (ChatRunSlot.tla `dispatch`; without it a crash can lose a sent attempt's record). */
+        await options.durable?.();
+        signal.throwIfAborted();
         /* The transport's own signal: pi's abort reaches it, and so does the stall bound's. */
         const request = new AbortController();
         const forward = (): void => {
@@ -863,7 +876,8 @@ export const createTransportStreamFunction =
                   invocationMetadata = {
                     tauInternal: { kind: 'billing-invocation', attemptId, operationId: binding.operationId },
                   };
-                  await options.bindInvocation?.(attemptId, invocationMetadata);
+                  /* Its failure is read below, after the stream, so it never goes unhandled meanwhile. */
+                  bound = failureOf(options.bindInvocation?.(attemptId, invocationMetadata));
                 },
               }
             : {}),
@@ -900,7 +914,7 @@ export const createTransportStreamFunction =
           }
           if (event.type === 'text-start') {
             updateBlock(event.contentIndex, { type: 'text', text: '' });
-            await options.onLiveDelta?.({
+            options.onLiveDelta?.({
               type: 'text-start',
               messageId,
               contentIndex: event.contentIndex,
@@ -914,14 +928,14 @@ export const createTransportStreamFunction =
               if (legacyActive?.kind === 'text') {
                 index = legacyActive.index;
               } else {
-                await closeLegacyActive();
+                closeLegacyActive();
                 index = partial.content.length;
                 legacyActive = { kind: 'text', index };
               }
             }
             if (partial.content[index]?.type !== 'text') {
               updateBlock(index, { type: 'text', text: '' });
-              await options.onLiveDelta?.({ type: 'text-start', messageId, contentIndex: index });
+              options.onLiveDelta?.({ type: 'text-start', messageId, contentIndex: index });
               output.push({ type: 'text_start', contentIndex: index, partial });
             }
             const block = partial.content[index];
@@ -930,7 +944,7 @@ export const createTransportStreamFunction =
                 ...block,
                 text: block.text + event.text,
               });
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'text-delta',
                 messageId,
                 contentIndex: index,
@@ -951,7 +965,7 @@ export const createTransportStreamFunction =
               throw new Error(`Model transport ended missing text block ${event.contentIndex}.`);
             }
             updateBlock(event.contentIndex, { ...block, text: event.content });
-            await options.onLiveDelta?.({
+            options.onLiveDelta?.({
               type: 'text-end',
               messageId,
               contentIndex: event.contentIndex,
@@ -968,7 +982,7 @@ export const createTransportStreamFunction =
           if (event.type === 'thinking-start') {
             updateBlock(event.contentIndex, { type: 'thinking', thinking: '' });
             const timestamp = startReasoning(event.contentIndex);
-            await options.onLiveDelta?.({
+            options.onLiveDelta?.({
               type: 'thinking-start',
               messageId,
               contentIndex: event.contentIndex,
@@ -983,7 +997,7 @@ export const createTransportStreamFunction =
               if (legacyActive?.kind === 'thinking') {
                 index = legacyActive.index;
               } else {
-                await closeLegacyActive();
+                closeLegacyActive();
                 index = partial.content.length;
                 legacyActive = { kind: 'thinking', index };
               }
@@ -994,7 +1008,7 @@ export const createTransportStreamFunction =
                 thinking: '',
               });
               const timestamp = startReasoning(index);
-              await options.onLiveDelta?.({ type: 'thinking-start', messageId, contentIndex: index, timestamp });
+              options.onLiveDelta?.({ type: 'thinking-start', messageId, contentIndex: index, timestamp });
               output.push({
                 type: 'thinking_start',
                 contentIndex: index,
@@ -1007,7 +1021,7 @@ export const createTransportStreamFunction =
                 ...block,
                 thinking: block.thinking + event.text,
               });
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'thinking-delta',
                 messageId,
                 contentIndex: index,
@@ -1029,7 +1043,7 @@ export const createTransportStreamFunction =
             }
             updateBlock(event.contentIndex, { ...block, thinking: event.content });
             const timestamp = endReasoning(event.contentIndex);
-            await options.onLiveDelta?.({
+            options.onLiveDelta?.({
               type: 'thinking-end',
               messageId,
               contentIndex: event.contentIndex,
@@ -1069,7 +1083,7 @@ export const createTransportStreamFunction =
                 arguments: {},
               };
               updateBlock(contentIndex, block);
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'tool-input-start',
                 messageId,
                 contentIndex,
@@ -1079,7 +1093,7 @@ export const createTransportStreamFunction =
               output.push({ type: 'toolcall_start', contentIndex, partial });
             }
             if (event.type === 'tool-input-delta') {
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'tool-input-delta',
                 messageId,
                 contentIndex,
@@ -1097,7 +1111,7 @@ export const createTransportStreamFunction =
             continue;
           }
           if (event.type === 'tool-input') {
-            await closeLegacyActive();
+            closeLegacyActive();
             const existingIndex = partial.content.findIndex(
               (block) => block.type === 'toolCall' && block.id === event.toolCallId,
             );
@@ -1112,7 +1126,7 @@ export const createTransportStreamFunction =
             };
             if (existing?.type !== 'toolCall') {
               updateBlock(contentIndex, { ...toolCall, arguments: {} });
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'tool-input-start',
                 messageId,
                 contentIndex,
@@ -1121,7 +1135,7 @@ export const createTransportStreamFunction =
               });
               output.push({ type: 'toolcall_start', contentIndex, partial });
               const delta = JSON.stringify(event.input);
-              await options.onLiveDelta?.({
+              options.onLiveDelta?.({
                 type: 'tool-input-delta',
                 messageId,
                 contentIndex,
@@ -1132,7 +1146,7 @@ export const createTransportStreamFunction =
               output.push({ type: 'toolcall_delta', contentIndex, delta, partial });
             }
             updateBlock(contentIndex, toolCall);
-            await options.onLiveDelta?.({
+            options.onLiveDelta?.({
               type: 'tool-input-end',
               messageId,
               contentIndex,
@@ -1154,8 +1168,12 @@ export const createTransportStreamFunction =
             usageSettled = true;
             continue;
           }
-          await closeLegacyActive();
+          closeLegacyActive();
           terminalReason = event.stopReason;
+        }
+        const unbound = await bound;
+        if (unbound !== undefined) {
+          throw unbound;
         }
         if (terminalReason === undefined) {
           throw new Error('Model transport ended without a completed event.');
@@ -1198,7 +1216,9 @@ export const createTransportStreamFunction =
         if (invocationMetadata) {
           transportMetadata = { ...transportMetadata, ...invocationMetadata };
         }
-        await closeLegacyActive();
+        /* The bound row lands before the failed attempt's message does; the stream's own failure is the one told. */
+        await bound;
+        closeLegacyActive();
         const reason = signal.aborted ? 'aborted' : 'error';
         const diagnostic = createTransportFailureDiagnostic(error, Date.now());
         const failure: AssistantMessage = {
@@ -1226,6 +1246,21 @@ export const createTransportStreamFunction =
     return output;
   };
 
+/**
+ * What a pending write failed with, if it failed, as a promise that never rejects.
+ *
+ * @param pending - The write.
+ * @returns Its failure, or `undefined` once it landed.
+ */
+const failureOf = async (pending: Promise<void> | undefined): Promise<Error | undefined> => {
+  try {
+    await pending;
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+};
+
 const asMiddleware =
   (wrap: (base: StreamFn) => StreamFn): ModelCallMiddleware =>
   async (request, next) =>
@@ -1248,6 +1283,7 @@ const compactionModelsWithTransport = (options: {
   readonly runAttemptId?: CreateTransportStreamOptions['runAttemptId'];
   readonly bindInvocation?: CreateTransportStreamOptions['bindInvocation'];
   readonly kernel?: CreateTransportStreamOptions['kernel'];
+  readonly durable?: CreateTransportStreamOptions['durable'];
   /** The session's side table, so a summarised document keeps its name (P32). */
   readonly documents: () => ReadonlyMap<string, MaterializedDocument>;
 }): Models => {
@@ -1267,6 +1303,9 @@ const compactionModelsWithTransport = (options: {
         signal.throwIfAborted();
         const documents = options.documents();
         const kernel = options.kernel?.();
+        /* The dispatch barrier, as for a generation call. */
+        await options.durable?.();
+        signal.throwIfAborted();
         const stream = options.transport.stream({
           attemptId,
           ...(options.chatId === undefined ? {} : { chatId: options.chatId }),
@@ -1408,6 +1447,13 @@ export type CreateAgentSessionOptions = {
    * is correct only while it is the log's one writer.
    */
   readonly appendEvent?: ((event: SessionLogEvent) => Promise<void>) | undefined;
+  /** The owner's writer for rows that go together, with `appendEvent` (WP-10): one write and one flush. */
+  readonly appendEvents?: ((events: readonly SessionLogEvent[]) => Promise<void>) | undefined;
+  /**
+   * WP-10 step B: resolves once every row the owner's writer took is durable, where that writer answers before (its rows'
+   * order fixed). A model request, a tool's start and the attempt's outcome each wait for it; a rejection fails them.
+   */
+  readonly durable?: (() => Promise<void>) | undefined;
   readonly clientContext?: ClientContext | undefined;
   readonly recentSkills?: RecentSkillsPort | undefined;
   readonly substituteToolResult?: ToolResultSubstituter | undefined;
@@ -1587,6 +1633,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     createId,
     now: () => now().toISOString(),
     ...(options.appendEvent ? { append: options.appendEvent } : {}),
+    ...(options.appendEvents ? { appendAll: options.appendEvents } : {}),
     ...(writeChatAttachment === undefined
       ? {}
       : {
@@ -1803,6 +1850,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         }
         return settled.value;
       }
+      /* WP-10 step B: the call's rows are durable before the tool acts. */
+      await options.durable?.();
       return tool.execute(toolCallId, input, signal, onUpdate);
     },
   }));
@@ -1976,6 +2025,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     documents: () => documents,
     runAttemptId,
     ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
+    durable: options.durable,
     committedContext: () => committedContext,
     committedTurns: async () => committedTurnContexts(await record.rows()),
     turnLabels,
@@ -2016,12 +2066,6 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           tauInternal: { kind: 'stream-checkpoint', ...provider.metadata?.tauInternal, streamState: 'checkpoint' },
         },
       };
-      await record.append(
-        committedMessageIds.has(messageId)
-          ? { type: 'message.envelope-replaced', messageId, replacement: assistant }
-          : { type: 'message.appended', message: assistant },
-      );
-      committedMessageIds.add(messageId);
       const inputId = toolInputIds.get(toolCall.id) ?? createId();
       toolInputIds.set(toolCall.id, inputId);
       const inputMessage = toolInputToProvider({
@@ -2030,15 +2074,22 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         toolName: toolCall.name,
         input: normalizeToolInput(toolCall.name, input),
       });
-      await record.append(
+      /* The checkpoint and the tool's input are one batch: one write and one flush before the tool starts (HP-14). */
+      await record.appendAll([
+        committedMessageIds.has(messageId)
+          ? { type: 'message.envelope-replaced', messageId, replacement: assistant }
+          : { type: 'message.appended', message: assistant },
         committedMessageIds.has(inputId)
           ? { type: 'message.envelope-replaced', messageId: inputId, replacement: inputMessage }
           : { type: 'message.appended', message: inputMessage },
-      );
+      ]);
+      committedMessageIds.add(messageId);
       committedMessageIds.add(inputId);
       // async-iife: bootstrap -- eager dispatch must settle without an unhandled rejection before Pi awaits it.
       const result = (async (): Promise<PrestartedToolResult> => {
         try {
+          /* WP-10 step B: the tool's input row is durable before the tool acts. */
+          await options.durable?.();
           const value = await tool.execute(
             toolCall.id,
             input,
@@ -2068,13 +2119,16 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       })();
       prestartedToolResults.set(toolCall.id, { toolName: toolCall.name, result });
     },
+    /* Handed over synchronously, never awaited per delta: the launcher conflates it (WP-08). */
     onLiveDelta: options.onLiveEvent
-      ? async (event) =>
-          options.onLiveEvent?.({
+      ? (event) => {
+          // async-iife: bootstrap -- a live subscriber is a preview and never paces the model stream.
+          void options.onLiveEvent?.({
             ...event,
             chatId: options.chatId,
             runId: options.runId,
-          })
+          });
+        }
       : undefined,
   });
   const agent = new Agent({
@@ -2128,6 +2182,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           runAttemptId,
           ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
           kernel: runKernel,
+          durable: options.durable,
         }),
     settleDiscardedToolCalls: settlePrestartedTools,
     onCompaction: options.onCompaction,
@@ -2309,6 +2364,14 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       }
     } catch (error) {
       outcome = abortRequested ? aborted() : { outcome: 'failed', failure: codedFailure(error) };
+    }
+    /* WP-10 step B: the attempt's rows are durable before its outcome is told; if they cannot be, it did not complete. */
+    try {
+      await options.durable?.();
+    } catch (error) {
+      if (outcome.outcome === 'completed') {
+        outcome = { outcome: 'failed', failure: codedFailure(error) };
+      }
     }
     state = outcome.outcome === 'completed' ? 'completed' : outcome.outcome === 'failed' ? 'failed' : 'cancelled';
     return outcome;

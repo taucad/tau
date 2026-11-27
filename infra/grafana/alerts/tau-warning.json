@@ -582,6 +582,40 @@
       }
     },
     {
+      "uid": "billing-case-unattributed",
+      "title": "P1: Financial Case Without an Account",
+      "condition": "case_unattributed",
+      "data": [
+        {
+          "refId": "case_unattributed",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "max by (app, kind) (tau_billing_open_financial_cases{app=~\".*\",service_name=\"tau-api\",attributed=\"false\",kind!~\"tax_registration_review|supplier_.+\"}) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "case_unattributed"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/operate/refunds-and-financial-cases.md",
+        "summary": "Tier U (billing unattributed case reopen blueprint D7, amending collection gate D5): an open financial case names no Tau account, usually foreign cash (a payment with no Tau customer) or a Stripe read that could not attribute it. No customer is refused anything, so it is a warning, not a page: operator work for business hours, raised at the first evaluation after the hourly gauge write. Run the billing lifecycle `list-cases` with `attributed: false`, then close each row with `resolve-case` (`resolved` for foreign cash); an operator-resolved row stays resolved unless its Stripe source changes. In staging, foreign cash means a test-mode key or drill was used outside staging. tax_registration_review and supplier_* cases never name an account, so they are left to billing-books-overdue-24h (and billing-supplier-invoice-mismatch) instead. Grouped by Fly `app` and case kind."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "billing"
+      }
+    },
+    {
       "uid": "billing-books-overdue-24h",
       "title": "P1: Bookkeeping Case Open for More Than 24 h",
       "condition": "books_overdue",
@@ -607,7 +641,7 @@
       "for": "0s",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/operate/refunds-and-financial-cases.md",
-        "summary": "Tier T3, daily digest (repeat_interval 24h): one of Tau's bookkeeping cases (gross_fee_net_mismatch, refund_unresolved, dispute_balance_transaction, tax_registration_review or a supplier_* kind), attributed or not, has been open for more than 24 h. No customer is refused anything. Run the billing lifecycle `list-cases` and work each row by its owner, next step and deadline. An unattributed row also pages as billing-case-unattributed; billing-supplier-invoice-mismatch still warns on its own. Grouped by Fly `app` and case kind."
+        "summary": "Tier T3, daily digest (repeat_interval 24h): one of Tau's bookkeeping cases (gross_fee_net_mismatch, refund_unresolved, dispute_balance_transaction, tax_registration_review or a supplier_* kind), attributed or not, has been open for more than 24 h. No customer is refused anything. Run the billing lifecycle `list-cases` and work each row by its owner, next step and deadline. An unattributed row also warns as billing-case-unattributed; billing-supplier-invoice-mismatch still warns on its own. Grouped by Fly `app` and case kind."
       },
       "labels": {
         "severity": "warning",

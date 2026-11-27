@@ -2,6 +2,7 @@ import { createAsyncLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, EnqueueObject, SystemRegistry } from 'xstate';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import type { ChatMessageQueueIntent } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
@@ -71,6 +72,8 @@ export type ChatRequest = Readonly<{ command?: HostCommand; queueId?: string }> 
         attachments?: readonly StoredAttachmentRef[];
         /** The edit composer's structured geometry references (blueprint D6). */
         references?: readonly CadReference[];
+        /** The edit's comments and annotated pictures, flattened like a send's; an empty record clears them. */
+        annotations?: MessageAnnotations;
       }
     | { kind: 'continue' }
   );
@@ -101,6 +104,7 @@ export type ChatTurnGesture =
       text: string;
       attachments?: readonly StoredAttachmentRef[];
       references?: readonly CadReference[];
+      annotations?: MessageAnnotations;
     }>
   | Readonly<{ kind: 'regenerate'; execution?: CadAgentExecution; requestId?: string }>
   /**

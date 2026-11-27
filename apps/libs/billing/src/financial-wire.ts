@@ -584,6 +584,16 @@ export const wireOperationReceiptSchema = z.union([
     .strict(),
 ]);
 export type WireOperationReceipt = z.infer<typeof wireOperationReceiptSchema>;
+/** The most operations one receipt batch may name (the usage filters' item bound). @public */
+export const maximumOperationReceiptBatch = 32;
+/**
+ * `GET /v1/billing/operations?operationIds=…`: the receipt for each distinct named operation, in id order, so a
+ * surface that shows many turns reads them in one request (chat performance WP-13 step 6). @public
+ */
+export const wireOperationReceiptBatchSchema = z
+  .object({ receipts: z.array(wireOperationReceiptSchema).max(maximumOperationReceiptBatch) })
+  .strict();
+export type WireOperationReceiptBatch = z.infer<typeof wireOperationReceiptBatchSchema>;
 
 const journalKindSchema = z.enum([
   'deferred_grant',

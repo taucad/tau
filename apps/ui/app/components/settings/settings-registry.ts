@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import {
   createSettingsCatalogue,
   searchSettings as searchCatalogue,
@@ -15,6 +15,7 @@ import { useFeatureState } from '#flags/use-feature.js';
 import { initialDeploymentMode } from '#cloud/deployment-mode.js';
 import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
 
 /*
  * The catalogue itself is pure and lives in `@taucad/settings-ui`. This module owns what this deployment offers:
@@ -103,19 +104,58 @@ const flaggedEntries: ReadonlyMap<string, FeatureFlagName> = new Map<SettingId, 
   ['setup-answers', 'onboarding'],
 ]);
 
+const subscribeToNothing = (): (() => void) => () => undefined;
+
+/**
+ * Whether this host can connect a folder on disk: always on desktop, and on the web only where the File System Access
+ * API exists (Chromium; not Safari, Firefox or Brave by default). The server cannot tell, so it assumes folders, which is
+ * what every desktop build and Chromium browser shows. Kept in this module, which the shell already loads, so the gate
+ * adds no chunk to the critical path (docs/research/remix-home-only-location-blueprint.md, folder-access hazard class).
+ *
+ * @returns Whether folders can be connected here.
+ */
+export const useHasFolderAccess = (): boolean =>
+  useSyncExternalStore(
+    subscribeToNothing,
+    () => directoryPicker().available,
+    () => true,
+  );
+
+/**
+ * Leaves out Workspaces where no folder can be connected (Safari, Brave): its panel would be empty, yet navigation and
+ * search would still lead to it. Read at render, since the host's folder access is known only after hydration.
+ *
+ * @param sections - The sections to gate.
+ * @param hasFolderAccess - Whether this host can connect a folder.
+ * @returns The sections, without Workspaces when folders cannot be connected.
+ */
+export const withFolderAccess = (
+  sections: readonly SettingsSectionDefinition[],
+  hasFolderAccess: boolean,
+): readonly SettingsSectionDefinition[] =>
+  hasFolderAccess
+    ? sections
+    : sections.map((section) =>
+        section.id === 'filesystem'
+          ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'workspaces') }
+          : section,
+      );
+
 /**
  * The sections this deployment shows for the given runtime flags.
  *
  * @param isOn - Whether a flag is on.
  * @param isFunded - Whether the display mode is `funded`; the build's initial mode by default.
+ * @param hasFolderAccess - Whether this host can connect a folder; assumed until known.
  * @returns The sections, in catalogue order.
  */
 export function availableSettingsSections(
   isOn: (flag: FeatureFlagName) => boolean,
   isFunded: boolean = initialDeploymentMode.state === 'funded',
+  hasFolderAccess = true,
 ): readonly SettingsSectionDefinition[] {
   const isShown = (flag: FeatureFlagName | undefined): boolean => flag === undefined || isOn(flag);
-  return settingsSectionsFor(isFunded)
+  return withFolderAccess(settingsSectionsFor(isFunded), hasFolderAccess)
     .filter((section) => isShown(flaggedSections[section.id]))
     .map((section) => {
       const entries = section.entries.filter((entry) => isShown(flaggedEntries.get(entry.id)));
@@ -132,10 +172,11 @@ export function useSettingsSections(): readonly SettingsSectionDefinition[] {
   const viewerControls = useFeatureState('viewerControls') === 'on';
   const onboarding = useFeatureState('onboarding') === 'on';
   const isFunded = useDeploymentMode().state === 'funded';
+  const hasFolderAccess = useHasFolderAccess();
   return useMemo(() => {
     const flags: Readonly<Partial<Record<FeatureFlagName, boolean>>> = { viewerControls, onboarding };
-    return availableSettingsSections((flag) => flags[flag] === true, isFunded);
-  }, [viewerControls, onboarding, isFunded]);
+    return availableSettingsSections((flag) => flags[flag] === true, isFunded, hasFolderAccess);
+  }, [viewerControls, onboarding, isFunded, hasFolderAccess]);
 }
 
 /**

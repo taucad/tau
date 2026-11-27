@@ -391,6 +391,121 @@ theorem t1_held_key_never_writes {raw : Bool} {s : Sys} (h : Reach raw s) {A : A
     rw [← hkey] at hk
     rcases verdict_held hk with hv | hv <;> rw [hv] at hfr <;> cases hfr
 
+/-! ## Group commit (WP-10 step A): one fence check and one flush per batch -/
+
+/-- An appender's own write keeps its view current. -/
+theorem current_after_write {F : File} {A : App} (R' : Reducer) (e : Row) (hc : current F A = true) :
+    current { lines := F.lines ++ [.row e], torn := 0 }
+      { A with red := R', view := A.view ++ [e], lines := A.lines + 1, torn := 0 } = true := by
+  simp only [current, Bool.and_eq_true, decide_eq_true_eq] at hc ⊢
+  simp [hc.1]
+
+/-- Skipping the fence check after the batch's first write changes nothing: the view is still current there. -/
+theorem appendBatchFrom_checked {F : File} {A : App} (es : List Row) (hc : current F A = true) :
+    appendBatchFrom true F A es = appendBatchFrom false F A es := by
+  induction es generalizing F A with
+  | nil => rfl
+  | cons e es ih =>
+    simp only [appendBatchFrom]
+    split
+    · rfl
+    · split
+      · rfl
+      · split
+        · rfl
+        · rw [ih hc]
+        · simp [hc]
+
+/-- **Group commit**: `appendMany` is the batch's rows appended one at a time, each with its own fence check and
+flush, stopping at the first refusal. -/
+theorem appendBatch_eq_appendSeq (F : File) (A : App) (es : List Row) :
+    appendBatch F A es = appendSeq F A es := by
+  unfold appendBatch
+  induction es generalizing F A with
+  | nil => rfl
+  | cons e es ih =>
+    simp only [appendBatchFrom, appendSeq, append]
+    split
+    · rfl
+    · split
+      · rfl
+      · split
+        · rfl
+        · simp [ih]
+        · rename_i R' _
+          split
+          · rename_i hc
+            simp only [Bool.false_or] at hc
+            simp only [hc, ite_true]
+            rw [appendBatchFrom_checked es (current_after_write R' e hc), ih]
+          · rename_i hc
+            simp only [Bool.false_or, Bool.not_eq_true] at hc
+            simp [hc]
+
+/-- The batch's rows one at a time are reachable steps of the system. -/
+theorem reach_appendSeq {raw : Bool} (es : List Row) : ∀ {s : Sys} (i : Nat) (hi : i < s.apps.length),
+    Reach raw s → Reach raw ⟨(appendSeq s.file s.apps[i] es).1, s.apps.set i (appendSeq s.file s.apps[i] es).2.1⟩ := by
+  induction es with
+  | nil => intro s i hi h; simpa [appendSeq] using h
+  | cons e es ih =>
+    intro s i hi h
+    have h1 := Reach.appendStep i hi e h
+    have hi1 : i < (s.apps.set i (append s.file s.apps[i] e).2.1).length := by simpa using hi
+    have ih1 := ih (s := ⟨(append s.file s.apps[i] e).1, s.apps.set i (append s.file s.apps[i] e).2.1⟩) i hi1 h1
+    simp only [List.getElem_set_self, List.set_set] at ih1
+    unfold appendSeq
+    generalize append s.file s.apps[i] e = x at h1 ih1 ⊢
+    obtain ⟨F1, A1, o⟩ := x
+    cases o with
+    | refused r => simpa using h1
+    | appended => simpa using ih1
+    | duplicate => simpa using ih1
+
+/-- **One flush allows no new crash outcome**: a crash while `appendMany` writes a batch leaves the file as the first
+`k` rows' appends left it, possibly with a torn fragment of the next, and each of those files is one that per-row
+appends (each flushed) with a crash between two of them could already leave. -/
+theorem batch_crash_reachable {raw : Bool} {s : Sys} (h : Reach raw s) (i : Nat) (hi : i < s.apps.length)
+    (es : List Row) (k : Nat) :
+    Reach raw ⟨(appendBatch s.file s.apps[i] (es.take k)).1, s.apps.set i (appendBatch s.file s.apps[i] (es.take k)).2.1⟩ ∧
+    Reach raw ⟨(appendBatch s.file s.apps[i] (es.take k)).1.tear,
+      s.apps.set i (appendBatch s.file s.apps[i] (es.take k)).2.1⟩ := by
+  rw [appendBatch_eq_appendSeq]
+  exact ⟨reach_appendSeq _ i hi h, Reach.tearStep (reach_appendSeq _ i hi h)⟩
+
+/-- Pipelined batches are reachable steps of the system: each batch is its rows appended one at a time. -/
+theorem reach_appendPiped {raw : Bool} (bs : List (List Row)) : ∀ {s : Sys} (i : Nat) (hi : i < s.apps.length),
+    Reach raw s → Reach raw ⟨(appendPiped s.file s.apps[i] bs).1, s.apps.set i (appendPiped s.file s.apps[i] bs).2⟩ := by
+  induction bs with
+  | nil => intro s i hi h; simpa [appendPiped] using h
+  | cons b bs ih =>
+    intro s i hi h
+    have h1 := (batch_crash_reachable h i hi b b.length).1
+    rw [List.take_length] at h1
+    have hi1 : i < (s.apps.set i (appendBatch s.file s.apps[i] b).2.1).length := by simpa using hi
+    have ih1 := ih (s := ⟨(appendBatch s.file s.apps[i] b).1, s.apps.set i (appendBatch s.file s.apps[i] b).2.1⟩)
+      i hi1 h1
+    simp only [List.getElem_set_self, List.set_set] at ih1
+    simpa [appendPiped] using ih1
+
+/-- **The durability barrier allows no new crash outcome** (WP-10 step B): a crash while rows past the synced
+watermark are unflushed leaves a file that per-row appends, each flushed, with a crash between two rows could already
+leave. Which rows an effect may act on is the barrier's part, modelled in `ChatRunSlot.tla` (`Synced`). -/
+theorem piped_crash_reachable {raw : Bool} {s : Sys} (h : Reach raw s) (i : Nat) (hi : i < s.apps.length)
+    (bs : List (List Row)) {F' : File} (hc : PipedCrash s.file s.apps[i] bs F') :
+    ∃ apps : List App, Reach raw ⟨F', apps⟩ := by
+  have pre_reach : ∀ pre : List (List Row), ∀ b : List Row, ∀ k : Nat,
+      Reach raw ⟨(appendBatch (appendPiped s.file s.apps[i] pre).1 (appendPiped s.file s.apps[i] pre).2 (b.take k)).1,
+        (s.apps.set i (appendPiped s.file s.apps[i] pre).2).set i
+          (appendBatch (appendPiped s.file s.apps[i] pre).1 (appendPiped s.file s.apps[i] pre).2 (b.take k)).2.1⟩ := by
+    intro pre b k
+    have h1 := reach_appendPiped pre i hi h
+    have hi1 : i < (s.apps.set i (appendPiped s.file s.apps[i] pre).2).length := by simpa using hi
+    have h2 := (batch_crash_reachable h1 i hi1 b k).1
+    simpa only [List.getElem_set_self] using h2
+  cases hc with
+  | at_ pre b post k _ => exact ⟨_, pre_reach pre b k⟩
+  | torn pre b post k _ => exact ⟨_, Reach.tearStep (pre_reach pre b k)⟩
+
 /-! ## T2: the term rules on a log written only through the appenders -/
 
 theorem snoc_induction {α : Type} {motive : List α → Prop} (nil : motive [])

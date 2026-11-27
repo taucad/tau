@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import userEvent from '@testing-library/user-event';
@@ -9,14 +9,14 @@ import type { ChatError as ChatErrorPayload } from '@taucad/types';
 import type * as AgentHostModule from '@taucad/agent-host';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
-import { chatTurnNotStartedCode, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
-import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
+import { admissionCauseKey, chatTurnNotStartedCode, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
+import { ChatError as ChatErrorBanner, selectVisibleChatErrorId } from '#routes/w.$workspace.$project/chat-error.js';
 import { chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
 import { recordProviderUnavailableAutoResume, resetAutoResumes } from '@taucad/chat-ui/utils/run-auto-resume';
-import { autoResumePlanOf, refusalOfGesture } from '#utils/run-auto-resume-plan.js';
+import { autoResumePlanOf, commandRefusalOf, refusalOfGesture } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 
 /* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
@@ -53,7 +53,15 @@ const googleInvalidArgumentByteList = [...new TextEncoder().encode(JSON.stringif
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ continueChat, regenerate }),
+  useChatContext: () => ({ activeChatId: 'chat_1' }),
   useChatSelector: vi.fn(),
+}));
+/* The residual cards name a computer from the placement list and pair it in Settings; this suite lists none. */
+const sessionStore = vi.hoisted((): { current: unknown } => ({ current: undefined }));
+vi.mock('#hooks/chat-session-store-provider.js', () => ({ useOptionalChatSessionStore: () => sessionStore.current }));
+vi.mock('#hooks/use-settings-dialog.js', () => ({ useSettingsDialog: () => ({ open: vi.fn() }) }));
+vi.mock('#hooks/use-cad-agent-config.js', () => ({
+  useAgentHostPlacements: () => ({ targets: [], loading: false, refresh: vi.fn() }),
 }));
 
 vi.mock('@taucad/agent-host', async (importOriginal) => {
@@ -343,6 +351,58 @@ describe('ChatError', () => {
     state = failedRunState('req_2');
     const retried = render(<ChatErrorBanner />);
     expect(decisionIdOf(retried.container)).toBe('run:req_2:1');
+  });
+
+  /* HA5 (I2): a quiet refusal of a gesture outranks the run's failure but says nothing, so the run's card shows. */
+  it.each(['HOST_CLOSED', 'LEADERSHIP_LOST', 'PEER_GONE'])(
+    'should keep the run’s card over a Resume answered %s',
+    (code) => {
+      const state = failedRunState('req_quiet');
+      const persistedError = refusalOfGesture(
+        { category: errorCategory.generic, title: 'Something went wrong', message: 'Closed.', code },
+        { kind: 'continue', projection: state.projection, createId: () => 'quiet' },
+      );
+
+      expect(selectVisibleChatErrorId({ ...state, persistedError })).toBe('run:req_quiet:1');
+    },
+  );
+
+  /* NEW-1: a refused Start in a chat that already holds a run shows; only a run that begins after it retires it. */
+  it('should show a refused Start over the completed run before it, in the shape the store saves', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 3,
+        endCursor: 3,
+        events: [
+          lifecycleRow(0, 'admitted', 'run_1'),
+          lifecycleRow(1, 'running', 'run_1'),
+          lifecycleRow(2, 'completed', 'run_1'),
+        ],
+      },
+    });
+    const { context } = projection.getSnapshot();
+    projection.stop();
+    const persistedError = commandRefusalOf(
+      {
+        category: errorCategory.generic,
+        title: 'Something went wrong',
+        message: 'Old wire.',
+        code: 'WIRE_VERSION_UNSUPPORTED',
+      },
+      { requestId: 'cmd_new', runId: 'run_2', commandType: 'start', kind: 'send', projection: context },
+    );
+
+    expect(
+      selectVisibleChatErrorId({
+        persistedError,
+        projection: context,
+        attachmentStatus: 'attached',
+      } as unknown as CombinedChatState),
+    ).toBe('refusal:cmd_new');
   });
 
   it('should identify a refused command by its request (I5)', () => {
@@ -805,21 +865,17 @@ describe('ChatError', () => {
     expect(screen.getByTestId('code-viewer')).toHaveTextContent(hostSentence);
   });
 
-  /* Ruling Q6: taking leadership back is a protocol, not an error action. */
-  it('should state that another tab continued the chat and offer nothing', () => {
-    persisted({
-      category: errorCategory.generic,
-      title: 'Error',
-      message: 'Leadership for chat chat_l1MMqYyEaacEAeqv0VCHE was lost.',
-      code: 'LEADERSHIP_LOST',
-    });
+  /* HA5 code table (HA-I8): a handoff or transport code is re-sent under "Reconnecting…"; the chat shows no card. */
+  it.each(['LEADERSHIP_LOST', 'PEER_UNRESPONSIVE', 'CHANNEL_CLOSED', 'COMMAND_SUPERSEDED'])(
+    'should show no card for %s',
+    (code) => {
+      persisted({ category: errorCategory.generic, title: 'Error', message: `The host said ${code}.`, code });
 
-    render(<ChatErrorBanner />);
+      const { container } = render(<ChatErrorBanner />);
 
-    expect(screen.getByText('This chat continued in another tab')).toBeInTheDocument();
-    expect(screen.getByText('Keep working there. Reload this page to follow along here.')).toBeInTheDocument();
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
-  });
+      expect(container).toBeEmptyDOMElement();
+    },
+  );
 
   /* XD3: another device runs the chat; its run cannot be moved or stopped from here. */
   it('should state that another device is running the chat and offer nothing', () => {
@@ -874,6 +930,34 @@ describe('ChatError', () => {
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(regenerate).toHaveBeenCalledTimes(1);
     expect(continueChat).not.toHaveBeenCalled();
+  });
+
+  /* HA5 review: a turn refused because its computer is out of reach leaves the chat to R1, so one card shows. */
+  it.each([
+    { r1: true, shown: false },
+    { r1: false, shown: true },
+  ])('should step the turn-not-started card aside for R1 only while R1 shows ($r1)', ({ r1, shown }) => {
+    sessionStore.current = {
+      subscribeProjection: () => () => undefined,
+      getRemoteResidual: () => undefined,
+      getUnreachableComputer: () => (r1 ? { hostId: 'device-a' } : undefined),
+      pinnedElsewhereOf: () => undefined,
+    };
+    try {
+      persisted({
+        category: errorCategory.generic,
+        title: 'Error',
+        message: 'Tau can’t reach that computer yet.',
+        code: chatTurnNotStartedCode,
+        details: { [admissionCauseKey]: 'CHAT_PLACEMENT_UNAVAILABLE' },
+      });
+
+      render(<ChatErrorBanner />);
+
+      expect(screen.queryByText('Tau could not start this turn') !== null).toBe(shown);
+    } finally {
+      sessionStore.current = undefined;
+    }
   });
 
   /* T2-D11. A resume the host cannot honour is not a failure: the turn is
@@ -967,92 +1051,133 @@ describe('ChatError', () => {
   });
 
   it.each([
-    ['LEADER_VERSION_MISMATCH', 'Another version of Tau is running this chat'],
-    ['RUN_UNREADABLE', 'This chat was continued in a newer version of Tau'],
-    ['HISTORY_INVALID', "Tau can't read this chat's history"],
-    ['EXTERNAL_AGENT_RECOVERY_UNKNOWN', "Tau couldn't reopen the agent's session"],
-  ] as const)('shows the approved recovery card for %s', (code, title) => {
+    ['RUN_UNREADABLE', 'Part of this chat was written by a newer version of Tau.', 'Reload'],
+    ['HISTORY_INVALID', 'This chat’s saved history can’t be read.', 'New chat'],
+    ['LINE_INVALID', 'This chat’s saved history can’t be read.', 'New chat'],
+    ['STORAGE_NOT_WRITABLE', 'Tau couldn’t save to this chat’s files.', 'Reload'],
+    ['LOG_POISONED', 'Tau couldn’t save to this chat’s files.', 'Reload'],
+    ['WORKER_UNAVAILABLE', 'Part of Tau did not finish loading', 'Reload'],
+    ['HOST_NOT_PAIRED', 'Pair that computer to keep working with it.', 'Pair'],
+    ['EXTERNAL_AGENT_RECOVERY_UNKNOWN', "Tau couldn't reopen the agent's session", 'Try again'],
+  ] as const)('shows the HA5 recovery card for %s with its one action', (code, title, action) => {
     persisted({ category: errorCategory.generic, title: 'Error', message: 'A coded refusal', code });
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText(title)).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toBeInTheDocument();
-  });
-
-  it('announces a pending model attempt as named busy status, not a failure alert', () => {
-    persisted({
-      category: errorCategory.generic,
-      title: 'Error',
-      message: 'The host is checking the last model attempt.',
-      code: 'MODEL_ATTEMPT_PENDING',
-    });
-
-    render(<ChatErrorBanner />);
-
-    expect(screen.getByRole('status', { name: 'Checking whether the last model call finished' })).toHaveAttribute(
-      'aria-busy',
-      'true',
-    );
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  });
-
-  it('offers New chat for unreadable history without offering Resume', async () => {
-    const user = userEvent.setup();
-    persisted({ category: errorCategory.generic, title: 'Error', message: 'Bad history', code: 'HISTORY_INVALID' });
-
-    render(<ChatErrorBanner />);
-
-    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'New chat' }));
-    expect(openNewChat).toHaveBeenCalledOnce();
-  });
-
-  /* A silent peer (a crashed worker, or a daemon past its liveness bound) leaves the command's effect unknown: the
-   * start may never have been admitted, so the card claims no run and promises nothing. */
-  it('should not claim a turn exists when its host stopped responding', async () => {
-    const user = userEvent.setup();
-    persisted({
-      category: errorCategory.generic,
-      title: 'Error',
-      message: 'No leader of chat chat-1 answered before it went silent; re-send this command.',
-      code: 'PEER_UNRESPONSIVE',
-    });
-
-    render(<ChatErrorBanner />);
-
-    expect(screen.getByText('Tau stopped responding')).toBeInTheDocument();
-    expect(screen.getByText('Tau cannot tell whether this turn started.')).toBeInTheDocument();
-    expect(screen.queryByText('Tau paused this turn')).not.toBeInTheDocument();
-    expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(regenerate).toHaveBeenCalledTimes(1);
-    expect(continueChat).not.toHaveBeenCalled();
-  });
-
-  /* A host whose hello names a wire this page cannot speak: nothing here can fix it, the host's Tau must change. */
-  it('should ask for an update on a host that speaks another wire version', async () => {
-    const user = userEvent.setup();
-    persisted({
-      category: errorCategory.generic,
-      title: 'Error',
-      message: 'The agent owner speaks another wire version; update Tau on that host.',
-      code: 'WIRE_VERSION_UNSUPPORTED',
-    });
-
-    render(<ChatErrorBanner />);
-
-    expect(screen.getByText('Update Tau on that computer')).toBeInTheDocument();
+    /* N4: the pair line is a status, the same card above the composer and in the chat. */
+    const card = screen.getByRole(code === 'HOST_NOT_PAIRED' ? 'status' : 'alert');
+    expect(card).toHaveTextContent(title);
     expect(
-      screen.getByText(
-        'That computer runs a version of Tau this page can’t talk to. Update Tau there, then try again.',
-      ),
-    ).toBeInTheDocument();
+      within(card)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual([action]);
+  });
 
+  it.each([
+    ['SYNC_ACCESS_HANDLE_UNAVAILABLE', 'Tau can’t save chats in this browser.'],
+    ['WIRE_VERSION_UNSUPPORTED', 'Update Tau on that computer to keep working with it.'],
+    ['FRAME_UNREADABLE', 'Update Tau on that computer to keep working with it.'],
+  ] as const)('shows the HA5 card for %s, which ends the send with nothing to press', (code, title) => {
+    persisted({ category: errorCategory.generic, title: 'Error', message: 'A coded refusal', code });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(title);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  /* HA5 code table: a `wait` code with its own line says it as status, and the send stays queued. */
+  it.each([
+    [
+      'LEADER_VERSION_MISMATCH',
+      'Another tab has a different version of Tau open on this chat. Reload that tab, and your message sends.',
+    ],
+    ['WRITER_LOCKED', 'This chat is running in Tau on this computer.'],
+    ['CHAT_RUN_LIVE', 'A turn is still running in this chat. Your message sends when it finishes.'],
+    ['REVISIONS_UNAVAILABLE', "This project's history is still opening. Your message sends when it's ready."],
+  ] as const)('shows the line of %s as status with nothing to press', (code, line) => {
+    persisted({ category: errorCategory.generic, title: 'Error', message: 'A coded refusal', code });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('status')).toHaveTextContent(line);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  /* AR3-11: HOST_FAULT is cause-aware. A run that ended on one is that turn's; any other is a command refused. */
+  it('should word a run that ended on a host fault as the turn going wrong, with no promise of Resume', async () => {
+    const user = userEvent.setup();
+    projected({ category: errorCategory.generic, title: 'Error', message: 'boom', code: 'HOST_FAULT' });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Something went wrong running this turn.');
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(regenerate).toHaveBeenCalledTimes(1);
-    expect(continueChat).not.toHaveBeenCalled();
+  });
+
+  it('should word a refused command that met a host fault as one to try again', () => {
+    persisted({ category: errorCategory.generic, title: 'Error', message: 'boom', code: 'HOST_FAULT' });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Tau couldn’t do that just now.Try again.');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  /* HA5 (I1, I4): the store now persists a refused command with its code and request, so this branch is reachable. */
+  it('should word a host fault the store persisted for a refused command, with its request, as one to try again', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Something went wrong',
+      message: 'boom',
+      code: 'HOST_FAULT',
+      requestId: 'cmd_start',
+      details: { runId: 'req_1', commandType: 'start' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Tau couldn’t do that just now.Try again.');
+    expect(screen.queryByText('boom')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  /* HA5 (STOP-SILENT): a refused Stop offers no Try again, which would start a turn; the composer offers Stop again. */
+  it('should offer nothing for a host fault that refused a Stop', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Something went wrong',
+      message: 'boom',
+      code: 'HOST_FAULT',
+      requestId: 'cmd_cancel',
+      details: { runId: 'req_1', commandType: 'cancel' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Tau couldn’t do that just now.');
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it('should offer nothing for an uncoded failure that refused a Stop', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'Chat chat_1 has no live host connector.',
+      requestId: 'cmd_cancel',
+      details: { runId: 'req_1', commandType: 'cancel' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Chat chat_1 has no live host connector.');
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(regenerate).not.toHaveBeenCalled();
   });
 
   it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {

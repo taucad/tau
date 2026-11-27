@@ -1,23 +1,26 @@
-import { memo } from 'react';
+import { memo, useCallback, useSyncExternalStore } from 'react';
 import type React from 'react';
 import { Bot, CircleAlert, MonitorSmartphone, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
-import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
+import { useChatActions, useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { CodeViewer } from '@taucad/editor-ui/components/code/code-viewer';
 import { cn } from '@taucad/ui/utils/cn';
 import { isCodeLoadFailure } from '@taucad/ui-core/lib/code-loading';
-import { chatHistoryTidyFailureMessage } from '@taucad/chat-ui/utils/error.utils';
-import { cardOf, pageHeadlineOf } from '@taucad/chat-ui/utils/chat-error-card';
+import { admissionCauseKey, chatHistoryTidyFailureMessage } from '@taucad/chat-ui/utils/error.utils';
+import { cardOf, pageHeadlineOf, waitLineOf } from '@taucad/chat-ui/utils/chat-error-card';
 import {
   autoResumableProviderUnavailableCode,
   nextProviderUnavailableRetry,
 } from '@taucad/chat-ui/utils/run-auto-resume';
 import { selectVisibleChatErrorEntry, selectVisibleFailureResumable } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan, AutoResumeTarget } from '#utils/run-auto-resume-plan.js';
-import { useChatAutoResume } from '#hooks/active-chat-provider.js';
+import { useChatAutoResume, useChatComposer } from '#hooks/active-chat-provider.js';
+import { useOptionalChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { ChatResidualLine, useComputerName } from '#routes/w.$workspace.$project/chat-residual.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-details.js';
 import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
@@ -34,18 +37,42 @@ import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.
 import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host/wire';
 import { selectCurrentRun } from '#machines/chat-projection.logic.js';
 
+type VisibleChatErrorEntry = NonNullable<ReturnType<typeof selectVisibleChatErrorEntry>>;
+
+const isQuiet = (entry: VisibleChatErrorEntry): boolean =>
+  cardOf(entry.error.code, entry.error.category).category === 'quiet';
+
+/**
+ * The visible failure the chat shows a card for. A `quiet` code shows none (HA5 code table): a transport or handoff
+ * code is re-sent under the "Reconnecting…" cue (HA-I8), and a send a Stop superseded ends without a word. A quiet
+ * refusal of a gesture never hides what it outranks: a Resume answered `HOST_CLOSED` leaves the run's own card.
+ */
+const shownEntry = (
+  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'persistedError'>,
+): VisibleChatErrorEntry | undefined => {
+  const entry = selectVisibleChatErrorEntry(state);
+  if (entry === undefined || !isQuiet(entry)) {
+    return entry;
+  }
+  const beneath =
+    state.persistedError === undefined
+      ? undefined
+      : selectVisibleChatErrorEntry({ ...state, persistedError: undefined });
+  return beneath === undefined || isQuiet(beneath) ? undefined : beneath;
+};
+
 /** The chat's visible failure, if any. */
 export function selectVisibleChatError(
   state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'persistedError'>,
 ): NormalizedChatError | undefined {
-  return selectVisibleChatErrorEntry(state)?.error;
+  return shownEntry(state)?.error;
 }
 
 /** The visible failure's durable identity (`run:…`, `refusal:…`), which the phone sheet acknowledges by (I5). */
 export function selectVisibleChatErrorId(
   state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'persistedError'>,
 ): string | undefined {
-  return selectVisibleChatErrorEntry(state)?.id;
+  return shownEntry(state)?.id;
 }
 
 /**
@@ -112,6 +139,118 @@ function modelPendingCard({ className, raw }: { readonly className: string; read
 }
 
 /**
+ * The name of the computer the chat's refusals came from (else the one it is placed on); mounted only by a card that
+ * names one, so the other cards list no computers.
+ */
+function ComputerName(): React.JSX.Element {
+  const attachedHostId = useChatSelector((state) => state.attachedHostId);
+  const { execution } = useChatComposer().execution;
+  return <>{useComputerName(attachedHostId ?? (execution.kind === 'tau' ? execution.hostId : undefined))}</>;
+}
+
+/** R9 on Tau Desktop: a chat placed on the page's own Tau, which the desktop app never runs. */
+function ChatErrorChooseThisComputer({ className }: { readonly className: string }): React.JSX.Element {
+  const { execution, setActiveExecution } = useChatComposer().execution;
+  return (
+    <ChatResidualLine
+      className={className}
+      residual={{
+        kind: 'R9',
+        cause: 'placement',
+        onChooseThisComputer: () => {
+          if (execution.kind === 'tau') {
+            setActiveExecution({ ...execution, hostId: 'desktop' });
+          }
+        },
+      }}
+    />
+  );
+}
+
+/**
+ * R6 for a refused command: the computer is no longer paired. A chat this device reads from its own files says that
+ * reading still works.
+ */
+const noSubscription = (): void => undefined;
+
+/** Whether the chat's R1 line shows: a remote computer it cannot read, or a message pinned to one. */
+function useR1Shows(): boolean {
+  const { activeChatId: chatId } = useChatContext();
+  const store = useOptionalChatSessionStore();
+  const subscribe = useCallback(
+    (listener: () => void) => store?.subscribeProjection(chatId, listener) ?? noSubscription,
+    [chatId, store],
+  );
+  const read = useCallback(
+    () =>
+      store !== undefined &&
+      store.getRemoteResidual(chatId) === undefined &&
+      (store.getUnreachableComputer(chatId) !== undefined || store.pinnedElsewhereOf(chatId) !== undefined),
+    [chatId, store],
+  );
+  return useSyncExternalStore(subscribe, read, read);
+}
+
+/**
+ * The one restart that loses nothing: admission refused before a run existed. A turn refused because its computer
+ * is out of reach steps aside while R1 says so, with Remove and Send here instead, so one card shows.
+ */
+function ChatErrorTurnNotStarted({
+  className,
+  error,
+  onTryAgain,
+}: {
+  readonly className: string | undefined;
+  readonly error: NormalizedChatError;
+  readonly onTryAgain: () => void;
+}): React.JSX.Element | undefined {
+  const r1Shows = useR1Shows();
+  if (r1Shows && error.details?.[admissionCauseKey] === 'CHAT_PLACEMENT_UNAVAILABLE') {
+    return undefined;
+  }
+  return (
+    <ChatErrorCard
+      className={className}
+      tone='warning'
+      icon={CircleAlert}
+      title='Tau could not start this turn'
+      description={error.message}
+      actions={
+        <Button variant='outline' size='xs' onClick={onTryAgain}>
+          <RefreshCcw className='size-3.5' />
+          Try again
+        </Button>
+      }
+    />
+  );
+}
+
+function ChatErrorPair({
+  className,
+  computer,
+}: {
+  readonly className: string;
+  readonly computer: React.ReactNode;
+}): React.JSX.Element {
+  const { activeChatId } = useChatContext();
+  const readable = useOptionalChatSessionStore()?.readsLocally(activeChatId) === true;
+  const { open: openSettings } = useSettingsDialog();
+  return (
+    <ChatResidualLine
+      className={className}
+      residual={{
+        kind: 'R6',
+        computer,
+        readable,
+        onPair: () => {
+          openSettings('compute');
+        },
+      }}
+    />
+  );
+}
+
+/**
  * The card a coded failure names for itself, or `undefined` when its category
  * decides instead.
  *
@@ -132,8 +271,11 @@ function codedErrorCard({
   canOpenNewChat,
   autoResume,
   waiting,
+  entryId,
 }: {
   readonly error: NormalizedChatError;
+  /** The failure's identity: `run:…` for a run that ended on it, else a refused command (`refusal:…`). */
+  readonly entryId: string | undefined;
   readonly resumable: boolean;
   /** The current run's failed attempt. */
   readonly autoResume: AutoResumeTarget | undefined;
@@ -149,16 +291,64 @@ function codedErrorCard({
   if (code === 'USER_STOPPED') {
     return <ChatErrorPausedTurn className={className} title='You stopped this turn' resumable={resumable} />;
   }
-  /* FP10: the agent host's own code failed to load and the page has already replaced its worker as often as it will.
-   * Sending again would meet the same failure in this page, so the card offers Reload, never Try again. */
-  if (code === 'WORKER_LOAD_FAILED' || isCodeLoadFailure(new Error(error.message))) {
+  const { category, retry } = cardOf(code, error.category);
+  const rawDetail = error.raw ? tryFormatJson(error.raw) : undefined;
+  const raw = rawDetail === undefined ? {} : { raw: rawDetail };
+  /* FP10 (R9): the agent host's own code failed to load and the page has already replaced its worker as often as it
+   * will. Sending again would meet the same failure in this page, so the card offers Reload, never Try again. */
+  if (code === 'WORKER_LOAD_FAILED' || category === 'reload' || isCodeLoadFailure(new Error(error.message))) {
+    return <ChatResidualLine className={className} residual={{ kind: 'R9', cause: 'load' }} />;
+  }
+  /* R9: a desktop chat placed on the page's own Tau, which the desktop app never runs; this computer runs it. */
+  if (code === 'BROWSER_HOST_UNAVAILABLE') {
+    return <ChatErrorChooseThisComputer className={className} />;
+  }
+  if (category === 'browserStorage') {
+    return <ChatResidualLine className={className} residual={{ kind: 'R3' }} />;
+  }
+  if (category === 'pair') {
+    return <ChatErrorPair className={className} computer={<ComputerName />} />;
+  }
+  if (category === 'waitLine') {
+    /* A `wait` code with a line of its own: the send stays queued and goes by itself, so nothing is offered. */
+    return <ChatErrorCard className={className} role='status' tone='neutral' icon={Bot} title={waitLineOf(code)} />;
+  }
+  /* AR3-11: a host defect. A run that ended on one is that turn's failure; anything else was a command refused. */
+  if (category === 'hostFault') {
+    return entryId?.startsWith('run:') === true ? (
+      <ChatErrorPausedTurn
+        className={className}
+        title='Something went wrong running this turn.'
+        resumable={resumable}
+        {...raw}
+      />
+    ) : (
+      <ChatErrorCard
+        className={className}
+        tone='warning'
+        icon={CircleAlert}
+        title='Tau couldn’t do that just now.'
+        description='Try again.'
+        actions={
+          /* A refused Stop: the composer offers Stop again, and Try again would start a turn nobody asked for. */
+          error.details?.['commandType'] === 'cancel' ? undefined : (
+            <Button variant='outline' size='xs' onClick={onTryAgain}>
+              <RefreshCcw className='size-3.5' />
+              Try again
+            </Button>
+          )
+        }
+      />
+    );
+  }
+  if (category === 'storageUnwritable') {
     return (
       <ChatErrorCard
         className={className}
         tone='warning'
         icon={CircleAlert}
-        title='Part of Tau did not finish loading'
-        description='Reload the page to continue.'
+        title='Tau couldn’t save to this chat’s files.'
+        description='Reload to try again. If it keeps happening, free up space on this device.'
         actions={
           <Button
             variant='outline'
@@ -174,9 +364,6 @@ function codedErrorCard({
       />
     );
   }
-  const { category, retry } = cardOf(code, error.category);
-  const rawDetail = error.raw ? tryFormatJson(error.raw) : undefined;
-  const raw = rawDetail === undefined ? {} : { raw: rawDetail };
 
   /* I1: the host could not learn whether this server funds model calls, so this attempt made none. The host's own
    * instruction wins when it sends one (a recorded mode this build cannot read, a host that cannot fund the run). */
@@ -213,35 +400,22 @@ function codedErrorCard({
     );
   }
 
-  /* The host went silent: a browser worker that died and could not be replaced (was `WORKER_CRASHED`, T3), or a
-   * daemon past the channel's liveness bound. The command's effect is unknown — the start may never have been
-   * admitted — so the card claims no run and promises nothing. */
-  if (category === 'peerUnresponsive') {
-    return (
-      <ChatErrorPausedTurn
-        className={className}
-        title='Tau stopped responding'
-        reason='Tau cannot tell whether this turn started.'
-        resumable={false}
-        {...raw}
-      />
-    );
-  }
-
-  // The host's hello names a wire this page cannot speak; only updating Tau there helps.
+  /* The computer speaks another wire, or could not read this page's frames: only updating Tau there helps. The send
+   * ends, and the composer keeps its draft. */
   if (category === 'updateHost') {
     return (
       <ChatErrorCard
         className={className}
         tone='warning'
         icon={CircleAlert}
-        title='Update Tau on that computer'
-        description='That computer runs a version of Tau this page can’t talk to. Update Tau there, then try again.'
-        actions={
-          <Button variant='outline' size='xs' onClick={onTryAgain}>
-            <RefreshCcw className='size-3.5' />
-            Try again
-          </Button>
+        title={
+          <>
+            Update Tau on{' '}
+            <strong>
+              <ComputerName />
+            </strong>{' '}
+            to keep working with it.
+          </>
         }
       />
     );
@@ -395,20 +569,6 @@ function codedErrorCard({
     );
   }
 
-  // Another tab holds this chat's log. Taking it back is a leadership protocol,
-  // not an error action (ruling Q6), and reloading already follows that tab.
-  if (category === 'otherTab') {
-    return (
-      <ChatErrorCard
-        className={className}
-        tone='neutral'
-        icon={Bot}
-        title='This chat continued in another tab'
-        description='Keep working there. Reload this page to follow along here.'
-      />
-    );
-  }
-
   // Another device is running this chat (XD3). Its run cannot be moved or stopped from here (OQ-N21); the composer
   // holds its send until sync brings that run's ending, and the draft that was refused is kept.
   if (category === 'otherDevice') {
@@ -439,33 +599,7 @@ function codedErrorCard({
 
   // The one restart that loses nothing: admission refused before a run existed.
   if (category === 'turnNotStarted') {
-    return (
-      <ChatErrorCard
-        className={className}
-        tone='warning'
-        icon={CircleAlert}
-        title='Tau could not start this turn'
-        description={error.message}
-        actions={
-          <Button variant='outline' size='xs' onClick={onTryAgain}>
-            <RefreshCcw className='size-3.5' />
-            Try again
-          </Button>
-        }
-      />
-    );
-  }
-
-  if (category === 'otherBuild') {
-    return (
-      <ChatErrorCard
-        className={className}
-        tone='neutral'
-        icon={Bot}
-        title='Another version of Tau is running this chat'
-        description='It continues here when that run finishes; if this window is the older version, reload it.'
-      />
-    );
+    return <ChatErrorTurnNotStarted className={className} error={error} onTryAgain={onTryAgain} />;
   }
 
   if (category === 'modelPending') {
@@ -473,25 +607,7 @@ function codedErrorCard({
   }
 
   if (category === 'update') {
-    return (
-      <ChatErrorCard
-        className={className}
-        tone='warning'
-        icon={CircleAlert}
-        title='This chat was continued in a newer version of Tau'
-        actions={
-          <Button
-            variant='outline'
-            size='xs'
-            onClick={() => {
-              globalThis.location.reload();
-            }}
-          >
-            Reload
-          </Button>
-        }
-      />
-    );
+    return <ChatResidualLine className={className} residual={{ kind: 'R4' }} />;
   }
 
   if (category === 'historyInvalid') {
@@ -500,7 +616,7 @@ function codedErrorCard({
         className={className}
         tone='warning'
         icon={CircleAlert}
-        title="Tau can't read this chat's history"
+        title='This chat’s saved history can’t be read.'
         description='Start a new chat to keep working.'
         actions={
           <Button variant='outline' size='xs' disabled={!canOpenNewChat} onClick={onNewChat}>
@@ -562,16 +678,18 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
   }
   return (
     <div data-decision='run-error' data-decision-id={decisionId} className='shrink-0'>
-      <ChatErrorBody parsedError={parsedError} className={className} />
+      <ChatErrorBody parsedError={parsedError} entryId={decisionId} className={className} />
     </div>
   );
 });
 
 function ChatErrorBody({
   parsedError,
+  entryId,
   className,
 }: {
   readonly parsedError: NormalizedChatError;
+  readonly entryId: string | undefined;
   readonly className: string | undefined;
 }): React.ReactNode {
   /* One decision, the turn host's own: a card may promise the turn and say Resume only where `continue` will be
@@ -605,16 +723,19 @@ function ChatErrorBody({
         icon={CircleAlert}
         title={parsedError.message || parsedError.title || 'Unable to send the message.'}
         actions={
-          <Button
-            variant='outline'
-            size='xs'
-            onClick={() => {
-              regenerate();
-            }}
-          >
-            <RefreshCcw className='size-3.5' />
-            Try again
-          </Button>
+          /* A refused Stop: the composer offers Stop again, and Try again would rerun the turn. */
+          parsedError.details?.['commandType'] === 'cancel' ? undefined : (
+            <Button
+              variant='outline'
+              size='xs'
+              onClick={() => {
+                regenerate();
+              }}
+            >
+              <RefreshCcw className='size-3.5' />
+              Try again
+            </Button>
+          )
         }
       >
         <ChatErrorDetails>
@@ -636,6 +757,7 @@ function ChatErrorBody({
   // `codedErrorCard`.
   const codedCard = codedErrorCard({
     error: parsedError,
+    entryId,
     resumable,
     className: cn('min-w-0', className),
     onTryAgain: handleTryAgain,

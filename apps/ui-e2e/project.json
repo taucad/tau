@@ -760,7 +760,7 @@
       "executor": "nx:run-commands",
       "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
       "metadata": {
-        "description": "The `tau serve` daemon over the serve build that its ui:build:serve dependency writes to apps/ui/serve/build. First its bytes on the wire, from Node (src/support/serve-ui-build.test.ts: status, headers, the SPA fallback, the cadmpeg engines the daemon serves); then a real chat placed on the daemon in Chromium (src/daemon-agent-host.spec.ts), after ui:build. serve-ui-build.test.ts runs here rather than in test, so no CI test lane builds a UI bundle (CI decomposition global review, G5)."
+        "description": "The `tau serve` daemon over the serve build that its ui:build:serve dependency writes to apps/ui/serve/build. First its bytes on the wire, from Node (src/support/serve-ui-build.test.ts: status, headers, the SPA fallback, the cadmpeg engines the daemon serves); then a real chat placed on the daemon in Chromium (src/daemon-agent-host.spec.ts, and the host-attachment harness rows in src/chat-reattach.spec.ts), after ui:build. serve-ui-build.test.ts runs here rather than in test, so no CI test lane builds a UI bundle (CI decomposition global review, G5)."
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",
@@ -768,7 +768,7 @@
         "commands": [
           "pnpm --dir ../.. exec vitest run --config apps/ui-e2e/vitest.node.config.ts --dir apps/ui-e2e apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
           "pnpm --dir ../.. exec nx run ui:build",
-          "vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts"
+          "vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts src/chat-reattach.spec.ts"
         ],
         "env": {
           "TAU_E2E_HOST_TIER": "true",

@@ -30,6 +30,7 @@ const { mockObserve, mockRelease, mockStore, mockUnread } = vi.hoisted(() => {
     mockStore: {
       observe,
       isUnread: (chatId: string) => unread.has(chatId),
+      isReconnecting: () => false,
       subscribeUnread: (_listener: () => void) => () => undefined,
     },
   };

@@ -77,10 +77,10 @@ const refusedTimeKey = 'refusedTime';
 const refusedGestureKey = 'refusedGesture';
 
 /** What the person asked for when the page refused to start a turn. @public */
-export type RefusedGesture = 'send' | 'edit' | 'regenerate' | 'continue';
+export type RefusedGesture = 'send' | 'edit' | 'regenerate' | 'continue' | 'stop';
 
 /**
- * A refusal the page itself made of one gesture (a send, an edit, a retry, a resume), as the chat keeps it.
+ * A refusal the page itself made of one gesture (a send, an edit, a retry, a resume, a stop), as the chat keeps it.
  *
  * Nothing ran, so the host log holds no trace of it, and the chat's saved error is its only record. It is a fact
  * about that gesture at that moment: it carries the gesture's own identity, and where the log stood when it was
@@ -110,6 +110,34 @@ export const refusalOfGesture = (
     },
   };
 };
+
+/**
+ * A host's refusal of one command, as the store saves it: the command's request, run and type, stamped as a refused
+ * gesture with where the log stood (NEW-1), so only a run that begins after it retires it, never the run before it.
+ *
+ * @param error - The parsed refusal.
+ * @param command - The refused command's request, run, type and gesture, and the chat's projection when it was refused.
+ * @returns The refusal to persist.
+ * @public
+ */
+export const commandRefusalOf = (
+  error: NormalizedChatError,
+  command: Readonly<{
+    requestId: string;
+    runId: string;
+    commandType: string;
+    kind: RefusedGesture;
+    projection: ChatProjection | undefined;
+  }>,
+): NormalizedChatError =>
+  refusalOfGesture(
+    {
+      ...error,
+      details: { ...error.details, runId: command.runId, commandType: command.commandType },
+      requestId: command.requestId,
+    },
+    { kind: command.kind, projection: command.projection, createId: () => command.requestId },
+  );
 
 /**
  * Whether a refusal recorded before the log was read is still newer than the log's current run. Its time is the only
@@ -180,7 +208,9 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
     // the persisted command records that run identity, not just its command ID.
     const refusal = persistedError;
     if (refusal?.requestId === undefined) {
-      return undefined;
+      /* R9: the host's own code did not load. The log reads without it, so a caught-up, attached chat is no proof the
+       * failure is past; the store clears it once the worker loads. */
+      return refusal?.code === 'WORKER_LOAD_FAILED' ? { error: refusal, id: liveErrorId(refusal) } : undefined;
     }
     const refusedRunId = refusal.details?.['runId'];
     const refusedCommandType = refusal.details?.['commandType'];
@@ -219,12 +249,25 @@ export const selectRunResumable = (projection: ChatProjection | undefined): bool
  */
 export const selectVisibleFailureResumable = (state: VisibleFailureSource): boolean => {
   const error = selectVisibleChatErrorEntry(state)?.error;
+  if (
+    error !== undefined &&
+    state.persistedError !== undefined &&
+    cardOf(error.code, error.category).category === 'quiet'
+  ) {
+    /* I2: a quiet refusal shows no card, so Resume is the card under it's to offer, as the chat shows that card. */
+    return selectVisibleFailureResumable({ ...state, persistedError: undefined });
+  }
   if (error === undefined || !selectRunResumable(state.projection)) {
     return false;
   }
-  const refusedGesture =
-    typeof error.details?.[refusedAtKey] === 'string' ? error.details[refusedGestureKey] : 'continue';
-  return refusedGesture === 'continue';
+  const refused = typeof error.details?.[refusedAtKey] === 'string';
+  const refusedGesture = refused ? error.details?.[refusedGestureKey] : 'continue';
+  /* HA-I4: a refused Resume offers Resume again only for a `resume` answer; a `never` or `reauth` one is not sent
+   * again by the same gesture. */
+  return (
+    refusedGesture === 'continue' &&
+    (!refused || error.code === undefined || cardOf(error.code, error.category).retry === 'resume')
+  );
 };
 
 /** The failed run attempt a failure resumes on its own. @public */

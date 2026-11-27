@@ -39,6 +39,7 @@ import { pluginCapabilityFilenameRule } from './rules/plugin-capability-filename
 import { noAuthoredPointerCursorRule } from './rules/no-authored-pointer-cursor.js';
 import { noInlineActorSelectorRule } from './rules/no-inline-actor-selector.js';
 import { noEngineeringVocabularyInCopyRule } from './rules/no-engineering-vocabulary-in-copy.js';
+import { noSystemicChatCopyRule } from './rules/no-systemic-chat-copy.js';
 import { noSaveRevisionInCopyRule } from './rules/no-save-revision-in-copy.js';
 import { noAuthInstanceOutsideApiAuthRule } from './rules/no-auth-instance-outside-api-auth.js';
 import { noStaticHeavyImportRule } from './rules/no-static-heavy-import.js';
@@ -61,7 +62,7 @@ import { noKernelTypeAssertionRule } from './rules/no-kernel-type-assertion.js';
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.34.0',
+    version: '1.35.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -96,6 +97,7 @@ const plugin = {
     'no-authored-pointer-cursor': noAuthoredPointerCursorRule,
     'no-inline-actor-selector': noInlineActorSelectorRule,
     'no-engineering-vocabulary-in-copy': noEngineeringVocabularyInCopyRule,
+    'no-systemic-chat-copy': noSystemicChatCopyRule,
     'no-save-revision-in-copy': noSaveRevisionInCopyRule,
     'no-auth-instance-outside-api-auth': noAuthInstanceOutsideApiAuthRule,
     'no-static-heavy-import': noStaticHeavyImportRule,

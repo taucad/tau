@@ -72,6 +72,7 @@ describe('useFocusedChatReadState', () => {
         blurChat,
         unreadRecordRef,
         isUnread: (chatId: string) => recordedUnread.has(chatId),
+        isReconnecting: () => false,
         hasUnreadMark: (chatId: string) => markedUnread.has(chatId),
         subscribeUnread: (listener: () => void) => {
           unreadListeners.add(listener);

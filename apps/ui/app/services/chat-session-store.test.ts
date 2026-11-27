@@ -19,6 +19,8 @@ import { pathToFileURL } from 'node:url';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Chat as ChatEntity, ModelSupport, MyUIMessage } from '@taucad/chat';
 import { errorCategory } from '@taucad/types/constants';
+import type { ChatError } from '@taucad/types';
+import { cardOf } from '@taucad/chat-ui/utils/chat-error-card';
 import type * as AiSdk from 'ai';
 import type { WatchEvent } from '@taucad/filesystem';
 import type { CatchUpFrame, CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
@@ -2105,6 +2107,53 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       store.release(chatId);
     });
   }
+
+  /* HA5 (I1): a refused command keeps its code, so its card words it with its action, not "Host … refused". */
+  it('should persist a Resume refused HOST_NOT_PAIRED with its code, so its card offers Pair', async () => {
+    const store = createStore();
+    const chatId = 'chat_resume_unpaired';
+    const projectId = 'project_resume_unpaired';
+    const runId = 'req_resume_unpaired';
+    const command: HostCommand = { type: 'resume', commandId: 'req_resume_unpaired_cmd', payload: { chatId, runId } };
+    const hostCommand = vi.fn<AgentHostClient['hostCommand']>(async (sent) => ({
+      commandId: sent.commandId,
+      generation: 1,
+      status: 'refused',
+      effect: 'not-applied',
+      code: 'HOST_NOT_PAIRED',
+      message: 'Host refused: not paired.',
+    }));
+    const unpublish = store.publishProjectHostConnector(projectId, async () =>
+      mock<AgentHostClient>({ catchUp: writerOwnedCatchUp, hostCommand, close: vi.fn(async () => undefined) }),
+    );
+    startTurnOwner(store, projectId);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    publishLogRows(store, chatId, [...runningUserRows(runId), lifecycleRow(2, 'failed', runId)]);
+    const unpublishAdmission = publishChatTurnAdmission(chatId, async () => ({
+      runId,
+      leaseTurnId: undefined,
+      request: { kind: 'continue', command },
+    }));
+    try {
+      await store.requestTurn(chatId, { kind: 'continue' });
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.persistedError).toMatchObject({
+          code: 'HOST_NOT_PAIRED',
+          requestId: command.commandId,
+        });
+      });
+      const { persistedError } = session.persistenceActorRef.getSnapshot().context;
+      expect(cardOf(persistedError?.code, errorCategory.generic)).toMatchObject({ category: 'pair' });
+      expect(persistedError?.title).not.toMatch(/host/iu);
+    } finally {
+      unpublishAdmission();
+      unpublish();
+      store.release(chatId);
+    }
+  });
 
   it('should cancel a resume the person stopped while the host answered, not mistake its last attempt for its end', async () => {
     const store = createStore();
@@ -4912,10 +4961,36 @@ describe('ChatSessionStore', () => {
           } else {
             expect(hostCommand).not.toHaveBeenCalled();
             if (preparedOn !== undefined) {
-              expect(session.messageQueueRef.getSnapshot().context.error).toContain('original host');
+              expect(session.messageQueueRef.getSnapshot().context.error).toBe(
+                "The latest turns are on another computer. They'll appear here when it's back online.",
+              );
               expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
                 items: [{ commandPlacement: preparedOn, command: { commandId: 'req_new_host_message' } }],
               });
+              /* R1 (HA-I4): the pinned entry is offered Remove and Send here instead, never replayed here. */
+              expect(store.pinnedElsewhereOf(chatId)).toEqual({
+                queueId: 'new_host_message',
+                hostId: preparedOn.startsWith('host:') ? preparedOn.slice('host:'.length) : undefined,
+              });
+              hostCommand.mockImplementation(async (command) => ({
+                commandId: command.commandId,
+                generation: 1,
+                status: 'applied',
+                effect: 'durable',
+                cursor: 0,
+              }));
+              /* AR3-9: Send here instead sends under a new command id; the old one may have reached the other computer. */
+              await store.sendQueuedMessageHere(chatId, 'new_host_message', {
+                kind: 'tau',
+                model: 'openai-gpt-6-astra',
+              });
+              await vi.waitFor(() => {
+                expect(hostCommand).toHaveBeenCalled();
+              });
+              const [[sent]] = hostCommand.mock.calls as unknown as [[{ commandId: string; type: string }]];
+              expect(sent.type).toBe('start');
+              expect(sent.commandId).not.toBe('req_new_host_message');
+              expect(store.pinnedElsewhereOf(chatId)).toBeUndefined();
             }
           }
         } finally {
@@ -5794,7 +5869,8 @@ describe('ChatSessionStore', () => {
 
           await vi.advanceTimersByTimeAsync(outboxWaitLineMilliseconds / 2);
 
-          expect(store.hostWaitOf(chatId)).toMatch(/^Queued\. Another tab still has this chat open/u);
+          /* Q3: past the still-closing bound, the chat says where it runs (HA5 code table). */
+          expect(store.hostWaitOf(chatId)).toBe('This chat is running in Tau on this computer.');
         } finally {
           vi.useRealTimers();
           unadmit();
@@ -5911,6 +5987,48 @@ describe('ChatSessionStore', () => {
           expect(store.isReconnecting(chatId)).toBe(true);
         } finally {
           vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* HA5 (I1): a `never` code ends the send with its card, the update line here, and the strip says only that. */
+      it('should end a send refused WIRE_VERSION_UNSUPPORTED with its card, not the host’s sentence', async () => {
+        const chatId = 'departing_wire_version';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async (command) => ({
+          commandId: command.commandId,
+          generation: 1,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'WIRE_VERSION_UNSUPPORTED',
+          message: 'The host speaks wire version 3.',
+        }));
+        const persisted: ChatError[] = [];
+        spyOnSend(session.persistenceActorRef, (event) => {
+          if (event.type === 'setPersistedError') {
+            persisted.push(event.error);
+          }
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('wire'));
+          await vi.waitFor(() => {
+            expect(persisted).toEqual([expect.objectContaining({ code: 'WIRE_VERSION_UNSUPPORTED' })]);
+          });
+          expect(cardOf(persisted[0]?.code, errorCategory.generic)).toMatchObject({ category: 'updateHost' });
+          expect(persisted[0]?.title).not.toMatch(/host/iu);
+          /* NEW-1: the chat already holds a completed run, and the refusal still shows over it. */
+          expect(
+            selectVisibleChatError({
+              persistedError: persisted[0],
+              projection: store.getProjection(chatId),
+              attachmentStatus: 'attached',
+            })?.code,
+          ).toBe('WIRE_VERSION_UNSUPPORTED');
+        } finally {
           unadmit();
           unpublish();
           store.release(chatId);
@@ -6094,6 +6212,44 @@ describe('ChatSessionStore', () => {
           }
         },
       );
+
+      /* HA5 (STOP-SILENT): a refused Stop is a refused gesture, so its card shows over the live run, not hidden. */
+      it('should show a Stop the host refused with HOST_FAULT over the run it aimed at', async () => {
+        const chatId = 'stop_host_fault';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async (command) => ({
+          commandId: command.commandId,
+          generation: 1,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'HOST_FAULT',
+          message: 'The host hit a defect.',
+        }));
+        const persisted: ChatError[] = [];
+        spyOnSend(session.persistenceActorRef, (event) => {
+          if (event.type === 'setPersistedError') {
+            persisted.push(event.error);
+          }
+        });
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(persisted).toEqual([expect.objectContaining({ code: 'HOST_FAULT' })]);
+          });
+          expect(persisted[0]?.details).toMatchObject({ runId: 'live', commandType: 'cancel' });
+          expect(
+            selectVisibleChatError({
+              persistedError: persisted[0],
+              projection: store.getProjection(chatId),
+              attachmentStatus: 'attached',
+            })?.code,
+          ).toBe('HOST_FAULT');
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
 
       it('should send a Stop pressed before the host attached once it attaches (audit A-5)', async () => {
         const chatId = 'stop_owed';
@@ -7112,6 +7268,65 @@ describe('ChatSessionStore', () => {
             expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
           });
           expect(session.messages.filter((message) => message.id === 'replayed')).toHaveLength(1);
+        } finally {
+          disconnect();
+          unadmitReopened();
+          unadmit();
+          store.release(chatId);
+        }
+      });
+
+      /* HA5 (I1): a replayed send that meets a `never` code ends with that code's card, not the host's sentence. */
+      it('should end a replayed send refused WIRE_VERSION_UNSUPPORTED with its card', async () => {
+        const chatId = 'replay_wire_version';
+        const projectId = 'departing_project';
+        const first = await open(chatId, projectId);
+        const unadmit = queueAdmission(chatId);
+        first.hostCommand.mockRejectedValueOnce(new Error('Acknowledgement lost'));
+        publishLogRows(first.store, chatId, []);
+        await first.store.requestTurn(chatId, queuedGesture('replayed_wire'));
+        await vi.waitFor(() => {
+          expect(first.session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+        });
+        first.unpublish();
+        first.store.release(chatId);
+        const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+        store.setDependencies(first.deps);
+        const session = store.acquire(chatId, projectId);
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        });
+        const persisted: ChatError[] = [];
+        spyOnSend(session.persistenceActorRef, (event) => {
+          if (event.type === 'setPersistedError') {
+            persisted.push(event.error);
+          }
+        });
+        const unadmitReopened = queueAdmission(chatId);
+        const replay = vi.fn<AgentHostClient['hostCommand']>(async (command) => ({
+          commandId: command.commandId,
+          generation: 2,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'WIRE_VERSION_UNSUPPORTED',
+          message: 'The host speaks wire version 3.',
+        }));
+        const client = mock<AgentHostClient>({
+          catchUp: writerOwnedCatchUp,
+          hostCommand: replay,
+          close: vi.fn(async () => undefined),
+        });
+        const disconnect = store.publishProjectHostConnector(projectId, async () => client);
+        try {
+          publishLogRows(store, chatId, []);
+          store.refreshMessageQueue(chatId);
+          await vi.waitFor(() => {
+            expect(persisted).toEqual([
+              expect.objectContaining({ code: 'WIRE_VERSION_UNSUPPORTED', requestId: 'req_replayed_wire' }),
+            ]);
+            expect(session.messageQueueRef.getSnapshot().context.error).toBe('Your message wasn’t sent.');
+          });
+          expect(cardOf(persisted[0]?.code, errorCategory.generic)).toMatchObject({ category: 'updateHost' });
         } finally {
           disconnect();
           unadmitReopened();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { refusalOf, refusals } from '@taucad/agent-host/wire';
 import { errorCategory } from '@taucad/types/constants';
-import { cardOf, normalizedErrorCategoryOf } from '#utils/chat-error-card.js';
+import { cardOf, normalizedErrorCategoryOf, waitLineOf } from '#utils/chat-error-card.js';
 
 describe('cardOf', () => {
   it('takes every known code’s recovery class from the host registry', () => {
@@ -16,7 +16,9 @@ describe('cardOf', () => {
   });
 
   it.each([
-    ['LEADER_VERSION_MISMATCH', 'otherBuild'],
+    ['LEADER_VERSION_MISMATCH', 'waitLine'],
+    ['PEER_UNRESPONSIVE', 'quiet'],
+    ['HOST_FAULT', 'hostFault'],
     ['MODEL_ATTEMPT_PENDING', 'modelPending'],
     ['RUN_UNREADABLE', 'update'],
     ['HISTORY_INVALID', 'historyInvalid'],
@@ -55,5 +57,15 @@ describe('cardOf', () => {
     ['BILLING_ACCOUNT_RESTRICTED', errorCategory.generic, 'accountRestricted'],
   ] as const)('should route %s to its own card that never offers Resume', (code, statusCategory, category) => {
     expect(cardOf(code, statusCategory)).toEqual({ category, retry: 'never' });
+  });
+
+  /* HA5: a `wait` code with a line of its own says it while the send stays queued; a transport code says nothing. */
+  it('should give a lined wait code its line and a transport code none', () => {
+    expect(waitLineOf('WRITER_LOCKED')).toBe('This chat is running in Tau on this computer.');
+    expect(waitLineOf('CHAT_RUN_LIVE')).toBe(
+      'A turn is still running in this chat. Your message sends when it finishes.',
+    );
+    expect(waitLineOf('PEER_UNRESPONSIVE')).toBeUndefined();
+    expect(waitLineOf(undefined)).toBeUndefined();
   });
 });

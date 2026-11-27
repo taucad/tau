@@ -144,8 +144,8 @@ export const awaitAgentHostAvailability = async (
         status: 'unavailable',
         reason:
           input.hostId === undefined
-            ? 'Timed out while checking whether this project can run the agent in your browser.'
-            : 'Timed out while looking for that agent host.',
+            ? 'Tau couldn’t get this project ready to run turns in your browser in time.'
+            : 'That computer didn’t answer in time.',
       });
     }, timeout);
     waiters.add(settle);
@@ -234,7 +234,8 @@ export const useBrowserAgentHostProjectAvailability = (providerKind: string): Br
       } catch (error) {
         settle({
           status: 'unavailable',
-          reason: error instanceof Error ? error.message : 'This project’s filesystem cannot host the agent log.',
+          reason:
+            error instanceof Error ? error.message : 'Tau can’t save this chat’s turns in this project’s storage.',
         });
       }
     };

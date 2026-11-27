@@ -31,7 +31,7 @@ import {
   useProjectSidebarRow,
   useSidebarCommands,
 } from '#hooks/use-sidebar-status.js';
-import type { ProjectSidebarRow, useLiveNow } from '#hooks/use-sidebar-status.js';
+import type { ChatSidebarStatus, ProjectSidebarRow, useLiveNow } from '#hooks/use-sidebar-status.js';
 import { publishRecordIssue } from '#workbench-records/record-issues.js';
 import { toSnapshotCallback } from '@taucad/ui-core/lib/xstate-test.utils';
 import type { SnapshotListener } from '@taucad/ui-core/lib/xstate-test.utils';
@@ -221,6 +221,9 @@ const sessionRefFor = (projectId: string): ProjectSessionActorRef =>
     },
   }) as unknown as ProjectSessionActorRef;
 
+/** The chats whose transient cause the store says has held (HA-I8). */
+const reconnecting = new Set<string>();
+
 /** The chat store's roots, as the sidebar reads them (PV-S5). */
 const fakeChats = {
   chatRootsOf: (projectId: string) => new Map(Object.entries(fakeRegistry.chatReferences[projectId] ?? {})),
@@ -229,6 +232,7 @@ const fakeChats = {
   subscribeProjection: () => () => undefined,
   subscribeMembership: () => () => undefined,
   isUnread: (chatId: string) => fakeRegistry.unread.has(chatId),
+  isReconnecting: (chatId: string) => reconnecting.has(chatId),
   subscribeUnread: () => () => undefined,
 } as unknown as ChatSessionStore;
 
@@ -350,6 +354,7 @@ beforeEach(() => {
     getProjection: fakeChats.getProjection,
     subscribeProjection: fakeChats.subscribeProjection,
     isUnread: fakeChats.isUnread,
+    isReconnecting: fakeChats.isReconnecting,
     subscribeUnread: fakeChats.subscribeUnread,
   } as unknown as ReturnType<typeof useChatSessionStore>);
   vi.mocked(useSessions).mockImplementation(() => fakeRegistry.actor);
@@ -665,6 +670,23 @@ describe('use-sidebar-status — pin (a): every agent-state row renders from a d
       { type: 'runLifecycle', phase: 'failed', reason: 'kernel crashed while meshing' },
     ]);
     expect(chatStatusLabel(selectChatStatus(actor.getSnapshot(), false))).toBe('Failed · kernel crashed while meshing');
+  });
+
+  /* HA-I8: the row says "Reconnecting…" exactly while the store's transient cause fact holds, and its run state else. */
+  it('should read Reconnecting… only while the store says a transient cause holds', () => {
+    liveProject(sidebarProject.id);
+    driveChat(sidebarProject.id, sidebarChat.id, [{ type: 'runLifecycle', phase: 'running' }]);
+    const chatOf = (): ChatSidebarStatus | undefined =>
+      readProjectStatus(fakeRegistry.actor, fakeChats, sidebarProject.id).chats.get(sidebarChat.id);
+    expect(chatOf()?.state).toBe('working');
+    reconnecting.add(sidebarChat.id);
+    try {
+      expect(chatOf()?.state).toBe('reconnecting');
+      expect(selectChatFacts(chatOf()!)).toEqual({ mark: 'running', sentence: 'Reconnecting…' });
+    } finally {
+      reconnecting.delete(sidebarChat.id);
+    }
+    expect(chatOf()?.state).toBe('working');
   });
 
   /* D16: the count hangs off the disc; the disc keeps the slot's centre. */

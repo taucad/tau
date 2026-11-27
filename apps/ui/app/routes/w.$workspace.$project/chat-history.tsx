@@ -17,6 +17,7 @@ import {
   useFollowLatestOutput,
 } from '#routes/w.$workspace.$project/use-follow-latest-output.js';
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
+import { ChatResidual } from '#routes/w.$workspace.$project/chat-residual.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { useProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
@@ -521,6 +522,8 @@ const ExpandedChatHistory = memo(function ({
                   isVisible={!atBottom}
                   onScrollToBottom={scrollToBottom}
                 />
+                {/* The chat's physical residual (R1, R6, R8): its line and its action, above the activity row. */}
+                <ChatResidual key={`${activeChatId}:residual`} className='mb-2' />
                 <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
                 <div className={cn(chatComposerTrayClassName, reservedTrayClassName)}>
                   <ChatTodoList

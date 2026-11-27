@@ -22,6 +22,9 @@ const textDecoder = new TextDecoder();
  */
 export const chatTurnNotStartedCode = 'CHAT_TURN_NOT_STARTED';
 
+/** The detail a turn-not-started refusal keeps its thrown code under (`CHAT_PLACEMENT_UNAVAILABLE`, a host refusal). */
+export const admissionCauseKey = 'admissionCause';
+
 /** Plain copy for compaction failures that leave the chat's history intact. */
 export const chatHistoryTidyFailureMessage = 'This chat hit a problem while Tau was tidying its history.';
 
@@ -229,8 +232,9 @@ const thrownCode = (error: Error): string | undefined =>
   'code' in error && typeof error.code === 'string' ? error.code : undefined;
 
 function parseError(error: Error): ChatError {
-  // Handle client-side network errors (these never reach the API)
-  if (isTransportError(error)) {
+  // Handle client-side network errors (these never reach the API). A coded refusal is its code's card, whatever its
+  // message says ("Load failed" included), so the thrown code is read first.
+  if (isTransportError(error) && thrownCode(error) === undefined) {
     return {
       category: errorCategory.network,
       title: errorCategoryTitles[errorCategory.network],
@@ -297,7 +301,13 @@ function parseError(error: Error): ChatError {
 export function parseAdmissionFailureForPersistence(error: Error): ChatError {
   const parsed = parseErrorForPersistence(error);
   // A thrown code is not a card of its own here: nothing ran, so the restart is the recovery.
-  return parsed.code === undefined || parsed.code === thrownCode(error)
-    ? { ...parsed, code: chatTurnNotStartedCode }
-    : parsed;
+  if (parsed.code !== undefined && parsed.code !== thrownCode(error)) {
+    return parsed;
+  }
+  /* The thrown code stays readable as the refusal's cause, so a card can step aside for the residual that says it. */
+  return {
+    ...parsed,
+    code: chatTurnNotStartedCode,
+    ...(parsed.code === undefined ? {} : { details: { ...parsed.details, [admissionCauseKey]: parsed.code } }),
+  };
 }

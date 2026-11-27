@@ -87,6 +87,7 @@ import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store
 import { resizeImageActor } from '#hooks/attachment-image.actor.js';
 import { clearLedger } from '@taucad/chat-ui/services/rpc-ledger';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
+import { waitLineOf } from '@taucad/chat-ui/utils/chat-error-card';
 import { buildEditedUserMessage, composeDraftText } from '#utils/chat.utils.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { HostAttachmentStatus } from '#chat-clients/_internal/host-attachment.js';
@@ -95,7 +96,7 @@ import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-c
 import type { CommitCancelledDraftRestoreInput } from '@taucad/project-library/types/chat-storage.types';
 import { ENV } from '#environment.config.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
-import { autoResumePlanOf, autoResumeStillAnswers } from '#utils/run-auto-resume-plan.js';
+import { autoResumePlanOf, autoResumeStillAnswers, commandRefusalOf } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 import {
   canAutoResumeModelPending,
@@ -747,6 +748,11 @@ type InternalSession = ChatSession & {
   offering: string | undefined;
   /** The prepared send the host last refused with an owner wait, sent again by its key once its backoff runs out. */
   hostWait: HostWait | undefined;
+  /**
+   * R1 (HA-I4): the queued entry whose command was prepared for another placement than the one this page reaches now,
+   * so it is never replayed here; it waits for the person's Remove or *Send here instead*.
+   */
+  pinnedElsewhere?: Readonly<{ queueId: string; placement: string }>;
   /** The live run this page saw before it had model text, so its first text can be timed (T10). */
   presentationWatch: string | undefined;
   /** The newest live run whose first model text this page has timed, or found already showing (T10). */
@@ -858,25 +864,20 @@ type HostWait = Readonly<{
   line: ReturnType<typeof setTimeout> | undefined;
 }>;
 
-/** What a send that waits for its host reads as: queued, with why and when it goes (PERF-5). */
 /**
- * The `wait` codes with a line of their own in the HA5 code table (blueprint, "HA5 code→copy table"): a queued command
- * held on one shows that line after {@link outboxWaitLineMilliseconds}, and never "Reconnecting…". Every other `wait`
+ * What a send that waits for its host reads as (PERF-5): a `wait` code with a line of its own in the HA5 code table
+ * (`waitLineOf`) says that line after {@link outboxWaitLineMilliseconds}, and never "Reconnecting…". Every other `wait`
  * code (the transport and handoff codes) and an answer lost past its bound show no line: the cue applies (HA-I8).
  */
-const linedWaitCodes: ReadonlySet<string> = new Set([
-  'WRITER_LOCKED',
-  'CHAT_RUN_LIVE',
-  'LEADER_VERSION_MISMATCH',
-  'RUN_ACTIVE_ON_ANOTHER_DEVICE',
-  'SEGMENTS_UNREADABLE',
-  'REVISIONS_UNAVAILABLE',
-]);
+const hostWaitSentence = (refusal: CommandRefusal): string | undefined => waitLineOf(refusal.code);
 
-const hostWaitSentence = (refusal: CommandRefusal): string =>
-  refusal.code === 'WRITER_LOCKED' || refusal.code === 'LEADER_VERSION_MISMATCH'
-    ? 'Queued. Another tab still has this chat open for writing. Your message is sent when that tab resumes or closes.'
-    : 'Queued. Your message is sent as soon as this chat can take it.';
+/** R1's fact: a remote placement's read was lost or refused and has not attached since (its retries included), outside R6. */
+const unreadable = (observed: ObservedChat): boolean =>
+  observed.ownStart === undefined && observed.residual === undefined && observed.status !== 'attached';
+
+/** A host's refusal as a thrown error that keeps its code, so its card (`cardOf`) words it with its action (HA5 I1). */
+const refusalError = (answer: Readonly<{ code: string; message: string }>): Error =>
+  Object.assign(new Error(answer.message), { code: answer.code });
 
 /**
  * A Stop this page is carrying out, from the press until nothing is left to wait for. One value, so letting go of it
@@ -1042,6 +1043,9 @@ type ObservedChat = {
   overlayTerminal?: boolean;
   /** HA-I8's cause facts have held since this timer started; at {@link reconnectingCueMilliseconds} the cue shows. */
   cueTimer?: ReturnType<typeof setTimeout>;
+  /** R1 holds once a remote read has stayed lost or refused for {@link reconnectingCueMilliseconds} (HA5 I6). */
+  unreachable?: boolean;
+  unreachableTimer?: ReturnType<typeof setTimeout>;
   cue?: boolean;
   /** Armed by a loss that is not a leadership handoff; reports it if it outlasts {@link chatReadLossBoundMilliseconds}. */
   lossReport?: ReturnType<typeof setTimeout>;
@@ -1074,6 +1078,8 @@ type ObservedChat = {
   ownDecide?: (local: boolean) => void;
   /** A restart (a pick) of a chat whose own run was unsettled: it stays unsettled until the new start decides. */
   ownHeldUnsettled?: boolean;
+  /** The own source's last pass found this device's saved log missing under rows it had shown (R8). */
+  ownMissing?: boolean;
 };
 
 /** The run IDs a Close prompt can truthfully promise to stop, and the work it cannot. @public */
@@ -1466,6 +1472,7 @@ export class ChatSessionStore {
       this.#stopOwnSource(observed);
       this.#observed.delete(chatId);
       clearTimeout(observed.cueTimer);
+      clearTimeout(observed.unreachableTimer);
       this.#stopRemoteObservationIfUnused(chatId);
       if (!this.#sessions.has(chatId)) {
         this.#historicalUsage.delete(chatId);
@@ -1689,7 +1696,7 @@ export class ChatSessionStore {
       ) {
         return 'continuing';
       }
-      throw new Error(`Host cancel refused ${answer.code}: ${answer.message}`);
+      throw refusalError(answer);
     }
     return 'stopped';
   }
@@ -1762,7 +1769,7 @@ export class ChatSessionStore {
       },
     });
     if (answer.status === 'refused') {
-      throw new Error(`Host approval refused ${answer.code}: ${answer.message}`);
+      throw refusalError(answer);
     }
     if (answer.effect !== 'durable') {
       return false;
@@ -1774,7 +1781,7 @@ export class ChatSessionStore {
         payload: { chatId, runId: run.runId },
       });
       if (resumed.status === 'refused' && resumed.code !== 'INTERRUPT_PENDING') {
-        throw new Error(`Host resume refused ${resumed.code}: ${resumed.message}`);
+        throw refusalError(resumed);
       }
     }
     return true;
@@ -2089,6 +2096,8 @@ export class ChatSessionStore {
     }
     this.#foldHostAnswer(chatId, answer);
     this.#latchIfForeignScanLost(chatId);
+    /* R1's hold follows the read's status even when the answer leaves the projection as it was (HA5 I6). */
+    this.#refreshReconnecting(chatId);
     // A verified empty batch can leave the reducer unchanged while establishing read authority.
     if (answer.status === 'batch' && answer.events.length === 0) {
       this.#syncProjection(chatId, 'none');
@@ -2126,6 +2135,41 @@ export class ChatSessionStore {
    */
   public getRemoteResidual(chatId: string): 'R6' | undefined {
     return this.#observed.get(chatId)?.residual;
+  }
+
+  /**
+   * Residual R1: the computer a remote placement's latest turns are on, while this device cannot read them (its read
+   * was lost or refused). `undefined` for a local placement, before a first read, while attached, and under R6.
+   *
+   * @param chatId - The chat.
+   * @returns The computer (its host id when the connection named one), or `undefined`.
+   * @public
+   */
+  public getUnreachableComputer(chatId: string): Readonly<{ hostId: TauAgentHostId | undefined }> | undefined {
+    const observed = this.#observed.get(chatId);
+    return observed?.unreachable === true && unreadable(observed) ? { hostId: observed.placement?.hostId } : undefined;
+  }
+
+  /**
+   * Residual R8: this device's saved log of a chat it had shown is missing while its record is present (HA-I3a).
+   *
+   * @param chatId - The chat.
+   * @returns `R8`, or `undefined`.
+   * @public
+   */
+  public getOwnResidual(chatId: string): 'R8' | undefined {
+    return this.#observed.get(chatId)?.ownMissing === true ? 'R8' : undefined;
+  }
+
+  /**
+   * Whether this device reads the chat from its own files (HA-I1), so reading it needs no other computer.
+   *
+   * @param chatId - The chat.
+   * @returns `true` for a local placement's own source.
+   * @public
+   */
+  public readsLocally(chatId: string): boolean {
+    return this.#observed.get(chatId)?.ownStart !== undefined;
   }
 
   /**
@@ -2265,6 +2309,75 @@ export class ChatSessionStore {
       ),
     );
     session.messageQueueRef.send({ type: 'retry' });
+  }
+
+  /**
+   * Residual R1's *Send here instead* (HA-I4, AR3-9): the chat runs on this device's own Tau from now on, and the
+   * entry is sent here as a new command. Its prepared command, if any, may already have reached the computer it was
+   * pinned to, and that log is not this one, so the entry takes a new id rather than replaying the old one.
+   *
+   * @param chatId - The chat.
+   * @param id - The queued entry.
+   * @param execution - This device's own execution for the chat.
+   * @public
+   */
+  public async sendQueuedMessageHere(chatId: string, id: string, execution: CadAgentExecution): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution });
+    const record = await session.messageQueueStore.exclusive(async () =>
+      session.messageQueueStore.update((current) => ({
+        ...current,
+        items: current.items.map((item) =>
+          item.id === id ? { ...unprepared(item), requestId: generatePrefixedId(idPrefix.request), execution } : item,
+        ),
+      })),
+    );
+    this.#loadOutbox(session, record);
+    session.messageQueueRef.send({ type: 'retry' });
+  }
+
+  /**
+   * Residual R1's *Remove*: the entry leaves the outbox, prepared or not. A prepared one was pinned to a computer this
+   * page cannot reach, so nothing here is sending it; whether that computer applied it is that computer's log's.
+   *
+   * @param chatId - The chat.
+   * @param id - The queued entry.
+   * @public
+   */
+  public async discardQueuedMessage(chatId: string, id: string): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    const record = await session.messageQueueStore.exclusive(async () =>
+      session.messageQueueStore.update((current) => ({
+        ...current,
+        items: current.items.filter((item) => item.id !== id),
+      })),
+    );
+    this.#loadOutbox(session, record);
+    session.messageQueueRef.send({ type: 'retry' });
+  }
+
+  /**
+   * Residual R1 for a queued entry (HA-I4): the entry prepared for another placement than the one this page reaches,
+   * with that placement's host id (`undefined` when the placement is not a computer this page can name).
+   *
+   * @param chatId - The chat.
+   * @returns The entry and its computer, or `undefined`.
+   * @public
+   */
+  public pinnedElsewhereOf(chatId: string): Readonly<{ queueId: string; hostId: string | undefined }> | undefined {
+    const pinned = this.#sessions.get(chatId)?.pinnedElsewhere;
+    return pinned === undefined
+      ? undefined
+      : {
+          queueId: pinned.queueId,
+          hostId: pinned.placement.startsWith('host:') ? pinned.placement.slice('host:'.length) : undefined,
+        };
   }
 
   /** Move one unsent entry before another, or to the end, preserving its identity. */
@@ -2881,9 +2994,9 @@ export class ChatSessionStore {
           throw new Error('Queued message is no longer awaiting delivery.');
         }
         if (item.commandPlacement !== undefined && item.commandPlacement !== destination) {
-          throw new Error(
-            'This message may already have been sent on another host. Return to its original host to confirm delivery.',
-          );
+          /* R1 (HA-I4): the person removes it or sends it here under a new id; it is never replayed elsewhere. */
+          this.#pinElsewhere(session, { queueId, placement: item.commandPlacement });
+          throw new Error("The latest turns are on another computer. They'll appear here when it's back online.");
         }
         if (destination === undefined || item.commandPlacement === destination) {
           return record;
@@ -2992,7 +3105,20 @@ export class ChatSessionStore {
           }
           /* `never`, `resume` and `reauth` end the item with the code's card. */
           if (answer.status === 'refused') {
-            throw new Error(`Delivery could not be confirmed: ${answer.message}`);
+            /* HA5 (I1): the chat's card words the code with its action; the strip says only that it was not sent. */
+            const parsed = parseErrorForPersistence(refusalError(answer));
+            session.persistenceActorRef.send({
+              type: 'setPersistedError',
+              /* NEW-1: stamped with where the log stood, so only a later run retires it, not the run before it. */
+              error: commandRefusalOf(parsed, {
+                requestId: commandId,
+                runId: item.command.payload.runId,
+                commandType: item.command.type,
+                kind: 'send',
+                projection: this.#projectionContext(session.chatId),
+              }),
+            });
+            throw Object.assign(new Error('Your message wasn’t sent.'), { code: answer.code });
           }
           if (answer.effect !== 'durable') {
             /* HA-I4 (HA4, `QueuePlacement`'s `AnswerNoop`): applied with nothing to do. The item ends with no receipt and
@@ -3084,6 +3210,19 @@ export class ChatSessionStore {
     });
   }
 
+  /** Record (or clear) the queued message the store holds because its computer cannot be reached (R1). */
+  #pinElsewhere(session: InternalSession, pinned: InternalSession['pinnedElsewhere']): void {
+    if (
+      session.pinnedElsewhere?.queueId === pinned?.queueId &&
+      session.pinnedElsewhere?.placement === pinned?.placement
+    ) {
+      return;
+    }
+    session.pinnedElsewhere = pinned;
+    this.#projectionTopics.get(session.chatId)?.emit();
+    this.#chatTopics.get(session.chatId)?.emit();
+  }
+
   /**
    * The outbox as this page just read it: the strip's rows and the record the gate reads its receipt from.
    *
@@ -3094,6 +3233,14 @@ export class ChatSessionStore {
    */
   #loadOutbox(session: InternalSession, record: ChatMessageQueueRecord, keepSending = true): void {
     session.outboxRecord = record;
+    const pinned = session.pinnedElsewhere;
+    if (
+      pinned !== undefined &&
+      !record.items.some((entry) => entry.id === pinned.queueId && entry.commandPlacement === pinned.placement)
+    ) {
+      /* Removed, sent here under a new id, or delivered where it was pinned: nothing is pinned elsewhere now. */
+      this.#pinElsewhere(session, undefined);
+    }
     const wait = session.hostWait;
     if (
       wait !== undefined &&
@@ -3184,7 +3331,8 @@ export class ChatSessionStore {
       },
       Math.min(hostWaitFirstDelay * 2 ** attempt, hostWaitLongestDelay),
     );
-    const lined = linedWaitCodes.has(refusal.code);
+    const sentence = hostWaitSentence(refusal);
+    const lined = sentence !== undefined;
     if (!lined) {
       clearTimeout(same?.line);
     }
@@ -3204,7 +3352,7 @@ export class ChatSessionStore {
       runId: command.payload.runId,
       attempt,
       due: false,
-      sentence: hostWaitSentence(refusal),
+      sentence: sentence ?? '',
       lineShown: lined && (same?.lineShown ?? false),
       cue: !lined,
       timer,
@@ -3924,7 +4072,7 @@ export class ChatSessionStore {
         return;
       }
       if (answer.status === 'refused') {
-        failure = new Error(`Host cancel refused ${answer.code}: ${answer.message}`);
+        failure = refusalError(answer);
       }
     } catch (error) {
       failure = error instanceof Error ? error : new Error(String(error));
@@ -3937,7 +4085,16 @@ export class ChatSessionStore {
         runId,
         reason: failure.message,
       });
-      session.persistenceActorRef.send({ type: 'setPersistedError', error: parseErrorForPersistence(failure) });
+      session.persistenceActorRef.send({
+        type: 'setPersistedError',
+        error: commandRefusalOf(parseErrorForPersistence(failure), {
+          requestId: command.commandId,
+          runId,
+          commandType: 'cancel',
+          kind: 'stop',
+          projection: this.#projectionContext(session.chatId),
+        }),
+      });
       this.#releaseStop(session);
     }
   }
@@ -4170,6 +4327,10 @@ export class ChatSessionStore {
   #ownVerdict(chatId: string, observed: ObservedChat, verdict: OwnSegmentVerdict): void {
     if (this.#observed.get(chatId) !== observed) {
       return;
+    }
+    if ((verdict === 'missing') !== (observed.ownMissing === true)) {
+      observed.ownMissing = verdict === 'missing' || undefined;
+      this.#projectionTopics.get(chatId)?.emit();
     }
     /* `unreadable` keeps the authority it had: a failed read is retried, and the file still holds the chat. */
     if (verdict !== 'unreadable') {
@@ -4435,6 +4596,8 @@ export class ChatSessionStore {
     await waitUnlessGone(session.persistenceActorRef, (snapshot) => !snapshot.context.isLoadingChat);
     if (
       this.#sessions.get(session.chatId) !== session ||
+      // The worker loaded while the chat did: R9 is already past.
+      this.#observed.get(session.chatId)?.hostLoadFailure === undefined ||
       session.persistenceActorRef.getSnapshot().context.persistedError?.code === 'WORKER_LOAD_FAILED'
     ) {
       return;
@@ -4444,6 +4607,15 @@ export class ChatSessionStore {
         ? error
         : Object.assign(new Error('The agent host worker did not load.'), { code: 'WORKER_LOAD_FAILED' });
     session.persistenceActorRef.send({ type: 'setPersistedError', error: parseErrorForPersistence(failure) });
+  }
+
+  /** The host's code loaded after all: R9 no longer holds, and the chat drops the card it saved for it. */
+  #clearHostLoadFailure(chatId: string, observed: ObservedChat): void {
+    observed.hostLoadFailure = undefined;
+    const persistence = this.#sessions.get(chatId)?.persistenceActorRef;
+    if (persistence?.getSnapshot().context.persistedError?.code === 'WORKER_LOAD_FAILED') {
+      persistence.send({ type: 'clearPersistedError' });
+    }
   }
 
   /**
@@ -4457,7 +4629,7 @@ export class ChatSessionStore {
     event: HostAttachmentStatus,
   ): void {
     if (event.type === 'attachment.attached') {
-      observed.hostLoadFailure = undefined;
+      this.#clearHostLoadFailure(chatId, observed);
       return;
     }
     if (observed.subscribed === true) {
@@ -4520,7 +4692,7 @@ export class ChatSessionStore {
 
   /**
    * HA-I8's cause facts: the outbox head re-sends after a lost answer or a `wait` code with no line of its own
-   * ({@link linedWaitCodes}), or a local
+   * (`waitLineOf`), or a local
    * chat's live overlay that was subscribed waits again for a transient cause while its own run is unsettled. Never in
    * a `paused` phase (an approval or a question), on a cold open's first connect, or over a coded terminal cause.
    */
@@ -4543,12 +4715,44 @@ export class ChatSessionStore {
     );
   }
 
+  /**
+   * Follow R1's fact as the cue follows its causes: a remote read lost for less than {@link reconnectingCueMilliseconds}
+   * is the HA3 retry's to heal, so the line waits that long and never flashes over a brief loss. ponytail: the same
+   * bound as the cue, not a timeouts row of its own.
+   */
+  #refreshUnreachable(chatId: string, observed: ObservedChat): void {
+    const announce = (unreachable: boolean): void => {
+      if ((observed.unreachable === true) !== unreachable) {
+        observed.unreachable = unreachable;
+        this.#projectionTopics.get(chatId)?.emit();
+      }
+    };
+    if (!unreadable(observed)) {
+      clearTimeout(observed.unreachableTimer);
+      observed.unreachableTimer = undefined;
+      announce(false);
+      return;
+    }
+    /* The loss starts the hold; a retry's `unknown` keeps it running, and only a read that attaches ends it. */
+    const lost = observed.status === 'lost' || observed.status === 'refused';
+    if (observed.unreachable === true || observed.unreachableTimer !== undefined || !lost) {
+      return;
+    }
+    observed.unreachableTimer = setTimeout(() => {
+      observed.unreachableTimer = undefined;
+      if (this.#observed.get(chatId) === observed && unreadable(observed)) {
+        announce(true);
+      }
+    }, reconnectingCueMilliseconds); // Bound: reconnectingCueMilliseconds.
+  }
+
   /** Follow the cause facts: the cue shows once they have held for {@link reconnectingCueMilliseconds}. */
   #refreshReconnecting(chatId: string): void {
     const observed = this.#observed.get(chatId);
     if (observed === undefined) {
       return;
     }
+    this.#refreshUnreachable(chatId, observed);
     const announce = (cue: boolean): void => {
       if ((observed.cue === true) !== cue) {
         observed.cue = cue;
@@ -4648,12 +4852,13 @@ export class ChatSessionStore {
           if (event.residual !== undefined) {
             observed.residual = event.residual;
           }
+          this.#refreshUnreachable(chatId, observed);
           this.#projectionTopics.get(chatId)?.emit();
           if (event.type === 'attachment.attached') {
             clearTimeout(observed.lossReport);
             observed.lossReport = undefined;
             observed.residual = undefined;
-            observed.hostLoadFailure = undefined;
+            this.#clearHostLoadFailure(chatId, observed);
             this.#syncProjection(chatId, 'none');
             return;
           }
@@ -5212,7 +5417,7 @@ export class ChatSessionStore {
         return;
       }
       if (answer.status === 'refused') {
-        throw new Error(`Host ${command.type} refused ${answer.code}: ${answer.message}`);
+        throw refusalError(answer);
       }
       if (answer.effect !== 'durable' || this.#sessions.get(session.chatId) !== session) {
         /* No run started, so a Stop deferred to this command has nothing to wait for. */
@@ -5276,11 +5481,14 @@ export class ChatSessionStore {
       const parsed = parseErrorForPersistence(error instanceof Error ? error : new Error(String(error)));
       session.persistenceActorRef.send({
         type: 'setPersistedError',
-        error: {
-          ...parsed,
-          details: { ...parsed.details, runId: command.payload.runId, commandType: command.type },
+        /* NEW-1: stamped with where the log stood, so a refused Start shows over the run before it until a later run. */
+        error: commandRefusalOf(parsed, {
           requestId: command.commandId,
-        },
+          runId: command.payload.runId,
+          commandType: command.type,
+          kind: request.kind,
+          projection: this.#projectionContext(session.chatId),
+        }),
       });
       session.stateActorRef.send({
         type: 'runLifecycle',

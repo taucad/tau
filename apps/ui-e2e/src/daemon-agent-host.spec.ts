@@ -329,7 +329,8 @@ describe('daemon agent host (AV-4, rung 1)', () => {
 
       /* Nothing the page had read is lost, and no attachment failure is shown. */
       expect(await renderedCount(finalText)).toBe(1);
-      const failure = /agent host could not be reached|connection to the agent host was refused|host attachment/iu;
+      const failure =
+        /couldn’t reach that computer|didn’t answer in time|agent host could not be reached|host attachment/iu;
       // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- what a reader sees.
       expect(await target.evaluate(() => document.body.innerText)).not.toMatch(failure);
 

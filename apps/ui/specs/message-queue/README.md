@@ -72,6 +72,12 @@ An answer applied with nothing to do now ends the item (HA4, 2026-11-27, HA-I4):
 
 The HA4 review (2026-11-27) re-pins the drift after `chat-session-store.ts` began cancelling, rather than letting go, a Stop aimed at a run that an applied not-applied answer names live (`details.state` admitted or running). The item still ends as `End(noop)`; the Stop is outside this slice, so no action changes.
 
+A prepared command pinned to a computer this page cannot reach now holds with the R1 line (HA5, 2026-11-27, HA-I8): "The latest turns are on **<computer>**", with Remove and Send here instead. `chat-session-store.ts` records the pin, and `chat-message-queue.tsx` hides the queue's own error while it holds. Remove withdraws the item. Send here instead rewrites it unprepared, under a new command id, for this computer, so it is a new command and never a replay of A's id. When the message had been sent, the line says it may already have reached that computer. No action changes; the `QueuePlacement.tla` note records it and the drift is re-pinned. TLC was not run for this note.
+
+The HA5 review (2026-11-27, I1) keeps a refused command's code. `chat-session-store.ts` throws the host's refusal as an error that carries its code, so the chat's card words it with its action. A queued command that ends on a `never`, `resume` or `reauth` code also records that card, and the queue strip says only that the message wasn't sent. `use-turn-admission.ts` rewords the placement reason. The item still ends as `End(never)`, so no action changes. The `QueuePlacement.tla` note records it, the drift is re-pinned, and TLC was not run for this note.
+
+The HA5 confirming review (2026-11-27, NEW-1) re-pins the drift after `chat-session-store.ts` began saving a command's refusal through `commandRefusalOf`. It is stamped with where the log stood, so only a later run retires the card and the run before it never does. This is a change to the chat's saved error only, so no action changes.
+
 ## Final runtime guard reconciliation
 
 `Acknowledge` requires membership in `Accepted`, which represents durable acceptance. The service now explicitly checks `answer.effect === 'durable'` on both initial dispatch and prepared replay before deleting an item. An `applied` answer with `not-applied` effect retains the original prepared command; it corresponds to stuttering, not `Acknowledge`. Reconciliation from `ledger.applied` uses the authoritative durable log. The model does not equate a successful transport response with acceptance.
@@ -160,3 +166,5 @@ Comment pins S1 re-pins the drift after `use-cad-chat-client.ts` flattened a mes
 The launch audit merged with PERF-8 re-pinned the drift after `chat-session-store.ts` began matching a restored draft to an outbox entry in the composed form, as it already compared a sent draft, so a restored draft with trailing whitespace is let go too; no action changed.
 
 Comment pins S2 re-pins the drift after an edit named its comments and was flattened like a send before its turn is requested (`use-cad-chat-client.ts`, `chat-turn-host.tsx`, `use-chat.tsx`), a returned message's originals were re-retained with its parts and the draft bytes reader fell back to the chat's directory (`chat-session-store.ts`), and the edit composer showed its comment list (`chat-textarea.tsx`); no action changed.
+
+The HA5 round-4 review (2026-11-28, R9-HIDDEN, STOP-SILENT) re-pins the drift after `chat-session-store.ts` began saving a refused Stop through `commandRefusalOf` and clearing a saved WORKER_LOAD_FAILED once the host attaches. Both change only the chat's saved error. A refused Stop still lets go of the Stop as before, so no action changes.

@@ -574,7 +574,7 @@ const chatReferencesOf = (
 ): ReadonlyMap<string, ChatSessionActorRef> =>
   projectSessionOf(sessions, projectId) === undefined ? noChatRoots : chats.chatRootsOf(projectId);
 
-const readChatStatus = ({
+const readStoredStatus = ({
   chats,
   chatId,
   ref,
@@ -592,6 +592,22 @@ const readChatStatus = ({
   return projection === undefined
     ? undefined
     : selectProjectedChatStatus(projection, chats.isUnread(chatId), peekRevisionClient(projectId)?.status());
+};
+
+const readChatStatus = ({
+  chats,
+  chatId,
+  ref,
+  projectId,
+}: {
+  chats: ChatSessionStore;
+  chatId: string;
+  ref: ChatSessionActorRef | undefined;
+  projectId: string;
+}): ChatSidebarStatus | undefined => {
+  const status = readStoredStatus({ chats, chatId, ref, projectId });
+  /* HA-I8: "Reconnecting…" only while the store's transient cause fact holds; it is never set in a `paused` phase. */
+  return status !== undefined && chats.isReconnecting(chatId) ? { ...status, state: 'reconnecting' } : status;
 };
 
 /**

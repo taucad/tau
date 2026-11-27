@@ -25,6 +25,8 @@ import { selectCaughtUp } from '#machines/chat-projection.logic.js';
 import type { SourceLiveEvent } from '@taucad/agent-host';
 import { chatReadReporter } from '#lib/chat-read-reporting.js';
 
+const { selectVisibleChatError } = await import('#routes/w.$workspace.$project/chat-error.js');
+
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirror the environment module's fixed exported names.
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'http://test.local' } }));
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
@@ -215,6 +217,31 @@ describe('host attachment regression harness (HA0 rows, green since HA1)', () =>
         expect(chat.text()).toContain(recordedText);
       }, coldBound);
     } finally {
+      chat.close();
+    }
+  });
+
+  /* Row 2, the card (R9-HIDDEN): the own file reads, so the chat is caught up and attached, yet the worker's code did
+   * not load. R9 ("Part of Tau did not finish loading", Reload) shows over the turn already read, never a cue. */
+  it('row 2: shows R9 over the own log while the host code does not load', async () => {
+    const store = createStore(createDisk({ [ownLog]: recordedTurn }));
+    const chat = open(store, deadHost('WORKER_LOAD_FAILED'));
+    const session = store.acquire(chatId, projectId);
+    try {
+      await vi.waitFor(() => {
+        expect(chat.text()).toContain(recordedText);
+        expect(store.getAttachmentStatus(chatId)).toBe('attached');
+        expect(
+          selectVisibleChatError({
+            persistedError: session.persistenceActorRef.getSnapshot().context.persistedError,
+            projection: store.getProjection(chatId),
+            attachmentStatus: store.getAttachmentStatus(chatId),
+          })?.code,
+        ).toBe('WORKER_LOAD_FAILED');
+      }, coldBound);
+      expect(store.isReconnecting(chatId)).toBe(false);
+    } finally {
+      store.release(chatId);
       chat.close();
     }
   });
@@ -723,6 +750,8 @@ describe('remote read loop (HA3)', () => {
       host.closeWith({ code: 4003, reason: 'device revoked' });
 
       expect(chat.store.getRemoteResidual(chatId)).toBe('R6');
+      /* R6 outranks R1: the line asks for pairing, not for the computer to come back online. */
+      expect(chat.store.getUnreachableComputer(chatId)).toBeUndefined();
       /* The same attachment dials again on its backoff; the store starts no attachment of its own. */
       await vi.waitFor(() => {
         expect(host.connect.mock.calls.length).toBe(dials + 1);
@@ -731,6 +760,68 @@ describe('remote read loop (HA3)', () => {
         expect(chat.store.getRemoteResidual(chatId)).toBeUndefined();
       }, coldBound);
     } finally {
+      chat.close();
+    }
+  });
+
+  /* HA5 (R9-HIDDEN): R9 holds only while the host's code fails to load; the read that attaches retires its card. */
+  it('should drop R9 once a remote read attaches after the host code failed to load', async () => {
+    const host = closableHost();
+    const chat = open(createStore(createDisk({})), host.connect);
+    const session = chat.store.acquire(chatId, projectId);
+    const persistedCode = () => session.persistenceActorRef.getSnapshot().context.persistedError?.code;
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+      host.connect.mockRejectedValueOnce(
+        Object.assign(new Error('The agent host worker did not load.'), { code: 'WORKER_LOAD_FAILED' }),
+      );
+
+      host.closeWith({ code: 1008, reason: 'route peer did not connect' });
+
+      await vi.waitFor(() => {
+        expect(persistedCode()).toBe('WORKER_LOAD_FAILED');
+      }, coldBound);
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+        expect(persistedCode()).toBeUndefined();
+      }, coldBound);
+    } finally {
+      chat.store.release(chatId);
+      chat.close();
+    }
+  });
+
+  it('should keep an unrelated saved error when a remote read attaches', async () => {
+    const host = closableHost();
+    const chat = open(createStore(createDisk({})), host.connect);
+    const session = chat.store.acquire(chatId, projectId);
+    const refusedSend = {
+      category: 'generic',
+      title: 'Your message wasn’t sent.',
+      message: 'Your message wasn’t sent.',
+      code: 'WIRE_VERSION_UNSUPPORTED',
+      requestId: 'cmd_send',
+    } as const;
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+      session.persistenceActorRef.send({ type: 'setPersistedError', error: refusedSend });
+      const dials = host.connect.mock.calls.length;
+
+      host.closeWith({ code: 1008, reason: 'route peer did not connect' });
+
+      await vi.waitFor(() => {
+        expect(host.connect.mock.calls.length).toBe(dials + 1);
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+      expect(session.persistenceActorRef.getSnapshot().context.persistedError).toMatchObject({
+        code: refusedSend.code,
+      });
+    } finally {
+      chat.store.release(chatId);
       chat.close();
     }
   });
@@ -749,6 +840,61 @@ describe('remote read loop (HA3)', () => {
       expect(chat.store.getRemoteResidual(chatId)).toBeUndefined();
     } finally {
       chat.close();
+    }
+  });
+
+  /* HA5 (I6): R1 waits out the HA3 retry's own window, so a brief loss never flashes the line. */
+  it('should show R1 only once a remote read has stayed lost for the cue’s bound', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const host = closableHost();
+    const chat = open(createStore(createDisk({})), host.connect);
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+      host.connect.mockRejectedValue(new Error('That computer is off.'));
+
+      host.closeWith({ code: 1008, reason: 'route peer did not connect' });
+
+      expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');
+      expect(chat.store.getUnreachableComputer(chatId)).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(reconnectingCueMilliseconds - 100);
+      expect(chat.store.getUnreachableComputer(chatId)).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(200);
+      /* The latest turns are on a computer this device cannot read now; no host id, so no name to give. */
+      expect(chat.store.getUnreachableComputer(chatId)).toEqual({ hostId: undefined });
+    } finally {
+      chat.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should never show R1 for a loss the retry heals within the bound', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const host = closableHost();
+    const chat = open(createStore(createDisk({})), host.connect);
+    const seen: unknown[] = [];
+    const unsubscribe = chat.store.subscribeProjection(chatId, () => {
+      seen.push(chat.store.getUnreachableComputer(chatId));
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+
+      host.closeWith({ code: 1008, reason: 'route peer did not connect' });
+      expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, reconnectingCueMilliseconds - 100);
+      await vi.advanceTimersByTimeAsync(reconnectingCueMilliseconds + 100);
+
+      expect(seen.filter((value) => value !== undefined)).toEqual([]);
+      expect(chat.store.getUnreachableComputer(chatId)).toBeUndefined();
+    } finally {
+      unsubscribe();
+      chat.close();
+      vi.useRealTimers();
     }
   });
 });

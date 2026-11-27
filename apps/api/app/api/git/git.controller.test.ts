@@ -304,6 +304,56 @@ describe('GitController cloud host budgets (RV-W10 F1, F2)', () => {
   });
 });
 
+/** WP12 (cloud backup admission, contracts § 4): git-lfs's lock check gets empty lists, not a 404. */
+describe('GitController LFS lock verification', () => {
+  it('should answer a member empty lock lists in the git-lfs media type after a read authorization', async () => {
+    const authorized: Array<{ projectId?: string; mode?: string; viaDevice?: string | undefined }> = [];
+    const controller = new GitController(
+      { get: () => 'https://api.tau.test' } as unknown as ConfigService<Environment, true>,
+      {
+        authorize: async (args: { projectId?: string; mode?: string; viaDevice?: string | undefined }) => {
+          authorized.push(args);
+          const access: Partial<GitAccess> = {};
+          return access;
+        },
+      } as unknown as GitRepositoryService,
+      {} as unknown as GitLfsService,
+      new PublicationRateLimiterService(countingRedis()),
+    );
+    const statuses: number[] = [];
+    const { reply, headers } = replyStub();
+    (reply as unknown as { status: (code: number) => FastifyReply }).status = (code) => {
+      statuses.push(code);
+      return reply;
+    };
+
+    await expect(controller.lfsLocksVerify('proj_wp12.git', 'user-owner', ownRequest(), reply)).resolves.toEqual({
+      ours: [],
+      theirs: [],
+    });
+    expect(authorized).toEqual([{ projectId: 'proj_wp12', userId: 'user-owner', mode: 'read', viaDevice: undefined }]);
+    expect(headers['content-type']).toBe('application/vnd.git-lfs+json');
+    expect(statuses).toEqual([200]);
+  });
+
+  it('should refuse a caller the project does not admit', async () => {
+    const controller = new GitController(
+      { get: () => 'https://api.tau.test' } as unknown as ConfigService<Environment, true>,
+      {
+        authorize: async () => {
+          throw new HttpException({ code: 'GIT_PROJECT_NOT_FOUND' }, HttpStatus.NOT_FOUND);
+        },
+      } as unknown as GitRepositoryService,
+      {} as unknown as GitLfsService,
+      new PublicationRateLimiterService(countingRedis()),
+    );
+
+    await expect(
+      controller.lfsLocksVerify('proj_wp12', 'user-stranger', ownRequest(), replyStub().reply),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+});
+
 /**
  * W36 D1: git answers a refused ref with HTTP 200, so a push's outcome is read
  * from its report-status, plain or inside side-band 1, never from the status.

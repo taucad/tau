@@ -59,6 +59,7 @@ const hostGitEndpoints: ReadonlySet<string> = new Set([
   'POST git-receive-pack',
   'POST info/lfs/objects/batch',
   'POST info/lfs/objects/verify',
+  'POST info/lfs/locks/verify',
 ]);
 
 /** `/v1/git/<repository>/<endpoint>`, the only shape of path this middleware fronts. */

@@ -579,6 +579,34 @@ export class GitController implements OnModuleInit {
   }
 
   /**
+   * Git-lfs's lock verification, which every `git push` with LFS objects calls before it uploads (cloud backup
+   * admission WP12, contracts § 4). Tau has no LFS locking, so every member gets empty lists; without this route the
+   * client logged a 404 on each push and fell back to "locking not supported".
+   *
+   * @param repository - `<projectId>` or `<projectId>.git`.
+   * @param userId - The authenticated caller.
+   * @param request - The request, for the cloud host it came through.
+   * @param reply - The reply, for `Retry-After` and the git-lfs media type.
+   * @returns Empty lock lists.
+   */
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets; bundling them would obscure the route contract
+  @Post(':repo/info/lfs/locks/verify')
+  public async lfsLocksVerify(
+    @Param('repo') repository: string,
+    @User('id') userId: string,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<{ ours: readonly never[]; theirs: readonly never[] }> {
+    const projectId = this.requireProjectId(repository);
+    const viaDevice = hostDeviceOf(request.raw)?.deviceId;
+    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'lfs' });
+    await this.repositories.authorize({ projectId, userId, mode: 'read', viaDevice });
+    void reply.header('content-type', 'application/vnd.git-lfs+json');
+    void reply.status(200);
+    return { ours: [], theirs: [] };
+  }
+
+  /**
    * The audited ref-removal verb (D24, I2): the only way a conflict line
    * leaves the Hosted Remote, since the push hook refuses every deletion.
    * Owner only. A version is never removed, so a tag is refused

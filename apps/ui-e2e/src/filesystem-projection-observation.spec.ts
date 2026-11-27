@@ -1034,6 +1034,8 @@ test('restores a real per-chat composer draft after chat replacement and reload'
     .toBe(draft);
   await target.click(selectors.getByRole('link', { name: 'Second chat', exact: true }));
   await target.expectUrl(new RegExp(`[?&]chat=${chatIds[1]}(?:&|$)`, 'u'), 30_000);
+  /* The URL changes before the second chat's composer mounts; read its text once it is there. */
+  await target.expectVisible(composer, 30_000);
   const acquiredValue16 = await target.textContent(composer);
   expect(acquiredValue16).not.toContain(draft);
   await target.click(selectors.getByRole('link', { name: 'Attachments chat', exact: true }));

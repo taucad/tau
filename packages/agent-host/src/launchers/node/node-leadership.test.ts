@@ -252,6 +252,9 @@ describe('Node leadership reconciliation', () => {
       expect(answer).toMatchObject({ status: 'applied', details: { takeover: false } });
       /* HA0's `claim.refused`: the refusal reaches the launcher's observer. */
       expect(onClaimRefused).toHaveBeenCalledWith('chat-held', 'WRITER_LOCKED');
+      /* Review round 2: the term's claim retry, each second, reports nothing more. */
+      await pause(1200);
+      expect(onClaimRefused).toHaveBeenCalledTimes(1);
       expect(await readFile(logPath, 'utf8')).not.toContain('"state":"failed"');
     } finally {
       holder.kill();

@@ -8,7 +8,7 @@
  * build, are inventoried in Brain `artifacts/host-attachment-reliability/ha0-results.md`.
  */
 import { readFileSync } from 'node:fs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Chat as ChatEntity } from '@taucad/chat';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
@@ -444,6 +444,11 @@ describe('host attachment regression harness (HA2 rows)', () => {
 
 /* Successors (testing §14): each behaviour HA2 deleted state for now comes from the own source. */
 describe('HA2 successors: a local placement keeps no attachment state', () => {
+  /* The store loads the own source lazily; a cold import resolves in real time, after a test's fake advance. */
+  beforeAll(async () => {
+    await import('#services/chat-own-segment-source.js');
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });

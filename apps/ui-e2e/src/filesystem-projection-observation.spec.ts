@@ -628,7 +628,9 @@ test('updates the real composer catalog from settled skill topology and retries 
       path,
       '---\nname: observation-peer\ndescription: Observation integration skill\n---\nUse this skill to qualify settled discovery.\n',
     );
-    await target.type(composer, '/observation-peer');
+    /* A query that is not yet a whole token: a token the person finished typing becomes its chip when the catalog
+     * that knows it settles after the keystroke (draft rehydration), so the open menu is the product signal here. */
+    await target.type(composer, '/observation-pe');
     await target.expectVisible(selectors.getByText('Observation integration skill', { exact: true }), 30_000);
     const closed = await controlWorkbenchObservation('close', '.agents');
     expect(closed.closed).toBeGreaterThan(0);
@@ -960,8 +962,15 @@ test('includes only the settled available skill in actual gateway system prompts
       '.agents/skills/gateway-observation/SKILL.md',
       `---\nname: gateway-observation\ndescription: ${description}\n---\nQualify actual prompt selection.\n`,
     );
-    await target.type(composer, '/gateway-observation');
+    /* Pick the skill from the open menu once the settled catalog lists it: a whole typed token becomes a chip only
+     * if the catalog settles after its last keystroke, so typing it out would race that settlement. */
+    await target.type(composer, '/gateway-obs');
     try {
+      await target.expectVisible(
+        selectors.getByCss('[data-testid="slash-command-dropdown"]').getByText(description, { exact: true }),
+        30_000,
+      );
+      await target.keyboardPress('Enter');
       await target.expectVisible(
         composer.getByCss('[data-node-view-wrapper]').getByText('/gateway-observation', { exact: true }),
         30_000,
@@ -994,9 +1003,16 @@ test('includes only the settled available skill in actual gateway system prompts
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
     await target.expectVisible(selectors.getByText('Unavailable skill excluded.', { exact: true }), 120_000);
     const acquiredValue15 = await target.readAgentHostGatewayRequests();
-    const closed = acquiredValue15.at(-1) as { readonly system?: unknown } | undefined;
+    const closed = acquiredValue15.at(-1) as { readonly system?: unknown; readonly messages?: unknown } | undefined;
     expect(closed).toBeDefined();
-    expect(JSON.stringify(closed?.system)).not.toContain(description);
+    /* The chat's first turn pinned its skills block in the cached system prefix (prompt-cache identity I1, 5fbe770fbb,
+     * #1629), so the system bytes keep it; the catalog this turn may use rides as the turn's skills note, and with the
+     * watch closed that catalog has no skill. */
+    expect(JSON.stringify(closed?.system)).toContain(description);
+    const skillsNotes =
+      JSON.stringify(closed?.messages ?? null).match(/The skills catalog changed after this chat began[^<]*/gu) ?? [];
+    expect(skillsNotes.at(-1)).toContain('empty: no skill can be activated.');
+    expect(skillsNotes.at(-1)).not.toContain(description);
   } finally {
     await restoreWorkbenchObservation();
   }

@@ -143,7 +143,9 @@ describe('useContextPayload', () => {
     await act(async () => {
       catalogClosed.resolve();
     });
-    expect(hook.result.current?.skills).toBeUndefined();
+    /* An empty listing, not an absent one: an absent listing lets the host read the skills itself, past the failure. */
+    expect(hook.result.current).toEqual({ skills: [], memory: undefined });
+    await expect(awaitContextPayload()).resolves.toEqual({ skills: [], memory: undefined });
     hook.unmount();
   });
 

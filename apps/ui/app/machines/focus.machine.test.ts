@@ -417,7 +417,8 @@ describe('focus: the registry answers an open', () => {
     expect(harness.opens()).toHaveLength(2);
   });
 
-  it('should settle on the closed view when its open lands on a failed session (rule 10)', () => {
+  /* The spec's `closed` view: the notice for a session that failed, which nobody closed, says the open failed. */
+  it('should settle on the failed-session view when its open lands on a failed session (rule 10)', () => {
     const harness = createFocusHarness();
     harness.route('r1', 'a');
     harness.ready('r1', 'a');
@@ -432,7 +433,7 @@ describe('focus: the registry answers an open', () => {
         { status: { a: { ...liveStatus, state: 'failed' } }, closed: {} },
         { slugs: slugsOf('a'), projectId: 'a', chatId: undefined },
       )?.kind,
-    ).toBe('closed');
+    ).toBe('session-failed');
   });
 
   it('should settle on the closed view when the session it opened closes before the join (rule 11)', () => {

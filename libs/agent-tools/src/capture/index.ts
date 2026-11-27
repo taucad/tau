@@ -20,6 +20,7 @@ export {
 } from '#capture/capture-workbench-view.js';
 export {
   buildViewerCaptureImageOptions,
+  createIsometricCaptureCamera,
   resolveViewerCapturePixelRatio,
   type ViewerCaptureImageOptions,
   type ViewerCaptureImageOptionsInput,

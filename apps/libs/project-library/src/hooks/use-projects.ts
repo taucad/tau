@@ -10,7 +10,7 @@ import { useCallback } from 'react';
 import type { Project } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import type { ProjectManagerContextType } from '#hooks/use-project-manager.js';
-import type { CreatedProject } from '#runtime/project-library-commands.js';
+import type { CreatedProject, PermanentDeleteOutcome } from '#runtime/project-library-commands.js';
 import { isInProjectScope, projectLibraryEntryToListItem } from '#types/project-library.types.js';
 import type { ProjectScope } from '#types/project-library.types.js';
 
@@ -114,24 +114,29 @@ export function useProjects(inputs: ProjectsInputs, options?: { scope?: ProjectS
   );
 
   const handlePermanentlyDeleteProject = useCallback(
-    async (projectId: string) => {
+    async (projectId: string): Promise<PermanentDeleteOutcome> => {
       /* A session this tab holds is verified through it before it closes; the closed project is then held quiescent
        * by its chat-log lease until its bytes are gone (W30), so no tab can start a run in between. */
       await requireQuiescentProject(projectId);
       await closeProjectSession(projectId);
       const lease = await leaseQuiescentProject(projectId);
+      let outcome: PermanentDeleteOutcome;
       try {
         // Live composer records must stop before their directory is removed, or they write it back (D11).
         await chatSessions.removeProject(projectId);
         if (lease.lost()) {
           throw new Error("Another tab opened one of this project's chats. Close it there before deleting.");
         }
-        await permanentlyDeleteProject(projectId);
+        outcome = await permanentlyDeleteProject(projectId);
       } finally {
         lease.release();
       }
-      // This device's view exceptions for the project go with it; a trashed project keeps them for its restore.
-      viewExceptions.dropProject(projectId);
+      /* This device's view exceptions for the project go with it; a trashed project keeps them for its restore, and so
+       * does one whose delete was cancelled (FW3): nothing was removed. */
+      if (outcome.status === 'deleted') {
+        viewExceptions.dropProject(projectId);
+      }
+      return outcome;
     },
     [
       chatSessions,
@@ -148,9 +153,9 @@ export function useProjects(inputs: ProjectsInputs, options?: { scope?: ProjectS
    * here. An open session reads the folder its route named, which may be this copy by now, so it closes first, as
    * choosing a folder does. */
   const handleDeleteProjectCopy = useCallback(
-    async (projectId: string, locator: ProjectLocator): Promise<void> => {
+    async (projectId: string, locator: ProjectLocator): Promise<PermanentDeleteOutcome> => {
       await closeProjectSession(projectId);
-      await permanentlyDeleteProject(projectId, locator);
+      return permanentlyDeleteProject(projectId, locator);
     },
     [closeProjectSession, permanentlyDeleteProject],
   );

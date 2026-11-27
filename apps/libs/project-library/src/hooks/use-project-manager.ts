@@ -23,12 +23,17 @@ import type {
   WorkspaceBindingRepairResult,
 } from '@taucad/files-ui/filesystem/handle-store';
 import type { CommitCancelledDraftRestoreInput } from '#types/chat-storage.types.js';
-import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
+import type { PendingProjectRecovery, SoleCopyCancellation } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
 import type { AppUiPreferences } from '#types/project-library-io.types.js';
 import type { ProjectLibrary, ProjectRouteAccess } from '#runtime/project-library.js';
 import type { ProjectListing } from '#runtime/project-library-storage.js';
-import type { CreatedProject, CreateProjectOptions, ImportStagingTarget } from '#runtime/project-library-commands.js';
+import type {
+  CreatedProject,
+  CreateProjectOptions,
+  ImportStagingTarget,
+  PermanentDeleteOutcome,
+} from '#runtime/project-library-commands.js';
 import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
 
 /**
@@ -71,8 +76,11 @@ export type ProjectManagerContextType = {
   restoreProject: (projectId: string) => Promise<boolean>;
   /** @returns whether a library row was actually trashed — a vanished row is not a success (DF3). */
   deleteProject: (projectId: string) => Promise<boolean>;
-  /** Delete one exact directory for good: `locator`'s copy, or else the one the route binds (blueprint W0). */
-  permanentlyDeleteProject: (projectId: string, locator?: ProjectLocator) => Promise<void>;
+  /**
+   * Delete one exact directory for good: `locator`'s copy, or else the one the route binds (blueprint W0). `cancelled`
+   * when no other copy held the id once the journal had waived the Trash for one: nothing was removed (FW3).
+   */
+  permanentlyDeleteProject: (projectId: string, locator?: ProjectLocator) => Promise<PermanentDeleteOutcome>;
   /** Refuse a delete while a stored chat's history is not caught up or work is running (row L7). */
   verifyProjectQuiescent: (projectId: string) => Promise<void>;
   /**
@@ -102,6 +110,10 @@ export type ProjectManagerContextType = {
   recoveries: readonly PendingProjectRecovery[];
   /** Drop a pending operation the user has given up on (DF11). */
   discardRecovery: (operationId: string) => Promise<void>;
+  /** Permanent deletes a replay cancelled because no other copy holds the id, until dismissed (FW3). */
+  cancelledDeletes: readonly SoleCopyCancellation[];
+  /** The person has read a cancelled delete's notice (FW3). */
+  dismissCancelledDelete: (operationId: string) => void;
   assertWorkspaceMutationAllowed: (workspaceId: string) => Promise<void>;
   /** Read what a folder picked for Locate holds; reads only (blueprint D2). */
   readFolderEvidence: (target: RelinkTarget) => Promise<FolderEvidence>;

@@ -467,6 +467,8 @@ type CreateTransportStreamOptions = {
   readonly kernel?: (() => string | undefined) | undefined;
   /** E9: the longest silence between transport events before the call fails `MODEL_STREAM_STALLED`. */
   readonly stallBound?: StreamStallBound | undefined;
+  /** WP-10 step B: resolves once every row written so far is durable; the request is sent only after it. */
+  readonly durable?: (() => Promise<void>) | undefined;
 };
 
 /** The timers a stall bound runs on: an actor's clock, so the incarnation's (or a `StepClock`) fits. @public */
@@ -852,6 +854,10 @@ export const createTransportStreamFunction =
         const kernel = options.kernel?.();
         signal.throwIfAborted();
         const documents = options.documents?.();
+        /* WP-10 step B, the dispatch barrier: the prepared row, and every row before it, is durable before the request
+         * leaves (ChatRunSlot.tla `dispatch`; without it a crash can lose a sent attempt's record). */
+        await options.durable?.();
+        signal.throwIfAborted();
         /* The transport's own signal: pi's abort reaches it, and so does the stall bound's. */
         const request = new AbortController();
         const forward = (): void => {
@@ -1277,6 +1283,7 @@ const compactionModelsWithTransport = (options: {
   readonly runAttemptId?: CreateTransportStreamOptions['runAttemptId'];
   readonly bindInvocation?: CreateTransportStreamOptions['bindInvocation'];
   readonly kernel?: CreateTransportStreamOptions['kernel'];
+  readonly durable?: CreateTransportStreamOptions['durable'];
   /** The session's side table, so a summarised document keeps its name (P32). */
   readonly documents: () => ReadonlyMap<string, MaterializedDocument>;
 }): Models => {
@@ -1296,6 +1303,9 @@ const compactionModelsWithTransport = (options: {
         signal.throwIfAborted();
         const documents = options.documents();
         const kernel = options.kernel?.();
+        /* The dispatch barrier, as for a generation call. */
+        await options.durable?.();
+        signal.throwIfAborted();
         const stream = options.transport.stream({
           attemptId,
           ...(options.chatId === undefined ? {} : { chatId: options.chatId }),
@@ -1439,6 +1449,11 @@ export type CreateAgentSessionOptions = {
   readonly appendEvent?: ((event: SessionLogEvent) => Promise<void>) | undefined;
   /** The owner's writer for rows that go together, with `appendEvent` (WP-10): one write and one flush. */
   readonly appendEvents?: ((events: readonly SessionLogEvent[]) => Promise<void>) | undefined;
+  /**
+   * WP-10 step B: resolves once every row the owner's writer took is durable, where that writer answers before (its rows'
+   * order fixed). A model request, a tool's start and the attempt's outcome each wait for it; a rejection fails them.
+   */
+  readonly durable?: (() => Promise<void>) | undefined;
   readonly clientContext?: ClientContext | undefined;
   readonly recentSkills?: RecentSkillsPort | undefined;
   readonly substituteToolResult?: ToolResultSubstituter | undefined;
@@ -1835,6 +1850,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         }
         return settled.value;
       }
+      /* WP-10 step B: the call's rows are durable before the tool acts. */
+      await options.durable?.();
       return tool.execute(toolCallId, input, signal, onUpdate);
     },
   }));
@@ -2008,6 +2025,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     documents: () => documents,
     runAttemptId,
     ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
+    durable: options.durable,
     committedContext: () => committedContext,
     committedTurns: async () => committedTurnContexts(await record.rows()),
     turnLabels,
@@ -2070,6 +2088,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       // async-iife: bootstrap -- eager dispatch must settle without an unhandled rejection before Pi awaits it.
       const result = (async (): Promise<PrestartedToolResult> => {
         try {
+          /* WP-10 step B: the tool's input row is durable before the tool acts. */
+          await options.durable?.();
           const value = await tool.execute(
             toolCall.id,
             input,
@@ -2162,6 +2182,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           runAttemptId,
           ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
           kernel: runKernel,
+          durable: options.durable,
         }),
     settleDiscardedToolCalls: settlePrestartedTools,
     onCompaction: options.onCompaction,
@@ -2343,6 +2364,14 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       }
     } catch (error) {
       outcome = abortRequested ? aborted() : { outcome: 'failed', failure: codedFailure(error) };
+    }
+    /* WP-10 step B: the attempt's rows are durable before its outcome is told; if they cannot be, it did not complete. */
+    try {
+      await options.durable?.();
+    } catch (error) {
+      if (outcome.outcome === 'completed') {
+        outcome = { outcome: 'failed', failure: codedFailure(error) };
+      }
     }
     state = outcome.outcome === 'completed' ? 'completed' : outcome.outcome === 'failed' ? 'failed' : 'cancelled';
     return outcome;

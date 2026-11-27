@@ -447,7 +447,7 @@ describe('useProjectManager recovery (I8)', () => {
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
     mockVerifyProjectRoute.mockResolvedValue({ status: 'discovery-required' });
     mockCommitPendingProjectDirectory.mockResolvedValue({ status: 'committed' });
-    mockPermanentlyDeleteProjectDirectory.mockResolvedValue({ status: 'deleted' });
+    mockPermanentlyDeleteProjectDirectory.mockResolvedValue({ status: 'deleted', remaining: [], absence: 'absent' });
     mockSyncProjectRoots.mockResolvedValue(undefined);
     journal = [pendingCreate];
     mockGetPendingProjectOperations.mockImplementation(async () => [...journal]);

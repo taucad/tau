@@ -10,6 +10,7 @@ import { parseCookies as parseCookiesBetterAuth } from 'better-auth/cookies';
 import { createSessionCacheHarness, dataCookie, tokenCookie } from '#testing/session-cache.fixture.js';
 import type { SessionCacheHarness } from '#testing/session-cache.fixture.js';
 import { isSnapshotName, snapshotHeaderShapes } from '#testing.js';
+import { forwardedBody } from '#auth.module.js';
 
 /** The status of a pending response. */
 const statusOf = async (pending: Promise<LightMyRequestResponse>): Promise<number> => {
@@ -169,5 +170,25 @@ describe('AuthModule forwardToAuth', () => {
     } finally {
       await checked.close();
     }
+  });
+});
+
+describe('forwardedBody', () => {
+  it('should send a parsed form body back as form fields, keeping repeated names', () => {
+    const body = forwardedBody({
+      headers: { 'content-type': 'application/x-www-form-urlencoded; charset=utf-8' },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- the OAuth wire field
+      body: { grant_type: 'authorization_code', resource: ['https://a.test', 'https://b.test'] },
+    });
+
+    expect(body).toBe('grant_type=authorization_code&resource=https%3A%2F%2Fa.test&resource=https%3A%2F%2Fb.test');
+  });
+
+  it('should send any other body as JSON', () => {
+    expect(forwardedBody({ headers: { 'content-type': 'application/json' }, body: { a: 1 } })).toBe('{"a":1}');
+  });
+
+  it('should send no body when there is none', () => {
+    expect(forwardedBody({ headers: {}, body: undefined })).toBeUndefined();
   });
 });

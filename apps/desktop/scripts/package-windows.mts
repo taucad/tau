@@ -19,6 +19,7 @@ import { build, Platform } from 'electron-builder';
 import { z } from 'zod';
 
 import { desktopArtifactName, desktopReleaseIdentity } from '#shared/desktop-release.js';
+import { windowsInstallerInclude } from '#shared/windows-installer-include.js';
 import { verifyWindowsSignature } from '#main/windows-signature.js';
 
 const required = (name: string): string => {
@@ -198,22 +199,8 @@ const main = async (): Promise<void> => {
   const protocolInclude = join(project, 'tau-protocol.nsh');
   // NSIS does not consume electron-builder's top-level protocols option.
   // Remove only our exact command so uninstalling an older location cannot steal a newer handler.
-  await writeFile(
-    protocolInclude,
-    String.raw`!macro customInstall
-  WriteRegStr HKCU "${protocolKey}" "" "URL:${name}"
-  WriteRegStr HKCU "${protocolKey}" "URL Protocol" ""
-  WriteRegStr HKCU "${protocolKey}\shell\open\command" "" '"$INSTDIR\Tau.exe" "%1"'
-!macroend
-!macro customUnInstall
-  Push $0
-  ReadRegStr $0 HKCU "${protocolKey}\shell\open\command" ""
-  StrCmp $0 '"$INSTDIR\Tau.exe" "%1"' 0 +2
-  DeleteRegKey HKCU "${protocolKey}"
-  Pop $0
-!macroend
-`,
-  );
+  // The sandbox's `revoke` runs from the uninstaller only (src/shared/windows-installer-include.ts).
+  await writeFile(protocolInclude, windowsInstallerInclude({ protocolKey, name }));
   const electronMetadata = z
     .object({ version: z.string() })
     .parse(JSON.parse(await readFile(join(desktopRoot, 'node_modules/electron/package.json'), 'utf8')));

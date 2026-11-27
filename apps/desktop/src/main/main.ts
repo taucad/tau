@@ -1383,7 +1383,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     desktopChannel === 'staging' ? join(tauConfigDirectory, 'dependencies') : defaultDependencyStore();
   const nativeStoreAbort = new AbortController();
   /* Windows: native workers and main's own seal step run in the sandbox helper's AppContainer, and only main may run
-   * its one-time elevated setup; the frame names the helper to every kernel utility. Off, a native kernel refuses. */
+   * its one-time elevated setup, on the first native use; the frame names the helper to every kernel utility. On by
+   * default; off (`TAU_WINDOWS_SHELL_SANDBOX=0`), a native kernel refuses. */
   const windowsNativeSandbox = resolveDesktopWindowsNativeSandbox({
     sandboxEnvironment: windowsSandboxEnvironment,
     userDataPath: app.getPath('userData'),

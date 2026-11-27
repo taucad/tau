@@ -60,8 +60,19 @@ const selectTauHost = async (workspace: string): Promise<void> => {
 };
 
 const send = async (prompt: string): Promise<void> => {
+  const submit = selectors.getByCss('button:has(svg.lucide-arrow-up)').last();
   await target.type(composer, prompt);
-  await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
+  /* A click before the button arms is dropped (daemon-agent-host.spec.ts), so wait until it is there and enabled. */
+  await target.expectVisible(submit, 120_000);
+  await expect.poll(async () => target.getAttribute(submit, 'disabled'), { timeout: 120_000 }).toBeNull();
+  await target.click(submit);
+};
+
+/* While a turn runs the button is Stop, so a follow-up is queued with Enter; the strip shows it once it is queued. */
+const queue = async (prompt: string): Promise<void> => {
+  await target.type(composer, prompt);
+  await target.keyboardPress('Enter');
+  await target.expectVisible(selectors.getByRole('region', { name: 'Queued messages' }), 30_000);
 };
 
 const runs = it.runIf(server.browser === 'chromium');
@@ -81,7 +92,7 @@ describe('host attachment regression harness, e2e', () => {
         await send('Create the Tau Host proof file.');
         await target.expectVisible(selectors.getByText(partialText, { exact: true }), 120_000);
         expect(await target.isTauServeGatewayHeld()).toBe(true);
-        await send('Then describe the model.');
+        await queue('Then describe the model.');
 
         // The page stays loaded; the computer it placed the chat on is gone.
         await target.stopTauServeFixture();

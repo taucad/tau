@@ -267,7 +267,9 @@ describe('createExternalAgentDiscovery', () => {
       harness.advance(externalAgentRediscoveryMilliseconds);
       elapsed += externalAgentRediscoveryMilliseconds;
       const retry = harness.discovery.list();
+      // oxlint-disable-next-line no-await-in-loop -- each retry settles before the clock moves to the next.
       await harness.settle({ agents: [], refused: [refusalOf('codex')] });
+      // oxlint-disable-next-line no-await-in-loop -- as above.
       await retry;
     }
     const retries = harness.discover.mock.calls.length;

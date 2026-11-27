@@ -179,6 +179,27 @@ describe('Node leadership reconciliation', () => {
     await port.close();
   });
 
+  /* Review N2: the bound runs from the first refusal, so a slow first claim still gets its retries. */
+  it('should start the bound at the first refusal, not before the first claim', async () => {
+    let calls = 0;
+    const claim = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        await pause(60);
+      }
+      return calls < 3 ? 'WRITER_LOCKED' : undefined;
+    });
+    const port = createNodeLeadership({ claim, writing: () => false } as unknown as LeadershipHost, {
+      claimRetry: 5,
+      claimRefusalRetry: 30,
+    });
+    port.reconcile('chat-1', { wait: true });
+    await vi.waitFor(() => {
+      expect(claim).toHaveBeenCalledTimes(3);
+    });
+    await port.close();
+  });
+
   it('should not retry any other refusal', async () => {
     const { host, claim } = hostAnswering(['LOG_POISONED', undefined]);
     const port = createNodeLeadership(host, delays);
@@ -187,7 +208,8 @@ describe('Node leadership reconciliation', () => {
     expect(claim).toHaveBeenCalledTimes(1);
   });
 
-  it('should run one reconciliation per chat at a time, and wait for it on close', async () => {
+  /* Review I3: a claim stuck in the host's closing wait never holds the close past the close-cut bound. */
+  it('should run one reconciliation per chat at a time, and close without waiting for a stuck claim', async () => {
     let open: (code: string | undefined) => void = () => undefined;
     const claim = vi.fn(
       async () =>
@@ -200,9 +222,10 @@ describe('Node leadership reconciliation', () => {
     port.reconcile('chat-1', { wait: true });
     expect(claim).toHaveBeenCalledTimes(1);
     const closing = port.close();
-    expect(await Promise.race([closing.then(() => 'closed'), pause(20).then(() => 'waiting')])).toBe('waiting');
-    open(undefined);
-    await closing;
+    expect(await Promise.race([closing.then(() => 'closed'), pause(20).then(() => 'waiting')])).toBe('closed');
+    open('WRITER_LOCKED');
+    await pause(20);
+    expect(claim).toHaveBeenCalledTimes(1);
   });
 
   /* H32: a second process on the project, refused by the live writer that drives the run, reports no takeover. */
@@ -212,13 +235,23 @@ describe('Node leadership reconciliation', () => {
     try {
       /* The marker names the log by its real path, as the writer that holds it records it. */
       await writeFile(`${logPath}.lock`, `${String(holder.pid)}\n${await realpath(logPath)}\n`, 'utf8');
-      const launcher = launch(root);
+      const onClaimRefused = vi.fn();
+      const launcher = createNodeLauncher({
+        workspaceRoot: root,
+        model,
+        systemPrompt: 'You are Tau.',
+        toolRegistry: emptyTools,
+        onClaimRefused,
+      });
+      launchers.push(launcher);
       const answer = await launcher.execute({
         type: 'attach',
         commandId: 'attach-1',
         payload: { chatId: 'chat-held' },
       });
       expect(answer).toMatchObject({ status: 'applied', details: { takeover: false } });
+      /* HA0's `claim.refused`: the refusal reaches the launcher's observer. */
+      expect(onClaimRefused).toHaveBeenCalledWith('chat-held', 'WRITER_LOCKED');
       expect(await readFile(logPath, 'utf8')).not.toContain('"state":"failed"');
     } finally {
       holder.kill();

@@ -292,7 +292,10 @@ export const createBrowserLeadership =
         claim: ({ corr, epoch }) => {
           serial(async () => {
             host.assume(chatId, epoch);
-            /* HA4 (RC3): M2 hears how the claim ended, so a refused one is retried or lets the lock go. */
+            /* HA4 (RC3): M2 hears how the claim ended, so a refused one is retried or lets the lock go.
+             * ponytail (review N3): the bound's relinquish runs on this chain, so it waits behind a claim that hangs
+             * in its incarnation's opening (`served` has no bound); the ceiling is that opening, as for `claimBound`'s
+             * relinquish. Bound `served` if a hung opening is seen. */
             let code: string | undefined;
             try {
               code = await host.claim(chatId);

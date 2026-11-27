@@ -330,10 +330,13 @@ function codedErrorCard({
         title='Tau couldn’t do that just now.'
         description='Try again.'
         actions={
-          <Button variant='outline' size='xs' onClick={onTryAgain}>
-            <RefreshCcw className='size-3.5' />
-            Try again
-          </Button>
+          /* A refused Stop: the composer offers Stop again, and Try again would start a turn nobody asked for. */
+          error.details?.['commandType'] === 'cancel' ? undefined : (
+            <Button variant='outline' size='xs' onClick={onTryAgain}>
+              <RefreshCcw className='size-3.5' />
+              Try again
+            </Button>
+          )
         }
       />
     );

@@ -166,3 +166,5 @@ Comment pins S1 re-pins the drift after `use-cad-chat-client.ts` flattened a mes
 The launch audit merged with PERF-8 re-pinned the drift after `chat-session-store.ts` began matching a restored draft to an outbox entry in the composed form, as it already compared a sent draft, so a restored draft with trailing whitespace is let go too; no action changed.
 
 Comment pins S2 re-pins the drift after an edit named its comments and was flattened like a send before its turn is requested (`use-cad-chat-client.ts`, `chat-turn-host.tsx`, `use-chat.tsx`), a returned message's originals were re-retained with its parts and the draft bytes reader fell back to the chat's directory (`chat-session-store.ts`), and the edit composer showed its comment list (`chat-textarea.tsx`); no action changed.
+
+The HA5 round-4 review (2026-11-28, R9-HIDDEN, STOP-SILENT) re-pins the drift after `chat-session-store.ts` began saving a refused Stop through `commandRefusalOf` and clearing a saved WORKER_LOAD_FAILED once the host attaches. Both change only the chat's saved error. A refused Stop still lets go of the Stop as before, so no action changes.

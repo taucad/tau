@@ -6213,6 +6213,44 @@ describe('ChatSessionStore', () => {
         },
       );
 
+      /* HA5 (STOP-SILENT): a refused Stop is a refused gesture, so its card shows over the live run, not hidden. */
+      it('should show a Stop the host refused with HOST_FAULT over the run it aimed at', async () => {
+        const chatId = 'stop_host_fault';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async (command) => ({
+          commandId: command.commandId,
+          generation: 1,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'HOST_FAULT',
+          message: 'The host hit a defect.',
+        }));
+        const persisted: ChatError[] = [];
+        spyOnSend(session.persistenceActorRef, (event) => {
+          if (event.type === 'setPersistedError') {
+            persisted.push(event.error);
+          }
+        });
+        try {
+          publishLogRows(store, chatId, runningRows('live'));
+          store.stopRun(chatId, 'stop-button');
+          await vi.waitFor(() => {
+            expect(persisted).toEqual([expect.objectContaining({ code: 'HOST_FAULT' })]);
+          });
+          expect(persisted[0]?.details).toMatchObject({ runId: 'live', commandType: 'cancel' });
+          expect(
+            selectVisibleChatError({
+              persistedError: persisted[0],
+              projection: store.getProjection(chatId),
+              attachmentStatus: 'attached',
+            })?.code,
+          ).toBe('HOST_FAULT');
+        } finally {
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
       it('should send a Stop pressed before the host attached once it attaches (audit A-5)', async () => {
         const chatId = 'stop_owed';
         const projectId = 'departing_project';

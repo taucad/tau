@@ -77,10 +77,10 @@ const refusedTimeKey = 'refusedTime';
 const refusedGestureKey = 'refusedGesture';
 
 /** What the person asked for when the page refused to start a turn. @public */
-export type RefusedGesture = 'send' | 'edit' | 'regenerate' | 'continue';
+export type RefusedGesture = 'send' | 'edit' | 'regenerate' | 'continue' | 'stop';
 
 /**
- * A refusal the page itself made of one gesture (a send, an edit, a retry, a resume), as the chat keeps it.
+ * A refusal the page itself made of one gesture (a send, an edit, a retry, a resume, a stop), as the chat keeps it.
  *
  * Nothing ran, so the host log holds no trace of it, and the chat's saved error is its only record. It is a fact
  * about that gesture at that moment: it carries the gesture's own identity, and where the log stood when it was

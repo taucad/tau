@@ -4085,7 +4085,16 @@ export class ChatSessionStore {
         runId,
         reason: failure.message,
       });
-      session.persistenceActorRef.send({ type: 'setPersistedError', error: parseErrorForPersistence(failure) });
+      session.persistenceActorRef.send({
+        type: 'setPersistedError',
+        error: commandRefusalOf(parseErrorForPersistence(failure), {
+          requestId: command.commandId,
+          runId,
+          commandType: 'cancel',
+          kind: 'stop',
+          projection: this.#projectionContext(session.chatId),
+        }),
+      });
       this.#releaseStop(session);
     }
   }

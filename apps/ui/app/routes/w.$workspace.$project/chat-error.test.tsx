@@ -1134,8 +1134,8 @@ describe('ChatError', () => {
       title: 'Something went wrong',
       message: 'boom',
       code: 'HOST_FAULT',
-      requestId: 'cmd_cancel',
-      details: { runId: 'req_1', commandType: 'cancel' },
+      requestId: 'cmd_start',
+      details: { runId: 'req_1', commandType: 'start' },
     });
 
     render(<ChatErrorBanner />);
@@ -1144,6 +1144,24 @@ describe('ChatError', () => {
     expect(screen.queryByText('boom')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  /* HA5 (STOP-SILENT): a refused Stop offers no Try again, which would start a turn; the composer offers Stop again. */
+  it('should offer nothing for a host fault that refused a Stop', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Something went wrong',
+      message: 'boom',
+      code: 'HOST_FAULT',
+      requestId: 'cmd_cancel',
+      details: { runId: 'req_1', commandType: 'cancel' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Tau couldn’t do that just now.');
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(regenerate).not.toHaveBeenCalled();
   });
 
   it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {

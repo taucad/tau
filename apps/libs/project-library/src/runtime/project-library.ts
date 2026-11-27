@@ -77,6 +77,7 @@ import {
   commitPendingProjectOperation,
   ensureProjectLibraryState,
   planDiscovery,
+  rememberedAbsenceProofs,
   presentWorkspaceRows,
   readProjectLibraryStateFromDisk,
   recoveryRowOf,
@@ -369,6 +370,11 @@ export class ProjectLibrary<
   readonly #bound = Promise.withResolvers<void>();
   /** Counts record replacements, so a read can tell the records it ran on were replaced while it ran. */
   #replacements = 0;
+  /** The orphan sweep's proofs from storage, remembered while the listing does not change (review M4). */
+  readonly #absenceProofs = rememberedAbsenceProofs(async (projectId) => {
+    const fileManager = await this.#facade();
+    return fileManager.client.verifyAbsent(projectId);
+  });
   /** The chat store and its read owner over the facade's record client. */
   #records: LibraryRecords<ChatStorage> | undefined;
   readonly #changed = new Topic<void>({ name: 'project-library' });
@@ -483,6 +489,7 @@ export class ProjectLibrary<
                 quarantinedLocators: scan?.quarantinedLocators ?? new Map(),
               },
               async () => this.getReadiedWorker(),
+              this.#absenceProofs,
             );
             this.#syncWriteStop();
             return planned;

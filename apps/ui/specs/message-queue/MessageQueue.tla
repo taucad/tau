@@ -278,6 +278,10 @@
 \* Chat performance WP-06 (2026-11-26): `ChatSessionStore` publishes a projection change that touches only the live
 \* preview from the next animation frame (`LiveOverlay.tla` `FrameClock`); ledger and durable changes, which this
 \* model reads, still publish at once. No action or verdict changes.
+\* HA0 review (2026-11-27): `chat-session-store.ts` reports a replayed command whose effect stays unknown (a refusal
+\* still `unknown`, an applied answer with no durable row, or a connection lost past the bound) to Sentry, and arms a
+\* report-only timer for a read that stays lost. A wait-class refusal still holds for its host. What is thrown, held and
+\* acknowledged is unchanged. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -1976,6 +1976,8 @@ describe('a chat continued on a second device', () => {
         payload: { chatId, runId: 'run-1', interruptId: 'int-1', kind: 'approval', prompt: 'Write?' },
       });
       await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
+      /* The pause settles after its row is durable; an approval before `turn.finalized` meets a settling run. */
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'turn.finalized'));
       /* Past the hold, the phone ran a whole turn on the chat; sync brought its segment here. */
       const at = new Date(Date.now() + 1000).toISOString();
       const phone = (sequence: number, body: Record<string, unknown>): string =>

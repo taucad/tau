@@ -367,6 +367,26 @@ def appendBatchFrom (checked : Bool) : File → App → List Row → File × App
 /-- `appendMany` over a batch, before its first write. -/
 def appendBatch (F : File) (A : App) (es : List Row) : File × App × List Outcome := appendBatchFrom false F A es
 
+/-- Pipelined writes (WP-10 step B): batches written one after another with no flush between them (storage `write`
+without `sync`). The synced watermark stays at the file this starts from, where the last `sync` left it; the rows
+after it are in order, and become durable together at the next `sync`. -/
+def appendPiped : File → App → List (List Row) → File × App
+  | F, A, [] => (F, A)
+  | F, A, b :: bs =>
+    let r := appendBatch F A b
+    appendPiped r.1 r.2.1 bs
+
+/-- A crash with rows past the synced watermark: the file as it stood after any row written since the last `sync`
+(the whole batches `pre`, then `k` rows of the next batch `b`), whole or with a torn fragment after it. Nothing before
+the watermark is lost, because `sync` returned for it. -/
+inductive PipedCrash (F : File) (A : App) (bs : List (List Row)) : File → Prop
+  | at_ (pre : List (List Row)) (b : List Row) (post : List (List Row)) (k : Nat) :
+      bs = pre ++ b :: post →
+      PipedCrash F A bs (appendBatch (appendPiped F A pre).1 (appendPiped F A pre).2 (b.take k)).1
+  | torn (pre : List (List Row)) (b : List Row) (post : List (List Row)) (k : Nat) :
+      bs = pre ++ b :: post →
+      PipedCrash F A bs (appendBatch (appendPiped F A pre).1 (appendPiped F A pre).2 (b.take k)).1.tear
+
 /-- One read's answer: a batch, or a refusal (`ahead` is `cursor-ahead`, else `identity-mismatch`). -/
 inductive Answer where
   | batch (cursor next finish : Nat) (events : List Row)

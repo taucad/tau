@@ -484,49 +484,47 @@ const ExpandedChatHistory = memo(function ({
                     />
                   }
                 />
-                {/* While the transcript loads the feed below draws its shape (Progressive Loading Policy rules 15 and 17):
-                 * the bars hang below the header over the empty feed, take no layout, and appear from 300 ms into the
-                 * wait on its own clock, which a lane mounted during the open shares with the open. No words: the
-                 * viewer is the open's one status, and the feed carries `aria-busy`. */}
-                {isDepartingShown ? (
-                  <div className='pointer-events-none absolute inset-x-0 top-full z-10'>
-                    <DepartingFirstMessage text={departing} />
-                  </div>
-                ) : transcript === 'loading' ? (
-                  <div className='pointer-events-none absolute inset-x-0 top-full z-10'>
-                    <WaitSkeleton
-                      isActive
-                      startedAt={transcriptWait.startedAt}
-                      shape='transcript'
-                      label='Chat'
-                      className='h-auto'
-                    />
-                  </div>
-                ) : null}
               </FloatingPanelContentHeader>
 
               {/* Main chat content area */}
               <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
-                <Virtuoso
-                  ref={virtuosoRef}
-                  data={groups}
-                  /* While the first message is on its way, the feed is still waiting for it: busy, no empty state. */
-                  context={isDepartingShown && groups.length === 0 ? 'loading' : transcript}
-                  initialTopMostItemIndex={initialChatTurn}
-                  itemContent={renderItem}
-                  computeItemKey={computeItemKey}
-                  scrollerRef={followLatestOutput.scrollerRef}
-                  followOutput={followLatestOutput.followOutput}
-                  /* A turn appended at the end starts at the viewport's foot, outside the rendered range: Virtuoso
-                   * follows it only once it is measured, so render a little past the foot. Without this a turn sent
-                   * from a short viewport (the phone sheet at half) is never followed, and its reply or failure stays
-                   * folded away below (I5). */
-                  increaseViewportBy={appendedTurnOverscan}
-                  totalListHeightChanged={handleTotalListHeightChanged}
-                  className='mt-1 min-h-0 min-w-0 flex-1'
-                  atBottomStateChange={handleAtBottomStateChange}
-                  components={virtuosoComponents}
-                />
+                {/* The feed's own box, between the header and the composer region. */}
+                <div className='relative mt-1 flex min-h-0 min-w-0 flex-1 flex-col'>
+                  {/* While the transcript loads the feed draws its shape (Progressive Loading Policy rules 15 and 17):
+                   * the bars lie over the empty feed, take no layout, end where the feed does (never behind the
+                   * composer, as a short phone sheet showed), and appear from 300 ms into the wait on its own clock,
+                   * which a lane mounted during the open shares with the open. No words: the viewer is the open's one
+                   * status, and the feed carries `aria-busy`. */}
+                  {isDepartingShown ? (
+                    <div className='pointer-events-none absolute inset-0 z-10'>
+                      <DepartingFirstMessage text={departing} />
+                    </div>
+                  ) : transcript === 'loading' ? (
+                    <div className='pointer-events-none absolute inset-0 z-10'>
+                      <WaitSkeleton isActive startedAt={transcriptWait.startedAt} shape='transcript' label='Chat' />
+                    </div>
+                  ) : null}
+                  <Virtuoso
+                    ref={virtuosoRef}
+                    data={groups}
+                    /* While the first message is on its way, the feed is still waiting for it: busy, no empty state. */
+                    context={isDepartingShown && groups.length === 0 ? 'loading' : transcript}
+                    initialTopMostItemIndex={initialChatTurn}
+                    itemContent={renderItem}
+                    computeItemKey={computeItemKey}
+                    scrollerRef={followLatestOutput.scrollerRef}
+                    followOutput={followLatestOutput.followOutput}
+                    /* A turn appended at the end starts at the viewport's foot, outside the rendered range: Virtuoso
+                     * follows it only once it is measured, so render a little past the foot. Without this a turn sent
+                     * from a short viewport (the phone sheet at half) is never followed, and its reply or failure stays
+                     * folded away below (I5). */
+                    increaseViewportBy={appendedTurnOverscan}
+                    totalListHeightChanged={handleTotalListHeightChanged}
+                    className='min-h-0 min-w-0 flex-1'
+                    atBottomStateChange={handleAtBottomStateChange}
+                    components={virtuosoComponents}
+                  />
+                </div>
               </AtReferenceProvider>
               {/*
             A refusal on an empty chat has to land somewhere (I12, W19-b).

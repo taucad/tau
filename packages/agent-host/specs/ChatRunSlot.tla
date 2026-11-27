@@ -69,6 +69,18 @@
 (*                      requests resolved, then is abandoned resumably     *)
 (*                      (W10; resume everywhere revises L4 D-112)          *)
 (*                                                                         *)
+(* WP-10 step B, the durability barrier (feature "pipelined"): an append   *)
+(* fixes order and returns, and `durable` is the prefix a flush made       *)
+(* durable. `sync` is a flush; a crash keeps the durable prefix and any    *)
+(* longer prefix of what was written, never a gap. A step whose outside    *)
+(* effect is in the same step (a command answer, a placement) writes with  *)
+(* `PutSync`, as the host awaits its rows' durability before the effect;  *)
+(* an effect in a later step (the model request, settlement, a lease       *)
+(* retired, the lock released, the close) waits until everything written   *)
+(* is durable (`Synced`). Feature "nobarrier" drops the model request's    *)
+(* wait: the witness that the barrier is load-bearing. Without "pipelined" *)
+(* every write is flushed before its step ends, as before WP-10 step B.    *)
+(*                                                                         *)
 (* Features select the part a configuration explores: "external" (X),     *)
 (* "resume", "steer", "cancel", "interrupt", "extpause" (X asks for        *)
 (* approval), "opening" (M1's opening and epochs), "stale" (a frozen       *)
@@ -109,9 +121,10 @@ NoGhost == [a |-> 0, e |-> 0]
 Final == {"applied", "replayed", "refused", "a0"}   \* "error" is an uncoded answer
 
 VARIABLES
-    log,        \* durable rows [t, r, a, k, p, v, e]: type, run, attempt, command id,
+    log,        \* written rows [t, r, a, k, p, v, e]: type, run, attempt, command id,
                 \*   flag (payload on admitted, executed on ending rows, charged on
                 \*   settled), invocation id, epoch
+    durable,    \* the length of the log's durable prefix (WP-10 step B; Len(log) without "pipelined")
     res,        \* memory: the run holding the chat's reservation, or None
     drivers,    \* memory: runs with a live driver
     steerQ,     \* memory: steers handed to the driver and not yet written
@@ -141,7 +154,7 @@ termVars == <<epoch, readLen, opened, ghost>>
 placeVars == <<lease, started, completes, acked, lockFree>>
 gwVars == <<gw, call, callState, lostCount>>
 closeVars == <<hostState, closeAt>>
-vars == <<log, claimed, revoked, memVars, pc, answered, alive, crashes,
+vars == <<log, durable, claimed, revoked, memVars, pc, answered, alive, crashes,
           termVars, placeVars, gwVars, closeVars>>
 
 ----------------------------------------------------------------------------
@@ -218,7 +231,17 @@ Held == SettlePerAttempt /\ Unsettled
 H(t, r, a, k, p, v) == Row(t, r, a, k, p, v, epoch)
 \* Session rows keep the epoch their attempt started under; external rows take the current one (L2a D12).
 D(t, r, a, k, p, v) == Row(t, r, a, k, p, v, IF r = T THEN AttEpoch(T) ELSE epoch)
-Put(rows) == log' = log \o rows /\ claimed' = TRUE
+Pipelined == Has("pipelined")
+\* The model request waits for its prepared row's durability (WP-10 step B); "nobarrier" is the witness without it.
+DispatchBarrier == ~Has("nobarrier")
+\* Everything written is durable: what an effect in a later step waits for.
+Synced == durable = Len(log)
+\* A write whose effect is in the same step (`sync`): the host awaits its durability, and everything's before it,
+\* first. Otherwise it fixes order only; without "pipelined" every write is flushed at once.
+PutIf(sync, rows) == /\ log' = log \o rows /\ claimed' = TRUE
+                     /\ durable' = IF Pipelined /\ ~sync THEN durable ELSE Len(log) + Len(rows)
+Put(rows) == PutIf(FALSE, rows)
+PutSync(rows) == PutIf(TRUE, rows)
 Answer(k, how) == answered' = [answered EXCEPT ![k] = how]
 Go(k, p) == pc' = [pc EXCEPT ![k] = p]
 AnsGo(k, how, p) == Answer(k, how) /\ Go(k, p)
@@ -235,7 +258,8 @@ Orphans == {r \in Runs : Orphan(r)}
 \* An orphaned external pause: its requests are resolved first (never left open, D-112), then the run is abandoned
 \* RUN_ABANDONED like any orphan, so Resume reattaches the vendor session and the agent asks again.
 AbandonRows(r) ==
-    IF r = X /\ LastOf(X) = "paused"
+    \* Whether or not the run reached its paused row (`orphanRows`): a crash can keep the request and lose the pause.
+    IF r = X /\ (LastOf(X) = "paused" \/ (OrphanCoded /\ Pending(X)))
       THEN <<H("recovered", X, Att(X), None, FALSE, 0), H("abandoned", X, Att(X), None, TRUE, 0)>>
       ELSE <<H("abandoned", r, Att(r), None, Executed(r), 0)>>
 RecoveryRows ==
@@ -251,11 +275,12 @@ TypeOK ==
     /\ alive \in BOOLEAN /\ crashes \in 0..MaxCrashes
     /\ lease \subseteq started
     /\ gw \in [Inv -> {"none", "pending", "charged", "free"}]
-    /\ callState \in {"idle", "inflight", "lost", "failed"}
+    /\ callState \in {"idle", "prepared", "inflight", "lost", "failed"}
+    /\ durable \in 0..Len(log)
     /\ hostState \in {"open", "closing", "closed"}
 
 Init ==
-    /\ log = <<>> /\ res = None /\ drivers = {} /\ steerQ = {}
+    /\ log = <<>> /\ durable = 0 /\ res = None /\ drivers = {} /\ steerQ = {}
     /\ ending = [r \in Runs |-> None] /\ waiters = {} /\ tools = {}
     /\ pc = [k \in Cmds |-> "idle"] /\ answered = [k \in Cmds |-> None]
     /\ alive = TRUE /\ crashes = 0
@@ -279,13 +304,13 @@ send(k) ==   \* a gesture; the page re-sends unanswered commands itself after a 
          [] k = Resolve -> \E r \in Runs : Pending(r)   \* the approval card shows the durable request
          [] OTHER -> FALSE
     /\ Go(k, "resend")
-    /\ UNCHANGED <<log, claimed, revoked, memVars, answered, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, answered, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
 
 hostClosed(k) ==   \* the registry refuses HOST_CLOSED after the barrier (RA-R16)
     /\ Barred /\ pc[k] = "resend"
     /\ AnsGo(k, "refused", "done")
-    /\ UNCHANGED <<log, claimed, revoked, memVars, alive, crashes, termVars, placeVars, gwVars, closeVars>>
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, alive, crashes, termVars, placeVars, gwVars, closeVars>>
 
 ----------------------------------------------------------------------------
 \* start (admit) and the reservation
@@ -298,26 +323,26 @@ start(r) ==
            THEN AnsGo(r, "refused", "done") /\ UNCHANGED res                \* CHAT_RUN_LIVE
            ELSE res' = r /\ Go(r, "check") /\ UNCHANGED answered
     /\ lockFree' = FALSE
-    /\ UNCHANGED <<log, claimed, revoked, drivers, steerQ, ending, waiters, tools, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, drivers, steerQ, ending, waiters, tools, alive, crashes,
                    termVars, lease, started, completes, acked, gwVars, closeVars>>
 
 admissionPrepared(r) ==   \* the ledger read and the session construction succeed; nothing written
     /\ alive /\ pc[r] = "check" /\ ChatFree /\ ~Barred
     /\ Go(r, IF r = X /\ ~HoldUntilRows THEN "extGap" ELSE "admit")
-    /\ UNCHANGED <<log, claimed, revoked, memVars, answered, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, answered, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
 
 admissionRefused(r) ==   \* CHAT_RUN_LIVE, HOST_CLOSED, or (native) HOST_MODEL_UNAVAILABLE and friends
     /\ alive /\ pc[r] = "check" /\ (~ChatFree \/ Barred \/ r = T)
     /\ res' = IF ~ChatFree \/ Barred \/ ReleaseOnFailure THEN None ELSE res
     /\ AnsGo(r, "refused", "done")
-    /\ UNCHANGED <<log, claimed, revoked, drivers, steerQ, ending, waiters, tools, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, drivers, steerQ, ending, waiters, tools, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
 
 releaseEarly(r) ==   \* today: the external path releases before it registers (tau-agent-host.ts:2209-2212)
     /\ alive /\ pc[r] = "extGap"
     /\ res' = None /\ Go(r, "admit")
-    /\ UNCHANGED <<log, claimed, revoked, drivers, steerQ, ending, waiters, tools, answered, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, drivers, steerQ, ending, waiters, tools, answered, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
 
 rowsCommitted(k) ==   \* the decision batch of command k is durable, then k is answered
@@ -325,23 +350,24 @@ rowsCommitted(k) ==   \* the decision batch of command k is durable, then k is a
     /\ \/ /\ k \in Runs /\ pc[k] = "admit"
           /\ IF BoundaryExclusive /\ ~ChatFree
                THEN /\ res' = IF res = k THEN None ELSE res
-                    /\ AnsGo(k, "refused", "done") /\ UNCHANGED <<log, claimed>>
-               ELSE /\ Put(<<H("admitted", k, 1, k, k = X \/ PayloadFirst, 0)>>)
+                    /\ AnsGo(k, "refused", "done") /\ UNCHANGED <<log, durable, claimed>>
+               ELSE /\ PutSync(<<H("admitted", k, 1, k, k = X \/ PayloadFirst, 0)>>)
                     /\ AnsGo(k, "applied", "placing") /\ UNCHANGED res
           /\ UNCHANGED steerQ
        \/ /\ k = Resume /\ pc[Resume] = "rsRow"
           /\ IF BoundaryExclusive /\ ~OthersClosed(T)
                THEN /\ res' = None
-                    /\ AnsGo(Resume, "refused", "done") /\ UNCHANGED <<log, claimed>>
-               ELSE /\ Put(<<H("running", T, Att(T) + 1, Resume, TRUE, 0)>> \o RecoveryRows)
+                    /\ AnsGo(Resume, "refused", "done") /\ UNCHANGED <<log, durable, claimed>>
+               ELSE /\ PutSync(<<H("running", T, Att(T) + 1, Resume, TRUE, 0)>> \o RecoveryRows)
                     /\ Go(Resume, "construct") /\ UNCHANGED <<res, answered>>
           /\ UNCHANGED steerQ
        \/ /\ k = Steer /\ pc[Steer] = "applied"
+          /\ Synced   \* the steer's row is durable before it is answered (WP-10 step B)
           /\ IF AckAfterRow
                THEN \/ Wrote(Steer) /\ Answer(Steer, "applied")
                     \/ ~Wrote(Steer) /\ Steer \notin steerQ /\ Answer(Steer, "refused")   \* STEER_NOT_DELIVERED
                ELSE Answer(Steer, "applied")
-          /\ Go(Steer, "done") /\ UNCHANGED <<log, claimed, res, steerQ>>
+          /\ Go(Steer, "done") /\ UNCHANGED <<log, durable, claimed, res, steerQ>>
     /\ UNCHANGED <<revoked, drivers, ending, waiters, tools, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
 
@@ -357,8 +383,8 @@ placed(k) ==   \* W8's admit answered (trivially without "placement"); the drive
           /\ pc' = [pc EXCEPT ![k] = IF k = T /\ ~PayloadFirst THEN "commit" ELSE "live"]
           /\ answered' = IF k = Resume THEN [answered EXCEPT ![Resume] = "applied"] ELSE answered
           /\ IF place /\ k = T
-               THEN CanAppend /\ Put(<<H("running", T, 1, None, TRUE, 0)>>)   \* running{attempt: 1, placement}
-               ELSE UNCHANGED <<log, claimed>>
+               THEN CanAppend /\ PutSync(<<H("running", T, 1, None, TRUE, 0)>>)   \* running{attempt: 1, placement}
+               ELSE UNCHANGED <<log, durable, claimed>>
           /\ lease' = IF place THEN lease \cup {Key(r)} ELSE lease
           /\ started' = IF place THEN started \cup {Key(r)} ELSE started
     /\ lostCount' = 0
@@ -369,7 +395,7 @@ placementRefused(k) ==   \* no lease remains: [failed{executed: false}, turn.fai
     /\ Has("placement") /\ alive /\ CanAppend
     /\ \/ k = T /\ pc[T] = "placing"
        \/ k = Resume /\ pc[Resume] = "bind"
-    /\ Put(<<H("failed", T, Att(T), None, FALSE, 0), H("turn", T, Att(T), None, FALSE, 0)>>)
+    /\ PutSync(<<H("failed", T, Att(T), None, FALSE, 0), H("turn", T, Att(T), None, FALSE, 0)>>)
     /\ res' = None
     /\ AnsGo(k, "applied", "done")
     /\ UNCHANGED <<revoked, drivers, steerQ, ending, waiters, tools, alive, crashes,
@@ -402,27 +428,27 @@ resume ==
          THEN AnsGo(Resume, "error", "done") /\ UNCHANGED <<res, waiters>>        \* "has no durable result" (L4 D-086)
        ELSE res' = T /\ Go(Resume, "rsRow") /\ UNCHANGED <<answered, waiters>>
     /\ lockFree' = FALSE
-    /\ UNCHANGED <<log, claimed, revoked, drivers, steerQ, ending, tools, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, drivers, steerQ, ending, tools, alive, crashes,
                    termVars, lease, started, completes, acked, gwVars, closeVars>>
 
 rearmed ==   \* today: the re-armed resume continues once someone resolves the pause
     /\ alive /\ pc[Resume] = "rearm" /\ ~Pending(T)
     /\ Go(Resume, "rsRow")
-    /\ UNCHANGED <<log, claimed, revoked, memVars, answered, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, answered, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
 
 resumePrepared ==
     /\ alive /\ pc[Resume] = "construct"
     /\ Go(Resume, "bind")
-    /\ UNCHANGED <<log, claimed, revoked, memVars, answered, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, answered, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
 
 resumeRefused ==   \* construction fails after the reopening row: M1 releases and ends the attempt
     /\ alive /\ pc[Resume] = "construct"
     /\ res' = IF ReleaseOnFailure THEN None ELSE res
     /\ IF ReleaseOnFailure
-         THEN CanAppend /\ Put(<<H("failed", T, Att(T), None, FALSE, 0)>>)
-         ELSE UNCHANGED <<log, claimed>>
+         THEN CanAppend /\ PutSync(<<H("failed", T, Att(T), None, FALSE, 0)>>)
+         ELSE UNCHANGED <<log, durable, claimed>>
     /\ AnsGo(Resume, "refused", "done")
     /\ UNCHANGED <<revoked, drivers, steerQ, ending, waiters, tools, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
@@ -442,7 +468,8 @@ agentEnded(r) ==   \* the driver reports its outcome; M1 is the only lifecycle d
                      ELSE {"completed", "failed"}
            prefix == IF r = X /\ Pending(X) THEN <<H("resolved", X, a, None, FALSE, 0)>> ELSE <<>>
        IN \E out \in outs :
-          /\ Put(CASE why = "interrupt" /\ SingleDecider ->
+          /\ PutIf(why = "cancel" \/ (why = "interrupt" /\ SingleDecider),
+                  CASE why = "interrupt" /\ SingleDecider ->
                         <<H("req", T, a, Interrupt, TRUE, 0), H("paused", T, a, Interrupt, x, 0)>>
                    [] why = "interrupt" -> <<D("cancelled", T, a, None, x, 0)>>   \* the session's row (L2a D8)
                    [] why = "cancel" -> <<H("cancelled", r, a, Cancel, x, 0)>>
@@ -471,14 +498,14 @@ approvalRequested ==   \* the external driver waits on a durable vendor request 
 toolStart(r) ==
     /\ Has("stop") /\ alive /\ r \in drivers /\ r \notin tools /\ ~HasRow("tool", r) /\ ~EndedAttempt(r)
     /\ tools' = tools \cup {r}
-    /\ UNCHANGED <<log, claimed, revoked, res, drivers, steerQ, ending, waiters, pc, answered, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, res, drivers, steerQ, ending, waiters, pc, answered, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
 
 toolWrite(r) ==   \* the tool's result row, through the tool port and the append gate
     /\ alive /\ r \in tools /\ CanAppend
     /\ tools' = tools \ {r}
     /\ IF Key(r) \in revoked \/ (StopFence /\ EndedAttempt(r))
-         THEN UNCHANGED <<log, claimed>>
+         THEN UNCHANGED <<log, durable, claimed>>
          ELSE Put(<<D("tool", r, Att(r), None, TRUE, 0)>>)
     /\ UNCHANGED <<revoked, res, drivers, steerQ, ending, waiters, pc, answered, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
@@ -486,11 +513,11 @@ toolWrite(r) ==   \* the tool's result row, through the tool port and the append
 abandon(r) ==   \* driverStopBound in ending.stopping: W8's abandon revokes the tool port (D13)
     /\ StopFence /\ alive /\ r = T /\ r \in drivers /\ ending[r] = "cancel" /\ Key(r) \notin revoked
     /\ revoked' = revoked \cup {Key(r)}
-    /\ UNCHANGED <<log, claimed, memVars, pc, answered, alive, crashes, termVars, placeVars, gwVars, closeVars>>
+    /\ UNCHANGED <<log, durable, claimed, memVars, pc, answered, alive, crashes, termVars, placeVars, gwVars, closeVars>>
 
 abandoned(r) ==   \* ending.fencing: the port answered; the ending batch appends, then cancel is answered
     /\ alive /\ r \in drivers /\ Key(r) \in revoked /\ CanAppend
-    /\ Put(<<H("cancelled", r, Att(r), Cancel, Executed(r), 0)>>)
+    /\ PutSync(<<H("cancelled", r, Att(r), Cancel, Executed(r), 0)>>)
     /\ answered' = [answered EXCEPT ![Cancel] = "applied"]
     /\ pc' = [k \in Cmds |-> IF (k \in Holders(r) /\ pc[k] \in {"commit", "live"}) \/ k = Cancel
                              THEN "done" ELSE pc[k]]
@@ -512,7 +539,7 @@ steer ==
          THEN steerQ' = {Steer} /\ Go(Steer, "applied") /\ UNCHANGED answered   \* steerDriver
        ELSE AnsGo(Steer, "refused", "done") /\ UNCHANGED steerQ                  \* RUN_NOT_LIVE
     /\ lockFree' = FALSE
-    /\ UNCHANGED <<log, claimed, revoked, res, drivers, ending, waiters, tools, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, res, drivers, ending, waiters, tools, alive, crashes,
                    termVars, lease, started, completes, acked, gwVars, closeVars>>
 
 driverSteered ==   \* the session consumes the steer and writes the message steer:<commandId>
@@ -530,19 +557,19 @@ cancel ==
     /\ ~(T \in drivers /\ ending[T] # None)    \* held while ending
     /\ ~(Live(T) /\ T \notin drivers)          \* held while orphaned (only without "opening")
     /\ IF KeyedCommands /\ Wrote(Cancel)
-         THEN AnsGo(Cancel, "replayed", "done") /\ UNCHANGED <<log, claimed, ending>>
+         THEN AnsGo(Cancel, "replayed", "done") /\ UNCHANGED <<log, durable, claimed, ending>>
        ELSE IF T \in drivers
          THEN /\ ending' = [ending EXCEPT ![T] = "cancel"] /\ Go(Cancel, "wait")
-              /\ UNCHANGED <<log, claimed, answered>>
+              /\ UNCHANGED <<log, durable, claimed, answered>>
        ELSE IF LastOf(T) = "paused" /\ DurablePause
          THEN /\ CanAppend
-              /\ Put((IF Pending(T) THEN <<H("resolved", T, Att(T), Cancel, FALSE, 0)>> ELSE <<>>)
+              /\ PutSync((IF Pending(T) THEN <<H("resolved", T, Att(T), Cancel, FALSE, 0)>> ELSE <<>>)
                      \o <<H("cancelled", T, Att(T), Cancel, Executed(T), 0)>>)
               /\ AnsGo(Cancel, "applied", "done") /\ UNCHANGED ending
        ELSE IF LastOf(T) = "paused"   \* today: no active run, so cancel returns (tau-agent-host.ts:2224-2227; L2a D9)
-         THEN AnsGo(Cancel, "applied", "done") /\ UNCHANGED <<log, claimed, ending>>
+         THEN AnsGo(Cancel, "applied", "done") /\ UNCHANGED <<log, durable, claimed, ending>>
        ELSE AnsGo(Cancel, IF Admitted(T) THEN "a0" ELSE "refused", "done")                    \* A0, NO_RUN_ADMITTED
-            /\ UNCHANGED <<log, claimed, ending>>
+            /\ UNCHANGED <<log, durable, claimed, ending>>
     /\ lockFree' = FALSE
     /\ UNCHANGED <<revoked, res, drivers, steerQ, waiters, tools, alive, crashes,
                    termVars, lease, started, completes, acked, gwVars, closeVars>>
@@ -556,12 +583,12 @@ interrupt ==   \* native: abort the driver, wait for it to end, then [requested,
               /\ Go(Interrupt, IF SingleDecider THEN "wait" ELSE "pausing") /\ UNCHANGED answered
        ELSE AnsGo(Interrupt, "refused", "done") /\ UNCHANGED ending                  \* RUN_NOT_LIVE
     /\ lockFree' = FALSE
-    /\ UNCHANGED <<log, claimed, revoked, res, drivers, steerQ, waiters, tools, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, res, drivers, steerQ, waiters, tools, alive, crashes,
                    termVars, lease, started, completes, acked, gwVars, closeVars>>
 
 pauseRecorded ==   \* today: after the session recorded `cancelled`, the host writes paused (L2a D8)
     /\ alive /\ pc[Interrupt] = "pausing" /\ T \notin drivers /\ LastOf(T) = "cancelled" /\ CanAppend
-    /\ Put(<<H("paused", T, Att(T), Interrupt, TRUE, 0), H("req", T, Att(T), Interrupt, TRUE, 0)>>)
+    /\ PutSync(<<H("paused", T, Att(T), Interrupt, TRUE, 0), H("req", T, Att(T), Interrupt, TRUE, 0)>>)
     /\ waiters' = waiters \cup {T}
     /\ AnsGo(Interrupt, "applied", "done")
     /\ UNCHANGED <<revoked, res, drivers, steerQ, ending, tools, alive, crashes,
@@ -570,19 +597,19 @@ pauseRecorded ==   \* today: after the session recorded `cancelled`, the host wr
 resolveInterrupt ==
     /\ Serving /\ pc[Resolve] = "resend"
     /\ IF KeyedCommands /\ Wrote(Resolve)
-         THEN AnsGo(Resolve, "replayed", "done") /\ UNCHANGED <<log, claimed, waiters>>
+         THEN AnsGo(Resolve, "replayed", "done") /\ UNCHANGED <<log, durable, claimed, waiters>>
        ELSE IF Pending(T) /\ (DurablePause \/ T \in waiters)
          THEN /\ CanAppend
-              /\ \/ Put(<<H("resolved", T, Att(T), Resolve, TRUE, 0)>>)   \* approve: the paused attempt continues
+              /\ \/ PutSync(<<H("resolved", T, Att(T), Resolve, TRUE, 0)>>)   \* approve: the paused attempt continues
                  \/ /\ DurablePause                                       \* deny (V8): the paused attempt ends
-                    /\ Put(<<H("resolved", T, Att(T), Resolve, TRUE, 0), H("cancelled", T, Att(T), Resolve, Executed(T), 0)>>)
+                    /\ PutSync(<<H("resolved", T, Att(T), Resolve, TRUE, 0), H("cancelled", T, Att(T), Resolve, Executed(T), 0)>>)
               /\ AnsGo(Resolve, "applied", "done") /\ waiters' = waiters \ {T}
        ELSE IF Pending(X) /\ X \in drivers
          THEN /\ CanAppend   \* [resolved, running{same attempt}], then decideApproval
-              /\ Put(<<H("resolved", X, Att(X), Resolve, TRUE, 0), H("running", X, Att(X), Resolve, TRUE, 0)>>)
+              /\ PutSync(<<H("resolved", X, Att(X), Resolve, TRUE, 0), H("running", X, Att(X), Resolve, TRUE, 0)>>)
               /\ AnsGo(Resolve, "applied", "done") /\ UNCHANGED waiters
        ELSE /\ AnsGo(Resolve, "refused", "done")   \* INTERRUPT_NOT_PENDING; today also for a durable request
-            /\ UNCHANGED <<log, claimed, waiters>>  \* the in-memory port lost (tau-agent-host.ts:2168-2176)
+            /\ UNCHANGED <<log, durable, claimed, waiters>>  \* the in-memory port lost (tau-agent-host.ts:2168-2176)
     /\ lockFree' = FALSE
     /\ UNCHANGED <<revoked, res, drivers, steerQ, ending, tools, alive, crashes,
                    termVars, lease, started, completes, acked, gwVars, closeVars>>
@@ -593,7 +620,7 @@ resolveInterrupt ==
 attach ==   \* today: waitForAdmission(chatId), then markAbandoned as a separate step
     /\ ~AtomicAbandon /\ ~Claiming /\ alive /\ pc[Attach] = "idle" /\ res = None
     /\ Go(Attach, "act")
-    /\ UNCHANGED <<log, claimed, revoked, memVars, answered, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, answered, alive, crashes,
                    termVars, placeVars, gwVars, closeVars>>
 
 markAbandoned ==   \* idle.orphaned: the abandonment rows
@@ -608,14 +635,14 @@ markAbandoned ==   \* idle.orphaned: the abandonment rows
           /\ IF \E r \in Runs : Live(r) /\ r \notin drivers
                THEN \E r \in {q \in Runs : Live(q) /\ q \notin drivers} :
                       Put(<<H("abandoned", r, Att(r), None, Executed(r), 0)>>)
-               ELSE UNCHANGED <<log, claimed>>
+               ELSE UNCHANGED <<log, durable, claimed>>
           /\ Go(Attach, "done")
     /\ UNCHANGED <<revoked, memVars, answered, alive, crashes, termVars, placeVars, gwVars, closeVars>>
 
 logOpened ==   \* the idle choice finds no orphan: M1 serves
     /\ Claiming /\ alive /\ ~opened /\ Orphans = {}
     /\ opened' = TRUE
-    /\ UNCHANGED <<log, claimed, revoked, memVars, pc, answered, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, pc, answered, alive, crashes,
                    epoch, readLen, ghost, placeVars, gwVars, closeVars>>
 
 logFenced ==   \* the claim was refused LOG_FENCED: M1 fences, W6 rereads, a new incarnation opens
@@ -625,7 +652,7 @@ logFenced ==   \* the claim was refused LOG_FENCED: M1 fences, W6 rereads, a new
     /\ pc' = Reset   \* LEADERSHIP_LOST (wait): the page re-sends
     /\ epoch' = MaxE + 1 /\ readLen' = Len(log) /\ opened' = FALSE
     /\ lockFree' = FALSE /\ call' = 0 /\ callState' = "idle" /\ lostCount' = 0
-    /\ UNCHANGED <<log, claimed, revoked, answered, alive, crashes, ghost,
+    /\ UNCHANGED <<log, durable, claimed, revoked, answered, alive, crashes, ghost,
                    lease, started, completes, acked, gw, closeVars>>
 
 ----------------------------------------------------------------------------
@@ -634,18 +661,27 @@ logFenced ==   \* the claim was refused LOG_FENCED: M1 fences, W6 rereads, a new
 crash ==
     /\ alive /\ crashes < MaxCrashes
     /\ alive' = FALSE /\ crashes' = crashes + 1
+    \* What was written and not flushed survives as any prefix (WP-10 step B); without "pipelined" all of it is durable.
+    /\ \E n \in durable..Len(log) : log' = SubSeq(log, 1, n) /\ durable' = n
     /\ res' = None /\ drivers' = {} /\ steerQ' = {} /\ ending' = [r \in Runs |-> None]
     /\ waiters' = {} /\ tools' = {}
     /\ pc' = Reset
     /\ lockFree' = FALSE /\ call' = 0 /\ callState' = "idle" /\ lostCount' = 0
-    /\ UNCHANGED <<log, claimed, revoked, answered, termVars, lease, started, completes, acked, gw, closeVars>>
+    /\ UNCHANGED <<claimed, revoked, answered, termVars, lease, started, completes, acked, gw, closeVars>>
+
+\* A flush: everything written is durable (WP-10 step B).
+sync ==
+    /\ Pipelined /\ alive /\ ~Synced
+    /\ durable' = Len(log)
+    /\ UNCHANGED <<log, claimed, revoked, memVars, pc, answered, alive, crashes,
+                   termVars, placeVars, gwVars, closeVars>>
 
 restart ==   \* W6 starts a new incarnation: it reads under the lock and writes nothing
     /\ ~alive /\ ~Barred
     /\ alive' = TRUE
     /\ epoch' = IF EpochsOn THEN MaxE + 1 ELSE epoch
     /\ readLen' = Len(log) /\ claimed' = FALSE /\ opened' = ~Claiming
-    /\ UNCHANGED <<log, revoked, memVars, pc, answered, crashes, ghost, placeVars, gwVars, closeVars>>
+    /\ UNCHANGED <<log, durable, revoked, memVars, pc, answered, crashes, ghost, placeVars, gwVars, closeVars>>
 
 freeze ==   \* the leader freezes with a live driver; a second host takes the chat
     /\ Has("stale") /\ alive /\ T \in drivers /\ ghost = NoGhost /\ crashes < MaxCrashes
@@ -656,14 +692,15 @@ freeze ==   \* the leader freezes with a live driver; a second host takes the ch
     /\ pc' = Reset
     /\ epoch' = MaxE + 1 /\ readLen' = Len(log) /\ claimed' = FALSE /\ opened' = ~Claiming
     /\ lockFree' = FALSE /\ call' = 0 /\ callState' = "idle" /\ lostCount' = 0
-    /\ UNCHANGED <<log, revoked, answered, alive, lease, started, completes, acked, gw, closeVars>>
+    /\ UNCHANGED <<log, durable, revoked, answered, alive, lease, started, completes, acked, gw, closeVars>>
 
 staleAppend ==   \* the frozen leader thaws and its driver's ending row reaches the store
     /\ ghost # NoGhost
     /\ ghost' = NoGhost
     /\ IF Claiming /\ ghost.e < MaxE
-         THEN UNCHANGED log                                   \* the store refuses a lower epoch (D5)
-         ELSE log' = Append(log, Row("completed", T, ghost.a, None, TRUE, 0, ghost.e))
+         THEN UNCHANGED <<log, durable>>                      \* the store refuses a lower epoch (D5)
+         ELSE /\ log' = Append(log, Row("completed", T, ghost.a, None, TRUE, 0, ghost.e))
+              /\ durable' = Len(log')                         \* the stale writer's own flush
     /\ UNCHANGED <<claimed, revoked, memVars, pc, answered, alive, crashes, epoch, readLen, opened,
                    placeVars, gwVars, closeVars>>
 
@@ -680,18 +717,18 @@ relinquish ==   \* leadership moves while the host runs
          ELSE \* today: assumeLeadership with a new generation, in place (tau-agent-host.ts:2534-2542)
               /\ epoch' = epoch + 1
               /\ UNCHANGED <<memVars, pc, readLen, claimed, opened, lockFree, call, callState, lostCount>>
-    /\ UNCHANGED <<log, revoked, answered, alive, ghost, lease, started, completes, acked, gw, closeVars>>
+    /\ UNCHANGED <<log, durable, revoked, answered, alive, ghost, lease, started, completes, acked, gw, closeVars>>
 
 ----------------------------------------------------------------------------
 \* Placement and settlement per attempt (W8)
 
 complete ==   \* complete{key, cut}
     /\ \E k \in lease :
-         /\ EndedKey(k) /\ ~Completed(k) /\ (SettlePerAttempt => alive)
+         /\ EndedKey(k) /\ ~Completed(k) /\ (SettlePerAttempt => alive) /\ Synced
          /\ LET e == log[Min(EndIdxOf(k))]
             IN completes' = completes \cup
                  {[key |-> k, cut |-> IF SettlePerAttempt THEN e.p ELSE e.t = "completed"]}
-    /\ UNCHANGED <<log, claimed, revoked, memVars, pc, answered, alive, crashes, termVars,
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, pc, answered, alive, crashes, termVars,
                    lease, started, acked, lockFree, gwVars, closeVars>>
 
 settlementPublished ==   \* the key's settlement fact; the turn.* row appends unless the ledger has one
@@ -701,35 +738,47 @@ settlementPublished ==   \* the key's settlement fact; the turn.* row appends un
 
 acknowledge ==   \* acknowledge{key}: the lease retires, only after the turn.* row is durable (I19)
     /\ \E k \in lease :
-         /\ Completed(k) /\ TurnRow(k) /\ (SettlePerAttempt => alive)
+         /\ Completed(k) /\ TurnRow(k) /\ (SettlePerAttempt => alive) /\ Synced
          /\ lease' = lease \ {k} /\ acked' = acked \cup {k}
-    /\ UNCHANGED <<log, claimed, revoked, memVars, pc, answered, alive, crashes, termVars,
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, pc, answered, alive, crashes, termVars,
                    started, completes, lockFree, gwVars, closeVars>>
 
 quiescent ==   \* M1's quiescent tag; W6 releases the chat lock (EQ4)
-    /\ Has("placement") /\ alive /\ opened /\ ~lockFree
+    /\ Has("placement") /\ alive /\ opened /\ ~lockFree /\ Synced
     /\ res = None /\ drivers = {} /\ \A k \in Sendable : pc[k] \in {"idle", "done"}
     /\ SettlePerAttempt => lease = {}
     /\ lockFree' = TRUE
-    /\ UNCHANGED <<log, claimed, revoked, memVars, pc, answered, alive, crashes, termVars,
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, pc, answered, alive, crashes, termVars,
                    lease, started, completes, acked, gwVars, closeVars>>
 
 ----------------------------------------------------------------------------
 \* An abstract model gateway (W11) for T's one model step
 
-modelCall ==   \* the prepared row (the intent row) precedes the call
+\* The attempt ids not yet used: never dispatched, and (pipelined, where a prepared row can stand alone) never prepared.
+Fresh(n) == gw[n] = "none" /\ ~(Pipelined /\ Prepared(n))
+
+modelCall ==   \* the prepared row (the intent row) precedes the call; pipelined, the call is `dispatch`
     /\ Has("gateway") /\ alive /\ T \in drivers /\ ending[T] = None /\ callState = "idle" /\ ~StepDone
     /\ ResolveFirst => Unresolved = {}
     /\ CanAppend
     /\ \E n \in Inv :
-         /\ gw[n] = "none" /\ \A m \in Inv : m < n => gw[m] # "none"
+         /\ Fresh(n) /\ \A m \in Inv : m < n => ~Fresh(m)
          /\ Put(<<D("prepared", T, Att(T), None, TRUE, n)>>)
-         /\ gw' = [gw EXCEPT ![n] = "pending"] /\ call' = n /\ callState' = "inflight"
+         /\ IF Pipelined
+              THEN call' = n /\ callState' = "prepared" /\ UNCHANGED gw
+              ELSE gw' = [gw EXCEPT ![n] = "pending"] /\ call' = n /\ callState' = "inflight"
     /\ UNCHANGED <<revoked, memVars, pc, answered, alive, crashes, termVars, placeVars, lostCount, closeVars>>
+
+dispatch ==   \* the model request leaves once its prepared row is durable (WP-10 step B)
+    /\ alive /\ T \in drivers /\ callState = "prepared"
+    /\ DispatchBarrier => Synced
+    /\ gw' = [gw EXCEPT ![call] = "pending"] /\ callState' = "inflight"
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, pc, answered, alive, crashes, termVars, placeVars,
+                   call, lostCount, closeVars>>
 
 gatewaySettles ==   \* the supplier finished (charged) or the client left first (free)
     /\ \E n \in Inv : gw[n] = "pending" /\ \E s \in {"charged", "free"} : gw' = [gw EXCEPT ![n] = s]
-    /\ UNCHANGED <<log, claimed, revoked, memVars, pc, answered, alive, crashes, termVars, placeVars,
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, pc, answered, alive, crashes, termVars, placeVars,
                    call, callState, lostCount, closeVars>>
 
 replyShown ==
@@ -741,7 +790,7 @@ replyShown ==
 replyLost ==   \* the stream fails; the reply is lost whatever the gateway did
     /\ alive /\ T \in drivers /\ callState = "inflight"
     /\ callState' = "lost"
-    /\ UNCHANGED <<log, claimed, revoked, memVars, pc, answered, alive, crashes, termVars, placeVars,
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, pc, answered, alive, crashes, termVars, placeVars,
                    gw, call, lostCount, closeVars>>
 
 invocationResolved ==   \* the driver resolves the failed call (target) or writes a failure message (today)
@@ -750,7 +799,7 @@ invocationResolved ==   \* the driver resolves the failed call (target) or write
          THEN /\ Put(<<D("failmsg", T, Att(T), None, TRUE, call)>>)
               /\ callState' = "failed" /\ UNCHANGED lostCount
        ELSE IF gw[call] = "pending"
-         THEN callState' = "failed" /\ UNCHANGED <<log, claimed, lostCount>>   \* ends RUN_ABANDONED
+         THEN callState' = "failed" /\ UNCHANGED <<log, durable, claimed, lostCount>>   \* ends RUN_ABANDONED
        ELSE IF gw[call] = "charged"
          THEN /\ Put(<<D("settled", T, Att(T), None, TRUE, call)>>)          \* EQ1: record, then a new key
               /\ callState' = IF lostCount >= 1 THEN "failed" ELSE "idle"    \* lostReplyRetries = 1
@@ -769,7 +818,7 @@ close ==
     /\ ending' = IF CloseBarrier
                    THEN [r \in Runs |-> IF r \in drivers /\ ending[r] = None THEN "close" ELSE ending[r]]
                    ELSE ending
-    /\ UNCHANGED <<log, claimed, revoked, res, drivers, steerQ, waiters, tools, pc, answered, alive, crashes,
+    /\ UNCHANGED <<log, durable, claimed, revoked, res, drivers, steerQ, waiters, tools, pc, answered, alive, crashes,
                    termVars, placeVars, gwVars, closeAt>>
 
 logClosed ==
@@ -777,8 +826,9 @@ logClosed ==
     /\ CloseBarrier => \/ ~alive
                        \/ /\ res = None /\ drivers = {} /\ tools = {}
                           /\ \A k \in Sendable : pc[k] \in {"idle", "done", "resend"}
+    /\ Synced   \* the log is flushed before it closes
     /\ hostState' = "closed" /\ closeAt' = Len(log)
-    /\ UNCHANGED <<log, claimed, revoked, memVars, pc, answered, alive, crashes, termVars, placeVars, gwVars>>
+    /\ UNCHANGED <<log, durable, claimed, revoked, memVars, pc, answered, alive, crashes, termVars, placeVars, gwVars>>
 
 ----------------------------------------------------------------------------
 
@@ -794,7 +844,7 @@ Next ==
     \/ attach \/ markAbandoned \/ logOpened \/ logFenced
     \/ crash \/ restart \/ freeze \/ staleAppend \/ relinquish
     \/ complete \/ settlementPublished \/ acknowledge \/ quiescent
-    \/ modelCall \/ gatewaySettles \/ replyShown \/ replyLost \/ invocationResolved
+    \/ modelCall \/ dispatch \/ sync \/ gatewaySettles \/ replyShown \/ replyLost \/ invocationResolved
     \/ close \/ logClosed
 
 \* Weak fairness on live host, driver, gateway and page-resend steps; none on a person's
@@ -812,6 +862,7 @@ Fairness ==
     /\ WF_vars(cancel) /\ WF_vars(interrupt) /\ WF_vars(pauseRecorded) /\ WF_vars(resolveInterrupt)
     /\ WF_vars(attach) /\ WF_vars(markAbandoned) /\ WF_vars(logOpened) /\ WF_vars(logFenced) /\ WF_vars(restart)
     /\ WF_vars(complete) /\ WF_vars(settlementPublished) /\ WF_vars(acknowledge)
+    /\ WF_vars(dispatch) /\ WF_vars(sync)
     /\ WF_vars(gatewaySettles) /\ WF_vars(replyShown \/ replyLost) /\ WF_vars(invocationResolved)
     /\ WF_vars(logClosed)
 

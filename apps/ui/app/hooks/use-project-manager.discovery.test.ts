@@ -23,6 +23,7 @@ import type {
   ProjectRouteVerification,
   WatchEvent,
   WatchRequest,
+  ProjectAbsence,
 } from '@taucad/filesystem';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { Project } from '@taucad/types';
@@ -84,6 +85,18 @@ const emitManifestChange = (path: string): void => {
 };
 const mockListProjectManifests = vi.fn<() => Promise<ProjectDiscoveryResult>>();
 const mockVerifyProjectRoute = vi.fn<(input: { projectId: string }) => Promise<ProjectRouteVerification>>();
+/*
+ * Storage's answer to `verifyAbsent` (fast-path FW2, index-contract review A1): this suite's disk is what its discovery
+ * double lists, read without consuming a queued result or counting a call. A row that tests the proof itself sets
+ * its own answer.
+ */
+const mockVerifyAbsent = vi.fn<(projectId: string) => Promise<ProjectAbsence>>(async (projectId) => {
+  const listed = await mockListProjectManifests.getMockImplementation()?.();
+  const locators = (listed?.entries ?? []).flatMap((entry) =>
+    'projectId' in entry && entry.projectId === projectId ? [entry.locator] : [],
+  );
+  return locators.length === 0 ? { status: 'absent' } : { status: 'present', locators };
+});
 const mockSyncProjectRoots = vi.fn<() => Promise<void>>();
 const mockReadFile = vi.fn(async (path: string) => {
   if (path.endsWith('/.tau/library.json')) {
@@ -114,6 +127,7 @@ const mockFileManager = {
   client: {
     listProjectManifests: mockListProjectManifests,
     verifyProjectRoute: mockVerifyProjectRoute,
+    verifyAbsent: mockVerifyAbsent,
   },
   workspace: { syncProjectRoots: mockSyncProjectRoots },
   scopedStorage: { readShallowDirectory: vi.fn(async () => []) },

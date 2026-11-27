@@ -71,6 +71,11 @@ vi.mock('@taucad/ui/components/client-only', () => ({
   ClientOnly: () => null,
 }));
 
+/* Every describe starts with no query: a Tau Desktop request left by another row would change what the page shows. */
+beforeEach(() => {
+  routeMocks.search = '';
+});
+
 describe('AuthPage', () => {
   beforeEach(() => {
     routeMocks.isFetching = false;
@@ -389,11 +394,6 @@ describe('Auth page naming', () => {
 });
 
 describe('Cached session and safe continuation', () => {
-  beforeEach(() => {
-    // Another describe may leave a Tau Desktop request in the query; these rows read none.
-    routeMocks.search = '';
-  });
-
   it('should not expose a stale anonymous form during session refresh', () => {
     routeMocks.segment = 'sign-in';
     routeMocks.session = undefined;

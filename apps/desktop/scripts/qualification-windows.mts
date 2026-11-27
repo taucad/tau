@@ -282,7 +282,11 @@ const spawnProgram: WindowsQualificationRun = (file, arguments_, timeoutMillisec
     timeout: timeoutMilliseconds,
     windowsHide: true,
   });
-  return { status: result.status ?? undefined, stdout: result.stdout, stderr: result.stderr, error: result.error };
+  /* A program that could not start has no output streams, whatever the types say: answer empty ones beside its error. */
+  if (result.error !== undefined) {
+    return { status: undefined, stdout: '', stderr: '', error: result.error };
+  }
+  return { status: result.status ?? undefined, stdout: result.stdout, stderr: result.stderr };
 };
 
 /**
@@ -684,8 +688,11 @@ $items=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Unins
         await visibleInstall(candidate, 'initial');
       } else {
         executeInstaller(path, ['/S', `/D=${installationPath}`]);
-        /* The hosted runner is an administrator: set the sandbox up before any renderer step uses Build123d. */
-        setUpWindowsQualificationSandbox(installationPath);
+        /* The hosted runner is an administrator: set the sandbox up before any renderer step uses Build123d. A fixture
+           installer (`test-windows-package`) carries a synthetic payload with no helper and runs no renderer. */
+        if (options.mode === 'release') {
+          setUpWindowsQualificationSandbox(installationPath);
+        }
       }
       installed = true;
       lifecycle.installed();

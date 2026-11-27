@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- E2E is the established project acronym. */
 import { resolve } from 'node:path';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import {
   reactCaptureTargetDiagnostics,
@@ -18,6 +19,7 @@ import { reactE2ETargets } from './support/targets.ts';
 export default defineConfig({
   root: import.meta.dirname,
   test: {
+    reporters: testReporters('default'),
     attachmentsDir: resolve(import.meta.dirname, '../../out/test-results/vitest-browser/apps/react-e2e/attachments'),
     coverage: {
       reportsDirectory: '../../out/reports/coverage/apps/react-e2e',
@@ -27,7 +29,7 @@ export default defineConfig({
     setupFiles: [resolve(import.meta.dirname, 'support/test-lifecycle.ts')],
     testTimeout: 180_000,
     hookTimeout: 300_000,
-    retry: process.env['CI'] ? 2 : 0,
+    retry: testRetry(),
     fileParallelism: false,
     browser: {
       enabled: true,

@@ -34,7 +34,7 @@ import type { ActorRefFrom, AnyActorRef, EventObject } from 'xstate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { ProjectRouteAccess } from '#runtime/project-library.js';
+import type { ProjectRouteAccess } from '@taucad/project-library/runtime/project-library';
 import { workbenchRecords } from '@taucad/workbench';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 
@@ -465,7 +465,7 @@ vi.mock('#hooks/use-project-slug-route.js', () => ({
         : { status: 'resolved', value: project },
   useCanonicalProjectUrlCorrection: () => undefined,
 }));
-vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: () => revisionClient }));
+vi.mock('@taucad/revisions-ui/services/revision-client-registry', () => ({ peekRevisionClient: () => revisionClient }));
 vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useRevisionClient: () => revisionClient,

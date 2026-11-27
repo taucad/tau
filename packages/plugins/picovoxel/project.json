@@ -3,5 +3,17 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/plugins/picovoxel",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"]
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/apps/ui/public/textures/matcap-sculpt.jpg",
+        "{workspaceRoot}/infra/seed/default-thumb.webp",
+        "{workspaceRoot}/pnpm-workspace.yaml"
+      ]
+    }
+  }
 }

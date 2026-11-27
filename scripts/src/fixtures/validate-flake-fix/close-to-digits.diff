@@ -1,0 +1,10 @@
+--- a/packages/kernels/src/mesh.test.ts
++++ b/packages/kernels/src/mesh.test.ts
+@@
+ import { expect, it } from 'vitest';
+
+ it('meshes the cube', () => {
+   const volume = mesh(cube()).volume;
+-  expect(volume).toBeCloseTo(1, 6);
++  expect(volume).toBeCloseTo(1, 2);
+ });

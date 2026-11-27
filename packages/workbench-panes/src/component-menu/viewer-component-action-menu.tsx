@@ -166,7 +166,8 @@ export type ViewerModelComponentMenuTarget = Readonly<{
 /**
  * The viewer menu's data for one part, kept current with the unit's focus, isolation, visibility and opacity.
  *
- * @param options - The graphics actor, the part (or `undefined` while no menu is open) and the host verbs.
+ * @param options - The graphics actor (or `undefined` while the host has none yet), the part (or `undefined` while no
+ *   menu is open) and the host verbs.
  * @returns The menu data, or `undefined` while no menu is open or the unit no longer has the part.
  * @public
  */
@@ -175,17 +176,19 @@ export function useViewerModelComponentActionMenuData({
   target,
   actions,
 }: Readonly<{
-  graphicsRef: GraphicsRef;
+  graphicsRef: GraphicsRef | undefined;
   target: ViewerModelComponentMenuTarget | undefined;
   actions?: ModelComponentHostActions;
 }>): ModelComponentActionMenuData | undefined {
-  const modelRef = useSelector(graphicsRef, (state) => state.context.modelInteractionRef);
+  const modelRef = useSelector(graphicsRef, (state) => state?.context.modelInteractionRef);
   const unit = useSelector(modelRef, (state) =>
-    target === undefined ? undefined : getModelInteractionUnitState(state.context, target.unitId),
+    target === undefined || state === undefined
+      ? undefined
+      : getModelInteractionUnitState(state.context, target.unitId),
   );
   const manifest = unit?.manifest;
   const node = target === undefined ? undefined : manifest?.nodesById[target.componentId];
-  if (!target || !unit || !manifest || !node) {
+  if (!graphicsRef || !target || !unit || !manifest || !node) {
     return undefined;
   }
   return {

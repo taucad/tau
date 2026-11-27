@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-11-16'
+updated: '2026-11-18'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -640,6 +640,8 @@ The `geometryCache()` middleware persists three role-aligned entries under `.tau
 | **export** | `export-{hash}.bin` | `wrapExport`   | Nonempty export files after selected contributors/transcoders         |
 
 The native-build key is exact rather than scope-selected. It covers source/import hashes, parameters, kernel version and initialization, implementation assets, mutative evaluation middleware and dependencies, and parsed `evaluateOptionsSchema` options. The artifact `dependencyHash` additionally covers the selected view or export, route options, requested content, contributors, and transcoders. View packing belongs in `render`; file encoding belongs in `export`.
+
+A kernel opts into bundle source identity with `sourceIdentity: 'bundle'` on its definition (default `'files'`). It MUST resolve through `runtime.bundler.resolveDependencies` and read the model's sources only as `runtime.bundler.bundle` output (source maps serve error locations only); a kernel that reads a source file itself keeps `'files'`. For an opted-in kernel whose resolve just answered from the bundler, the bundled output stands in for the content of the sources it was printed from: those files enter the build key by path, and a `bundle` dependency carries the SHA-256 of the output code. A comment-only or formatting-only edit prints the same bundle and keeps the key; a code, import-target or imported-asset change prints a different one. A bundle binds the built-in globals its selected kernel registered during `initialize`, plus any module registered outside a kernel's `initialize` (unclaimed), never another kernel's; so its bytes do not depend on which other kernels a worker initialized, though an unclaimed module still enters every bundle once it is registered. A cached bundle is reused only for the same set of globals. A parameter description keeps keying on file bytes, because its manifest records each file's digest. Requested view `content` is keyed after its operation defaults are applied, so an omitted property and its default share a key. Parameters are keyed as sent (an omitted parameter and its explicit default can differ, because a parameter record fills omitted values).
 
 A warm exact-match export reuses the evaluation's live handle, restores its serialized handle, or reheats from the retained evaluation input, in that order. An export-only request writes no view entry. Cache temperature must not change export output: live, reheated, and deserialized handles produce structurally identical STEP (verified by the Replicad conformance suite), and `exportSTEP` pins its `Interface_Static` state on every call so unit statics cannot leak between exports sharing a WASM instance.
 

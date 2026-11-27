@@ -7,7 +7,7 @@ import { check, index, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
  * An append-only inbox keyed by the delivery's `svix-id`, so a retried or replayed
  * delivery inserts nothing the second time. Rows are deleted 90 days after receipt
  * (blueprint D6) by the maintenance worker. Every recipient here is an address Tau
- * already holds (`user.email`, `publication_access.recipient_email`); the provider's
+ * already holds (`user.email`, `project_share_access.recipient_email`); the provider's
  * free-text bounce message is deliberately not stored.
  */
 export const emailEvent = pgTable(

@@ -79,7 +79,7 @@
  * | 72 | `opening.fetching(merged linked) → pushing` | **D87**: another checkout's diverged branch merged on the pull re-heads its actor and the merge revision is pushed |
  * | 73 | `opening.fetching(linked conflict) → backedUp` + parent `mergeConflicted` | **D87**: another checkout's conflict is announced without entering `conflicted`; this branch stays in sync |
  * | 74 | `queued(leaseLost on another branch) --syncBackoff--> opening → pushing` offering both sets | **D87**: a lost lease never narrows the retry away from this branch's own revisions |
- * | 75 | `selectSyncFacet(queued(leaseLost on another branch), undecided)` | **D90**: a branch whose conflict waits on the person says so instead of "will catch up and try again" |
+ * | 75 | `selectSyncFacet(queued(leaseLost on another branch), undecided)` | **D90**: a branch whose conflict waits on the person says so instead of "will get those changes and try again" |
  * | 76 | `pushing → recording → backedUp` over a leftover `projection` or another remote's entry | an accepted push is judged on what this remote is owed: `ok` with its lag and no backoff, and the entry it could not settle stays queued |
  * | 77 | `pushing → recording → queued` (refused chat ref beside a leftover `projection`) | a ref this push offered and the remote refused is still a `retry` |
  * | 78 | `backedUp --sessionChanged--> opening` (stream unwatched and watched again) | **audit R6**: a session change re-reads a refused stream and pulls at once from an idle state |
@@ -765,7 +765,7 @@ describe('syncMachine', () => {
       {
         type: 'syncConflict',
         ref: syncRef,
-        reason: 'The remote and this device changed the same files.',
+        reason: 'This project changed here and somewhere else. Choose what to keep, then back up again.',
       } satisfies SyncMachineEmitted,
     ]);
     expect(harness.parent.events).toContainEqual({
@@ -1042,7 +1042,7 @@ describe('syncMachine', () => {
       expect(harness.effects.running('push')).toBe(1);
     });
     harness.effects.settle('push', {
-      error: Object.assign(new Error('Syncing files to Tau Cloud is a paid plan feature.'), {
+      error: Object.assign(new Error('Syncing files to the cloud is a paid plan feature.'), {
         code: 'REMOTE_NOT_ENTITLED',
       }),
     });
@@ -1053,7 +1053,7 @@ describe('syncMachine', () => {
 
     const facet = selectSyncFacet(harness.actor.getSnapshot());
     expect(facet.reason).toBe('notEntitled');
-    expect(facet.error).toBe('Syncing files to Tau Cloud is a paid plan feature.');
+    expect(facet.error).toBe('Syncing files to the cloud is a paid plan feature.');
     expect(facet.error).not.toMatch(/could not be reached/u);
 
     /* No backoff reaches a state that pushes: only the person does. */
@@ -1072,7 +1072,7 @@ describe('syncMachine', () => {
       expect(harness.effects.running('fetch')).toBe(1);
     });
     harness.effects.settle('fetch', {
-      error: Object.assign(new Error('Syncing files to Tau Cloud is a paid plan feature.'), {
+      error: Object.assign(new Error('Syncing files to the cloud is a paid plan feature.'), {
         code: 'REMOTE_NOT_ENTITLED',
       }),
     });
@@ -1082,7 +1082,7 @@ describe('syncMachine', () => {
 
     const facet = selectSyncFacet(harness.actor.getSnapshot());
     expect(facet.reason).toBe('notEntitled');
-    expect(facet.error).toBe('Syncing files to Tau Cloud is a paid plan feature.');
+    expect(facet.error).toBe('Syncing files to the cloud is a paid plan feature.');
 
     /* No backoff re-opens the pull: only the person does. */
     harness.clock.advance(600_000);
@@ -1125,7 +1125,7 @@ describe('syncMachine', () => {
       expect(harness.effects.running('push')).toBe(1);
     });
     harness.effects.settle('push', {
-      error: Object.assign(new Error('Large files cannot be backed up to a Git remote: part.step.'), {
+      error: Object.assign(new Error('Large files can’t be backed up to this Git host: part.step.'), {
         code: 'LFS_REMOTE_UNSUPPORTED',
       }),
     });
@@ -1249,7 +1249,7 @@ describe('syncMachine', () => {
             remote: 'github-42',
             head: 'h-old',
             expected: undefined,
-            reason: 'The remote refused this ref.',
+            reason: 'Couldn’t back up part of this project. Try again.',
             recordedAt: 1,
           },
         ],
@@ -2138,7 +2138,7 @@ describe('syncMachine', () => {
 
     await vi.waitFor(() => {
       expect(harness.actor.getSnapshot().context.error).toBe(
-        'This branch changed on the remote; this project will catch up and try again.',
+        'This branch changed somewhere else. Tau will get those changes and try again.',
       );
     });
     harness.stop();
@@ -2165,7 +2165,7 @@ describe('syncMachine', () => {
 
     await vi.waitFor(() => {
       expect(harness.actor.getSnapshot().context.error).toBe(
-        'feature changed on the remote; this project will catch up and try again.',
+        'feature changed somewhere else. Tau will get those changes and try again.',
       );
     });
     harness.stop();
@@ -2963,6 +2963,46 @@ describe('syncMachine', () => {
     busy.stop();
   });
 
+  it('W9 R5: a refused open pull alone is stated as safeMode and never retried', async () => {
+    const harness = start();
+    await settleWhenRunning(harness.effects, 'fetch', {
+      error: Object.assign(new Error('Tau Cloud is off in safe mode.'), { code: 'REMOTE_SAFE_MODE' }),
+    });
+    await vi.waitFor(() => {
+      expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+        state: 'failed',
+        reason: 'safeMode',
+        error: 'Tau Cloud is off in safe mode.',
+      });
+    });
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(1);
+    expect(harness.effects.running('fetch')).toBe(0);
+    expect(harness.effects.inputsFor('push')).toHaveLength(0);
+    harness.stop();
+  });
+
+  it('W9 R5: safe mode fails after one push, is stated as safeMode and is never retried', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    harness.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(harness.effects, 'push', {
+      error: Object.assign(new Error('Tau Cloud is off in safe mode.'), { code: 'REMOTE_SAFE_MODE' }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+      reason: 'safeMode',
+      error: 'Tau Cloud is off in safe mode.',
+    });
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+    expect(harness.effects.running('fetch')).toBe(0);
+    harness.stop();
+  });
+
   it('L2-F9: the open pull has a finite fifteen-minute transfer deadline', () => {
     expect(machineModule.syncPullDeadlineMilliseconds).toBe(15 * 60_000);
   });
@@ -3595,11 +3635,11 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
 
     /* Nothing catches `feature` up until the person decides its conflict. */
     expect(selectSyncFacet(harness.actor.getSnapshot(), ['feature']).error).toBe(
-      'feature waits on your decision; its revisions back up once you choose.',
+      'feature is waiting for your decision. It backs up once you choose.',
     );
     /* Another branch's waiting conflict says nothing about `feature`. */
     expect(selectSyncFacet(harness.actor.getSnapshot(), ['other']).error).toBe(
-      'feature changed on the remote; this project will catch up and try again.',
+      'feature changed somewhere else. Tau will get those changes and try again.',
     );
 
     harness.stop();

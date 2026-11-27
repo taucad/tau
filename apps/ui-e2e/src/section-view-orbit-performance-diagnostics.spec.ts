@@ -25,21 +25,6 @@ type SectionCapStencilDiagnostics = Readonly<{
     | undefined;
 }>;
 
-type SectionPlaneCut = Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>;
-
-type SectionViewBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST__?: {
-    setSectionCuts(cuts: readonly SectionPlaneCut[]): string[];
-    setCamera(camera: {
-      position: readonly [number, number, number];
-      target?: readonly [number, number, number];
-      fov?: number;
-      zoom?: number;
-    }): void;
-    getSectionCapStencilDiagnostics(): SectionCapStencilDiagnostics | undefined;
-  };
-};
-
 type OrbitFixture = Readonly<{
   id: string;
   projectId: string;
@@ -75,7 +60,7 @@ const orbitFixtures: readonly OrbitFixture[] = [
 
 const readDiagnostics = async (): Promise<SectionCapStencilDiagnostics | undefined> =>
   target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     return bridge?.getSectionCapStencilDiagnostics();
   });
 
@@ -88,7 +73,7 @@ const readSequence = async (): Promise<number> => {
 const waitForCapFrame = async (sequence: number): Promise<void> =>
   target.waitFor(
     (previous) => {
-      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       return (bridge?.getSectionCapStencilDiagnostics()?.sequence ?? 0) > previous;
     },
     sequence,
@@ -98,7 +83,7 @@ const waitForCapFrame = async (sequence: number): Promise<void> =>
 const setCamera = async (fixture: OrbitFixture, angle: number): Promise<void> =>
   target.evaluate(
     ({ position, nextTarget, fov, zoom }) => {
-      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       if (!bridge) {
         throw new Error('Section view e2e bridge is not installed.');
       }
@@ -181,7 +166,7 @@ const driveContinuousOrbit = async (fixture: OrbitFixture, milliseconds: number)
   target.evaluate(
     async ({ nextFixture, wait }) =>
       new Promise<ContinuousOrbit>((resolve) => {
-        const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         if (!bridge) {
           throw new Error('Section view e2e bridge is not installed.');
         }
@@ -235,7 +220,7 @@ const collectFixtureDiagnostics = async (fixture: OrbitFixture, backend: 'webgl'
   const sequenceBeforeCut = await readSequence();
   await target.evaluate(
     ({ plane, offset }) => {
-      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       if (!bridge) {
         throw new Error('Section view e2e bridge is not installed.');
       }

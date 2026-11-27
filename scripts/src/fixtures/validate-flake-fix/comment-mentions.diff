@@ -1,0 +1,15 @@
+--- a/apps/ui/src/boot.test.ts
++++ b/apps/ui/src/boot.test.ts
+@@
+ import { describe, expect, it, vi } from 'vitest';
+
+ describe('boot', () => {
+   it('mounts the worker', async () => {
++    // Not it.skip, not sleep(100): wait for the worker's own ready event.
+     const worker = await boot();
++    await once(worker, 'ready');
+     expect(worker.state).toBe('ready');
+-    expect(worker.log).not.toContain('sleep(100)');
++    expect(worker.log).not.toContain('it.skip(');
+   });
+ });

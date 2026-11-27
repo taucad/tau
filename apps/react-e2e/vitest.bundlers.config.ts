@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 
 import { tauRuntime } from '@taucad/runtime/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -33,6 +34,8 @@ export default defineConfig({
     },
   },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     include: ['app/bundlers.browser.test.ts'],
     testTimeout: 300_000,
     hookTimeout: 300_000,

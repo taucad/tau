@@ -116,6 +116,46 @@ export const isWorkspaceIdentityConflictError = (error: unknown): error is Works
 export const workspaceIdentityConflictCopy =
   'That folder belongs to another workspace. Choose its original folder or disconnect the existing workspace first.';
 
+/** What a refused folder overlaps (desktop resilient startup blueprint R6). */
+export type WorkspaceOverlapTarget = 'home' | 'workspace';
+
+/**
+ * A node folder that is Home, or contains or sits inside Home or another workspace's folder, cannot become a
+ * workspace: two roots would own the same files (blueprint R6).
+ */
+export class WorkspaceOverlapError extends Error {
+  public readonly overlaps: WorkspaceOverlapTarget;
+  public readonly workspaceId: string | undefined;
+
+  public constructor(overlaps: WorkspaceOverlapTarget, options?: { readonly workspaceId?: string }) {
+    super(
+      overlaps === 'home'
+        ? 'That folder overlaps Tau’s Home folder. Choose a folder outside it.'
+        : 'That folder overlaps a folder Tau already uses. Choose a folder that is not inside or around another one.',
+    );
+    this.name = 'WorkspaceOverlapError';
+    this.overlaps = overlaps;
+    this.workspaceId = options?.workspaceId;
+  }
+}
+
+export const isWorkspaceOverlapError = (error: unknown): error is WorkspaceOverlapError =>
+  error instanceof WorkspaceOverlapError;
+
+/**
+ * A workspace change was refused because an unfinished project operation still needs the folder (blueprint U7).
+ * The project library lists that operation, where it can be discarded.
+ */
+export class WorkspaceRecoveryPendingError extends Error {
+  public constructor() {
+    super('This workspace is required to recover an unfinished project operation');
+    this.name = 'WorkspaceRecoveryPendingError';
+  }
+}
+
+export const isWorkspaceRecoveryPendingError = (error: unknown): error is WorkspaceRecoveryPendingError =>
+  error instanceof WorkspaceRecoveryPendingError;
+
 /**
  * Thrown when a durable write fails because the origin is out of quota.
  * Distinguishes "the browser refused to store this" from generic IndexedDB
@@ -125,7 +165,7 @@ export const workspaceIdentityConflictCopy =
  */
 export class StorageQuotaExceededError extends Error {
   public constructor(options?: { cause?: unknown }) {
-    super("Tau's local storage is full. Free up space or remove unused projects to continue.");
+    super('Tau’s storage on this device is full. Free up space or remove unused projects to continue.');
     this.name = 'StorageQuotaExceededError';
     if (options?.cause !== undefined) {
       (this as { cause?: unknown }).cause = options.cause;

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import {
   createSettingsCatalogue,
   searchSettings as searchCatalogue,
@@ -11,9 +11,11 @@ import type {
 import type { SettingsSection } from '@taucad/settings-ui/components/settings/settings-section';
 import { experimentalFeatureFlagNames, flagRegistry, featureFlagDefaults } from '#flags/flag.constants.js';
 import type { FeatureFlagName } from '#flags/flag.constants.js';
-import { useFeature } from '#flags/use-feature.js';
-import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
+import { useFeatureState } from '#flags/use-feature.js';
+import { initialDeploymentMode } from '#cloud/deployment-mode.js';
+import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
 
 /*
  * The catalogue itself is pure and lives in `@taucad/settings-ui`. This module owns what this deployment offers:
@@ -27,17 +29,22 @@ const settingsCatalog = createSettingsCatalogue(
   })),
 );
 
-const cloudSections: readonly SettingsSectionDefinition[] = tauCloudEnabled
-  ? settingsCatalog
-  : settingsCatalog
-      .filter((section) => section.id !== 'billing')
-      .map((section) =>
-        section.id === 'agents'
-          ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'show-credits') }
-          : section.id === 'data-controls'
-            ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'close-account') }
-            : section,
-      );
+/**
+ * The Tau Cloud rows (adaptive app deployment mode W4): Billing, Show credits and Close account exist only while the
+ * display mode is `funded`, read at render. A pinned build's mode is a constant, so its catalogue never changes.
+ */
+const withoutCloud = (sections: readonly SettingsSectionDefinition[]): readonly SettingsSectionDefinition[] =>
+  sections
+    .filter((section) => section.id !== 'billing')
+    .map((section) =>
+      section.id === 'agents'
+        ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'show-credits') }
+        : section.id === 'data-controls'
+          ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'close-account') }
+          : section,
+    );
+
+const cloudSections: readonly SettingsSectionDefinition[] = settingsCatalog;
 /* Machines are hosted by the desktop services utility; the web build has no
  * host to add one to, so the section is hidden rather than shown empty. Desktop's
  * Home is a folder on disk, so it has no browser storage to show. */
@@ -61,12 +68,28 @@ const platformSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
         ),
       }));
 
-export const settingsSections: readonly SettingsSectionDefinition[] = platformSections
+const fundedSections: readonly SettingsSectionDefinition[] = platformSections
   .filter((section) => section.id !== 'machines' || featureFlagDefaults.machines)
   .map((section) => ({
     ...section,
     entries: section.entries.filter((entry) => entry.id !== 'automatic-reload' || featureFlagDefaults.automaticReload),
   }));
+
+const unfundedSections = withoutCloud(fundedSections);
+
+/**
+ * The sections for a display mode: every one while `funded`, none of the Tau Cloud rows otherwise.
+ *
+ * @param isFunded - Whether the display mode is `funded`.
+ * @returns The sections.
+ */
+export const settingsSectionsFor = (isFunded: boolean): readonly SettingsSectionDefinition[] =>
+  isFunded ? fundedSections : unfundedSections;
+
+/** The sections for the build's initial mode: a pinned build's for its life. */
+export const settingsSections: readonly SettingsSectionDefinition[] = settingsSectionsFor(
+  initialDeploymentMode.state === 'funded',
+);
 
 /**
  * Sections that exist only while a runtime flag is on. The flag is read at render (PostHog evaluates it after
@@ -81,17 +104,58 @@ const flaggedEntries: ReadonlyMap<string, FeatureFlagName> = new Map<SettingId, 
   ['setup-answers', 'onboarding'],
 ]);
 
+const subscribeToNothing = (): (() => void) => () => undefined;
+
+/**
+ * Whether this host can connect a folder on disk: always on desktop, and on the web only where the File System Access
+ * API exists (Chromium; not Safari, Firefox or Brave by default). The server cannot tell, so it assumes folders, which is
+ * what every desktop build and Chromium browser shows. Kept in this module, which the shell already loads, so the gate
+ * adds no chunk to the critical path (docs/research/remix-home-only-location-blueprint.md, folder-access hazard class).
+ *
+ * @returns Whether folders can be connected here.
+ */
+export const useHasFolderAccess = (): boolean =>
+  useSyncExternalStore(
+    subscribeToNothing,
+    () => directoryPicker().available,
+    () => true,
+  );
+
+/**
+ * Leaves out Workspaces where no folder can be connected (Safari, Brave): its panel would be empty, yet navigation and
+ * search would still lead to it. Read at render, since the host's folder access is known only after hydration.
+ *
+ * @param sections - The sections to gate.
+ * @param hasFolderAccess - Whether this host can connect a folder.
+ * @returns The sections, without Workspaces when folders cannot be connected.
+ */
+export const withFolderAccess = (
+  sections: readonly SettingsSectionDefinition[],
+  hasFolderAccess: boolean,
+): readonly SettingsSectionDefinition[] =>
+  hasFolderAccess
+    ? sections
+    : sections.map((section) =>
+        section.id === 'filesystem'
+          ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'workspaces') }
+          : section,
+      );
+
 /**
  * The sections this deployment shows for the given runtime flags.
  *
  * @param isOn - Whether a flag is on.
+ * @param isFunded - Whether the display mode is `funded`; the build's initial mode by default.
+ * @param hasFolderAccess - Whether this host can connect a folder; assumed until known.
  * @returns The sections, in catalogue order.
  */
 export function availableSettingsSections(
   isOn: (flag: FeatureFlagName) => boolean,
+  isFunded: boolean = initialDeploymentMode.state === 'funded',
+  hasFolderAccess = true,
 ): readonly SettingsSectionDefinition[] {
   const isShown = (flag: FeatureFlagName | undefined): boolean => flag === undefined || isOn(flag);
-  return settingsSections
+  return withFolderAccess(settingsSectionsFor(isFunded), hasFolderAccess)
     .filter((section) => isShown(flaggedSections[section.id]))
     .map((section) => {
       const entries = section.entries.filter((entry) => isShown(flaggedEntries.get(entry.id)));
@@ -105,12 +169,14 @@ export function availableSettingsSections(
  * @returns The sections, stable while the flags are.
  */
 export function useSettingsSections(): readonly SettingsSectionDefinition[] {
-  const viewerControls = useFeature('viewerControls');
-  const onboarding = useFeature('onboarding');
+  const viewerControls = useFeatureState('viewerControls') === 'on';
+  const onboarding = useFeatureState('onboarding') === 'on';
+  const isFunded = useDeploymentMode().state === 'funded';
+  const hasFolderAccess = useHasFolderAccess();
   return useMemo(() => {
     const flags: Readonly<Partial<Record<FeatureFlagName, boolean>>> = { viewerControls, onboarding };
-    return availableSettingsSections((flag) => flags[flag] === true);
-  }, [viewerControls, onboarding]);
+    return availableSettingsSections((flag) => flags[flag] === true, isFunded, hasFolderAccess);
+  }, [viewerControls, onboarding, isFunded, hasFolderAccess]);
 }
 
 /**

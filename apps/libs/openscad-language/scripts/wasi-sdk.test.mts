@@ -55,7 +55,10 @@ describe('wasi-sdk', () => {
   it('should download, verify and keep the archive when none is present', async () => {
     const download = vi.fn<Download>(async () => bytes);
     expect(sha256(await ensureWasiSdkArchive({ cacheRoot, pins, pin, download }))).toBe(pin.sha256);
-    expect(download).toHaveBeenCalledWith(wasiSdkUrl(pins, pin));
+    expect(download).toHaveBeenCalledWith(
+      wasiSdkUrl(pins, pin),
+      `sha256-${createHash('sha256').update(bytes).digest('base64')}`,
+    );
     expect(sha256(new Uint8Array(await readFile(join(cacheRoot, pin.archive))))).toBe(pin.sha256);
   });
 

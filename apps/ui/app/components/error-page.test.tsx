@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
-import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactRouter from 'react-router';
 import type * as StaleBuildRecovery from '#lib/stale-build-recovery.js';
 import type * as BuildSkew from '#filesystem/build-skew.js';
@@ -75,7 +74,7 @@ vi.mock('#filesystem/build-skew.js', async (importOriginal) => ({
     };
   },
 }));
-vi.mock('#components/ui/collapsible-code-block.js', () => ({
+vi.mock('@taucad/editor-ui/components/ui/collapsible-code-block', () => ({
   CollapsibleCodeBlock: ({ title }: { readonly title: string }) => <pre aria-label='Stack trace'>{title}</pre>,
 }));
 
@@ -139,12 +138,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
-});
-
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
 });
 
 describe('ErrorPage', () => {

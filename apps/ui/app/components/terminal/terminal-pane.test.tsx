@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopTerminalBridge, DesktopTerminalSession, TerminalHostFrame } from '@taucad/types/desktop-terminal';
 import { TerminalPane } from '#components/terminal/terminal-pane.js';
-import type { TerminalRendererLoader } from '#components/terminal/terminal-pane.js';
+import type { TerminalRendererLoader } from '#components/terminal/terminal-view-options.js';
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
 import { highContrastQuery, highContrastRatio } from '#components/terminal/terminal-theme.js';
 import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
@@ -484,6 +484,63 @@ describe('TerminalPane', () => {
       screen.getByText('This computer has no shell sandbox Tau can use yet. Use the typed Tau tools.'),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('offers the one-time setup for provisioning-required, and starts with setUp only on that press', async () => {
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await act(async () => undefined);
+    expect(harness.open).toHaveBeenCalledOnce();
+    expect(harness.open.mock.calls[0]?.[0]).toStrictEqual({
+      projectRoot: '/home/me/Tau/project-1',
+      size: { columns: 120, rows: 30 },
+    });
+    harness.emit({
+      type: 'refused',
+      code: 'provisioning-required',
+      message: 'The Windows shell sandbox is not set up on this device.',
+      recovery: 'Choose Set up in the Terminal and approve the Windows administrator prompt.',
+    });
+    expect(
+      screen.getByText(
+        'The Windows shell sandbox is not set up on this device. Choose Set up in the Terminal and approve the Windows administrator prompt.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Set up' }));
+    expect(harness.open).toHaveBeenCalledTimes(2);
+    expect(harness.open.mock.calls[1]?.[0]).toStrictEqual({
+      projectRoot: '/home/me/Tau/project-1',
+      size: { columns: 120, rows: 30 },
+      setUp: true,
+    });
+    expect(
+      screen.getByText(
+        'Setting up the shell sandbox. Approve the administrator prompt your computer shows; Tau asks only once.',
+      ),
+    ).toBeInTheDocument();
+    harness.emit(opened);
+    expect(screen.getByText('The shell sandbox is set up.')).toBeInTheDocument();
+  });
+
+  it('offers setup again when the person declines the administrator prompt', async () => {
+    render(<TerminalPane availability={available(harness)} loadRenderer={harness.loadRenderer} />);
+    await act(async () => undefined);
+    const notSetUp: TerminalHostFrame = {
+      type: 'refused',
+      code: 'provisioning-required',
+      message: 'The Windows shell sandbox was not set up.',
+      recovery: 'Choose Set up to try again.',
+    };
+    harness.emit(notSetUp);
+    await userEvent.click(screen.getByRole('button', { name: 'Set up' }));
+    harness.emit(notSetUp);
+    expect(screen.queryByText(/Setting up the shell sandbox/u)).not.toBeInTheDocument();
+    expect(
+      screen.getByText('The Windows shell sandbox was not set up. Choose Set up to try again.'),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Set up' }));
+    expect(harness.open).toHaveBeenCalledTimes(3);
   });
 
   it('offers a new session after the shell exits, and only on a press', async () => {

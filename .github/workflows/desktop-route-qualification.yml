@@ -170,7 +170,9 @@ jobs:
       # The AppImage recovery row rebuilds A's managed image around a broken renderer entry (T-B22.4).
       - name: Install squashfs tools for the AppImage recovery row
         if: inputs.scope != 'linux' && matrix.scenario == 'recovery' && matrix.route == 'linux-appimage'
-        run: sudo apt-get install -y --no-install-recommends squashfs-tools
+        uses: ./.github/actions/apt-install
+        with:
+          packages: --no-install-recommends squashfs-tools
       - name: Run installed shipping renderer, explicit update and latest-feed update
         if: inputs.scope != 'linux'
         run: pnpm nx run desktop:qualify-installed-route
@@ -279,5 +281,5 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ inputs.scope == 'all' && 'desktop-route-recovery-receipts' || format('desktop-{0}-recovery-receipts', inputs.scope) }}
-          path: out/qualification-receipts/recovery-receipts.json
+          path: out/qualification-recovery-receipts/recovery-receipts.json
           if-no-files-found: error

@@ -14,8 +14,8 @@ import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-sessio
 import { WebglContextTrackerProvider } from '@taucad/viewer/hooks/use-webgl-context-tracker';
 import { PublicationTopbar } from '#components/share/publication-topbar.js';
 import { ephemeralKernelOptions, ephemeralPreviewStage } from '#constants/ephemeral-kernel-options.js';
-import type { ParsedPublication } from '#components/share/parsed-publication.js';
-import { useViewPing } from '#components/share/use-view-ping.js';
+import type { ParsedPublication } from '@taucad/publish-ui/components/share/parsed-publication';
+import { useViewPing } from '@taucad/publish-ui/components/share/use-view-ping';
 import { ENV } from '#environment.config.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { recordInteraction } from '#lib/kill-work-context.js';
@@ -23,7 +23,7 @@ import { recordKillWork, recordMemoryBreadcrumb } from '#lib/memory-kill-signal.
 import { killMemory, killMemoryClearAfter, modelKeyOf } from '#lib/kill-memory.js';
 import type { PausedState } from '#lib/kill-memory.js';
 import { readBuildId } from '#lib/build-identity.js';
-import { PausedModelGate } from '#components/share/paused-model-gate.js';
+import { PausedModelGate } from '@taucad/publish-ui/components/share/paused-model-gate';
 import { onViewerEvent } from '@taucad/viewer/lib/renderer-telemetry';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { parseShareSlug } from '@taucad/share/locator';

@@ -3,7 +3,7 @@ title: 'Brand Policy'
 description: 'The canonical Tau name, descriptions, brand colours and logo assets, and how to apply them in the product and on every external provider surface.'
 status: active
 created: '2026-11-10'
-updated: '2026-11-10'
+updated: '2026-11-18'
 related:
   - docs/policy/design-policy.md
   - docs/policy/color-policy.md
@@ -26,14 +26,15 @@ A person meets Tau on surfaces Tau does not render: GitHub's authorize screen, G
 
 Write the product name as **Tau**: capital T, no suffix.
 
-| Context                                                                                              | Value                                                                                       |
-| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Product name, everywhere a person reads it                                                           | `Tau`                                                                                       |
-| Named surfaces of the product                                                                        | `Tau Desktop`, `Tau Docs`, `Tau CLI`, `Tau Cloud`: the name first, then one plain qualifier |
-| Wordmark artwork (the logo asset only)                                                               | lowercase `tau` beside the mark; never typeset by hand                                      |
-| Legal entity (legal pages, email footers, invoices, signing identities, provider verification forms) | `TAUCAD LIMITED`                                                                            |
-| Technical identifiers (GitHub organization, npm scope, staging domain, bundle ids, user agent)       | `taucad`, `@taucad/*`, `taucad.dev`, `com.taucad.tau`, `TauCAD/<version>`                   |
-| Card statement descriptor (uppercase by card-network convention)                                     | `TAU.NEW`                                                                                   |
+| Context                                                                                              | Value                                                                                              |
+| ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Product name, everywhere a person reads it                                                           | `Tau`                                                                                              |
+| Named surfaces of the product                                                                        | `Tau Desktop`, `Tau Docs`, `Tau CLI`, `Tau Cloud`: the name first, then one plain qualifier        |
+| Capabilities named inside the product (UX policy Rule 13)                                            | `the cloud`, `Cloud link`, `your account`; `Tau Cloud` only in legal pages, docs and operator text |
+| Wordmark artwork (the logo asset only)                                                               | lowercase `tau` beside the mark; never typeset by hand                                             |
+| Legal entity (legal pages, email footers, invoices, signing identities, provider verification forms) | `TAUCAD LIMITED`                                                                                   |
+| Technical identifiers (GitHub organization, npm scope, staging domain, bundle ids, user agent)       | `taucad`, `@taucad/*`, `taucad.dev`, `com.taucad.tau`, `TauCAD/<version>`                          |
+| Card statement descriptor (uppercase by card-network convention)                                     | `TAU.NEW`                                                                                          |
 
 Never write `TauCAD`, `Tau CAD`, `TAU` or `tau` as the product name in copy; write "Tau" or "Tau's CAD tools", not "Tau CAD tools". `taucad` is an identifier, not a name: use it only where a slug, scope, domain or legal name is required.
 

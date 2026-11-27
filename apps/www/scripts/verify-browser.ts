@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Result } from 'lighthouse';
+import { checkServerBundle } from '#tools/server-bundle.js';
 
 const run = promisify(execFile);
 const appRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -62,10 +63,10 @@ try {
     agentText.includes(`Current release: ${plugin.version} (npm tag \`beta\`).`),
     'Agent page names the plugin release',
   );
-  const serverFiles = await readdir(resolve(appRoot, 'build/server/_www/bundles'));
-  assert.equal(
-    serverFiles.some((file) => /live-|scene-|\.map$/u.test(file)),
-    false,
+  // The Environment API build inlines the server into one index.js, so the check reads contents, not chunk names.
+  assert.deepEqual(
+    await checkServerBundle(resolve(appRoot, 'build/server')),
+    [],
     'SSR must not ship graphics or source maps',
   );
   for (const script of ['browser-check', 'check-story']) {

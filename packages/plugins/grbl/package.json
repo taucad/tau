@@ -58,6 +58,7 @@
   },
   "devDependencies": {
     "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
     "zod": "catalog:"
   },
   "taucad": {

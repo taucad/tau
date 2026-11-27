@@ -6,7 +6,7 @@
 
 import type { OnboardingState } from '@taucad/preferences';
 import { newAccountWindow, readAccountCreatedAt } from '#components/onboarding/should-offer-setup.js';
-import { isFeatureEnabled } from '#flags/feature-flags.js';
+import { readFeatureState, whenFeatureKnown } from '#flags/feature-flags.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
 
 /** What the decision reads. */
@@ -60,16 +60,53 @@ export type FirstProjectTourPorts = Readonly<{
   readAccount: () => Promise<Readonly<{ isSignedIn: false }> | Readonly<{ isSignedIn: true; createdAt: unknown }>>;
 }>;
 
+/** Store `tour.wanted = true` while the record still allows it. */
+const storeTourWanted = (): void => {
+  if (mayWantFirstProjectTour({ isOnboardingEnabled: true, onboarding: personRecordStores.onboarding.read() })) {
+    personRecordStores.onboarding.write({ wanted: true });
+  }
+};
+
+/** Wait for `onboarding` to be known (through a failed load, until a later refresh answers), then ask if it is on. */
+const askForTourOnceOnboardingIsKnown = async (): Promise<void> => {
+  if (await whenFeatureKnown('onboarding')) {
+    storeTourWanted();
+  }
+};
+
+/** Ask for the tour now when `onboarding` is on, or once it is known to be on; never when it turns out off. */
+const askForTourWhenOnboardingIsOn = (): void => {
+  if (readFeatureState('onboarding') === 'on') {
+    storeTourWanted();
+    return;
+  }
+  // async-iife: bootstrap — the create contract takes a synchronous call; this settles when PostHog answers.
+  void askForTourOnceOnboardingIsKnown();
+};
+
 /**
  * Decide, before a project is created, whether it is a newcomer's first. Nothing is read from the workspace or the
  * session unless the flag and the record allow it, and a session that cannot be read asks for nothing.
+ *
+ * The decision is one-shot: once the project exists it is no longer a first. A newcomer can create it before PostHog
+ * has answered for `onboarding`, so a flag that is still unknown does not count as off: the workspace and session are
+ * read as for an enabled flag, and the returned call stores the request once the flag is known to be on, against the
+ * record as it is then (setup may have been skipped meanwhile). A failed flag load is unknown too: the request waits
+ * for PostHog's background refresh rather than being dropped (as off would) or stored for a flag nobody evaluated (as
+ * on would); if no answer comes while the page is open, nothing is stored.
  *
  * @param ports - The workspace and session reads.
  * @returns A function to call once the project exists, or `undefined` when nothing is to be stored.
  */
 export const prepareFirstProjectTour = async (ports: FirstProjectTourPorts): Promise<(() => void) | undefined> => {
-  const isOnboardingEnabled = isFeatureEnabled('onboarding');
-  if (!mayWantFirstProjectTour({ isOnboardingEnabled, onboarding: personRecordStores.onboarding.read() })) {
+  /* `unknown` is decided as `on` here; the write below waits for the flag to be known. */
+  const isOnboardingPossible = readFeatureState('onboarding') !== 'off';
+  if (
+    !mayWantFirstProjectTour({
+      isOnboardingEnabled: isOnboardingPossible,
+      onboarding: personRecordStores.onboarding.read(),
+    })
+  ) {
     return undefined;
   }
   try {
@@ -84,17 +121,13 @@ export const prepareFirstProjectTour = async (ports: FirstProjectTourPorts): Pro
       return undefined;
     }
     const isWanted = wantsFirstProjectTour({
-      isOnboardingEnabled,
+      isOnboardingEnabled: isOnboardingPossible,
       onboarding: personRecordStores.onboarding.read(),
       projectCount,
       accountCreatedAt,
       now: Date.now(),
     });
-    return isWanted
-      ? () => {
-          personRecordStores.onboarding.write({ wanted: true });
-        }
-      : undefined;
+    return isWanted ? askForTourWhenOnboardingIsOn : undefined;
   } catch {
     return undefined;
   }

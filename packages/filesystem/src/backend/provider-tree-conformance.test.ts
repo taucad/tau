@@ -16,7 +16,7 @@ import { NodeFsChannel, NodeFsProviderClient } from '#backend/node/client.js';
 import { serveNodeFsProvider } from '#backend/node/host.js';
 import { tauPathPolicy } from '#path-registry.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -29,6 +29,15 @@ const createTemporaryRoot = (): string => {
   const root = mkdtempSync(join(tmpdir(), 'tau-node-provider-'));
   temporaryRoots.push(root);
   return root;
+};
+
+/** The disk directory behind each node provider, so a fixture can be laid down beneath it rather than through it. */
+const diskRoots = new WeakMap<FileSystemProvider, string>();
+
+/** Remember `root` as the disk behind `provider`. @returns `provider`. */
+const onDisk = <Provider extends FileSystemProvider>(provider: Provider, root: string): Provider => {
+  diskRoots.set(provider, root);
+  return provider;
 };
 
 const providers: ReadonlyArray<{
@@ -63,7 +72,10 @@ const providers: ReadonlyArray<{
   },
   {
     name: 'Node',
-    create: async () => new NodeFsProvider(createTemporaryRoot()),
+    create: async () => {
+      const root = createTemporaryRoot();
+      return onDisk(new NodeFsProvider(root), root);
+    },
   },
   {
     // The same contract has to survive the process seam, or the client half is
@@ -82,7 +94,7 @@ const providers: ReadonlyArray<{
         void stop();
         port2.close();
       });
-      return new NodeFsProviderClient(channel, root);
+      return onDisk(new NodeFsProviderClient(channel, root), root);
     },
   },
 ];
@@ -191,15 +203,25 @@ describe.each(providers)('$name provider path-tree conformance', ({ create }) =>
    * and it is the whole reason a 6,000-file project took seconds to index.
    *
    * The count is per directory and says nothing about how wide each one is, so
-   * the fixture is 200 files rather than the budget's 1,000: on the two node
-   * providers a thousand of them is a thousand fsyncs, and a multi-second
-   * fixture behind a fixed timeout is the flaky wall-clock gate EQ5 forbids. */
+   * the fixture is 200 files rather than the budget's 1,000. It is the walk's
+   * input, not what the row measures: on the two node providers it is written
+   * to the disk beneath them, because 200 durable writes through the provider
+   * (temp file, fsync, rename each) took 4.1 s and then 6.3 s of the 5 s test
+   * on a Windows runner (Windows unit runs 44058492146 and 44062658372). */
   it('should build an index with one stat-class call per directory', async () => {
     const provider = await create();
     const directories = 10;
     const filesPerDirectory = 20;
+    const disk = diskRoots.get(provider);
     try {
       for (let directory = 0; directory < directories; directory++) {
+        if (disk !== undefined) {
+          mkdirSync(join(disk, `dir${directory}`));
+          for (let file = 0; file < filesPerDirectory; file++) {
+            writeFileSync(join(disk, `dir${directory}`, `file${file}.ts`), `export const file = ${file};\n`);
+          }
+          continue;
+        }
         // oxlint-disable-next-line no-await-in-loop -- One directory's writes at a time keeps handle pressure bounded.
         await Promise.all(
           Array.from({ length: filesPerDirectory }, async (_, file) =>

@@ -31,11 +31,15 @@
 @source '../../../../node_modules/@streamdown/mermaid/dist';
 @source '../../../libs/ui-kit/src';
 @source '../../../libs/chat-ui/src';
+@source '../../../libs/chat-surfaces/src';
+@source '../../../libs/project-library/src';
 @source '../../../libs/project-workspace/src';
 @source '../../../libs/files-ui/src';
 @source '../../../libs/editor-ui/src';
+@source '../../../libs/revisions-ui/src';
 @source '../../../libs/settings-ui/src';
 @source '../../../libs/publish-ui/src';
+@source '../../../libs/billing-ui/src';
 @source '../../../libs/ui-core/src';
 @source '../../../../packages/ui/src';
 @source '../../../../packages/viewer/src';
@@ -130,6 +134,9 @@
   /* The running viewer tool's glyph (Section, Measure): 3:1 on accent and sidebar at every primary hue. Its per-theme
      values below are a recorded exception in docs/policy/color-policy.md (Separate Dark Mode Authoring). */
   --viewer-tool-active: oklch(0.53 0.12 var(--hue-primary));
+  /* Comment pins and drawn marks: one ink in both themes, cased in white, so a sent picture matches the viewer
+     (annotation-painter.ts holds the canvas copy). */
+  --markup-ink: #d6249f;
 }
 
 @keyframes chat-streaming-fade {
@@ -260,6 +267,7 @@
 
 @theme inline {
   --color-viewer-tool-active: var(--viewer-tool-active);
+  --color-markup-ink: var(--markup-ink);
 
   --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-gradient: gradient 5s ease infinite;

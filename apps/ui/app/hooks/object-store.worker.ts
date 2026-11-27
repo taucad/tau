@@ -5,15 +5,15 @@ import { idPrefix } from '@taucad/types/constants';
 import type { Chat } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
-import type { AppUiPreferences } from '#types/storage.types.js';
+import type { AppUiPreferences } from '@taucad/project-library/types/project-library-io.types';
 import type { EditorState, EditorStateInput, OpenFile } from '@taucad/ui-core/types/editor.types';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type { ProjectLibraryState } from '@taucad/project-library/types/project-library.types';
 import type {
   PendingCreateProjectOperation,
   PendingDuplicateProjectOperation,
   PendingProjectOperation,
   PendingProjectStorage,
-} from '#types/pending-project-operation.types.js';
+} from '@taucad/project-library/types/pending-project-operation.types';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import { mergePanelState } from '@taucad/ui-core/utils/panel-state.utils';
 import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
@@ -280,13 +280,18 @@ const objectStoreWorker = {
     await storage.deletePendingProjectOperation(operationId);
   },
 
-  async beginPermanentDeleteProject(projectId: string, storageConfig: PendingProjectStorage): Promise<string> {
+  async beginPermanentDeleteProject(
+    projectId: string,
+    storageConfig: PendingProjectStorage,
+    options?: Readonly<{ copy?: boolean }>,
+  ): Promise<string> {
     const operationId = generatePrefixedId(idPrefix.request);
     await storage.beginPermanentDeleteProject({
       operationId,
       kind: 'permanent-delete',
       projectId,
       storage: storageConfig,
+      ...(options?.copy === true ? { copy: true } : {}),
     });
     return operationId;
   },

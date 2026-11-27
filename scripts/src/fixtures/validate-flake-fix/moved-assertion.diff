@@ -1,0 +1,16 @@
+--- a/apps/ui/src/boot.test.ts
++++ b/apps/ui/src/boot.test.ts
+@@
+ import { expect, it } from 'vitest';
+
+ it('mounts the worker', async () => {
+   const worker = await boot();
+-  expect(worker.state).toBe('ready');
+ });
+
+ it('stops the worker', async () => {
+   const worker = await boot();
+   await worker.stop();
+   expect(worker.state).toBe('stopped');
++  expect(worker.port).toBeUndefined();
+ });

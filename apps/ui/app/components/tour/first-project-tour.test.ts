@@ -4,7 +4,10 @@ import { emptyOnboardingState } from '@taucad/preferences';
 import type { OnboardingState } from '@taucad/preferences';
 
 const flags = vi.hoisted(() => ({ onboarding: true }));
-vi.mock('#flags/feature-flags.js', () => ({ isFeatureEnabled: (flag: keyof typeof flags) => flags[flag] }));
+vi.mock('#flags/feature-flags.js', () => ({
+  readFeatureState: (flag: keyof typeof flags) => (flags[flag] ? 'on' : 'off'),
+  whenFeatureKnown: async (flag: keyof typeof flags) => flags[flag],
+}));
 
 const { prepareFirstProjectTour, wantsFirstProjectTour } = await import('#components/tour/first-project-tour.js');
 const { personRecordStores } = await import('#preferences/person-record.store.js');

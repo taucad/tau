@@ -29,7 +29,10 @@ export const projectReadinessStates: readonly ProjectReadiness[] = [
  */
 export type ProjectReadinessReading = Readonly<{
   state: ProjectReadiness;
-  /** The checkout and head the state is about; `undefined` before a head exists. */
+  /**
+   * The checkout and head the state is about; `undefined` before a head exists while a remote is recorded, being
+   * attached or not yet known, whose tree is not known yet.
+   */
   tree: string | undefined;
 }>;
 
@@ -73,6 +76,40 @@ export type ReadinessSource = Pick<
   }>;
 
 /**
+ * Whether the checkout's files are the whole project: no remote is recorded and none is being attached (I7).
+ *
+ * A connect names its kind from its first step, so a remote being attached is never mistaken for none; one that fails
+ * and leaves no remote (an attempt undone by `abandoning`, or one that never recorded its remote) is none again. While
+ * the remotes list is still being read, whether one is recorded is not known.
+ *
+ * @param remote - The remote facet.
+ * @returns `true` when no remote is recorded or being attached.
+ */
+const isLocalOnly = (remote: ReadinessSource['remote']): boolean =>
+  remote.reading !== true && (remote.kind === 'none' || (remote.phase === 'failed' && remote.url === undefined));
+
+/**
+ * The tree a reading is about (I7).
+ *
+ * With no revision and no remote the checkout's files are the whole project: a tree of their own. Attaching a remote
+ * makes the tree unknown again (the remote may hold one), so the local reading's completeness never carries across
+ * the attach. A failed write's tree is another tree than the one it was writing: its end took away the rows it never
+ * landed, so what the write had reached no longer stands, and only a write running or landed raises it again.
+ *
+ * @param status - The projection being read.
+ * @param treeWrites - How many writes of another revision's tree have begun on this checkout.
+ * @param unrevised - Whether no revision is behind the checkout and no tree write has begun.
+ * @returns The tree key, or `undefined` while a remote is recorded, attached or not yet known, and its tree is not.
+ */
+const treeOf = (status: ReadinessSource, treeWrites: number, unrevised: boolean): string | undefined => {
+  if (unrevised) {
+    return isLocalOnly(status.remote) ? `${status.checkoutId ?? ''}::local` : undefined;
+  }
+  const failed = status.treeWriteFailed === true ? ':failed' : '';
+  return `${status.checkoutId ?? ''}:${status.headRevisionId ?? ''}:${String(treeWrites)}${failed}`;
+};
+
+/**
  * What one merged projection says about readiness, before monotonicity.
  *
  * While a write holds the tree it reads `treeReady`, then `entryReady` once
@@ -96,24 +133,15 @@ export const readinessOf = (
   largeObjectsTold = true,
   treeWrites = 0,
 ): ProjectReadinessReading => {
-  /*
-   * A failed write's tree is another tree than the one it was writing: its end took away the rows it never landed, so
-   * what the write had reached no longer stands, and only a write running or landed raises it again (I7).
-   */
-  const tree =
-    status.headRevisionId === undefined && treeWrites === 0
-      ? undefined
-      : `${status.checkoutId ?? ''}:${status.headRevisionId ?? ''}:${String(treeWrites)}${
-          status.treeWriteFailed === true ? ':failed' : ''
-        }`;
+  const unrevised = status.headRevisionId === undefined && treeWrites === 0;
+  const tree = treeOf(status, treeWrites, unrevised);
   if (!status.registrySettled || status.checkoutRoot === undefined) {
     return { state: 'connected', tree };
   }
   const applying =
     status.sync.pullPhase === 'applying' || (status.applyingRoots?.includes(status.checkoutRoot) ?? false);
   /* With no revision behind the checkout no placeholder can be in it, so silence there is "nothing to fill". */
-  const written =
-    status.largeObjects === undefined && (largeObjectsTold || tree === undefined) ? 'filled' : 'materialized';
+  const written = status.largeObjects === undefined && (largeObjectsTold || unrevised) ? 'filled' : 'materialized';
   if (applying) {
     return { state: status.entryClosureLanded === true ? 'entryReady' : 'treeReady', tree };
   }
@@ -121,8 +149,8 @@ export const readinessOf = (
     /* An aborted write of a new tree: known, never `materialized`, and never more than known (I7). */
     return { state: 'treeReady', tree };
   }
-  if (tree !== undefined || status.remote.phase === 'none') {
-    /* A local project with no revision yet is complete: its files are the only copy. */
+  if (tree !== undefined) {
+    /* A known tree, or a local project with no revision yet, which is complete: its files are the only copy. */
     return { state: written, tree };
   }
   /* A remote project with no head has not shown its tree yet, unless the open already applied it. */

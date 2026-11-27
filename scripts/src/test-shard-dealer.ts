@@ -1,23 +1,41 @@
 /**
  * Deal the affected projects with a `test` target across the CI test shards by measured duration.
  *
- * Each `test-<n>` lane of `ci.yml` pipes the same affected project list (a JSON array from
- * `nx show projects --affected --with-target test`) into this script and runs only the projects it prints for its
- * own shard. The deal is greedy longest-processing-time: projects sorted by weight, heaviest first, ties by name,
- * each to the shard with the least load so far, ties to the lowest shard. Every lane computes the same deal, so the
- * shards partition the selected set exactly. Weights are the uncached `test` seconds in the checked-in
- * `test-shard-durations.json` snapshot; a project the snapshot does not list weighs its `defaultSeconds`.
- * This replaced the test-file-count weights, which had turned the shards into a fixed routing table
- * (tau-brain `research/ci-decomposition-blueprint.md` F2 and Part 4; charter W2).
+ * Each `test-<n>` lane of `ci.yml` pipes the same affected unit list (a JSON array read from its
+ * `nx affected -t test --graph=<file>`) into this script, with that graph (`--graph <file> --targets test`), and runs
+ * only the units it prints for its own shard. Every lane computes the same deal, so the shards partition the selected
+ * set exactly. A unit weighs its `test` task and every task it depends on, from the checked-in
+ * `test-shard-durations.json` snapshot keyed by task id (see the graph deal below): a lane builds what its suites
+ * depend on whenever the build lanes have not cached it yet, which the test seconds alone left out (tau-brain
+ * `research/ci-decomposition-blueprint.md`, global review G5). Plain project weights replaced the test-file-count
+ * weights, which had turned the shards into a fixed routing table (same blueprint, F2 and Part 4; charter W2).
+ *
+ * A project that declares `test:shard-<n>` targets enters the `test-<n>` lanes' list as its `<project>:test:shard-<n>`
+ * tasks in place of its name (`ui`: six tasks of its Vitest suite, CI throughput review ST-1), and the snapshot weighs
+ * each task on its own, so one slow suite no longer sets a lane's floor. A graph of `test` alone does not hold those
+ * tasks, so each stands in for a slice of its project's `test` and carries what that depends on.
  *
  * The names are opaque, so other sharded lanes deal with it too, each from its own snapshot through `--durations`:
  * the `pkgcheck-<n>` lanes deal the affected projects with a package check by measured `pkgcheck` seconds
  * (`pkgcheck-shard-durations.json`), and the `Viewer references` shards of `viewer-parity.yml` deal the parity
  * fixtures by measured capture seconds (`libs/tau-examples/fixtures/viewer-parity/capture-seconds.json`).
  *
- * Usage: node scripts/src/test-shard-dealer.ts --shard <n> [--shards <count>] [--durations <file>] < projects.json
- * Prints the shard's projects comma-separated (empty when it has none).
- * Exit codes: 0 success; 1 invalid input or duration snapshot; 2 usage.
+ * `--graph <file> --targets <list>` deals projects whose tasks share dependencies (the `lint-<n>`, `typecheck-<n>`,
+ * `build-<n>` and `test-<n>` lanes, tau-brain `research/ci-structural-decomposition-blueprint.md` ST-3). A project's
+ * unit is its tasks for those targets in the Nx task graph (`nx … --graph=<file>`) and every task they depend on, and
+ * a task id's unit (`project:target`) is that task and what it depends on; the snapshot is keyed by task id, and an
+ * unlisted task weighs `defaultSeconds` when it is one of the unit's own and nothing when it is only a dependency.
+ * Each unit goes to the shard whose load grows least, counting only the tasks that shard does not run already, so
+ * `ui` and the `desktop` build its payload check depends on land together. With disjoint units this is the plain deal.
+ *
+ * `--shards auto --max-shards <n> --shard-seconds <s>` lets the measured total choose the shard count: one shard per
+ * `<s>` seconds, at least one and at most `<n>`. `--shard all` prints every non-empty shard as a JSON matrix,
+ * `[{"shard":1,"shards":2,"projects":"a,b"},…]`, for a workflow job to fan out on (`[]` when nothing is selected).
+ *
+ * Usage: node scripts/src/test-shard-dealer.ts --shard <n|all> [--shards <count|auto>] [--max-shards <n>]
+ *   [--shard-seconds <s>] [--durations <file>] [--graph <file> --targets <list>] < projects.json
+ * Prints the shard's units comma-separated (empty when it has none), or the matrix for `--shard all`.
+ * Exit codes: 0 success; 1 invalid input, graph or duration snapshot; 2 usage.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -68,11 +86,13 @@ export const parseProjects = (raw: unknown): readonly string[] => {
 export const weightOf = (project: string, durations: DurationTable): number =>
   Object.hasOwn(durations.seconds, project) ? durations.seconds[project]! : durations.defaultSeconds;
 
+const byName = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 /** Deal projects into `shards` lists with greedy longest-processing-time; deterministic for any input order. */
 export const deal = (projects: readonly string[], shards: number, durations: DurationTable): string[][] => {
   const ordered = projects
     .map((project) => ({ project, weight: weightOf(project, durations) }))
-    .sort((a, b) => b.weight - a.weight || (a.project < b.project ? -1 : a.project > b.project ? 1 : 0));
+    .sort((a, b) => b.weight - a.weight || byName(a.project, b.project));
   const load = Array.from({ length: shards }, () => 0);
   const dealt = Array.from({ length: shards }, (): string[] => []);
   for (const { project, weight } of ordered) {
@@ -88,10 +108,210 @@ export const deal = (projects: readonly string[], shards: number, durations: Dur
   return dealt;
 };
 
+/** A deal unit: its name, and every task it runs (its own and those they depend on). */
+export type Unit = { readonly name: string; readonly tasks: readonly string[] };
+
+/**
+ * Deal units whose task sets may overlap: heaviest unit first (by the seconds of all its tasks), ties by name. A
+ * shard's load is the seconds of every task it runs, and a unit adds only the tasks its shard does not run yet. Each
+ * unit goes to the shard that leaves the longest load shortest, then adds the fewest seconds, then has the least
+ * load, then is lowest. Deterministic for any input order; with disjoint units it deals as `deal` does.
+ */
+export const dealUnits = (
+  units: readonly Unit[],
+  shards: number,
+  taskSeconds: (task: string) => number,
+): { readonly dealt: string[][]; readonly loads: number[] } => {
+  const secondsOf = (tasks: Iterable<string>): number => {
+    let sum = 0;
+    for (const task of tasks) {
+      sum += taskSeconds(task);
+    }
+    return sum;
+  };
+  const ordered = units
+    .map(({ name, tasks }) => {
+      const distinct = [...new Set(tasks)];
+      return { name, tasks: distinct, weight: secondsOf(distinct) };
+    })
+    .sort((a, b) => b.weight - a.weight || byName(a.name, b.name));
+  const loads = Array.from({ length: shards }, () => 0);
+  const runs = Array.from({ length: shards }, () => new Set<string>());
+  const dealt = Array.from({ length: shards }, (): string[] => []);
+  for (const unit of ordered) {
+    const longest = Math.max(...loads);
+    let best = {
+      shard: 0,
+      longest: Number.POSITIVE_INFINITY,
+      added: 0,
+      load: 0,
+    };
+    for (let shard = 0; shard < shards; shard++) {
+      const added = secondsOf(unit.tasks.filter((task) => !runs[shard]!.has(task)));
+      const load = loads[shard]! + added;
+      const candidate = {
+        shard,
+        longest: Math.max(longest, load),
+        added,
+        load,
+      };
+      if (
+        candidate.longest < best.longest ||
+        (candidate.longest === best.longest &&
+          (candidate.added < best.added || (candidate.added === best.added && candidate.load < best.load)))
+      ) {
+        best = candidate;
+      }
+    }
+    loads[best.shard] = best.load;
+    for (const task of unit.tasks) {
+      runs[best.shard]!.add(task);
+    }
+    dealt[best.shard]!.push(unit.name);
+  }
+  return { dealt, loads };
+};
+
+/** One shard per `shardSeconds` of measured work, at least one and at most `maxShards`. */
+export const shardCount = (totalSeconds: number, maxShards: number, shardSeconds: number): number =>
+  Math.min(maxShards, Math.max(1, Math.ceil(totalSeconds / shardSeconds)));
+
+/** The parts of an Nx task graph file (`nx … --graph=<file>`) the graph deal reads. */
+type TaskGraphFile = {
+  readonly tasks: {
+    readonly tasks: Readonly<
+      Record<
+        string,
+        {
+          readonly target: {
+            readonly project: string;
+            readonly target: string;
+          };
+        }
+      >
+    >;
+    readonly dependencies: Readonly<Record<string, readonly string[]>>;
+  };
+};
+
+/**
+ * Each unit's tasks: a project's tasks for `targets` and every task those depend on, or a task id's (`project:target`)
+ * task and every task it depends on. A task id the graph does not hold (a `test:shard-<n>` task, which a graph of
+ * `test` alone leaves out) stands in for a slice of its project's tasks for `targets`: it runs itself and what those
+ * depend on, not those tasks. Throws on a malformed graph, or on a unit with neither.
+ */
+export const unitsFromGraph = (raw: unknown, names: readonly string[], targets: readonly string[]): Unit[] => {
+  const graph = (typeof raw === 'object' && raw !== null ? raw : {}) as {
+    readonly tasks?: Partial<TaskGraphFile['tasks']>;
+  };
+  const tasks = graph.tasks?.tasks;
+  const dependencies = graph.tasks?.dependencies;
+  if (tasks === undefined || dependencies === undefined) {
+    throw new Error('graph file has no task graph');
+  }
+  const own = new Map<string, string[]>();
+  for (const [id, task] of Object.entries(tasks)) {
+    if (targets.includes(task.target.target)) {
+      own.set(task.target.project, [...(own.get(task.target.project) ?? []), id]);
+    }
+  }
+  /** The roots and every task they depend on. */
+  const closure = (roots: readonly string[]): Set<string> => {
+    const seen = new Set<string>(roots);
+    const pending = [...roots];
+    for (let task = pending.pop(); task !== undefined; task = pending.pop()) {
+      for (const dependency of dependencies[task] ?? []) {
+        if (!seen.has(dependency)) {
+          seen.add(dependency);
+          pending.push(dependency);
+        }
+      }
+    }
+    return seen;
+  };
+  return names.map((name) => {
+    const colon = name.indexOf(':');
+    if (colon === -1) {
+      const roots = own.get(name);
+      if (roots === undefined) {
+        throw new Error(`graph file has no ${targets.join(', ')} task for ${name}`);
+      }
+      return { name, tasks: [...closure(roots)].toSorted() };
+    }
+    if (Object.hasOwn(tasks, name)) {
+      return { name, tasks: [...closure([name])].toSorted() };
+    }
+    const project = name.slice(0, colon);
+    const slices = own.get(project);
+    if (slices === undefined) {
+      throw new Error(`graph file has no task ${name} and no ${targets.join(', ')} task for ${project}`);
+    }
+    const depended = [...closure(slices)].filter((task) => !slices.includes(task));
+    return { name, tasks: [name, ...depended].toSorted() };
+  });
+};
+
 const defaultDurations = resolve(import.meta.dirname, 'test-shard-durations.json');
 
 const positiveInteger = (value: string | undefined): number | undefined =>
   value !== undefined && /^[1-9]\d*$/u.test(value) ? Number(value) : undefined;
+
+const optionNames = new Set([
+  '--shard',
+  '--shards',
+  '--max-shards',
+  '--shard-seconds',
+  '--durations',
+  '--graph',
+  '--targets',
+]);
+
+const usage =
+  'usage: test-shard-dealer --shard <n|all> [--shards <count|auto>] [--max-shards <n>] [--shard-seconds <s>] ' +
+  '[--durations <file>] [--graph <file> --targets <list>] < projects.json';
+
+/** The parsed command line, or undefined when it is not a valid one. */
+type Options = {
+  readonly shard: number | 'all';
+  readonly shards: number | { readonly max: number; readonly seconds: number };
+  readonly durations: string | undefined;
+  readonly graph: { readonly file: string; readonly targets: readonly string[] } | undefined;
+};
+
+const parseOptions = (args: readonly string[]): Options | undefined => {
+  const options = new Map<string, string>();
+  for (let index = 0; index < args.length; index += 2) {
+    const [key, value] = [args[index] ?? '', args[index + 1]];
+    if (!optionNames.has(key) || value === undefined || value === '' || options.has(key)) {
+      return undefined;
+    }
+    options.set(key, value);
+  }
+  const shard = options.get('--shard') === 'all' ? 'all' : positiveInteger(options.get('--shard'));
+  const auto = options.get('--shards') === 'auto';
+  const max = positiveInteger(options.get('--max-shards'));
+  const seconds = positiveInteger(options.get('--shard-seconds'));
+  const fixed = options.has('--shards') ? positiveInteger(options.get('--shards')) : 3;
+  const shards = auto ? (max === undefined || seconds === undefined ? undefined : { max, seconds }) : fixed;
+  const targets = options.get('--targets')?.split(',');
+  const file = options.get('--graph');
+  if (
+    shard === undefined ||
+    shards === undefined ||
+    (!auto && (options.has('--max-shards') || options.has('--shard-seconds'))) ||
+    (shard !== 'all' && shard > (typeof shards === 'number' ? shards : shards.max)) ||
+    (file === undefined) !== (targets === undefined) ||
+    targets?.includes('')
+  ) {
+    return undefined;
+  }
+  return {
+    shard,
+    shards,
+    durations: options.get('--durations'),
+    graph: file === undefined ? undefined : { file, targets: targets! },
+  };
+};
 
 /** Run the CLI; returns the exit code and the line to print. */
 export const run = (
@@ -99,28 +319,46 @@ export const run = (
   input: string,
   readFile: (path: string) => string = (path) => readFileSync(path, 'utf8'),
 ): { readonly code: number; readonly output: string } => {
-  const options = new Map<string, string | undefined>();
-  for (let index = 0; index < args.length; index += 2) {
-    options.set(args[index] ?? '', args[index + 1]);
-  }
-  const shard = positiveInteger(options.get('--shard'));
-  const shards = options.has('--shards') ? positiveInteger(options.get('--shards')) : 3;
-  const known = [...options].every(
-    ([key, value]) => ['--shard', '--shards', '--durations'].includes(key) && value !== undefined && value !== '',
-  );
-  if (!known || shard === undefined || shards === undefined || shard > shards) {
-    return {
-      code: 2,
-      output: 'usage: test-shard-dealer --shard <n> [--shards <count>] [--durations <file>] < projects.json',
-    };
+  const options = parseOptions(args);
+  if (options === undefined) {
+    return { code: 2, output: usage };
   }
   try {
-    const durations = parseDurations(JSON.parse(readFile(options.get('--durations') ?? defaultDurations)));
+    const durations = parseDurations(JSON.parse(readFile(options.durations ?? defaultDurations)));
     const projects = parseProjects(JSON.parse(input));
-    return {
-      code: 0,
-      output: (deal(projects, shards, durations)[shard - 1] ?? []).join(','),
-    };
+    const { graph } = options;
+    const units =
+      graph === undefined
+        ? projects.map((project) => ({ name: project, tasks: [project] }))
+        : unitsFromGraph(JSON.parse(readFile(graph.file)), projects, graph.targets);
+    // A unit's own tasks weigh the default when the snapshot does not list them; a task only depended on, nothing.
+    const own = new Set(
+      graph === undefined
+        ? projects
+        : projects.flatMap((unit) =>
+            unit.includes(':') ? [unit] : graph.targets.map((target) => `${unit}:${target}`),
+          ),
+    );
+    const taskSeconds = (task: string): number =>
+      Object.hasOwn(durations.seconds, task) ? durations.seconds[task]! : own.has(task) ? durations.defaultSeconds : 0;
+    let shards: number;
+    if (typeof options.shards === 'number') {
+      shards = options.shards;
+    } else {
+      let total = 0;
+      for (const task of new Set(units.flatMap(({ tasks }) => tasks))) {
+        total += taskSeconds(task);
+      }
+      shards = shardCount(total, options.shards.max, options.shards.seconds);
+    }
+    const { dealt } = dealUnits(units, shards, taskSeconds);
+    if (options.shard === 'all') {
+      const matrix = dealt.flatMap((names, index) =>
+        names.length === 0 ? [] : [{ shard: index + 1, shards, projects: names.join(',') }],
+      );
+      return { code: 0, output: JSON.stringify(matrix) };
+    }
+    return { code: 0, output: (dealt[options.shard - 1] ?? []).join(',') };
   } catch (error) {
     return {
       code: 1,

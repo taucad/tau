@@ -4,8 +4,9 @@ import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
 /*
- * The weekly queue-health report (DC-21) only reads: it gets `actions: read` and `contents: read`, no
- * environment, so it can never reach the `nx-cache-write` token, and it posts nothing.
+ * The weekly queue-health report (DC-21) only reads: it gets `actions: read` and `contents: read` (and, for the D9
+ * section of FQ-11, `issues: read` and `pull-requests: read`), no environment, so it can never reach the
+ * `nx-cache-write` token, and it posts nothing.
  */
 const text = readFileSync(resolve(import.meta.dirname, '../../.github/workflows/ci-queue-health.yml'), 'utf8');
 
@@ -34,7 +35,12 @@ describe('ci queue health workflow', () => {
   });
 
   it('should only read, with no environment and no cache-write token', () => {
-    expect(workflow.permissions).toEqual({ actions: 'read', contents: 'read' });
+    expect(workflow.permissions).toEqual({
+      actions: 'read',
+      contents: 'read',
+      issues: 'read',
+      'pull-requests': 'read',
+    });
     for (const job of Object.values(workflow.jobs)) {
       expect(job.environment).toBeUndefined();
       expect(job.permissions).toBeUndefined();

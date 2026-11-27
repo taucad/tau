@@ -6,7 +6,7 @@ import type { EventLogErrorCode } from '#log/event-log-error.js';
 import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
 import type { ExternalAgentRefusalCode, ExternalAgentStopCode } from '#wire/external-agent.schema.js';
 import type { GatewayErrorCode } from '#wire/gateway.js';
-import { isResumableRunFailure } from '#log/resumable.js';
+import { isResumableRunFailure, turnWithdrawnCode } from '#log/resumable.js';
 import { gatewayErrorCodes } from '#wire/gateway.js';
 import { isResumable, refusalOf, refusals } from '#wire/refusals.js';
 import type { RefusalCode } from '#wire/refusals.js';
@@ -14,6 +14,7 @@ import type { RefusalCode } from '#wire/refusals.js';
 /** Produced resumable failures, including bounded output recovery. */
 const todaysResumable = [
   'CIRCUIT_BREAKER_OPEN',
+  'DEPLOYMENT_UNKNOWN',
   'INSUFFICIENT_CREDIT',
   'INVALID_REQUEST',
   'MALFORMED_RESPONSE',
@@ -67,6 +68,13 @@ describe('the refusal registry (D11, I17)', () => {
   /* XD3: another device's run holds the chat until it settles or goes stale; the same command is admitted then. */
   it('should let a start refused for another device’s run be sent again later', () => {
     expect(refusalOf('RUN_ACTIVE_ON_ANOTHER_DEVICE')).toEqual({ owner: 'host', retry: 'wait' });
+  });
+
+  /* A request the person took back before the turn was kept is a lifecycle detail, not a refusal: nothing continues it. */
+  it('should leave TURN_WITHDRAWN out of the refusals, where no resume continues it', () => {
+    expect(refusalOf(turnWithdrawnCode)).toEqual(refusalOf('NOT_A_CODE'));
+    expect(isResumableRunFailure({ code: turnWithdrawnCode, message: 'You took this request back.' })).toBe(false);
+    expect(resumableFailureCodes).not.toContain(turnWithdrawnCode);
   });
 
   it('should end no run with a wait code: a wait code is never resumable', () => {

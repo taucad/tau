@@ -1,7 +1,7 @@
 {
   "name": "@taucad/publish-ui",
   "version": "0.1.0-beta.0",
-  "description": "Tau UI app publish feature: publication access and recipient-email components that read no app state",
+  "description": "Tau UI app publish feature: publication access, viewer and archive import pieces that read no app state",
   "type": "module",
   "sideEffects": false,
   "private": true,
@@ -26,24 +26,55 @@
     "node": ">=24.0.0"
   },
   "exports": {
+    "./components/publish/project-share-panel": "./src/components/publish/project-share-panel.tsx",
+    "./components/publish/project-share-services": "./src/components/publish/project-share-services.tsx",
     "./components/publish/publication-access-panel": "./src/components/publish/publication-access-panel.tsx",
     "./components/publish/publication-email-tags": "./src/components/publish/publication-email-tags.tsx",
+    "./components/publish/share-envelope-state": "./src/components/publish/share-envelope-state.ts",
+    "./components/share/github-gist-management": "./src/components/share/github-gist-management.tsx",
+    "./components/share/github-gist-services": "./src/components/share/github-gist-services.tsx",
+    "./components/share/parsed-publication": "./src/components/share/parsed-publication.ts",
+    "./components/share/paused-model-gate": "./src/components/share/paused-model-gate.tsx",
+    "./components/share/publication-lock-screen": "./src/components/share/publication-lock-screen.tsx",
+    "./components/share/publication-viewer-services": "./src/components/share/publication-viewer-services.tsx",
+    "./components/share/shared-project-password": "./src/components/share/shared-project-password.tsx",
+    "./components/share/tau-publication": "./src/components/share/tau-publication.tsx",
+    "./components/share/use-view-ping": "./src/components/share/use-view-ping.ts",
+    "./hooks/use-publish-cloud-project-preview": "./src/hooks/use-publish-cloud-project-preview.ts",
+    "./lib/builtin-share-provider-descriptor": "./src/lib/builtin-share-provider-descriptor.ts",
+    "./lib/github-url": "./src/lib/github-url.ts",
+    "./machines/import-disk.machine": "./src/machines/import-disk.machine.ts",
+    "./machines/import-github.machine": "./src/machines/import-github.machine.ts",
+    "./machines/unzip.machine": "./src/machines/unzip.machine.ts",
+    "./machines/zip.machine": "./src/machines/zip.machine.ts",
     "./package.json": "./package.json"
   },
   "imports": {
     "#*": "./src/*"
   },
   "devDependencies": {
+    "@taucad/types": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "^14.6.1",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "vitest-mock-extended": "catalog:"
   },
   "dependencies": {
+    "@tanstack/react-query": "catalog:",
+    "@taucad/filesystem": "workspace:*",
+    "@taucad/revisions": "workspace:*",
+    "@taucad/share": "workspace:*",
     "@taucad/ui": "workspace:*",
+    "@taucad/ui-core": "workspace:*",
     "@taucad/ui-kit": "workspace:*",
-    "lucide-react": "catalog:"
+    "@taucad/workbench-panes": "workspace:*",
+    "jszip": "^3.10.1",
+    "lucide-react": "catalog:",
+    "react-router": "catalog:",
+    "uint8array-extras": "catalog:",
+    "xstate": "catalog:"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",

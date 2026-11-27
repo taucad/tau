@@ -194,6 +194,11 @@ export class MetricsService {
     },
   );
 
+  public readonly projectInviteEmailsTotal = this.apiMeter.createCounter(TauMetrics.projectInviteEmailsTotal.name, {
+    description: TauMetrics.projectInviteEmailsTotal.description,
+    unit: TauMetrics.projectInviteEmailsTotal.unit,
+  });
+
   public readonly emailEventsTotal = this.apiMeter.createCounter(TauMetrics.emailEventsTotal.name, {
     description: TauMetrics.emailEventsTotal.description,
     unit: TauMetrics.emailEventsTotal.unit,
@@ -351,6 +356,23 @@ export class MetricsService {
     description: TauMetrics.agentTimeToFirstUpdate.description,
     unit: TauMetrics.agentTimeToFirstUpdate.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.agentTimeToFirstUpdate.buckets] },
+  });
+
+  public readonly agentToolResults = this.clientMeter.createCounter(TauMetrics.agentToolResults.name, {
+    description: TauMetrics.agentToolResults.description,
+    unit: TauMetrics.agentToolResults.unit,
+  });
+
+  public readonly agentToolResultDelay = this.clientMeter.createHistogram(TauMetrics.agentToolResultDelay.name, {
+    description: TauMetrics.agentToolResultDelay.description,
+    unit: TauMetrics.agentToolResultDelay.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.agentToolResultDelay.buckets] },
+  });
+
+  public readonly agentAdmissionDelay = this.clientMeter.createHistogram(TauMetrics.agentAdmissionDelay.name, {
+    description: TauMetrics.agentAdmissionDelay.description,
+    unit: TauMetrics.agentAdmissionDelay.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.agentAdmissionDelay.buckets] },
   });
 
   public readonly agentToolCalls = this.clientMeter.createCounter(TauMetrics.agentToolCalls.name, {

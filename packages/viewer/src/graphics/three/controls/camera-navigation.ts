@@ -5,9 +5,14 @@
  *
  * A step moves the `camera-controls` instance at once, without a transition, as the input router does, so the pose
  * reaches the camera through the controls adapter's `update` as the person's input.
+ *
+ * An orbit step turns as a drag of the same travel does in the person's orbit style (roll rulings C, E and F): about
+ * the world up in Turntable, so it stops at a pole and stays upright, and about the screen's axes in Free orbit, so it
+ * goes on through a pole as the Free orbit drag does.
  */
 import type CameraControlsImpl from 'camera-controls';
 import { MathUtils, OrthographicCamera, PerspectiveCamera } from 'three';
+import type { OrbitStyle } from '#graphics/three/controls/camera-wheel-router.js';
 
 /**
  * Which way an orbit or pan step goes.
@@ -71,7 +76,17 @@ export const cameraZoomStepScale = 0.8;
  */
 export type CameraNavigationControls = Pick<
   CameraControlsImpl,
-  'camera' | 'enabled' | 'distance' | 'rotate' | 'truck' | 'dollyTo' | 'zoomTo' | 'minDistance' | 'maxDistance'
+  | 'camera'
+  | 'enabled'
+  | 'distance'
+  | 'rotate'
+  | 'truck'
+  | 'dollyTo'
+  | 'zoomTo'
+  | 'minDistance'
+  | 'maxDistance'
+  | 'update'
+  | 'applyCameraUp'
 > &
   Partial<Pick<CameraControlsImpl, 'minZoom' | 'maxZoom'>>;
 
@@ -98,7 +113,13 @@ const visibleHeight = (controls: CameraNavigationControls): number => {
  * the zoom (orthographic) by {@link cameraZoomStepScale}, within the controls' limits. Left and up orbit and pan as
  * the canvas prototype's arrow keys do. Invert zoom does not apply: a key names its direction.
  *
- * @param input - The controls, the step, and whether the viewer lets the person pan and zoom (default: yes).
+ * In Free orbit an orbit step first takes the camera's screen up as the controls' orbit axis (`applyCameraUp`, which
+ * keeps the view), as each step of a Free orbit drag does: the step then turns about the screen's axes and never meets
+ * a pole. The controls are stepped first, so a step still pending from the same frame is on the camera before its up
+ * is read.
+ *
+ * @param input - The controls, the step, whether the viewer lets the person pan and zoom (default: yes), and the
+ *   person's orbit style (default: Turntable).
  * @returns Whether the step moved, or tried to move, the camera: false while the controls are disabled or the step's
  *   gesture is off.
  * @public
@@ -108,11 +129,13 @@ export const applyCameraNavigationStep = ({
   step,
   enablePan = true,
   enableZoom = true,
+  orbitStyle = 'turntable',
 }: Readonly<{
   controls: CameraNavigationControls;
   step: CameraNavigationStep;
   enablePan?: boolean;
   enableZoom?: boolean;
+  orbitStyle?: OrbitStyle;
 }>): boolean => {
   if (!controls.enabled) {
     return false;
@@ -120,6 +143,10 @@ export const applyCameraNavigationStep = ({
   switch (step.kind) {
     case 'orbit': {
       const [x, y] = directionSigns[step.direction];
+      if (orbitStyle === 'free') {
+        controls.update(0);
+        controls.applyCameraUp();
+      }
       void controls.rotate(x * cameraOrbitStepRadians, y * cameraOrbitStepRadians, false);
       return true;
     }

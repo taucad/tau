@@ -218,7 +218,7 @@ const fixture = async (initial: Readonly<Record<string, string>>, options: Reado
     const close = async (): Promise<void> => {
       await actors.settled();
       await walking.settled();
-      service.dispose();
+      await service.close();
     };
     cleanups.push(close);
     return {

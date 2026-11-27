@@ -5,7 +5,7 @@ import type { ShareProvider, ShareProviderContext, ShareResolveInput } from '@ta
 import { ShareError } from '@taucad/share/provider';
 import type { ShareSnapshotFileRole } from '@taucad/share/snapshot';
 
-import { builtinShareProviderDescriptor } from '@taucad/ui-core/lib/builtin-share-provider-descriptor';
+import { builtinShareProviderDescriptor } from '@taucad/publish-ui/lib/builtin-share-provider-descriptor';
 
 const roleFor = (path: string, entryPath: string): ShareSnapshotFileRole => {
   if (path === entryPath) {

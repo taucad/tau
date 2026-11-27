@@ -1,3 +1,201 @@
 {
-  "entries": []
+  "entries": [
+    {
+      "key": "task ui-e2e:test:e2e:deploy-skew",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44021907154, 44027526318, 44070124967, 44070631184, 44072130629, 44096318250, 44120373585, 44844398794, 45505317710. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. Owner issue: taucad/tau#2787."
+    },
+    {
+      "key": "task scripts:test:e2e",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43996993384, 44023825427, 44029622905, 44054747707, 44093463604, 44101103236, 44116346111, 44123100509. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "src/shell/shell-qualification.conformance.test.ts > shell qualification > T12-custody: a run placed in an agent candidate checkout changes and verifies it; the live project changes only on adoption, once",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43294119942, 43351789817, 43356549848, 43547069480, 43554767389, 43820397560, 43841970570. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task ui:check-static-shells",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44070124967, 44070631184, 44072130629, 44095190195, 44096318250, 44100274005. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task ui:test",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43540228102, 43552959248, 43555119808, 43990460984, 44048796415, 44062740359. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "src/shell/shell-qualification.conformance.test.ts > shell qualification > S01: 256 MiB of each stream stay bounded in retention, transport queues and host/supervisor memory",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43294119942, 43356549848, 43356718881, 43556961199, 43990460984. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "src/shell/shell-qualification.conformance.test.ts > shell qualification > S02 (attempt 1): 50 create, run, cancel and dispose cycles leak no process, scratch folder or runtime directory",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43294119942, 43356549848, 43356718881, 43556961199. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "api-billing:\"test:billing-foundation\" › src/testing/billing-foundation.test.ts > funded LLM recovery worker under a mid-run database outage > should keep retrying and terminalize the due operation exactly once without changing money",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43396450383, 44085399737, 44831182699. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "src/shell/shell-qualification.conformance.test.ts > shell qualification > E14: git log, diff, show and blame read history through a view of branches and tags; every write fails",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43294119942, 43356549848, 43556961199. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task build123d:seed",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43473515256, 44307507165, 45513618962. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task filesystem:pkgcheck",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44085399737, 44093869091, 44171067506. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task scripts:test",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43356020228, 43356063861, 43361138244. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "agent-host:test › src/launchers/agent-launcher.segments.test.ts > a chat continued on a second device > while this device holds a run > should stop a paused run’s heartbeats once its hold is over",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44104264351, 44143394843. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "api-billing:\"test:billing-foundation\" › src/testing/billing-foundation.test.ts > billing database protections and real command > should let the release migration run when Cloud is disabled",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43781969271, 44197752293. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "chromium  src/graphics/three/viewer-parity-capture.browser.test.tsx > should capture the viewer frame of manifold.manifold-logo on webgpu with ao=true",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44093391454, 44116735708. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "cli-e2e:\"test:native-darwin\" › src/commands/serve.integration.test.ts > tau serve native kernels on darwin-arm64 (W11 tier 4b, native-darwin) > should refuse .py and .cs from an empty store, prepare each kernel once over the daemon, then evaluate and export both models with no egress",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44272420508, 45677414686. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "job Browser end-to-end (ui test:e2e:attachment-image-engines)",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43997484722, 44828694479. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "job Native hosts / Native kernels on darwin-x64",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43801415465, 43996169093. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "src/shell/shell-qualification.conformance.test.ts > shell qualification > E09: abort while awaiting approval or queued for a slot settles once and starts nothing",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43356718881, 43473515256. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task agent-plugin:test:e2e",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44161786637, 44201548172. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task filesystem:size",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44083614723, 44096318250. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task react-e2e:test:e2e:development",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44620295672, 45514493647. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task scripts:validate-expected-failures",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44101671177, 44102112452. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task smlibpy:seed",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43473515256, 45513618962. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task ui-e2e:test:e2e:non-isolated",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44814028236, 44879174109. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. Owner issue: taucad/tau#2788."
+    },
+    {
+      "key": "task ui:lint",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 43785653021, 44183213627. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task ui:test:shard-4",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44239865483, 44621638111. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    },
+    {
+      "key": "task www:verify-browser",
+      "owner": "rifont",
+      "recorded": "2026-11-25",
+      "expiryDay": "2026-12-09",
+      "note": "Flaked in runs 44002930803, 44020818775. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
+    }
+  ],
+  "aliases": []
 }

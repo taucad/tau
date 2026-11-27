@@ -19,6 +19,7 @@
     "acpSession.busy.flushing.close": "Stutter",
     "acpSession.busy.flushing.flushed": "Stutter",
     "acpSession.busy.flushing.vendorAnswered": "Stutter",
+    "acpSession.busy.flushing.xstate.timeout": "DrainTimedOut",
     "acpSession.busy.prompting.adapterExited": "Unmodelled",
     "acpSession.busy.prompting.callSettled": "PromptAnswered",
     "acpSession.busy.prompting.cancel": "Cancel",
@@ -27,6 +28,7 @@
     "acpSession.busy.recording.adapterExited": "Unmodelled",
     "acpSession.busy.recording.close": "Stutter",
     "acpSession.busy.recording.recorded": "TurnEnded",
+    "acpSession.busy.recording.xstate.timeout": "DrainTimedOut",
     "acpSession.callSettled": "Stutter",
     "acpSession.closing.ending.callSettled": "Stutter",
     "acpSession.closing.ending.xstate.timeout": "Stutter",
@@ -111,7 +113,7 @@
     "vendorRequest"
   ],
   "specs": {
-    "AcpSessions.tla": "bb553d0678ae4f758389b8d34327b9db262f0df0aa020885c8325c9e65f4df9a"
+    "AcpSessions.tla": "c0f16221de511317348e257d9a1fc798f24cd371321e3cd2e0c40a5e336aedc1"
   },
   "tables": {},
   "versions": {

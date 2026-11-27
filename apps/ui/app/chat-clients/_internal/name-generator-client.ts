@@ -4,8 +4,10 @@ import { idPrefix } from '@taucad/types/constants';
 import type { MyUIMessage } from '@taucad/chat';
 import { messageRole } from '@taucad/chat/constants';
 import { ENV } from '#environment.config.js';
+import { readIdentityState } from '#lib/identity-answer.js';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * Error thrown by the project-name / commit-name client when the
@@ -30,7 +32,7 @@ export class NameGeneratorRequestError extends Error {
 type NameProfile = 'project_name' | 'commit_name';
 
 type GenerateName = (prompt: string, projectId: string) => Promise<string>;
-type GenerateNameFromParts = (parts: MyUIMessage['parts'], projectId: string) => Promise<string>;
+type GenerateNameFromParts = (parts: MyUIMessage['parts'], projectId: string, signal?: AbortSignal) => Promise<string>;
 
 /**
  * Public surface of the simple-text name clients (project + commit). These
@@ -79,6 +81,13 @@ const nameGeneratorFetch: typeof globalThis.fetch = async (input, init) => {
 };
 
 /**
+ * The two refusals an account causes: no session (401) and not enough credit (402). A name is a courtesy, so either
+ * is no name, not a failure of naming; the turn itself says what the account must do (launch audit N-7).
+ */
+const isAccountRefusal = (error: unknown): boolean =>
+  error instanceof NameGeneratorRequestError && (error.status === 401 || error.status === 402);
+
+/**
  * Factory for the simple-text profile clients. The `profile` discriminator
  * is the only thing that varies between project-name and commit-name; the
  * wire body and streaming pipeline are delegated entirely to the AI SDK.
@@ -87,9 +96,15 @@ const nameGeneratorFetch: typeof globalThis.fetch = async (input, init) => {
  */
 export const useNameGeneratorPartsClient = (profile: NameProfile): NameGeneratorPartsClient => {
   const generateFromParts = useCallback<GenerateNameFromParts>(
-    async (parts, projectId) => {
+    async (parts, projectId, signal) => {
+      /* The naming profiles need a session. Once the identity owner has answered that nobody is signed in, the request
+       * is certain to be refused, so none is made (launch audit N-7). The answer is read when a name is asked for; an
+       * unknown or unverified identity is left to the API. */
+      if (readIdentityState() === 'signed-out') {
+        return '';
+      }
       // Mounting the project manager does not need a naming transport.
-      const sdk = await import('ai');
+      const sdk = await loadCode(async () => import('ai'));
       const chatId = generatePrefixedId(idPrefix.chat);
       const messageId = generatePrefixedId(idPrefix.message);
       const userMessage: MyUIMessage = {
@@ -103,21 +118,30 @@ export const useNameGeneratorPartsClient = (profile: NameProfile): NameGenerator
         credentials: 'include',
         fetch: nameGeneratorFetch,
       });
-      const stream = await transport.sendMessages({
-        chatId,
-        messageId: undefined,
-        messages: [userMessage],
-        trigger: 'submit-message',
-        body: {
-          projectId,
-          agent: { profile },
-          admission: {
-            version: 1,
-            idempotencyKey: generatePrefixedId(idPrefix.request),
+      let stream: Awaited<ReturnType<typeof transport.sendMessages>>;
+      try {
+        stream = await transport.sendMessages({
+          chatId,
+          messageId: undefined,
+          messages: [userMessage],
+          trigger: 'submit-message',
+          body: {
+            projectId,
+            agent: { profile },
+            admission: {
+              version: 1,
+              idempotencyKey: generatePrefixedId(idPrefix.request),
+            },
           },
-        },
-        abortSignal: AbortSignal.timeout(10_000),
-      });
+          /* A caller's signal cancels the request on the wire (a superseded name ahead, C1); the bound stays 10 s. */
+          abortSignal: AbortSignal.any([AbortSignal.timeout(10_000), ...(signal === undefined ? [] : [signal])]),
+        });
+      } catch (error) {
+        if (isAccountRefusal(error)) {
+          return '';
+        }
+        throw error;
+      }
 
       let assembled: MyUIMessage | undefined;
       for await (const message of sdk.readUIMessageStream<MyUIMessage>({ stream })) {

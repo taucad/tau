@@ -73,7 +73,7 @@ const createNodeService = (allowed: readonly string[]) => {
     mountTable: new MountTable(),
   });
   cleanups.push(async () => {
-    service.dispose();
+    await service.close();
     await stopHost();
     port2.close();
   });

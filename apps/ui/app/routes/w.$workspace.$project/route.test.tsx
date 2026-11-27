@@ -21,7 +21,6 @@ const testMatch = {
   id: 'test',
   pathname: '/',
   params: {},
-  data: undefined,
   loaderData: {},
   handle: undefined,
 } satisfies UIMatch;

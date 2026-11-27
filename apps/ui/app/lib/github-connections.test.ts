@@ -188,7 +188,7 @@ describe('githubErrorMessage', () => {
     expect(githubErrorMessage(Object.assign(new Error('raw'), { code: 'GIT_PROXY_UPSTREAM_FAILED' }))).toBe(
       "Tau couldn't reach the Git host. Try again shortly.",
     );
-    expect(githubErrorMessage(new TypeError('Failed to fetch'))).toMatch(/couldn't reach its server/u);
+    expect(githubErrorMessage(new TypeError('Failed to fetch'))).toMatch(/Couldn’t reach Tau/u);
     expect(githubErrorMessage(new Error('Not Found - https://docs.github.com'))).toBe(
       'The GitHub request failed. Try again.',
     );

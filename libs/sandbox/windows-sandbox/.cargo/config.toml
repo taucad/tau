@@ -1,0 +1,6 @@
+# The helper ships inside Tau's Windows package and must start on a machine without the Visual C++ Redistributable, so
+# it links the C runtime statically: no vcruntime140.dll or api-ms-win-crt-* import. Every build of the crate, the
+# packaged one (libs/sandbox/scripts/build-windows-sandbox.mts) and the WIN-X64 conformance row's alike, reads this,
+# so what conformance proves is what ships; build-windows-sandbox.mts refuses a build that imports the runtime.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

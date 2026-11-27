@@ -23,7 +23,7 @@ import {
 } from 'node:fs';
 import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { NodeFsChannel, NodeFsImportSources, NodeFsProviderClient } from '#backend/node/client.js';
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';
 import { heldDescriptorPath } from '#backend/node/import-source.js';
@@ -412,9 +412,12 @@ describe('a host-side import', () => {
     expect(existsSync(join(fixture.root, 'secret.txt'))).toBe(false);
   });
 
-  it.each(['linux', 'darwin', 'win32'] as const)(
+  it.for(['linux', 'darwin', 'win32'] as const)(
     'never lands bytes from a directory swapped in and back while a page was listed (%s)',
-    async (platform) => {
+    async (platform, { skip }) => {
+      /* The linux row reads the page beneath the held descriptor through `/proc/self/fd`, which only a Linux
+       * kernel serves: faked on a Windows host it opens `D:\proc\self\fd\<n>` and fails ENOENT. */
+      skip(platform === 'linux' && !existsSync('/proc/self/fd'), 'reads beneath /proc/self/fd, served only by Linux');
       const fixture = serve();
       const { grant } = folderGrant(fixture);
       const listed = join(fixture.folder, 'src');
@@ -442,7 +445,7 @@ describe('a host-side import', () => {
       vi.spyOn(fs, 'lstat').mockImplementation((async (path: string, options?: never) => {
         const stats = await lstat(path, options);
         /* Put the chosen folder back after the first row, before the walk that checks it again. */
-        if (swap.state === 'swapped' && String(path).startsWith(`${listed}/`)) {
+        if (swap.state === 'swapped' && String(path).startsWith(`${listed}${sep}`)) {
           renameSync(listed, swapped);
           renameSync(`${listed}.chosen`, listed);
           swap.state = 'restored';

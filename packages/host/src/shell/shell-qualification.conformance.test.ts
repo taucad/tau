@@ -154,6 +154,9 @@ let ready = false;
 let identity: HostShell['identity'] | undefined;
 let endpoint: Awaited<ReturnType<typeof controlledEndpoint>>;
 
+/* Every real provider a row creates, closed after the file so no custody lock is left to garbage collection. */
+const realProviders: ShellProvider[] = [];
+
 /** A provider over the real sandbox that counts launches and reports what each was granted. */
 const countingProvider = (
   options: Readonly<{
@@ -177,6 +180,7 @@ const countingProvider = (
     custody: { directory: join(custody.appData, 'shell-custody'), sessionDirectory: custody.sessions },
     ...(options.supervisor === undefined ? {} : { supervisor: options.supervisor }),
   });
+  realProviders.push(real);
   const launches: ShellLaunch[] = [];
   let running = 0;
   let highWater = 0;
@@ -186,6 +190,7 @@ const countingProvider = (
     inventory: real.inventory,
     recover: real.recover,
     release: real.release,
+    ...(real.close === undefined ? {} : { close: real.close }),
     ...(real.storeGuard === undefined ? {} : { storeGuard: real.storeGuard }),
     launch: async (launch) => {
       /* The probe's own launch proves the sandbox; it is not one of the row's calls. */
@@ -273,6 +278,8 @@ const agentHostOver = async (
     logPath?: string;
     custody?: Readonly<{ appData: string; sessions: string }>;
     toolchain?: Readonly<{ roots: readonly string[]; bins: readonly string[] }>;
+    /** Prefix for this host's ids; a host reopening another host's log needs its own, or its rows collide. */
+    idPrefix?: string;
   }> = {},
 ) => {
   const logPath = options.logPath ?? join(root, `${label}-events.jsonl`);
@@ -302,7 +309,7 @@ const agentHostOver = async (
     toolRegistry,
     placement: placementOver(toolRegistry),
     openEventLog: async () => createNodeEventLog({ filePath: logPath, access: 'write' }),
-    createId: () => `${label}-${String(id++)}`,
+    createId: () => `${options.idPrefix ?? label}-${String(id++)}`,
     createLeaderEpoch: () => `epoch-${label}`,
     now: () => new Date(Date.UTC(2026, 9, 25, 0, 0, tick++)),
   });
@@ -662,7 +669,8 @@ describe.runIf(enabled)('shell qualification', () => {
     ready = true;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await Promise.all(realProviders.map(async (provider) => provider.close?.()));
     if (ready) {
       endpoint.server.close();
     }
@@ -2006,7 +2014,13 @@ describe.runIf(enabled)('shell qualification', () => {
       expect(statSync(beat).size).toBe(size);
 
       const counting = countingProvider({ custody: crash });
-      const recovered = await agentHostOver('e11', [], { counting, logPath, custody: crash });
+      const recovered = await agentHostOver('e11', [], {
+        counting,
+        logPath,
+        custody: crash,
+        /* The crashed host wrote `e11-<n>` ids to this log; reusing them would make recovery's rows duplicates. */
+        idPrefix: 'e11-recovered',
+      });
       try {
         await recovered.host.resume(recovered.chatId).catch(() => undefined);
         const message = await recovered.toolOutput('e11-call');
@@ -2016,6 +2030,8 @@ describe.runIf(enabled)('shell qualification', () => {
         expect(readFileSync(count, 'utf8')).toBe('started\n');
       } finally {
         await recovered.host.close();
+        /* Its recovered receipt stays held until a run inventory releases it, which this harness never reads. */
+        await counting.provider.close?.();
       }
     },
   );

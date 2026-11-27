@@ -230,6 +230,44 @@ export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
         ],
       };
     }
+    case 'project-invite': {
+      const roleLabel = template.role === 'write' ? 'Can edit' : 'Can view';
+      const roleVerb = template.role === 'write' ? 'view and edit' : 'view';
+      return {
+        subject: `${template.ownerName} invited you to work on “${template.projectName}” in Tau`,
+        preheader: `Sign in as ${template.recipientEmail} to accept. The invite works until ${template.expiresAt}.`,
+        kicker: 'Project invite',
+        heading: `${template.ownerName} invited you to a project`,
+        reason: sentence(
+          `You received this email because ${template.ownerName} invited `,
+          createElement(address, { email: template.recipientEmail, tone: 'footer' }),
+          ' to work on a Tau project.',
+        ),
+        body: [
+          createElement(
+            paragraph,
+            null,
+            `${template.ownerName} invited you to ${roleVerb} “${template.projectName}”. Sign in to Tau with `,
+            createElement(address, { email: template.recipientEmail }),
+            ' to accept. The invite works only for that address.',
+          ),
+          createElement(details, {
+            rows: [
+              row('Project', template.projectName),
+              row('Invited by', template.ownerName),
+              row('Role', roleLabel),
+              row('Works until', template.expiresAt),
+            ],
+          }),
+          createElement(primaryAction, { href: template.url }, 'Accept invite'),
+          createElement(
+            note,
+            null,
+            "If you weren't expecting this, you can ignore this email. Nothing changes unless you accept.",
+          ),
+        ],
+      };
+    }
     case 'payment-failed': {
       const retry =
         template.nextAttemptAt === undefined

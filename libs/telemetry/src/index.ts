@@ -26,6 +26,7 @@ export {
   agentErrorCodeSchema,
   knownAgentIds,
   agentPlacements,
+  admissionPhases,
   agentToolKinds,
   tauToolNames,
   kernelIds,

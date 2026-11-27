@@ -40,7 +40,6 @@
     "./utils/file-tree-operation-results": "./src/utils/file-tree-operation-results.ts",
     "./utils/file-tree-targets": "./src/utils/file-tree-targets.ts",
     "./utils/native-image-format": "./src/utils/native-image-format.ts",
-    "./utils/project-manifest-equivalence": "./src/utils/project-manifest-equivalence.ts",
     "./utils/project-open-timer": "./src/utils/project-open-timer.ts",
     "./utils/revision-reveal": "./src/utils/revision-reveal.ts",
     "./package.json": "./package.json"

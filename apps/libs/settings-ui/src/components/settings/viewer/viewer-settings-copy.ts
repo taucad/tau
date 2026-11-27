@@ -33,7 +33,7 @@ export const mousePresetCopy: Readonly<Record<MousePresetId, Readonly<{ name: st
 /** Orbit styles, in the order the select lists them. Turntable is Tau's default. */
 export const orbitStyleCopy: Readonly<Record<OrbitStyleId, Readonly<{ name: string; hint: string }>>> = {
   turntable: { name: 'Turntable', hint: 'The view stays upright and stops at the top and bottom' },
-  tumble: { name: 'Tumble', hint: 'The view turns freely over the top and can roll' },
+  free: { name: 'Free orbit', hint: 'The view turns freely over the top and can roll' },
 };
 
 /** Gizmo styles, in the order the select lists them. "None" is the Show gizmo row. */
@@ -47,7 +47,7 @@ export const gizmoStyleCopy: Readonly<Record<GizmoStyleId, Readonly<{ name: stri
 /** Navigation and Gizmo rows. */
 export const viewerControlCopy = {
   mouseControls: { title: 'Mouse controls', description: 'Which buttons orbit, pan and zoom' },
-  orbitStyle: { title: 'Orbit', description: 'Keep the view upright, or turn it freely over the top' },
+  orbitStyle: { title: 'Orbit style', description: 'Keep the view upright, or turn it freely over the top' },
   zoomToCursor: { title: 'Zoom to cursor', description: 'Zoom toward the pointer instead of the view centre' },
   orbitAroundCursor: { title: 'Orbit around cursor', description: 'Rotate about the point under the pointer' },
   invertZoom: { title: 'Invert zoom', description: 'Scroll up to zoom out' },

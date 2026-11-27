@@ -60,8 +60,13 @@ export function EditorPanePlaceholder({
       className={cn('relative size-full overflow-hidden bg-background', className)}
     >
       {text === undefined ? (
-        /* Before the file is read: faint code-shaped lines where the text will be. */
-        <div aria-hidden='true' data-testid='editor-pane-skeleton' className='flex flex-col gap-2 py-1.5 pr-6 pl-16'>
+        /* Before the file is read: faint code-shaped lines where the text will be, from the wait ladder's skeleton
+           mark (300 ms, `wait-skeleton`) after they mount, so a file read at once draws no lines (rule 16). */
+        <div
+          aria-hidden='true'
+          data-testid='editor-pane-skeleton'
+          className='flex wait-skeleton flex-col gap-2 py-1.5 pr-6 pl-16'
+        >
           {skeletonLineWidths.map((width, index) => (
             <Skeleton
               // oxlint-disable-next-line react/no-array-index-key -- static decorative list

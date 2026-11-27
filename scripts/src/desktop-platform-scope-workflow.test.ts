@@ -261,6 +261,8 @@ describe('desktop route qualification platform scopes', () => {
     expect(interpolate(uploads[1]!.with?.['path'] ?? '', context({ scope: 'windows' }))).toContain(
       'qualification-binding.json',
     );
+    // The recovery collector runs first and keeps out of the directory the row collector requires to be fresh.
+    expect(uploads[2]!.with?.['path']).toBe('out/qualification-recovery-receipts/recovery-receipts.json');
     expect(interpolate(uploads[1]!.with?.['path'] ?? '', context({ scope: 'all' }))).not.toContain(
       'qualification-binding.json',
     );

@@ -13,18 +13,18 @@ import init, { Context, LspServerConfig, lsp_run_kcl, parse_wasm } from '@taucad
 import wasmPath from '@taucad/kcl-wasm-lib/kcl.wasm?url';
 import { attachLanguageFsClient } from '@taucad/lsp-fs/client';
 import { URI, Utils } from 'vscode-uri';
-import { Queue } from '#lib/kcl-language/lsp/codec/queue.js';
-import { StreamDemuxer } from '#lib/kcl-language/lsp/codec/stream-demuxer.js';
-import { createKclLogger } from '#lib/kcl-language/lsp/kcl-logs.js';
-import { lspWorkerEventType, kclWorkerType } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
+import { Queue } from '@taucad/editor-ui/lib/kcl-language/lsp/codec/queue';
+import { StreamDemuxer } from '@taucad/editor-ui/lib/kcl-language/lsp/codec/stream-demuxer';
+import { createKclLogger } from '@taucad/editor-ui/lib/kcl-language/lsp/kcl-logs';
+import { lspWorkerEventType, kclWorkerType } from '@taucad/editor-ui/lib/kcl-language/lsp/kcl-lsp-types';
 import type {
   KclLspWorkerOptions,
   KclSymbolRequest,
   KclSymbolResponse,
   LspWorkerEvent,
   SetDocumentContextPayload,
-} from '#lib/kcl-language/lsp/kcl-lsp-types.js';
-import { encodeMessage, decodeMessage } from '#lib/kcl-language/lsp/codec/utils.js';
+} from '@taucad/editor-ui/lib/kcl-language/lsp/kcl-lsp-types';
+import { encodeMessage, decodeMessage } from '@taucad/editor-ui/lib/kcl-language/lsp/codec/utils';
 import type { LanguageFsClient } from '@taucad/lsp-fs/client';
 
 const log = createKclLogger('LSP Worker');

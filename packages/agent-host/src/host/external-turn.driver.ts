@@ -34,6 +34,13 @@ export const startExternalTurn = (input: ExternalTurnInput): DriverHandle => {
   const approve: ExternalAgentTurn['approve'] = async (request) =>
     new Promise<InterruptResolution>((resolve) => {
       const interruptId = input.createInterruptId();
+      /* A request that was in flight when the turn was aborted arrives after `abort` answered the ones waiting then.
+       * Nobody can be asked any more and M1 drops the report, so it is answered here: left waiting, the port never
+       * returned and the turn never reported its end (launch audit B-1). */
+      if (controller.signal.aborted) {
+        resolve({ interruptId, outcome: 'cancelled' });
+        return;
+      }
       waiting.set(interruptId, resolve);
       input.report({
         type: 'approvalRequested',

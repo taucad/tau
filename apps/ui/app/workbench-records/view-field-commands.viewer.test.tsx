@@ -14,11 +14,13 @@ const state = vi.hoisted(() => ({
   viewRecords: new Map<string, unknown>(),
 }));
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => flag === 'viewerControls' && state.viewerControls,
+  useFeature: () => false,
+  useFeatureState: (flag: string) => (flag === 'viewerControls' && state.viewerControls ? 'on' : 'off'),
   subscribeFeatureFlags: () => () => undefined,
 }));
 vi.mock('#flags/feature-flags.js', () => ({
-  isFeatureEnabled: (flag: string) => flag === 'viewerControls' && state.viewerControls,
+  isFeatureEnabled: () => false,
+  readFeatureState: (flag: string) => (flag === 'viewerControls' && state.viewerControls ? 'on' : 'off'),
 }));
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture: state.capture }) }));
 vi.mock('#hooks/use-project.js', () => ({

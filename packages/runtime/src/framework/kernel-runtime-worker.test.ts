@@ -196,15 +196,13 @@ async function evaluateDocumentRequest(
   worker: KernelRuntimeWorker,
   input: Parameters<KernelRuntimeWorker['handleOpenDocument']>[0],
 ): Promise<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> {
-  const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
-  worker.onEvaluated = (event) => {
-    evaluated.push(event);
-  };
-  worker.handleOpenDocument(input);
-  await vi.waitFor(() => {
-    expect(evaluated).toHaveLength(1);
+  // The first evaluation the worker reports, awaited as the event itself: a polled wait gave up after `vi.waitFor`'s
+  // 1 s of wall time, which a loaded runner can spend before the worker reports, and the test's own timeout bounds it.
+  const evaluated = new Promise<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]>((resolve) => {
+    worker.onEvaluated = resolve;
   });
-  return evaluated[0]!;
+  worker.handleOpenDocument(input);
+  return evaluated;
 }
 
 async function evaluateWorkerDocument(
@@ -256,19 +254,16 @@ async function requestWorkerView(
     content?: Record<string, boolean>;
   },
 ): Promise<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> {
-  const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
-  worker.onRendered = (event) => {
-    rendered.push(event);
-  };
+  // The first render the worker reports, awaited as the event (see `evaluateDocumentRequest`).
+  const rendered = new Promise<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]>((resolve) => {
+    worker.onRendered = resolve;
+  });
   worker.handleOpenView({
     ...args,
     requestId: `${args.subscriptionId}-render`,
     view: 'display',
   });
-  await vi.waitFor(() => {
-    expect(rendered).toHaveLength(1);
-  });
-  return rendered[0]!;
+  return rendered;
 }
 
 async function renderWorkerView(
@@ -3786,7 +3781,7 @@ describe('KernelRuntimeWorker idle publication (D1, D3)', () => {
     }
   });
 
-  it('should wait for a queued edit and skip the superseded snapshot without touching its disposed handle', async () => {
+  it('should wait for a queued edit and still snapshot the replaced build, whose handle it holds until then (R1)', async () => {
     const serializeHandle = vi.fn(({ handle }: { handle: unknown }) => ({ label: handleLabel(handle) }));
     const reuse = createSnapshotReuse();
     await seedTestFileSystem({ 'model.mock': '' });
@@ -3807,19 +3802,18 @@ describe('KernelRuntimeWorker idle publication (D1, D3)', () => {
         evaluated.push(event);
       };
       // The delivery permits the first build's publication, but the next edit is admitted before
-      // the worker is idle; the first build's handle is gone by the time it could run.
+      // the worker is idle; the worker holds the first build's handle until its snapshot is taken.
       worker.permitComputePublication();
       worker.handleUpdateDocument({ documentId: 'edited-document', intent: 2, parameters: { width: 2 } });
       await vi.waitFor(() => {
         expect(evaluated).toHaveLength(1);
       });
-      expect(serializeHandle).not.toHaveBeenCalled();
 
       worker.permitComputePublication();
       await vi.waitFor(() => {
-        expect(reuse.encodes).toEqual([{ label: 'live-2' }]);
+        expect(reuse.encodes).toEqual([{ label: 'live-1' }, { label: 'live-2' }]);
       });
-      expect(serializeHandle.mock.calls.map(([input]) => handleLabel(input.handle))).toEqual(['live-2']);
+      expect(serializeHandle.mock.calls.map(([input]) => handleLabel(input.handle))).toEqual(['live-1', 'live-2']);
     } finally {
       await worker.cleanup();
     }

@@ -1,4 +1,4 @@
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { mock } from 'vitest-mock-extended';
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';
@@ -14,11 +14,15 @@ const { account } = vi.hoisted(() => ({
     auth: 'authed' as 'authed' | 'anonymous' | 'indeterminate',
     isResolved: true,
     canSyncFiles: true,
+    basis: 'pinned' as 'pinned' | 'confirmed' | 'remembered' | 'absent',
   },
 }));
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => account.auth }));
 vi.mock('#cloud/commercial-features.js', () => ({
-  useCommercialFeatures: () => ({ isResolved: account.isResolved, canSyncFiles: account.canSyncFiles }),
+  useCommercialFeatures: () =>
+    account.isResolved
+      ? { isResolved: true, basis: account.basis, canSyncFiles: account.canSyncFiles }
+      : { isResolved: false, wait: 'checking', retry: () => undefined },
 }));
 const { mockToast } = vi.hoisted(() => ({
   mockToast: vi.fn<
@@ -55,10 +59,10 @@ vi.stubGlobal(
 const { canOpenCloudProject, tauCloudIntent } = await import('#lib/tau-cloud-intent.js');
 const {
   backupByDefaultNotice,
+  cloudOpenContinuationTestApi,
   fetchCloudProjects,
-  materializeOnSignIn,
-  materializedCloudProjects,
   nextTauCloudStep,
+  useTauCloudEligibility,
   useTauCloudIntent,
   useTauCloudIntentConnection,
 } = await import('#hooks/use-cloud-projects.js');
@@ -149,17 +153,17 @@ describe('nextTauCloudStep', () => {
     expect(nextTauCloudStep(undefined, entitled, status('rev-1'))).toBe('wait');
   });
 
-  // ── D20: materialized projects ───────────────────────────────────────────
-  it('should connect a materialized project on its first open, before any revision', () => {
+  // ── D20: projects opened from the cloud ──────────────────────────────────
+  it('should connect a project opened from the cloud before any revision', () => {
     expect(nextTauCloudStep('open', notEntitled, status(undefined))).toBe('connect');
   });
 
-  it('should keep a materialized project owed until a person is signed in', () => {
+  it('should keep a project opened from the cloud owed until a person is signed in', () => {
     expect(nextTauCloudStep('open', { ...entitled, auth: 'anonymous' }, status(undefined))).toBe('wait');
     expect(nextTauCloudStep('open', { ...entitled, auth: 'indeterminate' }, status(undefined))).toBe('wait');
   });
 
-  it('should keep a materialized project owed until its authored manifest is reconciled', () => {
+  it('should keep a project opened from the cloud owed until its authored manifest is reconciled', () => {
     expect(nextTauCloudStep('open', entitled, status(undefined, 'tau', 'connecting'))).toBe('wait');
     expect(nextTauCloudStep('open', entitled, status(undefined, 'tau', 'failed'))).toBe('wait');
     expect(nextTauCloudStep('open', entitled, status(undefined, 'tau', 'connected'))).toBe('wait');
@@ -258,34 +262,6 @@ describe('tauCloudIntent', () => {
   });
 });
 
-describe('materializeOnSignIn', () => {
-  it('should be off by default', () => {
-    expect(materializeOnSignIn.get()).toBeUndefined();
-  });
-
-  it('should keep the chosen workspace in storage', () => {
-    materializeOnSignIn.set({ kind: 'workspace', workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa' });
-
-    expect(JSON.parse(localStorage.getItem('tau:materialize-cloud-projects') ?? 'null')).toEqual({
-      kind: 'workspace',
-      workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa',
-    });
-    materializeOnSignIn.set(undefined);
-    expect(localStorage.getItem('tau:materialize-cloud-projects')).toBeNull();
-  });
-});
-
-describe('materializedCloudProjects', () => {
-  it('should remember a project brought to this device, across a reload', () => {
-    expect(materializedCloudProjects.has('proj_aaaaaaaaaaaaaaaaaaaaa')).toBe(false);
-
-    materializedCloudProjects.add('proj_aaaaaaaaaaaaaaaaaaaaa');
-
-    expect(materializedCloudProjects.has('proj_aaaaaaaaaaaaaaaaaaaaa')).toBe(true);
-    expect(materializedCloudProjects.has('proj_bbbbbbbbbbbbbbbbbbbbb')).toBe(false);
-  });
-});
-
 describe('fetchCloudProjects', () => {
   it('should carry each row’s update time for the library’s Last Updated sort', async () => {
     vi.stubGlobal(
@@ -331,6 +307,8 @@ describe('useTauCloudIntentConnection', () => {
     cleanup();
     setRevisionSessionUser(undefined);
     vi.restoreAllMocks();
+    /* No Web Locks in jsdom: a row's hold that never settles would otherwise keep the next row's open waiting. */
+    cloudOpenContinuationTestApi.reset();
   });
 
   function Connector({
@@ -431,8 +409,8 @@ describe('useTauCloudIntentConnection', () => {
     expect(tauCloudIntent.get(projectId)).toBeUndefined();
   });
 
-  // ── D20: materialized projects ───────────────────────────────────────────
-  it('should connect a materialized project on open and keep it owed until the connection lands', async () => {
+  // ── D20: projects opened from the cloud ──────────────────────────────────
+  it('should connect a project opened from the cloud and keep it owed until the connection lands', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => Response.json([{ id: projectId, name: 'Gearbox', role: 'owner' }])),
@@ -447,7 +425,7 @@ describe('useTauCloudIntentConnection', () => {
     expect(tauCloudIntent.get(projectId)).toBe('open');
   });
 
-  it('should keep a materialized project owed, unconnected, while signed out', () => {
+  it('should keep a project opened from the cloud owed, unconnected, while signed out', () => {
     account.auth = 'anonymous';
     tauCloudIntent.set(projectId, 'open');
 
@@ -526,4 +504,29 @@ describe('useTauCloudIntentConnection', () => {
       }
     },
   );
+});
+
+/* Adaptive app deployment mode C4 (T-G4, D5): data moves only on a pinned or confirmed plan. */
+describe('useTauCloudEligibility basis', () => {
+  it.each([
+    ['pinned', true],
+    ['confirmed', true],
+    ['remembered', false],
+    ['absent', false],
+  ] as const)('reads a plan whose basis is %s as resolved: %s', (basis, isResolved) => {
+    account.basis = basis;
+    const { result } = renderHook(() => useTauCloudEligibility());
+    expect(result.current.isResolved).toBe(isResolved);
+    account.basis = 'pinned';
+  });
+
+  it('never connects or forgets on a remembered unfunded start, and waits until the answer confirms it', () => {
+    const status = { remote: { kind: 'none', phase: 'none' }, headRevisionId: 'rev-1' } as unknown as Parameters<
+      typeof nextTauCloudStep
+    >[2];
+    expect(nextTauCloudStep('noticed', { auth: 'authed', isResolved: false }, status)).toBe('wait');
+    expect(nextTauCloudStep('noticed', { auth: 'authed', isResolved: true, canSyncFiles: true }, status)).toBe(
+      'connect',
+    );
+  });
 });

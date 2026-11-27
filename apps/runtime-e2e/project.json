@@ -3,14 +3,14 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/runtime-e2e/src",
   "projectType": "application",
-  "tags": ["scope:shared", "type:e2e", "ci:quarantined", "ci:standalone"],
+  "tags": ["scope:shared", "type:e2e", "ci:nightly-only", "ci:standalone"],
   "implicitDependencies": ["runtime", "tau-examples"],
   "targets": {
     "test:e2e:queue": {
       "executor": "nx:noop",
       "dependsOn": ["test:e2e"],
       "metadata": {
-        "description": "The merge-queue e2e ratchet: the suites of this project that passed two consecutive e2e-nightly runs. ci.yml's e2e-queue lane runs each one as its own job in the merge queue whenever this project is affected, and e2e-nightly.yml leaves every suite listed here out of its matrix. A suite joins by being added to dependsOn (a target of this project) once green on two consecutive nightlies, and never moves back. Running this target runs them all."
+        "description": "The merge-queue e2e ratchet: the suites of this project that passed five consecutive e2e-nightly runs (two before 2026-11-17). ci.yml's e2e-queue lane runs each one as its own job in the merge queue whenever this project is affected, and e2e-nightly.yml leaves every suite listed here out of its matrix. A suite joins by being added to dependsOn (a target of this project) once green on five consecutive nightlies, and never moves back. Running this target runs them all."
       }
     },
     "test:e2e": {
@@ -66,10 +66,18 @@
     "native-turbofan": {
       "executor": "nx:run-commands",
       "cache": false,
-      "dependsOn": [{ "projects": ["cli"], "target": "build" }],
+      "dependsOn": [
+        {
+          "projects": ["cli"],
+          "target": "build"
+        }
+      ],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "node --import @oxc-node/core/register ../../packages/cli/dist/bin/tau.mjs prepare picogk && GEOSPEC_TURBOFAN_NATIVE=1 vitest run src/picogk-turbofan-native.test.ts"
+        "command": "node --import @oxc-node/core/register ../../packages/cli/dist/bin/tau.mjs prepare picogk && vitest run src/picogk-turbofan-native.test.ts",
+        "env": {
+          "GEOSPEC_TURBOFAN_NATIVE": "1"
+        }
       }
     },
     "example-health": {
@@ -112,6 +120,46 @@
         "cwd": "{projectRoot}"
       },
       "cache": false
+    },
+    "compute-qualify-ci": {
+      "command": "vitest run src/compute-baseline/compute-qualification.test.ts src/compute-baseline/identity-tracer.test.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "metadata": {
+        "description": "Compute reuse qualification, CI subset (audit R5): reuse-off GLB hashes and per-step counts against the pins, byte parity with reuse on, ten cache histories, multi-thread parity and the identity tracer's effect model."
+      }
+    },
+    "compute-qualify": {
+      "command": "node --import @oxc-node/core/register src/compute-baseline/harness/qualify-driver.mts --pairs 2",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "metadata": {
+        "description": "Full compute reuse qualification campaign: seven models, matrix, scrub, agent loop, history gate and stop latency, arms alternated in pairs. Writes out/reports/compute-qualify/<stamp>."
+      }
+    },
+    "compute-agent-edit": {
+      "command": "node --import @oxc-node/core/register src/compute-baseline/harness/agent-edit.mts --pairs 7",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "metadata": {
+        "description": "Agent-lifecycle one-part edit against the editor's latency for the same edit: editor (live document), agent (edit_file then evaluate_model) and watch (edit_file seen by the editor's watched document), alternated in pairs. Pass --model and --out after --."
+      }
+    },
+    "compute-qualify-summarize": {
+      "command": "node --import @oxc-node/core/register src/compute-baseline/harness/qualify-summarize.mts --pins src/compute-baseline/qualification-baselines.json",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "metadata": {
+        "description": "Summarize a qualification campaign directory (pass it after --): parity, history gate, counts, stop latency, timings and drift against the pins."
+      }
     },
     "benchmark": {
       "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-kernels.mts",

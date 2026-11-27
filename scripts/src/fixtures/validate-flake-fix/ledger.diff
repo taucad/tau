@@ -1,0 +1,7 @@
+--- a/scripts/src/flake-ledger.json
++++ b/scripts/src/flake-ledger.json
+@@
+ {
+-  "entries": []
++  "entries": [{ "key": "ui-e2e:test:e2e", "owner": "rifont", "expires": "2026-12-20" }]
+ }

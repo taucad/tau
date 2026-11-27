@@ -18,6 +18,10 @@ export const publicationKernelExtensions = [
   { id: 'gltf', extensions: ['glb', 'gltf'] },
   { id: 'brep', extensions: ['step', 'stp', 'iges', 'igs', 'brep'] },
   {
+    id: 'cadmpeg',
+    extensions: ['sldprt', 'catpart', 'ipt', 'iam', 'f3d', 'f3z', 'fcstd', '3dm', 'sat', 'sab', 'smt', 'smb', 'pvz'],
+  },
+  {
     id: 'assimp',
     extensions: [
       '3mf',

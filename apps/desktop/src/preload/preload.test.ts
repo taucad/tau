@@ -9,7 +9,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import {
   agentHostRatingChannel,
+  bootChannels,
+  bootstrapArgumentPrefix,
   directoryGrantChannels,
+  recoveryChannels,
   hostHandOffChannel,
   openDirectoryChannel,
   revealPathChannel,
@@ -367,5 +370,93 @@ describe('desktop native kernel preload bridge', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(desktopNativeKernelChannels.cancel, 'build123d');
     unsubscribe();
     expect(state.listeners.get(desktopNativeKernelChannels.progress)).toEqual([]);
+  });
+});
+
+describe('desktop boot and troubleshooting bridge (T-R12.9)', () => {
+  type BootApi = Readonly<{ report(stage: unknown): void }>;
+  type TroubleshootingApi = Readonly<{
+    showLogs(): Promise<void>;
+    open(): Promise<void>;
+    restartInSafeMode(): Promise<void>;
+    restartNormally(): Promise<void>;
+    copyDiagnostics(): Promise<void>;
+  }>;
+  type ExposedTau = {
+    readonly boot: BootApi;
+    readonly troubleshooting: TroubleshootingApi;
+    readonly safeMode?: unknown;
+  };
+  const tau = (): ExposedTau => state.exposed.get('tau') as ExposedTau;
+
+  it('should expose tau.boot.report and send only the two stage names on tau:boot:stage', () => {
+    vi.mocked(ipcRenderer.send).mockClear();
+    tau().boot.report('shell-mounted');
+    tau().boot.report('home-ready');
+    tau().boot.report('main-started');
+    tau().boot.report({ stage: 'home-ready' });
+    expect(vi.mocked(ipcRenderer.send).mock.calls).toEqual([
+      [bootChannels.stage, 'shell-mounted'],
+      [bootChannels.stage, 'home-ready'],
+    ]);
+    expect(bootChannels.stage).toBe('tau:boot:stage');
+  });
+
+  it('should send each troubleshooting call as a fixed recovery action', async () => {
+    vi.mocked(ipcRenderer.invoke).mockClear();
+    await tau().troubleshooting.showLogs();
+    await tau().troubleshooting.open();
+    await tau().troubleshooting.restartInSafeMode();
+    await tau().troubleshooting.restartNormally();
+    await tau().troubleshooting.copyDiagnostics();
+    expect(vi.mocked(ipcRenderer.invoke).mock.calls).toEqual([
+      [recoveryChannels.action, { type: 'show-logs' }],
+      [recoveryChannels.action, { type: 'open-recovery-window' }],
+      [recoveryChannels.action, { type: 'restart', mode: 'safe' }],
+      [recoveryChannels.action, { type: 'restart', mode: 'normal' }],
+      [recoveryChannels.action, { type: 'copy-diagnostics' }],
+    ]);
+  });
+
+  /* WP9 (R7, D3): Reset local database records the local-database reset, then restarts so main applies it. */
+  it('should reset the local database as a fixed reset request followed by a normal restart', async () => {
+    vi.mocked(ipcRenderer.invoke).mockClear();
+    const { troubleshooting } = state.exposed.get('tau') as {
+      readonly troubleshooting: Readonly<{ resetLocalDatabase(): Promise<void> }>;
+    };
+    await troubleshooting.resetLocalDatabase();
+    expect(vi.mocked(ipcRenderer.invoke).mock.calls).toEqual([
+      [recoveryChannels.action, { type: 'reset', store: 'local-database' }],
+      [recoveryChannels.action, { type: 'restart', mode: 'normal' }],
+    ]);
+  });
+
+  /* WP9 (R7, T-B5.8): the marker of a granted folder, read by main, so a reset database adopts the folder's id. */
+  it("should read a granted folder's marker through main and answer undefined for anything but text", async () => {
+    const { directories } = state.exposed.get('tau') as {
+      readonly directories: Readonly<{ readMarker(path: string): Promise<string | undefined> }>;
+    };
+    vi.mocked(ipcRenderer.invoke).mockResolvedValueOnce('{"workspaceId":"wsp_x"}');
+    await expect(directories.readMarker('/picked/Project')).resolves.toBe('{"workspaceId":"wsp_x"}');
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith(directoryGrantChannels.marker, '/picked/Project');
+    vi.mocked(ipcRenderer.invoke).mockResolvedValueOnce(42);
+    await expect(directories.readMarker('/picked/Project')).resolves.toBeUndefined();
+  });
+
+  it('should carry safe mode from the bootstrap argument and leave it absent in a normal launch', async () => {
+    expect(tau().safeMode).toBeUndefined();
+    const { argv } = process;
+    process.argv = [
+      ...argv,
+      `${bootstrapArgumentPrefix}${JSON.stringify({ env: {}, homeRoot: '/home', safeMode: { reason: 'unhealthy-launches' } })}`,
+    ];
+    try {
+      state.exposed.clear();
+      vi.resetModules();
+      await import('./preload.js');
+    } finally {
+      process.argv = argv;
+    }
+    expect(tau().safeMode).toEqual({ reason: 'unhealthy-launches' });
   });
 });

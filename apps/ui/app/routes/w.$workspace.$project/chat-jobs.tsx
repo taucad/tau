@@ -316,7 +316,7 @@ const JobCard = ({
       {job.syncState === 'reconnecting' ? (
         <p role='status' className='mt-3 flex items-center gap-1.5 text-xs text-warning'>
           <RotateCcw aria-hidden className='size-3' />
-          Reconnecting to durable updates
+          Reconnecting…
         </p>
       ) : null}
       {cancellationError ? (

@@ -42,18 +42,17 @@ const noEntry = (): ServerBuild['entry']['module'] => ({
 
 /**
  * A React Router request handler over the given routes, so a test sends a loader the request a client navigation
- * sends (`/<path>.data?_routes=…`) and the loader sees what production sees under the app's future flags.
+ * sends (`/<path>.data?_routes=…`) and the loader sees what production sees: on React Router 8 the raw request
+ * (blueprint B4), trailing-slash-aware data request names (B5) and middleware are the only behaviour.
  *
- * @param options - The routes, the server future flags and, for document requests, an entry module.
+ * @param options - The routes and, for document requests, an entry module.
  * @returns The production request handler for that build.
  */
 export const createTestRequestHandler = ({
   routes,
-  future,
   entry = noEntry(),
 }: {
   readonly routes: readonly TestRoute[];
-  readonly future: Partial<ServerBuild['future']>;
   readonly entry?: ServerBuild['entry']['module'];
 }): RequestHandler => {
   const build: ServerBuild = {
@@ -100,14 +99,7 @@ export const createTestRequestHandler = ({
     },
     publicPath: '/',
     assetsBuildDirectory: 'build/client',
-    future: {
-      /* eslint-disable @typescript-eslint/naming-convention -- React Router's flag names. */
-      v8_middleware: false,
-      v8_passThroughRequests: false,
-      v8_trailingSlashAwareDataRequests: false,
-      /* eslint-enable @typescript-eslint/naming-convention -- The flag names end here. */
-      ...future,
-    },
+    future: {},
     ssr: true,
     isSpaMode: false,
     prerender: [],
@@ -140,6 +132,17 @@ export const decodeDataResponse = async (response: Response): Promise<DataResult
 };
 
 /**
+ * The path of the `.data` request for a page, as React Router 8's client names it (`singleFetchUrl`): trailing-slash
+ * aware, so a path ending in `/` gets `<path>_.data` and `/` asks for `/_.data`. React Router 7 named Home's
+ * `/_root.data`; a tab of an earlier build may still send that name.
+ *
+ * @param pathname - The page's path.
+ * @returns The data request's path.
+ */
+export const dataRequestPath = (pathname: string): string =>
+  pathname.endsWith('/') ? `${pathname}_.data` : `${pathname}.data`;
+
+/**
  * Send the `.data` request a client navigation to `url` sends, loading the given routes.
  *
  * @param handler - The request handler.
@@ -153,7 +156,8 @@ export const requestData = async (
   routeIds: readonly string[],
 ): Promise<DataResult> => {
   const target = new URL(url);
-  target.pathname = target.pathname === '/' ? '/_root.data' : `${target.pathname.replace(/\/$/u, '')}.data`;
+  // Named as the app's client names it.
+  target.pathname = dataRequestPath(target.pathname);
   target.searchParams.set('_routes', routeIds.join(','));
   return decodeDataResponse(await handler(new Request(target)));
 };

@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -7,6 +8,8 @@ export default defineConfig({
   cacheDir: 'node_modules/.cache/typescript-worker-browser',
   server: { fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] } },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     include: ['apps/libs/lsp/src/typescript-worker/typescript-worker.browser.test.ts'],
     testTimeout: 30_000,
     browser: {

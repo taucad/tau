@@ -2,9 +2,9 @@
 /**
  * S1/D14/I13: off is off.
  *
- * With `computeReuse: false` the kernel constructs no reuse adapter, so it also
- * reads and digests no implementation asset — a consumer branches once before
- * canonicalizing anything, and the off arm pays no keying cost (A5).
+ * With `computeReuse: false` the kernel builds no live tier and reads no
+ * implementation asset; replicad-live-tier.test.ts covers the off arms' user
+ * code running with no operation cache installed (I2).
  */
 import { describe, expect, it, vi } from 'vitest';
 import { createTestGeometry, assertRenderingSuccess } from '@taucad/runtime-testing';

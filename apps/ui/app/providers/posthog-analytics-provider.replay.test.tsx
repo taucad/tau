@@ -17,6 +17,8 @@ import type { PostHog } from 'posthog-js';
 /* The provider keeps the singleton it fetched for the life of the module, as the SDK's own import does, so one
    double serves every row and is cleared between them. */
 const posthog = mock<PostHog>({ __loaded: true });
+// eslint-disable-next-line @typescript-eslint/naming-convention -- `session_recording` is the SDK's config key.
+Object.defineProperty(posthog, 'config', { value: { session_recording: {} } });
 vi.mock('posthog-js', () => ({ posthog }));
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('@better-auth-ui/react', () => ({
@@ -34,7 +36,7 @@ const options = {};
 /** An admitted, replay-enabled host whose router starts at `path`. */
 const mountAt = (path: string): ReturnType<typeof createMemoryRouter> => {
   const Shell = ({ children }: { readonly children?: ReactNode }): React.JSX.Element => (
-    <PostHogAnalyticsProvider isActive options={options} isReplayEnabled>
+    <PostHogAnalyticsProvider isActive options={options} isReplayEnabled isReplayContentAllowed>
       {children}
     </PostHogAnalyticsProvider>
   );

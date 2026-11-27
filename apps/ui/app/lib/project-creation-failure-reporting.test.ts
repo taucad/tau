@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { reportProjectCreationFailure } from '#lib/project-creation-failure-reporting.js';
-import { PendingProjectRecoveryError } from '#runtime/project-library-storage.js';
+import { PendingProjectRecoveryError } from '@taucad/project-library/runtime/project-library-storage';
 
 const reportUiError = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('#lib/error-reporting.js', () => ({ reportUiError }));

@@ -31,6 +31,7 @@ import { startGitHttpBackend } from '#test/git-http-backend.js';
 import type { GitHttpBackendFixture, GitHttpBackendOptions } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { recordedBy } from '#test/identity.js';
+import { writeNodeExecutable } from '#test/script-executable.js';
 
 /* Tau's block, so a cut adds a line for each file over the threshold (D16). */
 const tauAttributes = [generatedGitattributesPath, generatedGitattributesContent(undefined)] as const;
@@ -138,11 +139,9 @@ describe.runIf(gitToolchainOnPath)('native lazy large objects (D16)', () => {
     /* A failed `git lfs fetch` that also draws a progress meter (carriage returns, as under load) and a line this
      * port has never seen: its words settle nothing, so each object is asked by its oid, and the verdict is theirs. */
     const chatty = async (root: string): Promise<string> => {
-      const shim = join(root, 'git-chatty');
-      await writeFile(
-        shim,
-        `#!${process.execPath}
-const { spawnSync } = require('node:child_process');
+      return writeNodeExecutable(
+        join(root, 'git-chatty'),
+        `const { spawnSync } = require('node:child_process');
 const args = process.argv.slice(2);
 const at = args.indexOf('lfs');
 const result = spawnSync('git', args, { stdio: ['inherit', 'inherit', 'pipe'] });
@@ -153,9 +152,7 @@ if (at !== -1 && args[at + 1] === 'fetch' && result.status !== 0) {
 }
 process.exit(result.status ?? 1);
 `,
-        { mode: 0o755 },
       );
-      return shim;
     };
     const { clone, head, bytes } = await fetchedProject({ cloneGit: chatty });
     /* The mirror lacks it and says so in words this port does not know; Tau has it. */

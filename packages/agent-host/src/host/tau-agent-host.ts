@@ -1101,6 +1101,32 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const approvalScans = new Set<Readonly<{ chatId: string; done: Promise<void> }>>();
   /** Every run id this host has seen → its chat, for the verbs that name only a run. */
   const runChats = new Map<string, string>();
+  /*
+   * WP-11 item 4 (HP-04): the client context the admission asked for, kept for the same run's first driver, so a turn
+   * asks the client once. A resume, a later attempt and an admission that never starts a driver ask again.
+   */
+  const admittedClientContexts = new Map<string, ClientContext | undefined>();
+  const clientContextOnce = async (
+    runId: string,
+    ask: () => Promise<ClientContext | undefined> | ClientContext | undefined,
+  ): Promise<ClientContext | undefined> => {
+    const asked = await ask();
+    admittedClientContexts.delete(runId);
+    admittedClientContexts.set(runId, asked);
+    /* Admissions refused after this point leave theirs; the oldest go first. */
+    for (const stale of admittedClientContexts.keys()) {
+      if (admittedClientContexts.size <= 16) {
+        break;
+      }
+      admittedClientContexts.delete(stale);
+    }
+    return asked;
+  };
+  const takeAdmittedClientContext = (runId: string, mode: string): ClientContext | undefined => {
+    const kept = admittedClientContexts.get(runId);
+    admittedClientContexts.delete(runId);
+    return mode === 'start' ? kept : undefined;
+  };
   /** Each chat's start or resume in flight, for {@link TauAgentHost.waitForAdmission}. */
   const admissions = new Map<string, Readonly<{ runId?: string; answer: Promise<CommandAnswer> }>>();
   /** Host-shaped admissions the legacy `admit` hands `prepareAdmission` beside its command. */
@@ -2777,7 +2803,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       }
       const clientContext =
         config.clientContext ??
-        (typeof options.clientContext === 'function' ? await options.clientContext() : options.clientContext);
+        (typeof options.clientContext === 'function'
+          ? await clientContextOnce(start.runId, options.clientContext)
+          : options.clientContext);
       /* Journaled (RA-R3): a restart before the turn commits replays exactly this admission. */
       const rows = log.rows === undefined ? events : await log.rows();
       const carried = attachTurnContexts(await log.messages(), committedTurnContexts(rows));
@@ -3064,7 +3092,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             throw coded('HOST_MODEL_UNAVAILABLE', 'This Tau host configures no model; the admission must name one.');
           }
           const clientContext =
-            typeof options.clientContext === 'function' ? await options.clientContext() : options.clientContext;
+            typeof options.clientContext === 'function'
+              ? (takeAdmittedClientContext(runId, mode) ?? (await options.clientContext()))
+              : options.clientContext;
           /* D1, I3: every call of this attempt uses the transport of the mode the run recorded; none, and the run ends
            * DEPLOYMENT_UNKNOWN here, before any call (I1). */
           const modelTransport = runTransportOf(options.modelTransport, events, runId);
@@ -3085,6 +3115,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               appendEvents: async (events) => append(events as LogRowBody[]),
               /* WP-10 step B: the driver's rows answer once ordered; its request, tools and outcome wait for this. */
               ...(log.durable === undefined ? {} : { durable: async () => log.durable!() }),
+              /* WP-11: the chat's one incrementally folded ledger, which every row of this chain updates. */
+              ledger: async () => ledgerOf(chatId),
               ...(first && mode === 'start' && admission?.context !== undefined ? { context: admission.context } : {}),
               ...(selection === undefined ? {} : { selection }),
               clientContext,

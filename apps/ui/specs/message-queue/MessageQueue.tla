@@ -288,6 +288,11 @@
 \* (`s.observed # s.selected`); before, it restarted a reader already on the selected host and dropped the live text
 \* of the run under way. The grant, the prepared-command marking and delivery are unchanged. No action or verdict
 \* changes.
+\* H-1 (2026-11-27): a prepared send its host refused on the only try of a fresh command, with a code that never clears
+\* by itself, was pinned to that command for good: Delete, Edit and reorder stayed locked and every later send queued
+\* behind it. `chat-session-store.ts` now drops that command (`Refuse`): a lone send returns to the composer, and one
+\* with others behind it keeps its place for a new command. A `wait` refusal still yields, and a replay still keeps
+\* its pin.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,
@@ -405,7 +410,7 @@ Deliver(t) == LET m == s.prepared
                     !.phase[m] = IF accept THEN "running" ELSE @,
                     !.known = IF accept THEN @ \cup {m} ELSE @]
 \* Accepted means durable host acceptance, not merely an applied response.
-\* A refused/not-applied response leaves the prepared item intact (stuttering).
+\* A refused/not-applied response leaves the prepared item intact (stuttering), except `Refuse` below (H-1).
 \* Local actor-live, abort and in-lock session guards further restrict runtime
 \* sends; deletion and optional filesystem watch availability are outside this
 \* retained-session safety model. See README for the runtime conformance slice.
@@ -453,6 +458,23 @@ LoseAck(t) == /\ t = s.owner /\ s.prepared \in Accepted
 \* Recover sends it again by the same key after the backoff.
 Yield(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \notin Accepted /\ s.counts[s.prepared] > 0
             /\ s' = [s EXCEPT !.owner = None]
+\* H-1 (2026-11-27): a fresh command its host refused on its only try, with a code that never clears by itself
+\* (`not-applied`, retry class not `wait`), wrote nothing. The send is no longer pinned to that command: the delivery
+\* lets go of the lock and drops it. A lone send goes back to the composer, as an admission refusal's does; otherwise
+\* it keeps its place, unprepared, and a later preparation mints a new command for it.
+Refuse(t) == LET m == s.prepared
+             IN /\ t = s.owner /\ m # None /\ m \notin Accepted /\ s.counts[m] = 1
+                /\ \/ /\ Len(s.queue) = 1
+                      /\ s' = [s EXCEPT !.queue = Remove(@, m), !.prepared = None, !.owner = None,
+                           !.steerItem = IF @ = m THEN None ELSE @,
+                           !.target = IF s.steerItem = m THEN None ELSE @,
+                           !.saved = IF Durable THEN Remove(@, m) ELSE @,
+                           !.submitted = @ \ {m}, !.counts[m] = 0,
+                           !.capturedTerminal[m] = None, !.afterTerminal[m] = None,
+                           !.composer = @ \cup {m}, !.held = @ \ {m}]
+                   \/ s' = [s EXCEPT !.prepared = None, !.owner = None, !.counts[m] = 0,
+                        !.steerItem = IF @ = m THEN None ELSE @,
+                        !.target = IF s.steerItem = m THEN None ELSE @]
 \* The finite crash scenario begins only after a queue save has answered.
 Crash(t) == /\ t \in s.alive /\ s.pending = None
             /\ s' = [s EXCEPT !.alive = @ \ {t},
@@ -462,7 +484,7 @@ Crash(t) == /\ t \in s.alive /\ s.pending = None
 Reopen(t) == /\ t \notin s.alive /\ s' = [s EXCEPT !.alive = @ \cup {t}]
 Next == Persist \/ Complete \/ Pause \/ Resume \/ Stop \/ Fail
         \/ (\E t \in Tabs : Observe(t) \/ Prepare(t) \/ Recover(t) \/ Deliver(t)
-             \/ Acknowledge(t) \/ LoseAck(t) \/ Yield(t) \/ Crash(t) \/ Reopen(t) \/ Cancel(t)
+             \/ Acknowledge(t) \/ LoseAck(t) \/ Yield(t) \/ Refuse(t) \/ Crash(t) \/ Reopen(t) \/ Cancel(t)
              \/ (\E m \in Messages : Submit(t, m) \/ Steer(t, m) \/ Withdraw(t, m)
                  \/ (\E n \in Messages \cup {None} : Reorder(t, m, n))))
         \/ (\E r \in Runs : FinishCancel(r))

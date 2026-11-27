@@ -101,6 +101,8 @@ describe.runIf(gitToolchainOnPath)('the tree codec against native git', () => {
     }
     await writeFile(join(root, 'run'), '#!/bin/sh\n', { mode: 0o755 });
     git(root, ['add', '--all']);
+    /* Windows has no executable bit for `add` to read: the index is told, as on every platform. */
+    git(root, ['update-index', '--chmod=+x', 'run']);
     const expected = gitText(root, ['write-tree']);
 
     const tree = new ImmutableRevisionTree([

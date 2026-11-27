@@ -3807,6 +3807,9 @@ importers:
       '@taucad/replicad':
         specifier: workspace:*
         version: link:../../../packages/plugins/replicad
+      '@taucad/revisions':
+        specifier: workspace:*
+        version: link:../../../packages/revisions
       '@taucad/rpc':
         specifier: workspace:*
         version: link:../../../packages/rpc

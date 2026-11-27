@@ -53,6 +53,7 @@ import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { generatedGitattributesContent, generatedGitattributesPath, tauRevisionPolicy } from '#workspace-config.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { recordedBy, testIdentity } from '#test/identity.js';
+import { diskKeepsExecutableBit, fileHeavyTimeout, removalRetries } from '#test/native-git-harness.js';
 
 /** A clock stopped at `time`: these rows read only its `now()`. */
 const clockAt = (time: number): StepClock => {
@@ -64,7 +65,7 @@ const clockAt = (time: number): StepClock => {
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true, ...removalRetries })));
 });
 
 /** One fixed reading, so the memo's racy-timestamp window is the test's to place a file in. */
@@ -294,8 +295,12 @@ const applyEffects = (
   let temporary = 0;
   return createApplyTreeEffects({
     useFileSystem: async (_place, operation) => operation(checkout),
-    capture: async () =>
-      captureRevisionTree(checkout, { exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned }),
+    /* As the host's capture does: a mode the checkout cannot report is the basis's (`capture(place, modeBasis)`). */
+    capture: async (_place, modeBasis) =>
+      captureRevisionTree(checkout, {
+        exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned,
+        ...(modeBasis === undefined ? {} : { inheritedMode: (path: string) => modeBasis.mode(path) }),
+      }),
     onApplyingTree,
     ...(prepareTarget === undefined ? {} : { prepareTarget }),
     policy: tauRevisionPolicy.policy,
@@ -503,7 +508,10 @@ describe('a large apply', () => {
     /* One provider batch per changeset of at most 256 entries. */
     expect(context.counts.batches).toBe(Math.ceil(2000 / 256));
     expect(context.counts.writeFile).toBe(2000);
-    expect(context.counts.calls.filter((call) => call === 'setFileMode')).toHaveLength(2000);
+    /* One mode per new file, where the disk keeps modes; none where it has no seam for one (Windows). */
+    expect(context.counts.calls.filter((call) => call === 'setFileMode')).toHaveLength(
+      context.checkout.setFileMode === undefined ? 0 : 2000,
+    );
     expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
     /* Nothing staged, so nothing to sweep. */
     expect(context.counts.calls.filter((call) => call === 'unlink')).toHaveLength(0);
@@ -514,28 +522,32 @@ describe('a large apply', () => {
     await expect(context.tree.readFile('src/file-1999.ts', 'utf8')).resolves.toBe('export const value = 1999;\n');
   }, 120_000);
 
-  it('should replace 2,000 changed files through a staged sibling and a native move each, and leave no temporary sibling', async () => {
-    const files = Object.fromEntries(
-      Array.from({ length: 2000 }, (_, index) => [`src/file-${String(index).padStart(4, '0')}.ts`, 'old\n']),
-    );
-    const context = await project(files);
-    const before = new ImmutableRevisionTree(Object.entries(files));
-    const target = new ImmutableRevisionTree(
-      Object.keys(files).map((path, index) => [path, `export const value = ${String(index)};\n`]),
-    );
-    context.reset();
+  it(
+    'should replace 2,000 changed files through a staged sibling and a native move each, and leave no temporary sibling',
+    async () => {
+      const files = Object.fromEntries(
+        Array.from({ length: 2000 }, (_, index) => [`src/file-${String(index).padStart(4, '0')}.ts`, 'old\n']),
+      );
+      const context = await project(files);
+      const before = new ImmutableRevisionTree(Object.entries(files));
+      const target = new ImmutableRevisionTree(
+        Object.keys(files).map((path, index) => [path, `export const value = ${String(index)};\n`]),
+      );
+      context.reset();
 
-    const result = await materializer(context.checkout)(liveCheckout, target, { before });
+      const result = await materializer(context.checkout)(liveCheckout, target, { before });
 
-    expect(result.paths).toHaveLength(2000);
-    expect(context.counts.writeFile).toBe(2000);
-    /* Each file aside to its backup, then its staged sibling onto it. */
-    expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(4000);
-    /* Each backup removed once its replacement published. */
-    expect(context.counts.calls.filter((call) => call === 'unlink')).toHaveLength(2000);
-    expect(litterIn(await filesOf(context.tree))).toEqual([]);
-    await expect(context.tree.readFile('src/file-1999.ts', 'utf8')).resolves.toBe('export const value = 1999;\n');
-  }, 120_000);
+      expect(result.paths).toHaveLength(2000);
+      expect(context.counts.writeFile).toBe(2000);
+      /* Each file aside to its backup, then its staged sibling onto it. */
+      expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(4000);
+      /* Each backup removed once its replacement published. */
+      expect(context.counts.calls.filter((call) => call === 'unlink')).toHaveLength(2000);
+      expect(litterIn(await filesOf(context.tree))).toEqual([]);
+      await expect(context.tree.readFile('src/file-1999.ts', 'utf8')).resolves.toBe('export const value = 1999;\n');
+    },
+    Math.max(120_000, fileHeavyTimeout(30_000)),
+  );
 
   it('should swap a replaced file through its staged sibling and write the new ones in place', async () => {
     const context = await project({ 'main.ts': 'old\n' });
@@ -668,37 +680,42 @@ describe('a large apply', () => {
     expect(await filesOf(context.tree)).toEqual(['main.ts']);
   });
 
-  it('should put back the files an aborted removal already moved aside, and skip the rest', async () => {
-    const files = Object.fromEntries(
-      Array.from({ length: 300 }, (_, index) => [`gone/file-${String(index).padStart(3, '0')}.ts`, 'old\n']),
-    );
-    const context = await project({ ...files, 'kept.ts': 'kept\n' });
-    const controller = new AbortController();
-    const reason = new Error('the apply was cancelled');
-    /* The first changeset of moves aside lands whole; the abort arrives before the second. */
-    const checkout: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
-      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
-        const receipts = await context.checkout.applyBatch!(entries, batchOptions);
-        if (entries.some((entry) => entry.op === 'move' && entry.to.includes('.tau-backup.'))) {
-          controller.abort(reason);
-        }
-        return receipts;
-      },
-    });
-    const before = new ImmutableRevisionTree([...Object.entries(files), ['kept.ts', 'kept\n']]);
-    const target = new ImmutableRevisionTree([['kept.ts', 'kept\n']]);
+  it(
+    'should put back the files an aborted removal already moved aside, and skip the rest',
+    async () => {
+      const files = Object.fromEntries(
+        Array.from({ length: 300 }, (_, index) => [`gone/file-${String(index).padStart(3, '0')}.ts`, 'old\n']),
+      );
+      const context = await project({ ...files, 'kept.ts': 'kept\n' });
+      const controller = new AbortController();
+      const reason = new Error('the apply was cancelled');
+      /* The first changeset of moves aside lands whole; the abort arrives before the second. */
+      const checkout: RevisionFileSystem = Object.assign(Object.create(context.checkout) as RevisionFileSystem, {
+        applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+          const receipts = await context.checkout.applyBatch!(entries, batchOptions);
+          if (entries.some((entry) => entry.op === 'move' && entry.to.includes('.tau-backup.'))) {
+            controller.abort(reason);
+          }
+          return receipts;
+        },
+      });
+      const before = new ImmutableRevisionTree([...Object.entries(files), ['kept.ts', 'kept\n']]);
+      const target = new ImmutableRevisionTree([['kept.ts', 'kept\n']]);
 
-    await expect(
-      materializer(checkout)(liveCheckout, target, { before, signal: controller.signal }),
-    ).rejects.toBeDefined();
+      await expect(
+        materializer(checkout)(liveCheckout, target, { before, signal: controller.signal }),
+      ).rejects.toBeDefined();
 
-    const found = await filesOf(context.tree);
-    expect(litterIn(found)).toEqual([]);
-    expect(found).toHaveLength(301);
-    await expect(context.tree.readFile('gone/file-000.ts', 'utf8')).resolves.toBe('old\n');
-  });
+      const found = await filesOf(context.tree);
+      expect(litterIn(found)).toEqual([]);
+      expect(found).toHaveLength(301);
+      await expect(context.tree.readFile('gone/file-000.ts', 'utf8')).resolves.toBe('old\n');
+    },
+    fileHeavyTimeout(5000),
+  );
 
-  it('should keep an executable mode on a new file it writes in place', async () => {
+  // Measured: NTFS keeps no executable bit, so a Windows checkout has no mode to keep; the next row is its side.
+  it.runIf(diskKeepsExecutableBit)('should keep an executable mode on a new file it writes in place', async () => {
     const context = await project({});
     const target = new ImmutableRevisionTree([
       ['bin/run.sh', '#!/bin/sh\necho run\n', '100755'],
@@ -712,6 +729,26 @@ describe('a large apply', () => {
     await expect(context.tree.getFileMode?.('bin/run.sh')).resolves.toBe('100755');
     await expect(context.tree.getFileMode?.('bin/readme.txt')).resolves.toBe('100644');
   });
+
+  it.runIf(!diskKeepsExecutableBit)(
+    'should write an executable entry in place on a disk that keeps no mode, and claim none',
+    async () => {
+      const context = await project({});
+      const target = new ImmutableRevisionTree([
+        ['bin/run.sh', '#!/bin/sh\necho run\n', '100755'],
+        ['bin/readme.txt', 'plain\n'],
+      ]);
+      context.reset();
+
+      await materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+      expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
+      expect(context.counts.calls).not.toContain('setFileMode');
+      expect(context.tree.getFileMode).toBeUndefined();
+      await expect(context.tree.readFile('bin/run.sh', 'utf8')).resolves.toBe('#!/bin/sh\necho run\n');
+      await expect(context.tree.readFile('bin/readme.txt', 'utf8')).resolves.toBe('plain\n');
+    },
+  );
 });
 
 describe('an apply through the Node provider’s own batch (D16)', () => {
@@ -909,81 +946,85 @@ describe('landing large objects from the store (W11.3)', () => {
 });
 
 describe('the entry closure of a tree write (D10)', () => {
-  it('should tell the index every entry before any lands, and land the entry closure first', async () => {
-    const context = await project({ 'old.scad': 'old\n' });
-    const { pointer, bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
-    const manifest = serializeProjectManifest({
-      $schema: projectManifestSchemaUrl,
-      name: 'Bracket',
-      description: '',
-      tags: [],
-      assets: { main: { entryPath: 'zz/main.scad' } },
-    });
-    const target = new ImmutableRevisionTree([
-      ...Array.from({ length: 600 }, (_, index): [string, string] => [
-        `src/file-${String(index).padStart(4, '0')}.scad`,
-        'cube(1);\n',
-      ]),
-      ['old.scad', 'old\n'],
-      ['.gitattributes', '*.step filter=lfs diff=lfs merge=lfs -text\n'],
-      ['models/part.step', pointerBytes],
-      ['notes/pointer.txt', pointerBytes],
-      ['tau.json', manifest],
-      ['zz/main.scad', 'cube(2);\n'],
-    ]);
-    const events: string[] = [];
-    let expected: readonly ExpectedEntry[] = [];
-    const { checkout } = context;
-    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
-      expectEntries: (entries: readonly ExpectedEntry[]) => {
-        expected = entries;
-        events.push('expect');
-      },
-      endExpectation: () => {
-        events.push('end');
-      },
-      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
-        events.push(...entries.flatMap((entry) => (entry.op === 'write' ? [entry.path] : [])));
-        return checkout.applyBatch!(entries, batchOptions);
-      },
-    });
-    const brackets: Array<
-      Readonly<{ purpose: string; closure?: readonly string[]; manifest?: Uint8Array<ArrayBuffer> }> | undefined
-    > = [];
+  it(
+    'should tell the index every entry before any lands, and land the entry closure first',
+    async () => {
+      const context = await project({ 'old.scad': 'old\n' });
+      const { pointer, bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
+      const manifest = serializeProjectManifest({
+        $schema: projectManifestSchemaUrl,
+        name: 'Bracket',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'zz/main.scad' } },
+      });
+      const target = new ImmutableRevisionTree([
+        ...Array.from({ length: 600 }, (_, index): [string, string] => [
+          `src/file-${String(index).padStart(4, '0')}.scad`,
+          'cube(1);\n',
+        ]),
+        ['old.scad', 'old\n'],
+        ['.gitattributes', '*.step filter=lfs diff=lfs merge=lfs -text\n'],
+        ['models/part.step', pointerBytes],
+        ['notes/pointer.txt', pointerBytes],
+        ['tau.json', manifest],
+        ['zz/main.scad', 'cube(2);\n'],
+      ]);
+      const events: string[] = [];
+      let expected: readonly ExpectedEntry[] = [];
+      const { checkout } = context;
+      const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+        expectEntries: (entries: readonly ExpectedEntry[]) => {
+          expected = entries;
+          events.push('expect');
+        },
+        endExpectation: () => {
+          events.push('end');
+        },
+        applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+          events.push(...entries.flatMap((entry) => (entry.op === 'write' ? [entry.path] : [])));
+          return checkout.applyBatch!(entries, batchOptions);
+        },
+      });
+      const brackets: Array<
+        Readonly<{ purpose: string; closure?: readonly string[]; manifest?: Uint8Array<ArrayBuffer> }> | undefined
+      > = [];
 
-    const outcomes: unknown[] = [];
-    await materializer(watched, undefined, (_place, _paths, bracket) => {
-      brackets.push(bracket);
-      events.push('bracket');
-      return (outcome) => {
-        outcomes.push(outcome);
-        events.push('release');
-      };
-    })(liveCheckout, target, { before: new ImmutableRevisionTree([['old.scad', 'old\n']]), purpose: 'tree' });
+      const outcomes: unknown[] = [];
+      await materializer(watched, undefined, (_place, _paths, bracket) => {
+        brackets.push(bracket);
+        events.push('bracket');
+        return (outcome) => {
+          outcomes.push(outcome);
+          events.push('release');
+        };
+      })(liveCheckout, target, { before: new ImmutableRevisionTree([['old.scad', 'old\n']]), purpose: 'tree' });
 
-    /* The index learns the whole tree as the bracket opens, before any byte lands. */
-    expect(events.slice(0, 2)).toEqual(['bracket', 'expect']);
-    expect(outcomes).toEqual([{ failed: false }]);
-    expect(expected).toHaveLength(606);
-    expect(expected.find((entry) => entry.path === 'models/part.step')).toEqual({
-      path: 'models/part.step',
-      size: pointerBytes.byteLength,
-      pending: { oid: pointer.oid, size: pointer.size },
-      arriving: true,
-    });
-    /* A pointer the attributes do not track is a person's text, never a placeholder. */
-    expect(expected.find((entry) => entry.path === 'notes/pointer.txt')).toEqual({
-      path: 'notes/pointer.txt',
-      size: pointerBytes.byteLength,
-      arriving: true,
-    });
-    expect(expected.find((entry) => entry.path === 'old.scad')?.arriving).toBe(false);
-    /* With the closure, the `tau.json` bytes it lands: the host names which manifest the first view is (STO-25). */
-    expect(brackets).toStrictEqual([{ purpose: 'tree', closure: ['tau.json', 'zz/main.scad'], manifest }]);
-    /* The closure lands in the first changeset, before the tree's other files. */
-    expect(events.slice(2, 4).toSorted()).toEqual(['tau.json', 'zz/main.scad']);
-    expect(events.slice(-2)).toEqual(['end', 'release']);
-  });
+      /* The index learns the whole tree as the bracket opens, before any byte lands. */
+      expect(events.slice(0, 2)).toEqual(['bracket', 'expect']);
+      expect(outcomes).toEqual([{ failed: false }]);
+      expect(expected).toHaveLength(606);
+      expect(expected.find((entry) => entry.path === 'models/part.step')).toEqual({
+        path: 'models/part.step',
+        size: pointerBytes.byteLength,
+        pending: { oid: pointer.oid, size: pointer.size },
+        arriving: true,
+      });
+      /* A pointer the attributes do not track is a person's text, never a placeholder. */
+      expect(expected.find((entry) => entry.path === 'notes/pointer.txt')).toEqual({
+        path: 'notes/pointer.txt',
+        size: pointerBytes.byteLength,
+        arriving: true,
+      });
+      expect(expected.find((entry) => entry.path === 'old.scad')?.arriving).toBe(false);
+      /* With the closure, the `tau.json` bytes it lands: the host names which manifest the first view is (STO-25). */
+      expect(brackets).toStrictEqual([{ purpose: 'tree', closure: ['tau.json', 'zz/main.scad'], manifest }]);
+      /* The closure lands in the first changeset, before the tree's other files. */
+      expect(events.slice(2, 4).toSorted()).toEqual(['tau.json', 'zz/main.scad']);
+      expect(events.slice(-2)).toEqual(['end', 'release']);
+    },
+    fileHeavyTimeout(5000),
+  );
 
   it('should name the files a tree write removes, so a read of one waits until it is gone (I7)', async () => {
     const context = await project({ 'gone.scad': 'old\n', 'tau.json': '{}\n' });
@@ -1528,15 +1569,18 @@ describe('a cold open written from its listing (STO-25)', () => {
           throw new Error('the store could not read that pack');
         }
         if (paths?.includes('model/aircraft.usda') === true && events.includes('bracket')) {
+          /* The bound ends with the hold: a closure that landed first leaves no timer to mark the log later, however long the rest of the open takes (4 s on windows-2025, job 140421452943, against a 14 ms closure write). */
+          let bound: ReturnType<typeof setTimeout> | undefined;
           await Promise.race([
             closureLanded,
             new Promise<void>((resolve) => {
-              setTimeout(() => {
+              bound = setTimeout(() => {
                 events.push('model read unblocked by its bound');
                 resolve();
               }, 2000);
             }),
           ]);
+          clearTimeout(bound);
         }
         const tree = await context.port.readTree(id, readOptions);
         events.push(`read-done ${paths === undefined ? '*' : paths.join(',')}`);

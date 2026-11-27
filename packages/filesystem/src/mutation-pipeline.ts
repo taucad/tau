@@ -905,6 +905,65 @@ export class MutationPipeline {
     this._crossTabCoordinator.notifyChanges(notices);
   }
 
+  /**
+   * Publish what a permanent delete did to a directory at every logical path a
+   * current mount gives it, attributed to that mount so every view that
+   * captured it hears (project-library fast-path FW5): a Home project directory
+   * is seen through the Home connection as well as through its route. A
+   * `removed` directory is published as deleted; one whose removal failed or
+   * left it in place as changed, so each view re-reads what is there. A mount
+   * whose own directory lay inside it hears it at its prefix. A mapping a
+   * deeper mount shadows is published too, as the ingest publishes it: the
+   * pipeline hides it from unrooted watches, and a view that captured the
+   * holding mount still hears it.
+   *
+   * @param removal - The directory and what became of it.
+   * @param removal.storageRootKey - The storage root the directory was removed from.
+   * @param removal.provider - The storage root's provider.
+   * @param removal.providerPath - The directory's provider path.
+   * @param removal.outcome - `removed` once the directory is gone; `unsettled` otherwise.
+   */
+  public publishRemovedDirectory({
+    storageRootKey,
+    provider,
+    providerPath,
+    outcome,
+  }: Readonly<{
+    storageRootKey: string;
+    provider: FileSystemProvider;
+    providerPath: string;
+    outcome: 'removed' | 'unsettled';
+  }>): void {
+    const events: AttributedChangeEvent[] = [];
+    for (const entry of this._mountTable.listMounts()) {
+      if (entry.storageRootKey !== storageRootKey || entry.provider !== provider) {
+        continue;
+      }
+      const base = entry.providerBasePath;
+      let mapping: Readonly<{ path: string; resolved: string }> | undefined;
+      if (base === providerPath || base.startsWith(`${providerPath}/`)) {
+        /* The mount's own directory was, or lay inside, the directory: its whole tree, at its prefix. */
+        mapping = { path: entry.prefix, resolved: base };
+      } else if (base === '' || providerPath.startsWith(`${base}/`)) {
+        const suffix = base === '' ? providerPath : providerPath.slice(base.length + 1);
+        mapping = { path: entry.prefix === '/' ? `/${suffix}` : `${entry.prefix}/${suffix}`, resolved: providerPath };
+      }
+      if (mapping === undefined) {
+        continue;
+      }
+      const { path } = mapping;
+      const resolution: MountResolution = { provider, path: mapping.resolved, backend: entry.backend, entry };
+      events.push({
+        event:
+          outcome === 'removed'
+            ? { type: 'directoryDeleted', path, backend: entry.backend }
+            : { type: 'directoryChanged', path, backend: entry.backend },
+        operations: [{ path, resolution }],
+      });
+    }
+    this.emitChangeEvents(events);
+  }
+
   public async writeFileResolved({
     path,
     resolution,

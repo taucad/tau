@@ -1,13 +1,17 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Topic } from '@taucad/events';
 import type { ContextPayload } from '@taucad/chat';
-import { contextMemoryMaxBytes, contextMemoryMaxLines } from '@taucad/chat/schemas';
+import { contextMemoryMaxBytes } from '@taucad/chat/schemas';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 
 /** The project's instruction file, at its root, as the AGENTS.md convention places it. */
 const agentsMdPath = 'AGENTS.md';
 const decoder = new TextDecoder();
+const encoder = new TextEncoder();
+/* The kept head is decoded as-is: a default decoder would drop a leading U+FEFF, so the head would no longer be a prefix. */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- `ignoreBOM` is the TextDecoder option's own name.
+const headDecoder = new TextDecoder('utf-8', { ignoreBOM: true });
 const noSkills: NonNullable<ContextPayload['skills']> = [];
 
 /**
@@ -66,21 +70,27 @@ export const resetContextPayloadPublication = (): void => {
 };
 
 /**
- * CH-10 head truncation: memory content is capped at the first
- * `contextMemoryMaxLines` lines and `contextMemoryMaxBytes` bytes so an
- * oversized AGENTS.md cannot flood the uncached dynamic prompt block. The head
- * is kept (never the tail) and a one-line notice marks the cut.
+ * CH-10 head truncation: memory content is capped at `contextMemoryMaxBytes` (32 KiB) of UTF-8, with no line limit,
+ * so an oversized AGENTS.md cannot flood the uncached per-request prompt block. The cap is Codex's default
+ * (`project_doc_max_bytes`), so the same file reads whole in both. A file within the cap is returned unchanged.
+ * Past it, the longest head that fits is kept (never the tail), the cut never splits a character, and one notice
+ * line naming the kept byte count marks it.
+ *
+ * @param text - The decoded file.
+ * @returns The file, or its head and the notice line.
  */
 export function truncateMemoryHead(text: string): string {
-  const lines = text.split('\n');
-  let out = lines.length > contextMemoryMaxLines ? lines.slice(0, contextMemoryMaxLines).join('\n') : text;
-  if (out.length > contextMemoryMaxBytes) {
-    out = out.slice(0, contextMemoryMaxBytes);
-  }
-  if (out.length === text.length) {
+  const bytes = encoder.encode(text);
+  if (bytes.length <= contextMemoryMaxBytes) {
     return text;
   }
-  return `${out}\n[AGENTS.md truncated: first ${String(contextMemoryMaxLines)} lines / ${String(contextMemoryMaxBytes)} bytes retained]`;
+  /* The first byte left out must start a character: a UTF-8 continuation byte (10xxxxxx) is 0x80 to 0xbf. */
+  const isContinuationByte = (byte: number | undefined): boolean => byte !== undefined && byte >= 0x80 && byte < 0xc0;
+  let end = contextMemoryMaxBytes;
+  while (end > 0 && isContinuationByte(bytes[end])) {
+    end -= 1;
+  }
+  return `${headDecoder.decode(bytes.subarray(0, end))}\n[AGENTS.md truncated: first ${String(end)} bytes retained]`;
 }
 
 /**

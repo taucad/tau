@@ -10,7 +10,11 @@ import type * as AgentHostModule from '@taucad/agent-host';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { chatTurnNotStartedCode, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
-import { ChatError as ChatErrorBanner, resetFailureVoicesForTest } from '#routes/w.$workspace.$project/chat-error.js';
+import {
+  ChatError as ChatErrorBanner,
+  ChatErrorAnnouncement,
+  resetFailureAnnouncementsForTest,
+} from '#routes/w.$workspace.$project/chat-error.js';
 import { chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
@@ -154,7 +158,7 @@ describe('ChatError', () => {
   beforeEach(() => {
     debug.enabled = false;
     resumableFailureOverrides.clear();
-    resetFailureVoicesForTest();
+    resetFailureAnnouncementsForTest();
     vi.clearAllMocks();
   });
 
@@ -346,60 +350,100 @@ describe('ChatError', () => {
     expect(decisionIdOf(retried.container)).toBe('run:req_2:1');
   });
 
-  /* A refused send's turn leaves the transcript, so the chat's failure moves between the last turn and the slot under
-   * the empty transcript. One failure is said once per page, where it can be heard. */
+  /* A refused send's turn leaves the transcript, so the chat's failure moves between the slot under the empty transcript
+   * and the last turn. Staging re-check 5: the two copies never coexist (the first is replaced about 50 ms later), and
+   * each became an alert, so the failure was said twice. The chat's one announcement says it once, and stays. */
   const Places = ({ hasTurn, hasEmpty }: { readonly hasTurn: boolean; readonly hasEmpty: boolean }): ReactNode => (
-    <>
-      {hasTurn ? (
-        <div data-testid='turn'>
-          <ChatErrorBanner />
-        </div>
-      ) : null}
+    <ChatErrorAnnouncement>
       {hasEmpty ? (
         <section data-testid='empty'>
           <ChatErrorBanner />
         </section>
       ) : null}
-    </>
+      {hasTurn ? (
+        <div data-testid='turn'>
+          <ChatErrorBanner />
+        </div>
+      ) : null}
+    </ChatErrorAnnouncement>
   );
-  const roleIn = (testId: string): string | undefined =>
-    screen.getByTestId(testId).querySelector('[data-slot=chat-error-card]')?.getAttribute('role') ?? undefined;
+  /** Each time an alert gains words: inserted with them, or its words set. */
+  const watchAlerts = (): { readonly said: string[]; readonly stop: () => void } => {
+    const said: string[] = [];
+    const alertOf = (node: Node): Element | undefined =>
+      (node instanceof Element ? node : node.parentElement)?.closest('[role=alert]') ?? undefined;
+    const observer = new MutationObserver((records) => {
+      const changed = new Set<Element>();
+      for (const record of records) {
+        const alert = alertOf(record.target);
+        if (alert !== undefined) {
+          changed.add(alert);
+        }
+        for (const node of record.addedNodes) {
+          if (node instanceof Element) {
+            for (const inner of [node, ...node.querySelectorAll('[role=alert]')]) {
+              if (inner.matches('[role=alert]')) {
+                changed.add(inner);
+              }
+            }
+          }
+        }
+      }
+      for (const alert of changed) {
+        if (alert.isConnected && alert.textContent !== '') {
+          said.push(alert.textContent);
+        }
+      }
+    });
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+    return {
+      said,
+      stop: () => {
+        observer.disconnect();
+      },
+    };
+  };
 
-  /* Staging re-check 4: the copies swapped in separate commits. The alert under the empty transcript lasted about
-   * 100 ms, then the copy in the turn stayed silent; an alert removed that soon may go unheard. */
-  it('should hand the saying to the copy that stays when the first copy leaves before it could be heard', () => {
-    const now = vi.spyOn(performance, 'now').mockReturnValue(10_000);
+  it('should say a failure once when its card moves between places in separate commits', async () => {
     const state = failedRunState('req_1');
     vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
+    const alerts = watchAlerts();
     const view = render(<Places hasTurn={false} hasEmpty />);
-    expect(roleIn('empty')).toBe('alert');
-
-    now.mockReturnValue(10_080);
-    view.rerender(<Places hasTurn hasEmpty />);
-    expect(roleIn('turn')).toBe('group');
-    expect(screen.getAllByRole('alert')).toHaveLength(1);
-
-    now.mockReturnValue(10_180);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    view.rerender(<Places hasTurn={false} hasEmpty={false} />);
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+    });
     view.rerender(<Places hasTurn hasEmpty={false} />);
-    expect(roleIn('turn')).toBe('alert');
-    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    alerts.stop();
+
+    expect(alerts.said).toHaveLength(1);
+    const title = screen.getByTestId('turn').querySelector('p')?.textContent ?? '';
+    expect(screen.getByRole('group', { name: title })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(title);
   });
 
-  it('should keep later copies quiet once a copy stayed long enough to be heard, on this page', () => {
-    const now = vi.spyOn(performance, 'now').mockReturnValue(20_000);
-    const state = failedRunState('req_7');
+  it('should not say a failure already said on this page again, and say a new one', () => {
+    let state = failedRunState('req_7');
     vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
-    const view = render(<Places hasTurn hasEmpty={false} />);
-    const title = screen.getByRole('alert').querySelector('p')?.textContent ?? '';
+    const first = render(<Places hasTurn hasEmpty={false} />);
+    expect(screen.getByRole('alert')).not.toBeEmptyDOMElement();
+    first.unmount();
 
-    now.mockReturnValue(21_500);
-    view.rerender(<Places hasTurn={false} hasEmpty />);
+    const again = render(<Places hasTurn hasEmpty={false} />);
+    expect(screen.getByRole('alert')).toBeEmptyDOMElement();
+    again.unmount();
 
-    expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.getByRole('group', { name: title })).toBeInTheDocument();
-    view.unmount();
-    render(<Places hasTurn={false} hasEmpty />);
-    expect(screen.queryByRole('alert')).toBeNull();
+    state = failedRunState('req_8');
+    render(<Places hasTurn hasEmpty={false} />);
+    expect(screen.getByRole('alert')).not.toBeEmptyDOMElement();
   });
 
   it('should identify a refused command by its request (I5)', () => {
@@ -1503,7 +1547,7 @@ describe('ChatError for a run abandoned on a pending model attempt', () => {
   beforeEach(() => {
     debug.enabled = false;
     resumableFailureOverrides.clear();
-    resetFailureVoicesForTest();
+    resetFailureAnnouncementsForTest();
     vi.clearAllMocks();
     resetAutoResumes();
     vi.useFakeTimers();

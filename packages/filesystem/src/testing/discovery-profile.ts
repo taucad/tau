@@ -87,6 +87,8 @@ export type DiscoveryProfile = Readonly<{
   ioScheduler: IoScheduler;
   /** The folder's scope, as a delete of one of its directories names it. */
   workspaceScope: StorageRootConfig;
+  /** The routes and roots the fixture configured, so a test can add or drop one route as the library does. */
+  configuration: ProjectRootConfiguration;
   shape: DiscoveryProfileShape;
   /** Run `operation` and report what it cost, counted from a clean window. */
   measure: <Result>(operation: () => Promise<Result>) => Promise<Readonly<{ result: Result; cost: DiscoveryCost }>>;
@@ -235,7 +237,8 @@ export async function createDiscoveryProfile(
       }),
     ),
   ];
-  await service.configureProjectRoots({ projects, roots: [{ backend: 'opfs' }, workspaceScope] });
+  const configuration: ProjectRootConfiguration = { projects, roots: [{ backend: 'opfs' }, workspaceScope] };
+  await service.configureProjectRoots(configuration);
   await service.pollExternalChanges();
 
   const measure = async <Result>(
@@ -290,6 +293,7 @@ export async function createDiscoveryProfile(
     providers: { home: homeInstance, workspace: workspaceInstance },
     ioScheduler: providerRegistry.ioScheduler,
     workspaceScope,
+    configuration,
     shape,
     measure,
     dispose: () => {

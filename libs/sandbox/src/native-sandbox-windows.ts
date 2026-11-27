@@ -112,6 +112,16 @@ type CarriedLaunch = z.infer<typeof carriedLaunchSchema>;
 let configured: WindowsNativeSandboxOptions | undefined;
 let installation: Promise<void> | undefined;
 let recovery: Promise<void> | undefined;
+/*
+ * The helper refused a launch with a fault its elevated `setup` repairs: after an app update the runner copy setup
+ * installed differs from the new helper, or the sandbox account, profile, network rules or volume grant went missing.
+ * `status` still reports an install record then, so the next launch runs `setup` again rather than trust it, as the
+ * shell's probe answers such a refusal `provisioning-required`.
+ */
+let repairRequired = false;
+
+/** The helper's own word that its elevated `setup` repairs a refusal (`windows-sandbox/src/win/launch.rs`). */
+const setupRepairs = '(run setup again)';
 
 /**
  * Configure, or with `undefined` clear, how native workers reach the Windows sandbox in this process.
@@ -123,6 +133,7 @@ export const configureWindowsNativeSandbox = (options: WindowsNativeSandboxOptio
   configured = options;
   installation = undefined;
   recovery = undefined;
+  repairRequired = false;
 };
 
 /**
@@ -270,16 +281,22 @@ export const ensureWindowsNativeSandbox = async (): Promise<WindowsNativeSandbox
     throw new Error('the Windows sandbox is not enabled in this Tau build');
   }
   installation ??= (async () => {
-    if (await options.installed()) {
+    const repairing = repairRequired;
+    if (!repairing && (await options.installed())) {
       return;
     }
     if (options.setup === undefined) {
-      throw new Error('the Windows sandbox has not been set up on this computer');
+      throw new Error(
+        repairing
+          ? 'the Windows sandbox needs to be set up again on this computer, for example after a Tau update'
+          : 'the Windows sandbox has not been set up on this computer',
+      );
     }
     await options.setup();
     if (!(await options.installed())) {
       throw new Error('the Windows sandbox setup did not complete');
     }
+    repairRequired = false;
   })();
   recovery ??= (async () => {
     await installation;
@@ -593,6 +610,12 @@ export const spawnWindowsNative = (
     stdout.end();
     stderr.end();
     if (refusal !== undefined && reported === undefined) {
+      if (refusal.includes(setupRepairs) && configured === sandbox) {
+        /* The next launch asks for the elevated setup, which repairs this; this one has already been refused. */
+        repairRequired = true;
+        installation = undefined;
+        recovery = undefined;
+      }
       child.emit('error', new Error(`The Windows sandbox refused the native launch: ${refusal}`));
       return;
     }

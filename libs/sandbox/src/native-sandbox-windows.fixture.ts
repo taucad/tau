@@ -7,7 +7,7 @@
  * It frames bytes itself rather than importing the protocol codec, so a codec bug cannot hide behind its own mirror.
  *
  * - `TAU_FIXTURE_SCENARIO`: `echo` (default), `refuse`, `crash` (journals, then dies after `started`), `cleanup-failed`,
- *   `garbage` (an unknown frame after `started`).
+ *   `garbage` (an unknown frame after `started`), `stale` (refuses as an app update's stale runner copy does).
  * - `TAU_FIXTURE_LOG`: a file each event is appended to as one JSON line.
  */
 import { appendFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -72,6 +72,12 @@ if (command === 'restore') {
         if (scenario === 'refuse') {
           ended = true;
           json(0x86, { status: 'sandbox-unavailable', message: 'the executable digest does not match' });
+          leave(0);
+          return;
+        }
+        if (scenario === 'stale') {
+          ended = true;
+          json(0x86, { status: 'sandbox-unavailable', message: 'the sandbox runner needs repair (run setup again)' });
           leave(0);
           return;
         }

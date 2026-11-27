@@ -1,4 +1,4 @@
-import { createContext, useContext, useId } from 'react';
+import { createContext, useContext, useId, useLayoutEffect, useRef } from 'react';
 import type React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
@@ -14,11 +14,11 @@ type ChatErrorCardTone = 'neutral' | 'warning' | 'notice';
 export const turnSavedSentence = 'Everything up to here is saved.';
 
 /**
- * Whether the card in this place says its failure (an `alert`). `ChatError` sets it to `false` where a failure already
- * said lands again (its turn left the transcript, and it moved under the empty one): it is then a group labelled by its
- * title, so one failure is announced once.
+ * Where a card hands its title to be said, when a chat's one announcement says its failure (`ChatErrorAnnouncement`).
+ * The card is then a group labelled by its title, so a failure that moves between places is never a second alert.
+ * Without one, the card is the alert itself.
  */
-export const chatErrorAnnouncedContext = createContext(true);
+export const chatErrorReportContext = createContext<((title: string) => void) | undefined>(undefined);
 
 const iconClassName: Record<ChatErrorCardTone, string> = {
   neutral: 'text-muted-foreground',
@@ -59,8 +59,17 @@ export function ChatErrorCard({
   children,
   ...properties
 }: ChatErrorCardProps): React.JSX.Element {
-  const isAnnounced = useContext(chatErrorAnnouncedContext);
+  const report = useContext(chatErrorReportContext);
+  const isAnnounced = report === undefined;
   const titleId = useId();
+  const titleRef = useRef<HTMLParagraphElement>(null);
+  // Said once per failure: the region keeps the first title it hears, and `report` is new for each failure.
+  useLayoutEffect(() => {
+    const text = titleRef.current?.textContent ?? '';
+    if (report !== undefined && text !== '') {
+      report(text);
+    }
+  }, [report]);
   return (
     <section
       role={isAnnounced ? 'alert' : 'group'}
@@ -73,7 +82,7 @@ export function ChatErrorCard({
         <div className='flex min-w-0 flex-1 basis-48 items-start gap-2'>
           {Icon ? <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', iconClassName[tone])} /> : null}
           <div className='min-w-0 flex-1 space-y-1'>
-            <p id={titleId} className='font-medium break-words text-foreground'>
+            <p ref={titleRef} id={titleId} className='font-medium break-words text-foreground'>
               {title}
             </p>
             {description ? <div className='text-xs break-words text-muted-foreground'>{description}</div> : null}

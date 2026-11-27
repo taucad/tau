@@ -19,6 +19,12 @@ export const firstTurnBackupDeadline = 5000;
 type Hold = { readonly released: Promise<void>; readonly release: () => void };
 
 const holds = new Map<string, Hold>();
+const listeners = new Set<() => void>();
+const notify = (): void => {
+  for (const listener of listeners) {
+    listener();
+  }
+};
 
 /**
  * Hold a new project's first cloud backup until its first turn streams, or the deadline.
@@ -38,10 +44,12 @@ export const holdFirstTurnBackup = (projectId: string, deadline = firstTurnBacku
     clearTimeout(timer);
     if (holds.get(projectId)?.released === promise) {
       holds.delete(projectId);
+      notify();
     }
     resolve();
   };
   holds.set(projectId, { released: promise, release });
+  notify();
 };
 
 /**
@@ -60,3 +68,16 @@ export const releaseFirstTurnBackup = (projectId: string): void => {
  * @returns Settles when the backup may start; `undefined` when nothing holds it.
  */
 export const firstTurnBackupHold = (projectId: string): Promise<void> | undefined => holds.get(projectId)?.released;
+
+/**
+ * Listen for holds starting and ending, for `useSyncExternalStore` over {@link firstTurnBackupHold}.
+ *
+ * @param listener - Called after any project's hold starts or ends.
+ * @returns The unsubscribe.
+ */
+export const subscribeFirstTurnBackupHolds = (listener: () => void): (() => void) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};

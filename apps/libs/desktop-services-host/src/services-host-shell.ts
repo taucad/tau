@@ -6,7 +6,9 @@
  * call's checkout from whichever project owns that run, so an unknown run is refused and never defaults to a project.
  * The same project answers the run's permission mode and records each finished call (W9).
  * The agent registry reads the probe at every listing, so `shell` appears once the probe is ready and never before; the
- * Terminal (W5) reads the same memoized probe through {@link DesktopShell.probe}.
+ * Terminal (W5) reads the same memoized probe through {@link DesktopShell.probe}. On Windows, where the sandbox is on by
+ * default and needs one elevated setup, the registry instead lists a shell whose first call runs that setup (one
+ * administrator prompt), as the Terminal's first open does through {@link DesktopShell.provision}.
  *
  * @module
  */
@@ -99,9 +101,10 @@ export type DesktopShell = Readonly<{
   /** The memoized probe; the first call starts it. */
   probe: () => Promise<ShellProbe>;
   /**
-   * Run the shell's one-time setup when the probe asks for it (`provisioning-required`), then probe again. Only the
-   * person's own action in Tau's chrome calls it: on Windows it shows one administrator prompt (D15). Any other probe
-   * answer comes back unchanged, and concurrent calls share one setup.
+   * Run the shell's one-time setup when the probe asks for it (`provisioning-required`), then probe again. Only a use
+   * calls it, never a background probe: the Terminal's open and the agent's first `shell` call. On Windows it shows one
+   * administrator prompt (D15); a declined or failed setup answers `sandbox-unavailable` and the next use asks again.
+   * Any other probe answer comes back unchanged, and concurrent calls share one setup.
    */
   provision: () => Promise<ShellProbe>;
   /**
@@ -202,7 +205,8 @@ export const bundledWindowsSandboxHelper = (
 
 /**
  * The Windows sandbox helper this host composes, or `undefined` while the sandbox is off: only with
- * `TAU_WINDOWS_SHELL_SANDBOX=1` (until the WIN-X64 conformance row is green on a merged head, Q15) and a helper that
+ * `TAU_WINDOWS_SHELL_SANDBOX=1`, which main composes by default on Windows and drops only when it was started with
+ * `TAU_WINDOWS_SHELL_SANDBOX=0` (Q15; on by default since WIN-X64 conformance run 45966873741), and a helper that
  * exists.
  *
  * @param environment - The host environment.
@@ -249,7 +253,8 @@ const powerShellLiteral = (value: string): string => `'${value.replaceAll("'", "
  * Run the Windows shell sandbox's one-time setup: the helper's `setup --for-user <SID>`, elevated through the fixed
  * Windows PowerShell's `Start-Process -Verb RunAs -Wait`, so Windows shows one administrator prompt (D15). The SID is the
  * current person's, read with System32's `whoami /user`; their host is the one that may read the sandbox password.
- * {@link DesktopShell.provision} calls it when the person chooses Set up in the Terminal.
+ * {@link DesktopShell.provision} calls it on the first Terminal open or agent `shell` call that finds the sandbox not set
+ * up, and when the person chooses Set up in the Terminal.
  *
  * @public
  * @param helperPath - The helper ({@link bundledWindowsSandboxHelper}).
@@ -308,7 +313,17 @@ export const setUpWindowsShellSandbox = async (
 
 /** What the person does about a Windows sandbox that needs its one-time setup, shown beside the pane's Set up action. */
 const windowsSetupRecovery =
-  'Choose Set up in the Terminal and approve the Windows administrator prompt. Tau asks once; then the shell and Terminal work.';
+  'Start the Terminal or choose Set up, and approve the Windows administrator prompt. Tau asks once; then the shell and Terminal work.';
+
+/** What the person is told when the setup prompt was declined or setup failed; the next use asks again. */
+const windowsSetupDeclined = (diagnostic: string): ShellUnavailable => ({
+  status: 'unavailable',
+  code: 'sandbox-unavailable',
+  message: 'The Windows shell sandbox is not set up: the administrator prompt was declined or setup failed.',
+  recovery:
+    'Start the Terminal again, or ask the agent again, and approve the Windows administrator prompt. Tau starts no shell until the sandbox is set up.',
+  diagnostic,
+});
 
 /** Why an enabled Windows sandbox has no shell yet: its one-time elevated setup has not run. */
 const windowsSetupNeeded: ShellUnavailable = {
@@ -353,10 +368,14 @@ export const windowsSandboxSetupNeeded = (probe: ShellProbe, installed: boolean)
   return undefined;
 };
 
+/** Whether a probe answer asks for the one-time setup, which only a use runs ({@link DesktopShell.provision}). */
+const asksForSetup = (probe: ShellProbe): boolean =>
+  probe.status === 'unavailable' && probe.code === 'provisioning-required';
+
 /**
  * The one provider for this platform, chosen once (D3). macOS ships its Terminal with the PTY rows unverified (operator
- * ruling 2026-10-24T20:45Z). Windows composes the restricted-token provider only with `TAU_WINDOWS_SHELL_SANDBOX=1` and
- * the helper present (Q15); otherwise it has none.
+ * ruling 2026-10-24T20:45Z). Windows composes the restricted-token provider with `TAU_WINDOWS_SHELL_SANDBOX=1` (on by
+ * default) and the helper present (Q15); otherwise it has none.
  *
  * @param options - The platform, bubblewrap, home and, on Windows, the environment that enables the sandbox.
  * @returns The provider, or `undefined` when this platform has none.
@@ -417,14 +436,15 @@ export const desktopShellCustody = (
   return appData === undefined ? undefined : { directory: join(appData, 'shell-custody'), sessionDirectory: tmpdir() };
 };
 
-/** Why a platform with no provider has no shell; matches `probeHostShell`'s own Windows answer. */
+/** Why a platform with no provider has no shell: on Windows, the sandbox was turned off (`=0`) or its helper is missing. */
 const noProvider = (platform: NodeJS.Platform): ShellUnavailable =>
   platform === 'win32'
     ? {
         status: 'unavailable',
         code: 'sandbox-unavailable',
-        message: 'The Windows shell sandbox is not part of this Tau build.',
-        recovery: 'Use Tau on macOS or Linux for the shell and Terminal until the Windows sandbox ships.',
+        message: 'The Windows shell sandbox is off or missing in this Tau installation.',
+        recovery:
+          'Reinstall Tau, and start it without TAU_WINDOWS_SHELL_SANDBOX=0, for the shell and Terminal; Tau never starts an uncontained shell.',
       }
     : {
         status: 'unavailable',
@@ -511,6 +531,8 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
   let probing: Promise<ShellProbe> | undefined;
   let provisioning: Promise<ShellProbe> | undefined;
   let recording: HostShell | undefined;
+  /* The last probe asked for the Windows sandbox's one-time setup: the registry then lists the setup-pending shell. */
+  let setupPending = false;
   const environment = options.environment ?? process.env;
   /* Read at each probe, as the provider is: a helper staged after start counts at the next one. */
   const windowsHelper = (): string | undefined =>
@@ -600,6 +622,7 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
             },
         outcome.status === 'available' ? undefined : 'warn',
       );
+      setupPending = asksForSetup(outcome);
       /* "Not set up" is asked again at the next probe, never kept: a status run that failed or ran late at app start
          must not stand for the app's life (setup itself happens outside it, in an elevated helper). */
       if (windowsStatus?.installed === false) {
@@ -625,12 +648,7 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
       const setUp = await (options.setUpWindowsSandbox ?? setUpWindowsShellSandbox)(helper);
       if (setUp.status === 'failed') {
         options.log?.('shell.setup', { status: 'failed', message: setUp.message }, 'warn');
-        return {
-          ...current,
-          message: 'The Windows shell sandbox was not set up: the administrator prompt was declined or setup failed.',
-          recovery: 'Choose Set up to try again. Tau starts no shell until the sandbox is set up.',
-          diagnostic: setUp.message,
-        };
+        return windowsSetupDeclined(setUp.message);
       }
       options.log?.('shell.setup', { status: 'set-up' });
       probing = undefined;
@@ -646,6 +664,46 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
     } finally {
       provisioning = undefined;
     }
+  };
+
+  /*
+   * Windows, sandbox not set up: the registry still lists `shell`, and its first call is the use that runs the one
+   * elevated setup. A run whose setup was declined is answered without another prompt (no prompt loop within one use);
+   * the next run asks again. Bounded: only the latest runs are remembered.
+   */
+  const declinedRuns = new Map<string, string>();
+  const pendingShell: HostShell = {
+    identity: {
+      platform: 'win32',
+      kind: 'powershell',
+      shellVersion: '',
+      shellDigest: '',
+      provider: 'tau-windows-sandbox-setup',
+    },
+    run: async (request) => {
+      let message = declinedRuns.get(request.runId);
+      if (message === undefined) {
+        const next = await provision();
+        if (next.status === 'available' && recording !== undefined) {
+          return recording.run(request);
+        }
+        message =
+          next.status === 'available'
+            ? 'The shell is not available to this project yet.'
+            : `${next.message} ${next.recovery}`;
+        declinedRuns.set(request.runId, message);
+        const [oldest] = declinedRuns.keys();
+        if (declinedRuns.size > 64 && oldest !== undefined) {
+          declinedRuns.delete(oldest);
+        }
+      }
+      return {
+        status: 'not-started',
+        code: 'shell-unavailable',
+        message: `${message} The command did not run; do not retry the shell in this turn.`,
+      };
+    },
+    openTerminal: async () => ({ ...windowsSetupNeeded, status: 'refused' }),
   };
 
   return {
@@ -665,7 +723,7 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
           await outcome.shell.reconcile?.();
         }
       })();
-      return () => recording;
+      return () => recording ?? (setupPending && windowsHelper() !== undefined ? pendingShell : undefined);
     },
     release: (projectRoot) => {
       checkouts.projects.delete(projectRoot);

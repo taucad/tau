@@ -413,22 +413,26 @@ describe('windowsShellSandboxEnvironment', () => {
     return resources;
   };
 
-  it('should point the services utility at the helper a Windows build carries, with the sandbox off by default', async () => {
+  it('should point the services utility at the helper a Windows build carries, with the sandbox on by default', async () => {
     const resources = await resourcesWithHelper();
     expect(windowsShellSandboxEnvironment(resources, {}, win32)).toEqual({
       TAU_WINDOWS_SANDBOX_HELPER: join(resources, 'windows-sandbox/win32-x64/tau-windows-sandbox.exe'),
+      TAU_WINDOWS_SHELL_SANDBOX: '1',
     });
   });
 
-  it('should pass the sandbox switch on only when main was started with it', async () => {
+  it('should turn the sandbox off only when main was started with TAU_WINDOWS_SHELL_SANDBOX=0', async () => {
     const resources = await resourcesWithHelper();
-    expect(windowsShellSandboxEnvironment(resources, { TAU_WINDOWS_SHELL_SANDBOX: '1' }, win32)).toEqual({
-      TAU_WINDOWS_SANDBOX_HELPER: join(resources, 'windows-sandbox/win32-x64/tau-windows-sandbox.exe'),
-      TAU_WINDOWS_SHELL_SANDBOX: '1',
+    const helper = join(resources, 'windows-sandbox/win32-x64/tau-windows-sandbox.exe');
+    expect(windowsShellSandboxEnvironment(resources, { TAU_WINDOWS_SHELL_SANDBOX: '0' }, win32)).toEqual({
+      TAU_WINDOWS_SANDBOX_HELPER: helper,
     });
-    expect(windowsShellSandboxEnvironment(resources, { TAU_WINDOWS_SHELL_SANDBOX: 'true' }, win32)).toEqual({
-      TAU_WINDOWS_SANDBOX_HELPER: join(resources, 'windows-sandbox/win32-x64/tau-windows-sandbox.exe'),
-    });
+    for (const value of ['1', 'true', 'false', '']) {
+      expect(windowsShellSandboxEnvironment(resources, { TAU_WINDOWS_SHELL_SANDBOX: value }, win32)).toEqual({
+        TAU_WINDOWS_SANDBOX_HELPER: helper,
+        TAU_WINDOWS_SHELL_SANDBOX: '1',
+      });
+    }
   });
 
   it('should never forward an inherited helper path, so a launcher cannot choose what Tau elevates', async () => {

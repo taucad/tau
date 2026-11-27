@@ -495,7 +495,7 @@ describe('terminal concern', () => {
       shell: async () => ({
         status: 'unavailable',
         code: 'sandbox-unavailable',
-        message: 'The Windows shell sandbox is not part of this Tau build.',
+        message: 'The Windows shell sandbox is off or missing in this Tau installation.',
         recovery: 'Use Tau on macOS or Linux.',
       }),
     });
@@ -506,7 +506,7 @@ describe('terminal concern', () => {
       {
         type: 'refused',
         code: 'sandbox-unavailable',
-        message: 'The Windows shell sandbox is not part of this Tau build.',
+        message: 'The Windows shell sandbox is off or missing in this Tau installation.',
         recovery: 'Use Tau on macOS or Linux.',
       },
     ]);
@@ -520,13 +520,50 @@ describe('terminal concern', () => {
       recovery: 'Choose Set up in the Terminal.',
     };
 
-    it('should refuse provisioning-required and run no setup for a plain open', async () => {
-      const provision = vi.fn(async (): Promise<ShellProbe> => notSetUp);
+    it('should run the setup on a plain open, the first Terminal use, then open the shell it provisioned', async () => {
+      const { shell, sessions } = createShell();
+      const provision = vi.fn(async (): Promise<ShellProbe> => ({ status: 'available', shell }));
       const { connect } = setup({ shell: async () => notSetUp, provision });
       const port = connect();
       port.send({ type: 'open', size });
       await flush();
-      expect(provision).not.toHaveBeenCalled();
+      expect(provision).toHaveBeenCalledOnce();
+      expect(port.of('opened')).toHaveLength(1);
+      expect(sessions).toHaveLength(1);
+    });
+
+    it('should ask once per open: a declined setup refuses that open and the next open asks again', async () => {
+      const declined: ShellProbe = {
+        status: 'unavailable',
+        code: 'sandbox-unavailable',
+        message: 'The Windows shell sandbox is not set up: the administrator prompt was declined or setup failed.',
+        recovery: 'Start the Terminal again.',
+      };
+      const provision = vi.fn(async (): Promise<ShellProbe> => declined);
+      const { connect } = setup({ shell: async () => notSetUp, provision });
+      const first = connect();
+      first.send({ type: 'open', size });
+      await flush();
+      expect(provision).toHaveBeenCalledOnce();
+      expect(first.of('refused')).toEqual([
+        {
+          type: 'refused',
+          code: 'sandbox-unavailable',
+          message: 'The Windows shell sandbox is not set up: the administrator prompt was declined or setup failed.',
+          recovery: 'Start the Terminal again.',
+        },
+      ]);
+      const second = connect();
+      second.send({ type: 'open', size });
+      await flush();
+      expect(provision).toHaveBeenCalledTimes(2);
+    });
+
+    it('should refuse with the probe answer when no setup is wired', async () => {
+      const { connect } = setup({ shell: async () => notSetUp });
+      const port = connect();
+      port.send({ type: 'open', size });
+      await flush();
       expect(port.of('refused')).toEqual([
         {
           type: 'refused',

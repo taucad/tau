@@ -1233,7 +1233,7 @@ describe('sweepStagedImports', () => {
       // oxlint-disable-next-line no-await-in-loop -- three stagings, one after another.
       await stageOne(provider, operationId);
     }
-    await provider.writeFile('.tau-staging/other-owner/x', 'not an import');
+    await provider.writeFile('.tau/staging/other-owner/x', 'not an import');
 
     const fresh = await sweepStagedImports({
       port: port(provider),
@@ -1253,7 +1253,7 @@ describe('sweepStagedImports', () => {
     expect(stale).toEqual({ removed: ['orphan'], kept: ['held', 'owned'] });
     expect(await provider.exists(importStagingDirectory('orphan'))).toBe(false);
     expect(await provider.exists(importStagingDirectory('owned'))).toBe(true);
-    expect(await provider.exists('.tau-staging/other-owner/x')).toBe(true);
+    expect(await provider.exists('.tau/staging/other-owner/x')).toBe(true);
   });
 
   it('should judge stillness by the times its records carry where the provider keeps no mtime', async () => {

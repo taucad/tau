@@ -130,6 +130,20 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 });
 
 /**
+ * The sandbox runtime's next reset, which the last released lease starts. A test awaits this signal itself instead of
+ * polling for the call under a timer: the release runs after the worker's end on its own task, and a busy runner can
+ * hold it past `vi.waitFor`'s second (burn-in seed 978889614, job on #2527: 1043 ms against a 55 ms local run).
+ *
+ * @returns Settles when `SandboxManager.reset` is next called.
+ */
+const nextReset = async (): Promise<void> =>
+  new Promise((resolve) => {
+    sandbox.reset.mockImplementationOnce(async () => {
+      resolve();
+    });
+  });
+
+/**
  * Whether Tau's sandbox layer starts on this host at all, asked of the product rather than read off the platform.
  *
  * The runtime underneath is the double above, so this is not about prerequisites: it is whether the layer refuses the
@@ -693,6 +707,7 @@ ${keepAlive}`;
         launches.push(launch);
         return startNativeWorker(launch);
       });
+      const reset = nextReset();
       try {
         await expect(request(value.session)).resolves.toEqual({ value: 'brokered' });
         expect(launches).toEqual([
@@ -713,9 +728,8 @@ ${keepAlive}`;
         await value.session.cleanup();
       }
       /* The worker's own lease ended with it; the session took none, so its cleanup stops nothing twice. */
-      await vi.waitFor(() => {
-        expect(sandbox.reset).toHaveBeenCalledOnce();
-      });
+      await reset;
+      expect(sandbox.reset).toHaveBeenCalledOnce();
     },
   );
 
@@ -758,11 +772,11 @@ ${keepAlive}`;
       });
       expect(firstLine).toBe('{"protocolVersion":1,"type":"ready"}\n');
       expect(sandbox.reset).not.toHaveBeenCalled();
+      const reset = nextReset();
       await worker.terminate();
       await expect(worker.ended).resolves.toEqual({ signal: 'SIGTERM' });
-      await vi.waitFor(() => {
-        expect(sandbox.reset).toHaveBeenCalledOnce();
-      });
+      await reset;
+      expect(sandbox.reset).toHaveBeenCalledOnce();
     },
   );
 
@@ -1326,9 +1340,16 @@ ${keepAlive}`);
       expect(environment['TMPDIR']).toBe('/artifacts');
       expect(environment['HOME']).toBe('/artifacts');
       expect(environment['PATH']).toBe('/usr/bin:/bin');
+      expect(environment).not.toHaveProperty('USERPROFILE');
     });
     await withPlatform('win32', async () => {
       expect(processEnvironment('/artifacts')).not.toHaveProperty('PATH');
+      const windows = processEnvironment('/artifacts');
+      expect([windows['USERPROFILE'], windows['APPDATA'], windows['LOCALAPPDATA']]).toEqual([
+        '/artifacts',
+        '/artifacts',
+        '/artifacts',
+      ]);
     });
   });
 });
@@ -1527,14 +1548,14 @@ describe('NativeProcessSession.sampleResident', () => {
 
   // T35 (B19, PR-1c): no native runtime starts on Windows, so the child heap source there is `none`, never a reading
   // of some other process: the launch refuses before the sandbox wraps anything, and the session samples nothing.
-  it('should spawn nothing on Windows and sample undefined, so the heap source there is none', async () => {
+  it('should spawn nothing on Windows until this host enables its sandbox, and sample undefined, so the heap source there is none', async () => {
     const value = fixture();
     try {
       await withPlatform('win32', async () => {
         const refusal = startNativeWorker({ ...value.options, commandId: 'win32#1' });
         await expect(refusal).rejects.toBeInstanceOf(NativeRuntimeUnavailableError);
         await expect(refusal).rejects.toMatchObject({ code: 'NATIVE_RUNTIME_UNAVAILABLE' });
-        await expect(request(value.session)).rejects.toThrow('Windows is not yet a supported native runtime platform');
+        await expect(request(value.session)).rejects.toThrow('the Windows sandbox is not enabled in this Tau build');
         await expect(value.session.sampleResident()).resolves.toBeUndefined();
       });
       expect(sandbox.wrap).not.toHaveBeenCalled();

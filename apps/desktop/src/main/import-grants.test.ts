@@ -16,7 +16,8 @@ afterEach(() => {
 });
 
 const sandbox = (): string => {
-  const root = mkdtempSync(join(tmpdir(), 'tau-import-grant-'));
+  /* Grants hold the native real path, which spells out a Windows 8.3 temp directory (`RUNNER~1`). */
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'tau-import-grant-')));
   temporary.push(root);
   return root;
 };

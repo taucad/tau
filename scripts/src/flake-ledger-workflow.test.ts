@@ -7,8 +7,9 @@ import { describe, expect, it } from 'vitest';
  * The flake ledger ingestion (FQ-2) runs after every completed CI run, so its reach is kept to what it needs: it
  * lists runs and downloads artifacts (`actions: read`), writes its own state branch and the quarantine entry branch
  * (`contents: write`), and opens the owner issues and the entry pull request (FQ-6: `issues: write`,
- * `pull-requests: write`), with no environment, no secret and no persisted checkout credential, and it skips a pull
- * request's run before a runner starts.
+ * `pull-requests: write`), with no persisted checkout credential, and it skips a pull request's run before a runner
+ * starts. The entry and release steps write with a `tau-flake-bot` App token from the main-only `flake-bot`
+ * environment when its secrets are set, and with the workflow token when they are not.
  */
 const text = readFileSync(resolve(import.meta.dirname, '../../.github/workflows/flake-ledger.yml'), 'utf8');
 
@@ -60,7 +61,7 @@ describe('flake ledger workflow', () => {
     );
   });
 
-  it('should hold only the permissions it writes with, and no environment, secret or persisted credential', () => {
+  it('should hold only the permissions it writes with, the flake-bot environment and no persisted credential', () => {
     expect(workflow.permissions).toEqual({});
     for (const job of Object.values(workflow.jobs)) {
       expect(job.permissions).toEqual({
@@ -69,9 +70,12 @@ describe('flake ledger workflow', () => {
         issues: 'write',
         'pull-requests': 'write',
       });
-      expect(job.environment).toBeUndefined();
+      expect(job.environment).toEqual({ name: 'flake-bot', deployment: false });
     }
-    expect(text).not.toMatch(/secrets\./u);
+    // Only the App's two secrets, and only the mint step and the check that they are set read them.
+    expect(new Set(text.match(/secrets\.\w+/gu))).toEqual(
+      new Set(['secrets.FLAKE_BOT_APP_ID', 'secrets.FLAKE_BOT_APP_PRIVATE_KEY']),
+    );
     expect(text).not.toContain('nx-cache-write');
     const steps = Object.values(workflow.jobs).flatMap((job) => job.steps);
     for (const step of steps.filter((entry) => entry.uses?.startsWith('actions/checkout@'))) {
@@ -148,6 +152,68 @@ describe('flake ledger workflow', () => {
     expect((steps[release] as { if?: string } | undefined)?.if).toBe(
       `\${{ !cancelled() && steps.ingest.outcome != 'skipped' }}`,
     );
+  });
+
+  it('should mint a tau-flake-bot token for tau with only the write scopes the entry and release use', () => {
+    const [job] = Object.values(workflow.jobs) as Array<{ env?: Record<string, string>; steps: Step[] }>;
+    expect(job?.env).toEqual({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- an environment variable
+      FLAKE_BOT_CONFIGURED: `\${{ secrets.FLAKE_BOT_APP_ID != '' && secrets.FLAKE_BOT_APP_PRIVATE_KEY != '' }}`,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- an environment variable
+      FLAKE_BOT_LOGIN: `\${{ vars.FLAKE_BOT_LOGIN || 'tau-flake-bot[bot]' }}`,
+    });
+    const steps = job?.steps ?? [];
+    const mints = steps.filter((step) => step.uses?.startsWith('actions/create-github-app-token@'));
+    expect(mints).toHaveLength(1);
+    const [mint] = mints as Array<Step & { id?: string; if?: string }>;
+    expect(mint?.uses).toBe('actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254');
+    expect(mint?.id).toBe('flake-bot');
+    expect(mint?.with).toEqual({
+      'app-id': `\${{ secrets.FLAKE_BOT_APP_ID }}`,
+      'private-key': `\${{ secrets.FLAKE_BOT_APP_PRIVATE_KEY }}`,
+      owner: `\${{ github.repository_owner }}`,
+      repositories: 'tau',
+      'permission-contents': 'write',
+      'permission-issues': 'write',
+      'permission-pull-requests': 'write',
+    });
+    // Skipped without the secrets (the fallback), and minted after the ingestion so its hour covers the writers.
+    expect(mint?.if).toBe(
+      `\${{ !cancelled() && steps.ingest.outcome != 'skipped' && env.FLAKE_BOT_CONFIGURED == 'true' }}`,
+    );
+    const at = (cli: string): number => steps.findIndex((step) => step.run?.startsWith(`node scripts/src/${cli}`));
+    expect(steps.indexOf(mint ?? {})).toBeGreaterThan(at('ci-flake-ledger-ingest-cli.ts'));
+    expect(steps.indexOf(mint ?? {})).toBeLessThan(at('ci-flake-quarantine-entry-cli.ts'));
+  });
+
+  it('should write entries and removals with the App token, falling back to the workflow token without it', () => {
+    const steps = Object.values(workflow.jobs).flatMap((job) => job.steps) as Array<
+      Step & { env?: Record<string, string> }
+    >;
+    const tokenOf = (cli: string): string | undefined =>
+      steps.find((step) => step.run?.startsWith(`node scripts/src/${cli}`))?.env?.['GITHUB_TOKEN'];
+    for (const cli of ['ci-flake-quarantine-entry-cli.ts', 'ci-flake-quarantine-release-cli.ts']) {
+      expect(tokenOf(cli), cli).toBe(`\${{ steps.flake-bot.outputs.token || github.token }}`);
+    }
+    // The state branch is the workflow token's alone (the `flake-ledger-writer` ruleset), and the metrics only read.
+    for (const cli of ['ci-flake-ledger-ingest-cli.ts', 'ci-flake-metrics-cli.ts']) {
+      expect(tokenOf(cli), cli).toBe(`\${{ github.token }}`);
+    }
+    // No private key reaches a step that does not mint the token.
+    for (const step of steps.filter((entry) => !entry.uses?.startsWith('actions/create-github-app-token@'))) {
+      expect(JSON.stringify(step)).not.toContain('PRIVATE_KEY');
+    }
+  });
+
+  it('should never approve a pull request: no CLI it runs posts a review', () => {
+    for (const cli of [
+      'ci-flake-quarantine-entry-cli.ts',
+      'ci-flake-quarantine-release-cli.ts',
+      'ci-shadow-rows-promote-cli.ts',
+    ]) {
+      const source = readFileSync(resolve(import.meta.dirname, cli), 'utf8');
+      expect(source, cli).not.toMatch(/\/reviews|APPROVE|addPullRequestReview/u);
+    }
   });
 
   it('should write the D9 metrics table to its summary last, on every run that ingested (FQ-11)', () => {

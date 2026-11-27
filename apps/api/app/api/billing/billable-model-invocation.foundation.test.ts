@@ -2222,11 +2222,12 @@ describe('funded admission reads no supplier state', () => {
         const [recovered] = await database.select().from(creditOperation).where(eq(creditOperation.id, operationId));
         expect(recovered).toMatchObject(
           shape === 'client_abort'
-            ? {
-                customerState: 'absorbed',
-                chargedAtoms: 0n,
-                supplierCostPicoUsd: null,
-                supplierCostUnpricedReason: 'absorbed',
+            ? // The stop relayed output before the cut, so it is billed for what it used (D-3).
+              {
+                customerState: 'settled',
+                chargedAtoms: 1n,
+                supplierCostPicoUsd: 500_000n,
+                supplierCostUnpricedReason: null,
               }
             : {
                 customerState: 'released',

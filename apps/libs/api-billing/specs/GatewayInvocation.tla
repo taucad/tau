@@ -40,6 +40,10 @@
 (*                  the admitting generation, as a stop is (taucad/tau#851;*)
 (*                  FALSE left it pending for recovery, and the chat's     *)
 (*                  next step waited on it: agent-host StopSettlement)     *)
+(*   StopCharges    a client cut after the supplier generated may settle   *)
+(*                  charged for the output it relayed (launch audit D-3);  *)
+(*                  off only where the extra branch would push a large     *)
+(*                  configuration past its time budget                     *)
 (*   SupplierCutSettles  a step the supplier ended without complete usage  *)
 (*                  (a dropped stream, a request that failed before any    *)
 (*                  response, a deadline cut) is terminalized at once as   *)
@@ -95,6 +99,8 @@ CONSTANTS
     CutSettles,
     \* @type: Bool;
     SupplierCutSettles,
+    \* @type: Bool;
+    StopCharges,
     \* @type: Bool;
     AtomicAdmit,
     \* @type: Bool;
@@ -489,13 +495,19 @@ ApiObserve(k) ==
 
 \* The relayed body's cancel after the API noticed the client left: cut, record absorbed_unknown, and
 \* finish(clientLeft) terminalizes it under the admitting generation, as a stopping process does. A
-\* sweep claim that won the race fences it out, and recovery resolves the row as before.
+\* sweep claim that won the race fences it out, and recovery resolves the row as before. A cut that
+\* relayed output is charged for what it used (launch audit D-3, ruled 2026-11-27): the row settles at
+\* the one atom here; a cut before any output stays absorbed at zero.
 ApiClientCancel(k) ==
     /\ req[k] = "streaming"
     /\ conn[k] = "noticed"
     /\ sup' = IF sup[k] = "generating" THEN [sup EXCEPT ![k] = "cut"] ELSE sup
     /\ IF CutSettles /\ (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"
-       THEN /\ row' = [row EXCEPT ![k] = [@ EXCEPT !.cancel = IF @ < 0 THEN now ELSE @, !.cust = "absorbed",
+       \* Only a cut after the supplier generated can have relayed output, so only that one may charge (D-3).
+       THEN /\ \E used \in IF StopCharges /\ sup[k] # None THEN {0, 1} ELSE {0} :
+                 row' = [row EXCEPT ![k] = [@ EXCEPT !.cancel = IF @ < 0 THEN now ELSE @,
+                                              !.cust = IF used = 1 THEN "settled" ELSE "absorbed",
+                                              !.charged = used,
                                               !.ev = @ \cup {"abort"}, !.rat = now, !.tgen = 1]]
             /\ acctHeld' = acctHeld - 1
        ELSE /\ row' = [row EXCEPT ![k].cancel = IF row[k].cust = "pending" /\ @ < 0 THEN now ELSE @,
@@ -662,8 +674,8 @@ TerminalImpliesRecordedEvidence == \A k \in Keys : row[k].ex /\ row[k].cust # "p
 \* D19 CHECK: no settlement without a recorded dispatch intent
 NoChargeWithoutDispatch == \A k \in Keys : row[k].cust = "settled" => row[k].intent >= 0
 
-\* (13) client abort: a charge needs a completed supplier generation
-NoChargeWithoutFinalEvidence == \A k \in Keys : row[k].charged > 0 => "final" \in row[k].ev
+\* (13) a charge needs a completed supplier generation, or a client cut that relayed output (D-3)
+NoChargeWithoutFinalEvidence == \A k \in Keys : row[k].charged > 0 => row[k].ev \cap {"final", "abort"} # {}
 
 \* (4) no dispatch intent after cancellation (action) or at/after dueAt (state)
 NoDispatchAfterCancellation ==
@@ -717,6 +729,10 @@ NoUncodedDeadEnd == host.ph # "stuck"
 \* or a supplier cut absorbs under the admitting generation; every recovery absorb runs under a claimed
 \* one. Its witnesses must keep failing.
 NoLiveAbsorb == \A k \in Keys : row[k].cust = "absorbed" => row[k].tgen > 1
+
+\* Vacuity for ApiClientCancel's charge (D-3): a client cut that relayed output settles charged. Its
+\* witness must keep failing.
+NoChargedCut == \A k \in Keys : "abort" \in row[k].ev => row[k].charged = 0
 
 \* taucad/tau#851: a client cut under the live generation never waits for recovery, so the chat's next
 \* step finds it settled (agent-host StopSettlement). A claimed row is recovery's, as before.

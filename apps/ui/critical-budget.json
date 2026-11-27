@@ -12,7 +12,7 @@
     "adaptive": {
       "project": {
         "brotliBytes": 2013000,
-        "requests": 311,
+        "requests": 314,
         "largestChunkBrotliBytes": 167234,
         "knownHeavy": {}
       },

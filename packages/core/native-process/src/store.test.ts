@@ -275,7 +275,9 @@ describe('native kernels from the dependency store', () => {
         ],
       });
       await expect(binding).rejects.toSatisfy((error: UnpreparedKernelError) =>
-        error.issues.some(({ message }) => message.includes('Native kernels do not run on Windows yet')),
+        error.issues.some(({ message }) =>
+          message.includes('Native kernels do not run on Windows in this Tau: it has no Windows sandbox'),
+        ),
       );
       await expect(storeEntries()).resolves.toEqual([]);
     },

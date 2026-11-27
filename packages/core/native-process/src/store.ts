@@ -37,6 +37,8 @@ import { z } from 'zod';
 
 import { nativeDeploymentOf } from '#native-kernel-adopter.js';
 import type { NativeKernelBounds, NativeKernelDeployment } from '#native-kernel-adopter.js';
+import { nativeSandboxRefusal } from '@taucad/sandbox';
+
 import { installNativeRuntimeVerifier } from '#native-process-session.js';
 import type { NativeRuntimeVerifier } from '#native-process-session.js';
 
@@ -349,6 +351,7 @@ const inspectStore = async (
     store: input.store,
     ...(input.managed.seed === undefined ? {} : { seed: input.managed.seed }),
     selection: input.managed.selection,
+    nativeContainment: nativeSandboxRefusal,
   });
   const state = await host.inspectLaunch({ package: input.deployment.package, dependencies: input.dependencies });
   if (state.status === 'ready' && input.dependencies.every((dependency) => state.closures[dependency] !== undefined)) {
@@ -700,6 +703,7 @@ export const openNativePreparation = (
       ...(managed.mirror === undefined ? {} : { mirror: managed.mirror }),
       ...(managed.seed === undefined ? {} : { seed: managed.seed }),
       selection: managed.selection,
+      nativeContainment: nativeSandboxRefusal,
     });
     return { host, plugins };
   };

@@ -7,10 +7,10 @@
  *
  * @module
  */
-import { execFileSync } from 'node:child_process';
-import type { ExecFileSyncOptions } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import type { SpawnSyncOptions } from 'node:child_process';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, win32 } from 'node:path';
 
 const windows = process.platform === 'win32';
 
@@ -22,7 +22,108 @@ const windows = process.platform === 'win32';
  * @param command - The executable to start.
  * @returns Whether `command` is a `.cmd` or `.bat` file on Windows.
  */
-export const needsShell = (command: string): boolean => windows && /\.(?:bat|cmd)$/iu.test(command);
+const needsShell = (command: string): boolean => windows && /\.(?:bat|cmd)$/iu.test(command);
+
+/** The characters `cmd.exe` gives a meaning to, each escaped with `^` (https://qntm.org/cmd). */
+const cmdMetaCharacters = /([ !"%&()*,;<>?[\]^`|])/gu;
+
+/**
+ * One argument for an npm-style `.cmd` shim, which `cmd.exe` parses twice: once for the `/c` line and again
+ * where the shim expands `%*` into the `node` line it starts. Quoted as `CommandLineToArgvW` reads it, then
+ * every metacharacter, the quotes among them, escaped once per parse.
+ *
+ * @param argument - The argument as the started program should see it.
+ * @returns The escaped argument.
+ */
+const shimArgument = (argument: string): string => {
+  const quoted = `"${argument.replaceAll(/(\\*)"/gu, String.raw`$1$1\"`).replace(/(\\*)$/u, '$1$1')}"`;
+  return quoted.replaceAll(cmdMetaCharacters, '^$1').replaceAll(cmdMetaCharacters, '^$1');
+};
+
+/**
+ * The first `command` on `PATH` (with each `PATHEXT` extension when it has none), as Windows' own search would
+ * find it, but never in the current folder, which `cmd.exe` searches first.
+ *
+ * @param command - A file name without a folder.
+ * @param environment - The variables that hold `PATH` and `PATHEXT`.
+ * @returns Its path, or `undefined` when no folder on `PATH` holds it.
+ */
+const onWindowsPath = (command: string, environment: NodeJS.ProcessEnv): string | undefined => {
+  const extensions =
+    win32.extname(command) === '' ? (environment['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
+  for (const folder of (environment['PATH'] ?? '').split(';').filter(Boolean)) {
+    for (const extension of extensions) {
+      const candidate = win32.join(folder, `${command}${extension}`);
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
+ * How to start a command with its arguments, as `spawn` and `execFileSync` take them.
+ *
+ * @internal
+ */
+export type Startable = {
+  /** The executable: the command itself, or `cmd.exe` for a Windows `.cmd` or `.bat` shim. */
+  readonly file: string;
+  /** Its arguments. */
+  readonly args: readonly string[];
+  /** True when `args` is already one `cmd.exe` line that Node.js must pass on unquoted. */
+  readonly windowsVerbatimArguments: boolean;
+};
+
+/**
+ * How to start `command` with `args` so that it receives exactly `args`.
+ *
+ * On Windows a bare name is looked up on `PATH` first, and a `.cmd` or `.bat` shim, such as `npx.cmd` and an
+ * npm-installed `tau.cmd`, starts through `cmd.exe /d /s /c` with every argument escaped for it ({@link
+ * needsShell}): `shell: true` would join the arguments unescaped, which Node.js deprecates (DEP0190) with a
+ * warning on stderr, and would let `&` or `|` in an argument run a second command.
+ *
+ * @internal
+ * @param command - The executable, a path or (on Windows) a name to find on `PATH`.
+ * @param args - Its arguments.
+ * @param environment - The variables that hold `PATH`, `PATHEXT`, `ComSpec` and `SystemRoot`; this process's own by
+ *   default.
+ * @returns How to start it, or `undefined` when it is a name that no folder on Windows' `PATH` holds.
+ */
+export const startable = (
+  command: string,
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv = process.env,
+): Startable | undefined => {
+  if (!windows) {
+    return { file: command, args, windowsVerbatimArguments: false };
+  }
+  const path = /[/\\]/u.test(command) ? command : onWindowsPath(command, environment);
+  if (path === undefined) {
+    return undefined;
+  }
+  if (!needsShell(path)) {
+    return { file: path, args, windowsVerbatimArguments: false };
+  }
+  const line = [path.replaceAll(cmdMetaCharacters, '^$1'), ...args.map((argument) => shimArgument(argument))].join(' ');
+  return {
+    file:
+      environment['ComSpec'] ?? win32.join(environment['SystemRoot'] ?? String.raw`C:\Windows`, 'System32', 'cmd.exe'),
+    args: ['/d', '/s', '/c', `"${line}"`],
+    windowsVerbatimArguments: true,
+  };
+};
+
+/**
+ * The error a command not found on `PATH` gives, as `spawn` reports one.
+ *
+ * @internal
+ * @param command - The command's name.
+ * @returns An error whose `code` is `ENOENT`.
+ */
+export const notOnPath = (command: string): Error =>
+  Object.assign(new Error(`spawn ${command} ENOENT`), { code: 'ENOENT' });
 
 /**
  * Run a command to completion, with nothing on its standard input and its standard error discarded.
@@ -33,22 +134,35 @@ export const needsShell = (command: string): boolean => windows && /\.(?:bat|cmd
  *   print (`maxBuffer`) and the signal that kills it past either (`killSignal`); without them it runs until it
  *   exits and may print 1 MiB.
  * @returns What it printed on standard output, trimmed.
- * @throws When it cannot start, exits non-zero, is killed or prints past `maxBuffer`.
+ * @throws When it cannot start (`code` `ENOENT` when it is not on `PATH`), exits non-zero, is killed or prints
+ *   past `maxBuffer`.
  */
 const run = (
   command: string,
   args: readonly string[],
-  limits?: Pick<ExecFileSyncOptions, 'killSignal' | 'maxBuffer' | 'timeout'>,
+  limits?: Pick<SpawnSyncOptions, 'killSignal' | 'maxBuffer' | 'timeout'>,
 ): string => {
-  const shell = needsShell(command);
+  const start = startable(command, args);
+  if (start === undefined) {
+    throw notOnPath(command);
+  }
   /* Discarded rather than piped, standard error never counts towards `maxBuffer`: a warning there does not
    * cost a matching `tau` its turn. */
-  return execFileSync(shell ? `"${command}"` : command, args, {
+  const result = spawnSync(start.file, start.args, {
     encoding: 'utf8',
-    shell,
+    windowsVerbatimArguments: start.windowsVerbatimArguments,
     stdio: ['ignore', 'pipe', 'ignore'],
     ...limits,
-  }).trim();
+  });
+  if (result.error !== undefined) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw Object.assign(new Error(`${command} exited with ${result.status ?? result.signal}`), {
+      status: result.status,
+    });
+  }
+  return result.stdout.trim();
 };
 
 /**
@@ -145,8 +259,8 @@ export const npmPreflight = (
   try {
     version = npm(['--version']);
   } catch (error) {
-    /* ENOENT is an npm missing from the host's `PATH`, as under Claude Desktop's minimal one. Windows' `cmd.exe`
-     * reports a missing `npm.cmd` as a failed command, which reads as npm not running. */
+    /* ENOENT is an npm missing from the host's `PATH`, as under Claude Desktop's minimal one; on Windows `run`
+     * looks `npm.cmd` up itself, since `cmd.exe` reports a missing one only as a failed command. */
     const reason = (error as { readonly code?: unknown }).code === 'ENOENT' ? 'was not found on PATH' : 'did not run';
     return { failure: { code: 4, message: `tau: npm ${reason}; install Node.js 24 or later, which includes npm\n` } };
   }

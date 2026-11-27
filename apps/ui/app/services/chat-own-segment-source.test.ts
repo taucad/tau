@@ -28,6 +28,24 @@ const admitted = (time = start): unknown => ({
 });
 const running = (time = start): unknown => ({ ...lifecycleRow(1, 'running'), ...at(time) });
 const completed = (time = start): unknown => ({ ...lifecycleRow(1, 'completed'), ...at(time) });
+/* The settlement the host appends after the lifecycle's last row, once the turn's revision is recorded (W8 TS-S4). */
+const finalized = (time = start): unknown => ({
+  ...logRow(3, {
+    type: 'turn.finalized',
+    attempt: 1,
+    turnId: 'user_1',
+    chatId: 'chat_own',
+    projectId: 'p',
+    checkoutId: 'live',
+    revisionId: 'a'.repeat(40),
+    branch: 'main',
+    changedPaths: ['main.scad'],
+    treeId: 'b'.repeat(40),
+    trigger: 'turn',
+    runIds: ['run_1'],
+  }),
+  ...at(time),
+});
 const user = logRow(2, { type: 'message.appended', message: { id: 'user_1', role: 'user', content: 'Hi' } });
 
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
@@ -259,6 +277,36 @@ describe('own segment source: absence judged against the record (HA-I3a)', () =>
     chat.wake();
     await pass(clock);
     expect(chat.verdicts.at(-1)).toBe('current');
+    chat.stop();
+  });
+
+  /* A run's lifecycle ends before its settlement is appended (desktop shell row: `completed`, then `turn.finalized`
+   * 0.5-0.66 s later). The turn's Save status waits on that row, so an ended run without one is still read. */
+  it('should keep reading an ended run until its settlement row arrives, then stop', async () => {
+    const disk = createDisk({ [log]: line(admitted()) + line(completed()) });
+    const chat = follow(disk, clock);
+    await pass(clock);
+    expect(selectRunPhase(chat.projection())).toBe('completed');
+
+    disk.write(log, line(admitted()) + line(completed()) + line(finalized()));
+    await pass(clock, unsettledReadPollMilliseconds);
+    expect(chat.projection().ledger.runs['run_1']?.appendState).toBe('settled');
+
+    const reads = vi.spyOn(disk.client, 'readFile');
+    await pass(clock, 10 * unsettledReadPollMilliseconds);
+    expect(reads).not.toHaveBeenCalled();
+    chat.stop();
+  });
+
+  it('should stop reading an ended run without a settlement once its writer has gone stale', async () => {
+    const old = start - foreignRunStaleMilliseconds;
+    const disk = createDisk({ [log]: line(admitted(old)) + line(completed(old)) });
+    const chat = follow(disk, clock);
+    await pass(clock);
+    expect(chat.projection().ledger.runs['run_1']?.appendState).toBe('terminal');
+    const reads = vi.spyOn(disk.client, 'readFile');
+    await pass(clock, 10 * unsettledReadPollMilliseconds);
+    expect(reads).not.toHaveBeenCalled();
     chat.stop();
   });
 

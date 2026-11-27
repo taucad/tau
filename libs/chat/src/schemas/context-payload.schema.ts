@@ -39,24 +39,30 @@ export const skillMetadataSchema = z.object({
 });
 
 /**
+ * The most a memory entry may hold: 32 KiB of UTF-8, with no line limit.
+ *
+ * The project's root `AGENTS.md` is head-truncated client-side to this many bytes, and a cut is marked with one
+ * notice line. The number is Codex's default (`project_doc_max_bytes`), so a file Codex reads whole Tau's agent also
+ * reads whole. The memory message is per-request and uncached; at the cap it is about 8,000 tokens.
+ * @public
+ */
+export const contextMemoryMaxBytes = 32_768;
+/**
+ * The most skills one context payload may list, so the uncached turn block cannot grow without limit.
+ * @public
+ */
+export const contextSkillsMaxEntries = 64;
+
+/**
  * Context payload assembled client-side from the project filesystem and attached to message metadata.
  * Carries the skills catalog and the project's root `AGENTS.md` (as `memory`, keyed by its path) so the
  * agent host can place them in the turn context without RPC round-trips.
+ *
+ * A memory value is bounded by {@link contextMemoryMaxBytes} plus 256 for the truncation notice. The bound counts
+ * UTF-16 code units, and a value cut to the cap in UTF-8 bytes is never longer than the cap in code units, so a
+ * truncated file always parses.
  * @public
  */
-/**
- * CH-10 payload caps: memory entries are head-truncated client-side to the first
- * {@link contextMemoryMaxLines} lines / {@link contextMemoryMaxBytes} bytes, and the
- * schema enforces the byte ceiling (with slack for the truncation notice) plus a
- * bound on catalog size so the uncached dynamic block cannot grow without limit.
- * @public
- */
-export const contextMemoryMaxLines = 200;
-/** @public */
-export const contextMemoryMaxBytes = 25_000;
-/** @public */
-export const contextSkillsMaxEntries = 64;
-
 export const contextPayloadSchema = z.object({
   skills: z.array(skillMetadataSchema).max(contextSkillsMaxEntries).optional(),
   memory: z.record(z.string(), z.string().max(contextMemoryMaxBytes + 256)).optional(),

@@ -37,7 +37,7 @@ import { toast } from '@taucad/ui/components/sonner';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFocus, useSessions } from '#hooks/use-sessions.js';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
-import { projectFilesCopy } from '#lib/project-open-copy.js';
+import { projectFilesCopy, projectSessionFailedCopy } from '#lib/project-open-copy.js';
 import type { SessionsActorRef } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
@@ -167,8 +167,10 @@ export const describeProjectRouteNotice = (
       /* Nobody closed this project: its open failed. The open's own words, offline or not, said once by this region
        * with its one action (Progressive Loading Policy rules 19, 21 and 22). The action reloads: code that failed to
        * load stays failed for the page's life, so a reopen in place cannot finish the open (`code-loading.ts`).
-       * Offline the reload shows this notice again from the offline shell; online it opens the project. */
-      const [title, description] = projectFilesCopy(isOffline ? 'offline' : 'failed', undefined);
+       * Offline the reload shows this notice again from the offline shell; online it opens the project. Online, the
+       * session's own failure is no download (its regions are local startup, `project-session.machine.ts`), so it
+       * never says the files' "download didn't finish". */
+      const [title, description] = isOffline ? projectFilesCopy('offline', undefined) : projectSessionFailedCopy;
       return {
         icon: isOffline ? WifiOff : TriangleAlert,
         tone: 'neutral',

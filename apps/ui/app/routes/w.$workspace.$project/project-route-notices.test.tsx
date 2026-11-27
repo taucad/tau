@@ -276,6 +276,11 @@ describe('ProjectRouteNotice', () => {
     render(<ProjectRouteNotice state={{ kind: 'session-failed', projectId, project }} />);
 
     expect(screen.queryByText('Project closed')).toBeNull();
+    /* Staging QA (2026-11-27 recheck 4): a local project whose session passed its start bound under main-thread load
+     * read "The download didn’t finish", but the session's regions are local startup and no open of it downloads. */
+    const alert = screen.getByRole('alert');
+    expect(within(alert).getByRole('heading', { level: 3, name: 'Couldn’t open this project' })).toBeInTheDocument();
+    expect(alert).not.toHaveTextContent(/download|device|network|sync/iu);
     expect(screen.getAllByRole('button')).toHaveLength(1);
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(reload).toHaveBeenCalledOnce();

@@ -167,6 +167,24 @@ runs:
       if: inputs.affected-base == ''
       uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
 
+    # On `merge_group`, `nx-set-shas` sets NX_BASE to `HEAD^1`, and the recorded retry (RT-3,
+    # `@taucad/vitest-ci`) diffs the entry from it to find the files the entry changes. A job that
+    # checks out one commit (the default depth, as the end-to-end rows do) has no `HEAD^1`, so each
+    # retried pass there failed its task as "the changed files are unknown (Command failed: git
+    # merge-base HEAD^1 <sha>)" (run 45991511410). Fetch the parent whatever depth the job checked
+    # out; a checkout that has it fetches nothing. Each retry is an `infra-retry` event.
+    - name: Fetch the merge-queue base
+      if: github.event_name == 'merge_group' && inputs.affected-base == ''
+      shell: bash
+      env:
+        INFRA_RETRY_BACKOFF: '5 10'
+      run: |
+        set -euo pipefail
+        if git rev-parse --quiet --verify 'HEAD^1^{commit}' > /dev/null; then exit 0; fi
+        bash "$GITHUB_ACTION_PATH/../apt-install/infra-retry.sh" merge-queue-base-fetch \
+          git fetch --no-tags --no-recurse-submodules --depth=2 origin "$(git rev-parse HEAD)"
+        git rev-parse --quiet --verify 'HEAD^1^{commit}' > /dev/null
+
     # A push to `main` whose commit has a merge-group run diffs against the queue's own base,
     # so `nx affected` selects exactly the lanes the queue selected (`queue-verdict`).
     - name: Set NX SHAs to the given base

@@ -1081,7 +1081,8 @@ export class ProjectDirectories {
         try {
           await this._deleteProjectDirectory({ provider, directoryPath: path, ...removal });
         } finally {
-          this._projectIndexes.clear();
+          /* Only the indexes that read or hold the removed bytes: every other project's stays warm (fast-path FW5). */
+          this._projectIndexes.forgetRemovedDirectory({ provider, path });
           this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
           /* The root fact is for an older tab; the named one tells a sibling's index which directory went (A2 b). */
           this._crossTabCoordinator.notifyChanges([

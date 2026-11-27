@@ -113,6 +113,10 @@
 \* Staging path (2026-11-27): `project-directories.ts` names the storage root's import staging `.tau/staging/` instead
 \* of `.tau-staging/` (taucad/tau#2909), in a comment only. Discovery still skips every dot-named root entry; no action
 \* or verdict changes.
+\* FW5 (2026-11-27, scoped invalidation): the permanent delete forgets only the Project Indexes that read or hold the
+\* removed directory (`ProjectIndexes.forgetRemovedDirectory`) instead of every one. Project Indexes are not the
+\* discovery index; the delete's probes, removal order, discovery taps and notices are untouched. Every action and
+\* verdict is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

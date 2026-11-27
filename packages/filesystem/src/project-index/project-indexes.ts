@@ -145,6 +145,23 @@ const readStillHolds = (
 const lacksCount = (facts: ContentFacts | undefined): boolean =>
   facts === undefined || (facts.contentKind === 'text' && facts.lineCount === undefined);
 
+/**
+ * Where a provider path sits under a provider directory, `''` being the provider's root.
+ *
+ * @param directory - The provider directory.
+ * @param path - A provider path.
+ * @returns `path` relative to `directory`, or `undefined` when outside it.
+ */
+const providerRelative = (directory: string, path: string): string | undefined => {
+  if (path === directory) {
+    return '';
+  }
+  if (directory === '') {
+    return path;
+  }
+  return path.startsWith(`${directory}/`) ? path.slice(directory.length + 1) : undefined;
+};
+
 /** `relative` of `absolute` under `root`, or `undefined` when outside it. */
 const relativeTo = (root: string, absolute: string): string | undefined => {
   if (absolute === root) {
@@ -338,6 +355,14 @@ export class ProjectIndexes {
   private readonly _persisting = new Set<Promise<unknown>>();
   /* Aborted by every clear: a write begun before it stores nothing after it. */
   private _cleared = new AbortController();
+  /*
+   * Per root, its snapshot writes' abort and where the latest one writes: aborted when a removal takes that directory,
+   * so a write begun before stores nothing after it.
+   */
+  private readonly _writeAborts = new Map<
+    string,
+    { readonly controller: AbortController; at?: Readonly<{ provider: FileSystemProvider; path: string }> }
+  >();
   /* Set once by `dispose` or `close`: no snapshot write starts after it. */
   private _closed = false;
 
@@ -600,7 +625,13 @@ export class ProjectIndexes {
     if (this._closed) {
       return 'skipped';
     }
-    const writing = this._persist(normalizePath(root), this._cleared.signal);
+    const key = normalizePath(root);
+    let removed = this._writeAborts.get(key);
+    if (removed === undefined) {
+      removed = { controller: new AbortController() };
+      this._writeAborts.set(key, removed);
+    }
+    const writing = this._persist(key, AbortSignal.any([this._cleared.signal, removed.controller.signal]));
     this._persisting.add(writing);
     try {
       return await writing;
@@ -1259,54 +1290,74 @@ export class ProjectIndexes {
    * @param absolutePath - The mount prefix that changed.
    */
   public evict(absolutePath: string): void {
-    this._forget(absolutePath);
-    const changed = normalizePath(absolutePath);
-    const carried = new Set<string>();
-    for (const [root, state] of this._states) {
-      if (relativeTo(changed, root) !== undefined || relativeTo(root, changed) !== undefined) {
-        clearTimeout(state.persistTimer);
-        this._states.delete(root);
-        if (this._carry(root, state)) {
-          carried.add(root);
+    this._evict(absolutePath, true);
+  }
+
+  /**
+   * Forget what every index knows of a directory a permanent delete removed
+   * (project-library fast-path FW5), where {@link ProjectIndexes.clear} dropped
+   * every index. An index whose root reads the removed directory, or a
+   * directory inside it, is evicted with nothing carried, and a snapshot write
+   * it began stops at its next await before the disk. An index whose root holds
+   * the removed directory records it removed. A root this set cannot resolve is
+   * evicted, as it cannot be shown to read other bytes. Every other root, which
+   * reads none of the removed bytes, stays warm.
+   *
+   * @param removed - The provider and provider path of the removed directory.
+   */
+  public forgetRemovedDirectory(removed: Readonly<{ provider: FileSystemProvider; path: string }>): void {
+    const roots = new Set<string>([
+      ...this._states.keys(),
+      ...this._stored.keys(),
+      ...this._readFacts.keys(),
+      ...this._declaration.keys(),
+      ...this._settled,
+      ...this._expected.keys(),
+      ...this._landing.keys(),
+      ...this._importSeeded.keys(),
+      ...this._importFactsPending,
+    ]);
+    const reading: string[] = [];
+    const holding: string[] = [];
+    for (const root of roots) {
+      let at: Readonly<{ provider: FileSystemProvider; path: string }> | undefined = this._states.get(root)?.opened;
+      if (at === undefined) {
+        try {
+          at = this._resolve(root);
+        } catch {
+          reading.push(root);
+          continue;
         }
       }
-    }
-    for (const [root, stored] of this._stored) {
-      if (relativeTo(changed, root) !== undefined && !carried.has(root) && !stored.carried) {
-        this._stored.delete(root);
-        this._peeking.delete(root);
+      if (at.provider !== removed.provider) {
+        continue;
+      }
+      if (providerRelative(removed.path, at.path) !== undefined) {
+        reading.push(root);
+        continue;
+      }
+      const inside = providerRelative(at.path, removed.path);
+      if (inside !== undefined) {
+        holding.push(root === '/' ? `/${inside}` : `${root}/${inside}`);
       }
     }
-    for (const root of this._expected.keys()) {
-      if (relativeTo(changed, root) !== undefined) {
-        this._expected.delete(root);
-      }
+    for (const path of holding) {
+      this._forget(path);
+      this.removeDirectory(path);
     }
-    /* The root no longer reads the same bytes: its write is not landed there, and nothing waits on it. */
-    for (const root of this._landing.keys()) {
-      if (relativeTo(changed, root) !== undefined) {
-        this._landing.delete(root);
-      }
+    for (const root of reading) {
+      this._evict(root, false);
+      this._importFactsPending.delete(root);
+      this._importSeeded.delete(root);
     }
-    this._noteLanding();
-    /*
-     * A root that moved is no longer what the revision layer declared: what waited answers now, a root still mounted
-     * is unknown again and held again when it is configured, and an unmounted one is no revision root.
-     */
-    this.releaseDeclaration(changed);
-    for (const root of this._settled) {
-      if (relativeTo(changed, root) !== undefined) {
-        this._settled.delete(root);
-      }
-    }
-    const mounted = new Set(this._options.mountPrefixes?.() ?? []);
-    for (const root of this._declaration.keys()) {
-      if (relativeTo(changed, root) !== undefined && !carried.has(root)) {
-        if (mounted.has(root)) {
-          this._declaration.set(root, 'unknown');
-        } else {
-          this._declaration.delete(root);
-        }
+    /* A write goes where it resolved when it began, whatever the root resolves to now (a revoked route falls through). */
+    for (const [root, { controller, at }] of this._writeAborts) {
+      if (
+        at === undefined ||
+        (at.provider === removed.provider && providerRelative(removed.path, at.path) !== undefined)
+      ) {
+        controller.abort();
+        this._writeAborts.delete(root);
       }
     }
   }
@@ -1315,6 +1366,7 @@ export class ProjectIndexes {
   public clear(): void {
     this._cleared.abort();
     this._cleared = new AbortController();
+    this._writeAborts.clear();
     this._readFacts.clear();
     this._importFactsPending.clear();
     this._importSeeded.clear();
@@ -1416,6 +1468,63 @@ export class ProjectIndexes {
       }
     }
     this._noteObserved(root, index, changed);
+  }
+
+  private _evict(absolutePath: string, carry: boolean): void {
+    this._forget(absolutePath);
+    const changed = normalizePath(absolutePath);
+    const carried = new Set<string>();
+    for (const [root, state] of this._states) {
+      if (relativeTo(changed, root) !== undefined || relativeTo(root, changed) !== undefined) {
+        clearTimeout(state.persistTimer);
+        this._states.delete(root);
+        if (carry && this._carry(root, state)) {
+          carried.add(root);
+        }
+      }
+    }
+    for (const [root, stored] of this._stored) {
+      if (relativeTo(changed, root) !== undefined && !carried.has(root) && !stored.carried) {
+        this._stored.delete(root);
+        this._peeking.delete(root);
+      }
+    }
+    for (const root of this._expected.keys()) {
+      if (relativeTo(changed, root) !== undefined) {
+        this._expected.delete(root);
+      }
+    }
+    /* The root no longer reads the same bytes: its write is not landed there, and nothing waits on it. */
+    for (const root of this._landing.keys()) {
+      if (relativeTo(changed, root) !== undefined) {
+        this._landing.delete(root);
+      }
+    }
+    this._noteLanding();
+    this._undeclare(changed, carried);
+  }
+
+  /*
+   * A root that moved is no longer what the revision layer declared: what waited answers now, a root still mounted
+   * is unknown again and held again when it is configured, and an unmounted one is no revision root.
+   */
+  private _undeclare(changed: string, carried: ReadonlySet<string>): void {
+    this.releaseDeclaration(changed);
+    for (const root of this._settled) {
+      if (relativeTo(changed, root) !== undefined) {
+        this._settled.delete(root);
+      }
+    }
+    const mounted = new Set(this._options.mountPrefixes?.() ?? []);
+    for (const root of this._declaration.keys()) {
+      if (relativeTo(changed, root) !== undefined && !carried.has(root)) {
+        if (mounted.has(root)) {
+          this._declaration.set(root, 'unknown');
+        } else {
+          this._declaration.delete(root);
+        }
+      }
+    }
   }
 
   /*
@@ -1936,6 +2045,10 @@ export class ProjectIndexes {
     const resolution = this._resolve(key);
     if (resolution.persist === undefined) {
       return 'skipped';
+    }
+    const aborts = this._writeAborts.get(key);
+    if (aborts !== undefined) {
+      aborts.at = { provider: resolution.provider, path: resolution.path };
     }
     /* A snapshot claims every notice its vector names: re-observe what those
      * notices left unknown first, so it never stores a view older than its vector.

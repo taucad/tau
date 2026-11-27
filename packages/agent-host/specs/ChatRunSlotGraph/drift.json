@@ -132,8 +132,8 @@
     "steer"
   ],
   "specs": {
-    "ChatRunSlot.tla": "4280389904f2a0925ac140d98ec7e50f6934434334f186ffd37ef674d1b5f64b",
-    "ChatRunSlotGraph.tla": "8e0ead5432b435e03bfec31863999214835040bccdc52f96928aba79f5d84a81"
+    "ChatRunSlot.tla": "21a0ad97c45ff9ebe17405c27753cbe9a4b1a87766deab8643f4b7b1a9f56dc1",
+    "ChatRunSlotGraph.tla": "e1ce4d53d36351caeb4c29f5dea5276dad5da76ba707b394bdee16cbdc2e9aff"
   },
   "tables": {},
   "versions": {

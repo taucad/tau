@@ -43,7 +43,7 @@ import type { MarkAnswer, PendingObject, SettledFile } from '#pending-content.js
 import { importFactsMaximumBytes, importFactsPath, parseImportFacts, verifiedImportFacts } from '#importer/facts.js';
 
 /** Reserved root paths no index ever holds (I9): its own snapshot, and import staging. @public */
-export const reservedIndexPaths: readonly string[] = Object.freeze([projectIndexDirectory, '.tau-staging']);
+export const reservedIndexPaths: readonly string[] = Object.freeze([projectIndexDirectory, '.tau/staging']);
 
 /**
  * Whether a root-relative path is one of the {@link reservedIndexPaths} or lies under one.

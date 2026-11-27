@@ -1,7 +1,8 @@
 // Two native kernel packages for the store tests, in a module of their own: a reported deployment is re-imported by
 // its `entry`, which is this module's URL. One has Linux and macOS variants and a seal step; one is macOS only.
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import type { ClosureLaunch } from '@taucad/runtime/preparation/node';
 import { z } from 'zod';
@@ -10,6 +11,10 @@ import { defineNativeKernelDeployment } from '#native-kernel-adopter.js';
 
 /** The URL every fixture deployment names as its entry. */
 export const fixtureUrl = import.meta.url;
+
+/* Absolute on this host: a drive-less `file:///packages/…` is no absolute path on Windows. */
+const packageRootOf = (name: string): string => new URL(`packages/${name}/`, pathToFileURL(resolve('/'))).href;
+export const voxelPackageRoot = packageRootOf('voxel');
 
 const dependencyFile = (name: string, byteLength: number) => ({
   name,
@@ -53,7 +58,7 @@ export const engineNative = defineNativeKernelDeployment({
   ecosystem: 'none',
   manifest: engineManifest,
   moduleUrl: import.meta.url,
-  packageRoot: 'file:///packages/engine/',
+  packageRoot: packageRootOf('engine'),
   optionsSchema: options,
   optionsFromClosure,
   seal,
@@ -64,7 +69,7 @@ export const voxelNative = defineNativeKernelDeployment({
   ecosystem: 'nuget',
   manifest: voxelManifest,
   moduleUrl: import.meta.url,
-  packageRoot: 'file:///packages/voxel/',
+  packageRoot: voxelPackageRoot,
   optionsSchema: options,
   optionsFromClosure,
   launchSet: (files) => files.map(({ path }) => path),

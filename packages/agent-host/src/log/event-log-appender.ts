@@ -1,4 +1,5 @@
 import { EventLogError } from '#log/event-log-error.js';
+import { hostTimingNow, recordHostTiming } from '#timing.js';
 import { parseLogEvent } from '#log/event-schema.js';
 import { createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
@@ -1037,7 +1038,12 @@ export const createEventLogAppender = async (
       return { appended: false, endCursor: events.length };
     }
     const bytes = serializeLogEventBytes(event, needsSeparator);
+    /* WP-00: one row's fenced write; for a single append it includes the flush, in a batch the flush is measured once. */
+    const writeStarted = hostTimingNow();
     await write(bytes);
+    if (writeStarted !== undefined) {
+      recordHostTiming('log-write', writeStarted, { type: event.type, bytes: bytes.byteLength });
+    }
     term.commit();
     transition.commit();
     /* Rebuilt from the log when next needed, with this row. */
@@ -1093,7 +1099,11 @@ export const createEventLogAppender = async (
   const flushOnce = async (): Promise<void> => {
     const upTo = written;
     try {
+      const syncStarted = hostTimingNow();
       await storage.sync!();
+      if (syncStarted !== undefined) {
+        recordHostTiming('log-flush', syncStarted, { rows: upTo - synced });
+      }
       synced = Math.max(synced, upTo);
     } catch (syncError) {
       /* The rows are in this appender's view but their bytes may not be durable: nothing more is written here. A held

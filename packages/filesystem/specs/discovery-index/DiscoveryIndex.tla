@@ -110,6 +110,9 @@
 \* FW4 re-verification (2026-11-27): a call releases into the lane that admitted it, the sweep's pre-lock wait is the
 \* discovery lane's and maps its failure to `unknown`, aging restarts after a quiet period, and a hung root's probes
 \* back off to one per 10 minutes. Timing only: every action and verdict is unchanged.
+\* Staging path (2026-11-27): `project-directories.ts` names the storage root's import staging `.tau/staging/` instead
+\* of `.tau-staging/` (taucad/tau#2909), in a comment only. Discovery still skips every dot-named root entry; no action
+\* or verdict changes.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

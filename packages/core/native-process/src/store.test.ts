@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 import type * as PreparationNode from '@taucad/runtime/preparation/node';
@@ -10,7 +10,15 @@ import { readManagedPreparation } from '@taucad/runtime/preparation/node';
 import type { ClosureLaunch } from '@taucad/runtime/preparation/node';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { withNativeDeployment } from '#native-kernel-adopter.js';
-import { deployments, engineNative, fixtureUrl, seal, voxelManifest, voxelNative } from '#store.fixture.js';
+import {
+  deployments,
+  engineNative,
+  fixtureUrl,
+  seal,
+  voxelManifest,
+  voxelNative,
+  voxelPackageRoot,
+} from '#store.fixture.js';
 import {
   bindNativeKernel,
   defaultDependencyStore,
@@ -100,7 +108,7 @@ describe('native deployments of a resolved runtime', () => {
       {
         package: '@acme/voxel',
         entry: fixtureUrl,
-        packageRoot: 'file:///packages/voxel/',
+        packageRoot: voxelPackageRoot,
         manifest: voxelManifest,
         kernels: ['voxel'],
       },
@@ -119,6 +127,15 @@ describe('native deployments of a resolved runtime', () => {
     );
   });
 });
+
+/*
+ * Native kernels do not run on Windows by design until Tau has a Windows sandbox (lane R7): the preparation host
+ * blocks every native variant there, whatever `TAU_DEPENDENCY_TARGET` names (`preparation-host.ts`). Measured on the
+ * Windows unit lane (run 44000873014): the engine answered `unsupported-target` and binding refused with
+ * `KERNEL_CAPABILITY_MISSING`. The two cases that need a host able to run one are gated on this; the Windows case below
+ * asserts what Windows answers instead.
+ */
+const nativeKernelsRunHere = process.platform !== 'win32';
 
 describe('native kernels from the dependency store', () => {
   let directory: string;
@@ -145,7 +162,7 @@ describe('native kernels from the dependency store', () => {
 
     expect([engine?.package, voxel?.package]).toEqual(['@acme/engine', '@acme/voxel']);
     expect(engine?.deployment.kernels).toEqual({ engine: { requires: ['runtime'], extensions: ['eng'] } });
-    expect(engine?.directory).toBe(join('/', 'packages', 'engine'));
+    expect(engine?.directory).toBe(resolve('/packages/engine'));
     expect(engine?.seal).toBe(seal);
     expect(voxel).not.toHaveProperty('seal');
     expect(engine?.launchSet?.([])).toEqual(['bin/worker']);
@@ -182,30 +199,33 @@ describe('native kernels from the dependency store', () => {
     });
   });
 
-  it('should inspect every declared kernel on a cold store, with the bytes preparing downloads, downloading nothing', async () => {
-    const managed = readManagedPreparation({ TAU_DEPENDENCY_TARGET: 'linux-x64-glibc' });
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+  it.runIf(nativeKernelsRunHere)(
+    'should inspect every declared kernel on a cold store, with the bytes preparing downloads, downloading nothing',
+    async () => {
+      const managed = readManagedPreparation({ TAU_DEPENDENCY_TARGET: 'linux-x64-glibc' });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
-    const inspection = await inspectNativeKernels({ deployments, store, managed });
+      const inspection = await inspectNativeKernels({ deployments, store, managed });
 
-    expect(nativeInspectionSchema.parse(structuredClone(inspection))).toMatchObject([
-      {
-        package: '@acme/engine',
-        kernel: 'engine',
-        extensions: ['eng'],
-        answer: { status: 'unavailable', reason: 'not-prepared', byteLength: 3000 },
-      },
-      {
-        package: '@acme/voxel',
-        kernel: 'voxel',
-        extensions: ['vox'],
-        answer: { status: 'unavailable', reason: 'unsupported-target', byteLength: 0 },
-      },
-    ]);
-    expect(inspection[1]?.answer).toHaveProperty('detail', expect.stringContaining('@acme/voxel'));
-    expect(fetchSpy).not.toHaveBeenCalled();
-    await expect(storeEntries()).resolves.toEqual([]);
-  });
+      expect(nativeInspectionSchema.parse(structuredClone(inspection))).toMatchObject([
+        {
+          package: '@acme/engine',
+          kernel: 'engine',
+          extensions: ['eng'],
+          answer: { status: 'unavailable', reason: 'not-prepared', byteLength: 3000 },
+        },
+        {
+          package: '@acme/voxel',
+          kernel: 'voxel',
+          extensions: ['vox'],
+          answer: { status: 'unavailable', reason: 'unsupported-target', byteLength: 0 },
+        },
+      ]);
+      expect(inspection[1]?.answer).toHaveProperty('detail', expect.stringContaining('@acme/voxel'));
+      expect(fetchSpy).not.toHaveBeenCalled();
+      await expect(storeEntries()).resolves.toEqual([]);
+    },
+  );
 
   it('should read the store by its real path when the store is reached through a link', async () => {
     /* As under macOS's `/tmp` (a link to `/private/tmp`), whose spelling a sandboxed worker cannot start through. */
@@ -230,33 +250,67 @@ describe('native kernels from the dependency store', () => {
     expect(new Set(opened.stores)).toEqual(new Set([real]));
   });
 
-  it('should refuse to bind an unprepared kernel with KERNEL_NOT_PREPARED naming the call that prepares it', async () => {
-    vi.stubEnv('TAU_CONFIG_DIR', directory);
-    vi.stubEnv('TAU_DEPENDENCY_TARGET', 'linux-x64-glibc');
+  it.runIf(!nativeKernelsRunHere)(
+    'should answer every native kernel unsupported on Windows and refuse to bind one, preparing nothing',
+    async () => {
+      const managed = readManagedPreparation({ TAU_DEPENDENCY_TARGET: 'linux-x64-glibc' });
+      const inspection = await inspectNativeKernels({ deployments, store, managed });
 
-    const binding = bindNativeKernel({ deployment: engineNative, kernel: 'engine', options: { requestTimeout: 0 } });
+      expect(nativeInspectionSchema.parse(structuredClone(inspection))).toMatchObject([
+        { package: '@acme/engine', answer: { status: 'unavailable', reason: 'unsupported-target', byteLength: 0 } },
+        { package: '@acme/voxel', answer: { status: 'unavailable', reason: 'unsupported-target', byteLength: 0 } },
+      ]);
+      expect(inspection[0]?.answer).toHaveProperty('detail', expect.stringContaining('do not run on Windows'));
 
-    await expect(binding).rejects.toThrow(UnpreparedKernelError);
-    await expect(binding).rejects.toMatchObject({
-      issues: [
-        {
-          code: 'KERNEL_NOT_PREPARED',
-          type: 'kernel',
-          severity: 'error',
-          message:
-            'engine handles ".eng" but its runtime (0 MB) is not prepared on this machine. Call prepare_kernel with { "kernel": "engine" } (or run `tau prepare engine`), then evaluate again.',
-          details: {
-            kernel: 'engine',
-            package: '@acme/engine',
-            extension: '.eng',
-            byteLength: 3000,
-            prepare: { tool: 'prepare_kernel', input: { kernel: 'engine' } },
+      vi.stubEnv('TAU_CONFIG_DIR', directory);
+      vi.stubEnv('TAU_DEPENDENCY_TARGET', 'linux-x64-glibc');
+      const binding = bindNativeKernel({ deployment: engineNative, kernel: 'engine', options: { requestTimeout: 0 } });
+      await expect(binding).rejects.toThrow(UnpreparedKernelError);
+      await expect(binding).rejects.toMatchObject({
+        issues: [
+          {
+            code: 'KERNEL_CAPABILITY_MISSING',
+            details: { kernel: 'engine', package: '@acme/engine', extension: '.eng' },
           },
-        },
-      ],
-    });
-    await expect(storeEntries()).resolves.toEqual([]);
-  });
+        ],
+      });
+      await expect(binding).rejects.toSatisfy((error: UnpreparedKernelError) =>
+        error.issues.some(({ message }) => message.includes('Native kernels do not run on Windows yet')),
+      );
+      await expect(storeEntries()).resolves.toEqual([]);
+    },
+  );
+
+  it.runIf(nativeKernelsRunHere)(
+    'should refuse to bind an unprepared kernel with KERNEL_NOT_PREPARED naming the call that prepares it',
+    async () => {
+      vi.stubEnv('TAU_CONFIG_DIR', directory);
+      vi.stubEnv('TAU_DEPENDENCY_TARGET', 'linux-x64-glibc');
+
+      const binding = bindNativeKernel({ deployment: engineNative, kernel: 'engine', options: { requestTimeout: 0 } });
+
+      await expect(binding).rejects.toThrow(UnpreparedKernelError);
+      await expect(binding).rejects.toMatchObject({
+        issues: [
+          {
+            code: 'KERNEL_NOT_PREPARED',
+            type: 'kernel',
+            severity: 'error',
+            message:
+              'engine handles ".eng" but its runtime (0 MB) is not prepared on this machine. Call prepare_kernel with { "kernel": "engine" } (or run `tau prepare engine`), then evaluate again.',
+            details: {
+              kernel: 'engine',
+              package: '@acme/engine',
+              extension: '.eng',
+              byteLength: 3000,
+              prepare: { tool: 'prepare_kernel', input: { kernel: 'engine' } },
+            },
+          },
+        ],
+      });
+      await expect(storeEntries()).resolves.toEqual([]);
+    },
+  );
 
   it('should refuse a kernel with no runtime for the host with KERNEL_CAPABILITY_MISSING, or a host wording', async () => {
     installNativeClosureResolver(
@@ -305,7 +359,7 @@ describe('native kernels from the dependency store', () => {
 
     expect(bound).toEqual({
       options: {
-        executable: '/store/closures/sha256/abc/bin/worker',
+        executable: join('/store/closures/sha256/abc', 'bin', 'worker'),
         runtimePath: '/store/closures/sha256/abc',
         requestTimeout: 1000,
         maxArtifactBytes: 64,

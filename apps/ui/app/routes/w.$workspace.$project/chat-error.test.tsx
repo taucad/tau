@@ -1290,7 +1290,8 @@ describe('ChatError', () => {
       ),
     });
 
-    expect(screen.getByText('This turn needs 13 more credits on openai-gpt-6-astra.')).toBeInTheDocument();
+    expect(screen.getByText('This message needs 13 more credits on openai-gpt-6-astra.')).toBeInTheDocument();
+    expect(screen.getByText('Add credits to send this')).toBeInTheDocument();
     expect(screen.queryByText(/Tau paused this turn/iu)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
   });
@@ -1330,7 +1331,7 @@ describe('ChatError', () => {
     for (const [first, second] of snapshots) {
       expect(Object.is(first, second)).toBe(true);
     }
-    expect(screen.getByText('You’re out of credits')).toBeInTheDocument();
+    expect(screen.getByText('Add credits to send this')).toBeInTheDocument();
   });
 
   /* The funded boundary's own 402 copy is credit-denominated and reaches the
@@ -1354,7 +1355,7 @@ describe('ChatError', () => {
       ),
     });
 
-    expect(screen.getByText('You’re out of credits')).toBeInTheDocument();
+    expect(screen.getByText('Add credits to send this')).toBeInTheDocument();
     expect(screen.getByText(creditMessage)).toBeInTheDocument();
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
     expect(screen.queryByText('Processing error')).not.toBeInTheDocument();
@@ -1401,7 +1402,7 @@ describe('ChatError', () => {
       ),
     });
 
-    expect(screen.getByText('You’re out of credits')).toBeInTheDocument();
+    expect(screen.getByText('Add credits to send this')).toBeInTheDocument();
   });
 
   it('renders decoded Google provider errors instead of opaque byte lists', () => {

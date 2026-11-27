@@ -58,6 +58,7 @@
     "./store/commit": "./src/store/commit.ts",
     "./store/errors": "./src/store/errors.ts",
     "./store/fence": "./src/store/fence.ts",
+    "./store/history-audit": "./src/store/history-audit.ts",
     "./store/lease": "./src/store/lease.ts",
     "./store/limits": "./src/store/limits.ts",
     "./store/listing-key": "./src/store/listing-key.ts",
@@ -93,6 +94,7 @@
     "@taucad/api-observability": "workspace:*",
     "@taucad/api-redis": "workspace:*",
     "@taucad/billing": "workspace:*",
+    "@taucad/revisions": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "ioredis": "^5.11.1"
   },

@@ -15,6 +15,13 @@ import { repositoryLocator } from '@taucad/api-git-core/store/locator';
 import { S3RepositoryStore } from '@taucad/api-git-core/store/s3-repository-store';
 import { dueCondition, lfsRetirementWindowMilliseconds, retireDueLfsObjects } from '#api/git/lfs-retirement.js';
 import { markOrphanedLfsObjects } from '#api/git/lfs-orphans.js';
+import { auditProvenance } from '#api/git/provenance-audit.js';
+import type { AuditTarget } from '#api/git/provenance-audit.js';
+import { hydrateAdmittedLease } from '@taucad/api-git-core/admission/admitted-lease';
+import { LeaseAdmission } from '@taucad/api-git-core/admission/lease-admission';
+import { buffer } from 'node:stream/consumers';
+import { statfs } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { collectZeroCountBlobs } from '@taucad/api-git-mirror/maintenance/blob-collector';
 import { liveOwnerIds, purgeTombstonedTenants } from '@taucad/api-git-mirror/maintenance/purge';
 import { assertProjectActive } from '@taucad/api-database/project-lifecycle';
@@ -130,6 +137,18 @@ const usage = `Usage: revisions-maintenance <command>
       of its repository still does not reach. One read-only lease per project
       that has a candidate; --dry-run lists the candidates, marks nothing and
       hydrates nothing.
+
+  audit-provenance [--project <id>]
+      Read-only audit before the attestation backfill (cloud backup admission
+      WP11). One line per active project with a committed push: its history by
+      record shape (git, tau/2, tau/other), Tau-written, pseudonymous and
+      account-naming commits, its push records, those that counted refs they
+      did not list, listed tips no longer held, the commits no listed branch or
+      tag tip reaches (unlisted: the backfill marks them inferred) and its
+      finalized LFS objects live and marked. Then one summary line with the
+      totals and the orphaned LFS objects of projects whose push never
+      committed. One read-only lease at a time; nothing is written. Output
+      carries project ids and counts only. Exits 1 when any repository failed.
 
   lfs-integrity [--concurrency <n>]
       Read-only inventory of stored LFS checksums. Scope: the reservation rows
@@ -681,6 +700,54 @@ async function main(): Promise<void> {
             await writeLine(JSON.stringify(outcome));
           }
         });
+        break;
+      }
+      case 'audit-provenance': {
+        const store = new S3RepositoryStore(driver);
+        const admission = new LeaseAdmission({
+          readFreeBytes: async () => {
+            const { bavail, bsize } = await statfs(tmpdir());
+            return bavail * bsize;
+          },
+        });
+        const locatorOf = (target: AuditTarget) => {
+          if (target.storageAccountId !== null && target.storageAccountId !== driver.account.id) {
+            throw new Error('ProjectInAnotherStorageAccount');
+          }
+          return repositoryLocator({
+            ownerId: target.ownerId,
+            projectId: target.projectId,
+            ...(target.storageAccountId === null ? {} : { accountId: target.storageAccountId }),
+          });
+        };
+        const projectId = optionalOperand(args, 'project');
+        for await (const line of auditProvenance(
+          {
+            database,
+            hydrate: async (target) => {
+              const admitted = await hydrateAdmittedLease({
+                store,
+                locator: locatorOf(target),
+                ownerId: target.ownerId,
+                admission,
+              });
+              return {
+                directory: admitted.lease.directory,
+                manifest: admitted.lease.manifest,
+                release: async () => admitted.release(),
+              };
+            },
+            readSegment: async (target, key) =>
+              new Uint8Array(await buffer(await store.getObject(locatorOf(target), key))),
+          },
+          projectId === undefined ? {} : { projectId },
+        )) {
+          // oxlint-disable-next-line no-await-in-loop -- backpressure bounds audit output
+          await writeLine(JSON.stringify({ event: 'revisions_maintenance.provenance_audit', ...line }));
+          if (line.kind === 'summary' && line.failed > 0) {
+            process.exitCode = 1;
+          }
+        }
         break;
       }
       case 'lfs-integrity': {

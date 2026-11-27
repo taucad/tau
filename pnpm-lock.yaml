@@ -2846,6 +2846,9 @@ importers:
       '@taucad/billing':
         specifier: workspace:*
         version: link:../billing
+      '@taucad/revisions':
+        specifier: workspace:*
+        version: link:../../../packages/revisions
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@4.1.1)

@@ -6,7 +6,7 @@
 // EVAL(geospec-first-testing): pending benchmark — replaces legacy requirement-file editing with GeoSpec files (`*.geospec.ts` / `*.geospec.js`) and browser-runner `test_model`. Validates the agent creates executable GeoSpec tests before implementation and no longer attempts legacy test-file edits.
 // EVAL(diagnose-before-switching): pending benchmark-2026-04-20 — replaces "stop after 1-2 retries" with claude-code's diagnose-before-switching guidance in <error_handling>. Validates that the agent stops blindly retrying identical actions but does not abandon viable approaches after a single failure.
 // EVAL(faithful-reporting): pending benchmark-2026-04-20 — adds faithful-reporting bullet to <constraints>. Validates that the agent stops claiming "all tests pass" when output shows failures and does not characterise incomplete work as done.
-// EVAL(step-economy): pending staging A/B (chat performance WP-16) — <tool_usage_policy> asks for every file a step needs in one response, and <task_tracking> asks for list updates beside the next tool call. Baseline 2026-11-27 on staging, "40 mm cube with a 10 mm hole": google-gemini-4-hydrogen 7 model requests (model and GeoSpec written in separate steps), anthropic-claude-haiku-5.5 8, openai-gpt-6-luna 10 (two steps that only called `update_todos`; files one per step). Reads were already parallel on all three. The other three <tool_usage_policy> bullets were compressed, same instructions, to keep the core budget. Validates fewer steps per turn with the same test pass and screenshot.
+// EVAL(step-economy): measured 2026-11-27 on staging (chat performance WP-16), "40 mm cube with a 10 mm hole", model requests per turn before → after a <tool_usage_policy> line asking for every file a step needs in one response and a <task_tracking> clause asking for list updates beside the next tool call: anthropic-claude-haiku-5.5 8 → 6, 6; google-gemini-4-hydrogen 7 → 8, 7 (files still one per response, and the turn began calling `update_todos`); openai-gpt-6-luna 10 → 13, 14 (still sent `update_todos` alone). Not adopted. Reads were already parallel on all three, so batched read tools would not help either; what remains is structural (a task-list update as its own round trip, and separate evaluate, test and screenshot calls).
 // EVAL(tool-usage-policy): pending benchmark-2026-04-20 — new <tool_usage_policy> static section codifies parallel-vs-sequential calls and bans placeholder values. Validates fewer wasted sequential reads and zero placeholder-arg tool calls.
 // EVAL(screenshot-cap): pending benchmark-2026-04-20 — caps screenshots at 2 per inspection cycle and bans chaining a single screenshot after multi_angle in <visual_inspection>. Validates lower screenshot tool-call counts per task.
 // EVAL(top-level-export-positive): pending benchmark-2026-04-20 — replaces the OpenSCAD-only "do not add module-only library files" warning with a kernel-aware <test_requirements> directive that pushes the agent to ADD a top-level export (via KernelConfig.topLevelExportExample) rather than skip a test. The block now states the requirement once with a single canonical example; the imperative "Add ..." recovery sentence is reserved for the test_model tool error so the system prompt no longer dual-states. Validates that the agent patches the source file with edit_file instead of dropping GeoSpec coverage. Follow-up 2026-04-21: removed the test_model tool description pre-warning that duplicated this block, single-source-of-truth fix.
@@ -321,10 +321,10 @@ Check \`<project_layout>\` for existing files. Read before editing.${tddNote}
     name: 'tool_usage_policy',
     cacheBreak: false,
     compute: () => `<tool_usage_policy>
-- Make independent tool calls in parallel in one response; run a call that depends on another's result after it. Write every file a step needs (a model and its GeoSpec) in one response.
-- Never use placeholders or guess missing tool parameters; read the source for an unknown value first.
-- Read files in \`offset\` + \`limit\` ranges where you can; a file over 2000 lines requires them.
-- In dense generated code (declarations, lockfiles, bundles), \`grep\` with a narrow regex and a small \`headLimit\`, then \`read_file\` only the relevant ranges.
+- Make independent tool calls in parallel in one response; run a call that depends on another's result after it.
+- Never use placeholders or guess missing parameters in tool calls. If a required value is unknown, read the source first.
+- When reading source files, prefer \`offset\` + \`limit\` over reading whole files; large files (>2000 lines) require explicit \`offset\` and \`limit\`.
+- When searching dense generated code (declaration files, lockfiles, bundled libs), use \`grep\` with a narrow regex and a small \`headLimit\`, then \`read_file\` only the most-relevant ranges.
 </tool_usage_policy>`,
   });
 
@@ -478,7 +478,7 @@ Use \`${toolName.arrangeWorkbench}\` when the person asks to arrange views, open
     name: 'task_tracking',
     cacheBreak: false,
     compute: () => `<task_tracking>
-For work with three or more steps, keep the person's task list at \`.tau/chats/<chatId>/todo.yaml\` with \`${toolName.updateTodos}\`: write it first, keep one item \`in_progress\`, mark each \`done\` as it finishes, beside your next tool call. Short, outcome-shaped titles; it is watched, not a scratchpad.
+For work with three or more steps, keep the person's task list at \`.tau/chats/<chatId>/todo.yaml\` with \`${toolName.updateTodos}\`: write it first, keep one item \`in_progress\`, mark each \`done\` as it finishes. Short, outcome-shaped titles; it is watched, not a scratchpad.
 </task_tracking>`,
   });
 

@@ -71,6 +71,8 @@ type RootIndex<Reading extends IndexedReading> = {
   readonly entries: Map<string, IndexedDirectory<Reading>>;
   /** Directories with evidence since they were read. */
   readonly dirty: Set<string>;
+  /** Dirty only because their reading did not fit the budget, with no evidence since: read again on every pass. */
+  readonly unretained: Set<string>;
   /** Each directory's clock reading of its last evidence. */
   readonly evidenceAt: Map<string, number>;
   /** This authority's writes in flight, per directory. */
@@ -90,6 +92,8 @@ export type IndexedRootView = Readonly<{
   namesListed: boolean;
   names: readonly string[];
   dirty: readonly string[];
+  /** The dirty directories with no evidence, dirty only because the budget did not retain them (FW4 review m8). */
+  unretained: readonly string[];
   validatedAt: number;
 }>;
 
@@ -162,6 +166,7 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
         names: new Set(),
         entries: new Map(),
         dirty: new Set(),
+        unretained: new Set(),
         evidenceAt: new Map(),
         writes: new Map(),
         nameWrites: 0,
@@ -204,6 +209,7 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
       namesListed: root.namesListed,
       names: [...root.names].sort(),
       dirty: [...root.dirty].sort(),
+      unretained: [...root.unretained].sort(),
       validatedAt: root.validatedAt,
     };
   }
@@ -299,6 +305,7 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
       root.names.clear();
       root.namesListed = false;
       root.dirty.clear();
+      root.unretained.clear();
       this._timings.count('discovery.unretained', names.length);
       return false;
     }
@@ -352,6 +359,7 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
     if (this._bytes + bytes > this._budgetBytes) {
       root.entries.delete(name);
       root.dirty.add(name);
+      root.unretained.add(name);
       this._timings.count('discovery.unretained');
       this._gauge();
       return { status: 'dirty' };
@@ -359,6 +367,7 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
     this._bytes += bytes;
     root.entries.set(name, previous !== undefined && !changed ? previous : { reading, bytes });
     root.dirty.delete(name);
+    root.unretained.delete(name);
     /* The directory's counter never falls: lowered, it would let a slower reader that took an older value install the
      * older bytes it read (review M1). A reading that changed moves it, so an overlapping read that captured before
      * this one is refused even when no evidence arrived between them. */
@@ -672,6 +681,7 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
 
   private _dirty(root: RootIndex<Reading>, name: string): void {
     root.dirty.add(name);
+    root.unretained.delete(name);
     root.evidenceAt.set(name, this._tick());
     /* Counters never fall, so their memory is bounded another way: past twice the root's entries, every counter rises
      * to one new floor, which refuses every read in flight on the root and keeps every clean entry. */
@@ -694,6 +704,7 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
     root.namesListed = false;
     root.names.clear();
     root.dirty.clear();
+    root.unretained.clear();
     root.evidenceAt.clear();
     root.validatedAt = Number.NEGATIVE_INFINITY;
     root.auditCursor = 0;
@@ -704,6 +715,7 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
     root.entries.delete(name);
     root.names.delete(name);
     root.dirty.delete(name);
+    root.unretained.delete(name);
     this._gauge();
   }
 

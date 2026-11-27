@@ -7,6 +7,9 @@ import { useBillingBinding } from '@taucad/billing-ui/components/billing/use-bil
 import { SettingsGroup } from '@taucad/settings-ui/components/settings/settings-item';
 import { EmailDeliverabilityBanner } from '#components/auth/settings/account/email-deliverability-banner.js';
 import { authClient } from '#lib/auth-client.js';
+import { WebHandOffRow } from '@taucad/settings-ui/components/settings/web-hand-off-row';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { cloudWebSettingsUrl } from '#cloud/cloud-web-settings-url.js';
 
 /** Account closure's last step deletes the signed-in user through the app's Better Auth client. */
 const accountClosureServices: AccountClosureServices = {
@@ -14,13 +17,31 @@ const accountClosureServices: AccountClosureServices = {
 };
 
 export function CloudBillingSettings(): React.JSX.Element {
-  return <BillingSettings accountNotice={<EmailDeliverabilityBanner />} />;
+  return (
+    <BillingSettings
+      accountNotice={<EmailDeliverabilityBanner />}
+      webBillingUrl={isDesktopTarget() ? cloudWebSettingsUrl('billing') : undefined}
+    />
+  );
 }
 
 /** Account closure for a signed-in owner; it waits on payments the Add credits dialog can finish. */
 export function CloudAccountClosure(): React.JSX.Element | undefined {
   const binding = useBillingBinding();
   const [isTopupOpen, setIsTopupOpen] = useState(false);
+  if (isDesktopTarget()) {
+    // Closing the account needs Tau on the web (desktop sign-in ruling D1=A).
+    return (
+      <SettingsGroup>
+        <WebHandOffRow
+          settingId='close-account'
+          title='Close account'
+          description='Close your Tau account on Tau’s website.'
+          href={cloudWebSettingsUrl('data-controls', 'close-account')}
+        />
+      </SettingsGroup>
+    );
+  }
   if (binding === undefined) {
     return undefined;
   }

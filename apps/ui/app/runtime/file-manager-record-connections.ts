@@ -8,12 +8,21 @@
  */
 import type { FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import { createRootedContentClient } from '@taucad/fs-client/rooted-content-client';
-import type { RootedContentOwner } from '@taucad/fs-client/rooted-content-client';
+import type { RootedConnectionOptions, RootedContentOwner } from '@taucad/fs-client/rooted-content-client';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
-/** How a record connection is opened: the file manager's bridge opener, or the scope's fallback. @public */
-export type RecordBridgeOpener = (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
+/**
+ * How a record connection is opened: the file manager's bridge opener, or the scope's fallback; `options.lane` is the
+ * lane its reads run in (FW4).
+ *
+ * @public
+ */
+export type RecordBridgeOpener = (
+  root: string,
+  consumer: RootedBridgeConsumer,
+  options?: RootedConnectionOptions,
+) => FileSystemBridgeConnection;
 
 /** One file manager's record connections. @public */
 export type RecordConnections = Readonly<{
@@ -35,13 +44,16 @@ function recordConnectionsForIncarnation(
   const ownerFor = (opener: RecordBridgeOpener | undefined): RootedContentOwner<RootedBridgeConsumer> => {
     if (!owner || (previous !== undefined && opener !== previous)) {
       owner = createRootedContentClient({
-        open: async (root, consumer: RootedBridgeConsumer) => {
+        open: async (root, consumer: RootedBridgeConsumer, options) => {
           await ready();
           const { createFileSystemBridgeProxy } = await loadCode(async () => {
             const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
             return { createFileSystemBridgeProxy };
           });
-          const proxy = createFileSystemBridgeProxy((opener ?? fallback)(root, consumer));
+          const open = opener ?? fallback;
+          const proxy = createFileSystemBridgeProxy(
+            options === undefined ? open(root, consumer) : open(root, consumer, options),
+          );
           try {
             await proxy.ready;
           } catch (error) {

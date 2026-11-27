@@ -86,6 +86,10 @@
 (* approval), "opening" (M1's opening and epochs), "stale" (a frozen       *)
 (* leader, relinquish), "placement" (W8 per attempt), "stop" (tools and    *)
 (* the stop bound), "close", "gateway" (an abstract model gateway).        *)
+(* "committed" is the witness knob for the ending's drain: M1 decides     *)
+(* which external requests to resolve from the durable prefix only, so a   *)
+(* request whose batch is ordered but not yet flushed outlives its run     *)
+(* (NoPendingAfterEnd).                                                    *)
 (* Without "opening" the orphan is abandoned by the draft's attach, which  *)
 (* over-approximates M1's opening: moving recovery into the opening only   *)
 (* removes behaviours, so the draft's safety results carry over.           *)
@@ -183,6 +187,10 @@ OthersClosed(r) == \A o \in Runs \ {r} : ~Open(o)
 ChatFree == \A r \in Runs : ~Open(r)
 HasRow(t, r) == \E i \in DOMAIN log : log[i].t = t /\ log[i].r = r
 Pending(r) == HasRow("req", r) /\ ~HasRow("resolved", r) /\ ~HasRow("recovered", r)
+HasRowIn(t, r, n) == \E i \in 1..n : log[i].t = t /\ log[i].r = r
+\* What a decider that reads only the durable prefix sees pending ("committed").
+DurablyPending(r) ==
+    HasRowIn("req", r, durable) /\ ~HasRowIn("resolved", r, durable) /\ ~HasRowIn("recovered", r, durable)
 Wrote(k) == \E i \in DOMAIN log : log[i].k = k
 \* A native pause ends its attempt; an external run's pause is the same attempt waiting.
 EndingRow(i) == log[i].t \in Terminals \/ (log[i].t = "paused" /\ log[i].r = T)
@@ -466,14 +474,16 @@ agentEnded(r) ==   \* the driver reports its outcome; M1 is the only lifecycle d
            outs == IF r = T /\ Has("gateway")
                      THEN (IF callState = "idle" /\ StepDone THEN {"completed"} ELSE {"failed"})
                      ELSE {"completed", "failed"}
-           prefix == IF r = X /\ Pending(X) THEN <<H("resolved", X, a, None, FALSE, 0)>> ELSE <<>>
+           \* Every request whose rows are ordered, durable or not: an unflushed request outlives nothing.
+           drains == IF Has("committed") THEN DurablyPending(X) ELSE Pending(X)
+           prefix == IF r = X /\ drains THEN <<H("resolved", X, a, None, FALSE, 0)>> ELSE <<>>
        IN \E out \in outs :
           /\ PutIf(why = "cancel" \/ (why = "interrupt" /\ SingleDecider),
                   CASE why = "interrupt" /\ SingleDecider ->
                         <<H("req", T, a, Interrupt, TRUE, 0), H("paused", T, a, Interrupt, x, 0)>>
                    [] why = "interrupt" -> <<D("cancelled", T, a, None, x, 0)>>   \* the session's row (L2a D8)
                    [] why = "cancel" -> <<H("cancelled", r, a, Cancel, x, 0)>>
-                   [] why = "close" -> <<H("failed", r, a, None, x, 0)>>          \* RUN_ABANDONED, host close
+                   [] why = "close" -> prefix \o <<H("failed", r, a, None, x, 0)>>   \* RUN_ABANDONED, host close
                    [] OTHER -> prefix \o <<D(out, r, a, None, x, 0)>>)
           /\ answered' = CASE why = "interrupt" /\ SingleDecider -> [answered EXCEPT ![Interrupt] = "applied"]
                            [] why = "cancel" -> [answered EXCEPT ![Cancel] = "applied"]
@@ -933,12 +943,16 @@ ChargeAfterRecordedLoss ==                                                      
 \* W10: once M1 serves, no external request is pending without its driver.
 OrphanApprovalCoded == ~(alive /\ opened /\ Pending(X) /\ X \notin drivers)
 
+\* An ended attempt resolved every request it held, the ones still flushing included.
+NoPendingAfterEnd == \A r \in Runs : Terminal(r) => ~Pending(r)
+
 Safety ==
     /\ ChatSingleRun /\ ReservationHasHolder /\ PayloadDurable /\ AbandonOnlyOrphans
     /\ AtMostOnceEffect /\ AckAfterDurable
     /\ NoTransientTerminal /\ AbandonIsClaim /\ FencedAttempt /\ AckBeforeNextAttempt
     /\ QuiescentAfterAck /\ CutIffExecuted /\ AckAfterTurnRow /\ NoRowAfterEnding
     /\ NothingAfterClose /\ NeverResendKnownAttempt /\ ChargeAfterRecordedLoss /\ OrphanApprovalCoded
+    /\ NoPendingAfterEnd
 
 ----------------------------------------------------------------------------
 \* Liveness under weak fairness of live processes (policy rule 5). Each names its quiescence.

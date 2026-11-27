@@ -148,6 +148,17 @@ describe('an approval nobody answers', () => {
       'the failed lifecycle marker',
       async () => readLog(workspaceRoot, chatId),
     );
+    /* The file shows a batch's rows as they are written, before their flush; the host's index folds them once they are
+     * durable, which a slow flush (Windows) holds back. Nothing is left in that live index either, so the `waiting` map
+     * does not leak: an interrupt the ending missed stays pending for good and times this out. */
+    await until(
+      async () => {
+        const pending = await launcher.pendingInterrupts(runId);
+        return pending.length === 0;
+      },
+      'the host to settle the interrupt',
+      async () => launcher.pendingInterrupts(runId),
+    );
 
     const events = await readLog(workspaceRoot, chatId);
     const interrupts = interruptsOf(events);
@@ -164,8 +175,6 @@ describe('an approval nobody answers', () => {
     expect(events.findIndex((event) => event.type === 'interrupt.recorded' && event.phase === 'resolved')).toBeLessThan(
       events.findIndex((event) => event.type === 'run.lifecycle' && event.state === 'failed'),
     );
-    // Nothing is left in the live index either, so the `waiting` map does not leak.
-    expect(await launcher.pendingInterrupts(runId)).toEqual([]);
   }, 90_000);
 
   it('reaches a terminal state when a cancel arrives with a permission outstanding', async () => {

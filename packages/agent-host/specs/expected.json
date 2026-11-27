@@ -162,6 +162,14 @@
       "kind": "witness",
       "ref": "WP-10 step B (F-3): without the dispatch barrier a request leaves, a crash drops its prepared row, and the retry cannot know the attempt"
     },
+    "ChatRunSlot.pipelined-committed-NoPendingAfterEnd.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoPendingAfterEnd"
+      },
+      "kind": "witness",
+      "ref": "#2398: an ending that drains only the durable prefix leaves an external request pending when the agent dies before the request's batch is flushed"
+    },
     "ChatRunSlot.target-interrupt.cfg": {
       "tier": "pr",
       "expect": "pass",

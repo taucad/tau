@@ -2996,8 +2996,8 @@ describe('authentication, initialize and prompt content', () => {
   }, 30_000);
 
   it("never sends the person block to an external agent, even when the client's system prompt carries one", async () => {
-    /* Only Tau's own agent is told what the person makes and reads. An external agent gets the guidance, skills,
-     * memory and snapshot blocks, never the system prompt, so a client that did put the block there leaks nothing. */
+    /* Only Tau's own agent is told what the person makes and reads. An external agent gets the guidance, skills
+     * and snapshot blocks, never the system prompt, so a client that did put the block there leaks nothing. */
     const harness = await startHarness();
     const person = [
       '<person>',
@@ -3020,13 +3020,14 @@ describe('authentication, initialize and prompt content', () => {
     expect(first).not.toContain('Background about the person');
   }, 60_000);
 
-  it('sends shared ACP guidance once and current CAD context on every prompt, and writes no file', async () => {
+  it('sends shared ACP guidance once and current CAD context on every prompt, never the project AGENTS.md, and writes no file', async () => {
     const harness = await startHarness();
+    const instructions = 'Keep all dimensions in millimetres.';
     const config = {
       systemPrompt: 'You are Tau. The kernel is OpenSCAD.',
       contextPayload: {
         skills: [{ name: 'brep-design', description: 'Design manufacture-ready parts.' }],
-        memory: { 'AGENTS.md': 'Keep all dimensions in millimetres.' },
+        memory: { 'AGENTS.md': instructions },
       },
       snapshot: {
         files: ['main.scad'],
@@ -3052,17 +3053,19 @@ describe('authentication, initialize and prompt content', () => {
     expect(first).not.toContain('tau://system-prompt');
     expect(first).not.toContain('The kernel is OpenSCAD.');
     expect(first).toContain('tau://skills');
-    expect(first).toContain('tau://memory');
-    expect(first).toContain('Keep all dimensions in millimetres.');
     expect(first).toContain('tau://snapshot');
+    /* The agent reads the project's AGENTS.md from its own working directory; Tau does not re-send it. */
+    expect(first).not.toContain('tau://memory');
+    expect(first).not.toContain(instructions);
     /* The snapshot's kernel object (AKS-7) crosses as loose JSON: forwarded as sent, with no reader of its own. */
     expect(first).toContain(JSON.stringify(config.snapshot.kernel).replaceAll('"', String.raw`\"`));
     /* Stable guidance is session-scoped; current project facts accompany each
      * turn so a native→ACP switch cannot leave the vendor on an old snapshot. */
     expect(second).not.toContain('tau://agent-guidance');
     expect(second).toContain('tau://skills');
-    expect(second).toContain('tau://memory');
     expect(second).toContain('tau://snapshot');
+    expect(second).not.toContain('tau://memory');
+    expect(second).not.toContain(instructions);
     expect(second).toContain('second noask');
     /* V12 supersedes the `AGENTS.md` rung: in direct mode the cwd is the user's
      * own project, and Tau writes no control file into it. */
@@ -3144,15 +3147,43 @@ describe('authentication, initialize and prompt content', () => {
       chatId: 'chat-text-context',
       runId: 'run-text-context',
       text: 'noask',
-      config: { contextPayload: { memory: { 'AGENTS.md': 'Prefer symmetric parts.' } } },
+      config: {
+        contextPayload: {
+          skills: [{ name: 'brep-design', description: 'Design manufacture-ready parts.' }],
+          memory: { 'AGENTS.md': 'Prefer symmetric parts.' },
+        },
+      },
     });
 
     const [prompt] = promptFrames(harness.frames);
     expect(prompt).not.toContain('"type":"resource"');
     expect(prompt).toContain('tau://agent-guidance');
-    expect(prompt).toContain('tau://memory');
-    expect(prompt).toContain('Prefer symmetric parts.');
+    expect(prompt).toContain('tau://skills');
+    expect(prompt).toContain('Design manufacture-ready parts.');
+    expect(prompt).not.toContain('tau://memory');
+    expect(prompt).not.toContain('Prefer symmetric parts.');
   }, 30_000);
+
+  it('sends no Tau context block for a memory record alone', async () => {
+    const harness = await startHarness();
+    const instructions = 'Label every hole with its thread size.';
+    const config = { contextPayload: { memory: { 'AGENTS.md': instructions } } };
+
+    await runTurn(harness, { chatId: 'chat-memory-only', runId: 'run-memory-only-1', text: 'noask', config });
+    await runTurn(harness, { chatId: 'chat-memory-only', runId: 'run-memory-only-2', text: 'second noask', config });
+
+    const [first, second] = promptFrames(harness.frames);
+    /* The first prompt carries the session's guidance and nothing for the record. */
+    expect(first?.match(/"type":"resource"/g)).toHaveLength(1);
+    expect(first).toContain('tau://agent-guidance');
+    expect(first).not.toContain('tau://memory');
+    expect(first).not.toContain(instructions);
+    /* A later prompt has no guidance left to send, so the record alone yields no block at all. */
+    expect(second).not.toContain('"type":"resource"');
+    expect(second).not.toContain('tau://');
+    expect(second).not.toContain(instructions);
+    expect(second).toContain('second noask');
+  }, 60_000);
 
   /* W8 TS-S4 (RH-S11): a placed attempt runs where its grant rooted it, not where the host's own checkout map says. */
   it('should open the agent session in the root the placement granted', async () => {

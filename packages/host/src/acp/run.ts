@@ -320,6 +320,11 @@ const contextBlock = (uri: string, mimeType: string, text: string): ContentBlock
  * first turn only. Current project facts still ride every turn so a session
  * resumed after another agent's edit cannot keep stale context (EQ8).
  *
+ * The project's own `AGENTS.md` is not among them: the agent runs in the
+ * project and reads that file from its working directory by its vendor's rule,
+ * so Tau does not re-send it. The client's `memory` record carries it for Tau's
+ * own agent only.
+ *
  * This content is transmitted to the vendor, exactly like the tree the agent
  * already reads.
  *
@@ -336,7 +341,6 @@ const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): 
     return [];
   }
   const skills = config.clientContext?.skills ?? [];
-  const memory = config.clientContext?.memory ?? {};
   return [
     ...(first ? [contextBlock('tau://agent-guidance', 'text/markdown', agentGuidance)] : []),
     ...(skills.length === 0
@@ -348,9 +352,6 @@ const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): 
             skills.map((skill) => `- ${skill.name}: ${skill.description}`).join('\n'),
           ),
         ]),
-    ...(Object.keys(memory).length === 0
-      ? []
-      : [contextBlock('tau://memory', 'application/json', JSON.stringify(memory))]),
     ...(config.snapshot === undefined
       ? []
       : [contextBlock('tau://snapshot', 'application/json', JSON.stringify(config.snapshot))]),

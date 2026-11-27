@@ -91,6 +91,9 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  * - `discovery.rootCold`: discovery roots whose index went cold, every directory unknown; each also moves its reason's
  *   counter, `discovery.rootCold.<reason>` (see {@link discoveryRootColdReasons}).
  *
+ * - `io.background.stalled`: background provider calls still in flight after the stall deadline, whose slots the I/O
+ *   lanes released (FW4): a hung mount shows here.
+ *
  * The discovery index (fast-path blueprint FW2) moves the sweep, audit, cold and unretained counters.
  *
  * @public
@@ -132,6 +135,7 @@ export const workerTimingCounters = [
   'discovery.rootCold.observer',
   'discovery.rootCold.notice',
   'discovery.rootCold.bound',
+  'io.background.stalled',
 ] as const;
 
 /** One counter's name. @public */

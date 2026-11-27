@@ -448,7 +448,7 @@ export class ProviderRegistry {
     const scheduler = this.ioScheduler;
     const storageRootKey = this._rootOf.get(provider) ?? provider.id;
     const admit = async <Result>(call: () => Result): Promise<Awaited<Result>> =>
-      lane === 'sweep' ? scheduler.runSweep(storageRootKey, call) : scheduler.runBackground(call);
+      lane === 'sweep' ? scheduler.runSweep(storageRootKey, call) : scheduler.runBackground(storageRootKey, call);
     const gated = new Map<string | symbol, (...arguments_: unknown[]) => unknown>();
     const bound = new WeakMap<(...arguments_: unknown[]) => unknown, unknown>();
     return new Proxy(provider, {

@@ -93,6 +93,9 @@
 \* before its first call is issued and a write's tap still fires before its bytes move, so the lane only delays a
 \* `ReadStart`'s I/O or a write, which the model already lets interleave arbitrarily (untimed). Every action and verdict
 \* is unchanged.
+\* FW4 stall deadline (2026-11-27, coordinator ruling): a background call in flight past 5 s releases its slot and a
+\* root with stalled calls is admitted one call at a time; the snapshot walk names its root to the lane. Timing only:
+\* every action and verdict is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

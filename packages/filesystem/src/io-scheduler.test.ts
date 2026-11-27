@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   IoScheduler,
   backgroundIoAgingMilliseconds,
+  backgroundIoStallMilliseconds,
   backgroundIoConcurrency,
   sweepIoConcurrency,
 } from '#io-scheduler.js';
@@ -58,7 +59,7 @@ describe('IoScheduler', () => {
 
   /** Issue one background call that holds its slot until settled; `started` counts the admitted ones. */
   const issueBackground = async (calls: HeldCall[], started: { count: number }): Promise<void> =>
-    scheduler.runBackground(async () => {
+    scheduler.runBackground('root-b', async () => {
       started.count += 1;
       const call = held();
       calls.push(call);
@@ -242,7 +243,7 @@ describe('IoScheduler', () => {
         Promise.all(
           Array.from({ length: 40 }, async () => {
             const issuedAt = Date.now();
-            await scheduler.runBackground(async () => {
+            await scheduler.runBackground('root-b', async () => {
               waits.push(Date.now() - issuedAt);
               await new Promise<void>((resolve) => {
                 setTimeout(resolve, 10);
@@ -309,9 +310,144 @@ describe('IoScheduler', () => {
     });
   });
 
+  describe('stall deadline', () => {
+    /** Issue one background call on `root` that never settles until the test settles it. */
+    const hang = (root: string, calls: HeldCall[], started: { count: number }): void => {
+      void scheduler.runBackground(root, async () => {
+        started.count += 1;
+        const call = held();
+        calls.push(call);
+        await call.promise;
+      });
+    };
+    const stalledCount = (): number => timings.summarize(0).counters['io.background.stalled']?.total ?? 0;
+
+    it(`should release the slots of calls hung past ${backgroundIoStallMilliseconds} ms, so another root's call is admitted`, async () => {
+      const hung: HeldCall[] = [];
+      const startedA = { count: 0 };
+      for (let index = 0; index < backgroundIoConcurrency; index += 1) {
+        hang('root-a', hung, startedA);
+      }
+      const home: HeldCall[] = [];
+      const startedHome = { count: 0 };
+      hang('home', home, startedHome);
+      await drain();
+      expect(startedA.count).toBe(backgroundIoConcurrency);
+      expect(startedHome.count).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(backgroundIoStallMilliseconds - 1);
+      expect(startedHome.count).toBe(0);
+      expect(stalledCount()).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(startedHome.count).toBe(1);
+      expect(stalledCount()).toBe(backgroundIoConcurrency);
+      expect(scheduler.backgroundStalled('root-a')).toBe(backgroundIoConcurrency);
+      expect(scheduler.backgroundInFlight()).toBe(1);
+      home[0]!.settle();
+      await drain();
+      expect(scheduler.backgroundInFlight()).toBe(0);
+    });
+
+    it('should let a root with stalled calls in flight claim one new slot at a time, while other roots use the rest', async () => {
+      const hung: HeldCall[] = [];
+      const startedA = { count: 0 };
+      for (let index = 0; index < backgroundIoConcurrency; index += 1) {
+        hang('root-a', hung, startedA);
+      }
+      await drain();
+      await vi.advanceTimersByTimeAsync(backgroundIoStallMilliseconds);
+
+      /* Root A asks again for many slots; another root asks for some too. */
+      const moreA: HeldCall[] = [];
+      const startedMoreA = { count: 0 };
+      for (let index = 0; index < 6; index += 1) {
+        hang('root-a', moreA, startedMoreA);
+      }
+      const other: HeldCall[] = [];
+      const startedOther = { count: 0 };
+      for (let index = 0; index < 5; index += 1) {
+        hang('root-c', other, startedOther);
+      }
+      await drain();
+      expect(startedMoreA.count).toBe(1);
+      expect(startedOther.count).toBe(backgroundIoConcurrency - 1);
+      expect(scheduler.backgroundInFlight()).toBe(backgroundIoConcurrency);
+
+      /* A's new call settling admits A's next one, still one at a time while its stalled calls are in flight. */
+      moreA[0]!.settle();
+      await drain();
+      expect(startedMoreA.count).toBe(2);
+      other[0]!.settle();
+      await drain();
+      expect(startedMoreA.count).toBe(2);
+      expect(startedOther.count).toBe(backgroundIoConcurrency);
+
+      /* The capped call stalls in its turn: it releases its slot, and A still claims only one. */
+      await vi.advanceTimersByTimeAsync(backgroundIoStallMilliseconds);
+      expect(scheduler.backgroundStalled('root-a')).toBe(backgroundIoConcurrency + 1);
+      expect(startedMoreA.count).toBe(3);
+      expect(startedOther.count).toBe(5);
+    });
+
+    it('should keep the accounting whole when stalled calls settle at last, and lift the cap once none is in flight', async () => {
+      const hung: HeldCall[] = [];
+      const startedA = { count: 0 };
+      for (let index = 0; index < backgroundIoConcurrency; index += 1) {
+        hang('root-a', hung, startedA);
+      }
+      await drain();
+      await vi.advanceTimersByTimeAsync(backgroundIoStallMilliseconds);
+      expect(scheduler.backgroundInFlight()).toBe(0);
+
+      for (const call of hung) {
+        call.settle();
+      }
+      await drain();
+      expect(scheduler.backgroundInFlight()).toBe(0);
+      expect(scheduler.backgroundStalled('root-a')).toBe(0);
+      expect(scheduler.backgroundStalled()).toBe(0);
+
+      /* A settled late is not released twice: the lane admits exactly four again, A's included. */
+      const next: HeldCall[] = [];
+      const startedNext = { count: 0 };
+      for (let index = 0; index < backgroundIoConcurrency + 2; index += 1) {
+        hang('root-a', next, startedNext);
+      }
+      await drain();
+      expect(startedNext.count).toBe(backgroundIoConcurrency);
+      expect(scheduler.backgroundInFlight()).toBe(backgroundIoConcurrency);
+      for (const call of next.splice(0)) {
+        call.settle();
+      }
+      await drain();
+      for (const call of next) {
+        call.settle();
+      }
+      await drain();
+      expect(scheduler.backgroundInFlight()).toBe(0);
+      expect(scheduler.backgroundQueued()).toBe(0);
+    });
+
+    it('should not hold an interactive call’s wait open behind a stalled call', async () => {
+      const hung: HeldCall[] = [];
+      hang('root-a', hung, { count: 0 });
+      await drain();
+      const settleInteractive = scheduler.beginInteractive('home');
+      await vi.advanceTimersByTimeAsync(backgroundIoStallMilliseconds);
+
+      expect(timings.summarize(0).spans['io.wait.interactive']).toMatchObject({
+        count: 1,
+        maxMilliseconds: backgroundIoStallMilliseconds,
+      });
+      settleInteractive();
+      hung[0]!.settle();
+    });
+  });
+
   it('should free the slot of a call that throws before it returns a promise', async () => {
     await expect(
-      scheduler.runBackground(() => {
+      scheduler.runBackground('root-b', () => {
         throw new Error('refused');
       }),
     ).rejects.toThrow('refused');

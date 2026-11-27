@@ -46,8 +46,19 @@ export const backgroundIoAgingMilliseconds = 250;
  */
 export const sweepIoConcurrency = 16;
 
-/** One queued call: when it was issued, and how to admit it. */
-type Waiter = Readonly<{ queuedAt: number; admit: () => void }>;
+/**
+ * How long an admitted background call counts toward {@link backgroundIoConcurrency} (the coordinator's ruling on a
+ * hung root): past it the call is stalled, its slot is released for accounting while the call itself runs on, and
+ * `io.background.stalled` moves. The same 5 s as a root other than Home is given to answer its admission (blueprint
+ * D1). Applied to every root, Home included: a background call is a listing or a small record read, so one that runs
+ * 5 s is behind a hung mount or a saturated backend, and releasing its slot costs only concurrency, never correctness.
+ *
+ * @public
+ */
+export const backgroundIoStallMilliseconds = 5000;
+
+/** One queued call: its root, when it was queued, and how to admit it. */
+type Waiter = Readonly<{ storageRootKey: string; queuedAt: number; admit: () => void }>;
 
 /**
  * The admission rule, one per authority (its provider registry owns it).
@@ -58,8 +69,12 @@ export class IoScheduler {
   /** Interactive calls in flight, per storage root. */
   private readonly _interactive = new Map<string, number>();
   private _interactiveTotal = 0;
-  /** Background calls admitted and not yet settled. */
+  /** Background calls admitted, not yet settled and not stalled: the ones that count toward the limit. */
   private _background = 0;
+  /** {@link IoScheduler._background}, per root. */
+  private readonly _backgroundByRoot = new Map<string, number>();
+  /** Background calls in flight past {@link backgroundIoStallMilliseconds}, per root. */
+  private readonly _stalled = new Map<string, number>();
   /** Sweep calls admitted and not yet settled. */
   private _sweep = 0;
   private readonly _backgroundQueue: Waiter[] = [];
@@ -97,12 +112,24 @@ export class IoScheduler {
   }
 
   /**
-   * Background calls admitted and not yet settled.
+   * Background calls admitted, not yet settled and not stalled: the ones that count toward the limit of four.
    *
    * @returns The count.
    */
   public backgroundInFlight(): number {
     return this._background;
+  }
+
+  /**
+   * Background calls in flight past the stall deadline: one root's, or every root's.
+   *
+   * @param storageRootKey - The root; every root when omitted.
+   * @returns The count.
+   */
+  public backgroundStalled(storageRootKey?: string): number {
+    return storageRootKey === undefined
+      ? [...this._stalled.values()].reduce((sum, count) => sum + count, 0)
+      : (this._stalled.get(storageRootKey) ?? 0);
   }
 
   /**
@@ -154,23 +181,40 @@ export class IoScheduler {
   }
 
   /**
-   * Run one background provider call once it is admitted.
+   * Run one background provider call once it is admitted. Admitted, it counts toward the limit until it settles or
+   * until {@link backgroundIoStallMilliseconds} pass, whichever is first; a root with stalled calls in flight is
+   * admitted one call at a time, so a hung root never claims the slots it released.
    *
+   * @param storageRootKey - The root the call is on.
    * @param call - The call; its synchronous part runs with nested calls uncounted.
    * @returns What the call answers.
    */
-  public async runBackground<Result>(call: () => Result | Promise<Result>): Promise<Awaited<Result>> {
+  public async runBackground<Result>(
+    storageRootKey: string,
+    call: () => Result | Promise<Result>,
+  ): Promise<Awaited<Result>> {
     const issuedAt = this._timings.now();
-    const queuedAt = this._clock();
-    if (this._backgroundQueue.length > 0 || !this._admitsBackground(queuedAt)) {
-      await this._enqueue(this._backgroundQueue, queuedAt);
-    } else {
-      this._background += 1;
-    }
+    await this._enqueue(this._backgroundQueue, { storageRootKey, queuedAt: this._clock() });
     this._timings.record('io.wait.background', issuedAt);
-    return this._run(call, () => {
-      this._background -= 1;
-    });
+    let stalled = false;
+    return this._run(
+      call,
+      () => {
+        if (stalled) {
+          adjust(this._stalled, storageRootKey, -1);
+        } else {
+          this._background -= 1;
+          adjust(this._backgroundByRoot, storageRootKey, -1);
+        }
+      },
+      () => {
+        stalled = true;
+        this._background -= 1;
+        adjust(this._backgroundByRoot, storageRootKey, -1);
+        adjust(this._stalled, storageRootKey, 1);
+        this._timings.count('io.background.stalled');
+      },
+    );
   }
 
   /**
@@ -186,7 +230,7 @@ export class IoScheduler {
     call: () => Result | Promise<Result>,
   ): Promise<Awaited<Result>> {
     if (this._sweepQueue.length > 0 || this._sweep >= sweepIoConcurrency) {
-      await this._enqueue(this._sweepQueue, this._clock());
+      await this._enqueue(this._sweepQueue, { storageRootKey, queuedAt: this._clock() });
     } else {
       this._sweep += 1;
     }
@@ -213,16 +257,20 @@ export class IoScheduler {
     this._interactiveTotal += delta;
   }
 
-  private async _run<Result>(call: () => Result | Promise<Result>, release: () => void): Promise<Awaited<Result>> {
+  /**
+   * Make one admitted call. `release` runs once when it settles; `onStall`, when given, runs once if it is still in
+   * flight after {@link backgroundIoStallMilliseconds}, and from then on no interactive call waits behind it.
+   */
+  private async _run<Result>(
+    call: () => Result | Promise<Result>,
+    release: () => void,
+    onStall?: () => void,
+  ): Promise<Awaited<Result>> {
     const ticket = this._nextTicket;
     this._nextTicket += 1;
     this._ranked.add(ticket);
     let released = false;
-    const settle = (): void => {
-      if (released) {
-        return;
-      }
-      released = true;
+    const unrank = (): void => {
       this._ranked.delete(ticket);
       for (const wait of this._interactiveWaits) {
         if (wait.ahead.delete(ticket) && wait.ahead.size === 0) {
@@ -230,6 +278,24 @@ export class IoScheduler {
           this._timings.record('io.wait.interactive', wait.startedAt);
         }
       }
+    };
+    const stallTimer =
+      onStall === undefined
+        ? undefined
+        : setTimeout(() => {
+            if (!released) {
+              unrank();
+              onStall();
+              this._pump();
+            }
+          }, backgroundIoStallMilliseconds);
+    const settle = (): void => {
+      if (released) {
+        return;
+      }
+      released = true;
+      clearTimeout(stallTimer);
+      unrank();
       release();
       this._pump();
     };
@@ -250,17 +316,18 @@ export class IoScheduler {
     }
   }
 
-  /** Whether a background call queued at `queuedAt` may be admitted now. */
-  private _admitsBackground(queuedAt: number): boolean {
-    return (
-      this._background < backgroundIoConcurrency &&
-      (this._interactiveTotal === 0 || this._clock() - queuedAt >= backgroundIoAgingMilliseconds)
-    );
+  /** Whether a waiter's root may take a slot now: any number while none of its calls is stalled, else one at a time. */
+  private _rootAdmits(storageRootKey: string): boolean {
+    return (this._stalled.get(storageRootKey) ?? 0) === 0 || (this._backgroundByRoot.get(storageRootKey) ?? 0) === 0;
   }
 
-  private async _enqueue(queue: Waiter[], queuedAt: number): Promise<void> {
+  private _aged(waiter: Waiter): boolean {
+    return this._clock() - waiter.queuedAt >= backgroundIoAgingMilliseconds;
+  }
+
+  private async _enqueue(queue: Waiter[], waiter: Omit<Waiter, 'admit'>): Promise<void> {
     const admitted = Promise.withResolvers<void>();
-    queue.push({ queuedAt, admit: admitted.resolve });
+    queue.push({ ...waiter, admit: admitted.resolve });
     this._pump();
     return admitted.promise;
   }
@@ -271,24 +338,46 @@ export class IoScheduler {
       this._sweep += 1;
       this._sweepQueue.shift()!.admit();
     }
-    while (this._backgroundQueue.length > 0 && this._admitsBackground(this._backgroundQueue[0]!.queuedAt)) {
-      this._background += 1;
-      this._backgroundQueue.shift()!.admit();
+    /* In queue order, skipping a waiter whose root is capped: a hung root never holds back another root's calls. */
+    let blockedByInteractive: Waiter | undefined;
+    for (let index = 0; index < this._backgroundQueue.length && this._background < backgroundIoConcurrency; ) {
+      const waiter = this._backgroundQueue[index]!;
+      if (!this._rootAdmits(waiter.storageRootKey)) {
+        index += 1;
+      } else if (this._interactiveTotal > 0 && !this._aged(waiter)) {
+        blockedByInteractive ??= waiter;
+        index += 1;
+      } else {
+        this._background += 1;
+        adjust(this._backgroundByRoot, waiter.storageRootKey, 1);
+        this._backgroundQueue.splice(index, 1);
+        waiter.admit();
+      }
     }
     clearTimeout(this._agingTimer);
     this._agingTimer = undefined;
-    const head = this._backgroundQueue[0];
-    if (head !== undefined && this._background < backgroundIoConcurrency) {
-      /* Blocked only by interactive calls: wake when the head has aged. A full lane is woken by a release instead. */
+    if (blockedByInteractive !== undefined && this._background < backgroundIoConcurrency) {
+      /* Blocked only by interactive calls: wake when the first such waiter has aged. A full lane, or a capped root, is
+       * woken by a release instead. */
       this._agingTimer = setTimeout(
         () => {
           this._agingTimer = undefined;
           this._pump();
         },
-        Math.max(0, head.queuedAt + backgroundIoAgingMilliseconds - this._clock()),
+        Math.max(0, blockedByInteractive.queuedAt + backgroundIoAgingMilliseconds - this._clock()),
       );
     }
   }
 }
 
 const noop = (): void => undefined;
+
+/** Move one root's count by `delta`, dropping it at zero. */
+const adjust = (counts: Map<string, number>, storageRootKey: string, delta: 1 | -1): void => {
+  const count = (counts.get(storageRootKey) ?? 0) + delta;
+  if (count === 0) {
+    counts.delete(storageRootKey);
+  } else {
+    counts.set(storageRootKey, count);
+  }
+};

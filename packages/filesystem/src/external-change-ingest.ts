@@ -1224,7 +1224,7 @@ export class ExternalChangeIngest {
     /* A snapshot walk is background work (fast path FW4): each browser call it makes, and each directory's listing as
      * one, waits for the lane, so an interactive call waits behind at most the few it admitted. */
     const background = async <Result>(call: () => Promise<Result>): Promise<Result> =>
-      this._registry.ioScheduler.runBackground(call);
+      this._registry.ioScheduler.runBackground(state.storageRootKey, call);
     const admittedEntries = async (handle: FileSystemDirectoryHandle): Promise<Array<[string, EntryHandle]>> => {
       const entries = await background(async () => {
         const listed: Array<[string, EntryHandle]> = [];

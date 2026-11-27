@@ -7,7 +7,14 @@ import {
   operatorDiscoveryProfile,
 } from '#testing/discovery-profile.js';
 import type { DiscoveryProfile } from '#testing/discovery-profile.js';
-import { backgroundIoAgingMilliseconds, backgroundIoConcurrency, sweepIoConcurrency } from '#io-scheduler.js';
+import {
+  backgroundIoAgingMilliseconds,
+  backgroundIoConcurrency,
+  backgroundIoStallMilliseconds,
+  sweepIoConcurrency,
+} from '#io-scheduler.js';
+import { resolveStorageRootKey } from '#storage-root-key.js';
+import { workerTimings } from '#worker-timings.js';
 
 /**
  * The I/O lanes on the 386-directory profile (project-library fast path FW4, invariant S10).
@@ -234,6 +241,73 @@ describe('I/O lanes on the 386-directory profile', () => {
     loading.on = false;
     await advanceUntil(() => profile.ioScheduler.interactiveInFlight() === 0, 1000);
     await Promise.all(reads);
+  });
+
+  describe('a root whose background calls hang (stall deadline)', () => {
+    it('should admit Home’s background reads after the deadline while the folder’s full read hangs, and keep the lane’s accounting whole', async () => {
+      await profile.service.listProjectManifests();
+      /* The folder goes cold; Home stays warm, so the next pass reads only the folder, in the background lane. */
+      profile.index.cold(resolveStorageRootKey(profile.workspaceScope, 'unused'), 'reset');
+      let hanging = true;
+      const hung: Gate[] = [];
+      /* Only the folder's reads hang: Home answers as usual. */
+      const reader = profile.providers.workspace as unknown as RawReader;
+      const raw = reader.readFileRaw.bind(profile.providers.workspace);
+      vi.spyOn(reader, 'readFileRaw').mockImplementation(async (path) => {
+        if (hanging && isDiscoveryRead(path)) {
+          const { promise, resolve } = Promise.withResolvers<void>();
+          hung.push({ path, release: resolve });
+          await promise;
+        }
+        return raw(path);
+      });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      const stalledBefore = workerTimings.summarize(0).counters['io.background.stalled']?.total ?? 0;
+      let peak = 0;
+      let lowest = 0;
+      const sample = (): void => {
+        peak = Math.max(peak, profile.ioScheduler.backgroundInFlight());
+        lowest = Math.min(lowest, profile.ioScheduler.backgroundInFlight());
+      };
+
+      const pass = track(profile.service.listProjectManifests());
+      await flush();
+      expect(hung).toHaveLength(backgroundIoConcurrency);
+
+      /* Home's records, read by a connection that declared the background lane. */
+      const homeRecords = profile.service.createRootedFileSystem(`/projects/${homeProjectId}`, { lane: 'background' });
+      const homeRead = track(homeRecords.readFile('notes.txt', 'utf8'));
+      await flush();
+      expect(homeRead.settled()).toBe(false);
+
+      const took = await advanceUntil(() => {
+        sample();
+        return homeRead.settled();
+      }, 2 * backgroundIoStallMilliseconds);
+      expect(homeRead.value()).toBe('notes');
+      expect(took).toBe(backgroundIoStallMilliseconds);
+      /* The folder claims one new call at a time while its stalled ones are in flight. */
+      expect(hung).toHaveLength(backgroundIoConcurrency + 1);
+      expect((workerTimings.summarize(0).counters['io.background.stalled']?.total ?? 0) - stalledBefore).toBe(
+        backgroundIoConcurrency,
+      );
+
+      /* The hung calls settle at last: the pass completes and nothing is counted twice. */
+      hanging = false;
+      for (const gate of hung.splice(0)) {
+        gate.release();
+      }
+      await advanceUntil(() => {
+        sample();
+        return pass.settled();
+      }, 60_000);
+      expect(pass.value()?.entries).toHaveLength(directories);
+      expect(peak).toBeLessThanOrEqual(backgroundIoConcurrency);
+      expect(lowest).toBe(0);
+      expect(profile.ioScheduler.backgroundInFlight()).toBe(0);
+      expect(profile.ioScheduler.backgroundStalled()).toBe(0);
+      expect(profile.ioScheduler.backgroundQueued()).toBe(0);
+    });
   });
 
   describe('lock-holding background work', () => {

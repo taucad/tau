@@ -3085,6 +3085,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               appendEvents: async (events) => append(events as LogRowBody[]),
               /* WP-10 step B: the driver's rows answer once ordered; its request, tools and outcome wait for this. */
               ...(log.durable === undefined ? {} : { durable: async () => log.durable!() }),
+              /* WP-11: the chat's one incrementally folded ledger, which every row of this chain updates. */
+              ledger: async () => ledgerOf(chatId),
               ...(first && mode === 'start' && admission?.context !== undefined ? { context: admission.context } : {}),
               ...(selection === undefined ? {} : { selection }),
               clientContext,

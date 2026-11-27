@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T15:18:02.351Z",
+  "updatedAt": "2026-11-27T15:18:45.905Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -6321,6 +6321,19 @@
       "rejected": 0
     },
     {
+      "run": 46020708336,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "cb2196ab4068610c84d487580364444c1cb9985e",
+      "at": "2026-11-27T15:18:06Z",
+      "conclusion": "success",
+      "artifacts": 1,
+      "counted": 1,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
       "run": 46021175056,
       "attempt": 1,
       "event": "push",
@@ -6340,6 +6353,19 @@
       "lineage": "push:main",
       "sha": "e9798f30b914ee58523f9b804ef1a2f6ef86c748",
       "at": "2026-11-27T15:17:49Z",
+      "conclusion": "success",
+      "artifacts": 1,
+      "counted": 1,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 46022856414,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "c090a768a6bb36971fc59d9d6e3b6a3ab48c7ff9",
+      "at": "2026-11-27T15:18:16Z",
       "conclusion": "success",
       "artifacts": 1,
       "counted": 1,
@@ -6690,14 +6716,14 @@
       }
     },
     "apps-runtime-e2e:vitest": {
-      "executions": 104,
-      "tests": 104,
+      "executions": 106,
+      "tests": 106,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:40:19Z",
-      "lastSeen": "2026-11-27T15:17:49Z",
+      "lastSeen": "2026-11-27T15:18:16Z",
       "targets": {
-        "vitest linux-x64 project=suites": 71
+        "vitest linux-x64 project=suites": 73
       }
     },
     "archive-core:test": {

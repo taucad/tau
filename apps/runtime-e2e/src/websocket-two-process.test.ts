@@ -166,6 +166,8 @@ const stopProcess = async (child: ChildProcess): Promise<void> => {
     return true;
   })();
   if (!signalProcess(child, 'SIGTERM')) {
+    // Nothing left to signal, but the leader's exit may not be reaped yet: wait for it, as for a signalled stop.
+    await Promise.race([exited, delay(5000, false)]);
     return;
   }
   const stopped = await Promise.race([exited, delay(5000, false)]);
@@ -179,7 +181,7 @@ const stopProcess = async (child: ChildProcess): Promise<void> => {
  *
  * @param child - Spawned API server.
  * @param signal - Signal to deliver.
- * @returns `false` when the group is already gone.
+ * @returns `false` when no member of the group can still take a signal.
  */
 const signalProcess = (child: ChildProcess, signal: NodeJS.Signals): boolean => {
   try {
@@ -190,10 +192,18 @@ const signalProcess = (child: ChildProcess, signal: NodeJS.Signals): boolean => 
     }
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
-      throw error;
+    const { code } = error as NodeJS.ErrnoException;
+    /*
+     * ESRCH: the group has no member left. EPERM on Darwin: the group still has members, but each one is already
+     * exiting or a zombie its parent has not reaped, and XNU's killpg answers EPERM when it finds members and
+     * signals none. For a group this test spawned, that means the group is already gone. Linux signals a zombie
+     * leader without error, so it never takes this branch. E5 hit it on the macOS nightly (#342): its own SIGKILL
+     * left the API server tearing down its heap when `afterEach` sent SIGTERM.
+     */
+    if (code === 'ESRCH' || (code === 'EPERM' && process.platform === 'darwin')) {
+      return false;
     }
-    return false;
+    throw error;
   }
 };
 

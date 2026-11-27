@@ -1211,7 +1211,10 @@ function projectListLayout({
 }
 
 /**
- * One loading card: the card's own frame with skeletons where its media, name, location and Open button sit.
+ * One loading card: the card's own frame with skeletons where its media, name, location and Open button sit. Each
+ * part has the box the loaded card's part has (H-d): the media box is `ProjectCardMedia`'s with its pending
+ * thumbnail, and the name and location rows are the inline editor's `h-7` and the location's `min-h-4`, so a card
+ * replacing it moves nothing.
  *
  * @returns The skeleton card, hidden from assistive technology.
  */
@@ -1222,11 +1225,17 @@ function ProjectCardSkeleton(): React.JSX.Element {
       data-testid='project-card-skeleton'
       className='relative flex h-full flex-col overflow-hidden pt-0'
     >
-      <Skeleton className='aspect-4/3 w-full rounded-none' />
+      <div className='relative aspect-4/3 h-fit w-full overflow-hidden bg-muted'>
+        <Skeleton className='size-full rounded-none' />
+      </div>
       <CardHeader>
-        <div className='flex flex-col gap-1 py-1'>
-          <Skeleton className='h-6 w-3/4' />
-          <Skeleton className='h-3 w-1/2' />
+        <div className='-mx-2 flex flex-col py-1'>
+          <div className='flex h-7 items-center px-2'>
+            <Skeleton className='h-5 w-3/4' />
+          </div>
+          <div className='flex min-h-4 items-center px-2'>
+            <Skeleton className='h-3 w-1/2' />
+          </div>
         </div>
       </CardHeader>
       <CardFooter className='mt-auto'>

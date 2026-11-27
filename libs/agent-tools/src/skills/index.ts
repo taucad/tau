@@ -3,6 +3,9 @@ export {
   fingerprintSkillContent,
   mergeSkillMetadata,
   parseSkillFrontmatter,
+  readSkillFrontmatter,
+  skillFrontmatterFields,
+  validateSkillFrontmatter,
 } from '#skills/skill-metadata.js';
 export { tauStoreSkills, type TauStoreSkill } from '#skills/store-catalog.js';
 export {

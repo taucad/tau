@@ -1,6 +1,10 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+
+/** This `src` directory as a native path with a trailing separator (`URL#pathname` is `/D:/…` on Windows). */
+const sourceRoot = fileURLToPath(new URL('.', import.meta.url));
 
 const sourceFiles = (directory: string): string[] =>
   readdirSync(directory).flatMap((entry) => {
@@ -11,7 +15,7 @@ const sourceFiles = (directory: string): string[] =>
 
 describe('@taucad/filesystem import boundary', () => {
   it('should not import rpc, runtime, fs-bridge, or app code', () => {
-    const files = sourceFiles(new URL('.', import.meta.url).pathname);
+    const files = sourceFiles(sourceRoot);
     const forbidden = /from ['"](?:@taucad\/rpc|@taucad\/runtime|@taucad\/fs-bridge|apps\/)/u;
 
     const offenders = files.filter((file) => forbidden.test(readFileSync(file, 'utf8')));
@@ -98,9 +102,12 @@ const boundaryRules: readonly BoundaryRule[] = [
 const allowList: ReadonlyArray<readonly [file: string, rule: string, workPackage: string]> = [];
 
 describe('@taucad/filesystem layer-1 core boundary', () => {
-  const base = new URL('.', import.meta.url).pathname;
-  const violations = sourceFiles(base)
-    .map((file) => ({ file: file.slice(base.length), code: withoutComments(readFileSync(file, 'utf8')) }))
+  const violations = sourceFiles(sourceRoot)
+    // Rules name files by their `/`-separated path relative to `src`.
+    .map((file) => ({
+      file: file.slice(sourceRoot.length).replaceAll(sep, '/'),
+      code: withoutComments(readFileSync(file, 'utf8')),
+    }))
     .filter(({ file }) => !file.endsWith('.test.ts') && !file.endsWith('.test-d.ts'))
     .flatMap(({ file, code }) =>
       boundaryRules
@@ -130,12 +137,10 @@ describe('@taucad/filesystem layer-1 core boundary', () => {
   });
 });
 
-const sourceDirectory = new URL('.', import.meta.url).pathname;
-
 /** Resolve one `#…` or relative specifier to its source file, or `undefined` when external. */
 const resolveLocal = (specifier: string, from: string): string | undefined => {
   const relative = specifier.startsWith('#')
-    ? join(sourceDirectory, specifier.slice(1))
+    ? join(sourceRoot, specifier.slice(1))
     : specifier.startsWith('.')
       ? join(from, '..', specifier)
       : undefined;
@@ -181,13 +186,13 @@ const reachableSpecifiers = (entry: string): { files: string[]; externals: Set<s
 
 describe('@taucad/filesystem node backend containment', () => {
   it('keeps node builtins out of everything the browser barrel reaches', () => {
-    const { externals } = reachableSpecifiers(join(sourceDirectory, 'backend/index.ts'));
+    const { externals } = reachableSpecifiers(join(sourceRoot, 'backend/index.ts'));
 
     expect([...externals].filter((specifier) => specifier.startsWith('node:'))).toEqual([]);
   });
 
   it('proves the walk would see a node builtin — the node subpath does import them', () => {
-    const { externals } = reachableSpecifiers(join(sourceDirectory, 'backend/node/index.ts'));
+    const { externals } = reachableSpecifiers(join(sourceRoot, 'backend/node/index.ts'));
 
     expect([...externals].filter((specifier) => specifier.startsWith('node:')).sort()).toEqual([
       // The node host scopes ancestor claims with `AsyncLocalStorage` (`backend/node/host.ts`).

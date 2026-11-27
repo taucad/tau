@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T21:55:58.504Z",
+  "updatedAt": "2026-11-27T21:57:03.881Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -7580,6 +7580,19 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 46073187010,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-3014",
+      "sha": "7feedabd2559dee0f23bc26e9444d5df873283c7",
+      "at": "2026-11-27T21:56:33Z",
+      "conclusion": "cancelled",
+      "artifacts": 1,
+      "counted": 1523,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -9018,14 +9031,14 @@
       }
     },
     "scripts:test": {
-      "executions": 257,
-      "tests": 374824,
+      "executions": 258,
+      "tests": 376347,
       "failures": 5,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T21:55:44Z",
+      "lastSeen": "2026-11-27T21:56:33Z",
       "targets": {
-        "test linux-x64": 211
+        "test linux-x64": 212
       }
     },
     "scripts:test:e2e": {
@@ -12799,18 +12812,18 @@
       "targetKey": "test",
       "file": "src/flake-regression-workflow.test.ts",
       "firstSeen": "2026-11-25T23:53:17Z",
-      "lastSeen": "2026-11-27T21:55:44Z",
+      "lastSeen": "2026-11-27T21:56:33Z",
       "lastFailure": "2026-11-26T08:08:04Z",
-      "executions": 217,
+      "executions": 218,
       "failures": 5,
       "retriedPasses": 0,
-      "passStreak": 212,
+      "passStreak": 213,
       "variants": {
         "linux-x64": {
-          "executions": 217,
+          "executions": 218,
           "failures": 5,
           "events": 0,
-          "lastSeen": "2026-11-27T21:55:44Z"
+          "lastSeen": "2026-11-27T21:56:33Z"
         }
       },
       "events": [],
@@ -12853,14 +12866,14 @@
         }
       ],
       "passHashes": [
-        "linux-x64 3372266510793671911",
         "linux-x64 15968600662315477516",
         "linux-x64 12333925536581834001",
         "linux-x64 6069316159749148281",
         "linux-x64 18055973687090834058",
         "linux-x64 8870018838589116548",
         "linux-x64 7944498172664717203",
-        "linux-x64 7764456485858087603"
+        "linux-x64 7764456485858087603",
+        "linux-x64 6249075552866491322"
       ],
       "failureShas": [
         "fed01aadc523f2b1064a8638e1ed6403623eee65",

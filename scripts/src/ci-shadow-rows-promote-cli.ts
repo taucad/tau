@@ -10,15 +10,18 @@
  * proposal, or one a human closed: delete the branch to propose it again), so a run of this CLI never opens a second
  * pull request for one row.
  *
- * A pull request opened with the workflow's token starts no workflow, so its body asks the reviewer to close and
- * reopen it, which runs CI as the reviewer. When the repository does not let workflows open pull requests (HTTP 403),
- * the branch is kept and the summary names it for a human to open.
+ * `shadow-row-promotion.yml` opens it with a `tau-flake-bot` App token when the `flake-bot` environment holds the
+ * App's secrets (`PULL_REQUEST_STARTS_CI=true`): its pull request starts CI. Otherwise it falls back to the workflow's
+ * token, whose pull request starts no workflow, so the body asks the reviewer to close and reopen it, which runs CI
+ * as the reviewer. When the repository does not let workflows open pull requests (HTTP 403), the branch is kept and
+ * the summary names it for a human to open.
  *
  * Usage: node scripts/src/ci-shadow-rows-promote-cli.ts [--base main] [--state-branch flake-ledger]
  *          [--state-file <path>] [--root .] [--dry-run] [--summary <file>]
  * `--state-file` reads a local state; `--dry-run` writes nothing to GitHub and prints each edit.
  * Env: GITHUB_TOKEN (`contents: write` for the branch, `pull-requests: write` for the pull request),
- * GITHUB_REPOSITORY (default taucad/tau), GITHUB_API_URL.
+ * PULL_REQUEST_STARTS_CI (`true` when GITHUB_TOKEN is the App's), GITHUB_REPOSITORY (default taucad/tau),
+ * GITHUB_API_URL.
  * Exit codes: 0 nothing to promote, or every proposal opened or already open; 1 API failure; 2 usage.
  */
 import { appendFile } from 'node:fs/promises';
@@ -57,7 +60,12 @@ export const promotionTitle = (row: { readonly project: string; readonly target:
 export const promotionBody = (
   row: ShadowRow,
   state: ShadowRowState,
-  options: { readonly repository: string; readonly server?: string },
+  options: {
+    readonly repository: string;
+    readonly server?: string;
+    /** The token is `tau-flake-bot`'s, so the pull request starts CI by itself; otherwise the reviewer reruns it. */
+    readonly startsCi?: boolean;
+  },
 ): string => {
   const server = options.server ?? 'https://github.com';
   const counted = state.streak > 0 ? state.history.slice(-state.streak) : [];
@@ -67,7 +75,9 @@ export const promotionBody = (
     '',
     `The flake ledger counted it (\`ledger.json\` on the \`${stateBranch}\` branch, \`shadowRows\`); ${state.runs} runs counted since ${state.firstSeen.slice(0, 10)}${state.lastFailure ? `, the last failure in run ${state.lastFailure.run} (${state.lastFailure.at.slice(0, 10)})` : ', none failed'}. ${retried.length > 0 ? `${retried.length} of the passing runs passed a test on its recorded retry (${retried.reduce((sum, record) => sum + record.retried, 0)} retried passes); each is a flake event in the ledger.` : 'No test passed on a retry in them.'}`,
     '',
-    '**Promotion changes the gate, so this pull request is not merged automatically.** It was opened with the workflow token, which starts no CI: close and reopen it to run CI, review, then enable auto-merge.',
+    options.startsCi === true
+      ? '**Promotion changes the gate, so this pull request is not merged automatically.** CI runs on it: review it, then enable auto-merge.'
+      : '**Promotion changes the gate, so this pull request is not merged automatically.** It was opened with the workflow token, which starts no CI: close and reopen it to run CI, review, then enable auto-merge.',
     '',
     `<details><summary>The ${counted.length} runs counted</summary>`,
     '',
@@ -112,9 +122,15 @@ type Outcome = { readonly key: string; readonly line: string };
 
 const propose = async (
   github: Client,
-  input: { readonly row: ShadowRow; readonly state: ShadowRowState; readonly base: string; readonly dryRun: boolean },
+  input: {
+    readonly row: ShadowRow;
+    readonly state: ShadowRowState;
+    readonly base: string;
+    readonly dryRun: boolean;
+    readonly startsCi: boolean;
+  },
 ): Promise<Outcome> => {
-  const { row, state, base, dryRun } = input;
+  const { row, state, base, dryRun, startsCi } = input;
   const repo = `/repos/${github.repository}`;
   const key = shadowRowKey(row);
   const branch = promotionBranch(row);
@@ -131,7 +147,7 @@ const propose = async (
   );
   const edited = promoteProjectJson(text, row.target);
   const title = promotionTitle(row);
-  const body = promotionBody(row, state, { repository: github.repository });
+  const body = promotionBody(row, state, { repository: github.repository, startsCi });
   if (dryRun) {
     console.log(`--- ${row.projectFile} (${title})\n${edited}`);
     return { key, line: `\`${key}\`: would open "${title}" (dry run)` };
@@ -208,7 +224,13 @@ const main = async (args: readonly string[]): Promise<number> => {
   if (state) {
     for (const { row, state: rowState } of readyRows(registry.rows, state.shadowRows)) {
       // oxlint-disable-next-line no-await-in-loop -- one proposal at a time, in row order
-      const outcome = await propose(github, { row, state: rowState, base: values.base, dryRun: values['dry-run'] });
+      const outcome = await propose(github, {
+        row,
+        state: rowState,
+        base: values.base,
+        dryRun: values['dry-run'],
+        startsCi: process.env['PULL_REQUEST_STARTS_CI'] === 'true',
+      });
       lines.push(`- ${outcome.line}`);
     }
   }

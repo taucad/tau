@@ -219,6 +219,17 @@ const runAll = async <T>(
 };
 
 /**
+ * Without a containment answer from the sandbox, a Windows host runs no native worker: none runs unsandboxed.
+ * @param indicators - The host's indicators.
+ * @param packageName - The package whose native variant is asked for.
+ * @returns The refusal on Windows; `undefined` elsewhere.
+ */
+const defaultNativeContainment = (indicators: HostIndicators, packageName: string): string | undefined =>
+  indicators.os === 'win32'
+    ? `Native kernels do not run on Windows in this Tau: it has no Windows sandbox, and no native worker runs unsandboxed. Use macOS or Linux (glibc) for ${packageName}.`
+    : undefined;
+
+/**
  * Create the preparation host (API 4) for a Node host: `tau mcp`, `tau export`, `tau prepare`, the daemon parent
  * and the desktop main process compose one each, over one shared store.
  *
@@ -329,13 +340,11 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       };
     }
     const variants = plugin.deployment.dependencies[dependency] ?? [];
-    if (indicators.os === 'win32' && variants.some(({ target }) => target.runtime === 'native')) {
-      return {
-        kind: 'blocked',
-        dependency,
-        message: `Native kernels do not run on Windows yet: Tau has no Windows sandbox, and no native worker runs unsandboxed. Use macOS or Linux (glibc) for ${plugin.package}.`,
-        detail: { axis: 'os' },
-      };
+    const uncontained = variants.some(({ target }) => target.runtime === 'native')
+      ? (options.nativeContainment ?? defaultNativeContainment)(indicators, plugin.package)
+      : undefined;
+    if (uncontained !== undefined) {
+      return { kind: 'blocked', dependency, message: uncontained, detail: { axis: 'os' } };
     }
     const selection = selectVariant(variants, indicators, options.selection ?? {});
     if (selection.status === 'unsupported') {

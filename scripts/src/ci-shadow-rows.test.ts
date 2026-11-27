@@ -363,6 +363,12 @@ describe('the promotion pull request', () => {
     expect(body).toContain('| [2062](https://github.com/taucad/tau/actions/runs/2062/attempts/2) | 2 |');
     expect(body).not.toContain('| [2062](https://github.com/taucad/tau/actions/runs/2062/attempts/1)');
     expect(body.match(/^\| \[\d+\]/gmu)).toHaveLength(109);
+    // The workflow token's pull request starts no CI, so the reviewer reruns it; the flake bot's starts CI itself.
+    expect(body).toContain('close and reopen it to run CI');
+    const appBody = promotionBody(first.row, first.state, { repository: 'taucad/tau', startsCi: true });
+    expect(appBody).toContain('is not merged automatically');
+    expect(appBody).toContain('CI runs on it: review it, then enable auto-merge.');
+    expect(appBody).not.toContain('close and reopen');
     expect(readyRows(registry, ingestFixture(2160).shadowRows)).toEqual([]);
   });
 });

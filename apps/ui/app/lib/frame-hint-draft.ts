@@ -141,6 +141,44 @@ export const writeDraftHint = (
   }
 };
 
+let pendingWrite: (() => void) | undefined;
+let isListening = false;
+
+/**
+ * Write any held draft hint now: the page is hiding, or its composer is leaving.
+ */
+export const flushDraftHint = (): void => {
+  const write = pendingWrite;
+  pendingWrite = undefined;
+  write?.();
+};
+
+const flushWhenHidden = (): void => {
+  if (globalThis.document.visibilityState === 'hidden') {
+    flushDraftHint();
+  }
+};
+
+/**
+ * Hold a draft for {@link writeDraftHint} until the page hides (`visibilitychange` to hidden, or `pagehide`) or
+ * {@link flushDraftHint} is called as the composer leaves. The write reads, parses and rewrites the whole record
+ * synchronously, and the hint is only read when a document loads, so a keystroke only replaces the held draft and the
+ * last one lands before any load could read it. No timer runs while typing.
+ *
+ * @param scope - Home, or a project by its URL key.
+ * @param draft - The draft's text, and for a project the chat it belongs to.
+ */
+export const holdDraftHint = (scope: DraftHintScope, draft: Readonly<{ text: string; chatId?: string }>): void => {
+  pendingWrite = () => {
+    writeDraftHint(scope, draft);
+  };
+  if (!isListening && typeof globalThis.addEventListener === 'function') {
+    isListening = true;
+    globalThis.addEventListener('pagehide', flushDraftHint);
+    globalThis.document.addEventListener('visibilitychange', flushWhenHidden);
+  }
+};
+
 /** Whether a write would store what is stored: the same draft for the same chat, or no draft where there is none. */
 const isUnchanged = (previous: DraftHintEntry | undefined, entry: DraftHintEntry | undefined): boolean =>
   entry === undefined

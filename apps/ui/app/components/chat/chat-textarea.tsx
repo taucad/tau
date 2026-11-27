@@ -12,7 +12,7 @@ import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { useHandOffAdoption } from '#components/hand-off/hand-off-store.js';
 import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
 import type { HandOffSnapshot } from '#components/hand-off/hand-off.js';
-import { draftHintScopeOf, writeDraftHint } from '#lib/frame-hint-draft.js';
+import { draftHintScopeOf, flushDraftHint, holdDraftHint } from '#lib/frame-hint-draft.js';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 import { ChatTextareaSkeleton } from '@taucad/chat-ui/components/chat-textarea-skeleton';
 import { useProject } from '#hooks/use-project.js';
@@ -324,18 +324,20 @@ export const ChatTextarea = memo(function ({
    * on `/`, a project's under its URL key with the chat it belongs to. */
   const draftHintChatId = session?.activeChatId;
   const isProjectComposer = projectContext !== undefined;
+  /* Scheduled, not written: the write waits for a typing pause, and lands when the composer leaves. */
   useEffect(() => {
     if (mode !== 'main') {
       return;
     }
     const scope = draftHintScopeOf(globalThis.location.pathname, isProjectComposer);
     if (scope !== undefined) {
-      writeDraftHint(scope, {
+      holdDraftHint(scope, {
         text: logic.inputText,
         ...(scope.kind === 'project' && draftHintChatId !== undefined ? { chatId: draftHintChatId } : {}),
       });
     }
   }, [mode, logic.inputText, draftHintChatId, isProjectComposer]);
+  useEffect(() => flushDraftHint, []);
 
   const setDraftText = useCallback(
     (text: string) => {
@@ -351,6 +353,8 @@ export const ChatTextarea = memo(function ({
   // Mutable ref populated by ChatTextareaDesktop so the imperative handle
   // can focus the Tiptap editor instead of the (non-existent) <textarea>
   const focusEditorRef = useRef<(() => void) | undefined>(undefined);
+  // Populated by ChatTextareaDesktop with its Send, so a card's Send message takes the same path as the button.
+  const submitEditorRef = useRef<(() => Promise<void>) | undefined>(undefined);
 
   useImperativeHandle(
     ref,
@@ -362,8 +366,11 @@ export const ChatTextarea = memo(function ({
           logic.focusInput();
         }
       },
+      submit: async () => {
+        await (submitEditorRef.current ?? logic.handleSubmit)();
+      },
     }),
-    [logic.focusInput],
+    [logic.focusInput, logic.handleSubmit],
   );
 
   const geometryUnits = projectContext?.geometryUnits;
@@ -609,6 +616,7 @@ export const ChatTextarea = memo(function ({
         fileInputReference={logic.fileInputReference}
         containerReference={logic.containerReference}
         focusEditorRef={focusEditorRef}
+        submitEditorRef={submitEditorRef}
         addContextChipsRef={addContextChipsRef}
         addContextReferencesRef={addContextReferencesRef}
         // Handlers

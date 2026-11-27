@@ -317,7 +317,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
 | [@taulabs/replicad](https://github.com/taucad/replicad) | 1.2.1-beta.1 | MIT |
 | [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 1.2.1-beta.0 | MIT |
-| [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 3.0.0-beta.6 | MIT |
+| [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 3.0.0 | MIT |
 | [@tiptap/core](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
 | [@tiptap/extension-bubble-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
 | [@tiptap/extension-floating-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |

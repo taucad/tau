@@ -156,14 +156,14 @@ describe('createIndexMirror', () => {
 
   it('does not cover the reserved paths and nested mounts the feed names, nor the unwatched rows', () => {
     const mirror = createIndexMirror();
-    mirror.receive({ ...reset([['a.ts', 'f', 1, 1, 1]]), excluded: ['.tau/index', '.tau-staging', 'vendor/lib'] });
+    mirror.receive({ ...reset([['a.ts', 'f', 1, 1, 1]]), excluded: ['.tau/index', '.tau/staging', 'vendor/lib'] });
 
     expect(mirror.covers('')).toBe(true);
     expect(mirror.covers('a.ts')).toBe(true);
     expect(mirror.covers('missing.ts')).toBe(true);
     expect(mirror.covers('.tau/index')).toBe(false);
     expect(mirror.covers('.tau/index/snapshot.bin')).toBe(false);
-    expect(mirror.covers('.tau-staging/import/a.ts')).toBe(false);
+    expect(mirror.covers('.tau/staging/import/a.ts')).toBe(false);
     expect(mirror.covers('vendor/lib')).toBe(false);
     expect(mirror.covers('vendor/lib/index.ts')).toBe(false);
     expect(mirror.covers('vendor/library.ts')).toBe(true);

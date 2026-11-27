@@ -8,6 +8,7 @@ import { useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 /** The project's instruction file, at its root, as the AGENTS.md convention places it. */
 const agentsMdPath = 'AGENTS.md';
 const decoder = new TextDecoder();
+const noSkills: NonNullable<ContextPayload['skills']> = [];
 
 /**
  * The settled context payload, published for dispatch.
@@ -97,6 +98,9 @@ export function useContextPayload(): ContextPayload | undefined {
   const { readFile, treeService, contentService } = useFileManager();
   const [memory, setMemory] = useState<Record<string, string> | undefined>();
   const catalog = useSkillsCatalogState();
+  /* A failed catalog (its watch closed or errored) offers no skill, as the composer shows it: the turn says so with an
+   * empty listing, because an absent one lets the host read the skills itself, past the failure. */
+  const isCatalogUnavailable = catalog.status === 'closed' || catalog.status === 'error';
   const skills = catalog.status === 'ready' ? catalog.prompt : undefined;
 
   const readFileRef = useRef(readFile);
@@ -140,6 +144,9 @@ export function useContextPayload(): ContextPayload | undefined {
   }, [treeService, contentService]);
 
   const payload = useMemo((): ContextPayload | undefined => {
+    if (isCatalogUnavailable) {
+      return { skills: noSkills, memory };
+    }
     if ((!skills || skills.length === 0) && !memory) {
       return undefined;
     }
@@ -148,7 +155,7 @@ export function useContextPayload(): ContextPayload | undefined {
       skills: skills && skills.length > 0 ? skills : undefined,
       memory,
     };
-  }, [skills, memory]);
+  }, [isCatalogUnavailable, skills, memory]);
 
   /* `registering` and `pending` are the catalog still being read; every other status is its answer. */
   const catalogSettled = catalog.status !== 'registering' && catalog.status !== 'pending';

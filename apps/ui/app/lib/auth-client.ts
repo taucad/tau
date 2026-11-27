@@ -1,5 +1,6 @@
 import { createAuthClient } from 'better-auth/react';
 import { apiKeyClient } from '@better-auth/api-key/client';
+import { oauthProviderClient } from '@better-auth/oauth-provider/client';
 import { magicLinkClient, deviceAuthorizationClient } from 'better-auth/client/plugins';
 import { requireClientEnvironment } from '#environment.config.js';
 import { offlineRequestError, pageReadsOffline } from '#lib/page-offline.js';
@@ -24,7 +25,9 @@ export const authClient = createAuthClient({
   // every real request to runtimeAuthFetch where the injected host is resolved.
   baseURL: 'https://window-env.invalid/v1/auth',
   fetchOptions: { customFetchImpl: runtimeAuthFetch },
-  plugins: [magicLinkClient(), apiKeyClient(), deviceAuthorizationClient()],
+  // `oauthProviderClient` adds a signed OAuth request in the page's query (Tau Desktop's sign-in, DSI-3) to every
+  // sign-in call made from that page, so the provider continues to the consent page after it; elsewhere it adds nothing.
+  plugins: [magicLinkClient(), apiKeyClient(), deviceAuthorizationClient(), oauthProviderClient()],
   emailAndPassword: {
     enabled: true,
     autoSignIn: true,

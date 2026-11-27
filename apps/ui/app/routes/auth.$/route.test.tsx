@@ -19,7 +19,8 @@ const routeMocks = vi.hoisted(() => ({
   isError: false,
   refetch: vi.fn(),
   navigate: vi.fn(),
-  session: undefined as { user: { id: string } } | undefined,
+  setSearchParams: vi.fn(),
+  session: undefined as { user: { id: string }; session?: { createdAt: Date } } | undefined,
 }));
 
 vi.mock('react-router', () => ({
@@ -30,7 +31,7 @@ vi.mock('react-router', () => ({
   ),
   useParams: () => ({ '*': routeMocks.segment }),
   useNavigate: () => routeMocks.navigate,
-  useSearchParams: () => [new URLSearchParams(routeMocks.search)],
+  useSearchParams: () => [new URLSearchParams(routeMocks.search), routeMocks.setSearchParams],
 }));
 
 vi.mock('@better-auth-ui/react', () => ({
@@ -79,6 +80,7 @@ describe('AuthPage', () => {
     routeMocks.search = '';
     routeMocks.session = undefined;
     routeMocks.navigate.mockClear();
+    routeMocks.setSearchParams.mockClear();
   });
 
   it.each(['sign-in', 'sign-up', 'magic-link/verify', 'verify-email'])(
@@ -118,6 +120,58 @@ describe('AuthPage', () => {
 
     expect(routeMocks.navigate).toHaveBeenCalledWith('/auth/desktop?state=abc', { replace: true });
     expect(screen.queryByText(`auth:${segment}`)).not.toBeInTheDocument();
+  });
+
+  /* Tau Desktop's OAuth sign-in (DSI-3): the provider's signed request in the query. */
+  describe('with a Tau Desktop sign-in request', () => {
+    const desktopQuery = (prompt: string, issuedAt: number): string => {
+      /* eslint-disable @typescript-eslint/naming-convention -- OAuth wire parameters keep their spelling */
+      const parameters = new URLSearchParams({
+        client_id: 'tau-desktop',
+        prompt,
+        exp: '9999999999',
+        ba_iat: String(issuedAt),
+      });
+      /* eslint-enable @typescript-eslint/naming-convention */
+      for (const name of ['ba_iat', 'ba_param', 'client_id', 'exp', 'prompt']) {
+        parameters.append('ba_param', name);
+      }
+      parameters.set('sig', 'signature');
+      return `?${parameters.toString()}`;
+    };
+
+    it('should hold the consent page as where the sign-in continues', () => {
+      routeMocks.search = desktopQuery('consent', Date.now());
+
+      render(<AuthPage />);
+
+      expect(routeMocks.setSearchParams).toHaveBeenCalled();
+      const update = routeMocks.setSearchParams.mock.calls[0]?.[0] as (current: URLSearchParams) => URLSearchParams;
+      const next = update(new URLSearchParams(routeMocks.search));
+      expect(next.get('redirectTo')).toMatch(/^\/auth\/desktop\?.*&continue=1$/u);
+      expect(next.get('sig')).toBe('signature');
+    });
+
+    it('should show the form over a session older than a "Use a different account" request', () => {
+      const issuedAt = Date.now();
+      routeMocks.search = desktopQuery('login consent', issuedAt);
+      routeMocks.session = { user: { id: 'user_1' }, session: { createdAt: new Date(issuedAt - 60_000) } };
+
+      render(<AuthPage />);
+
+      expect(routeMocks.navigate).not.toHaveBeenCalled();
+      expect(screen.getByText('auth:sign-in')).toBeInTheDocument();
+    });
+
+    it('should continue once the session is newer than the request', () => {
+      const issuedAt = Date.now() - 60_000;
+      routeMocks.search = `${desktopQuery('login consent', issuedAt)}&redirectTo=%2Fauth%2Fdesktop%3Fcontinue%3D1`;
+      routeMocks.session = { user: { id: 'user_1' }, session: { createdAt: new Date() } };
+
+      render(<AuthPage />);
+
+      expect(routeMocks.navigate).toHaveBeenCalledWith('/auth/desktop?continue=1', { replace: true });
+    });
   });
 
   it('keeps a signed-in browser on the other auth pages', () => {

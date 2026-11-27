@@ -18,6 +18,7 @@
     "@better-auth-ui/core": "catalog:",
     "@better-auth-ui/react": "catalog:",
     "@better-auth/api-key": "catalog:",
+    "@better-auth/oauth-provider": "catalog:",
     "@codemirror/autocomplete": "catalog:",
     "@codemirror/commands": "catalog:",
     "@codemirror/lang-javascript": "catalog:",

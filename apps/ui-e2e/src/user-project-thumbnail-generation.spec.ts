@@ -79,28 +79,8 @@ async function expectProjectCardParity(name: string): Promise<void> {
     )
     .toBeGreaterThan(100);
 
-  // First pixels can precede camera/layout settling; compare the final view, not an intermediate fit.
-  await expect
-    .poll(
-      async () =>
-        target.evaluate(
-          async () => {
-            const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
-            if (!bridge) {
-              return false;
-            }
-            const before = bridge.getRendererIdentity().frame;
-            await new Promise<void>((resolve) => {
-              setTimeout(resolve, 500);
-            });
-            return bridge.getRendererIdentity().frame === before;
-          },
-          undefined,
-          'secondary',
-        ),
-      { timeout: 10_000 },
-    )
-    .toBe(true);
+  // First pixels can precede the camera's fit; compare the framed view the preview settles on.
+  await target.expectGeometryFramed('secondary');
   previewForeground = await measureProjectCardForeground(activeMedia, 'secondary');
   const camera = await target.evaluate(
     () => {
@@ -135,7 +115,8 @@ async function expectProjectCardParity(name: string): Promise<void> {
 }
 
 test('user project thumbnails follow settled sources, persist, and match the live card preview', async () => {
-  await target.navigate('/__e2e/user-project-thumbnail-generation');
+  /* Automatic thumbnails are a hardware-tier feature: the fixture runs that tier on any GPU. */
+  await target.navigate('/__e2e/user-project-thumbnail-generation?renderTier=hardware');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?graphicsBackend=webgpu(?:&[^#]*)?$/u, 60_000);
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
   await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Open parameters');
@@ -220,9 +201,12 @@ test('user project thumbnails follow settled sources, persist, and match the liv
 });
 
 test('curved user project thumbnail matches the live AABB-framed card preview', async () => {
-  await target.navigate('/__e2e/user-project-thumbnail-generation?fixture=curved');
+  await target.navigate('/__e2e/user-project-thumbnail-generation?fixture=curved&renderTier=hardware');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?graphicsBackend=webgpu(?:&[^#]*)?$/u, 60_000);
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
+  /* The hardware tier's first frame filters its full-size lighting environment on the CPU when the GPU is software,
+   * which takes longer than the presentation bound; the framed view comes first, then its backend. */
+  await target.expectGeometryFramed();
   await target.expectPresentedGraphicsBackend('webgpu');
   await target.openSecondary('/projects');
   try {

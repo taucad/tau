@@ -1,6 +1,7 @@
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
-import { ProjectCardCadPreview, projectCardVerticalFieldOfView } from '#components/project-card.js';
+import { ProjectCardCadPreview } from '#components/project-card.js';
+import { projectCardVerticalFieldOfView } from '#components/project-card-camera.js';
 
 /*
  * A library card's live model preview, in its own chunk, loaded when a card's preview is first turned on (progressive

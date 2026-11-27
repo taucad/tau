@@ -401,6 +401,9 @@ export const ChatTextareaDesktop = memo(function ({
   const queuedSubmitRef = useRef(earlyInput?.submitQueued === true);
   /* The replay of that send while it is on its way to the chat; aborting it cancels the send. */
   const replayingRef = useRef<AbortController | undefined>(undefined);
+  /* While it is, the submit it runs is in flight, and the editor stays the person's: the send waits on the opening
+   * project for seconds, and they can still cancel it, by Escape or an edit (staging re-check 6). */
+  const [isReplayingQueuedSend, setIsReplayingQueuedSend] = useState(false);
   /* A15d (C10, the operator's ruling of 2026-11-13T13:14Z, item 5): the queued send is visible until it is sent or
    * cancelled — Send shows it pending and its status says so — and Escape cancels it, as an edit does. */
   const [isQueuedSubmitShown, setIsQueuedSubmitShown] = useState(earlyInput?.submitQueued === true);
@@ -419,6 +422,10 @@ export const ChatTextareaDesktop = memo(function ({
   }, []);
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
+      /* An edit cancels the queued send, also while its replay is on its way: the text stays in the draft. */
+      const replaying = replayingRef.current;
+      replayingRef.current = undefined;
+      replaying?.abort();
       cancelQueuedSubmit();
       setIsQueuedSendCancelled(false);
       unconfirmedTextsRef.current.push(content.text);
@@ -793,6 +800,7 @@ export const ChatTextareaDesktop = memo(function ({
      * taken it (an opening project can hold it for seconds), Escape still cancels it, through its signal. */
     const replaying = new AbortController();
     replayingRef.current = replaying;
+    setIsReplayingQueuedSend(true);
     const replay = async (): Promise<void> => {
       try {
         await submitWithReferences(content.text, cadReferencesOfChips(content.contextChips), replaying.signal);
@@ -800,6 +808,7 @@ export const ChatTextareaDesktop = memo(function ({
         if (replayingRef.current === replaying) {
           replayingRef.current = undefined;
         }
+        setIsReplayingQueuedSend(false);
         setIsQueuedSubmitShown(false);
       }
     };
@@ -853,15 +862,23 @@ export const ChatTextareaDesktop = memo(function ({
   // `sendMessage` on the project route). Only long submits flip `true`,
   // so the tracer beam + shimmer indicate CDN-heavy navigation without
   // flashing during normal chat sends on `/projects/:id`.
+  /* A replayed queued send is not locked: it can wait seconds on an opening project, and the person keeps their box. */
+  const isEditorLocked = isSubmitting && !isReplayingQueuedSend;
   useEffect(() => {
     if (!editor) {
       return;
     }
+    /* A browser drops focus from an element that stops being editable, to the page, where no key reaches the
+     * composer: the box keeps it, so Escape still cancels a queued send. */
+    const isFocusInEditor = editor.view.dom.contains(document.activeElement);
     /* No update event: editability is not content, and on mount the editor is
      * still empty until the restored draft lands (F20), so an update here
      * would persist an empty draft over it. */
-    editor.setEditable(!isSubmitting, false);
-  }, [editor, isSubmitting]);
+    editor.setEditable(!isEditorLocked, false);
+    if (isEditorLocked && isFocusInEditor) {
+      containerReference.current?.focus({ preventScroll: true });
+    }
+  }, [editor, isEditorLocked, containerReference]);
 
   const handleComposerFocus = useCallback((): void => {
     handleTextareaFocus?.();
@@ -956,12 +973,17 @@ export const ChatTextareaDesktop = memo(function ({
           radius,
           collapse.composer,
           'has-[.tiptap:focus-visible]:focus-outline',
+          /* The box itself holds focus only while the editor is locked (below); it shows it as the editor would. */
+          'outline-none focus-visible:focus-outline',
           /* Home's native input held focus until this replaced it: keep its outline until the editor takes focus. */
           isHandoverOutlined && 'focus-outline',
           className,
         )}
         data-collapsed={isCollapsed ? '' : undefined}
         data-queued-send={isQueuedSendShown ? '' : undefined}
+        /* Focusable from script and by a click, never by Tab: it holds focus while the editor is locked, so Escape
+         * reaches the handler below whatever the editor's state. */
+        tabIndex={-1}
         onKeyDownCapture={cancelQueuedSubmitOnEscape}
         onFocus={handleComposerFocus}
         onBlur={handleTextareaBlur}

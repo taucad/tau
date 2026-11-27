@@ -193,61 +193,76 @@ describe('ChatOptionsMeta — receipt credits', () => {
     chatSelectorState.messages = [{ metadata: {}, parts: [usagePart('op_1'), usagePart('op_2')] }];
     cookie.showCredits = true;
     cloud.enabled = true;
+    const readOne = (input: string) =>
+      input.endsWith('op_1')
+        ? {
+            ok: true,
+            json: async () => ({
+              ...receipt,
+              state: 'terminal',
+              operationId: 'op_1',
+              receipt: {
+                schemaVersion: 1,
+                environment: 'development',
+                ownerId: 'user',
+                subjectId: 'account',
+                kind: 'base',
+                operationId: 'op_1',
+                baseTransactionId: 'txn-1',
+                terminalRevision: '9',
+                policyVersion: 'policy-1',
+                activationId: 'activation-1',
+                meterContractId: 'meter-1',
+                category: 'llm',
+                model: { id: 'm', displayName: null, providerId: null },
+                activity: { kind: 'agent', projectHint: null, chatHint: null, parentAttemptKey: null },
+                historyVersion: 1,
+                admittedAt: receipt.asOf,
+                dispatchIntentAt: receipt.asOf,
+                usageOccurredAt: receipt.asOf,
+                evidenceOccurredAt: receipt.asOf,
+                timingStatus: 'dispatch_intent',
+                resolvedAt: receipt.asOf,
+                executionStatus: 'succeeded',
+                customerState: 'settled',
+                authorizedMaxCreditAtoms: '99999',
+                chargedCreditAtoms: '12345',
+                accountDeltaCreditAtoms: '-12345',
+                meteringStatus: 'complete',
+                meterItems: [],
+                tokens: {
+                  status: 'complete',
+                  uncachedInput: '1',
+                  cacheRead: '0',
+                  cacheWrite: '0',
+                  inputTotal: '1',
+                  output: '1',
+                  reasoning: '0',
+                },
+              },
+              correctionTotalCreditAtoms: '0',
+              corrections: { items: [], nextCursor: null, complete: true },
+            }),
+          }
+        : { ok: false, status: 503 };
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: string) =>
-        input.endsWith('op_1')
-          ? {
-              ok: true,
-              json: async () => ({
-                ...receipt,
-                state: 'terminal',
-                operationId: 'op_1',
-                receipt: {
-                  schemaVersion: 1,
-                  environment: 'development',
-                  ownerId: 'user',
-                  subjectId: 'account',
-                  kind: 'base',
-                  operationId: 'op_1',
-                  baseTransactionId: 'txn-1',
-                  terminalRevision: '9',
-                  policyVersion: 'policy-1',
-                  activationId: 'activation-1',
-                  meterContractId: 'meter-1',
-                  category: 'llm',
-                  model: { id: 'm', displayName: null, providerId: null },
-                  activity: { kind: 'agent', projectHint: null, chatHint: null, parentAttemptKey: null },
-                  historyVersion: 1,
-                  admittedAt: receipt.asOf,
-                  dispatchIntentAt: receipt.asOf,
-                  usageOccurredAt: receipt.asOf,
-                  evidenceOccurredAt: receipt.asOf,
-                  timingStatus: 'dispatch_intent',
-                  resolvedAt: receipt.asOf,
-                  executionStatus: 'succeeded',
-                  customerState: 'settled',
-                  authorizedMaxCreditAtoms: '99999',
-                  chargedCreditAtoms: '12345',
-                  accountDeltaCreditAtoms: '-12345',
-                  meteringStatus: 'complete',
-                  meterItems: [],
-                  tokens: {
-                    status: 'complete',
-                    uncachedInput: '1',
-                    cacheRead: '0',
-                    cacheWrite: '0',
-                    inputTotal: '1',
-                    output: '1',
-                    reasoning: '0',
-                  },
-                },
-                correctionTotalCreditAtoms: '0',
-                corrections: { items: [], nextCursor: null, complete: true },
-              }),
-            }
-          : { ok: false, status: 503 },
-      ),
+      vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname !== '/v1/billing/operations') {
+          return readOne(input);
+        }
+        /* The batch route answers with the receipts it could read and leaves the rest out. */
+        const receipts: unknown[] = [];
+        for (const operationId of url.searchParams.getAll('operationIds')) {
+          const one = readOne(operationId);
+          if (one.ok && one.json !== undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- the fixture's answers are already settled.
+            receipts.push(await one.json());
+          }
+        }
+        return { ok: true, json: async () => ({ receipts }) };
+      }),
     );
   });
 

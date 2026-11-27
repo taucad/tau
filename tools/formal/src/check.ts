@@ -90,6 +90,7 @@ const planDirectory = (
         env,
         timeoutSeconds,
         ...(run.traceFile ? { traceFile: run.traceFile } : {}),
+        ...(expectation?.heapGigabytes ? { heapGigabytes: expectation.heapGigabytes } : {}),
       });
     },
   });

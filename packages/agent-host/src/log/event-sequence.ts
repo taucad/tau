@@ -3,7 +3,17 @@ import { canonicalJson } from '#log/canonical-json.js';
 import type { ReplayIdentity, ReplayReadRow } from '#log/serialization.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
-const fingerprint = (event: AgentLogEvent): string => canonicalJson(event);
+/* Each fold checks the same row object; rows are immutable once in a log, so its canonical form is taken once. */
+const fingerprints = new WeakMap<AgentLogEvent, string>();
+const fingerprint = (event: AgentLogEvent): string => {
+  const known = fingerprints.get(event);
+  if (known !== undefined) {
+    return known;
+  }
+  const canonical = canonicalJson(event);
+  fingerprints.set(event, canonical);
+  return canonical;
+};
 const cursorKey = (event: AgentLogEvent): string => `${event.leaderEpoch}\u0000${event.sequence}`;
 /** Legacy rows carry no integer epoch and count as 0 (D5). */
 const epochOf = (event: AgentLogEvent): number => event.epoch ?? 0;

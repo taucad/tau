@@ -31,12 +31,14 @@ const anySpelling = (name: string): string =>
  * A sign-in credential carried as a query parameter, plain or percent-encoded.
  *
  * Magic-link, password-reset and email-verification pages read `?token=`, OAuth
- * callbacks read `?code=`, and the CLI device flow reads `?user_code=`. The value
+ * callbacks read `?code=`, and the CLI device flow reads `?user_code=`. Tau Desktop's
+ * sign-in pages carry the provider's signed request (`?sig=`) and the desktop's `?state=`
+ * (RFC 9700 §4.2.4), so a page holding them is never recorded either. The value
  * ends at the next parameter (`&` or `%26`), the fragment, or whitespace and quotes,
  * so the same pass covers a bare URL and one nested inside `?redirectTo=`.
  */
 const queryCredentialPattern = new RegExp(
-  `([?&]|%3F|%26)(${['token', 'code', 'user_code'].map((name) => anySpelling(name)).join('|')})(=|%3D)(?:(?!%26)[^&#\\s"'])+`,
+  `([?&]|%3F|%26)(${['token', 'code', 'user_code', 'state', 'sig'].map((name) => anySpelling(name)).join('|')})(=|%3D)(?:(?!%26)[^&#\\s"'])+`,
   'giu',
 );
 

@@ -12,8 +12,11 @@ import { useTheme } from '#hooks/use-theme.js';
 
 export type MetalMorphSpinnerProperties = Readonly<{
   className?: string;
-  /** Stands in until the first frame arrives; without one the spinner is simply blank while it warms up. */
-  fallback?: React.ReactNode;
+  /**
+   * Stands in until the first frame arrives, and for good on a page without WebGPU, where the spinner renders no
+   * frame (UI Policy, steady-state decorations): pass the flat spinner.
+   */
+  fallback: React.ReactNode;
 }>;
 
 /** Upper bound for the device pixel ratio a spinner asks the shared source to cover. */
@@ -56,24 +59,31 @@ export function MetalMorphSpinner({ className, fallback }: MetalMorphSpinnerProp
       return;
     }
     const service = getMetalMorphSpinnerService();
+    // The service reads the size on every frame it paints, so it is cached here and kept current by the
+    // `ResizeObserver`: a layout read in the paint loop would force a layout per frame (UI Policy, steady-state
+    // decorations). One read seeds it before the first frame.
+    const seed = canvas.getBoundingClientRect();
+    const size = { width: seed.width, height: seed.height };
     // The service reads visibility synchronously while it paints, so it comes from a ref the effect below
     // keeps current rather than from the render that observed the change.
     const unsubscribe = service.subscribe({
       canvas,
-      getSize: () => {
-        const rect = canvas.getBoundingClientRect();
-        return {
-          width: Math.max(1, Math.round(rect.width)),
-          height: Math.max(1, Math.round(rect.height)),
-          pixelRatio: Math.min(globalThis.devicePixelRatio || 1, maxPixelRatio),
-        };
-      },
+      getSize: () => ({
+        width: Math.max(1, Math.round(size.width)),
+        height: Math.max(1, Math.round(size.height)),
+        pixelRatio: Math.min(globalThis.devicePixelRatio || 1, maxPixelRatio),
+      }),
       isIntersecting: () => isIntersectingRef.current,
       onFirstFrame: () => {
         setHasFrame(true);
       },
     });
-    const observer = new ResizeObserver(() => {
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries.at(-1);
+      if (entry) {
+        size.width = entry.contentRect.width;
+        size.height = entry.contentRect.height;
+      }
       service.refresh();
     });
     observer.observe(canvas);

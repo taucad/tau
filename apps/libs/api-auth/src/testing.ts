@@ -5,6 +5,7 @@
 import type { Auth } from 'better-auth';
 import { authInstanceKey as instanceKey } from '#auth.constant.js';
 import type { AuthSession, AuthUser } from '#auth.type.js';
+import type { AuthClientKind } from '#desktop-grant.js';
 import { modeOf, SessionResolver } from '#session-resolver.js';
 import type { SessionLookup, SessionResolution } from '#session-resolver.js';
 
@@ -13,7 +14,13 @@ export const authInstanceKey: typeof instanceKey = instanceKey;
 
 /** What a fake resolver answers for one lookup: a session, or `null` for unauthenticated. */
 // oxlint-disable-next-line typescript/no-restricted-types -- mirrors SessionResolution, where null means unauthenticated.
-export type FakeSession = { readonly session: AuthSession; readonly user: AuthUser } | null;
+/** `client` defaults to `web`; `desktop` stands for Tau Desktop's OAuth access token. */
+export type FakeSession = {
+  readonly session: AuthSession;
+  readonly user: AuthUser;
+  readonly client?: AuthClientKind;
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is unauthenticated, as the resolver answers it.
+} | null;
 
 /** How a test answers lookups; a `vi.fn<FakeSessionLookup>()` fits it. */
 export type FakeSessionLookup = (lookup: SessionLookup) => Promise<FakeSession>;
@@ -43,6 +50,7 @@ class FakeSessionResolver extends SessionResolver {
       setCookies: Object.freeze([]),
       mode: modeOf(lookup),
       coalesced: false,
+      client: found?.client ?? 'web',
     });
   }
 }

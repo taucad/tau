@@ -121,6 +121,11 @@ test('renders distinct held current-turn chunks and qualifies actual delivery wi
   await sendDraft('Verify the current projection.');
   await target.waitForAgentHostGatewayGate({ kind: 'stream' });
   try {
+    /* A thought rests closed while it streams, and only the reader opens it (d582eaf3bf, #2816): its body is not in
+     * the page until then. The row opens it the way a person does, then reads the held chunk inside. */
+    const thought = selectors.getByRole('button', { name: 'Thinking…', exact: true });
+    await target.expectVisible(thought, 30_000);
+    await target.click(thought);
     await target.expectVisible(selectors.getByText('Projection reasoning alpha.', { exact: true }), 30_000);
   } catch (error) {
     const diagnostics = await target.commands.uiCaptureTargetDiagnostics();

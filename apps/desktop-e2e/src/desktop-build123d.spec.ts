@@ -624,8 +624,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       TAU_DEBUG: 'true',
       /* An ad-hoc package signature cannot access Electron's prior Keychain
        * item unattended. Memory-only custody still exercises the production
-       * `tau://auth/callback` exchange without weakening or replacing
-       * safeStorage. */
+       * loopback sign-in without weakening or replacing safeStorage. */
       TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1',
     },
   });

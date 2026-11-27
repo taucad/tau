@@ -125,6 +125,18 @@ describe('chat settings in a Tau admission (U10)', () => {
     expect(admission.allowedTools).toEqual(base.allowedTools);
   });
 
+  it('should send every chat the same system prompt and name the chat log in the turn context', () => {
+    // OpenAI renders the tools after the system text, so a per-chat line there leaves new chats nothing to share (WP-15).
+    const other = agentHostConfig({ agent: defaults, chatId: 'chat-2', runId: 'run-1', resolvedModel });
+    expect(other.systemPrompt).toBe(base.systemPrompt);
+    expect(other.systemPromptBlocks).toEqual(base.systemPromptBlocks);
+    expect(base.systemPrompt).not.toContain('chat-1');
+    const context = other.contextMessages?.find(
+      (message) => message.metadata?.tauInternal?.['kind'] === 'snapshot-context',
+    );
+    expect(context?.content).toContain('`.tau/chats/chat-2/events.jsonl`');
+  });
+
   it('should declare every tool the model supports, the test tool among them, and mask nothing by default', () => {
     expect(base.allowedTools).toContain(toolName.testModel);
     expect(base.toolChoice).toBe('auto');

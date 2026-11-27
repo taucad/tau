@@ -23,8 +23,6 @@ const lowFraction = 0.1;
 type MonthlyCreditsMeterProps = {
   readonly state: MonthlyCreditsMeterState;
   readonly purchasedCreditAtoms?: bigint;
-  readonly purchasedHeldCreditAtoms?: bigint;
-  readonly monthlyHeldCreditAtoms?: bigint;
   readonly isInMenu?: boolean;
   readonly className?: string;
   /**
@@ -41,8 +39,6 @@ export function MonthlyCreditsMeter({
   state,
   addCredits,
   purchasedCreditAtoms,
-  purchasedHeldCreditAtoms = 0n,
-  monthlyHeldCreditAtoms = 0n,
   isInMenu = false,
   className,
 }: MonthlyCreditsMeterProps): React.JSX.Element {
@@ -107,9 +103,6 @@ export function MonthlyCreditsMeter({
                       ? `Your plan includes ${formatCredits(monthly.scaleCreditAtoms)} a month.`
                       : 'Your monthly credits are set by your contract.'}
                   </p>
-                  {monthlyHeldCreditAtoms > 0n ? (
-                    <p>{formatCreditAtomsDisplay(monthlyHeldCreditAtoms)} more on hold for work in progress.</p>
-                  ) : undefined}
                   {monthly.scaleCreditAtoms > 0n && monthly.availableCreditAtoms > monthly.scaleCreditAtoms ? (
                     <p>Includes credits rolled over from last month, so you have more than 100%.</p>
                   ) : undefined}
@@ -150,11 +143,6 @@ export function MonthlyCreditsMeter({
           <span className='font-medium tabular-nums'>{formatCreditAtomsDisplay(purchasedCreditAtoms)}</span>
         </div>
       )}
-      {purchasedCreditAtoms !== undefined && purchasedHeldCreditAtoms > 0n ? (
-        <p className='text-muted-foreground'>
-          {formatCreditAtomsDisplay(purchasedHeldCreditAtoms)} more on hold for work in progress
-        </p>
-      ) : undefined}
       {isLow ? addCredits : undefined}
     </div>
   );

@@ -4,7 +4,11 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import AuthDesktopRoute, { buildDesktopCallbackUrl, parseDesktopHandoffTarget } from '#routes/auth.desktop/route.js';
+import AuthDesktopRoute, {
+  buildDesktopCallbackUrl,
+  headers,
+  parseDesktopHandoffTarget,
+} from '#routes/auth.desktop/route.js';
 
 const mocks = vi.hoisted(() => ({
   search: '?state=abcd1234efgh',
@@ -30,6 +34,18 @@ vi.mock('#lib/auth-client.js', () => ({
     $fetch: (...args: unknown[]) => mocks.authFetch(...args),
   },
 }));
+
+describe('headers', () => {
+  it('should refuse framing and withhold the referrer, keeping the parent headers', () => {
+    const parentHeaders = new Headers({ 'Cache-Control': 'no-store' });
+
+    const answer = headers({ parentHeaders } as unknown as Parameters<typeof headers>[0]) as Headers;
+
+    expect(answer.get('X-Frame-Options')).toBe('DENY');
+    expect(answer.get('Referrer-Policy')).toBe('no-referrer');
+    expect(answer.get('Cache-Control')).toBe('no-store');
+  });
+});
 
 describe('parseDesktopHandoffTarget', () => {
   it('accepts the opaque nonce on its own, with no port', () => {

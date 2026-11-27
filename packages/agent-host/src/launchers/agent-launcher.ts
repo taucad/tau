@@ -19,7 +19,7 @@ import type { CreateTauAgentHostOptions, TauAgentHost } from '#host/tau-agent-ho
 import { externalTurnOf, latestTurnId } from '#host/run-history.js';
 import { createPortableId, transportFailureOfRun } from '#harness/session-record.js';
 import { v1Batch } from '#log/event-log-appender.js';
-import type { EventLogAppender, EventLogBatch } from '#log/event-log-appender.js';
+import type { EventLogAppender, EventLogBatch, EventLogBatchOutcome } from '#log/event-log-appender.js';
 import { EventLogError } from '#log/event-log-error.js';
 import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
@@ -650,20 +650,42 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       candidate.type === 'run.lifecycle' && candidate.state === 'admitted'
         ? { ...candidate, storageDurability: binding.durability }
         : candidate;
+    /* A term's first append is its claim once the rows' order is fixed (ChatRunSlot.tla `Put` sets `claimed`). */
+    const told = (batch: EventLogBatchOutcome): EventLogBatchOutcome => {
+      const last = batch.outcomes.findLast((outcome) => outcome.appended);
+      if (last !== undefined) {
+        leading.port?.appended(chatId, last.endCursor);
+      }
+      if ((batch.failure as { readonly code?: unknown } | undefined)?.code === 'LOG_FENCED') {
+        leading.port?.fenced(chatId);
+      }
+      return batch;
+    };
     return {
       ...(log.appendMany === undefined
         ? {}
         : {
-            appendMany: async (candidates: readonly AgentLogEvent[]) => {
-              const batch = await log.appendMany!(candidates.map((candidate) => stated(candidate)));
-              const last = batch.outcomes.findLast((outcome) => outcome.appended);
-              if (last !== undefined) {
-                leading.port?.appended(chatId, last.endCursor);
+            appendMany: async (candidates: readonly AgentLogEvent[]) =>
+              told(await log.appendMany!(candidates.map((candidate) => stated(candidate)))),
+          }),
+      ...(log.appendOrdered === undefined
+        ? {}
+        : {
+            appendOrdered: async (candidates: readonly AgentLogEvent[]) =>
+              told(await log.appendOrdered!(candidates.map((candidate) => stated(candidate)))),
+          }),
+      ...(log.durable === undefined
+        ? {}
+        : {
+            durable: async () => {
+              try {
+                await log.durable!();
+              } catch (error) {
+                if ((error as { readonly code?: unknown }).code === 'LOG_FENCED') {
+                  leading.port?.fenced(chatId);
+                }
+                throw error;
               }
-              if ((batch.failure as { readonly code?: unknown } | undefined)?.code === 'LOG_FENCED') {
-                leading.port?.fenced(chatId);
-              }
-              return batch;
             },
           }),
       append: async (candidate: AgentLogEvent) => {

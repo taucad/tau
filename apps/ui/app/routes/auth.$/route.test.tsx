@@ -2,7 +2,7 @@
 
 // oxlint-disable-next-line import/no-unassigned-import -- extends Vitest matchers for DOM assertions.
 import '@testing-library/jest-dom/vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as VerifyEmailModule from '#components/auth/verify-email.js';
 import * as Cookies from 'es-cookie';
 import AuthPage, { meta } from '#routes/auth.$/route.js';
+import type { DesktopSignInMode, DesktopSignInOutcome, DesktopSignInStatus } from '#providers/auth-provider.js';
 
 const routeMocks = vi.hoisted(() => ({
   segment: 'sign-in',
@@ -19,7 +20,8 @@ const routeMocks = vi.hoisted(() => ({
   isError: false,
   refetch: vi.fn(),
   navigate: vi.fn(),
-  session: undefined as { user: { id: string } } | undefined,
+  setSearchParams: vi.fn(),
+  session: undefined as { user: { id: string }; session?: { createdAt: Date } } | undefined,
 }));
 
 vi.mock('react-router', () => ({
@@ -30,7 +32,7 @@ vi.mock('react-router', () => ({
   ),
   useParams: () => ({ '*': routeMocks.segment }),
   useNavigate: () => routeMocks.navigate,
-  useSearchParams: () => [new URLSearchParams(routeMocks.search)],
+  useSearchParams: () => [new URLSearchParams(routeMocks.search), routeMocks.setSearchParams],
 }));
 
 vi.mock('@better-auth-ui/react', () => ({
@@ -70,6 +72,11 @@ vi.mock('@taucad/ui/components/client-only', () => ({
   ClientOnly: () => null,
 }));
 
+/* Every describe starts with no query: a Tau Desktop request left by another row would change what the page shows. */
+beforeEach(() => {
+  routeMocks.search = '';
+});
+
 describe('AuthPage', () => {
   beforeEach(() => {
     routeMocks.isFetching = false;
@@ -79,6 +86,7 @@ describe('AuthPage', () => {
     routeMocks.search = '';
     routeMocks.session = undefined;
     routeMocks.navigate.mockClear();
+    routeMocks.setSearchParams.mockClear();
   });
 
   it.each(['sign-in', 'sign-up', 'magic-link/verify', 'verify-email'])(
@@ -120,6 +128,64 @@ describe('AuthPage', () => {
     expect(screen.queryByText(`auth:${segment}`)).not.toBeInTheDocument();
   });
 
+  /* Tau Desktop's OAuth sign-in (DSI-3): the provider's signed request in the query. */
+  describe('with a Tau Desktop sign-in request', () => {
+    const desktopQuery = (prompt: string, issuedAt: number): string => {
+      /* eslint-disable @typescript-eslint/naming-convention -- OAuth wire parameters keep their spelling */
+      const parameters = new URLSearchParams({
+        client_id: 'tau-desktop',
+        prompt,
+        exp: '9999999999',
+        ba_iat: String(issuedAt),
+      });
+      /* eslint-enable @typescript-eslint/naming-convention -- end of the wire parameters */
+      for (const name of ['ba_iat', 'ba_param', 'client_id', 'exp', 'prompt']) {
+        parameters.append('ba_param', name);
+      }
+      parameters.set('sig', 'signature');
+      return `?${parameters.toString()}`;
+    };
+
+    it('should hold the consent page as where the sign-in continues', () => {
+      routeMocks.search = desktopQuery('consent', Date.now());
+
+      render(<AuthPage />);
+
+      expect(routeMocks.setSearchParams).toHaveBeenCalled();
+      const update = routeMocks.setSearchParams.mock.calls[0]?.[0] as (current: URLSearchParams) => URLSearchParams;
+      const next = update(new URLSearchParams(routeMocks.search));
+      expect(next.get('redirectTo')).toMatch(/^\/auth\/desktop\?.*&continue=1$/u);
+      expect(next.get('sig')).toBe('signature');
+    });
+
+    it('should show the form over a session older than a "Use a different account" request', () => {
+      const issuedAt = Date.now();
+      routeMocks.search = desktopQuery('login consent', issuedAt);
+      routeMocks.session = {
+        user: { id: 'user_1' },
+        session: { createdAt: new Date(issuedAt - 60_000) },
+      };
+
+      render(<AuthPage />);
+
+      expect(routeMocks.navigate).not.toHaveBeenCalled();
+      expect(screen.getByText('auth:sign-in')).toBeInTheDocument();
+    });
+
+    it('should continue once the session is newer than the request', () => {
+      const issuedAt = Date.now() - 60_000;
+      routeMocks.search = `${desktopQuery('login consent', issuedAt)}&redirectTo=%2Fauth%2Fdesktop%3Fcontinue%3D1`;
+      routeMocks.session = {
+        user: { id: 'user_1' },
+        session: { createdAt: new Date() },
+      };
+
+      render(<AuthPage />);
+
+      expect(routeMocks.navigate).toHaveBeenCalledWith('/auth/desktop?continue=1', { replace: true });
+    });
+  });
+
   it('keeps a signed-in browser on the other auth pages', () => {
     routeMocks.segment = 'sign-out';
     routeMocks.session = { user: { id: 'user_1' } };
@@ -136,12 +202,31 @@ describe('AuthPage', () => {
    * however the user arrived — a plain link included.
    */
   describe('inside the Electron shell', () => {
-    const signIn = vi.fn(async () => undefined);
+    /* Pending until a test settles it, as a real attempt waits for the browser. */
+    let settleSignIn: (outcome: DesktopSignInOutcome) => void = () => undefined;
+    const signIn = vi.fn(
+      async (_mode?: DesktopSignInMode) =>
+        new Promise<DesktopSignInOutcome | undefined>((resolve) => {
+          settleSignIn = resolve;
+        }),
+    );
     const signOut = vi.fn(async () => undefined);
+    const cancelSignIn = vi.fn(async () => undefined);
+    const clearNotice = vi.fn(async () => undefined);
+    let status: DesktopSignInStatus = {};
+    const statusOf = vi.fn(async () => status);
 
     beforeEach(() => {
       vi.stubEnv('TAU_TARGET', 'desktop');
-      globalThis.window.tauAuth = { signIn, signOut, onAuthChanged: () => () => undefined };
+      status = {};
+      globalThis.window.tauAuth = {
+        signIn,
+        signOut,
+        cancelSignIn,
+        clearNotice,
+        status: statusOf,
+        onAuthChanged: () => () => undefined,
+      };
     });
 
     afterEach(() => {
@@ -149,6 +234,7 @@ describe('AuthPage', () => {
       delete globalThis.window.tauAuth;
       signIn.mockClear();
       signOut.mockClear();
+      cancelSignIn.mockClear();
     });
 
     it.each([
@@ -175,7 +261,9 @@ describe('AuthPage', () => {
       routeMocks.session = { user: { id: 'user_1' } };
       view.rerender(<AuthPage />);
 
-      expect(routeMocks.navigate).toHaveBeenCalledWith('/s/tau~pub_123', { replace: true });
+      expect(routeMocks.navigate).toHaveBeenCalledWith('/s/tau~pub_123', {
+        replace: true,
+      });
     });
 
     it('never follows a held link that leaves the app', () => {
@@ -187,14 +275,81 @@ describe('AuthPage', () => {
       expect(routeMocks.navigate).toHaveBeenCalledWith('/', { replace: true });
     });
 
-    it('offers a second attempt when the browser never opened', async () => {
+    it('waits with Copy link, Open browser again and Cancel sign-in while the attempt is open', async () => {
+      routeMocks.segment = 'sign-in';
+      status = {
+        attempt: {
+          url: 'https://api.tau.test/v1/auth/oauth2/authorize?x=1',
+          phase: 'waiting',
+          browserFailed: false,
+        },
+      };
+      const writeText = vi.fn(async () => undefined);
+      Object.defineProperty(globalThis.navigator, 'clipboard', {
+        value: { writeText },
+        configurable: true,
+      });
+
+      render(<AuthPage />);
+      const copy = await screen.findByRole('button', { name: /copy link/i });
+      await waitFor(() => {
+        expect(copy).toBeEnabled();
+      });
+      await userEvent.click(copy);
+      await userEvent.click(screen.getByRole('button', { name: /open browser again/i }));
+      await userEvent.click(screen.getByRole('button', { name: /cancel sign-in/i }));
+
+      expect(screen.getByText(/continue in your browser/i)).toBeInTheDocument();
+      expect(writeText).toHaveBeenCalledWith('https://api.tau.test/v1/auth/oauth2/authorize?x=1');
+      expect(signIn).toHaveBeenCalledTimes(2);
+      expect(cancelSignIn).toHaveBeenCalledTimes(1);
+    });
+
+    it('says the browser did not open, keeping Copy link', async () => {
+      routeMocks.segment = 'sign-in';
+      status = {
+        attempt: {
+          url: 'https://api.tau.test/authorize',
+          phase: 'waiting',
+          browserFailed: true,
+        },
+      };
+
+      render(<AuthPage />);
+
+      expect(await screen.findByText(/couldn't open your browser/i)).toBeInTheDocument();
+    });
+
+    it('shows finishing once the browser came back with a code', async () => {
+      routeMocks.segment = 'sign-in';
+      status = {
+        attempt: {
+          url: 'https://api.tau.test/authorize',
+          phase: 'finishing',
+          browserFailed: false,
+        },
+      };
+
+      render(<AuthPage />);
+
+      expect(await screen.findByText(/finishing sign-in/i)).toBeInTheDocument();
+    });
+
+    it.each([
+      ['canceled', /sign-in canceled/i],
+      ['expired', /sign-in timed out/i],
+      ['error', /couldn't sign in/i],
+    ] as const)('says why a %s attempt ended and offers Sign in and another account', async (outcome, title) => {
       routeMocks.segment = 'sign-in';
 
       render(<AuthPage />);
-      await userEvent.click(screen.getByRole('button', { name: /open my browser again/i }));
+      act(() => {
+        settleSignIn(outcome);
+      });
 
-      expect(screen.getByText(/continue in your browser/i)).toBeInTheDocument();
-      expect(signIn).toHaveBeenCalledTimes(2);
+      expect(await screen.findByText(title)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: /use a different account/i }));
+      expect(signIn).toHaveBeenLastCalledWith('different-account');
     });
 
     it('fails closed with no embedded form when the desktop bridge is missing', () => {
@@ -211,15 +366,15 @@ describe('AuthPage', () => {
       }
     });
 
-    it('keeps the handoff panel when the shell rejects the sign-in call', async () => {
+    it('says the sign-in failed, with no embedded form, when the shell rejects the sign-in call', async () => {
       signIn.mockRejectedValueOnce(new Error('loopback failed'));
       routeMocks.segment = 'sign-in';
 
       render(<AuthPage />);
-      await Promise.resolve();
 
+      expect(await screen.findByText(/couldn't sign in/i)).toBeInTheDocument();
       expect(screen.queryByText('auth:sign-in')).not.toBeInTheDocument();
-      expect(screen.getByText(/continue in your browser/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument();
     });
 
     it('still renders callback surfaces the browser lands on', () => {
@@ -354,6 +509,8 @@ describe('Cached session and safe continuation', () => {
     routeMocks.isSuccess = true;
     routeMocks.isFetching = false;
     render(<AuthPage />);
-    expect(routeMocks.navigate).toHaveBeenLastCalledWith('/', { replace: true });
+    expect(routeMocks.navigate).toHaveBeenLastCalledWith('/', {
+      replace: true,
+    });
   });
 });

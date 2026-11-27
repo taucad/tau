@@ -8,6 +8,7 @@
  * Finding 10; T5 defect 4).
  */
 import { expect } from 'vitest';
+import { parseEventLog } from '@taucad/agent-host';
 import type { RefusalCode } from '@taucad/agent-host/wire';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
@@ -49,10 +50,8 @@ export const twoTurnScript = [reply('Reply one.'), reply('Reply two.')];
  */
 export const chatLog = async (chatId: string): Promise<readonly LogRecord[]> => {
   const text = await readHomeGlobText(`/*/.tau/chats/${chatId}/events.jsonl`);
-  return (text ?? '')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as LogRecord);
+  /* Parsed as the host parses it: a compact row (WP-17) is restored from the rows before it. */
+  return parseEventLog(text ?? '') as unknown as readonly LogRecord[];
 };
 
 /**

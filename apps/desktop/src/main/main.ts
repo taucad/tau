@@ -64,7 +64,7 @@ import {
 } from '@taucad/host';
 
 import { appOrigin, appSchemePrivileges, registerAppProtocol } from '#main/app-protocol.js';
-import { createAuthService } from '#main/auth-service.js';
+import { createAuthService, SignInEndedError } from '#main/auth-service.js';
 import {
   createDiagnosticsLog,
   forwardRendererDiagnostics,
@@ -1060,7 +1060,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
   let quitting = false;
 
   const auth = createAuthService({
-    callbackScheme: desktopScheme === 'tau-staging:' ? 'tau-staging' : 'tau',
     apiUrl: environment['TAU_API_URL']!.replace(/\/$/u, ''),
     frontendUrl: environment['TAU_FRONTEND_URL']!.replace(/\/$/u, ''),
     userDataPath: app.getPath('userData'),
@@ -1134,6 +1133,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
     token: () => auth.token(),
     clientHeader: `tau-desktop/${app.getVersion()}`,
     ready: credentialRead.promise,
+    onUnauthorized: (token) => {
+      auth.reportRejected(token);
+    },
   });
 
   if (!isDevelopment) {
@@ -1733,20 +1735,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
       }
     })();
   };
-  /* `get-session` names the user; a restored or fresh sign-in asks once rather than waiting for the hourly probe. */
-  const identify = (): void => {
-    if (auth.token() === undefined || auth.principal() !== undefined) {
-      return;
-    }
-    // async-iife: bootstrap -- a failed probe leaves the principal unknown until the next refresh, as before.
-    void (async (): Promise<void> => {
-      try {
-        await auth.refresh();
-      } catch (error) {
-        log.log('warn', 'auth.identify-failed', error);
-      }
-    })();
-  };
 
   publishRoots();
   /* B32: reading the credential can wait on the system keychain and its unlock prompt, so bootstrap no longer awaits
@@ -1760,11 +1748,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     publishCredential();
     publishZooProxyToken();
-    identify();
+    /* The sign-in names its account with its tokens (DSI-4): token and identity change in one step. */
     auth.onChange(() => {
       publishCredential();
       publishZooProxyToken();
-      identify();
       for (const window of BrowserWindow.getAllWindows()) {
         window.webContents.send('tau:auth-changed');
       }
@@ -2021,10 +2008,44 @@ const bootstrapElectronApp = async (): Promise<void> => {
       return bambuStudio[call](input);
     });
   }
-  ipcMain.handle('tau:auth:sign-in', async (event) => {
+  /* Answers how the attempt ended, for the window's outcome: `signed-in`, or why it did not. */
+  ipcMain.handle('tau:auth:sign-in', async (event, mode: unknown) => {
+    if (!trusted(event.senderFrame)) {
+      return undefined;
+    }
+    await credentialRead.promise;
+    try {
+      await auth.signIn(mode === 'different-account' ? 'different-account' : 'consent');
+      return 'signed-in';
+    } catch (error) {
+      if (error instanceof SignInEndedError) {
+        return error.reason;
+      }
+      log.log('warn', 'auth.sign-in-failed', error instanceof Error ? error.message : 'unknown');
+      return 'error';
+    }
+  });
+  ipcMain.handle('tau:auth:cancel-sign-in', (event) => {
     if (trusted(event.senderFrame)) {
-      await credentialRead.promise;
-      await auth.signIn();
+      auth.cancelSignIn();
+    }
+  });
+  /* What the sign-in surfaces show: the attempt's link for Copy link, a notice to show once, and when the sign-in
+   * ends. Never a token. */
+  ipcMain.handle('tau:auth:status', (event) => {
+    if (!trusted(event.senderFrame)) {
+      return undefined;
+    }
+    return {
+      attempt: auth.signInAttempt(),
+      notice: auth.notice(),
+      email: auth.principalEmail(),
+      signInEndsAt: auth.signInEndsAt()?.toISOString(),
+    };
+  });
+  ipcMain.handle('tau:auth:clear-notice', (event) => {
+    if (trusted(event.senderFrame)) {
+      auth.clearNotice();
     }
   });
   ipcMain.handle('tau:auth:sign-out', async (event) => {
@@ -3463,10 +3484,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
           target: /^tau:\/\/([\w-]{1,32})/iu.exec(value)?.[1],
           length: value.length,
         });
-      } else if (link.kind === 'auth-callback') {
-        await auth.handleCallback(link);
       } else if (safeMode) {
-        /* Safe mode does no link routing (D0); the sign-in callback above is not a route. */
+        /* Safe mode does no link routing (D0). */
         log.log('info', 'deep-link.ignored-in-safe-mode', { kind: link.kind });
       } else {
         log.log('info', 'deep-link.opened', { kind: link.kind });

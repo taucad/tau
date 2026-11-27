@@ -51,7 +51,7 @@ describe('path registry', () => {
   });
 
   it('should fold generated control-plane spellings at any depth', () => {
-    const rows = pathRegistry.filter((row) => row.class === 'control-plane');
+    const rows = pathRegistry.filter((row) => row.class === 'control-plane' && row.match === 'segment');
     fc.assert(
       fc.property(
         fc.record({
@@ -149,7 +149,7 @@ describe('path registry', () => {
    * a submodule, a second Tau project — is the control plane wherever it sits.
    * A `.git` with no children is a worktree or submodule pointer file, which
    * names the real store somewhere else, so it is covered by the same row. */
-  it.each(['vendor/lib/.git/hooks/pre-commit', 'a/b/.jj/x', 'sub/.git', 'packages/kernel/.tau/binding.json'])(
+  it.each(['vendor/lib/.git/hooks/pre-commit', 'a/b/.jj/x', 'sub/.git'])(
     'should keep %s in the control plane whatever its depth',
     (path) => {
       expect(classify(path)).toStrictEqual({
@@ -206,7 +206,6 @@ describe('path registry', () => {
     /* `.tau/binding.json` names the store this project is bound to, so a
      * spelling the filesystem folds onto it is the same control file. */
     '.TAU/Binding.JSON',
-    'packages/kernel/.Tau/binding.json',
   ])('should fold %s onto the control plane on every filesystem', (path) => {
     expect(classify(path)).toStrictEqual(controlPlane);
   });
@@ -325,12 +324,15 @@ describe('path registry', () => {
     expect(classify(path)).toStrictEqual(unlistedPathClassification);
   });
 
-  /* PP3: a control-plane row matches a path segment, never a root, so its answer
-   * cannot depend on how deep the repository sits. */
-  it('should match every control-plane row by segment, never by root', () => {
+  /* PP3: a repository store's row matches a path segment, never a root, so its
+   * answer cannot depend on how deep the repository sits. Tau's own control
+   * files live in a root's `.tau/` and match there only, like every `.tau` row. */
+  it('should match every repository store by segment and every .tau control file by root', () => {
     const controlPlane = pathRegistry.filter((row) => row.class === 'control-plane');
 
-    expect(controlPlane.filter((row) => row.match !== 'segment')).toStrictEqual([]);
+    expect(
+      controlPlane.filter((row) => row.match !== (row.prefix.startsWith('.tau/') ? 'root' : 'segment')),
+    ).toStrictEqual([]);
   });
 
   /* PP2: hidden is inherited. The mask relies on it for every descent and
@@ -352,8 +354,18 @@ describe('path registry', () => {
       '.tau/binding.json',
       '.jj',
       '.git',
-      '.tau-staging',
+      '.tau/staging',
     ]);
+  });
+
+  /* Project Git policy: the `.tau` control rows are root-only, like every other
+   * `.tau` member, so the generated block's `/.tau/*` head excludes them with no
+   * line of their own. Nothing writes either below a project root: the binding
+   * belongs to a workspace's own `.tau/` and staging to the storage root's. */
+  it('should keep the .tau control rows at the root only', () => {
+    expect(classify('.tau/staging/import-x/intent.json')).toStrictEqual(controlPlane);
+    expect(classify('packages/kernel/.tau/binding.json')).toStrictEqual(unlistedPathClassification);
+    expect(classify('vendor/.tau-staging/x')).toStrictEqual(unlistedPathClassification);
   });
 
   /* D5: an agent that lists or greps the project never walks into the Project

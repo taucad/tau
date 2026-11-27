@@ -2,7 +2,9 @@ import { createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
 import type { SourceLiveEvent } from '@taucad/agent-host';
 import { agentWireLimits } from '@taucad/agent-host/wire';
+import type { ReadAnswer } from '@taucad/agent-host/wire';
 import type { AgentHostClient } from '#services/agent-host-client.js';
+import { markChatTiming } from '#chat-clients/_internal/chat-timing.js';
 import {
   initialChatProjection,
   reduceChatProjection,
@@ -34,7 +36,31 @@ export type HostAttachmentInput = Readonly<{
     send: (event: Extract<ChatProjectionEvent, { type: 'batch' | 'catch-up' | 'live' | 'clear-live' }>) => void;
   }>;
   onStatus?: (event: HostAttachmentStatus) => void;
+  /**
+   * Whether this device reads the chat's own segment from the file (HA1, HA-I1). Then the host read path is bypassed:
+   * the attachment carries only the live overlay, and the own source feeds the ledger.
+   */
+  local?: () => Promise<boolean>;
+  /** The live overlay (re)subscribed on a local placement: the store's settler sends `attach` if a run is open (HA-I5). */
+  onSubscribed?: () => void;
+  /** A live event arrived on a local placement: the own source reads again. */
+  onLive?: () => void;
 }>;
+
+/**
+ * Whether a followed read left more rows behind it than a fresh capture would read again. The ordinary reader takes one
+ * page per round trip and publishes every partial turn on the way (a log another writer grew by a thousand turns showed
+ * a run in progress for as long as it read); a capture streams the whole log as pipelined fact pages and publishes once.
+ * It starts from row 0, so it is taken only once the backlog outweighs the rows this projection already holds.
+ */
+const fallsBehind = (answer: ReadAnswer): boolean =>
+  answer.status === 'batch' &&
+  answer.endCursor - answer.nextCursor > Math.max(agentWireLimits.batchRows, answer.nextCursor);
+
+/** A local attachment's held deltas are bounded as early staging was (UTF-8 bytes). */
+const heldLiveBytes = 65_536;
+const isEnded = (lifecycle: string | undefined): boolean =>
+  lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled';
 
 /** Follow the host's one log reader; an idle chat attaches without waiting on an empty read. @public */
 export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInput>(({ input, sendBack, receive }) => {
@@ -57,7 +83,13 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
       input.projection.send({ type: 'clear-live', runId });
     }
   };
+  /* WP-00: the first live event of each run, for the chat timing marks; bounded by the runs this attachment sees. */
+  const liveRuns = new Set<string>();
   const publishLive = (event: SourceLiveEvent): void => {
+    if (!liveRuns.has(event.runId)) {
+      liveRuns.add(event.runId);
+      markChatTiming('first-live-event', { type: event.type });
+    }
     const { sourceGeneration: _sourceGeneration, ...modelEvent } = event;
     input.projection.send({ type: 'live', event: modelEvent });
   };
@@ -143,6 +175,71 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
     return selectPosition(input.projection.getSnapshot().context).last;
   };
 
+  /*
+   * Local placements (HA1): no generation gate. A run's deltas are dropped once a newer writer's generation for it has
+   * been seen on this subscription (generations are opaque and unordered: newer means seen later), and deltas for a
+   * run the ledger does not hold yet are held by run until the next own read admits it (AR3-7).
+   */
+  let local = false;
+  let liveConnected = false;
+  const latestGeneration = new Map<string, string>();
+  const superseded = new Set<string>();
+  let held = new Map<string, { current: string | undefined; events: SourceLiveEvent[] }>();
+  let heldBytes = 0;
+  const receiveLocalLive = (event: SourceLiveEvent): void => {
+    input.onLive?.();
+    if (superseded.has(event.sourceGeneration)) {
+      return;
+    }
+    const latest = latestGeneration.get(event.runId);
+    if (latest !== undefined && latest !== event.sourceGeneration) {
+      superseded.add(latest);
+    }
+    latestGeneration.set(event.runId, event.sourceGeneration);
+    const { ledger } = input.projection.getSnapshot().context;
+    const run = ledger.runs[event.runId];
+    if (run !== undefined) {
+      if (!isEnded(run.lifecycle)) {
+        publishLive(event);
+      }
+      return;
+    }
+    const bytes = new TextEncoder().encode(JSON.stringify(event)).byteLength;
+    if (heldBytes + bytes > heldLiveBytes) {
+      return; // ponytail: past the bound a delta is dropped; the durable rows still carry the run.
+    }
+    heldBytes += bytes;
+    const hold = held.get(event.runId) ?? { current: ledger.currentRunId, events: [] };
+    hold.events.push(event);
+    held.set(event.runId, hold);
+  };
+  /** After an own read: release holds the read admitted, drop those it ended or passed, retire an ended overlay. */
+  const releaseHeld = (): void => {
+    const { ledger, live } = input.projection.getSnapshot().context;
+    const kept = new Map<string, { current: string | undefined; events: SourceLiveEvent[] }>();
+    heldBytes = 0;
+    for (const [runId, hold] of held) {
+      const run = ledger.runs[runId];
+      if (run !== undefined) {
+        if (!isEnded(run.lifecycle)) {
+          for (const event of hold.events) {
+            if (!superseded.has(event.sourceGeneration)) {
+              publishLive(event);
+            }
+          }
+        }
+      } else if (ledger.currentRunId === hold.current) {
+        kept.set(runId, hold);
+        heldBytes += new TextEncoder().encode(JSON.stringify(hold.events)).byteLength;
+      }
+    }
+    held = kept;
+    const lifecycle = live === undefined ? undefined : ledger.runs[live.runId]?.lifecycle;
+    if (live !== undefined && (lifecycle === undefined || isEnded(lifecycle))) {
+      input.projection.send({ type: 'clear-live', runId: live.runId });
+    }
+  };
+
   const connectLive = async (): Promise<void> => {
     try {
       client = await input.connect();
@@ -154,6 +251,10 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
         input.chatId,
         (_chatId, event) => {
           if (closed || liveUnavailable || _chatId !== input.chatId || event.chatId !== input.chatId) {
+            return;
+          }
+          if (local) {
+            receiveLocalLive(event);
             return;
           }
           const projection = input.projection.getSnapshot().context;
@@ -198,6 +299,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
           }
         },
       );
+      liveConnected = true;
     } catch (error) {
       report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error), error });
     }
@@ -244,7 +346,9 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
             answer.sourceGeneration === basePosition.sourceGeneration &&
             answer.cursor === basePosition.cursor &&
             answer.nextCursor === basePosition.cursor + answer.events.length &&
-            answer.endCursor >= answer.nextCursor
+            answer.endCursor >= answer.nextCursor &&
+            // A retained cursor far behind its log is recaptured below rather than published a page at a time.
+            !fallsBehind(answer)
           ) {
             onAnswer(answer);
             const observed = input.projection.getSnapshot().context.ledger.position;
@@ -402,6 +506,12 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
           if (answer.status === 'refused' && answer.reason === 'owner-fenced') {
             readerFenced = true;
           }
+          if (!followCurrent && fallsBehind(answer)) {
+            // Retire this ordinary reader before it publishes the first page of a backlog it would replay a page at a
+            // time: that page can end inside a turn, which the chat would show as running until the next one came.
+            void beginRead();
+            return undefined;
+          }
           const { resetVersion } = input.projection.getSnapshot().context;
           const last = onAnswer(answer);
           if (input.projection.getSnapshot().context.resetVersion !== resetVersion) {
@@ -418,19 +528,41 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
     }
   };
   receive((event) => {
-    if (event.type === 'retry-read' && readerFenced && !closed && !liveUnavailable) {
+    if (event.type === 'own-read' && local && !closed) {
+      releaseHeld();
+    } else if (event.type === 'retry-read' && readerFenced && !closed && !liveUnavailable) {
       void beginRead();
     }
   });
   const begin = async (): Promise<void> => {
+    /* Decided beside the connect, so a local decision never delays it. */
+    const decide = async (): Promise<boolean> => {
+      try {
+        return (await input.local?.()) ?? false;
+      } catch {
+        return false;
+      }
+    };
+    const deciding = decide();
     await connectLive();
-    await beginRead();
+    local = await deciding;
+    if (closed) {
+      return;
+    }
+    if (!local) {
+      await beginRead();
+    } else if (liveConnected) {
+      attached = true;
+      report({ type: 'attachment.attached' });
+      input.onSubscribed?.();
+    }
   };
   void begin();
   return () => {
     closed = true;
     capture.abort();
     pending = undefined;
+    held.clear();
     clearLive();
     unsubscribe?.();
     unsubscribeLive?.();

@@ -1949,7 +1949,16 @@ describe('live and automatic', () => {
 
 /** Charter W13/V18 and blueprint S48(15): real close-and-continue in both directions. */
 describe('close and continue', () => {
-  /** The pre-insert page-clock sample, then the close signals W13/V18 require within 1 s. */
+  /**
+   * The last edit, then the close signals W13/V18 require within 1 s of it.
+   *
+   * The tab is hidden while the edit may still be in the editor's save
+   * debounce, as a person who closes within a second of typing does: the close
+   * revision minted at `hidden` must carry it (D17's producer flush), and the
+   * close revision and each row's destination bytes then prove that it did.
+   * Waiting for the debounced write before hiding timed this machine's write
+   * path and frame work, not the close, and left the flush with nothing to do.
+   */
   const editThenHide = async (
     client: BrowserClient,
     options: Readonly<{ slug: string; contents: string; row: string }>,
@@ -1964,13 +1973,6 @@ describe('close and continue', () => {
     await client.page.keyboard.press(`${modifier}+KeyA`);
     const beforeEditInputAt = await client.page.evaluate(() => performance.now());
     await client.page.keyboard.insertText(contents);
-    await expect
-      .poll(async () => readBrowserFile(client, slug, ['main.scad']), {
-        message: `${continuationOwner} ${row}: the product write must put the last-edit marker in main.scad`,
-        timeout: 1000,
-      })
-      .toBe(contents);
-    const persistedAt = await client.page.evaluate(() => performance.now());
     const dispatchedAt = await client.page.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
       const timestamp = performance.now();
@@ -1982,10 +1984,12 @@ describe('close and continue', () => {
       dispatchedAt - beforeEditInputAt,
       `${continuationOwner} ${row}: hidden must follow the pre-insert page-clock sample within 1 s`,
     ).toBeLessThanOrEqual(1000);
-    expect(
-      dispatchedAt - persistedAt,
-      `${continuationOwner} ${row}: hidden must follow persisted bytes within 1 s`,
-    ).toBeLessThanOrEqual(1000);
+    await expect
+      .poll(async () => readBrowserFile(client, slug, ['main.scad']), {
+        message: `${continuationOwner} ${row}: the close flush must put the last-edit marker in main.scad`,
+        timeout: 120_000,
+      })
+      .toBe(contents);
   };
 
   const awaitCloseRevision = async (
@@ -2363,10 +2367,11 @@ describe('close and continue', () => {
       await client.context.route(`${desktopE2EApiUrl}/**`, async (route) => route.abort('connectionfailed'));
       /* End the simulated outage even when an assertion fails. */
       let queuedCloseRevisionId = '';
+      const offlineEdit = 'cube([34, 34, 34]); // edited while the API was down\n';
       try {
         await editThenHide(client, {
           slug,
-          contents: 'cube([34, 34, 34]); // edited while the API was down\n',
+          contents: offlineEdit,
           row: 'offline',
         });
         queuedCloseRevisionId = await awaitCloseRevision(client, {
@@ -2405,6 +2410,10 @@ describe('close and continue', () => {
           timeout: 180_000,
         })
         .toBe(queuedCloseRevisionId);
+      expect(
+        await gitOutput(await tauRepository(offlineProjectId), ['show', `${queuedCloseRevisionId}:main.scad`]),
+        `${continuationOwner} offline: the queued close revision must carry the last edit`,
+      ).toBe(offlineEdit.trimEnd());
     } catch (error) {
       await captureAndRethrow(error, 'offline-close-and-reconnect', [client]);
     } finally {

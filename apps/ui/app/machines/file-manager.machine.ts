@@ -7,6 +7,7 @@ import type * as FileSystemBridgeModule from '@taucad/fs-bridge';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
 import { fromComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
+import { receiveWorkerTimings } from '@taucad/filesystem';
 import { createFileManagerWorker } from '#machines/file-manager-worker.js';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
@@ -435,6 +436,9 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
         createFileManagerWorker({ name: fileManagerWorkerName(homeBackend, { safeMode: context.safeMode }) }),
         'file-manager',
       );
+      // Tau #2014: the worker posts the spans it records; the page writes them as `tau.worker.*` measures on its own
+      // timeline, where a measuring session reads them. They stop with the worker, which is never reused.
+      receiveWorkerTimings(worker, 'file-manager');
       // A node-backed Home needs its provider host before the worker can mount
       // `/`, so the brokered port is handed over immediately after construction
       // and the worker's module evaluation waits on it. One port per concern:

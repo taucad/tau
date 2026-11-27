@@ -1569,15 +1569,18 @@ describe('a cold open written from its listing (STO-25)', () => {
           throw new Error('the store could not read that pack');
         }
         if (paths?.includes('model/aircraft.usda') === true && events.includes('bracket')) {
+          /* The bound ends with the hold: a closure that landed first leaves no timer to mark the log later, however long the rest of the open takes (4 s on windows-2025, job 140421452943, against a 14 ms closure write). */
+          let bound: ReturnType<typeof setTimeout> | undefined;
           await Promise.race([
             closureLanded,
             new Promise<void>((resolve) => {
-              setTimeout(() => {
+              bound = setTimeout(() => {
                 events.push('model read unblocked by its bound');
                 resolve();
               }, 2000);
             }),
           ]);
+          clearTimeout(bound);
         }
         const tree = await context.port.readTree(id, readOptions);
         events.push(`read-done ${paths === undefined ? '*' : paths.join(',')}`);

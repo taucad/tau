@@ -1123,19 +1123,16 @@ export const deliverDesktopDeepLink = async (session: DesktopSession, link: stri
 };
 
 /**
- * Complete the production sign-in handoff for a packaged app.
+ * Complete the production sign-in for a packaged app (desktop sign-in DSI-4).
  *
- * The shell opens `${TAU_FRONTEND_URL}/auth/sign-in?redirectTo=/auth/desktop?state=…`
- * in the system browser (captured here by the `shell.openExternal` override) and
- * waits for a `tau://auth/callback` deep link. R4 deleted the loopback listener,
- * so there is no port to fetch: this mints the one-time token the web route would
- * have minted and delivers the callback through `open-url`, the same event macOS
- * raises. Main's listener is installed at module scope, so emitting on `app`
- * reaches it exactly as the OS would.
+ * The shell opens the API's OAuth authorization URL in the system browser (captured here by the
+ * `shell.openExternal` override) and listens on `127.0.0.1` for the redirect. This does what the browser and the
+ * consent page do with a signed-in session: it follows the authorization request to the consent page, accepts there,
+ * and follows the provider's redirect to the app's listener, which exchanges the code itself.
  */
 export const authenticatePackagedDesktop = async (session: DesktopSession, bearerToken: string): Promise<void> => {
   let signInError: unknown;
-  // async-iife: the deep-link callback must arrive while renderer sign-in is pending.
+  // async-iife: the browser half must run while renderer sign-in is pending.
   const signIn = (async (): Promise<void> => {
     try {
       await session.page.evaluate(async () => {
@@ -1154,33 +1151,28 @@ export const authenticatePackagedDesktop = async (session: DesktopSession, beare
         const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
         return testState.__TAU_E2E_EXTERNAL_URL__ ?? '';
       });
-      expect(externalUrl, 'Packaged sign-in must open its browser handoff').not.toBe('');
+      expect(externalUrl, 'Packaged sign-in must open its browser authorization').not.toBe('');
     },
     { timeout: 30_000 },
   );
-  const redirect = new URL(externalUrl).searchParams.get('redirectTo');
-  if (!redirect) {
-    throw new Error(`Packaged desktop sign-in emitted no redirect target: ${externalUrl}`);
+  const browser = { authorization: `Bearer ${bearerToken}` };
+  const authorize = await fetch(externalUrl, { headers: browser, redirect: 'manual' });
+  const consentPage = authorize.headers.get('location');
+  if (authorize.status !== 302 || consentPage === null || !consentPage.includes('/auth/desktop?')) {
+    throw new Error(
+      `Packaged desktop authorization did not reach the consent page (HTTP ${String(authorize.status)}).`,
+    );
   }
-  const handoff = new URL(redirect, desktopE2EFrontendUrl);
-  const state = handoff.searchParams.get('state');
-  if (!state) {
-    throw new Error(`Packaged desktop sign-in emitted an invalid handoff target: ${handoff.toString()}`);
-  }
-  const generated = await fetch(`${desktopE2EApiUrl}/v1/auth/one-time-token/generate`, {
-    headers: { authorization: `Bearer ${bearerToken}` },
+  const consent = await fetch(`${desktopE2EApiUrl}/v1/auth/oauth2/consent`, {
+    method: 'POST',
+    headers: { ...browser, 'content-type': 'application/json', origin: desktopE2EFrontendUrl },
+    body: JSON.stringify({ accept: true, oauth_query: new URL(consentPage).search.slice(1) }),
   });
-  if (!generated.ok) {
-    throw new Error(`Packaged desktop token generation failed with HTTP ${String(generated.status)}.`);
+  const redirect = consent.ok ? ((await consent.json()) as { readonly url?: string }).url : undefined;
+  if (redirect === undefined || !redirect.startsWith('http://127.0.0.1:')) {
+    throw new Error(`Packaged desktop consent returned no loopback redirect (HTTP ${String(consent.status)}).`);
   }
-  const oneTimeToken = ((await generated.json()) as { readonly token?: string }).token;
-  if (!oneTimeToken) {
-    throw new Error('Packaged desktop token generation returned no token.');
-  }
-  const callback = new URL('tau://auth/callback');
-  callback.searchParams.set('ott', oneTimeToken);
-  callback.searchParams.set('state', state);
-  await deliverDesktopDeepLink(session, callback.toString());
+  await fetch(redirect, { redirect: 'manual' });
   await signIn;
   if (signInError !== undefined) {
     throw signInError instanceof Error

@@ -36,15 +36,25 @@ import type {
   WireUsageSnapshot,
   WireBalanceExplanation,
   WireModelEstimates,
-  WireOpenHolds,
   WireOperationReceipt,
+  WireOperationReceiptBatch,
 } from '@taucad/billing';
 import { serializeEntitlements } from '@taucad/billing';
-import type { AuthUser } from '@taucad/api-auth';
-import { UseAuth, User } from '@taucad/api-auth';
+import type { AuthCaller, AuthClientKind, AuthUser } from '@taucad/api-auth';
+import { AuthClient, Caller, RequireWebSession, UseAuth, User, webSessionRequired } from '@taucad/api-auth';
 import { BillingService } from '#billing.service.js';
 import { BillingEstimatesService } from '#billing-estimates.service.js';
 import { BillingUsageService } from '#billing-usage.service.js';
+
+/**
+ * A reload-consent setup action without its Stripe setup link, for Tau Desktop: setting up automatic reload happens on
+ * the web (ruling D1=A), so the desktop learns the state but never receives the page that grants the consent.
+ *
+ * @param action - The action as the payments service answers it.
+ * @returns The same action, with no `redirectUrl` when it is a reload setup.
+ */
+const withoutReloadSetupLink = (action: WirePaymentAction): WirePaymentAction =>
+  action.purpose === 'reload_setup' ? { ...action, redirectUrl: null } : action;
 
 @UseAuth()
 @Controller({ path: 'billing', version: '1' })
@@ -79,16 +89,19 @@ export class BillingController {
     return this.estimatesService.getModelEstimates({ authUserId: user.id });
   }
 
-  @Get('holds')
-  @Header('Cache-Control', 'private, no-store')
-  public async getOpenHolds(@User() user: AuthUser): Promise<WireOpenHolds> {
-    return this.usageService.getOpenHolds({ authUserId: user.id });
-  }
-
   @Get('usage')
   @Header('Cache-Control', 'private, no-store')
   public async getUsage(@User() user: AuthUser, @Query() rawQuery: unknown): Promise<WireUsageSnapshot> {
     return this.usageService.getUsage({ authUserId: user.id, rawQuery });
+  }
+
+  @Get('operations')
+  @Header('Cache-Control', 'private, no-store')
+  public async getOperationReceipts(
+    @User() user: AuthUser,
+    @Query() rawQuery: unknown,
+  ): Promise<WireOperationReceiptBatch> {
+    return this.usageService.getOperationReceipts({ authUserId: user.id, rawQuery });
   }
 
   @Get('operations/:operationId')
@@ -103,9 +116,19 @@ export class BillingController {
 
   @Get('reload-consent')
   @Header('Cache-Control', 'private, no-store')
-  // oxlint-disable-next-line typescript/no-restricted-types -- JSON absence is explicitly null in the shared wire contract.
-  public async getReloadConsent(@User() user: AuthUser): Promise<WireAutoReloadConsent | null> {
-    return (await this.paymentsService.getReloadConsent(user.id)) ?? null;
+  public async getReloadConsent(
+    @User() user: AuthUser,
+    @AuthClient() client: AuthClientKind,
+    // oxlint-disable-next-line typescript/no-restricted-types -- JSON absence is explicitly null in the shared wire contract.
+  ): Promise<WireAutoReloadConsent | null> {
+    const consent = await this.paymentsService.getReloadConsent(user.id);
+    if (consent === undefined) {
+      return null;
+    }
+    const { setupAction } = consent;
+    return client === 'desktop' && setupAction
+      ? { ...consent, setupAction: withoutReloadSetupLink(setupAction) }
+      : consent;
   }
 
   @Post('enterprise-invoice')
@@ -121,6 +144,7 @@ export class BillingController {
   }
 
   @Post('reload-consent')
+  @RequireWebSession()
   @HttpCode(200)
   @Header('Cache-Control', 'private, no-store')
   public async prepareReloadConsent(
@@ -158,6 +182,7 @@ export class BillingController {
   }
 
   @Post('account-closure')
+  @RequireWebSession()
   @HttpCode(200)
   @Header('Cache-Control', 'private, no-store')
   public async prepareClosure(
@@ -174,8 +199,10 @@ export class BillingController {
   public async listPaymentActions(
     @User() user: AuthUser,
     @Query() query: PaymentActionListQueryDto,
+    @AuthClient() client: AuthClientKind,
   ): Promise<WirePaymentAction[]> {
-    return this.paymentsService.listActions(user.id, query.purpose);
+    const actions = await this.paymentsService.listActions(user.id, query.purpose);
+    return client === 'desktop' ? actions.map((action) => withoutReloadSetupLink(action)) : actions;
   }
 
   @Get('payment-actions/:actionId')
@@ -183,8 +210,10 @@ export class BillingController {
   public async getPaymentAction(
     @User() user: AuthUser,
     @Param() params: PaymentActionIdDto,
+    @AuthClient() client: AuthClientKind,
   ): Promise<WirePaymentAction> {
-    return this.paymentsService.getAction(user.id, params.actionId);
+    const action = await this.paymentsService.getAction(user.id, params.actionId);
+    return client === 'desktop' ? withoutReloadSetupLink(action) : action;
   }
 
   @Post('payment-actions/topup')
@@ -212,6 +241,7 @@ export class BillingController {
   }
 
   @Post('payment-actions/portal')
+  @RequireWebSession()
   @HttpCode(200)
   @Header('Cache-Control', 'private, no-store')
   public async createPortal(
@@ -227,11 +257,12 @@ export class BillingController {
   @HttpCode(200)
   @Header('Cache-Control', 'private, no-store')
   public async confirmPayment(
-    @User() user: AuthUser,
+    @Caller() { user, client }: AuthCaller,
     @Param() params: PaymentActionIdDto,
     @Headers('origin') origin: string | undefined,
   ): Promise<WirePaymentAction> {
     this.assertPaymentMutation(user, origin);
+    await this.assertNotDesktopReloadSetup(client, user, params.actionId);
     return this.paymentsService.confirmAction(user.id, params.actionId);
   }
 
@@ -251,12 +282,23 @@ export class BillingController {
   @HttpCode(200)
   @Header('Cache-Control', 'private, no-store')
   public async recoverPayment(
-    @User() user: AuthUser,
+    @Caller() { user, client }: AuthCaller,
     @Param() params: PaymentActionIdDto,
     @Headers('origin') origin: string | undefined,
   ): Promise<WirePaymentAction> {
     this.assertPaymentMutation(user, origin);
+    await this.assertNotDesktopReloadSetup(client, user, params.actionId);
     return this.paymentsService.recoverAction(user.id, params.actionId);
+  }
+
+  /**
+   * Confirm and recover route a reload consent's id to that consent's card setup, which authorizes later off-session
+   * charges: standing payment consent, which Tau Desktop does not set up (ruling D1=A). Purchases stay allowed.
+   */
+  private async assertNotDesktopReloadSetup(client: AuthClientKind, user: AuthUser, actionId: string): Promise<void> {
+    if (client === 'desktop' && (await this.paymentsService.isReloadConsentAction(user.id, actionId))) {
+      throw webSessionRequired();
+    }
   }
 
   private assertPaymentMutation(user: AuthUser, origin: string | undefined): void {

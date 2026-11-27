@@ -685,6 +685,49 @@ describe('createFileSystemBridgeProxy', () => {
     proxy.dispose();
   });
 
+  /* Fast-path FW3: one additive workspace method, and two optional fields on the delete's answer. */
+  it('carries a probe of known locations, and a delete answer with or without what remains', async () => {
+    const channel = new MessageChannel();
+    const locator = { backend: 'opfs', storageRootKey: 'opfs', relativeDirectory: 'p' } as const;
+    const probe = { locations: [{ locator, status: 'held' }], names: ['p', 'q'] } as const;
+    let deleted: unknown = { status: 'deleted', remaining: [locator] };
+    createBridgeServer(
+      {
+        probeProjectDirectories: async () => probe,
+        permanentlyDeleteProjectDirectory: async () => deleted,
+      },
+      fsBridgePort(channel.port1, 'fs-bridge-probe-server'),
+      {
+        hello: createFileSystemBridgeHello({ state: 'workspace', watchable: false }),
+        protocolSchemas: fileSystemBridgeSchemas,
+      },
+    );
+    const proxy = createFileSystemBridgeProxy({
+      port: fsBridgePort(channel.port2, 'fs-bridge-probe-client'),
+      dispose: () => {
+        channel.port2.close();
+      },
+    });
+    const input = {
+      projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+      providerBasePath: 'q',
+      scope: { backend: 'opfs' },
+      copy: true,
+      locations: [locator],
+    } as const;
+
+    await expect(
+      proxy.probeProjectDirectories({ projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa', locators: [locator], known: true }),
+    ).resolves.toEqual(probe);
+    await expect(proxy.permanentlyDeleteProjectDirectory(input)).resolves.toEqual(deleted);
+    deleted = { status: 'copy-unproven', reason: 'unknown' };
+    await expect(proxy.permanentlyDeleteProjectDirectory(input)).resolves.toEqual(deleted);
+    /* An authority from before FW3 answers neither field; the caller reads that as no proof. */
+    deleted = { status: 'deleted' };
+    await expect(proxy.permanentlyDeleteProjectDirectory(input)).resolves.toEqual(deleted);
+    proxy.dispose();
+  });
+
   it('rejects unknown project-verification result modes before client resolution', async () => {
     const channel = new MessageChannel();
     createBridgeServer(

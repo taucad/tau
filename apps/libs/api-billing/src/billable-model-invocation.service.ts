@@ -45,6 +45,7 @@ import type {
   BillableInvocationIntent,
   BillableInvocationResult,
   BillableModelQualificationResolver,
+  PreviousSettledInput,
   QualifiedBillableInvocation,
 } from '#billable-model-invocation.types.js';
 import type { AdmissionDenied } from '#credit-ledger.service.js';
@@ -220,7 +221,9 @@ export class BillableModelInvocationService {
       ...suppliedIntent,
       priceHeaders: { ...suppliedIntent.priceHeaders },
     };
-    const existing = await this.operation(intent);
+    /* WP-15 step 6 (O-6): the chat's previous settled step is read beside the attempt lookup, not after it. A failed
+     * read only loses the tighter hold: the byte bound is still a proved bound. */
+    const [existing, previous] = await Promise.all([this.operation(intent), this.previousSettledInput(intent)]);
     if (existing) {
       const requestDigest = this.requestDigest(intent, existing);
       assertMatchingRequestDigest(existing.requestDigest, requestDigest);
@@ -232,17 +235,20 @@ export class BillableModelInvocationService {
     }
     let resolved: QualifiedBillableInvocation;
     try {
-      resolved = this.resolver.resolve({
-        environment: intent.environment,
-        surface: intent.surface,
-        attempt: intent.attempt,
-        providerWire: intent.providerWire,
-        body: intent.body,
-        priceHeaders: intent.priceHeaders,
-        activity: intent.activity,
-        ...(intent.projectHint === undefined ? {} : { projectHint: intent.projectHint }),
-        ...(intent.chatHint === undefined ? {} : { chatHint: intent.chatHint }),
-      });
+      resolved = this.resolver.resolve(
+        {
+          environment: intent.environment,
+          surface: intent.surface,
+          attempt: intent.attempt,
+          providerWire: intent.providerWire,
+          body: intent.body,
+          priceHeaders: intent.priceHeaders,
+          activity: intent.activity,
+          ...(intent.projectHint === undefined ? {} : { projectHint: intent.projectHint }),
+          ...(intent.chatHint === undefined ? {} : { chatHint: intent.chatHint }),
+        },
+        previous,
+      );
     } catch (error) {
       this.recordUnqualified(intent, startedAt, error);
       throw error;
@@ -334,21 +340,14 @@ export class BillableModelInvocationService {
           signal: countSignal,
         });
         countSignal.throwIfAborted();
-        const jointInputMaximum = {
-          ...maximumInput,
-          quantity: inputCount.inputTokens,
-        };
-        const maximumQuantities = qualification.maximumQuantities.map((meter) => ({
-          ...meter,
-          quantity: meter.dimension === 'output' ? meter.quantity : BigInt(inputCount.inputTokens),
-        }));
+        // The tariff is pinned again from the count, so a long-context sibling the byte bound reached is dropped.
+        const counted = qualification.withInputMaximum(BigInt(inputCount.inputTokens));
         qualification = {
-          ...qualification,
-          maximumQuantities,
+          ...counted,
           invocation: {
-            ...qualification.invocation,
-            jointInputMaximum,
+            ...counted.invocation,
             inputCount,
+            holdBasis: 'count',
           },
         };
       } catch (error) {
@@ -971,6 +970,22 @@ export class BillableModelInvocationService {
       ...genAiAttributes(qualification),
       'error.type': errorType,
     });
+  }
+
+  private async previousSettledInput(intent: BillableInvocationIntent): Promise<PreviousSettledInput | undefined> {
+    if (intent.chatHint === undefined) {
+      return undefined;
+    }
+    try {
+      return await this.ledger.previousSettledInput({
+        environment: intent.environment,
+        authUserId: intent.authUserId,
+        chatHint: intent.chatHint,
+      });
+    } catch (error) {
+      this.logger.warn({ err: error }, 'Previous settled step unavailable; holding at the byte bound');
+      return undefined;
+    }
   }
 
   private async operation(intent: BillableInvocationIntent): ReturnType<CreditLedgerService['getOperationForAttempt']> {

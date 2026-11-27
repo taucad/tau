@@ -17,6 +17,8 @@ import { storageTombstone, user as userTable } from '@taucad/api-database/schema
 import type { Environment } from '@taucad/api-core';
 import { staticAuthConfig } from '#config/auth-static.config.js';
 import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
+import { desktopOauthProvider, desktopTokenPolicy } from '#config/desktop-oauth.js';
+import { revokeDesktopSignIns } from '#desktop-sign-ins.js';
 import { emailDomainNotAllowed, isEmailDomainAllowed } from '#email-domain-allowlist.js';
 import type { EmailService } from '@taucad/api-email';
 import type { AccountDeletionGate, AccountDeletionHook, AuthRateLimitStore } from '#auth-extensions.js';
@@ -140,6 +142,18 @@ const prefixFromModel: Record<Exclude<ModelNames, ''>, IdPrefix> = {
   apikey: idPrefix.secretKey,
 };
 
+/** The `@better-auth/oauth-provider` models (desktop sign-in), which Better Auth's `ModelNames` does not list. */
+const prefixFromPluginModel: Readonly<Record<string, IdPrefix>> = {
+  deviceCode: idPrefix.verification,
+  oauthClient: idPrefix.oauthClient,
+  oauthRefreshToken: idPrefix.oauthRefreshToken,
+  oauthAccessToken: idPrefix.oauthAccessToken,
+  oauthConsent: idPrefix.oauthConsent,
+  oauthResource: idPrefix.oauthResource,
+  oauthClientResource: idPrefix.oauthClientResource,
+  oauthClientAssertion: idPrefix.oauthClientAssertion,
+};
+
 /**
  * Mapping between BetterAuth log levels and NestJS log levels.
  */
@@ -235,6 +249,9 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     // Desktop sign-in handoff (ruling D7) — must mirror auth.ts at this index.
     oneTimeToken({ storeToken: 'hashed' }),
     cliDeviceAuthorization(configService.get('TAU_FRONTEND_URL', { infer: true })),
+    // Tau Desktop sign-in (desktop sign-in execution plan DSI-1) — must mirror auth.ts at these indexes.
+    desktopOauthProvider(frontendURL),
+    desktopTokenPolicy(),
     // `bearer()` stays LAST (see auth.ts).
     // Only signed session tokens (`token.signature`): a session row alone never authenticates.
     bearer({ requireSignature: true }),
@@ -381,6 +398,8 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
         } catch (error) {
           logger.error(`Password-changed notice failed for ${user.id}: ${String(error)}`);
         }
+        // A new password signs every Tau Desktop out too: their sign-ins are not sessions, which the change ends.
+        await revokeDesktopSignIns(databaseService.database, user.id);
       }),
     },
 
@@ -429,6 +448,8 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       // email and the revocation describe the same moment.
       async onPasswordReset({ user }, request) {
         logger.log(`Password reset completed for ${user.id}`);
+        // The reset ends every session (`revokeSessionsOnPasswordReset`); Tau Desktop sign-ins are not sessions.
+        await revokeDesktopSignIns(databaseService.database, user.id);
         await sendPasswordChanged(user, request);
       },
       /*
@@ -505,7 +526,8 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       // the cookie to every subdomain of that host. Host-only is the narrowest scope.
       database: {
         generateId(options) {
-          const prefix = options.model === 'deviceCode' ? idPrefix.verification : prefixFromModel[options.model];
+          const prefix =
+            prefixFromPluginModel[options.model] ?? prefixFromModel[options.model as Exclude<ModelNames, ''>];
 
           if (!prefix) {
             throw new Error(`Model ID not supported: ${options.model}`);

@@ -34,6 +34,40 @@ export const dontRememberCookie = 'tau.dont_remember';
 
 type AuthStore = Record<string, Array<Record<string, unknown>>>;
 
+/**
+ * The `@better-auth/oauth-provider` tables, empty, with the `tau-desktop` client seeded as migration
+ * `0072_desktop_oauth_provider` seeds it.
+ *
+ * @returns Fresh arrays for a memory adapter store.
+ */
+export const emptyOauthStore = (): AuthStore => ({
+  oauthClient: [
+    {
+      id: 'oac_tau_desktop',
+      clientId: 'tau-desktop',
+      name: 'Tau Desktop',
+      redirectUris: ['http://127.0.0.1/cb'],
+      scopes: ['openid', 'profile', 'email', 'offline_access'],
+      grantTypes: ['authorization_code', 'refresh_token'],
+      responseTypes: ['code'],
+      tokenEndpointAuthMethod: 'none',
+      applicationType: 'native',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- the provider's field name
+      requirePKCE: true,
+      skipConsent: false,
+      disabled: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  ],
+  oauthRefreshToken: [],
+  oauthAccessToken: [],
+  oauthConsent: [],
+  oauthResource: [],
+  oauthClientResource: [],
+  oauthClientAssertion: [],
+});
+
 /** The guard sets `user` to the session's user, or to null; only `id` is read here. */
 type RequestWithUser = FastifyRequest & { user?: { id?: string } };
 
@@ -211,6 +245,7 @@ export const createSessionCacheHarness = async (options: HarnessOptions = {}): P
     apikey: [],
     subscription: [],
     deviceCode: [],
+    ...emptyOauthStore(),
   };
   let sessionReads = 0;
   let held: Promise<void> | undefined;

@@ -14,6 +14,8 @@ import { join, resolve } from 'node:path';
 import { createPackage } from '@electron/asar';
 // oxlint-disable-next-line no-restricted-imports -- Exercise the real managed package producer.
 import { buildLinuxAptPackages } from './linux-apt-package.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Use the real packaging check.
+import { desktopEntryProblems } from './appimage-desktop-entry.mjs';
 
 const main = async (): Promise<void> => {
   if (process.platform !== 'linux' || process.arch !== 'x64') {
@@ -114,6 +116,18 @@ const main = async (): Promise<void> => {
     await readFile(join(selector, 'etc/apparmor.d/tau-appimage-bwrap'), 'utf8'),
     /^profile tau-appimage-bwrap \/opt\/tau-appimage\/sandbox\/bwrap flags=\(unconfined\) \{$/mu,
   );
+  // D4=C: AppImageLauncher and appimaged install the embedded entry, the portable build's only route for tau:// links.
+  const embeddedEntry = await readFile(join(appDirectory, 'Tau.desktop'), 'utf8');
+  assert.deepEqual(desktopEntryProblems(embeddedEntry, 'tau'), []);
+  assert.match(embeddedEntry, /^MimeType=x-scheme-handler\/tau;$/mu);
+  assert.match(embeddedEntry, /^Exec=AppRun %U$/mu);
+  assert.deepEqual(desktopEntryProblems(embeddedEntry, 'tau-staging'), [
+    'MimeType does not claim x-scheme-handler/tau-staging',
+    "MimeType claims another channel's scheme: x-scheme-handler/tau",
+  ]);
+  assert.deepEqual(desktopEntryProblems(embeddedEntry.replace('Exec=AppRun %U', 'Exec=AppRun'), 'tau'), [
+    'Exec does not launch AppRun with %U',
+  ]);
   // A portable AppImage mounts at a random path and has no install step, so it must not pretend to carry one.
   const portable = await readdir(appDirectory, { recursive: true });
   assert.deepEqual(

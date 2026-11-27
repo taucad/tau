@@ -3,7 +3,7 @@ title: 'Filesystem Context Policy'
 description: 'Rules for the filesystem-backed context management pipeline: transcripts, tool offloading, skills, memory, compaction, and middleware ordering.'
 status: active
 created: '2026-03-24'
-updated: '2026-11-10'
+updated: '2026-11-26'
 related:
   - docs/research/provider-reasoning-replay-contract.md
   - docs/policy/context-engineering-policy.md
@@ -50,15 +50,17 @@ Never increase the offloading threshold without measuring the impact on context 
 
 ### 4. Skills and Memory via Filesystem
 
-| Feature       | Source                                        | Loading                                                             |
-| ------------- | --------------------------------------------- | ------------------------------------------------------------------- |
-| Skills        | `.agents/skills/` (client-assembled catalog)  | Metadata in the turn context; body on `use_skill` activation        |
-| Memory        | Client-assembled AGENTS.md payload (`memory`) | User-role `<system-reminder>` message in the turn context           |
-| Recent skills | `RecentSkillsPort`, per-chat                  | Fingerprint-reconciled; content restored after a compaction summary |
+| Feature       | Source                                       | Loading                                                             |
+| ------------- | -------------------------------------------- | ------------------------------------------------------------------- |
+| Skills        | `.agents/skills/` (client-assembled catalog) | Metadata in the turn context; body on `use_skill` activation        |
+| Memory        | Project-root `AGENTS.md` (client `memory`)   | User-role `<system-reminder>` message in the turn context           |
+| Recent skills | `RecentSkillsPort`, per-chat                 | Fingerprint-reconciled; content restored after a compaction summary |
 
 `createTurnContextSnapshot` (`packages/agent-host/src/harness/cad-middleware.ts`) resolves all three once per turn, and the session commits the result with `turn.history-projection-committed` before the first model call, so a replay sees the exact context the model saw.
 
 Do not add static skill or memory content to the system prompt. Let the turn context load it from the client payload / filesystem so users can edit, version, and customize it.
+
+Memory is the project's own `AGENTS.md` at its root, the path every agent following the AGENTS.md convention reads. It belongs to the person: read it, let the agent edit it like any project file, and never generate Tau content into it or read another instruction file (`CLAUDE.md`, `GEMINI.md`, a `.tau` path) in its place. Describe the file to the agent; do not prescribe when it must be updated.
 
 ### 5. Context Compaction Pipeline
 

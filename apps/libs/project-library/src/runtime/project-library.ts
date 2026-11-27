@@ -68,7 +68,11 @@ import { createLibraryAccess } from '#machines/library-access.machine.js';
 import type { AccessAnswer, LibraryAccessActor } from '#machines/library-access.machine.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/chat-storage.types.js';
-import type { PendingProjectOperation, PendingProjectRecovery } from '#types/pending-project-operation.types.js';
+import type {
+  PendingProjectOperation,
+  PendingProjectRecovery,
+  SoleCopyCancellation,
+} from '#types/pending-project-operation.types.js';
 import {
   applyDiscovery,
   buildDiscoveryOnlyListing,
@@ -85,7 +89,7 @@ import {
   replayOutcomeOf,
   scanDiscovery,
 } from '#runtime/project-library-storage.js';
-import type { DiscoveryScan, ProjectListing } from '#runtime/project-library-storage.js';
+import type { CommitOutcome, DiscoveryScan, ProjectListing } from '#runtime/project-library-storage.js';
 import type { ProjectLibraryRootFacade, ProjectLibraryWorker } from '#types/project-library-io.types.js';
 import {
   createDiscoveryObservation,
@@ -204,6 +208,11 @@ export type ProjectLibrarySnapshot = Readonly<{
   workspaceConnection: WorkspaceConnectionState;
   /** The rows this tab holds: waiting, replaying or failed (DF11). */
   recoveries: readonly PendingProjectRecovery[];
+  /**
+   * Permanent deletes a replay cancelled because no other copy holds the id (FW3, "cancel and say so"), until the
+   * person dismisses them. A delete the person is waiting on is told to its caller instead.
+   */
+  cancelledDeletes: readonly SoleCopyCancellation[];
   /** Moves whenever a project moves in or out of the Trash (`libraryChanged`). */
   revision: number;
   /** The manifest watch's last error; absent when healthy. */
@@ -227,8 +236,11 @@ export type WorkspaceConnectionRef = Actor<typeof workspaceConnectionMachine>;
 export type LibraryMutation<ObjectStore extends ProjectLibraryWorker = ProjectLibraryWorker> = Readonly<{
   /** The mutation wrote its journal row: the row is held, and quarantined, until it settles. */
   journaled: (operation: PendingProjectOperation) => void;
-  /** Commit the journaled operation; the row settles recovered, or failed with its reason (and the error is thrown). */
-  apply: (operation: PendingProjectOperation, worker?: ObjectStore) => Promise<void>;
+  /**
+   * Commit the journaled operation; the row settles recovered, cancelled (FW3: a permanent delete that removed nothing
+   * because no other copy holds the id), or failed with its reason (and the error is thrown).
+   */
+  apply: (operation: PendingProjectOperation, worker?: ObjectStore) => Promise<CommitOutcome>;
   /** The mutation wrote no row. */
   abandon: () => void;
 }>;
@@ -249,6 +261,10 @@ export const selectLibraryWorkspaceConnection = (snapshot: ProjectLibrarySnapsho
   snapshot.workspaceConnection;
 
 /** The rows this tab holds. @public */
+/** The permanent deletes a replay cancelled, until the person dismisses them (FW3). @public */
+export const selectLibraryCancelledDeletes = (snapshot: ProjectLibrarySnapshot): readonly SoleCopyCancellation[] =>
+  snapshot.cancelledDeletes;
+
 export const selectLibraryRecoveries = (snapshot: ProjectLibrarySnapshot): readonly PendingProjectRecovery[] =>
   snapshot.recoveries;
 
@@ -569,6 +585,7 @@ export class ProjectLibrary<
       isLoading: isLoadingOf(this.projectManager.getSnapshot()),
       workspaceConnection: selectWorkspaceConnectionState(this.workspaceConnection.getSnapshot()),
       recoveries: [],
+      cancelledDeletes: [],
       revision: 0,
       discoveryObservationError: undefined,
       metadataObservationError: undefined,
@@ -643,6 +660,7 @@ export class ProjectLibrary<
       forgetProject: (projectId) => {
         this.forgetProject(projectId);
       },
+      failedDeletes: () => this.#failedDeletes(),
     });
     this.workspaceCommands = new WorkspaceCommands({
       workspaceConnection: this.workspaceConnection,
@@ -660,6 +678,7 @@ export class ProjectLibrary<
       invalidateProject: (projectId) => {
         this.invalidateProject(projectId);
       },
+      failedDeletes: () => this.#failedDeletes(),
       telemetry: workspaceTelemetry,
     });
     this.listingQuery = {
@@ -727,6 +746,18 @@ export class ProjectLibrary<
 
   /** The snapshot React reads, stable until it changes. */
   public readonly getSnapshot = (): ProjectLibrarySnapshot => this.#snapshot;
+
+  /**
+   * The person has read a cancelled delete's notice (FW3).
+   *
+   * @param operationId - The cancelled delete's operation.
+   */
+  public readonly dismissCancelledDelete = (operationId: string): void => {
+    const cancelledDeletes = this.#snapshot.cancelledDeletes.filter((known) => known.operationId !== operationId);
+    if (cancelledDeletes.length !== this.#snapshot.cancelledDeletes.length) {
+      this.#publish({ ...this.#snapshot, cancelledDeletes });
+    }
+  };
 
   /** Listen for `libraryChanged{revision}`: a project moved in or out of the Trash. @returns The unsubscribe. */
   public readonly onLibraryChanged = (listener: (event: LibraryChanged) => void): (() => void) =>
@@ -1117,7 +1148,11 @@ export class ProjectLibrary<
       apply: async (operation, worker) => {
         let outcome: ReplayOutcome = { status: 'recovered' };
         try {
-          await this.#commit(operation, worker);
+          const committed = await this.#commit(operation, worker);
+          if (committed.status === 'cancelled') {
+            outcome = committed;
+          }
+          return committed;
         } catch (error) {
           outcome = replayOutcomeOf(error);
           throw error;
@@ -1256,6 +1291,19 @@ export class ProjectLibrary<
     recovery.on('rowStarted', (event) => {
       access.send({ type: 'recoveryStarted', projectId: event.projectId });
     });
+    /* FW3: a replay cancelled a delete; nobody is waiting on it, so the notice waits where recoveries surface. A
+     * mutation's own cancel is told to its caller. */
+    recovery.on('rowCancelled', (event) => {
+      if (event.via !== 'mutation') {
+        this.#publish({
+          ...this.#snapshot,
+          cancelledDeletes: [
+            ...this.#snapshot.cancelledDeletes.filter((known) => known.operationId !== event.operationId),
+            event.cancellation,
+          ],
+        });
+      }
+    });
     // A row settled or was discarded: storage may have changed, so the listing owes a pass (the model's `Bump`).
     recovery.on('rowSettled', () => {
       this.invalidateListing();
@@ -1279,6 +1327,13 @@ export class ProjectLibrary<
     }
     this.#recoveryStarted = true;
     this.recovery.start();
+  }
+
+  /** The journal rows this tab saw fail (review N2): a delete does not leave their directories out of its proof. */
+  #failedDeletes(): ReadonlySet<string> {
+    return new Set(
+      this.#snapshot.recoveries.flatMap((recovery) => (recovery.status === 'failed' ? [recovery.operationId] : [])),
+    );
   }
 
   #recoveries(): readonly PendingProjectRecovery[] {
@@ -1458,7 +1513,10 @@ export class ProjectLibrary<
       }
     }
     try {
-      await this.#commit(operation);
+      const committed = await this.#commit(operation);
+      if (committed.status === 'cancelled') {
+        return committed;
+      }
       /* XD2: a replayed creation keeps its first chat's placement on this device, as the first attempt would have. */
       if (operation.kind === 'create' && operation.chat !== undefined) {
         const fileManager = await this.#facade();
@@ -1475,15 +1533,19 @@ export class ProjectLibrary<
   }
 
   /** Commit an operation between passes: a pass in flight ends first, and the commit's own pass after it. */
-  async #commit(operation: PendingProjectOperation, supplied?: ObjectStore): Promise<void> {
+  async #commit(operation: PendingProjectOperation, supplied?: ObjectStore): Promise<CommitOutcome> {
     await this.#passSettled();
     const [fileManager, worker, { chatStore }] = await Promise.all([
       this.#facade(),
       supplied ?? this.getReadiedWorker(),
       this.#currentRecords(),
     ]);
-    await commitPendingProjectOperation({ fileManager, worker, chatStore, queryClient: this.queryClient }, operation);
+    const committed = await commitPendingProjectOperation(
+      { fileManager, worker, chatStore, queryClient: this.queryClient, failedOperationIds: this.#failedDeletes() },
+      operation,
+    );
     await this.#passSettled();
+    return committed;
   }
 
   /** The listing through the library: its journal, its discovery pass and its rows. */

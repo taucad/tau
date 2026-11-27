@@ -864,7 +864,7 @@
           },
           "datasourceUid": "loki",
           "model": {
-            "expr": "sum by (projectId) (count_over_time({service_name=\"tau-api\"} | event_provider=\"app\" |= \"\\\"A push was refused\\\"\" | json | terminal=\"true\" [1h])) >= 5",
+            "expr": "sum by (projectId) (count_over_time({service_name=\"tau-api\"} | event_provider=\"app\" |= \"A push was refused\" != \"A push was refused for\" | json | line_format \"{{.message}}\" | json | terminal=\"true\" [1h])) >= 5",
             "intervalMs": 15000,
             "maxDataPoints": 43200,
             "queryType": "range",
@@ -928,7 +928,7 @@
     },
     {
       "uid": "backup-check-failed",
-      "title": "P1: Push Checks Keep Failing",
+      "title": "P1: A Push Check Could Not Finish",
       "condition": "check_failed",
       "data": [
         {
@@ -942,7 +942,7 @@
           "model": {
             "instant": true,
             "range": false,
-            "expr": "sum(increase(tau_sync_hook_refusals_total{app=~\".*\",service_name=\"tau-api\",tau_sync_refusal_code=\"GIT_PUSH_CHECK_FAILED\"}[15m])) > 3",
+            "expr": "sum(increase(tau_sync_hook_refusals_total{app=~\".*\",service_name=\"tau-api\",tau_sync_refusal_code=\"GIT_PUSH_CHECK_FAILED\"}[15m])) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "check_failed"
@@ -954,7 +954,43 @@
       "for": "0s",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md",
-        "summary": "More than three pushes in 15 minutes were refused because a pre-receive check could not finish (GIT_PUSH_CHECK_FAILED, retryable): the hook fails closed while git, Node or the lease disk misbehaves."
+        "summary": "A push was refused in the last 15 minutes because a pre-receive check could not finish (GIT_PUSH_CHECK_FAILED, retryable); the client retries it. Three or more in 15 minutes page as backup-check-repeat."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "git"
+      }
+    },
+    {
+      "uid": "backup-first-quota",
+      "title": "P1: First Backup Over Quota Or Ceiling",
+      "condition": "first_quota",
+      "data": [
+        {
+          "refId": "first_quota",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 900,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "sum(increase(tau_sync_hook_refusals_total{app=~\".*\",service_name=\"tau-api\",tau_sync_first_backup=\"true\",tau_sync_refusal_code=~\"GIT_PUSH_(QUOTA|CEILING)\"}[15m])) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "first_quota"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md",
+        "summary": "A first backup was refused in the last 15 minutes for the owner's plan quota or the repository ceiling. That is a customer state with an action (free space or change plan), not an incident (ruling F4); check the plan and the account's usage if the customer asks."
       },
       "labels": {
         "severity": "warning",

@@ -1598,7 +1598,7 @@
     {
       "title": "Refusals by first backup and client rules",
       "type": "timeseries",
-      "description": "first_backup=true: the push's manifest held no branch or tag (backup-first-refused pages on it). client_rules=none: a build released before WP6 sent no Tau-Client-Rules header.",
+      "description": "first_backup=true: the push's manifest held no branch or tag (backup-first-refused pages on its terminal codes; quota and ceiling only warn). client_rules=none: a build released before WP6 sent no Tau-Client-Rules header.",
       "targets": [
         {
           "expr": "sum by (tau_sync_first_backup, tau_sync_client_rules) (increase(tau_sync_hook_refusals_total{app=~\"$app\",service_name=~\"$service\",tau_sync_refusal_code!~\"GIT_PUSH_NOT_FAST_FORWARD|GIT_PUSH_VERSION_NUMBER_TAKEN\"}[5m]))",

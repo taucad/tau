@@ -874,7 +874,9 @@ const ruleServices: Readonly<Record<string, string>> = {
 const selectorSourceProblems = (root: string): string[] => [
   ...lokiSources(root).flatMap(({ file, query, where }) => {
     const expected = lokiSelectors[where];
-    return [...query.matchAll(/\{(?<body>[^{}]*)\}/gu)]
+    /* A `line_format` template's `{{.field}}` is not a selector: the Fly envelope's message is re-parsed through one. */
+    const selectors = query.replaceAll(/line_format\s+"(?:[^"\\]|\\.)*"/gu, 'line_format ""');
+    return [...selectors.matchAll(/\{(?<body>[^{}]*)\}/gu)]
       .filter(({ groups }) => !expected.includes(groups?.['body']?.trim() ?? ''))
       .map(
         ({ groups }) =>

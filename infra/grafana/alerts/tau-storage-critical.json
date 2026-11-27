@@ -382,10 +382,10 @@
     {
       "uid": "backup-first-refused",
       "title": "P0: First Backup Refused",
-      "condition": "first_refused_any",
+      "condition": "first_refused",
       "data": [
         {
-          "refId": "first_refused_metric",
+          "refId": "first_refused",
           "queryType": "",
           "relativeTimeRange": {
             "from": 300,
@@ -395,12 +395,31 @@
           "model": {
             "instant": true,
             "range": false,
-            "expr": "sum(increase(tau_sync_hook_refusals_total{app=~\".*\",service_name=\"tau-api\",tau_sync_first_backup=\"true\",tau_sync_refusal_code!~\"GIT_PUSH_NOT_FAST_FORWARD|GIT_PUSH_VERSION_NUMBER_TAKEN\"}[5m])) or vector(0)",
+            "expr": "sum(increase(tau_sync_hook_refusals_total{app=~\".*\",service_name=\"tau-api\",tau_sync_first_backup=\"true\",tau_sync_refusal_code=~\"GIT_PUSH_(NOT_ADMITTED|REF_NOT_PUSHABLE|REF_DELETION|RECORD_REWRITTEN|CONFLICT_REF_INVALID|CONFLICT_OFF_LINE|VERSION_TAG_INVALID|VERSION_MOVED|FILE_TOO_LARGE|TOO_LARGE|OBJECT_INVALID|ACTOR_NOT_PUSHER|AUTHOR_ADDRESS|NOT_RECORDED_BY_TAU|RECORD_UNREADABLE)\"}[5m])) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
-            "refId": "first_refused_metric"
+            "refId": "first_refused"
           }
-        },
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "Error",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md",
+        "summary": "A push into a project with no branch or tag yet (a first backup, record refs aside) was refused by a terminal pre-receive guard in the last 5 minutes, from any client build; every Try again repeats it. Quota, ceiling and check-failed refusals do not page here (backup-first-quota, backup-check-repeat). Read the A push was refused line for codes, client and first_backup, and never ask the customer to run git. The series are seeded at boot; backup-first-logs is the log twin for the seconds after a restart (cloud backup admission blueprint WP2a, R3-1, ruling F4)."
+      },
+      "labels": {
+        "severity": "critical",
+        "service": "tau-api",
+        "component": "git"
+      }
+    },
+    {
+      "uid": "backup-first-logs",
+      "title": "P0: First Backup Refused (Logs)",
+      "condition": "first_refused_threshold",
+      "data": [
         {
           "refId": "first_refused_logs",
           "queryType": "range",
@@ -410,7 +429,7 @@
           },
           "datasourceUid": "loki",
           "model": {
-            "expr": "sum(count_over_time({service_name=\"tau-api\"} | event_provider=\"app\" |= \"\\\"A push was refused\\\"\" | json | first_backup=\"true\" | terminal=\"true\" [5m]))",
+            "expr": "sum(count_over_time({service_name=\"tau-api\"} | event_provider=\"app\" |= \"A push was refused\" != \"A push was refused for\" | json | line_format \"{{.message}}\" | json | first_backup=\"true\" | terminal=\"true\" [5m]))",
             "intervalMs": 15000,
             "maxDataPoints": 43200,
             "queryType": "range",
@@ -418,7 +437,7 @@
           }
         },
         {
-          "refId": "first_refused_logs_reduce",
+          "refId": "first_refused_reduce",
           "queryType": "",
           "relativeTimeRange": {
             "from": 0,
@@ -429,11 +448,11 @@
             "type": "reduce",
             "reducer": "last",
             "expression": "first_refused_logs",
-            "refId": "first_refused_logs_reduce"
+            "refId": "first_refused_reduce"
           }
         },
         {
-          "refId": "first_refused_any",
+          "refId": "first_refused_threshold",
           "queryType": "",
           "relativeTimeRange": {
             "from": 0,
@@ -441,18 +460,30 @@
           },
           "datasourceUid": "__expr__",
           "model": {
-            "type": "math",
-            "expression": "($first_refused_metric > 0) || ($first_refused_logs_reduce > 0)",
-            "refId": "first_refused_any"
+            "type": "threshold",
+            "expression": "first_refused_reduce",
+            "conditions": [
+              {
+                "type": "query",
+                "evaluator": {
+                  "type": "gt",
+                  "params": [0]
+                },
+                "operator": {
+                  "type": "and"
+                }
+              }
+            ],
+            "refId": "first_refused_threshold"
           }
         }
       ],
       "noDataState": "OK",
-      "execErrState": "Error",
+      "execErrState": "OK",
       "for": "0s",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md",
-        "summary": "A push into a project with no branch or tag yet (a first backup, record refs aside) was refused by a kept pre-receive guard in the last 5 minutes, from any client build; every Try again repeats it. Read the A push was refused line for codes, client and first_backup, and never ask the customer to run git. The metric series are seeded at boot and the Loki twin covers the seconds after a restart (cloud backup admission blueprint WP2a, R3-1)."
+        "summary": "Log twin of backup-first-refused, evaluated on its own so an empty log query never masks the metric rule: an A push was refused line with first_backup true and terminal true in the last 5 minutes. Quota and ceiling are not terminal, so they do not page here."
       },
       "labels": {
         "severity": "critical",
@@ -497,6 +528,82 @@
       }
     },
     {
+      "uid": "backup-retired-logs",
+      "title": "P0: Retired Authorship Refusal (Logs)",
+      "condition": "retired_code_threshold",
+      "data": [
+        {
+          "refId": "retired_code_logs",
+          "queryType": "range",
+          "relativeTimeRange": {
+            "from": 300,
+            "to": 0
+          },
+          "datasourceUid": "loki",
+          "model": {
+            "expr": "sum(count_over_time({service_name=\"tau-api\"} | event_provider=\"app\" |= \"A push was refused\" != \"A push was refused for\" |~ \"GIT_PUSH_(ACTOR_NOT_PUSHER|AUTHOR_ADDRESS|NOT_RECORDED_BY_TAU|RECORD_UNREADABLE)\" [5m]))",
+            "intervalMs": 15000,
+            "maxDataPoints": 43200,
+            "queryType": "range",
+            "refId": "retired_code_logs"
+          }
+        },
+        {
+          "refId": "retired_code_reduce",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "reduce",
+            "reducer": "last",
+            "expression": "retired_code_logs",
+            "refId": "retired_code_reduce"
+          }
+        },
+        {
+          "refId": "retired_code_threshold",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "threshold",
+            "expression": "retired_code_reduce",
+            "conditions": [
+              {
+                "type": "query",
+                "evaluator": {
+                  "type": "gt",
+                  "params": [0]
+                },
+                "operator": {
+                  "type": "and"
+                }
+              }
+            ],
+            "refId": "retired_code_threshold"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/operate/rollback-api.md",
+        "summary": "Log twin of backup-retired-code: an A push was refused line names a retired authorship code, which no current hook prints. It fires on the first such refusal even on a series the counter has not seen yet. Roll tau-storage (or tau-api in process) forward."
+      },
+      "labels": {
+        "severity": "critical",
+        "service": "tau-api",
+        "component": "git"
+      }
+    },
+    {
       "uid": "backup-unknown-refusal",
       "title": "P0: Push Refused Without A Code",
       "condition": "unknown_refusal",
@@ -525,6 +632,42 @@
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md",
         "summary": "A refused push printed no Tau-Code line this API declares (unknown) or one it does not (other), so the client can only show attention. A hook sentence lost its code, or a newer hook is ahead of this API."
+      },
+      "labels": {
+        "severity": "critical",
+        "service": "tau-api",
+        "component": "git"
+      }
+    },
+    {
+      "uid": "backup-check-repeat",
+      "title": "P0: Push Checks Keep Failing",
+      "condition": "check_repeat",
+      "data": [
+        {
+          "refId": "check_repeat",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 900,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "sum(increase(tau_sync_hook_refusals_total{app=~\".*\",service_name=\"tau-api\",tau_sync_refusal_code=\"GIT_PUSH_CHECK_FAILED\"}[15m])) >= 3",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "check_repeat"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md",
+        "summary": "Three or more pushes across projects in 15 minutes were refused because a pre-receive check could not finish (GIT_PUSH_CHECK_FAILED, retryable): the hook fails closed while git, Node or the lease disk misbehaves, and clients keep retrying. A single one is backup-check-failed, a warning."
       },
       "labels": {
         "severity": "critical",

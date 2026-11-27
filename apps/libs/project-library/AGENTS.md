@@ -46,7 +46,7 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 ## Project notes
 
 - Layer L2 (`ui:project-library`): `eslint.config.mjs` names the UI app libraries it may depend on (`chat-ui`, `files-ui`, `ui-core`, `ui-kit`). Never import `apps/ui`, another L2 library or `agent-host-ui`.
-- The three library machines and `runtime/project-library{,-commands,-workspace}.ts` and `hooks/project-manager-provider.tsx` are hashed by `apps/ui/specs/library-catalog/LibraryCatalog/drift.json`: a change goes through `LibraryCatalog.tla` first, then `FORMAL_UPDATE=1` re-pins the manifest.
+- The three library machines and `runtime/project-library{,-commands,-workspace}.ts` and `hooks/project-manager-provider.tsx` are reviewed sources of `apps/ui/specs/library-catalog`: a change goes through `LibraryCatalog.tla` first, then adds a new `LibraryCatalog/reviews/<yyyy-mm-dd>-<slug>.md` (formal verification policy rule 12); `FORMAL_UPDATE=1` re-pins the machines' alphabets in `drift.json`.
 - App services arrive by injection (`ProjectLibraryServices`, `ProjectCommandsServices`, `ProjectManagerServices`), never by import; the app's bindings are `apps/ui/app/runtime/project-library.ts`, `hooks/use-project-manager.tsx` and `hooks/use-projects.ts`.
 
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.

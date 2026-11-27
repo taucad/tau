@@ -3,7 +3,7 @@ title: 'Formal Verification Policy'
 description: 'Rules for TLA+ specs, Lean proofs and their TypeScript conformance: spec homes, expected verdicts, the formal runner, trace and log formats, differential tests, pinned toolchains and the drift gate.'
 status: active
 created: '2026-09-25'
-updated: '2026-11-13'
+updated: '2026-11-27'
 related:
   - docs/research/agent-substrate-formal-methods-blueprint.md
   - docs/research/verified-agent-substrate-charter.md
@@ -39,6 +39,7 @@ Specs live in the owner project's `specs/` directory. Modules that `EXTENDS` or 
 | `MC_<Module>.tla`                                | A checking instance                                                        |
 | `<Module>.<scenario>.cfg`                        | One TLC configuration                                                      |
 | `<Module>/`                                      | The model's data: fixtures, traces, generated files, mutants, `drift.json` |
+| `<Module>/reviews/<yyyy-mm-dd>-<slug>.md`        | One acknowledgement that a change to a reviewed source keeps the model     |
 | `expected.json`                                  | One per directory that holds modules                                       |
 | `specs/lean/`                                    | Lean files, flat, with `lean-toolchain` and their own `expected.json`      |
 
@@ -153,11 +154,31 @@ Every tool is pinned by URL and sha256 in `tools/formal/toolchain.lock`, and `fo
 
 **Why**: The rolling TLC release tag has already served different bytes under the same URL; a pinned hash makes that a setup failure instead of a changed verdict, and a skip that exits 0 in CI would be a gate that checked nothing.
 
-### 12. The Drift Gate Forces a Spec Touch
+### 12. The Drift Gate Forces a Model Review
 
-A spec tied to a machine, a seam or a code path has `<Module>/drift.json`: the machine alphabet, each machine's `version`, table and source hashes, each transition's `meta.tla`, and the spec hashes. The owner's Node-tier test fails when the manifest is stale or when a transition names an action the spec does not define. `formal update` refuses to rewrite a manifest whose alphabet, tables, sources or actions moved while no spec file did, or whose alphabet moved while no machine's `version` did.
+A spec tied to a machine, a seam or a code path has `<Module>/drift.json`: the machine alphabet, each machine's `version`, table hashes, each transition's `meta.tla`, and the spec hashes. The owner's Node-tier test fails when the manifest is stale or when a transition names an action the spec does not define. `formal update` refuses to rewrite a manifest whose alphabet, tables or actions moved while no spec file did, or whose alphabet moved while no machine's `version` did.
 
-**Why**: A machine whose alphabet changes without its spec changing is the drift the models exist to stop; a stale manifest is the cheapest place to catch it.
+Code slices the spec describes without an alphabet of their own are `reviewed` sources, acknowledged in `<Module>/reviews/` rather than pinned in the manifest. A change to one adds a new file, `<Module>/reviews/<yyyy-mm-dd>-<slug>.md`: a note saying what changed and why the model still holds (or how it changed with it), and a `sha256` block of `<sha256>  <path>` lines. A source passes while any review records its current hash, and the failing test prints the file to add with its block. Never edit an earlier review, never write the note into the `.tla` or the family's README, and never type the hashes by hand: write the note with an empty `sha256` block and `FORMAL_UPDATE=1` fills it, or paste the block the failure printed.
+
+**Why**: A machine whose alphabet changes without its spec changing is the drift the models exist to stop; a stale manifest is the cheapest place to catch it. One new file per acknowledgement keeps the review while two changes to different sources merge on GitHub's server, which runs no custom merge driver; two changes to one source still need a review of the merged text.
+
+CORRECT (`MessageQueue/reviews/2026-11-27-outbox-gate-copy.md`):
+
+````markdown
+The outbox gate's refusal copy changed; Prepare and Deliver keep their guards, so no action changes.
+
+```sha256
+62beff863c58f9531c819c673f826cad869aa1bddda939c43aceff45faab2511  apps/ui/app/services/outbox-gate.ts
+```
+````
+
+INCORRECT:
+
+```text
+\* Outbox gate copy (2026-11-27): no action or verdict changes.   <- a note above EXTENDS, then a re-pinned drift.json
+```
+
+A manifest that still pins `sources` predates reviews; its owner test passes them as `sources` until it moves them. `formal review-notes [--slug <slug>] <path/to/Module.tla>` moves the notes above `EXTENDS` and a manifest's `sources` pins into a review. It skips notes an earlier review already holds, so it also converts a late old-format pin after a rebase: take `main`'s `drift.json`, keep the note above `EXTENDS`, run it with the change's slug, then fill the hashes with `FORMAL_UPDATE=1`.
 
 ### 13. Outputs Stay Out of the Root
 
@@ -181,7 +202,7 @@ Scratch and toolchains go under `node_modules/.cache/formal/`, reports under `ou
 - [ ] Each violating configuration checks exactly one property
 - [ ] Liveness properties name their quiescence predicate
 - [ ] Generated files are regenerated and committed
-- [ ] `drift.json` is current and the spec was touched with the alphabet
+- [ ] `drift.json` is current, the spec was touched with the alphabet, and each changed reviewed source has a new review
 - [ ] `pnpm nx run <project>:formal:tla` passes locally or reports `SKIPPED`
 
 ## References

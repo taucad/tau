@@ -21,22 +21,8 @@
     "watchFailed",
     "withdrawTurn"
   ],
-  "sources": {
-    "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx": "b44a781d3813b51d49b0af4fb70f7c07db3c323b255182dc86fc58c9fff1e2ac",
-    "apps/libs/chat-ui/src/db/chat-message-queue-store.ts": "7f5887a1f65eea460b3463f445a3aef19dd7843ea1b379940e0273eebc1c32f7",
-    "apps/libs/chat-ui/src/machines/chat-message-queue.machine.ts": "b8ff03658a2db816af1d7e34ad621d548653e48784d5c7b2ce7801a26bbfeb0f",
-    "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "53443348c954ec1cb4656dda9569385dd0af65c39356e1cfadd5ddb44ded8d0a",
-    "apps/ui/app/chat-clients/chat-turn-host.tsx": "f2037dc8f438aa8a006009909def50e9ba4d558896e77fe539f1613ecb030cd8",
-    "apps/ui/app/chat-clients/use-cad-chat-client.ts": "68fafe3a26f23b5f35079fb93681cb083e4b56e33a2221b5086ee716c7a48cf7",
-    "apps/ui/app/components/chat/chat-message-queue.tsx": "77c8164d742b8c64dc79ae0969fa71721be0c3bc64ea908cb0b812b8c42c081b",
-    "apps/ui/app/components/chat/chat-textarea.tsx": "b9a3839922a621107c96dc58bec8ade972d373c34539bb56d176507eb3dda9b9",
-    "apps/ui/app/hooks/use-chat.tsx": "7affee504c879ec5a34c175360dc71ff7ce05e94407a6da9dfd8b4b946a1fd91",
-    "apps/ui/app/machines/chat-session.machine.ts": "2076bc41cb203f45c0049297df17be9a4a4eed966d704f34423e3a2aa3f733cf",
-    "apps/ui/app/services/chat-session-store.ts": "18c37ded8ed9b8102dc0d540bbdc71e6e1383e55686b311ac38615abfbdc8a9e",
-    "apps/ui/app/services/outbox-gate.ts": "c9d5a33f02c06d6bb45657f76e30a6c3a28b31bf6403d7dc0e9d3c840c4e357e"
-  },
   "specs": {
-    "MessageQueue.tla": "e7456428239601bdc37bf4ab528f314d1ea7dbbf593b657ad03fdd6be6acf595",
+    "MessageQueue.tla": "c2e8e647a088b51144402e0070656c9406013b85821eadf8a8c42bd928d3ad1e",
     "QueuePlacement.tla": "deb7d4f4fcd0de459b5c490eae7ec417bffb9ed99f7eca969e0141443648c952"
   },
   "tables": {

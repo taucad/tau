@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { AnyStateMachine } from 'xstate';
 import { canonicalJson } from '#graph.js';
+import { checkReviewedSources } from '#reviews.js';
 
 /**
  * `<Module>/drift.json` (FM-R13): what a spec is tied to, hashed or listed so a change forces a spec touch.
@@ -16,12 +17,23 @@ export type DriftManifest = {
   readonly versions?: Readonly<Record<string, string>>;
   /** Legality or timeout table path → sha256. */
   readonly tables: Readonly<Record<string, string>>;
-  /** Owner-chosen code slice → sha256, for specs without a machine. */
+  /** Owner-chosen code slice → sha256, for specs without a machine; new owners pass `reviewed` instead (`DriftInputs`). */
   readonly sources?: Readonly<Record<string, string>>;
   /** `<machine>#<state>.<eventType>` → its transition's `meta.tla` (W2 MC-R27). */
   readonly actions?: Readonly<Record<string, string>>;
   /** `.tla` path → sha256. */
   readonly specs: Readonly<Record<string, string>>;
+};
+
+/**
+ * What an owner test passes: the manifest's parts, and `reviewed`, code slice → sha256 for sources
+ * acknowledged by `<Module>/reviews/` rather than pinned in the manifest. Each change to a reviewed
+ * source adds its own review file, so independent changes merge without touching the same text.
+ *
+ * @public
+ */
+export type DriftInputs = DriftManifest & {
+  readonly reviewed?: Readonly<Record<string, string>>;
 };
 
 type NodeLike = {
@@ -182,27 +194,30 @@ export const refuseDriftUpdate = (committed: DriftManifest, rebuilt: DriftManife
 
 /**
  * The owner test's entry point: under `FORMAL_UPDATE=1` rewrite the manifest (subject to the
- * refusals), otherwise report what moved.
+ * refusals), otherwise report what moved. `reviewed` sources are checked against
+ * `<Module>/reviews/` (`checkReviewedSources`) and never written to the manifest.
  *
  * @public
  */
 export const driftManifestProblems = (
   file: string,
-  rebuilt: DriftManifest,
+  { reviewed, ...rebuilt }: DriftInputs,
   update = process.env['FORMAL_UPDATE'] === '1',
 ): string[] => {
+  const today = new Date().toISOString().slice(0, 10);
+  const reviewProblems = reviewed === undefined ? [] : checkReviewedSources(file, reviewed, { update, today });
   if (!update) {
-    return checkDriftManifest(file, rebuilt);
+    return [...checkDriftManifest(file, rebuilt), ...reviewProblems];
   }
   if (existsSync(file)) {
     const refusal = refuseDriftUpdate(JSON.parse(readFileSync(file, 'utf8')) as DriftManifest, rebuilt);
     if (refusal) {
-      return [refusal];
+      return [refusal, ...reviewProblems];
     }
   }
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, serializeManifest(rebuilt));
-  return [];
+  return reviewProblems;
 };
 
 /**

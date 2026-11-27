@@ -65,7 +65,8 @@ describe('MessageQueue.tla implementation correspondence', () => {
           'QueuePlacement.cross-host-replay.cfg',
           'QueuePlacement.unscoped-rebase.cfg',
         ]),
-        sources: hashFiles(workspace, [
+        // Acknowledged by a new file in reviews/ per change, so independent changes merge (FM-R13).
+        reviewed: hashFiles(workspace, [
           'apps/libs/chat-ui/src/db/chat-message-queue-store.ts',
           'apps/libs/chat-ui/src/machines/chat-message-queue.machine.ts',
           'apps/ui/app/machines/chat-session.machine.ts',

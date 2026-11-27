@@ -5,6 +5,14 @@
       "expect": "pass",
       "ref": "GI-A5 one-key graph for the credit operation oracle"
     },
+    "GatewayInvocation.charged-cut-NoChargedCut.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoChargedCut"
+      },
+      "kind": "witness",
+      "ref": "D-3: a client cut that relayed output settles charged for what it used (ruled 2026-11-27)"
+    },
     "GatewayInvocation.cut-absorbs-NoLiveAbsorb.cfg": {
       "tier": "pr",
       "expect": {
@@ -152,7 +160,7 @@
     "GatewayInvocation.target-three-attempts.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "EQ1 with three attempts: re-prepare, end the run, Resume proceeds; ChargeAfterRecordedLoss, LostReplyBound and IndInv hold (927,265 states)"
+      "ref": "EQ1 with three attempts: re-prepare, end the run, Resume proceeds; ChargeAfterRecordedLoss, LostReplyBound and IndInv hold (10.7M distinct states; StopCharges FALSE, as the charged-cut branch doubles it past the watchdog, and target-safety checks it with these invariants)"
     },
     "GatewayInvocation.today-NoUncodedDeadEnd-3.cfg": {
       "tier": "nightly",

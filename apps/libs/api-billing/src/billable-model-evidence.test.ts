@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createBillableModelEvidenceCollector } from '#billable-model-evidence.js';
+import { isBilledStop } from '#billable-stop-charge.js';
 import type { BillingPolicyService } from '#billing-policy.service.js';
 import { CreditLedgerService } from '#credit-ledger.service.js';
 import type { DatabaseService } from '@taucad/api-database';
@@ -663,6 +664,139 @@ describe('createBillableModelEvidenceCollector', () => {
         { dimension: 'output', quantity: 2n },
       ],
       normalizationEvidence: { terminalReason: 'max_output_tokens' },
+    });
+  });
+
+  describe('a step the person stopped (D-3)', () => {
+    const anthropicRates = [
+      { dimension: 'uncached_input', tier: null },
+      { dimension: 'cache_read', tier: null },
+      { dimension: 'cache_write', tier: '5m' },
+      { dimension: 'cache_write', tier: '1h' },
+      { dimension: 'output', tier: null },
+    ];
+    const responsesRates = [
+      { dimension: 'uncached_input', tier: null },
+      { dimension: 'cache_read', tier: null },
+      { dimension: 'output', tier: null },
+    ];
+    const dimensionsOf = (rates: ReadonlyArray<{ dimension: string }>): Set<string> =>
+      new Set(rates.map(({ dimension }) => dimension));
+    const anthropicStart =
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":120,"cache_read_input_tokens":3000,"cache_creation_input_tokens":0,"output_tokens":1}}}\n\n';
+    const anthropicText = (text: string): string =>
+      `event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })}\n\n`;
+
+    it('should price reported input and a rounded-down output estimate', () => {
+      const collector = createBillableModelEvidenceCollector('anthropic', dimensionsOf(anthropicRates), 'anthropic', {
+        rates: anthropicRates,
+      });
+      collector.accept(bytes(anthropicStart));
+      collector.accept(bytes(anthropicText('a'.repeat(41))));
+
+      expect(collector.failed('client_abort')).toMatchObject({
+        kind: 'absorbed_unknown',
+        executionStatus: 'cancelled',
+        meterItems: [
+          { dimension: 'uncached_input', tier: null, quantity: 120n },
+          { dimension: 'cache_read', tier: null, quantity: 3000n },
+          { dimension: 'cache_write', tier: '5m', quantity: 0n },
+          { dimension: 'cache_write', tier: '1h', quantity: 0n },
+          { dimension: 'output', tier: null, quantity: 10n },
+        ],
+        normalizationEvidence: {
+          terminalReason: 'client_abort',
+          fields: { relayedOutputCharacters: '41', estimatedOutputTokens: '10' },
+        },
+      });
+    });
+
+    it('should price an exact input count as cache reads when the supplier reported no input', () => {
+      const collector = createBillableModelEvidenceCollector(
+        'openai-responses',
+        dimensionsOf(responsesRates),
+        'openai',
+        {
+          rates: responsesRates,
+          countedInputTokens: 5000n,
+        },
+      );
+      collector.accept(
+        bytes(
+          'data: {"type":"response.output_text.delta","delta":"Hello there, "}\n\ndata: {"type":"response.function_call_arguments.delta","delta":"{\\"x\\":1}"}\n\n',
+        ),
+      );
+
+      const evidence = collector.failed('client_abort');
+
+      expect(evidence).toMatchObject({
+        kind: 'absorbed_unknown',
+        meterItems: [
+          { dimension: 'uncached_input', quantity: 0n },
+          { dimension: 'cache_read', quantity: 5000n },
+          { dimension: 'output', quantity: 5n },
+        ],
+      });
+      expect(isBilledStop(evidence)).toBe(true);
+    });
+
+    it('should leave the input at zero when nothing measured it', () => {
+      const collector = createBillableModelEvidenceCollector(
+        'openai-completions',
+        dimensionsOf(responsesRates),
+        'vertexai',
+        { rates: responsesRates },
+      );
+      collector.accept(bytes('data: {"choices":[{"index":0,"delta":{"content":"abcdefgh"}}]}\n\n'));
+
+      expect(collector.failed('client_abort')).toMatchObject({
+        meterItems: [
+          { dimension: 'uncached_input', quantity: 0n },
+          { dimension: 'cache_read', quantity: 0n },
+          { dimension: 'output', quantity: 2n },
+        ],
+      });
+    });
+
+    it('should keep a stop free when no output was relayed', () => {
+      const collector = createBillableModelEvidenceCollector('anthropic', dimensionsOf(anthropicRates), 'anthropic', {
+        rates: anthropicRates,
+      });
+      collector.accept(bytes(anthropicStart));
+
+      const evidence = collector.failed('client_abort');
+
+      expect(evidence.normalizationEvidence?.fields).not.toHaveProperty('relayedOutputCharacters');
+      expect(isBilledStop(evidence)).toBe(false);
+    });
+
+    it.each(['deadline', 'malformed_response'] as const)('should keep a %s cut free', (reason) => {
+      const collector = createBillableModelEvidenceCollector('anthropic', dimensionsOf(anthropicRates), 'anthropic', {
+        rates: anthropicRates,
+      });
+      collector.accept(bytes(anthropicStart));
+      collector.accept(bytes(anthropicText('a'.repeat(400))));
+
+      const evidence = collector.failed(reason);
+
+      expect(evidence.kind).toBe('absorbed_unknown');
+      expect(isBilledStop(evidence)).toBe(false);
+    });
+
+    it('should not bill a stop relabelled as a service restart', () => {
+      const collector = createBillableModelEvidenceCollector('anthropic', dimensionsOf(anthropicRates), 'anthropic', {
+        rates: anthropicRates,
+      });
+      collector.accept(bytes(anthropicStart));
+      collector.accept(bytes(anthropicText('a'.repeat(400))));
+      const evidence = collector.failed('client_abort');
+
+      expect(
+        isBilledStop({
+          ...evidence,
+          normalizationEvidence: { ...evidence.normalizationEvidence!, terminalReason: 'service_restart' },
+        }),
+      ).toBe(false);
     });
   });
 });

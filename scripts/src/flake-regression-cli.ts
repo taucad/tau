@@ -34,7 +34,7 @@ import { setTimeout as sleepFor } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { client } from '#ci-github-client.js';
+import { client, isMarkerAuthor, markerAuthors } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
 import { branchStore, fileStore, stateBranch } from '#ci-flake-ledger-store.js';
 import type { StateStore } from '#ci-flake-ledger-store.js';
@@ -71,8 +71,6 @@ const maximumIssues = 5;
 /** Waits for a `flake-repro.yml` slot when its gate refuses a probe (three runs at once). */
 const gateRetries = 6;
 const gateWaitMinutes = 10;
-/** The workflow token's account: the only author whose bisect markers count. */
-export const automationLogin = 'github-actions[bot]';
 /** `flake-repro.yml`'s smallest `minutes`: a retry with less of the probe's budget left is not dispatched. */
 const minimumDispatchMinutes = 5;
 /** Time a dispatched run may queue before it starts, beyond its own cap. */
@@ -197,15 +195,22 @@ export const flagIssue = async (
   return created.number;
 };
 
-/** The bodies of the issue's comments written by {@link automationLogin}: the only ones whose markers count. */
-const automationComments = async (github: Client, issue: number): Promise<string[]> => {
+/**
+ * The bodies of the issue's comments written by the flake automation's allowlisted accounts ({@link markerAuthors}:
+ * `tau-flake-bot[bot]` and `github-actions[bot]`, which writes this CLI's markers): the only ones whose markers count.
+ */
+const automationComments = async (
+  github: Client,
+  issue: number,
+  authors: ReadonlySet<string> = markerAuthors(),
+): Promise<string[]> => {
   const bodies: string[] = [];
   for (let page = 1; page <= 10; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- pages are read in order until a short one
     const comments = await github.get<Array<{ body?: string; user?: { login?: string } }>>(
       `/repos/${github.repository}/issues/${issue}/comments?per_page=100&page=${page}`,
     );
-    bodies.push(...comments.filter((entry) => entry.user?.login === automationLogin).map((entry) => entry.body ?? ''));
+    bodies.push(...comments.filter((entry) => isMarkerAuthor(entry.user, authors)).map((entry) => entry.body ?? ''));
     if (comments.length < 100) {
       break;
     }

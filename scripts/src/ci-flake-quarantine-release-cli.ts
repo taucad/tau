@@ -20,9 +20,11 @@
  *   open pull request is closed.
  *
  * Opening a pull request needs a token that may create one, as for the entry step (`ci-flake-quarantine-entry-cli.ts`):
- * the Actions `GITHUB_TOKEN` may not while the repository does not let Actions create pull requests, so the branch is
- * pushed and each owner issue names it with a compare link. Writes start only when the checkout is the base branch's
- * current commit.
+ * `flake-ledger.yml` passes a `tau-flake-bot` App token when the main-only `flake-bot` environment holds the App's
+ * secrets. Without them it falls back to the Actions `GITHUB_TOKEN`, which may not while the repository does not let
+ * Actions create pull requests, so the branch is pushed and each owner issue names it with a compare link. Writes
+ * start only when the checkout is the base branch's current commit. Issue-comment markers count only when
+ * `FLAKE_BOT_LOGIN` (default `tau-flake-bot[bot]`) or `github-actions[bot]` wrote them (taucad/tau#2878).
  *
  * Usage: node scripts/src/ci-flake-quarantine-release-cli.ts [--dry-run] [--offline] [--state-file <path>]
  *          [--state-branch flake-ledger] [--base main] [--today YYYY-MM-DD] [--root .] [--out <dir>]
@@ -30,7 +32,7 @@
  * `--dry-run` writes nothing to GitHub; `--out` writes the proposed `quarantine.json` files under a directory.
  * `--offline` (with `--state-file`) reads nothing from GitHub either: no fixes, no pending removals.
  * Env: GITHUB_TOKEN (`contents: write`, `issues: write`, `pull-requests: write`; read-only for a dry run),
- * GITHUB_REPOSITORY (default taucad/tau), GITHUB_API_URL.
+ * FLAKE_BOT_LOGIN (default `tau-flake-bot[bot]`), GITHUB_REPOSITORY (default taucad/tau), GITHUB_API_URL.
  * Exit codes: 0 done, or nothing to remove; 1 API failure; 2 usage.
  */
 import { execFileSync } from 'node:child_process';
@@ -663,7 +665,7 @@ const settleExpiry = async (
  * the 30-day return window, and closes as completed, labelled `flake:released`. It is found through the merged branch,
  * not through a label, so an owner update that failed before the merge is recovered. An issue still labelled
  * `flake:releasing` whose entry left `main` without a landed release only loses that label. Markers are read only
- * from comments an app wrote.
+ * from comments the flake bot or the workflow token wrote, so no other author can supersede a removal record.
  */
 export const closeReleased = async (
   github: Client,

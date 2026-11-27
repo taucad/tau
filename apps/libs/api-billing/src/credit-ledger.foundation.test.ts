@@ -1495,6 +1495,51 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     });
   });
 
+  it('should charge a step the person stopped for what it used, capped at the authorization (D-3)', async () => {
+    const fixture = await createFixture({ promoAtoms: 0n, planAtoms: 0n, purchasedAtoms: 10n });
+    const settle = async (attemptKey: string, quantity: bigint, terminalReason: string) => {
+      const admitted = await firstLedger.admitOperation(admission(fixture, attemptKey, 3n));
+      if (admitted.status !== 'admitted') {
+        throw new Error(`${attemptKey} was not admitted`);
+      }
+      await firstLedger.markDispatchIntent(admitted.operationId, admitted.generation);
+      const evidence: Parameters<typeof firstLedger.terminalizeOperation>[0]['evidence'] = {
+        kind: 'absorbed_unknown',
+        executionStatus: 'cancelled',
+        usageOccurredAt: new Date(),
+        meterItems: [{ dimension: 'uncached_input', tier: null, quantity }],
+        normalizationEvidence: {
+          version: 'provider-usage-v1',
+          terminalReason,
+          fields: { relayedOutputCharacters: '40', estimatedOutputTokens: '10' },
+        },
+      };
+      const receipt = await firstLedger.terminalizeOperation({
+        operationId: admitted.operationId,
+        accountId: fixture.accountId,
+        requestDigest: `sha256:${attemptKey}`,
+        expectedGeneration: admitted.generation,
+        evidence,
+        resolvedAt: new Date(),
+      });
+      const [stored] = await firstDatabase
+        .select()
+        .from(creditOperation)
+        .where(eq(creditOperation.id, admitted.operationId));
+      return { receipt, stored };
+    };
+
+    const stopped = await settle('stop-used', 2n, 'client_abort');
+    expect(stopped.receipt).toMatchObject({ customerState: 'settled', chargedAtoms: 2n });
+    expect(stopped.stored).toMatchObject({ customerState: 'settled', meteringStatus: 'partial', chargedAtoms: 2n });
+
+    const capped = await settle('stop-capped', 50n, 'client_abort');
+    expect(capped.receipt).toMatchObject({ customerState: 'settled', chargedAtoms: 3n });
+
+    const deadline = await settle('stop-deadline', 2n, 'deadline');
+    expect(deadline.receipt).toMatchObject({ customerState: 'absorbed', chargedAtoms: 0n });
+  });
+
   it('should claim lost acknowledgements once and fence the prior generation', async () => {
     const fixture = await createFixture({
       promoAtoms: 0n,

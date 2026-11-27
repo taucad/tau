@@ -310,6 +310,8 @@ export const ChatTextarea = memo(function ({
   // Mutable ref populated by ChatTextareaDesktop so the imperative handle
   // can focus the Tiptap editor instead of the (non-existent) <textarea>
   const focusEditorRef = useRef<(() => void) | undefined>(undefined);
+  // Populated by ChatTextareaDesktop with its Send, so a card's Send message takes the same path as the button.
+  const submitEditorRef = useRef<(() => Promise<void>) | undefined>(undefined);
 
   useImperativeHandle(
     ref,
@@ -321,8 +323,11 @@ export const ChatTextarea = memo(function ({
           logic.focusInput();
         }
       },
+      submit: async () => {
+        await (submitEditorRef.current ?? logic.handleSubmit)();
+      },
     }),
-    [logic.focusInput],
+    [logic.focusInput, logic.handleSubmit],
   );
 
   const geometryUnits = projectContext?.geometryUnits;
@@ -568,6 +573,7 @@ export const ChatTextarea = memo(function ({
         fileInputReference={logic.fileInputReference}
         containerReference={logic.containerReference}
         focusEditorRef={focusEditorRef}
+        submitEditorRef={submitEditorRef}
         addContextChipsRef={addContextChipsRef}
         addContextReferencesRef={addContextReferencesRef}
         // Handlers

@@ -9,6 +9,8 @@ import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useIdentity } from '#hooks/use-identity.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
+import { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.js';
+import { useCreditStanding } from '#hooks/use-credit-standing.js';
 
 type ChatErrorUnauthorizedProps = {
   readonly className?: string;
@@ -45,9 +47,14 @@ export const ChatErrorUnauthorized = memo(function ({
     return `${pathname}${remaining ? `?${remaining}` : ''}${hash}`;
   }, [hash, pathname, resumable, search]);
   const { signIn, signUp } = useAuthLinks({ redirectTo: returnTo });
+  const standing = useCreditStanding();
 
   if (isSignedIn && resumable) {
     return <ChatErrorPausedTurn className={className} title='You’re signed in' resumable />;
+  }
+  // Back from sign-up with nothing to spend: the send would be refused, so say what it takes now.
+  if (isSignedIn && standing?.isEmpty === true) {
+    return <ChatErrorCredits className={className} resumable={false} details={{ availableCreditAtoms: '0' }} />;
   }
   if (isSignedIn) {
     return (
@@ -60,40 +67,44 @@ export const ChatErrorUnauthorized = memo(function ({
     );
   }
 
+  const signInButton = (
+    <Button key='sign-in' asChild variant={resumable ? 'default' : 'outline'} size='xs'>
+      <NavLink to={signIn}>
+        {({ isPending }) => (
+          <span aria-busy={isPending} className='inline-flex items-center gap-1.5'>
+            {isPending ? <Loader className='size-3.5' /> : <LogIn className='size-3.5' />}
+            Sign in
+          </span>
+        )}
+      </NavLink>
+    </Button>
+  );
+  const createAccountButton = (
+    <Button key='sign-up' asChild variant={resumable ? 'outline' : 'default'} size='xs'>
+      <NavLink to={signUp}>
+        {({ isPending }) => (
+          <span aria-busy={isPending} className='inline-flex items-center gap-1.5'>
+            {isPending ? <Loader className='size-3.5' /> : <UserPlus className='size-3.5' />}
+            Create account
+          </span>
+        )}
+      </NavLink>
+    </Button>
+  );
+
+  // A paused run belongs to someone who was signed in, so Sign in leads. A send refused before it ran is almost always
+  // a new person's first prompt, so Create account leads, and nothing about credits is said before sign-up.
   return (
     <ChatErrorCard
       tone='neutral'
       className={className}
-      title='Sign in to continue'
+      title={resumable ? 'Sign in to continue' : 'Create an account to send this'}
       description={
         resumable
           ? 'Your turn is paused. Sign in and Tau resumes where it stopped.'
-          : 'Nothing has run yet. Sign in, then send your message.'
+          : 'Your message stays here. Sign up free, then send it.'
       }
-      actions={
-        <>
-          <Button asChild variant='default' size='xs'>
-            <NavLink to={signIn}>
-              {({ isPending }) => (
-                <span aria-busy={isPending} className='inline-flex items-center gap-1.5'>
-                  {isPending ? <Loader className='size-3.5' /> : <LogIn className='size-3.5' />}
-                  Sign in
-                </span>
-              )}
-            </NavLink>
-          </Button>
-          <Button asChild variant='outline' size='xs'>
-            <NavLink to={signUp}>
-              {({ isPending }) => (
-                <span aria-busy={isPending} className='inline-flex items-center gap-1.5'>
-                  {isPending ? <Loader className='size-3.5' /> : <UserPlus className='size-3.5' />}
-                  Create account
-                </span>
-              )}
-            </NavLink>
-          </Button>
-        </>
-      }
+      actions={resumable ? [signInButton, createAccountButton] : [createAccountButton, signInButton]}
     />
   );
 });

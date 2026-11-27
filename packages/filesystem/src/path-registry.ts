@@ -55,6 +55,14 @@ export type PathRegistryRow = PathClassification &
      */
     match: 'root' | 'segment';
     directory: boolean;
+    /**
+     * Whether stock Git already leaves this path untracked without a line from
+     * Tau: `.git` is Git's own store, which its directory walk never enters. The
+     * generated ignore block omits such a row (project Git policy, rule 3).
+     * `.jj` is not one: Jujutsu writes its own `.jj/.gitignore` only in a store
+     * colocated with Git, so a nested non-colocated store needs Tau's line.
+     */
+    selfIgnored?: boolean;
   }>;
 
 /**
@@ -125,22 +133,26 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
   /* Control plane: hidden from every composed view, refused before provider
    * I/O. A revision hash never covers its own store — its own or a vendored
    * dependency's, a submodule's, a second project's (EQ1, CI1), which is why
-   * every row here matches a segment and none of them is anchored in the ignore
-   * file: `versioned` and the generated block have to agree at every depth
-   * (PP5).
+   * the store rows match a segment. Stock Git never walks into `.git`
+   * (`selfIgnored`), so only `.jj` takes an ignore line, unanchored; the two
+   * `.tau` rows are root-only and fall under the block's `/.tau/*` head (PP5).
    *
    * They lead the table because {@link classify} takes the *first* match: behind
    * the rows below, a store vendored into `node_modules` was the cache's and one
    * under `.tau/skills` was authored — and therefore versioned, captured into
    * every revision (G0-3). */
+  /* The workspace binding: root-only, like every other `.tau` member, so the
+   * generated block's `/.tau/*` head already excludes it and it needs no line of
+   * its own. Nothing writes it yet; the architecture places it in a workspace's
+   * host-private `.tau/`, which is never inside a project. */
   {
     prefix: '.tau/binding.json',
     class: 'control-plane',
     versioned: false,
     agentAccess: 'hidden',
     watch: 'none',
-    anchored: false,
-    match: 'segment',
+    anchored: true,
+    match: 'root',
     directory: false,
   },
   {
@@ -162,19 +174,20 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     anchored: false,
     match: 'segment',
     directory: true,
+    selfIgnored: true,
   },
-  /* The OPFS provider's staging directory: bytes a large write or a create is
-   * still writing, moved into place once whole and swept at the next open when
-   * their writer is gone (I1). It sits at the storage root; like every row
-   * above it matches by segment, so no depth ever shows it. */
+  /* The storage root's staging directory: bytes a large OPFS write or an import
+   * is still writing, moved into place once whole and swept when their writer is
+   * gone (I1, I9). It sits in the storage root's own `.tau/`, beside the index
+   * snapshot, so it adds no top-level name and no ignore line. */
   {
-    prefix: '.tau-staging',
+    prefix: '.tau/staging',
     class: 'control-plane',
     versioned: false,
     agentAccess: 'hidden',
     watch: 'none',
-    anchored: false,
-    match: 'segment',
+    anchored: true,
+    match: 'root',
     directory: true,
   },
 

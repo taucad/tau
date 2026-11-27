@@ -9,7 +9,7 @@
  * three times under three different cache keys.
  */
 
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { QueryClient, QueryState, UseMutationResult } from '@tanstack/react-query';
 import { notifyManager, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
@@ -878,6 +878,8 @@ export const useTauCloudIntentConnection = ({
   const step =
     intent === 'open' && !canOpenCloudProject(projectId) ? 'wait' : nextTauCloudStep(intent, eligibility, status);
   const { connectRemote } = commands;
+  /* A held first backup's end, which runs the connect step again (WP-12 step 5). */
+  const [holdsEnded, setHoldsEnded] = useState(0);
   /* The session's connect verb while its session is open: a held first backup connects only through a live one. */
   const liveConnectRemote = useRef<typeof connectRemote | undefined>(connectRemote);
   useEffect(() => {
@@ -906,6 +908,21 @@ export const useTauCloudIntentConnection = ({
         return;
       }
       case 'connect': {
+        /* WP-12 step 5: a project created from Home backs up once its first turn streams, or 5 s on. The intent stays
+         * `noticed` meanwhile, so this connector stays mounted while the project is open; when the hold ends, this
+         * effect runs again with every check above, and connects through the session that is open then. A session
+         * that closed during the hold leaves `noticed` for the next one. */
+        const hold = intent === 'noticed' ? firstTurnBackupHold(projectId) : undefined;
+        if (hold !== undefined) {
+          // async-iife: bootstrap -- an effect cannot await; the effect's next run does the connecting.
+          void (async (): Promise<void> => {
+            await hold;
+            if (liveConnectRemote.current === connectRemote) {
+              setHoldsEnded((ended) => ended + 1);
+            }
+          })();
+          break;
+        }
         /* `open` is kept until the connection lands; `noticed` becomes `connected` first, so it connects once. */
         if (intent === 'noticed') {
           tauCloudIntent.set(projectId, 'connected');
@@ -914,37 +931,14 @@ export const useTauCloudIntentConnection = ({
           void continueCloudOpen({ projectId, account, connect: async () => connectRemote('tau') });
           break;
         }
-        /* WP-12 step 5: a project created from Home backs up once its first turn streams, or 5 s on. */
-        const hold = firstTurnBackupHold(projectId);
-        if (hold === undefined) {
-          void connectRemote('tau');
-          break;
-        }
-        const connectAfterFirstTurn = async (): Promise<void> => {
-          await hold;
-          if (getCloudDeletionState(projectId) !== undefined) {
-            return;
-          }
-          /* A closed session's client would queue the connect for whoever opens it next, unchecked. */
-          if (getRevisionSessionUser()?.id === account && liveConnectRemote.current === connectRemote) {
-            await connectRemote('tau');
-            return;
-          }
-          /* A different person signed in, or the project closed, while the first turn held the backup: back to
-           * `noticed`, so the next session whose account may connect still does, once. */
-          if (tauCloudIntent.get(projectId) === 'connected') {
-            tauCloudIntent.set(projectId, 'noticed');
-          }
-        };
-        // async-iife: bootstrap -- an effect cannot await; the connect reports its own outcome, as the direct one does.
-        void connectAfterFirstTurn();
+        void connectRemote('tau');
         break;
       }
       case 'wait': {
         break;
       }
     }
-  }, [account, connectRemote, intent, projectId, step]);
+  }, [account, connectRemote, holdsEnded, intent, projectId, step]);
 };
 
 /**

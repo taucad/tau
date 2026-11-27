@@ -392,7 +392,8 @@ describe('useTauCloudIntentConnection', () => {
     tauCloudIntent.set(projectId, 'noticed');
     const { rerender } = renderConnection(undefined);
     rerender({ head: 'rev-1' });
-    expect(tauCloudIntent.get(projectId)).toBe('connected');
+    /* Still owed while held, so the connector stays mounted for as long as the project is open. */
+    expect(tauCloudIntent.get(projectId)).toBe('noticed');
     await act(async () => {
       await Promise.resolve();
     });
@@ -404,6 +405,7 @@ describe('useTauCloudIntentConnection', () => {
     });
     expect(connectRemote).toHaveBeenCalledOnce();
     expect(connectRemote).toHaveBeenCalledWith('tau');
+    expect(tauCloudIntent.get(projectId)).toBe('connected');
   });
 
   it('should leave a held first backup to the account signed in when the hold ends, connecting once', async () => {
@@ -411,14 +413,14 @@ describe('useTauCloudIntentConnection', () => {
     tauCloudIntent.set(projectId, 'noticed');
     const { rerender } = renderConnection(undefined);
     rerender({ head: 'rev-1' });
-    expect(tauCloudIntent.get(projectId)).toBe('connected');
+    expect(tauCloudIntent.get(projectId)).toBe('noticed');
 
     setRevisionSessionUser({ id: 'account-b', name: 'B' });
     await act(async () => {
       releaseFirstTurnBackup(projectId);
       await Promise.resolve();
     });
-    /* Account A's continuation skips and puts the intent back to `noticed`; account B's session connects it once. */
+    /* The connect step runs again for the account signed in when the hold ends, and connects once. */
     expect(connectRemote).toHaveBeenCalledOnce();
     expect(tauCloudIntent.get(projectId)).toBe('connected');
   });
@@ -428,7 +430,6 @@ describe('useTauCloudIntentConnection', () => {
     tauCloudIntent.set(projectId, 'noticed');
     const { rerender, unmount } = renderConnection(undefined);
     rerender({ head: 'rev-1' });
-    expect(tauCloudIntent.get(projectId)).toBe('connected');
 
     unmount();
     await act(async () => {

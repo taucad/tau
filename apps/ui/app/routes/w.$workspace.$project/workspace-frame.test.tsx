@@ -312,6 +312,11 @@ describe('WorkspaceFrame', () => {
     const frame = renderFrame('/w/home/one');
 
     expect(frame.className).toContain(
+      '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*):not([data-mobile-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
+    );
+    /* The phone workspace's own regions (its docks' assertive live region) are not a failure in its place: the box stays
+     * (seen in the production build: the box hid and the typed input lost focus as the phone dock mounted). */
+    expect(frame.className).not.toContain(
       '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
     );
     expect(frame.className).toContain('[&:has([data-chat-lane=hidden])>[data-slot=workspace-frame-composer]]:hidden');
@@ -490,8 +495,18 @@ describe('WorkspaceFrame', () => {
     expect(phone!.querySelectorAll('[data-slot=wait-indicator]')).toHaveLength(1);
     const shapes = [...phone!.querySelectorAll<HTMLElement>('[data-frame-part=sheet] [data-slot=project-wait]')];
     expect(shapes.map((shape) => shape.getAttribute('aria-label'))).toEqual(['Chat', 'Parameters', 'Workbench']);
-    expect(shapes.map((shape) => shape.className.includes('hidden'))).toEqual([true, true, true]);
-    expect(shapes[0]!.className).toContain('[[data-frame-tab=chat]_&]:block');
+    expect(shapes.slice(1).map((shape) => shape.className.includes('hidden'))).toEqual([true, true]);
+    /* The chat's shape stands in the live chat surface's box, with its header's and resting composer's boxes, so its
+     * bars do not move at the hand-over (staging re-check 3: 64 px, and 7 bars down to 4). */
+    const chat = phone!.querySelector<HTMLElement>('[data-frame-chat=surface]')!;
+    expect(chat.className).toContain('hidden');
+    expect(chat.className).toContain('[[data-frame-tab=chat]_&]:flex');
+    expect(chat.className).toContain(
+      'h-[calc(var(--frame-sheet-height,0px)_-_var(--spacing)*2_-_var(--nav-offset)_-_1px)]',
+    );
+    expect(chat.contains(shapes[0]!)).toBe(true);
+    expect(chat.querySelector('[data-frame-chat=header]')?.className).toContain('h-15');
+    expect(chat.querySelector('[data-frame-chat=composer]')?.className).toContain('h-11.5');
     expect(phone!.innerHTML).not.toMatch(/fade-in|slide-in|animate-in/u);
     const sheet = phone!.querySelector<HTMLElement>('[data-frame-part=sheet]')!;
     expect(sheet.className).toContain('[display:var(--frame-sheet-display,none)]');
@@ -535,6 +550,14 @@ describe('WorkspaceFrame', () => {
     expect(layer.className).not.toMatch(/(?:^|\s)max-md:hidden(?:\s|$)/u);
     expect(layer.className).toContain('max-md:[:root:not([data-frame-tab=chat])_&]:hidden');
     expect(layer.className).toContain('[--nav-offset:');
+    /* Above the live sheet (z-40) until the live composer adopts the input, so the input never goes out of sight. */
+    expect(layer.className).toContain('max-md:z-45');
+    /* At rest it is the live phone composer's one row, so nothing moves at the hand-over. */
+    const box = screen.getByRole('textbox', { name: 'Chat message' }).closest('.rounded-2xl')!;
+    expect(box.className).toContain('max-md:[&:not(:focus-within):has(textarea:placeholder-shown)]:min-h-0');
+    expect(box.className).toContain(
+      'max-md:[&:not(:focus-within):has(textarea:placeholder-shown)_[data-slot=composer-bar]]:-mt-6.5',
+    );
     /* Its column is the sheet's foot: the live surface ends at the tab bar, and the composer rests at its foot. */
     const column = layer.firstElementChild!;
     expect(column.className).toContain('max-md:fixed');

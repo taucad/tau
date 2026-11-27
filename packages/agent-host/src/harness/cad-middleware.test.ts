@@ -100,6 +100,29 @@ describe('ToolResultTrimmer', () => {
     ]);
   });
 
+  // WP-11 item 2: every step sends the whole history; a recorded result is trimmed once in its life.
+  it('should trim a recorded result once and give every later step the same message', () => {
+    const content = { failures: [], passes: [{ huge: 'x' }], total: 1 };
+    const result = {
+      role: 'toolResult' as const,
+      toolCallId: 'call-1',
+      toolName: 'test_model',
+      content: [{ type: 'text' as const, text: JSON.stringify(content) }],
+      details: { content, isError: false, substituted: false },
+      isError: false,
+      timestamp: 0,
+    };
+    const parse = vi.spyOn(JSON, 'parse');
+
+    const [first] = trimToolResultContext([result]);
+    const parsedOnce = parse.mock.calls.length;
+    const [second] = trimToolResultContext([result]);
+
+    expect(second).toBe(first);
+    expect(parse.mock.calls.length).toBe(parsedOnce);
+    parse.mockRestore();
+  });
+
   it('keeps the source revision a trimmed verdict was computed from (R4)', () => {
     const sourceRevision = { entry: 'main.ts', files: { 'main.ts': `sha256:${'a'.repeat(64)}` } };
     const content = {

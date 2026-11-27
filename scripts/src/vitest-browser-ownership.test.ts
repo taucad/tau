@@ -14,8 +14,8 @@ const repositoryFiles = (): readonly string[] => {
   return execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
     cwd: root,
     encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
     env: gitEnvironment,
+    maxBuffer: 64 * 1024 * 1024,
   })
     .split('\0')
     .filter(

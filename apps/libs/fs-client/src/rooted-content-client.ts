@@ -49,6 +49,14 @@ export type RootedFiles = Pick<
   | 'move'
 >;
 
+/**
+ * How a rooted connection is opened beyond its root and consumer: the I/O lane its reads run in (project-library fast
+ * path FW4). `'background'` is for a reader nobody waits on call by call; such a client opens its own connections.
+ *
+ * @public
+ */
+export type RootedConnectionOptions = Readonly<{ lane?: 'interactive' | 'background' }>;
+
 /** One root's open connection, and the release that closes it. @public */
 export type RootedConnection = Readonly<{
   files: RootedFiles;
@@ -80,7 +88,7 @@ export type RootedContentOwner<Consumer extends string> = Readonly<{
    *
    * Stable per consumer, so a store memoised on it is not rebuilt.
    */
-  files: (consumer: Consumer) => RootedContentClient;
+  files: (consumer: Consumer, options?: RootedConnectionOptions) => RootedContentClient;
   /** Close every connection this owner opened. Idempotent. */
   dispose: () => void;
 }>;
@@ -130,11 +138,12 @@ export const rootedPathOf = (absolutePath: string): Readonly<{ root: string; pat
  * ```
  */
 export const createRootedContentClient = <Consumer extends string>(input: {
-  readonly open: (root: string, consumer: Consumer) => Promise<RootedConnection>;
+  readonly open: (root: string, consumer: Consumer, options?: RootedConnectionOptions) => Promise<RootedConnection>;
 }): RootedContentOwner<Consumer> => {
   /**
-   * Keyed by consumer and root together: the consumer decides what the handle
-   * serves. A consumer never carries a space, so the first one splits the key.
+   * Keyed by consumer, lane and root together: the consumer decides what the
+   * handle serves and the lane how its reads are ranked (FW4). Neither a consumer
+   * nor a lane carries a space, so the first two split the key.
    */
   const connections = new Map<string, Promise<RootedConnection>>();
   /** Releases for the connections that actually opened, so `dispose` stays synchronous. */
@@ -149,8 +158,8 @@ export const createRootedContentClient = <Consumer extends string>(input: {
   let generation = 0;
 
   /** One connection per `(root, consumer)`, opened once; a failed open is not remembered. */
-  const connectionFor = async (root: string, consumer: Consumer): Promise<RootedConnection> => {
-    const key = `${consumer} ${root}`;
+  const connectionFor = async (root: string, consumer: Consumer, background: boolean): Promise<RootedConnection> => {
+    const key = `${consumer} ${background ? 'background' : 'interactive'} ${root}`;
     const existing = connections.get(key);
     if (existing !== undefined) {
       return existing;
@@ -159,7 +168,9 @@ export const createRootedContentClient = <Consumer extends string>(input: {
     const opening = (async (): Promise<RootedConnection> => {
       let connection: RootedConnection;
       try {
-        connection = await input.open(root, consumer);
+        connection = await (background
+          ? input.open(root, consumer, { lane: 'background' })
+          : input.open(root, consumer));
       } catch (error) {
         /* A worker that went away must not be remembered as this root's connection. */
         connections.delete(key);
@@ -180,9 +191,9 @@ export const createRootedContentClient = <Consumer extends string>(input: {
   };
 
   /** One absolute-path client per consumer, so a store memoised on it is stable. */
-  const clients = new Map<Consumer, RootedContentClient>();
+  const clients = new Map<string, RootedContentClient>();
 
-  const clientFor = (consumer: Consumer): RootedContentClient => {
+  const clientFor = (consumer: Consumer, background: boolean): RootedContentClient => {
     /**
      * The connection all of these paths belong to, and the rewrite into its
      * namespace.
@@ -199,7 +210,7 @@ export const createRootedContentClient = <Consumer extends string>(input: {
       if (resolved.some((entry) => entry.root !== root)) {
         throw new Error(`One rooted connection serves one root; ${absolutePaths.join(', ')} span several.`);
       }
-      const { files } = await connectionFor(root, consumer);
+      const { files } = await connectionFor(root, consumer, background);
       return { files, relative: (absolutePath) => rootedPathOf(absolutePath).path };
     };
 
@@ -280,13 +291,15 @@ export const createRootedContentClient = <Consumer extends string>(input: {
   };
 
   return {
-    files: (consumer) => {
-      const existing = clients.get(consumer);
+    files: (consumer, options) => {
+      const background = options?.lane === 'background';
+      const key = `${consumer} ${background ? 'background' : 'interactive'}`;
+      const existing = clients.get(key);
       if (existing !== undefined) {
         return existing;
       }
-      const client = clientFor(consumer);
-      clients.set(consumer, client);
+      const client = clientFor(consumer, background);
+      clients.set(key, client);
       return client;
     },
     dispose: () => {

@@ -37,6 +37,7 @@ import { describe, expect, it } from 'vitest';
 const zeroScope = [
   new URL('chat-clients/debug-probes.tsx', import.meta.url),
   new URL('components/geometry/debug/section-view-test-bridge.tsx', import.meta.url),
+  new URL('components/layout/use-workspace-frame-state.ts', import.meta.url),
   new URL('hooks/chat-session-store.fixture.tsx', import.meta.url),
   new URL('hooks/use-file-manager.tsx', import.meta.url),
   new URL('hooks/use-project-manager.tsx', import.meta.url),
@@ -45,8 +46,10 @@ const zeroScope = [
   new URL('hooks/use-revision-status.ts', import.meta.url),
   new URL('hooks/use-sessions.tsx', import.meta.url),
   new URL('hooks/use-wait-start.ts', import.meta.url),
+  new URL('lib/eager-route-modules.ts', import.meta.url),
   new URL('lib/frame-hint-draft.ts', import.meta.url),
   new URL('lib/frame-hint.ts', import.meta.url),
+  new URL('lib/tau-cloud-intent.ts', import.meta.url),
   new URL('machines/focus.machine.ts', import.meta.url),
   new URL('machines/focus.route-state.ts', import.meta.url),
   new URL('machines/project-session.machine.ts', import.meta.url),
@@ -62,6 +65,7 @@ const zeroScope = [
   new URL('routes/w.$workspace.$project/project-route-intent.tsx', import.meta.url),
   new URL('routes/w.$workspace.$project/project-route.tsx', import.meta.url),
   new URL('routes/w.$workspace.$project/project-sync-placeholder.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/project-workspace-context.panels.ts', import.meta.url),
   new URL('routes/w.$workspace.$project/project-workspace-context.tsx', import.meta.url),
   new URL('routes/w.$workspace.$project/workbench-checkout-root.tsx', import.meta.url),
   new URL('routes/w.$workspace.$project/workbench-layout-controller.shim.ts', import.meta.url),
@@ -70,6 +74,8 @@ const zeroScope = [
   new URL('routes/w.$workspace.$project/workspace-frame.tsx', import.meta.url),
   new URL('runtime/', import.meta.url),
   new URL('services/sessions-store.ts', import.meta.url),
+  new URL('types/project-route-state.types.ts', import.meta.url),
+  new URL('utils/remote-host-harness.ts', import.meta.url),
   new URL('workbench-records/', import.meta.url),
 ];
 

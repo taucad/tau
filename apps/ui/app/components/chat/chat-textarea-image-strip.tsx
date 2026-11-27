@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, Suspense, useMemo, useState } from 'react';
 import { Pencil, X } from 'lucide-react';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
@@ -9,6 +9,17 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 import type { DraftAttachment, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
 import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { attachmentKind, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
+import type { AnnotatedImage, AnnotationComment } from '@taucad/chat/annotations';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
+
+/** What a composer image carries to its tile: its annotated record and the comments pinned on it. */
+export type TileMarkupInput = Readonly<{ image: AnnotatedImage; comments: readonly AnnotationComment[] }>;
+
+/* Loaded when a tile first has pins or marks to draw: most drafts have none. */
+const TileMarkup = lazyCode(async () => {
+  const module = await import('#components/comments/tile-markup.js');
+  return { default: module.TileMarkup };
+});
 
 type ChatTextareaAttachmentRailSize = 'desktop' | 'mobile';
 
@@ -25,8 +36,8 @@ type ChatTextareaAttachmentRailProperties = {
   readonly onRemove: (index: number) => void;
   /** Opens mark up on an image; without it, images have no pencil. */
   readonly onMarkUp?: (index: number) => void;
-  /** The comment numbers pinned on each image, by attachment URL, drawn on its tile. */
-  readonly pinNumbersByAttachment?: ReadonlyMap<string, readonly number[]>;
+  /** Each marked up image's record and pinned comments, by attachment URL: its pins and marks are drawn on its tile. */
+  readonly markupByAttachment?: ReadonlyMap<string, TileMarkupInput>;
   readonly size: ChatTextareaAttachmentRailSize;
 };
 
@@ -86,7 +97,7 @@ export const ChatTextareaAttachmentRail = memo(function ({
   blockReasonId,
   onRemove,
   onMarkUp,
-  pinNumbersByAttachment,
+  markupByAttachment,
   size,
 }: ChatTextareaAttachmentRailProperties): React.JSX.Element | undefined {
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -166,6 +177,7 @@ export const ChatTextareaAttachmentRail = memo(function ({
               );
             }
             const imageIndex = images.indexOf(entry);
+            const markup = markupByAttachment?.get(entry.url);
             return (
               <div
                 // oxlint-disable-next-line react/no-array-index-key -- the same bytes can be attached twice
@@ -176,9 +188,10 @@ export const ChatTextareaAttachmentRail = memo(function ({
                   type='button'
                   aria-label={`Open uploaded image ${imageIndex + 1}`}
                   className={cn(
+                    // `relative`: the tile's pins and marks are drawn over the thumbnail, inside its rounded crop.
                     // `block`: an inline-block button sits on the wrapper's text line, whose descender space would add
                     // height under the thumbnail that the pending tile does not have, moving the composer as it lands.
-                    'block overflow-hidden rounded-md border bg-background hover:bg-accent',
+                    'relative block overflow-hidden rounded-md border bg-background hover:bg-accent',
                     'outline-none focus-visible:focus-outline',
                     thumbnailSize[size],
                   )}
@@ -197,6 +210,11 @@ export const ChatTextareaAttachmentRail = memo(function ({
                     alt={`Uploaded ${imageIndex + 1}`}
                     className='size-full object-cover'
                   />
+                  {markup === undefined ? null : (
+                    <Suspense fallback={null}>
+                      <TileMarkup image={markup.image} comments={markup.comments} />
+                    </Suspense>
+                  )}
                 </button>
                 <button
                   type='button'
@@ -228,7 +246,7 @@ export const ChatTextareaAttachmentRail = memo(function ({
                     <Pencil className='size-3' />
                   </button>
                 )}
-                <TilePinNumbers numbers={pinNumbersByAttachment?.get(entry.url)} />
+                <TilePinNumbers numbers={markup?.comments.map(({ number }) => number)} />
               </div>
             );
           })}

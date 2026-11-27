@@ -34,6 +34,7 @@ import { getClipboardImageFiles, handleClipboardImagePaste } from '@taucad/chat-
 import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
 import type { AttachmentIntakeRefusal } from '@taucad/chat-ui/utils/attachment-intake';
 import type { ClipboardPasteEvent } from '@taucad/chat-ui/components/chat-paste-handler';
+import type { TileMarkupInput } from '#components/chat/chat-textarea-image-strip.js';
 import {
   attachmentTranscodeSourcesSnapshot,
   loadAttachmentTranscodeSources,
@@ -221,6 +222,23 @@ export type ChatTextareaLogicOptions = Pick<
 };
 
 /**
+ * Each marked up image of a draft with what its tile draws: its record and the comments pinned on it.
+ *
+ * @param annotations - The draft's annotations.
+ * @returns The tiles' mark up, by attachment URL.
+ */
+const tileMarkupOf = (annotations: MessageAnnotations | undefined): ReadonlyMap<string, TileMarkupInput> => {
+  const markup = new Map<string, TileMarkupInput>();
+  for (const image of annotations?.images ?? []) {
+    const comments = (annotations?.comments ?? []).filter((comment) => comment.image === image.id);
+    if (image.attachment !== undefined && (comments.length > 0 || image.marks.length > 0)) {
+      markup.set(image.attachment, { image, comments });
+    }
+  }
+  return markup;
+};
+
+/**
  * Shared logic hook for the chat textarea component.
  * Provides all the state and handlers needed by both desktop and mobile versions.
  */
@@ -306,7 +324,7 @@ export function useChatTextareaLogic({
   /** This composer's draft holds at least one comment. */
   hasDraftComments: boolean;
   /** The comment numbers pinned on each draft image, by attachment URL, for its tile. */
-  pinNumbersByAttachment: ReadonlyMap<string, readonly number[]>;
+  markupByAttachment: ReadonlyMap<string, TileMarkupInput>;
   setDraftToolChoice: (choice: ToolSelection) => void;
   setShowContextMenu: (show: boolean) => void;
   setAtSymbolPosition: (position: number) => void;
@@ -388,19 +406,7 @@ export function useChatTextareaLogic({
     mode === 'main' ? state.draftAnnotations : state.editDraftAnnotations,
   );
   const sendBlockReason = attachmentSendBlockReason(attachments, attachmentModel);
-  const pinNumbersByAttachment = useMemo(() => {
-    const numbers = new Map<string, number[]>();
-    for (const image of annotations?.images ?? []) {
-      const pinned = (annotations?.comments ?? []).filter((comment) => comment.image === image.id);
-      if (image.attachment !== undefined && pinned.length > 0) {
-        numbers.set(
-          image.attachment,
-          pinned.map(({ number }) => number),
-        );
-      }
-    }
-    return numbers;
-  }, [annotations]);
+  const markupByAttachment = useMemo(() => tileMarkupOf(annotations), [annotations]);
   const isAttaching = useDraftSelector((state) => (mode === 'main' ? state.attachingMain : state.attachingEdit));
   const pendingImages = useDraftSelector((state) => (mode === 'main' ? state.pendingMain : state.pendingEdit));
   const canResume =
@@ -968,7 +974,7 @@ export function useChatTextareaLogic({
     focusInput,
     removeAttachment,
     hasDraftComments: (annotations?.comments.length ?? 0) > 0,
-    pinNumbersByAttachment,
+    markupByAttachment,
     setDraftToolChoice,
     setShowContextMenu,
     setAtSymbolPosition,

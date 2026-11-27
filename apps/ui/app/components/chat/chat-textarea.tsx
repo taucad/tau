@@ -124,11 +124,11 @@ const DraftImageMarkup = lazyCode(async () => {
  */
 const useComposerMarkUp = ({
   mode,
-  pinNumbersByAttachment,
+  markupByAttachment,
   directory,
 }: Readonly<{
   mode: 'main' | 'edit';
-  pinNumbersByAttachment: ReturnType<typeof useChatTextareaLogic>['pinNumbersByAttachment'];
+  markupByAttachment: ReturnType<typeof useChatTextareaLogic>['markupByAttachment'];
   directory: ReturnType<typeof useChatTextareaLogic>['attachmentDirectory'];
 }>) => {
   const isOffered = useFeatureState('commentPins') === 'on';
@@ -137,7 +137,7 @@ const useComposerMarkUp = ({
     setIndex(undefined);
   }, []);
   return {
-    props: isOffered ? { markUpAttachment: setIndex, pinNumbersByAttachment } : {},
+    props: isOffered ? { markUpAttachment: setIndex, markupByAttachment } : {},
     dialog:
       index === undefined ? null : (
         <Suspense fallback={null}>
@@ -311,7 +311,7 @@ export const ChatTextarea = memo(function ({
   });
   const markUp = useComposerMarkUp({
     mode,
-    pinNumbersByAttachment: logic.pinNumbersByAttachment,
+    markupByAttachment: logic.markupByAttachment,
     directory: logic.attachmentDirectory,
   });
 

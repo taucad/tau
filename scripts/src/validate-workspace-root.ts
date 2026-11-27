@@ -80,6 +80,8 @@ const main = (): void => {
   const trackedPaths = execFileSync('git', ['ls-files', '-z'], {
     cwd: workspaceRoot,
     encoding: 'utf8',
+    // `git ls-files -z` was 1,048,174 bytes on main on 2026-11-27, at Node's 1 MiB default; 64 MiB as validate-cross-root-reads.
+    maxBuffer: 64 * 1024 * 1024,
   })
     .split('\0')
     .filter(Boolean);

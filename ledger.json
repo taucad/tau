@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T17:01:55.786Z",
+  "updatedAt": "2026-11-27T17:03:40.332Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -6685,6 +6685,19 @@
       "rejected": 0
     },
     {
+      "run": 46038049729,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2528",
+      "sha": "ede941e871e367759f01a3088b8c6c2b7e5f5f6a",
+      "at": "2026-11-27T17:03:09Z",
+      "conclusion": "cancelled",
+      "artifacts": 6,
+      "counted": 2105,
+      "replayed": 14792,
+      "rejected": 0
+    },
+    {
       "run": 46038052563,
       "attempt": 1,
       "event": "merge_group",
@@ -7106,14 +7119,14 @@
       }
     },
     "billing-ui:test": {
-      "executions": 80,
-      "tests": 16776,
+      "executions": 81,
+      "tests": 16987,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:46:39Z",
+      "lastSeen": "2026-11-27T17:03:09Z",
       "targets": {
-        "test linux-x64": 65
+        "test linux-x64": 66
       }
     },
     "billing:test": {
@@ -7225,14 +7238,14 @@
       }
     },
     "chat-ui:test": {
-      "executions": 107,
-      "tests": 82125,
+      "executions": 108,
+      "tests": 82897,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:35:47Z",
+      "lastSeen": "2026-11-27T17:03:09Z",
       "targets": {
-        "test linux-x64": 89
+        "test linux-x64": 90
       }
     },
     "chat:test": {
@@ -7459,14 +7472,14 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "files-ui:test": {
-      "executions": 88,
-      "tests": 34727,
+      "executions": 89,
+      "tests": 35124,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:35:47Z",
+      "lastSeen": "2026-11-27T17:03:09Z",
       "targets": {
-        "test linux-x64": 74
+        "test linux-x64": 75
       }
     },
     "files:test": {
@@ -7939,14 +7952,14 @@
       }
     },
     "python-kernel-core:test": {
-      "executions": 34,
-      "tests": 1768,
+      "executions": 35,
+      "tests": 1828,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:35:47Z",
+      "lastSeen": "2026-11-27T17:03:09Z",
       "targets": {
-        "test linux-x64": 27
+        "test linux-x64": 28
       }
     },
     "r2-audit:test": {
@@ -8015,14 +8028,14 @@
       }
     },
     "revisions-ui:test": {
-      "executions": 108,
-      "tests": 11880,
+      "executions": 109,
+      "tests": 11990,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:35:47Z",
+      "lastSeen": "2026-11-27T17:03:09Z",
       "targets": {
-        "test linux-x64": 93
+        "test linux-x64": 94
       }
     },
     "revisions:test": {
@@ -8232,14 +8245,14 @@
       "lastSeen": "2026-11-25T23:44:04Z"
     },
     "tau-examples:test": {
-      "executions": 112,
-      "tests": 11200,
+      "executions": 113,
+      "tests": 11300,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:35:47Z",
+      "lastSeen": "2026-11-27T17:03:09Z",
       "targets": {
-        "test linux-x64": 92
+        "test linux-x64": 93
       }
     },
     "taucad-ui:test": {
@@ -8265,14 +8278,14 @@
       }
     },
     "three:test": {
-      "executions": 33,
-      "tests": 3115,
+      "executions": 34,
+      "tests": 3210,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:35:47Z",
+      "lastSeen": "2026-11-27T17:03:09Z",
       "targets": {
-        "test linux-x64": 26
+        "test linux-x64": 27
       }
     },
     "tscircuit:test": {
@@ -8843,14 +8856,14 @@
       }
     },
     "workbench-panes:test": {
-      "executions": 49,
-      "tests": 17626,
+      "executions": 50,
+      "tests": 17986,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:35:47Z",
+      "lastSeen": "2026-11-27T17:03:09Z",
       "targets": {
-        "test linux-x64": 36
+        "test linux-x64": 37
       }
     },
     "workbench:test": {

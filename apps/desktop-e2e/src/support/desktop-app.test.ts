@@ -133,15 +133,17 @@ describe('explicit manual desktop window identity', () => {
 
 describe('explicit automated trace snapshot accommodation', () => {
   it.each([
-    { configured: undefined, visible: false, manual: undefined, snapshots: true },
-    { configured: 'true', visible: false, manual: undefined, snapshots: true },
-    { configured: 'false', visible: false, manual: undefined, snapshots: false },
-    { configured: 'false', visible: true, manual: undefined, snapshots: true },
-    { configured: 'false', visible: false, manual: 'plugins', snapshots: true },
+    { configured: undefined, shots: undefined, visible: false, manual: undefined, snapshots: true, screenshots: true },
+    { configured: 'true', shots: 'true', visible: false, manual: undefined, snapshots: true, screenshots: true },
+    { configured: 'false', shots: undefined, visible: false, manual: undefined, snapshots: false, screenshots: true },
+    { configured: undefined, shots: 'false', visible: false, manual: undefined, snapshots: true, screenshots: false },
+    { configured: 'false', shots: 'false', visible: true, manual: undefined, snapshots: true, screenshots: true },
+    { configured: 'false', shots: 'false', visible: false, manual: 'plugins', snapshots: true, screenshots: true },
   ])(
-    'should preserve trace controls for $configured / visible=$visible / manual=$manual',
-    async ({ configured, visible, manual, snapshots }) => {
+    'should preserve trace controls for $configured / screenshots=$shots / visible=$visible / manual=$manual',
+    async ({ configured, shots, visible, manual, snapshots, screenshots }) => {
       vi.stubEnv('TAU_E2E_TRACE_SNAPSHOTS', configured);
+      vi.stubEnv('TAU_E2E_TRACE_SCREENSHOTS', shots);
       vi.stubEnv('TAU_E2E_OBSERVATION_MANUAL', manual);
       const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-trace-test-'));
       const stopped = new Error('Fixture stops at trace initialization.');
@@ -160,7 +162,7 @@ describe('explicit automated trace snapshot accommodation', () => {
         await expect(launchDesktopApp({ token: 'fixture-token', profileRoot, visible })).rejects.toThrow(
           'The desktop shell did not survive launch.',
         );
-        expect(context.tracing.start).toHaveBeenCalledWith({ screenshots: true, snapshots });
+        expect(context.tracing.start).toHaveBeenCalledWith({ screenshots, snapshots });
         expect(page.setDefaultTimeout).toHaveBeenCalledWith(60_000);
       } finally {
         const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
@@ -174,19 +176,22 @@ describe('explicit automated trace snapshot accommodation', () => {
     },
   );
 
-  it('should reject an invalid trace selector before launching', async () => {
-    vi.stubEnv('TAU_E2E_TRACE_SNAPSHOTS', 'off');
-    const launch = vi.spyOn(electron, 'launch');
-    try {
-      await expect(launchDesktopApp({ token: 'fixture-token' })).rejects.toThrow(
-        'TAU_E2E_TRACE_SNAPSHOTS must be true or false.',
-      );
-      expect(launch).not.toHaveBeenCalled();
-    } finally {
-      launch.mockRestore();
-      vi.unstubAllEnvs();
-    }
-  });
+  it.each(['TAU_E2E_TRACE_SNAPSHOTS', 'TAU_E2E_TRACE_SCREENSHOTS'])(
+    'should reject an invalid %s before launching',
+    async (variable) => {
+      vi.stubEnv(variable, 'off');
+      const launch = vi.spyOn(electron, 'launch');
+      try {
+        await expect(launchDesktopApp({ token: 'fixture-token' })).rejects.toThrow(
+          `${variable} must be true or false.`,
+        );
+        expect(launch).not.toHaveBeenCalled();
+      } finally {
+        launch.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
 });
 
 describe('initial main navigation readiness', () => {

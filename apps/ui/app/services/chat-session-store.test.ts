@@ -74,7 +74,8 @@ vi.mock('#machines/inspector.js', () => ({
   inspect: undefined,
 }));
 
-const { ChatSessionStore, presentMessages } = await import('#services/chat-session-store.js');
+const { ChatSessionStore, outboxWaitLineMilliseconds, presentMessages, reconnectingCueMilliseconds } =
+  await import('#services/chat-session-store.js');
 const { selectVisibleChatError } = await import('#routes/w.$workspace.$project/chat-error.js');
 const { attachmentSendBlockReason, buildUserMessage } = await import('#utils/chat.utils.js');
 type StoreType = InstanceType<typeof ChatSessionStore>;
@@ -5362,6 +5363,8 @@ describe('ChatSessionStore', () => {
       }
     });
 
+    /* HA-I4: `CHAT_RUN_LIVE` is a `wait` code, so the command stays queued to be sent again by its id; it never
+     * fails, and the gate holds it while the other run is live. */
     it('should never cancel an unrelated live run when retrying a prepared command', async () => {
       const chatId = 'queue_refused';
       const projectId = 'queue_refused_project';
@@ -5379,12 +5382,18 @@ describe('ChatSessionStore', () => {
         publishLogRows(store, chatId, []);
         await store.requestTurn(chatId, queuedGesture('wait'));
         await vi.waitFor(() => {
-          expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+          expect(hostCommand).toHaveBeenCalledTimes(1);
         });
         publishLogRows(store, chatId, runningRows('other'));
+        /* A retry, and the first re-send's 250 ms backoff: the other run's gate still holds it. */
         store.retryMessageQueue(chatId);
         await settle();
+        await new Promise((resolve) => {
+          setTimeout(resolve, 600);
+        });
         expect(hostCommand).toHaveBeenCalledTimes(1);
+        expect(hostCommand.mock.calls.every(([command]) => command.type === 'start')).toBe(true);
+        expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(false);
         expect(session.messageQueueRef.getSnapshot().context.items[0]?.command?.commandId).toBe('req_wait');
       } finally {
         unadmit();
@@ -5759,8 +5768,10 @@ describe('ChatSessionStore', () => {
           publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
           await store.requestTurn(chatId, queuedGesture('waits'));
           await vi.waitFor(() => {
-            expect(store.hostWaitOf(chatId)).toMatch(/^Queued\. Another tab still has this chat open/u);
+            expect(hostCommand).toHaveBeenCalled();
           });
+          /* HA-I4: the code's line waits for its bound (outboxWaitLineMilliseconds); the send is queued meanwhile. */
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
           /* Not failed: the send is in the thread, the chat reads as on its way, and nothing offers Try again. */
           expect(store.departingSendOf(chatId)).toBe('waits');
           expect(store.getChatStatus(chatId)).toBe('submitted');
@@ -5790,6 +5801,186 @@ describe('ChatSessionStore', () => {
         }
       });
 
+      it("should show a waiting send's line only once it has waited its bound (HA-I4)", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_host_wait_line';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async (command) => writerLocked(command.commandId));
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('line'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalled();
+          });
+          await vi.advanceTimersByTimeAsync(outboxWaitLineMilliseconds / 2);
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          /* Re-sent by its key meanwhile, never failed. */
+          expect(new Set(hostCommand.mock.calls.map(([command]) => command.commandId)).size).toBe(1);
+
+          await vi.advanceTimersByTimeAsync(outboxWaitLineMilliseconds / 2);
+
+          expect(store.hostWaitOf(chatId)).toMatch(/^Queued\. Another tab still has this chat open/u);
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* HA-I4: an answer lost past the command's bound (U21) is a `wait`, not a failure: the command is sent again by
+       * its key, and the host's answer ends it. */
+      it('should keep a send whose answer was lost and send it again by its key until the host answers', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_host_lost';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        let reachable = false;
+        hostCommand.mockImplementation(async (command) => {
+          if (!reachable) {
+            throw Object.assign(new Error('The host stopped answering.'), { code: 'PEER_UNRESPONSIVE' });
+          }
+          return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 3 };
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('lost'));
+          /* Past the send's own 30 s bound: the answer is lost, and the outbox keeps the command. */
+          await vi.advanceTimersByTimeAsync(31_000);
+          expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(false);
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+          expect(session.messageQueueRef.getSnapshot().context.items.map(({ id }) => id)).toEqual(['lost']);
+
+          reachable = true;
+          await vi.advanceTimersByTimeAsync(31_000);
+
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          expect(new Set(hostCommand.mock.calls.map(([command]) => command.commandId)).size).toBe(1);
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* The host applied the first send, but its answer was lost: the log's `applied[commandId]` ends the item on the
+       * next pass, with no second send and so no second run. */
+      it('should end a send the host applied but whose answer was lost, without sending it again', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_host_applied_lost';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async () => {
+          throw Object.assign(new Error('The host stopped answering.'), { code: 'PEER_UNRESPONSIVE' });
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          const settled = [...runningRows('old'), lifecycleRow(2, 'completed', 'old')];
+          publishLogRows(store, chatId, settled);
+          await store.requestTurn(chatId, queuedGesture('applied'));
+          await vi.advanceTimersByTimeAsync(31_000);
+          const sent = hostCommand.mock.calls[0]![0];
+          expect(sent.type).toBe('start');
+          const runId = sent.type === 'start' ? sent.payload.runId : '';
+          publishLogRows(store, chatId, [
+            ...settled,
+            logRow(3, { runId, type: 'run.lifecycle', state: 'admitted', attempt: 1, commandId: sent.commandId }),
+          ]);
+          store.refreshMessageQueue(chatId);
+          /* A re-send already out runs to its bound; the next pass reads `applied` and ends the item. */
+          await vi.advanceTimersByTimeAsync(31_000);
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          const calls = hostCommand.mock.calls.length;
+          await vi.advanceTimersByTimeAsync(31_000);
+          expect(hostCommand).toHaveBeenCalledTimes(calls);
+          /* One command id throughout: no second run was ever asked for. */
+          expect(new Set(hostCommand.mock.calls.map(([command]) => command.commandId))).toEqual(
+            new Set([sent.commandId]),
+          );
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* HA5 table: a transport wait code has no line of its own; "Reconnecting…" says it while the send re-sends. */
+      it('should say "Reconnecting…", and show no line, over a send refused with a transport wait code', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_cue_transport';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async (command) => ({
+          commandId: command.commandId,
+          generation: 1,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'PEER_GONE',
+          message: 'The host went away.',
+        }));
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('transport'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalled();
+          });
+          await vi.advanceTimersByTimeAsync(reconnectingCueMilliseconds + 100);
+          expect(store.isReconnecting(chatId)).toBe(true);
+          await vi.advanceTimersByTimeAsync(outboxWaitLineMilliseconds);
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          expect(store.isReconnecting(chatId)).toBe(true);
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should say "Reconnecting…" over a send whose answer was lost, never over a coded wait or a pause', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const lost = await open('departing_cue_lost', 'departing_project');
+        const coded = await open('departing_cue_coded', 'departing_project');
+        lost.hostCommand.mockImplementation(async () => {
+          throw Object.assign(new Error('The host stopped answering.'), { code: 'PEER_UNRESPONSIVE' });
+        });
+        coded.hostCommand.mockImplementation(async (command) => writerLocked(command.commandId));
+        const unadmitLost = queueAdmission('departing_cue_lost');
+        const unadmitCoded = queueAdmission('departing_cue_coded');
+        try {
+          const settled = [...runningRows('old'), lifecycleRow(2, 'completed', 'old')];
+          publishLogRows(lost.store, 'departing_cue_lost', settled);
+          publishLogRows(coded.store, 'departing_cue_coded', settled);
+          await lost.store.requestTurn('departing_cue_lost', queuedGesture('cue_lost'));
+          await coded.store.requestTurn('departing_cue_coded', queuedGesture('cue_coded'));
+          await vi.advanceTimersByTimeAsync(31_000 + reconnectingCueMilliseconds);
+          expect(lost.store.isReconnecting('departing_cue_lost')).toBe(true);
+          expect(coded.store.isReconnecting('departing_cue_coded')).toBe(false);
+          /* A run that pauses on an approval meanwhile: no cue in a `paused` phase. */
+          publishLogRows(lost.store, 'departing_cue_lost', [
+            ...settled,
+            ...runningRows('paused_run').map((row, index) => ({ ...row, sequence: 3 + index })),
+            lifecycleRow(5, 'paused', 'paused_run'),
+          ]);
+          await vi.advanceTimersByTimeAsync(100);
+          expect(lost.store.isReconnecting('departing_cue_lost')).toBe(false);
+        } finally {
+          vi.useRealTimers();
+          unadmitLost();
+          unadmitCoded();
+          lost.unpublish();
+          coded.unpublish();
+          lost.store.release('departing_cue_lost');
+          coded.store.release('departing_cue_coded');
+        }
+      });
+
       it('should take a send that waits for its host back to the composer on Stop, with no cancel sent', async () => {
         const chatId = 'departing_host_wait_stopped';
         const projectId = 'departing_project';
@@ -5799,8 +5990,9 @@ describe('ChatSessionStore', () => {
         try {
           publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
           await store.requestTurn(chatId, queuedGesture('stopped'));
+          /* Sent again by its key: the send waits for its host between re-sends. */
           await vi.waitFor(() => {
-            expect(store.hostWaitOf(chatId)).toBeDefined();
+            expect(hostCommand).toHaveBeenCalledTimes(2);
           });
           expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'dispatched' } })).toBe(true);
 

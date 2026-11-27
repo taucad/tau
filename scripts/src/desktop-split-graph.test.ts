@@ -247,6 +247,7 @@ describe('desktop split graph: renderer edge (cut)', () => {
       'package-macos-unsigned',
       'package-macos-unsigned-intel',
       'package-windows',
+      'package-windows-e2e',
     ]);
     for (const target of packageTargets) {
       expect(desktopTargets[target]?.dependsOn, target).toContainEqual({

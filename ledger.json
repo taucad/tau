@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T02:30:26.987Z",
+  "updatedAt": "2026-11-27T02:32:29.804Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -4486,6 +4486,19 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 45928104236,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2941",
+      "sha": "0bdb70f6ac0f1de72d97b01cc57b0661c5ee37aa",
+      "at": "2026-11-27T02:32:12Z",
+      "conclusion": "success",
+      "artifacts": 2,
+      "counted": 127,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -6616,25 +6629,25 @@
       "lastSeen": "2026-11-26T00:03:34Z"
     },
     "www:test": {
-      "executions": 20,
-      "tests": 2055,
+      "executions": 21,
+      "tests": 2162,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T02:24:49Z",
+      "lastSeen": "2026-11-27T02:32:12Z",
       "targets": {
-        "test linux-x64 project=www": 11
+        "test linux-x64 project=www": 12
       }
     },
     "www:test-download-browser": {
-      "executions": 20,
-      "tests": 315,
+      "executions": 21,
+      "tests": 335,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T02:24:49Z",
+      "lastSeen": "2026-11-27T02:32:12Z",
       "targets": {
-        "test-download-browser linux-x64 project=www-download-browser": 11
+        "test-download-browser linux-x64 project=www-download-browser": 12
       }
     },
     "xstate-testing:test": {

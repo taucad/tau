@@ -40,6 +40,10 @@
 (*                  the admitting generation, as a stop is (taucad/tau#851;*)
 (*                  FALSE left it pending for recovery, and the chat's     *)
 (*                  next step waited on it: agent-host StopSettlement)     *)
+(*   StopCharges    a client cut after the supplier generated may settle   *)
+(*                  charged for the output it relayed (launch audit D-3);  *)
+(*                  off only where the extra branch would push a large     *)
+(*                  configuration past its time budget                     *)
 (*   SupplierCutSettles  a step the supplier ended without complete usage  *)
 (*                  (a dropped stream, a request that failed before any    *)
 (*                  response, a deadline cut) is terminalized at once as   *)
@@ -95,6 +99,8 @@ CONSTANTS
     CutSettles,
     \* @type: Bool;
     SupplierCutSettles,
+    \* @type: Bool;
+    StopCharges,
     \* @type: Bool;
     AtomicAdmit,
     \* @type: Bool;
@@ -497,7 +503,8 @@ ApiClientCancel(k) ==
     /\ conn[k] = "noticed"
     /\ sup' = IF sup[k] = "generating" THEN [sup EXCEPT ![k] = "cut"] ELSE sup
     /\ IF CutSettles /\ (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"
-       THEN /\ \E used \in {0, 1} :
+       \* Only a cut after the supplier generated can have relayed output, so only that one may charge (D-3).
+       THEN /\ \E used \in IF StopCharges /\ sup[k] # None THEN {0, 1} ELSE {0} :
                  row' = [row EXCEPT ![k] = [@ EXCEPT !.cancel = IF @ < 0 THEN now ELSE @,
                                               !.cust = IF used = 1 THEN "settled" ELSE "absorbed",
                                               !.charged = used,

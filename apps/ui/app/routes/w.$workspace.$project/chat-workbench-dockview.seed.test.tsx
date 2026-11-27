@@ -3,22 +3,26 @@
  * project opens (progressive-loading rule 22).
  */
 import { describe, expect, it, vi } from 'vitest';
-import type { DockviewApi, DockviewGroupPanel } from 'dockview-react';
+import { mock } from 'vitest-mock-extended';
+import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
 import { isChangingQuietly } from '#components/panes/dockview-announcements.js';
 import { seedFreshWorkbench } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 
 const createSeedDockview = () => {
-  const group: Pick<DockviewGroupPanel, 'id'> = { id: 'group-1' };
+  const group = mock<DockviewGroupPanel>();
   const quiet: boolean[] = [];
-  const panels: unknown[] = [];
-  const fake = { id: 'workbench-seed', panels, groups: [group], activeGroup: group, addPanel: vi.fn() };
-  const api = fake as unknown as DockviewApi;
-  fake.addPanel.mockImplementation((options: { readonly id: string }) => {
+  const panels: IDockviewPanel[] = [];
+  const api = mock<DockviewApi>();
+  /* The recorder: whether Dockview's announcements were silenced for each panel the seed adds. Dockview's api and
+   * panels carry private members, which the mock's typed initial values cannot spell, so the values are assigned. */
+  const addPanel = vi.fn((options: { readonly id: string }): IDockviewPanel => {
     quiet.push(isChangingQuietly(api));
-    const added = { id: options.id, api: { setActive: vi.fn(), updateParameters: vi.fn(), setTitle: vi.fn() } };
+    const added = Object.assign(mock<IDockviewPanel>(), { id: options.id });
     panels.push(added);
     return added;
   });
+  Object.assign(group, { id: 'group-1' });
+  Object.assign(api, { id: 'workbench-seed', panels, groups: [group], activeGroup: group, addPanel });
   return { api, quiet };
 };
 

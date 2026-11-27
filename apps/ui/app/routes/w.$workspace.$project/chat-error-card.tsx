@@ -1,3 +1,4 @@
+import { createContext, useContext, useId } from 'react';
 import type React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
@@ -11,6 +12,13 @@ type ChatErrorCardTone = 'neutral' | 'warning' | 'notice';
  * (DESIGN: the consequence and the action never fold away).
  */
 export const turnSavedSentence = 'Everything up to here is saved.';
+
+/**
+ * Whether the card in this place says its failure (an `alert`). `ChatError` sets it to `false` where a failure already
+ * said lands again (its turn left the transcript, and it moved under the empty one): it is then a group labelled by its
+ * title, so one failure is announced once.
+ */
+export const chatErrorAnnouncedContext = createContext(true);
 
 const iconClassName: Record<ChatErrorCardTone, string> = {
   neutral: 'text-muted-foreground',
@@ -51,9 +59,12 @@ export function ChatErrorCard({
   children,
   ...properties
 }: ChatErrorCardProps): React.JSX.Element {
+  const isAnnounced = useContext(chatErrorAnnouncedContext);
+  const titleId = useId();
   return (
     <section
-      role='alert'
+      role={isAnnounced ? 'alert' : 'group'}
+      aria-labelledby={isAnnounced ? undefined : titleId}
       data-slot='chat-error-card'
       className={cn('flex min-w-0 flex-col gap-2 rounded-md border bg-muted/40 p-2 text-sm', className)}
       {...properties}
@@ -62,7 +73,9 @@ export function ChatErrorCard({
         <div className='flex min-w-0 flex-1 basis-48 items-start gap-2'>
           {Icon ? <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', iconClassName[tone])} /> : null}
           <div className='min-w-0 flex-1 space-y-1'>
-            <p className='font-medium break-words text-foreground'>{title}</p>
+            <p id={titleId} className='font-medium break-words text-foreground'>
+              {title}
+            </p>
             {description ? <div className='text-xs break-words text-muted-foreground'>{description}</div> : null}
           </div>
         </div>

@@ -4587,6 +4587,8 @@ export class ChatSessionStore {
     await waitUnlessGone(session.persistenceActorRef, (snapshot) => !snapshot.context.isLoadingChat);
     if (
       this.#sessions.get(session.chatId) !== session ||
+      // The worker loaded while the chat did: R9 is already past.
+      this.#observed.get(session.chatId)?.hostLoadFailure === undefined ||
       session.persistenceActorRef.getSnapshot().context.persistedError?.code === 'WORKER_LOAD_FAILED'
     ) {
       return;
@@ -4596,6 +4598,15 @@ export class ChatSessionStore {
         ? error
         : Object.assign(new Error('The agent host worker did not load.'), { code: 'WORKER_LOAD_FAILED' });
     session.persistenceActorRef.send({ type: 'setPersistedError', error: parseErrorForPersistence(failure) });
+  }
+
+  /** The host's code loaded after all: R9 no longer holds, and the chat drops the card it saved for it. */
+  #clearHostLoadFailure(chatId: string, observed: ObservedChat): void {
+    observed.hostLoadFailure = undefined;
+    const persistence = this.#sessions.get(chatId)?.persistenceActorRef;
+    if (persistence?.getSnapshot().context.persistedError?.code === 'WORKER_LOAD_FAILED') {
+      persistence.send({ type: 'clearPersistedError' });
+    }
   }
 
   /**
@@ -4609,7 +4620,7 @@ export class ChatSessionStore {
     event: HostAttachmentStatus,
   ): void {
     if (event.type === 'attachment.attached') {
-      observed.hostLoadFailure = undefined;
+      this.#clearHostLoadFailure(chatId, observed);
       return;
     }
     if (observed.subscribed === true) {
@@ -4838,7 +4849,7 @@ export class ChatSessionStore {
             clearTimeout(observed.lossReport);
             observed.lossReport = undefined;
             observed.residual = undefined;
-            observed.hostLoadFailure = undefined;
+            this.#clearHostLoadFailure(chatId, observed);
             this.#syncProjection(chatId, 'none');
             return;
           }

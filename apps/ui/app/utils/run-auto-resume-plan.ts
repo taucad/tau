@@ -208,7 +208,9 @@ export function selectVisibleChatErrorEntry(state: VisibleFailureSource): Visibl
     // the persisted command records that run identity, not just its command ID.
     const refusal = persistedError;
     if (refusal?.requestId === undefined) {
-      return undefined;
+      /* R9: the host's own code did not load. The log reads without it, so a caught-up, attached chat is no proof the
+       * failure is past; the store clears it once the worker loads. */
+      return refusal?.code === 'WORKER_LOAD_FAILED' ? { error: refusal, id: liveErrorId(refusal) } : undefined;
     }
     const refusedRunId = refusal.details?.['runId'];
     const refusedCommandType = refusal.details?.['commandType'];

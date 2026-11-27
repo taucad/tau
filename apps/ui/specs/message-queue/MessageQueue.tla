@@ -295,10 +295,14 @@
 \* turn and is not admitting its own gesture, whatever run it presents, so a read that folds a run's `running` with
 \* its end, or ends a later run too, no longer leaves the machine live and the queue waiting for good. This is the
 \* model's `Observe` of a terminal phase; no action or verdict changes.
+\* H-1 review (2026-11-27): `Deliver` may now be refused on any try, including a fresh key on an idle host, so `Refuse`
+\* is reached from the state the runtime meets. `RefuseOnlyUnapplied` gates `Refuse`'s `m \notin Accepted`; the
+\* `refuse-accepted` witness drops it and must violate `ComposerExclusive`.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,
-          RequireTerminalIntent, CaptureTerminalAtSubmit, HoldBehindWithdraw
+          RequireTerminalIntent, CaptureTerminalAtSubmit, HoldBehindWithdraw,
+          RefuseOnlyUnapplied
 VARIABLE s
 vars == <<s>>
 None == "none"
@@ -392,10 +396,12 @@ Prepare(t) == /\ t \in s.alive /\ s.owner = None /\ Len(s.queue) > 0
               /\ s' = [s EXCEPT !.owner = t, !.prepared = Chosen]
 Recover(t) == /\ t \in s.alive /\ s.owner = None /\ s.prepared # None
               /\ s' = [s EXCEPT !.owner = t]
-Deliver(t) == LET m == s.prepared
+\* The host may refuse any delivery (`refused`, effect `not-applied`): it is counted and accepts nothing.
+Deliver(t) == \E refused \in BOOLEAN :
+              LET m == s.prepared
                   key == <<m, IF StableIdentity THEN 1 ELSE s.counts[m] + 1>>
                   fresh == key \notin s.accepted
-                  accept == fresh /\ Terminal(s.phase[s.active])
+                  accept == ~refused /\ fresh /\ Terminal(s.phase[s.active])
               IN /\ t = s.owner /\ m # None /\ s.counts[m] < 2
                  /\ s' = [s EXCEPT
                     !.counts[m] = @ + 1,
@@ -465,7 +471,7 @@ Yield(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \notin Accepted /\
 \* lets go of the lock and drops it. A lone send goes back to the composer, as an admission refusal's does; otherwise
 \* it keeps its place, unprepared, and a later preparation mints a new command for it.
 Refuse(t) == LET m == s.prepared
-             IN /\ t = s.owner /\ m # None /\ m \notin Accepted /\ s.counts[m] = 1
+             IN /\ t = s.owner /\ m # None /\ (~RefuseOnlyUnapplied \/ m \notin Accepted) /\ s.counts[m] = 1
                 /\ \/ /\ Len(s.queue) = 1
                       /\ s' = [s EXCEPT !.queue = Remove(@, m), !.prepared = None, !.owner = None,
                            !.steerItem = IF @ = m THEN None ELSE @,

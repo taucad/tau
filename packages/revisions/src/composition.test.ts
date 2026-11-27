@@ -41,7 +41,7 @@ import type { TurnLeaseActorInput } from '#turn.machine.js';
 import type { TurnAttemptKey } from '#turn.types.js';
 import { createFakeCallbackActors, createFakePromiseActors, recordEmitted } from '@taucad/xstate-testing/fakes';
 import type { FakeCallbackActors, FakePromiseActors } from '@taucad/xstate-testing/fakes';
-import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { fileHeavyTimeout, gitToolchainOnPath, removalRetries } from '#test/native-git-harness.js';
 import { testIdentity, testPerson } from '#test/identity.js';
 
 /** Let every queued microtask and the actors' promise handlers run. */
@@ -618,7 +618,7 @@ describe('revision machine composition (S48 Node set)', () => {
 const temporaryRoots: string[] = [];
 
 afterAll(async () => {
-  await Promise.all(temporaryRoots.map(async (root) => rm(root, { force: true, recursive: true })));
+  await Promise.all(temporaryRoots.map(async (root) => rm(root, { force: true, recursive: true, ...removalRetries })));
 });
 
 /**
@@ -859,84 +859,92 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
 };
 
 describe('composition root options (MC-R4)', () => {
-  it('should forward the injected clock, inspector and rejection hook to the tree', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tau-root-options-'));
-    temporaryRoots.push(root);
-    const filesystem: RevisionFileSystem = new NodeFsProvider(root);
-    const port = createIsomorphicGitRevisionPort({
-      filesystem,
-      checkouts: { projectId: 'project-1', root: () => filesystem },
-    });
-    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-    const clock = new StepClock();
-    const actorIds: string[] = [];
-    const rejections: string[] = [];
-    const { actor, settled } = createProjectRevisionsActor({
-      identity: testIdentity,
-      port,
-      projectId: 'project-1',
-      filesystem: () => filesystem,
-      clock,
-      inspect: (event) => {
-        if (event.type === '@xstate.actor') {
-          actorIds.push(event.id);
-        }
-      },
-      onRejectedEvent: (rejection) => {
-        rejections.push(`${rejection.event.type}:${rejection.reason}`);
-      },
-    });
+  it(
+    'should forward the injected clock, inspector and rejection hook to the tree',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-root-options-'));
+      temporaryRoots.push(root);
+      const filesystem: RevisionFileSystem = new NodeFsProvider(root);
+      const port = createIsomorphicGitRevisionPort({
+        filesystem,
+        checkouts: { projectId: 'project-1', root: () => filesystem },
+      });
+      await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      const clock = new StepClock();
+      const actorIds: string[] = [];
+      const rejections: string[] = [];
+      const { actor, settled } = createProjectRevisionsActor({
+        identity: testIdentity,
+        port,
+        projectId: 'project-1',
+        filesystem: () => filesystem,
+        clock,
+        inspect: (event) => {
+          if (event.type === '@xstate.actor') {
+            actorIds.push(event.id);
+          }
+        },
+        onRejectedEvent: (rejection) => {
+          rejections.push(`${rejection.event.type}:${rejection.reason}`);
+        },
+      });
 
-    expect(actor.clock).toBe(clock);
-    actor.start();
-    expect(actorIds).toContain(actor.id);
-    expect(actorIds).toContain('checkouts');
+      expect(actor.clock).toBe(clock);
+      actor.start();
+      expect(actorIds).toContain(actor.id);
+      expect(actorIds).toContain('checkouts');
 
-    actor.stop();
-    await settled();
-    actor.send({ type: 'turnCompleted', key: keyOf('turn-1') });
+      actor.stop();
+      await settled();
+      actor.send({ type: 'turnCompleted', key: keyOf('turn-1') });
 
-    expect(rejections).toEqual(['turnCompleted:stopped']);
-  });
+      expect(rejections).toEqual(['turnCompleted:stopped']);
+    },
+    fileHeavyTimeout(5000),
+  );
 });
 
 describe('placement over a real port (RM-R12)', () => {
   /* The host lets the agent write once it hears `leased`, so that fact waits for the dirty base (RM-S14). */
-  it('should report the placement to the host only after the base is minted', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tau-placement-'));
-    temporaryRoots.push(root);
-    const filesystem: RevisionFileSystem = new NodeFsProvider(root);
-    const port = createIsomorphicGitRevisionPort({
-      filesystem,
-      checkouts: { projectId: 'project-1', root: () => filesystem },
-    });
-    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-    /* Unsaved edits the person made before sending: the base the turn builds on. */
-    await filesystem.writeFile('main.ts', 'export const size = 1;\n');
-    const order: string[] = [];
-    const { actor, settled } = createProjectRevisionsActor({
-      identity: testIdentity,
-      port,
-      projectId: 'project-1',
-      filesystem: () => filesystem,
-      onPlacement: (placement) => {
-        order.push(placement.status);
-      },
-    });
-    actor.on('revisionMinted', () => {
-      order.push('minted');
-    });
-    actor.start();
-    await until(() => actor.getSnapshot().context.registrySettled, 'the registry to settle');
+  it(
+    'should report the placement to the host only after the base is minted',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-placement-'));
+      temporaryRoots.push(root);
+      const filesystem: RevisionFileSystem = new NodeFsProvider(root);
+      const port = createIsomorphicGitRevisionPort({
+        filesystem,
+        checkouts: { projectId: 'project-1', root: () => filesystem },
+      });
+      await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      /* Unsaved edits the person made before sending: the base the turn builds on. */
+      await filesystem.writeFile('main.ts', 'export const size = 1;\n');
+      const order: string[] = [];
+      const { actor, settled } = createProjectRevisionsActor({
+        identity: testIdentity,
+        port,
+        projectId: 'project-1',
+        filesystem: () => filesystem,
+        onPlacement: (placement) => {
+          order.push(placement.status);
+        },
+      });
+      actor.on('revisionMinted', () => {
+        order.push('minted');
+      });
+      actor.start();
+      await until(() => actor.getSnapshot().context.registrySettled, 'the registry to settle');
 
-    actor.send({ type: 'admitTurn', key: keyOf('turn-1') });
-    await until(() => order.includes('leased'), 'the turn to be placed');
+      actor.send({ type: 'admitTurn', key: keyOf('turn-1') });
+      await until(() => order.includes('leased'), 'the turn to be placed');
 
-    expect(order).toEqual(['placed', 'minted', 'leased']);
+      expect(order).toEqual(['placed', 'minted', 'leased']);
 
-    actor.stop();
-    await settled();
-  });
+      actor.stop();
+      await settled();
+    },
+    fileHeavyTimeout(5000),
+  );
 });
 
 describe.runIf(gitToolchainOnPath)(

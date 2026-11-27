@@ -50,7 +50,6 @@ const state = vi.hoisted(() => ({
   authRestored: undefined as Promise<void> | undefined,
   authToken: undefined as string | undefined,
   headerOptions: undefined as TauHeaderInjectionOptions | undefined,
-  authHandleCallback: vi.fn(async () => undefined),
   protocolClient: [] as unknown[][],
   resolveFork: undefined as
     | undefined
@@ -414,6 +413,7 @@ vi.mock('#main/app-protocol.js', () => ({
   registerAppProtocol: vi.fn(),
 }));
 vi.mock('#main/auth-service.js', () => ({
+  SignInEndedError: class extends Error {},
   createAuthService: vi.fn(() => ({
     restore: vi.fn(async () => state.authRestored),
     token: vi.fn(() => state.authToken),
@@ -422,7 +422,6 @@ vi.mock('#main/auth-service.js', () => ({
     refresh: vi.fn(async () => undefined),
     onChange: vi.fn(),
     dispose: vi.fn(),
-    handleCallback: state.authHandleCallback,
     signIn: state.authSignIn,
     signOut: vi.fn(),
   })),
@@ -576,7 +575,6 @@ afterEach(async () => {
   app.isPackaged = false;
   app.commandLine.hasSwitch.mockReturnValue(false);
   state.protocolClient.length = 0;
-  state.authHandleCallback.mockClear();
   state.resolveFork = undefined;
   state.servicesConnect.mockClear();
   state.geometryMeasurementConnect.mockClear();
@@ -2233,19 +2231,17 @@ describe('desktop main deep links', () => {
   );
 
   it(
-    'should redeem a sign-in callback in main and never navigate the renderer to it',
+    /* Share-link ruling R1: sign-in returns over loopback (DSI-4), so the retired callback link does nothing. */
+    'should ignore the retired one-time-token sign-in link, neither signing in nor navigating',
     async () => {
       await bootAndWait();
 
       listener('open-url')({ preventDefault: vi.fn() }, 'tau://auth/callback?ott=A1b2C3d4&state=dGhlLXN0YXRl');
-
-      await vi.waitFor(() => {
-        expect(state.authHandleCallback).toHaveBeenCalledWith({
-          kind: 'auth-callback',
-          oneTimeToken: 'A1b2C3d4',
-          state: 'dGhlLXN0YXRl',
-        });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
       });
+
+      expect(state.authSignIn).not.toHaveBeenCalled();
       expect(fakeWindow.loadURL).not.toHaveBeenCalled();
     },
     bootMilliseconds,

@@ -40,6 +40,19 @@ type ModelPins = {
       readonly sha256: string;
     }>;
   };
+  /**
+   * Reuse-off matrix hashes for a host whose bytes differ from the pin host's, keyed `<platform>-<arch>`. Each set is
+   * a byte-exact reference for that host, captured there and updated under the same rule as `off`.
+   */
+  readonly offByHost?: Readonly<
+    Record<
+      string,
+      {
+        readonly capture: string;
+        readonly matrix: ReadonlyArray<{ readonly token: string; readonly sha256: string }>;
+      }
+    >
+  >;
   readonly counts: Readonly<Record<string, ScenarioCounts>>;
 };
 
@@ -253,7 +266,12 @@ describe('compute reuse qualification: spur-gearbox matrix parity', () => {
   });
 
   it('should render the pinned reuse-off bytes on every matrix step', () => {
-    expect(hashes(off)).toEqual(pins.models[model]!.off.matrix.map((step) => step.sha256));
+    // ECMA-262 leaves Math.sin, Math.cos and Math.atan implementation-approximated, and this model's involute
+    // profile is built from them: darwin-arm64 renders other bytes than the x64 pin host on every step. Each host
+    // is held to its own byte-exact reference.
+    const modelPins = pins.models[model]!;
+    const pinned = modelPins.offByHost?.[`${process.platform}-${process.arch}`]?.matrix ?? modelPins.off.matrix;
+    expect(hashes(off)).toEqual(pinned.map((step) => step.sha256));
   });
 
   it('should render every matrix step with reuse on byte-equal to reuse off', () => {

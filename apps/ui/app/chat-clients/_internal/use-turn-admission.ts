@@ -182,7 +182,7 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
             availability.status === 'pending'
               ? daemonHostId === undefined
                 ? 'Tau is still checking whether this project can run the agent in your browser.'
-                : 'Tau is still looking for that agent host.'
+                : 'Tau can’t reach that computer yet.'
               : availability.reason,
           ),
           { code: 'CHAT_PLACEMENT_UNAVAILABLE' },

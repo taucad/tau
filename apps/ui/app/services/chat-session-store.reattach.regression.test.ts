@@ -749,10 +749,63 @@ describe('remote read loop (HA3)', () => {
 
       expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');
       expect(chat.store.getRemoteResidual(chatId)).toBeUndefined();
-      /* HA5 R1: the latest turns are on a computer this device cannot read now; no host id, so no name to give. */
+    } finally {
+      chat.close();
+    }
+  });
+
+  /* HA5 (I6): R1 waits out the HA3 retry's own window, so a brief loss never flashes the line. */
+  it('should show R1 only once a remote read has stayed lost for the cue’s bound', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const host = closableHost();
+    const chat = open(createStore(createDisk({})), host.connect);
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+      host.connect.mockRejectedValue(new Error('That computer is off.'));
+
+      host.closeWith({ code: 1008, reason: 'route peer did not connect' });
+
+      expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');
+      expect(chat.store.getUnreachableComputer(chatId)).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(reconnectingCueMilliseconds - 100);
+      expect(chat.store.getUnreachableComputer(chatId)).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(200);
+      /* The latest turns are on a computer this device cannot read now; no host id, so no name to give. */
       expect(chat.store.getUnreachableComputer(chatId)).toEqual({ hostId: undefined });
     } finally {
       chat.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should never show R1 for a loss the retry heals within the bound', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const host = closableHost();
+    const chat = open(createStore(createDisk({})), host.connect);
+    const seen: unknown[] = [];
+    const unsubscribe = chat.store.subscribeProjection(chatId, () => {
+      seen.push(chat.store.getUnreachableComputer(chatId));
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+
+      host.closeWith({ code: 1008, reason: 'route peer did not connect' });
+      expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, reconnectingCueMilliseconds - 100);
+      await vi.advanceTimersByTimeAsync(reconnectingCueMilliseconds + 100);
+
+      expect(seen.filter((value) => value !== undefined)).toEqual([]);
+      expect(chat.store.getUnreachableComputer(chatId)).toBeUndefined();
+    } finally {
+      unsubscribe();
+      chat.close();
+      vi.useRealTimers();
     }
   });
 });

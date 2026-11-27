@@ -871,6 +871,14 @@ type HostWait = Readonly<{
  */
 const hostWaitSentence = (refusal: CommandRefusal): string | undefined => waitLineOf(refusal.code);
 
+/** R1's fact: a remote placement's read was lost or refused and has not attached since (its retries included), outside R6. */
+const unreadable = (observed: ObservedChat): boolean =>
+  observed.ownStart === undefined && observed.residual === undefined && observed.status !== 'attached';
+
+/** A host's refusal as a thrown error that keeps its code, so its card (`cardOf`) words it with its action (HA5 I1). */
+const refusalError = (answer: Readonly<{ code: string; message: string }>): Error =>
+  Object.assign(new Error(answer.message), { code: answer.code });
+
 /**
  * A Stop this page is carrying out, from the press until nothing is left to wait for. One value, so letting go of it
  * (`#releaseStop`) clears every part at once and no part outlives the Stop.
@@ -1035,6 +1043,9 @@ type ObservedChat = {
   overlayTerminal?: boolean;
   /** HA-I8's cause facts have held since this timer started; at {@link reconnectingCueMilliseconds} the cue shows. */
   cueTimer?: ReturnType<typeof setTimeout>;
+  /** R1 holds once a remote read has stayed lost or refused for {@link reconnectingCueMilliseconds} (HA5 I6). */
+  unreachable?: boolean;
+  unreachableTimer?: ReturnType<typeof setTimeout>;
   cue?: boolean;
   /** Armed by a loss that is not a leadership handoff; reports it if it outlasts {@link chatReadLossBoundMilliseconds}. */
   lossReport?: ReturnType<typeof setTimeout>;
@@ -1461,6 +1472,7 @@ export class ChatSessionStore {
       this.#stopOwnSource(observed);
       this.#observed.delete(chatId);
       clearTimeout(observed.cueTimer);
+      clearTimeout(observed.unreachableTimer);
       this.#stopRemoteObservationIfUnused(chatId);
       if (!this.#sessions.has(chatId)) {
         this.#historicalUsage.delete(chatId);
@@ -1684,7 +1696,7 @@ export class ChatSessionStore {
       ) {
         return 'continuing';
       }
-      throw new Error(`Host cancel refused ${answer.code}: ${answer.message}`);
+      throw refusalError(answer);
     }
     return 'stopped';
   }
@@ -1757,7 +1769,7 @@ export class ChatSessionStore {
       },
     });
     if (answer.status === 'refused') {
-      throw new Error(`Host approval refused ${answer.code}: ${answer.message}`);
+      throw refusalError(answer);
     }
     if (answer.effect !== 'durable') {
       return false;
@@ -1769,7 +1781,7 @@ export class ChatSessionStore {
         payload: { chatId, runId: run.runId },
       });
       if (resumed.status === 'refused' && resumed.code !== 'INTERRUPT_PENDING') {
-        throw new Error(`Host resume refused ${resumed.code}: ${resumed.message}`);
+        throw refusalError(resumed);
       }
     }
     return true;
@@ -2084,6 +2096,8 @@ export class ChatSessionStore {
     }
     this.#foldHostAnswer(chatId, answer);
     this.#latchIfForeignScanLost(chatId);
+    /* R1's hold follows the read's status even when the answer leaves the projection as it was (HA5 I6). */
+    this.#refreshReconnecting(chatId);
     // A verified empty batch can leave the reducer unchanged while establishing read authority.
     if (answer.status === 'batch' && answer.events.length === 0) {
       this.#syncProjection(chatId, 'none');
@@ -2133,15 +2147,7 @@ export class ChatSessionStore {
    */
   public getUnreachableComputer(chatId: string): Readonly<{ hostId: TauAgentHostId | undefined }> | undefined {
     const observed = this.#observed.get(chatId);
-    if (
-      observed === undefined ||
-      observed.ownStart !== undefined ||
-      observed.residual !== undefined ||
-      (observed.status !== 'lost' && observed.status !== 'refused')
-    ) {
-      return undefined;
-    }
-    return { hostId: observed.placement?.hostId };
+    return observed?.unreachable === true && unreadable(observed) ? { hostId: observed.placement?.hostId } : undefined;
   }
 
   /**
@@ -3099,7 +3105,17 @@ export class ChatSessionStore {
           }
           /* `never`, `resume` and `reauth` end the item with the code's card. */
           if (answer.status === 'refused') {
-            throw new Error(`Delivery could not be confirmed: ${answer.message}`);
+            /* HA5 (I1): the chat's card words the code with its action; the strip says only that it was not sent. */
+            const parsed = parseErrorForPersistence(refusalError(answer));
+            session.persistenceActorRef.send({
+              type: 'setPersistedError',
+              error: {
+                ...parsed,
+                details: { ...parsed.details, runId: item.command.payload.runId, commandType: item.command.type },
+                requestId: commandId,
+              },
+            });
+            throw Object.assign(new Error('Your message wasn’t sent.'), { code: answer.code });
           }
           if (answer.effect !== 'durable') {
             /* HA-I4 (HA4, `QueuePlacement`'s `AnswerNoop`): applied with nothing to do. The item ends with no receipt and
@@ -4053,7 +4069,7 @@ export class ChatSessionStore {
         return;
       }
       if (answer.status === 'refused') {
-        failure = new Error(`Host cancel refused ${answer.code}: ${answer.message}`);
+        failure = refusalError(answer);
       }
     } catch (error) {
       failure = error instanceof Error ? error : new Error(String(error));
@@ -4676,12 +4692,44 @@ export class ChatSessionStore {
     );
   }
 
+  /**
+   * Follow R1's fact as the cue follows its causes: a remote read lost for less than {@link reconnectingCueMilliseconds}
+   * is the HA3 retry's to heal, so the line waits that long and never flashes over a brief loss. ponytail: the same
+   * bound as the cue, not a timeouts row of its own.
+   */
+  #refreshUnreachable(chatId: string, observed: ObservedChat): void {
+    const announce = (unreachable: boolean): void => {
+      if ((observed.unreachable === true) !== unreachable) {
+        observed.unreachable = unreachable;
+        this.#projectionTopics.get(chatId)?.emit();
+      }
+    };
+    if (!unreadable(observed)) {
+      clearTimeout(observed.unreachableTimer);
+      observed.unreachableTimer = undefined;
+      announce(false);
+      return;
+    }
+    /* The loss starts the hold; a retry's `unknown` keeps it running, and only a read that attaches ends it. */
+    const lost = observed.status === 'lost' || observed.status === 'refused';
+    if (observed.unreachable === true || observed.unreachableTimer !== undefined || !lost) {
+      return;
+    }
+    observed.unreachableTimer = setTimeout(() => {
+      observed.unreachableTimer = undefined;
+      if (this.#observed.get(chatId) === observed && unreadable(observed)) {
+        announce(true);
+      }
+    }, reconnectingCueMilliseconds); // Bound: reconnectingCueMilliseconds.
+  }
+
   /** Follow the cause facts: the cue shows once they have held for {@link reconnectingCueMilliseconds}. */
   #refreshReconnecting(chatId: string): void {
     const observed = this.#observed.get(chatId);
     if (observed === undefined) {
       return;
     }
+    this.#refreshUnreachable(chatId, observed);
     const announce = (cue: boolean): void => {
       if ((observed.cue === true) !== cue) {
         observed.cue = cue;
@@ -4781,6 +4829,7 @@ export class ChatSessionStore {
           if (event.residual !== undefined) {
             observed.residual = event.residual;
           }
+          this.#refreshUnreachable(chatId, observed);
           this.#projectionTopics.get(chatId)?.emit();
           if (event.type === 'attachment.attached') {
             clearTimeout(observed.lossReport);
@@ -5345,7 +5394,7 @@ export class ChatSessionStore {
         return;
       }
       if (answer.status === 'refused') {
-        throw new Error(`Host ${command.type} refused ${answer.code}: ${answer.message}`);
+        throw refusalError(answer);
       }
       if (answer.effect !== 'durable' || this.#sessions.get(session.chatId) !== session) {
         /* No run started, so a Stop deferred to this command has nothing to wait for. */

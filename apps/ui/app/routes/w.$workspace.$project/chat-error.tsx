@@ -37,15 +37,28 @@ import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.
 import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host/wire';
 import { selectCurrentRun } from '#machines/chat-projection.logic.js';
 
+type VisibleChatErrorEntry = NonNullable<ReturnType<typeof selectVisibleChatErrorEntry>>;
+
+const isQuiet = (entry: VisibleChatErrorEntry): boolean =>
+  cardOf(entry.error.code, entry.error.category).category === 'quiet';
+
 /**
  * The visible failure the chat shows a card for. A `quiet` code shows none (HA5 code table): a transport or handoff
- * code is re-sent under the "Reconnecting…" cue (HA-I8), and a send a Stop superseded ends without a word.
+ * code is re-sent under the "Reconnecting…" cue (HA-I8), and a send a Stop superseded ends without a word. A quiet
+ * refusal of a gesture never hides what it outranks: a Resume answered `HOST_CLOSED` leaves the run's own card.
  */
 const shownEntry = (
   state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'persistedError'>,
-): ReturnType<typeof selectVisibleChatErrorEntry> => {
+): VisibleChatErrorEntry | undefined => {
   const entry = selectVisibleChatErrorEntry(state);
-  return entry === undefined || cardOf(entry.error.code, entry.error.category).category === 'quiet' ? undefined : entry;
+  if (entry === undefined || !isQuiet(entry)) {
+    return entry;
+  }
+  const beneath =
+    state.persistedError === undefined
+      ? undefined
+      : selectVisibleChatErrorEntry({ ...state, persistedError: undefined });
+  return beneath === undefined || isQuiet(beneath) ? undefined : beneath;
 };
 
 /** The chat's visible failure, if any. */
@@ -237,7 +250,7 @@ function codedErrorCard({
     return <ChatErrorChooseThisComputer className={className} />;
   }
   if (category === 'browserStorage') {
-    return <ChatResidualLine className={className} residual={{ kind: 'R3', place: 'browser' }} />;
+    return <ChatResidualLine className={className} residual={{ kind: 'R3' }} />;
   }
   if (category === 'pair') {
     return <ChatErrorPair className={className} computer={<ComputerName />} />;

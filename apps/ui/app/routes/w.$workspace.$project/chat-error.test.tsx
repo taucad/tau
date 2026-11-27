@@ -10,7 +10,7 @@ import type * as AgentHostModule from '@taucad/agent-host';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { chatTurnNotStartedCode, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
-import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
+import { ChatError as ChatErrorBanner, selectVisibleChatErrorId } from '#routes/w.$workspace.$project/chat-error.js';
 import { chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
@@ -351,6 +351,20 @@ describe('ChatError', () => {
     const retried = render(<ChatErrorBanner />);
     expect(decisionIdOf(retried.container)).toBe('run:req_2:1');
   });
+
+  /* HA5 (I2): a quiet refusal of a gesture outranks the run's failure but says nothing, so the run's card shows. */
+  it.each(['HOST_CLOSED', 'LEADERSHIP_LOST', 'PEER_GONE'])(
+    'should keep the run’s card over a Resume answered %s',
+    (code) => {
+      const state = failedRunState('req_quiet');
+      const persistedError = refusalOfGesture(
+        { category: errorCategory.generic, title: 'Something went wrong', message: 'Closed.', code },
+        { kind: 'continue', projection: state.projection, createId: () => 'quiet' },
+      );
+
+      expect(selectVisibleChatErrorId({ ...state, persistedError })).toBe('run:req_quiet:1');
+    },
+  );
 
   it('should identify a refused command by its request (I5)', () => {
     const projection = createActor(chatProjectionLogic).start();
@@ -983,7 +997,8 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    const card = screen.getByRole('alert');
+    /* N4: the pair line is a status, the same card above the composer and in the chat. */
+    const card = screen.getByRole(code === 'HOST_NOT_PAIRED' ? 'status' : 'alert');
     expect(card).toHaveTextContent(title);
     expect(
       within(card)
@@ -1042,6 +1057,25 @@ describe('ChatError', () => {
     render(<ChatErrorBanner />);
 
     expect(screen.getByRole('alert')).toHaveTextContent('Tau couldn’t do that just now.Try again.');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  /* HA5 (I1, I4): the store now persists a refused command with its code and request, so this branch is reachable. */
+  it('should word a host fault the store persisted for a refused command, with its request, as one to try again', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Something went wrong',
+      message: 'boom',
+      code: 'HOST_FAULT',
+      requestId: 'cmd_cancel',
+      details: { runId: 'req_1', commandType: 'cancel' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Tau couldn’t do that just now.Try again.');
+    expect(screen.queryByText('boom')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 

@@ -7,7 +7,10 @@ import { withoutHostId } from '@taucad/chat-ui/utils/chat-execution';
 import type { ChatMessageQueueActor } from '@taucad/chat-ui/machines/chat-message-queue.machine';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
-import { useChatContext } from '#hooks/use-chat.js';
+import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
+import { cardOf } from '@taucad/chat-ui/utils/chat-error-card';
+import { errorCategory } from '@taucad/types/constants';
+import { selectVisibleChatErrorEntry } from '#utils/run-auto-resume-plan.js';
 import { useChatSessionStore, useOptionalChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
@@ -17,7 +20,8 @@ import { isDesktopTarget } from '#lib/build-target.js';
 
 /**
  * One physical residual (blueprint "Residuals and their treatment"): what the person sees, and its action. R2 (another
- * device runs the turn) and R5 (Chat paused, with Resume) keep their existing cards.
+ * device runs the turn) and R5 (Chat paused, with Resume) keep their existing cards. R3 is the browser's line; the
+ * desktop's R3 and R7 are deferred (blueprint rev 11), since nothing produces them yet.
  *
  * @public
  */
@@ -28,10 +32,9 @@ export type ChatResidualFact =
       /** The queued message the line offers to remove or send here; `reached` when its command was already sent. */
       queued?: Readonly<{ reached: boolean; onRemove: () => void; onSendHere: () => void }>;
     }>
-  | Readonly<{ kind: 'R3'; place: 'browser' | 'desktop' }>
+  | Readonly<{ kind: 'R3' }>
   | Readonly<{ kind: 'R4' }>
   | Readonly<{ kind: 'R6'; computer: React.ReactNode; readable: boolean; onPair: () => void }>
-  | Readonly<{ kind: 'R7'; onMakeCopy: () => void }>
   | Readonly<{ kind: 'R8'; desktop: boolean; onNewChat: () => void; canOpenNewChat: boolean }>
   | Readonly<{ kind: 'R9'; cause: 'load' }>
   | Readonly<{ kind: 'R9'; cause: 'placement'; onChooseThisComputer: () => void }>;
@@ -99,22 +102,13 @@ export function ChatResidualLine({
       );
     }
     case 'R3': {
-      return residual.place === 'browser' ? (
+      return (
         <ChatErrorCard
           className={className}
           tone='warning'
           icon={CircleAlert}
           title='Tau can’t save chats in this browser.'
           description='Use another browser or the Tau desktop app.'
-        />
-      ) : (
-        <ChatErrorCard
-          className={className}
-          tone='warning'
-          icon={CircleAlert}
-          title='Tau couldn’t reach this project’s files.'
-          description='Reload Tau to try again.'
-          actions={reloadButton}
         />
       );
     }
@@ -134,6 +128,7 @@ export function ChatResidualLine({
       return (
         <ChatErrorCard
           className={className}
+          role='status'
           tone='warning'
           icon={MonitorSmartphone}
           title={
@@ -150,26 +145,11 @@ export function ChatResidualLine({
         />
       );
     }
-    case 'R7': {
-      return (
-        <ChatErrorCard
-          className={className}
-          tone='notice'
-          icon={CircleAlert}
-          title='Turns can’t run in this preview.'
-          description='Make a copy to work with Tau.'
-          actions={
-            <Button variant='outline' size='xs' onClick={residual.onMakeCopy}>
-              Make a copy
-            </Button>
-          }
-        />
-      );
-    }
     case 'R8': {
       return (
         <ChatErrorCard
           className={className}
+          role='status'
           tone='warning'
           icon={CircleAlert}
           title='This chat’s saved turns are missing on this device.'
@@ -247,7 +227,7 @@ function QueueHeadOf({
 }
 
 type ResidualFacts = Readonly<{
-  residual: 'R1' | 'R6' | 'R8';
+  residual: 'R1' | 'R4' | 'R6' | 'R8';
   hostId: string | undefined;
   local: boolean;
   /** The queued entry prepared for that computer (HA-I4): it, not the queue's head, is the one R1 offers. */
@@ -272,6 +252,9 @@ function NamedResidual({
   const { open: openSettings } = useSettingsDialog();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
   const computer = useComputerName(facts.hostId ?? (execution.kind === 'tau' ? execution.hostId : undefined));
+  if (facts.residual === 'R4') {
+    return <ChatResidualLine className={className} residual={{ kind: 'R4' }} />;
+  }
   if (facts.residual === 'R6') {
     return (
       <ChatResidualLine
@@ -333,7 +316,8 @@ function NamedResidual({
 /**
  * The chat's residual above the composer, from the store's facts: R6 for a computer that must be paired again; R1 for
  * a remote computer this device cannot read, or a queued message prepared for one, with Remove and *Send here
- * instead*; R8 for a saved log that went missing. A residual a coded failure names is the chat error card's.
+ * instead*; R8 for a saved log that went missing; R4 for rows a newer Tau wrote. A residual a coded failure names is
+ * the chat error card's.
  *
  * @param properties - The card's class.
  * @returns The line, or nothing.
@@ -355,7 +339,9 @@ export function ChatResidual({ className }: { readonly className?: string }): Re
     const residual =
       store.getRemoteResidual(chatId) ??
       (unreachable === undefined && pinned === undefined ? undefined : 'R1') ??
-      store.getOwnResidual(chatId);
+      store.getOwnResidual(chatId) ??
+      /* R4: the ledger read rows a newer Tau wrote (`chat-ledger.ts`); the prefix shows, and Reload reads the rest. */
+      (store.getProjection(chatId)?.ledger.newerHistory === true ? 'R4' : undefined);
     return residual === undefined
       ? ''
       : [
@@ -366,10 +352,17 @@ export function ChatResidual({ className }: { readonly className?: string }): Re
         ].join('|');
   }, [chatId, store]);
   const key = useSyncExternalStore(subscribe, read, read);
+  /* N1: a chat whose card already asks for pairing shows one Pair, the card's. */
+  const pairCardShown = useChatSelector(
+    (state) => cardOf(selectVisibleChatErrorEntry(state)?.error.code, errorCategory.generic).category === 'pair',
+  );
   if (key === '') {
     return undefined;
   }
-  const [residual, hostId, local, pinnedId] = key.split('|') as ['R1' | 'R6' | 'R8', string, string, string];
+  const [residual, hostId, local, pinnedId] = key.split('|') as ['R1' | 'R4' | 'R6' | 'R8', string, string, string];
+  if (residual === 'R6' && pairCardShown) {
+    return undefined;
+  }
   return (
     <NamedResidual
       chatId={chatId}

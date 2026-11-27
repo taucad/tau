@@ -11,6 +11,9 @@ type Facts = {
   own?: 'R8';
   local?: boolean;
   pinned?: { queueId: string; hostId: string | undefined };
+  newerHistory?: boolean;
+  /** The code of the chat's visible error card. */
+  shownCode?: string;
 };
 const store = vi.hoisted((): { facts: Facts } => ({ facts: {} }));
 const openSettings = vi.fn();
@@ -25,11 +28,19 @@ const fakeStore = {
   getOwnResidual: () => store.facts.own,
   readsLocally: () => store.facts.local === true,
   pinnedElsewhereOf: () => store.facts.pinned,
+  getProjection: () => ({ ledger: { newerHistory: store.facts.newerHistory === true } }),
   discardQueuedMessage: discard,
   sendQueuedMessageHere: sendHere,
 } as unknown as ChatSessionStore;
 
-vi.mock('#hooks/use-chat.js', () => ({ useChatContext: () => ({ activeChatId: 'chat_1' }) }));
+vi.mock('#hooks/use-chat.js', () => ({
+  useChatContext: () => ({ activeChatId: 'chat_1' }),
+  useChatSelector: (selector: (state: unknown) => unknown) => selector({}),
+}));
+vi.mock('#utils/run-auto-resume-plan.js', () => ({
+  selectVisibleChatErrorEntry: () =>
+    store.facts.shownCode === undefined ? undefined : { error: { code: store.facts.shownCode, category: 'generic' } },
+}));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => fakeStore,
   useOptionalChatSessionStore: () => fakeStore,
@@ -76,15 +87,9 @@ const lines: readonly Line[] = (
     ],
     [
       'R3 in a browser',
-      { kind: 'R3', place: 'browser' },
+      { kind: 'R3' },
       'Tau can’t save chats in this browser.Use another browser or the Tau desktop app.',
       [],
-    ],
-    [
-      'R3 on the desktop',
-      { kind: 'R3', place: 'desktop' },
-      'Tau couldn’t reach this project’s files.Reload Tau to try again.',
-      ['Reload'],
     ],
     [
       'R4',
@@ -97,12 +102,6 @@ const lines: readonly Line[] = (
       { kind: 'R6', computer: 'Studio Mac', readable: true, onPair: vi.fn() },
       'Pair Studio Mac to keep working with it.Reading this chat still works.',
       ['Pair'],
-    ],
-    [
-      'R7',
-      { kind: 'R7', onMakeCopy: vi.fn() },
-      'Turns can’t run in this preview.Make a copy to work with Tau.',
-      ['Make a copy'],
     ],
     [
       'R8 on the desktop',
@@ -193,7 +192,8 @@ describe('ChatResidual', () => {
 
     render(<ChatResidual />);
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Pair Studio Mac to keep working with it.');
+    /* N4: a status, so a chat switch does not announce it again. */
+    expect(screen.getByRole('status')).toHaveTextContent('Pair Studio Mac to keep working with it.');
     expect(screen.queryByText('Reading this chat still works.')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Pair' }));
     expect(openSettings).toHaveBeenCalledWith('compute');
@@ -205,8 +205,27 @@ describe('ChatResidual', () => {
 
     render(<ChatResidual />);
 
-    expect(screen.getByRole('alert')).toHaveTextContent('This chat’s saved turns are missing on this device.');
+    expect(screen.getByRole('status')).toHaveTextContent('This chat’s saved turns are missing on this device.');
     await user.click(screen.getByRole('button', { name: 'New chat' }));
     expect(openNewChat).toHaveBeenCalledOnce();
+  });
+
+  /* I5: the ledger read rows a newer Tau wrote: the prefix shows, and Reload reads the rest. */
+  it('should ask for a reload when a newer Tau wrote part of the chat (R4)', () => {
+    store.facts = { newerHistory: true, local: true };
+
+    render(<ChatResidual />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Part of this chat was written by a newer version of Tau.');
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+  });
+
+  /* N1: one Pair, the card's, when the chat's error already asks for pairing. */
+  it('should leave R6 to the chat’s Pair card when that card shows', () => {
+    store.facts = { remote: 'R6', shownCode: 'HOST_NOT_PAIRED' };
+
+    const { container } = render(<ChatResidual />);
+
+    expect(container).toBeEmptyDOMElement();
   });
 });

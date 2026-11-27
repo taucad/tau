@@ -85,6 +85,8 @@ export const createNodeLeadership = (host: LeadershipHost, delays?: NodeLeadersh
           await claimUntilOpen(chatId);
         } finally {
           reconciling.delete(chatId);
+          /* Node never relinquishes: the loop's end is the term's, so a later refusal is reported again (review). */
+          host.claimEnded(chatId);
         }
       })();
     },

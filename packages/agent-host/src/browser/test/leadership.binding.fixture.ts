@@ -101,6 +101,9 @@ export const scriptedHost = (overrides: Partial<LeadershipHost> = {}): ScriptedH
       calls.push('claim');
       return undefined;
     },
+    claimEnded: () => {
+      calls.push('claimEnded');
+    },
     relinquish: async () => {
       calls.push('relinquish');
     },

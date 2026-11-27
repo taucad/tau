@@ -909,6 +909,9 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         ? refusedWith(answered.code, answered.message)
         : refusedWith('HOST_FAULT', 'The claim was refused without a code.');
     },
+    claimEnded: (chatId) => {
+      reportedRefusals.delete(chatId);
+    },
     relinquish: async (chatId) => {
       reportedRefusals.delete(chatId);
       await host.relinquish(chatId);

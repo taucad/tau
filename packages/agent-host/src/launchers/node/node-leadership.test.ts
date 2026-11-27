@@ -142,7 +142,7 @@ describe('Node leadership reconciliation', () => {
   const hostAnswering = (codes: ReadonlyArray<string | undefined>) => {
     const answers = [...codes];
     const claim = vi.fn(async () => answers.shift());
-    const host = { claim, writing: () => false } as unknown as LeadershipHost;
+    const host = { claim, writing: () => false, claimEnded: () => undefined } as unknown as LeadershipHost;
     return { host, claim };
   };
   const delays = { claimRetry: 5, claimRefusalRetry: 1000 };
@@ -164,10 +164,13 @@ describe('Node leadership reconciliation', () => {
 
   it('should stop claiming at the still-closing bound', async () => {
     const claim = vi.fn(async () => 'WRITER_LOCKED');
-    const port = createNodeLeadership({ claim, writing: () => false } as unknown as LeadershipHost, {
-      claimRetry: 5,
-      claimRefusalRetry: 30,
-    });
+    const port = createNodeLeadership(
+      { claim, writing: () => false, claimEnded: () => undefined } as unknown as LeadershipHost,
+      {
+        claimRetry: 5,
+        claimRefusalRetry: 30,
+      },
+    );
     port.reconcile('chat-1', { wait: true });
     await vi.waitFor(() => {
       expect(claim.mock.calls.length).toBeGreaterThan(1);
@@ -189,13 +192,38 @@ describe('Node leadership reconciliation', () => {
       }
       return calls < 3 ? 'WRITER_LOCKED' : undefined;
     });
-    const port = createNodeLeadership({ claim, writing: () => false } as unknown as LeadershipHost, {
-      claimRetry: 5,
-      claimRefusalRetry: 30,
-    });
+    const port = createNodeLeadership(
+      { claim, writing: () => false, claimEnded: () => undefined } as unknown as LeadershipHost,
+      {
+        claimRetry: 5,
+        claimRefusalRetry: 30,
+      },
+    );
     port.reconcile('chat-1', { wait: true });
     await vi.waitFor(() => {
       expect(claim).toHaveBeenCalledTimes(3);
+    });
+    await port.close();
+  });
+
+  /* Review: Node never relinquishes, so each loop's end clears the launcher's reported refusal, and a later
+   * reconciliation's refusal is reported again. */
+  it('should end the claim each time a reconciliation stops retrying', async () => {
+    const claim = vi.fn(async () => 'LOG_POISONED');
+    const ended: string[] = [];
+    const host = {
+      claim,
+      writing: () => false,
+      claimEnded: (chatId: string) => ended.push(`${chatId}@${String(claim.mock.calls.length)}`),
+    } as unknown as LeadershipHost;
+    const port = createNodeLeadership(host, delays);
+    port.reconcile('chat-1', { wait: true });
+    await vi.waitFor(() => {
+      expect(ended).toEqual(['chat-1@1']);
+    });
+    port.reconcile('chat-1', { wait: true });
+    await vi.waitFor(() => {
+      expect(ended).toEqual(['chat-1@1', 'chat-1@2']);
     });
     await port.close();
   });
@@ -217,7 +245,10 @@ describe('Node leadership reconciliation', () => {
           open = resolve;
         }),
     );
-    const port = createNodeLeadership({ claim, writing: () => false } as unknown as LeadershipHost, delays);
+    const port = createNodeLeadership(
+      { claim, writing: () => false, claimEnded: () => undefined } as unknown as LeadershipHost,
+      delays,
+    );
     port.reconcile('chat-1', { wait: true });
     port.reconcile('chat-1', { wait: true });
     expect(claim).toHaveBeenCalledTimes(1);

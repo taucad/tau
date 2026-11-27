@@ -93,6 +93,15 @@ jobs:
           command -v uv || pipx install uv
           uv --version
 
+      # desktop:prepare-windows-sandbox builds the sandbox helper with the toolchain its crate pins.
+      - name: Install the pinned Rust toolchain
+        working-directory: libs/sandbox/windows-sandbox
+        run: |
+          set -euo pipefail
+          test -f rust-toolchain.toml || { echo 'libs/sandbox/windows-sandbox/rust-toolchain.toml is missing' >&2; exit 1; }
+          rustup toolchain install
+          rustup show active-toolchain
+
       - name: Record package source identity
         run: echo "TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
@@ -115,6 +124,40 @@ jobs:
           set -euo pipefail
           export PATH="/c/Windows/System32:$PATH"
           pnpm nx run-many -p desktop api -t package-windows-e2e build --parallel=1 --outputStyle=stream
+
+      # The packaged app runs Build123d's worker in the Windows sandbox (TAU_WINDOWS_SHELL_SANDBOX=1 below). The runner's
+      # account is already elevated, so the helper's one-time setup runs here, for that account, where a person would
+      # approve one UAC prompt.
+      - name: Set up the Windows sandbox for the runner's account (elevated)
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $helper = 'apps/desktop/package-out/Tau-win32-x64/resources/windows-sandbox/win32-x64/tau-windows-sandbox.exe'
+          if (-not (Test-Path -LiteralPath $helper)) { throw "the package has no $helper" }
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          # The drive roots' DACLs before setup, in this step's log, so a run can tell the image's own grants from the helper's.
+          icacls 'C:\'
+          icacls 'D:\'
+          & $helper setup --for-user $sid
+          if ($LASTEXITCODE -ne 0) { throw "the sandbox setup exited $LASTEXITCODE" }
+          & $helper status
+          if ($LASTEXITCODE -ne 0) { throw "the sandbox status exited $LASTEXITCODE" }
+
+      # The window station and desktop DACLs, the temp folder ACL, and whether a Chromium-style restricted,
+      # low-integrity child on an alternate desktop can still create a window: once before the suite's native
+      # launches and once after them (below), to tell whether a sandboxed launch changed the session the GPU process
+      # needs. Diagnostics only: the probe never fails the run.
+      - name: Record the session before native launches
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $probe = 'libs/sandbox/windows-sandbox/target/x86_64-pc-windows-msvc/release/examples/tau-worker-probe.exe'
+          $dir = Join-Path $env:RUNNER_TEMP 'desktop-e2e-services'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          if (-not (Test-Path -LiteralPath $probe)) { "the build has no $probe" | Tee-Object (Join-Path $dir 'worker-probe-session-before.log'); exit 0 }
+          '{"op":"session"}' | & $probe *> (Join-Path $dir 'worker-probe-session-before.log')
+          "probe exit $LASTEXITCODE" | Add-Content (Join-Path $dir 'worker-probe-session-before.log')
+          Get-Content (Join-Path $dir 'worker-probe-session-before.log') -TotalCount 200
 
       # Real users run with Defender on, so the gate does too. These steps record what Defender is doing and sample
       # CPU and disk once a second through the suite (typeperf, stopped after it), so a slow run can tell scanning
@@ -193,6 +236,13 @@ jobs:
           # on this GPU-less runner (WARP) that held about 3 of its 4 cores through the Build123d test's opening
           # minutes (run 44088812001), slowing every git process the app ran. Snapshots stay on for failure evidence.
           TAU_E2E_TRACE_SCREENSHOTS: 'false'
+          # Each launch's user data (and its dependency store) lives under the temporary folder. The runner's own
+          # (C:\Users\RUNNER~1\AppData\Local\Temp) leaves too little of Windows' 259-character library path for
+          # Build123d's closure, so use the runner's short temp folder.
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          # Contain native kernels and the Terminal in the Windows sandbox the step above set up (Q15 gate).
+          TAU_WINDOWS_SHELL_SANDBOX: '1'
           # The API listens on IPv4 only. On windows-2025 the packaged app's services process failed every gateway
           # call to `localhost:4014` with a network error while the renderer reached it (run 44008138089), so name
           # the loopback address the API binds.
@@ -206,6 +256,48 @@ jobs:
             ../../node_modules/.bin/vitest run --config vitest.config.ts \
             src/desktop-webgl-renderer.spec.ts src/desktop-build123d.spec.ts \
             | tee "$RUNNER_TEMP/desktop-packaged-windows.log"
+
+      - name: Record the session after native launches
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $probe = 'libs/sandbox/windows-sandbox/target/x86_64-pc-windows-msvc/release/examples/tau-worker-probe.exe'
+          $dir = Join-Path $env:RUNNER_TEMP 'desktop-e2e-services'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          if (-not (Test-Path -LiteralPath $probe)) { "the build has no $probe" | Tee-Object (Join-Path $dir 'worker-probe-session-after.log'); exit 0 }
+          '{"op":"session"}' | & $probe *> (Join-Path $dir 'worker-probe-session-after.log')
+          "probe exit $LASTEXITCODE" | Add-Content (Join-Path $dir 'worker-probe-session-after.log')
+          Get-Content (Join-Path $dir 'worker-probe-session-after.log') -TotalCount 200
+
+      - name: Record the Windows sandbox and crash evidence
+        if: failure()
+        shell: pwsh
+        run: |
+          # The sandbox setup grants volume roots and adds firewall and WFP rules; a failed run keeps what the helper
+          # reports now, the top-level ACLs it touched, and Windows' own crash records (faulting module and code).
+          $out = Join-Path $env:RUNNER_TEMP 'desktop-e2e-services/windows-sandbox-diagnostics.log'
+          New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
+          $helper = 'apps/desktop/package-out/Tau-win32-x64/resources/windows-sandbox/win32-x64/tau-windows-sandbox.exe'
+          & {
+            '--- helper status ---'
+            & $helper status 2>&1
+            "exit $LASTEXITCODE"
+            '--- volume root ACLs ---'
+            icacls 'C:\' 2>&1
+            icacls 'D:\' 2>&1
+            icacls $env:TEMP 2>&1
+            icacls $env:RUNNER_TEMP 2>&1
+            '--- window station and desktop ---'
+            whoami /groups /fo list 2>&1 | Select-String -Pattern 'Logon|Mandatory' -Context 0,2
+            '--- application crashes (Event 1000, 1001) ---'
+            Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1001; StartTime = (Get-Date).AddHours(-2) } -ErrorAction SilentlyContinue |
+              Select-Object -First 40 | Format-List TimeCreated, Id, ProviderName, Message
+            '--- sandbox processes still running ---'
+            Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'tau-windows-sandbox|python|Tau' } |
+              Format-Table Id, Name, StartTime -AutoSize
+          } *> $out
+          Get-Content $out -TotalCount 400
 
       - name: Stop the load sampler
         if: always()

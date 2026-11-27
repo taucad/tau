@@ -85,6 +85,11 @@ DATABASE_BACKGROUND_POOL_MAX = '1'
 DATABASE_POOLER_POOL_SIZE = '15'
 DATABASE_CONNECT_TIMEOUT_SECONDS = '10'
 DATABASE_IDLE_TIMEOUT_SECONDS = '60'
+# Chat performance WP-05 (server audit S-04): keep 2 of the 4 request connections open between turns, so
+# the first model step after think time does not reconnect (production opened 1,153 connections for 48
+# admissions with none kept). A `select 1` per connection every 30 s; inside DATABASE_POOL_MAX, so the
+# pooler budget above is unchanged.
+DATABASE_POOL_WARM_CONNECTIONS = '2'
 DATABASE_STATEMENT_TIMEOUT_MS = '15000'
 DATABASE_LOCK_TIMEOUT_MS = '5000'
 DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS = '15000'

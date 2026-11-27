@@ -3,7 +3,7 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/libs/ui-kit",
   "projectType": "library",
-  "tags": ["scope:ui", "type:app-lib", "layer:ui"],
+  "tags": ["scope:ui", "type:app-lib", "layer:ui", "ui:ui-kit"],
   "targets": {
     "generate-svg-sprite": {
       "executor": "nx:run-commands",

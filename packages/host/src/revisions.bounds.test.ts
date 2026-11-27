@@ -108,7 +108,6 @@ describe('revision waits answered with the clock frozen (TS-S8)', () => {
         projectName: 'Project',
         entryPath: 'main.ts',
         visibility: 'public',
-        title: 'Project',
       }),
     );
     await revisions.close();

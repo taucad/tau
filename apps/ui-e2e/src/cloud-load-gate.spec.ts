@@ -162,6 +162,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
+      // Expected-failure: @rifont until 2026-12-15
       expectedFailure: true,
       title: 'N2: requests get-session and /v1/agents once per load of a project route',
     },
@@ -267,7 +268,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await target.navigate('/');
       await waitForSettledHome();
       const record = await keep('k-b-listing-late');
-      const waits = record.cloudStates.filter((state) => state.text.includes('Loading Tau Cloud projects'));
+      const waits = record.cloudStates.filter((state) => state.text.includes('Loading cloud projects'));
       precondition(waits.length > 0, 'K-b: the Tau Cloud wait was never shown');
       const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
       await defect(() => {
@@ -308,7 +309,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       );
       await target.delay(settleWindow);
       await cloud.uiReadCloudRequestCounts(true);
-      await target.click(selectors.getByRole('button', { name: 'Retry Tau Cloud' }));
+      await target.click(selectors.getByRole('button', { name: 'Try loading cloud projects again' }));
       /* Long enough for react-query's own retries of a failed listing (1, 2 and 4 s) to be counted. */
       await target.delay(retryWatch);
       const counts = await cloud.uiReadCloudRequestCounts();
@@ -318,7 +319,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await defect(() => {
         expect(
           {
-            words: alerts.every((state) => state.text.includes('Tau Cloud projects not loaded')),
+            words: alerts.every((state) => state.text.includes('Couldn’t load cloud projects')),
             inHeader: alerts.every((state) => state.inHeader),
             gridMoved: tops.length > 1,
             retryRequests: counts.projects,
@@ -344,10 +345,10 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await target.navigate('/');
       await waitForSettledHome();
       const record = await keep('k-d-listing-long');
-      const slow = record.cloudStates.filter((state) => state.text.includes('Still loading Tau Cloud projects'));
+      const slow = record.cloudStates.filter((state) => state.text.includes('Still loading cloud projects'));
       await defect(() => {
         expect(
-          slow.some((state) => state.inHeader && state.t >= slowWait && state.text.includes('Retry')),
+          slow.some((state) => state.inHeader && state.t >= slowWait && state.text.includes('Try again')),
           `K-d: the Tau Cloud states shown ${JSON.stringify(record.cloudStates)}`,
         ).toBe(true);
       });
@@ -361,9 +362,10 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       title: `U24: paints the usage shell within ${String(shellPaintBound)} ms while its document is stalled ${String(documentStall)} ms, the service worker installed`,
     },
     async (defect) => {
+      await target.commands.uiOpenTarget({ serviceWorker: true });
       await openSignedIn();
       await target.navigate('/usage');
-      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-offline-shell-/u);
+      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-precache-/u);
       const load = await stalledDocument(target.commands).uiOpenWithStalledDocument('/usage', documentStall);
       await target.writeArtifact('cloud-load-gate/u24-document-stalled.json', `${JSON.stringify(load, null, 2)}\n`);
       expect(load.stalledRequests, 'the usage document was never held, so nothing forced the stall').toBeGreaterThan(0);
@@ -383,15 +385,22 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
+      // Expected-failure: @rifont until 2026-12-15
       expectedFailure: true,
       title:
         'F14: an offline reload of a project on this device renders the workspace frame and the workspace, the service worker installed',
     },
     async (defect) => {
+      await target.commands.uiOpenTarget({ serviceWorker: true });
       await openSignedIn();
       const route = await seedLocalProject();
       await waitForSettledProject();
-      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-offline-shell-/u);
+      /* The page registers the service worker outside a project workspace (B-27); the project then opens under it,
+         which caches its deferred files on first use. */
+      await target.navigate('/projects');
+      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-precache-/u);
+      await target.navigate(route);
+      await waitForSettledProject();
       await setTargetOffline(true);
       let reloadError = '';
       let offline: OfflineRead;

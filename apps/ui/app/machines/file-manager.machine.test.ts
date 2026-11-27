@@ -1,12 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
 import type * as FsBridge from '@taucad/fs-bridge';
 import type * as EnvironmentConfig from '#environment.config.js';
-import type { ProjectRootConfiguration } from '@taucad/filesystem';
+import type { ProjectRootConfiguration, ProjectRootConfigurationResult, RootStatus } from '@taucad/filesystem';
+import { StepClock, flush } from '@taucad/xstate-testing/clock';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
+import { rootHash } from '#lib/file-service-reports.js';
+
+const uiReports = vi.hoisted(() => ({ calls: [] as Array<{ error: unknown; details: unknown }> }));
+vi.mock('#lib/error-reporting.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  reportUiError: async (error: unknown, details?: unknown) => {
+    uiReports.calls.push({ error, details });
+    return undefined;
+  },
+}));
 
 const diagnosticEnvironment = vi.hoisted(() => ({ enabled: false }));
 vi.mock('#environment.config.js', async (importOriginal) => {
@@ -74,8 +86,10 @@ vi.mock('#machines/file-manager-worker.js', () => {
 
 const mockMount = vi.fn<(prefix: string, backend: string, options?: unknown) => Promise<void>>();
 const mockUnmount = vi.fn<(prefix: string) => void>();
-const mockConfigureProjectRoots = vi.fn<(configuration: ProjectRootConfiguration) => Promise<void>>();
+const mockConfigureProjectRoots =
+  vi.fn<(configuration: ProjectRootConfiguration) => Promise<ProjectRootConfigurationResult>>();
 const mockWaitForWorkerReady = vi.fn<() => Promise<void>>();
+const mockRecheckRoots = vi.fn<(storageRootKeys?: string[]) => Promise<RootStatus[]>>();
 const mockCreateFileSystemBridge = vi.fn(() => ({
   port: {
     postMessage: vi.fn(),
@@ -129,6 +143,7 @@ vi.mock('@taucad/fs-bridge', () => ({
       hello: { payload: { state: mockViewHelloState } },
       pollExternalChanges: vi.fn(async () => undefined),
       configureProjectRoots: mockConfigureProjectRoots,
+      recheckRoots: mockRecheckRoots,
       mount: mockMount,
       unmount: mockUnmount,
       getDirectoryStat: vi.fn(async () => []),
@@ -167,6 +182,10 @@ const mockCheckHandlePermission = vi.fn<() => Promise<string>>();
 const mockSetProjectFileSystemConfig =
   vi.fn<(config: { projectId: string; backend: 'webaccess'; workspaceId: string }) => Promise<void>>();
 const mockGetProjectRootConfigs = vi.fn<() => Promise<ProjectRootConfiguration>>();
+/* What `readProjectRootConfigs` reports as degraded beside the configuration (B5); none by default. */
+const rootConfigurationRead = vi.hoisted(() => ({
+  degraded: undefined as { input: 'records' | 'grants'; errorName: string } | undefined,
+}));
 const mockGetHomeStorageBackend = vi.fn<() => Promise<'indexeddb' | 'opfs' | 'node'>>();
 
 const mockNodeFsConnect = vi.fn(async () => new MessageChannel().port1);
@@ -180,6 +199,10 @@ vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
 
 vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
+  readProjectRootConfigs: async () => ({
+    configuration: await mockGetProjectRootConfigs(),
+    degraded: rootConfigurationRead.degraded,
+  }),
   getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
   getWorkspace: async (...args: unknown[]) => mockGetWorkspace(...(args as [string])),
   getWorkspaceMetadata: async (...args: unknown[]) => mockGetWorkspaceMetadata(...(args as [string])),
@@ -218,7 +241,10 @@ describe('fileManagerMachine', () => {
     mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
     mockGetHomeStorageBackend.mockResolvedValue('indexeddb');
-    mockConfigureProjectRoots.mockResolvedValue(undefined);
+    mockConfigureProjectRoots.mockResolvedValue({ roots: [], skipped: [] });
+    mockRecheckRoots.mockResolvedValue([]);
+    rootConfigurationRead.degraded = undefined;
+    uiReports.calls.length = 0;
     mockWorkspaceReadDirectory.mockResolvedValue([]);
     mockViewReaddirWithStats.mockResolvedValue([]);
     mockViewHelloState = 'ready';
@@ -2154,6 +2180,314 @@ describe('fileManagerMachine', () => {
       } finally {
         actor.stop();
       }
+    });
+  });
+
+  /*
+   * WP2 (blueprint D1, D3, D5): the root mount starts with Home and publishes every root's status, no wait of the start
+   * outlives one deadline, a failure carries a phase and a class, and the start's failures are reported without a path.
+   */
+  describe('resilient start', () => {
+    const neverSettles = async <T>(): Promise<T> => Promise.withResolvers<T>().promise;
+
+    it('should reach ready with Home available and publish the status of a root that was not found (T-B1.4)', async () => {
+      const roots = [
+        { storageRootKey: 'indexeddb', backend: 'indexeddb', state: 'available' },
+        { storageRootKey: 'webaccess:wsp_gone', backend: 'webaccess', state: 'notFound', code: 'ENOENT' },
+      ] as const;
+      mockConfigureProjectRoots.mockResolvedValue({ roots, skipped: [] });
+      const actor = createActor(fileManagerMachine, { input: { rootDirectory: '/', shouldInitializeOnStart: true } });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+      expect(actor.getSnapshot().context.rootStatuses).toEqual(roots);
+      actor.stop();
+    });
+
+    it('should re-check a lost root on window focus and every 30 s while the page is visible, not while hidden (T-B2.3)', async () => {
+      const roots: RootStatus[] = [
+        { storageRootKey: 'indexeddb', backend: 'indexeddb', state: 'available' },
+        { storageRootKey: 'node:/Users/tester/Workshop', backend: 'node', state: 'notFound', code: 'ENOENT' },
+      ];
+      mockConfigureProjectRoots.mockResolvedValue({ roots, skipped: [] });
+      mockRecheckRoots.mockResolvedValue(roots);
+      let visibility: DocumentVisibilityState = 'visible';
+      const visibilityState = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+      const clock = new StepClock();
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/', shouldInitializeOnStart: true },
+        clock,
+      });
+      actor.start();
+      try {
+        await vi.waitFor(() => {
+          expect(actor.getSnapshot().value).toBe('ready');
+        });
+        expect(mockRecheckRoots).not.toHaveBeenCalled();
+
+        globalThis.dispatchEvent(new Event('focus'));
+        await flush();
+        expect(mockRecheckRoots).toHaveBeenCalledTimes(1);
+
+        clock.advance(29_999);
+        await flush();
+        expect(mockRecheckRoots).toHaveBeenCalledTimes(1);
+        clock.advance(1);
+        await flush();
+        expect(mockRecheckRoots).toHaveBeenCalledTimes(2);
+
+        visibility = 'hidden';
+        clock.advance(30_000);
+        await flush();
+        expect(mockRecheckRoots).toHaveBeenCalledTimes(2);
+
+        visibility = 'visible';
+        clock.advance(30_000);
+        await flush();
+        expect(mockRecheckRoots).toHaveBeenCalledTimes(3);
+      } finally {
+        actor.stop();
+        visibilityState.mockRestore();
+      }
+    });
+
+    it('should not re-check on focus when every root is available', async () => {
+      mockConfigureProjectRoots.mockResolvedValue({
+        roots: [{ storageRootKey: 'indexeddb', backend: 'indexeddb', state: 'available' }],
+        skipped: [],
+      });
+      const actor = createActor(fileManagerMachine, { input: { rootDirectory: '/', shouldInitializeOnStart: true } });
+      actor.start();
+      try {
+        await vi.waitFor(() => {
+          expect(actor.getSnapshot().value).toBe('ready');
+        });
+        globalThis.dispatchEvent(new Event('focus'));
+        await flush();
+        expect(mockRecheckRoots).not.toHaveBeenCalled();
+      } finally {
+        actor.stop();
+      }
+    });
+
+    it('should leave a worker that never posts ready for error at 20 000 ms, retry once by itself, and class the second miss deterministic (T-B12.1)', async () => {
+      mockWaitForWorkerReady.mockImplementation(async () => neverSettles());
+      const clock = new StepClock();
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/', shouldInitializeOnStart: true },
+        clock,
+      });
+      actor.start();
+      await vi.waitFor(() => {
+        expect(workerTestState.instances).toHaveLength(1);
+      });
+
+      clock.advance(19_999);
+      await flush();
+      expect(actor.getSnapshot().value).toBe('connectingWorker');
+      clock.advance(1);
+      await flush();
+      expect(actor.getSnapshot().value).toBe('error');
+      expect(actor.getSnapshot().context).toMatchObject({ errorPhase: 'startDeadline', errorClass: 'transient' });
+      expect(workerTestState.instances[0]?.terminate).toHaveBeenCalled();
+
+      /* The one automatic retry. */
+      clock.advance(1000);
+      await flush();
+      expect(actor.getSnapshot().value).toBe('connectingWorker');
+      await vi.waitFor(() => {
+        expect(workerTestState.instances).toHaveLength(2);
+      });
+
+      clock.advance(20_000);
+      await flush();
+      expect(actor.getSnapshot().value).toBe('error');
+      expect(actor.getSnapshot().context).toMatchObject({
+        errorPhase: 'startDeadline',
+        errorClass: 'deterministic',
+      });
+
+      clock.advance(120_000);
+      await flush();
+      expect(actor.getSnapshot().value).toBe('error');
+      expect(workerTestState.instances).toHaveLength(2);
+      actor.stop();
+    });
+
+    it('should leave services that never initialize for error at the start deadline (T-B12.2)', async () => {
+      mockGetProjectFileSystemConfig.mockImplementation(async () => neverSettles());
+      const clock = new StepClock();
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/projects/p1', projectId: 'p1', shouldInitializeOnStart: true },
+        clock,
+      });
+      actor.start();
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('initializingServices');
+      });
+
+      clock.advance(19_999);
+      await flush();
+      expect(actor.getSnapshot().value).toBe('initializingServices');
+      clock.advance(1);
+      await flush();
+      expect(actor.getSnapshot().value).toBe('error');
+      expect(actor.getSnapshot().context.errorPhase).toBe('startDeadline');
+      actor.stop();
+    });
+
+    /** Every string a report carries: the error's name and message, and every string in its details. */
+    const reportedStrings = (value: unknown): string[] => {
+      if (typeof value === 'string') {
+        return [value];
+      }
+      if (value instanceof Error) {
+        return [value.name, value.message];
+      }
+      if (Array.isArray(value)) {
+        return value.flatMap((entry) => reportedStrings(entry));
+      }
+      if (typeof value === 'object' && value !== null) {
+        return Object.entries(value).flatMap(([key, entry]) => [key, ...reportedStrings(entry)]);
+      }
+      return [];
+    };
+    const reportsOf = (event: string) =>
+      uiReports.calls.filter(
+        ({ details }) => (details as { tags?: Record<string, string> } | undefined)?.tags?.['tau_event'] === event,
+      );
+
+    it('should report a failed start once for the machine, with its phase, code and class and no path (T-R9.1)', async () => {
+      mockConfigureProjectRoots.mockRejectedValue(
+        Object.assign(new Error('Home could not be admitted at /Users/tester/Library/Tau/home'), {
+          code: 'HOME_ROOT_UNAVAILABLE',
+        }),
+      );
+      const clock = new StepClock();
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/', shouldInitializeOnStart: true },
+        clock,
+      });
+      actor.start();
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('error');
+      });
+      expect(actor.getSnapshot().context).toMatchObject({
+        errorPhase: 'configureRoots',
+        errorCode: 'HOME_ROOT_UNAVAILABLE',
+        errorClass: 'transient',
+      });
+      clock.advance(1000);
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().context.errorClass).toBe('deterministic');
+      });
+      expect(actor.getSnapshot().value).toBe('error');
+
+      await vi.waitFor(() => {
+        expect(reportsOf('file_service.start_failed')).toHaveLength(1);
+      });
+      const [report] = reportsOf('file_service.start_failed');
+      /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag and context keys are snake_case. */
+      expect(report?.details).toMatchObject({
+        tags: {
+          tau_event: 'file_service.start_failed',
+          phase: 'configureRoots',
+          code: 'HOME_ROOT_UNAVAILABLE',
+          class: 'transient',
+          home_backend: 'indexeddb',
+        },
+        contexts: { file_service: { roots_by_state: {} } },
+        level: 'error',
+      });
+      /* eslint-enable @typescript-eslint/naming-convention -- end of the Sentry report shape. */
+      for (const text of reportedStrings(uiReports.calls)) {
+        expect(text).not.toMatch(/[/\\]/u);
+      }
+      actor.stop();
+    });
+
+    it('should report a skipped entry, a degraded input and an unavailable root without a path (T-R9.1)', async () => {
+      rootConfigurationRead.degraded = { input: 'records', errorName: 'VersionError' };
+      mockConfigureProjectRoots.mockResolvedValue({
+        roots: [
+          { storageRootKey: 'indexeddb', backend: 'indexeddb', state: 'available' },
+          { storageRootKey: 'webaccess:wsp_gone', backend: 'webaccess', state: 'notFound', code: 'ENOENT' },
+        ],
+        skipped: [
+          {
+            kind: 'project',
+            reason: 'root-unavailable',
+            projectId: 'proj_000000000000000000001',
+            storageRootKey: 'node:/Volumes/Gone',
+          },
+        ],
+      });
+      const actor = createActor(fileManagerMachine, { input: { rootDirectory: '/', shouldInitializeOnStart: true } });
+      actor.start();
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+      expect(actor.getSnapshot().context.degraded).toEqual({ input: 'records', errorName: 'VersionError' });
+
+      await vi.waitFor(() => {
+        expect(reportsOf('file_service.entry_skipped')).toHaveLength(1);
+        expect(reportsOf('file_service.started_degraded')).toHaveLength(1);
+        expect(reportsOf('file_service.root_unavailable')).toHaveLength(1);
+      });
+      expect(reportsOf('file_service.entry_skipped')[0]?.details).toMatchObject({
+        tags: { kind: 'project', reason: 'root-unavailable' },
+        level: 'warning',
+      });
+      expect(reportsOf('file_service.started_degraded')[0]?.details).toMatchObject({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry tag keys are snake_case.
+        tags: { input: 'records', error_name: 'VersionError' },
+        level: 'error',
+      });
+      const unavailable = reportsOf('file_service.root_unavailable')[0]?.details as
+        | { tags: Record<string, string> }
+        | undefined;
+      expect(unavailable?.tags).toMatchObject({ state: 'notFound', code: 'ENOENT' });
+      expect(unavailable?.tags['root_hash']).toMatch(/^[\da-f]{12}$/u);
+      for (const text of reportedStrings(uiReports.calls)) {
+        expect(text).not.toMatch(/[/\\]/u);
+      }
+      actor.stop();
+    });
+
+    /* Principal ruling on WP13: a safe-mode page load configures Home alone, so no other folder is admitted or polled. */
+    it('should configure Home alone in safe mode', async () => {
+      const handle = mock<FileSystemDirectoryHandle>();
+      mockGetProjectRootConfigs.mockResolvedValue({
+        roots: [{ backend: 'indexeddb' }, { backend: 'webaccess', workspaceId: 'wsp_1', directoryHandle: handle }],
+        projects: [
+          { projectId: 'proj_home', backend: 'indexeddb', providerBasePath: 'home-project' },
+          { projectId: 'proj_ws', backend: 'webaccess', workspaceId: 'wsp_1', providerBasePath: 'ws-project' },
+        ],
+      });
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/', shouldInitializeOnStart: true, safeMode: true },
+      });
+      actor.start();
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      expect(mockConfigureProjectRoots).toHaveBeenCalledWith({
+        roots: [{ backend: 'indexeddb' }],
+        projects: [{ projectId: 'proj_home', backend: 'indexeddb', providerBasePath: 'home-project' }],
+      });
+      actor.stop();
+    });
+
+    it('should hash one storage root differently under two salts (T-R9.1)', async () => {
+      const first = await rootHash('node:/Users/tester/Projects', 'salt-one');
+      const second = await rootHash('node:/Users/tester/Projects', 'salt-two');
+      expect(first).toMatch(/^[\da-f]{12}$/u);
+      expect(second).toMatch(/^[\da-f]{12}$/u);
+      expect(first).not.toBe(second);
+      await expect(rootHash('node:/Users/tester/Projects', 'salt-one')).resolves.toBe(first);
     });
   });
 });

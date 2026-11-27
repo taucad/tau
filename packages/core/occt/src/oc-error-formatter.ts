@@ -16,6 +16,7 @@ import {
   parseStackTrace,
   createFrameClassifier,
   deriveLocationFromFrames,
+  isRenderAbortedError,
   resolveSourcePath,
 } from '@taucad/runtime/kernel';
 import { formatRuntimeErrorWithOc } from '#oc-exceptions.js';
@@ -69,6 +70,11 @@ export function formatOcRuntimeError(
   ocInstance: OcExceptionInstance,
   context: OcErrorContext,
 ): KernelIssue {
+  // A superseded run is dropped by its caller, so its stack is never shown. Mapping it would parse the
+  // bundle and library source maps (about 80 ms on the first abort in a worker) before the frame stops.
+  if (isRenderAbortedError(error)) {
+    return { message: error.message, code: 'RUNTIME', type: 'runtime', severity: 'error', stackFrames: [] };
+  }
   return formatRuntimeErrorWithOc({
     error,
     ocInstance,

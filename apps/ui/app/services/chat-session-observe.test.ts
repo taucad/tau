@@ -1,5 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { describe, expect, it, vi } from 'vitest';
 import type { CommandAnswer, HostCommand, ReadAnswer } from '@taucad/agent-host/wire';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { chunksOf } from '#machines/chat-projection.logic.js';
@@ -15,12 +14,6 @@ const liveSessions = projectSessionsStandIn();
 const unusedHostCommand = async (): Promise<never> => {
   throw new Error('Unexpected host command.');
 };
-
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
-});
 
 describe('ChatSessionStore.observe', () => {
   for (const { ending, sameTurn } of [

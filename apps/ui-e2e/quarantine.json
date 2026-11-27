@@ -1,0 +1,17 @@
+{
+  "$schema": "../../tools/vitest-ci/quarantine.schema.json",
+  "entries": [
+    {
+      "test": "src/picovoxel-multi.spec.ts > renders PicoVoxel on the variant its isolation allows and exports the pinned exact STL and GLB",
+      "variant": {
+        "browser": "firefox"
+      },
+      "owner": "rifont",
+      "issue": 2788,
+      "class": "unreproduced",
+      "created": "2026-11-25",
+      "expires": "2026-12-09",
+      "evidence": "2 flake events (retry 2) in its last 64 executions; runs 45624895145, 45719013710"
+    }
+  ]
+}

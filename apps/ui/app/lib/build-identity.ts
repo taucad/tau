@@ -1,3 +1,5 @@
+import { Topic } from '@taucad/events';
+
 /**
  * This build's ordered identity (blueprint DF20): a build timestamp, or `0`
  * where the context has none.
@@ -28,6 +30,16 @@ export const unknownBuildRelease = '0000000';
 const releaseLabel = /^[\da-f]{7,12}$|^\d+\.\d+\.\d+$/u;
 
 /**
+ * Whether a value is a release label: a short commit or a desktop semver. A web build's server graph holds a
+ * placeholder until the deploy stamps its commit (`apps/ui/scripts/stamp-build-release.mts`), and the placeholder is
+ * not a label.
+ *
+ * @param value - The candidate label.
+ * @returns `true` for a label.
+ */
+export const isBuildReleaseLabel = (value: string): boolean => releaseLabel.test(value);
+
+/**
  * This build's release label for runtime telemetry: the desktop app's semver (compiled in), else the web build's short
  * commit the server published as `window.ENV.TAU_RELEASE`, else {@link unknownBuildRelease}.
  *
@@ -38,7 +50,7 @@ export const readBuildRelease = (): string => {
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window is absent in a worker.
   const published = compiled === '' && globalThis.window ? globalThis.window.ENV?.TAU_RELEASE : undefined;
   const release = compiled === '' ? published : compiled;
-  return typeof release === 'string' && releaseLabel.test(release) ? release : unknownBuildRelease;
+  return typeof release === 'string' && isBuildReleaseLabel(release) ? release : unknownBuildRelease;
 };
 
 /**
@@ -77,6 +89,70 @@ export const liveBuildIdTimeout = 4000;
  */
 export type LiveBuildAnswer = number | 'none' | 'unreachable';
 
+/** A build id as text or a number: a positive safe integer, digits only as text. */
+const buildIdText = /^\d+$/u;
+
+/**
+ * Read a build id written by an operator (`TAU_MIN_BUILD_ID`), a deploy (the stamped retained floor) or a message.
+ *
+ * @param value - The candidate: a number, or its decimal digits.
+ * @returns The build id, or `undefined` for anything that is not a positive safe integer.
+ */
+export const parseBuildId = (value: unknown): number | undefined => {
+  const candidate = typeof value === 'string' && buildIdText.test(value) ? Number(value) : value;
+  return typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate > 0 ? candidate : undefined;
+};
+
+/**
+ * The build floor `/health/build` reports as `minBuildId` (FP2 of Brain
+ * `research/pl7-service-worker-staging-defects-blueprint.md`): the newer of the operator's floor and the oldest build
+ * whose assets the deploy still serves. Either may be missing; with neither the server reports no floor.
+ *
+ * @param floors - `operatorFloor`: `TAU_MIN_BUILD_ID`; `retainedFloor`: what the deploy stamped
+ *   (`retain-previous-assets.mts`), or its placeholder when it stamped nothing.
+ * @returns The floor, or `undefined`.
+ */
+export const resolveMinBuildId = (
+  floors: Readonly<{ operatorFloor: unknown; retainedFloor: unknown }>,
+): number | undefined => {
+  const known = [parseBuildId(floors.operatorFloor), parseBuildId(floors.retainedFloor)].filter(
+    (floor): floor is number => floor !== undefined,
+  );
+  return known.length === 0 ? undefined : Math.max(...known);
+};
+
+/** The floor the server last reported: a build id, or `none` when its whole answer named none. */
+export type ReportedBuildFloor = number | 'none';
+
+let reportedBuildFloor: ReportedBuildFloor | undefined;
+const reportedBuildFloorTopic = new Topic<void>({ name: 'reported-build-floor' });
+
+/**
+ * The build floor (`minBuildId`) in the server's last whole `/health/build` answer to this page, which the page hands
+ * its service worker (`pwa-registration.ts`, FP2). `undefined` until one came.
+ *
+ * @returns The floor, `none`, or `undefined`.
+ */
+export const readReportedBuildFloor = (): ReportedBuildFloor | undefined => reportedBuildFloor;
+
+/**
+ * Subscribe to {@link readReportedBuildFloor}.
+ *
+ * @param listener - Called after each change.
+ * @returns Unsubscribes.
+ */
+export const subscribeReportedBuildFloor = (listener: () => void): (() => void) =>
+  reportedBuildFloorTopic.subscribe(listener);
+
+const recordReportedBuildFloor = (body: Readonly<{ minBuildId?: unknown }>): void => {
+  const floor = parseBuildId(body.minBuildId) ?? 'none';
+  if (floor === reportedBuildFloor) {
+    return;
+  }
+  reportedBuildFloor = floor;
+  reportedBuildFloorTopic.emit();
+};
+
 let liveBuildRequest: Promise<LiveBuildAnswer> | undefined;
 
 const requestLiveBuild = async (): Promise<LiveBuildAnswer> => {
@@ -109,6 +185,9 @@ const requestLiveBuild = async (): Promise<LiveBuildAnswer> => {
   }
   const published = typeof body === 'object' && body !== null && 'buildId' in body ? body.buildId : undefined;
   const liveBuildId = Number(published);
+  if (typeof body === 'object' && body !== null && Number.isFinite(liveBuildId) && liveBuildId > 0) {
+    recordReportedBuildFloor(body);
+  }
   return Number.isFinite(liveBuildId) && liveBuildId > 0 ? liveBuildId : 'none';
 };
 

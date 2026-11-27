@@ -1,7 +1,7 @@
 {
   "repository": "https://github.com/taucad/picovoxel",
-  "commit": "11c51188a8f4cc754a25bde77e07c107523f7986",
-  "package": "picovoxel@0.1.0",
+  "commit": "cacb49206a8f6f8f04d09a631ff12fe52b55de7f",
+  "package": "picovoxel@0.3.0",
   "upstreams": [
     {
       "sources": "examples/shapekernel/",
@@ -57,7 +57,7 @@
   ],
   "inventory": [
     {
-      "sha256": "c710e461da186c591db9429cedd49c68267c44e14e46b2f07654e0e4a6b407da",
+      "sha256": "91b29e534c2f056230ccf99424048c076de434e0f3f9ea196b873655ca6b49b6",
       "source": "examples/helixheatx/helixHeatX.ts",
       "destinations": ["helix-heat-x/helixHeatX.ts"]
     },

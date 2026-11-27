@@ -11,6 +11,7 @@ import {
   FloatingPanelButtonGroup,
   FloatingPanelContentTitle,
   FloatingPanelContent,
+  SheetHeaderStatusContext,
 } from '#components/ui/floating-panel.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
@@ -43,6 +44,9 @@ vi.mock('#lib/error-reporting.js', () => ({ reportUiError }));
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
+/** A host's covering-sheet status, one element for every render. */
+const sheetStatus = <span data-testid='sheet-status' />;
+
 function renderInPanel(ui: React.ReactNode): ReturnType<typeof render> {
   return render(
     <FloatingPanel side='right' isOpen>
@@ -57,6 +61,13 @@ function setMobileDrawerContext(): void {
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
+
+/* Every case starts on a wide screen outside a drawer: a case that set a phone or a drawer must not decide what a later
+ * one sees, whatever order the cases run in. */
+beforeEach(() => {
+  mockUseIsMobile.mockReset().mockReturnValue(false);
+  mockUseIsInsideDrawer.mockReset().mockReturnValue(false);
+});
 
 describe('FloatingPanelContentHeader', () => {
   it('matches the desktop Dockview tab-strip height', () => {
@@ -205,6 +216,37 @@ describe('FloatingPanelContentHeaderActions', () => {
         'relative',
         'bg-(--fade-scrim-into)',
       );
+    });
+  });
+
+  /* The covering sheet's status (Progressive Loading Policy rule 17) shows wherever the host provides it: the Terminal
+   * sheet renders through a portal outside the drawer's React tree, so it never reads as inside a drawer. */
+  describe('covering sheet status', () => {
+    const renderWithStatus = (): void => {
+      renderInPanel(
+        <SheetHeaderStatusContext.Provider value={sheetStatus}>
+          <FloatingPanelContent>
+            <FloatingPanelContentHeader>
+              <FloatingPanelContentTitle>Terminal</FloatingPanelContentTitle>
+              <FloatingPanelContentHeaderActions>
+                <FloatingPanelMenuButton aria-label='Close'>Close</FloatingPanelMenuButton>
+              </FloatingPanelContentHeaderActions>
+            </FloatingPanelContentHeader>
+          </FloatingPanelContent>
+        </SheetHeaderStatusContext.Provider>,
+      );
+    };
+
+    it('should show the status in a phone sheet that renders outside the drawer, as the Terminal does', () => {
+      mockUseIsMobile.mockReturnValue(true);
+      mockUseIsInsideDrawer.mockReturnValue(false);
+      renderWithStatus();
+      expect(screen.getByTestId('sheet-status')).toBeInTheDocument();
+    });
+
+    it('should not show it on a wide screen', () => {
+      renderWithStatus();
+      expect(screen.queryByTestId('sheet-status')).not.toBeInTheDocument();
     });
   });
 

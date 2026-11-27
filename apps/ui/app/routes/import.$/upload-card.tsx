@@ -2,7 +2,11 @@ import { Heading } from '@taucad/ui/components/heading';
 import { useCallback, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Folder, Files, FolderOpen } from 'lucide-react';
-import { importFileAcceptString, supportedKernelExtensions } from '#routes/import.$/import.utils.js';
+import {
+  importFileAcceptString,
+  nativeCadExtensions,
+  supportedKernelExtensions,
+} from '#routes/import.$/import.utils.js';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { isZipFile } from '@taucad/ui-core/utils/file-reader.utils';
@@ -185,7 +189,7 @@ export function UploadCard({
         <Heading level={2} variant='item'>
           Local files
         </Heading>
-        <p className='text-sm text-muted-foreground'>Open a folder, source files or a ZIP archive.</p>
+        <p className='text-sm text-muted-foreground'>Open a folder, source or CAD files, or a ZIP archive.</p>
       </div>
       <div
         className={cn(
@@ -200,7 +204,8 @@ export function UploadCard({
           {isDropping ? 'Release to import' : 'Drop a folder, files or a ZIP here'}
         </span>
         <span className='text-xs text-muted-foreground'>
-          Sources: <span className='font-mono'>{supportedKernelExtensions.join(' ')}</span> · archives:{' '}
+          Sources: <span className='font-mono'>{supportedKernelExtensions.join(' ')}</span> · CAD files:{' '}
+          <span className='font-mono'>{nativeCadExtensions.join(' ')}</span> · archives:{' '}
           <span className='font-mono'>.zip</span>
         </span>
       </div>

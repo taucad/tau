@@ -33,7 +33,7 @@ import {
   useRevisionCommands,
   useProjectRole,
 } from '#hooks/use-revision-status.js';
-import type { RevisionCommands } from '#hooks/use-revision-status.js';
+import type { RevisionCommands } from '@taucad/revisions-ui/hooks/use-revision-status';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
 
@@ -75,6 +75,13 @@ function ProjectSessionBinding({
       retryManifestObservation();
     }
   }, [cloudIntent, retryManifestObservation, status?.sync.hasAppliedRemote]);
+  /* STO-25: once a tree write's closure has landed its `tau.json`, the manifest is read again, so the model surfaces
+     know from the first view whether the project holds that manifest. */
+  useEffect(() => {
+    if (cloudIntent === 'open' && status?.entryManifest !== undefined) {
+      retryManifestObservation();
+    }
+  }, [cloudIntent, retryManifestObservation, status?.entryManifest]);
   const role = useProjectRole();
   usePublishCloudProjectPreview({
     projectId,

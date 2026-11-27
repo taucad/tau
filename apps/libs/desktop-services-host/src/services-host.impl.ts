@@ -50,7 +50,8 @@ import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { DesktopShell } from '#services-host-shell.js';
 import type { HostEvidence } from '@taucad/agent-observability/host-evidence';
 import { desktopChatObserver, desktopHostBuild } from '#services-host-evidence.js';
-import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import { createGatewayModelTransport } from '@taucad/agent-host';
+import { createDeploymentModeResolver } from '@taucad/utils/deployment-mode';
 import type { GatewayHostLabels } from '@taucad/agent-host/wire';
 import {
   acpModelProbeTimeout,
@@ -63,6 +64,7 @@ import {
   localMachineFacet,
   machineAgentGrants,
   machineRouteGrants,
+  observeAdmissionRefusals,
   openMachineHostIdentity,
   openSecretVault,
   readProjectId,
@@ -79,7 +81,14 @@ import type {
   ProjectHostActor,
   ProjectHostOptions,
 } from '@taucad/host';
-import type { ReportingConsent } from '@taucad/host/telemetry';
+import {
+  admissionRefusalReporter,
+  createNodeHostTelemetry,
+  machineOperationReporter,
+  preparationReporter,
+  reportingPrepareKernel,
+} from '@taucad/host/telemetry';
+import type { NodeHostTelemetry, ReportingConsent } from '@taucad/host/telemetry';
 import { createChannelServer, wrapMessagePortMain } from '@taucad/rpc';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import type { HostAdmissionAuthority } from '@taucad/runtime/host';
@@ -247,6 +256,11 @@ export type AgentHostConfig = {
   readonly tauApiUrl: string;
   readonly tauWebSocketUrl: string;
   /**
+   * This launch started in safe mode (main decides it before `ready`): every project's revisions refuse Tau Cloud before
+   * any request (W9 R5). Read once per project host, never live.
+   */
+  readonly safeMode?: boolean | undefined;
+  /**
    * ACP adapters main resolved and probed (W4-ACP), or absent for Tau's own
    * runs only. Discovery is *main's* because main also advertises the ids to
    * the renderer through the preload bootstrap, and a second resolution here
@@ -331,6 +345,22 @@ export type ServicesHostOptions = {
    * first-use download runs, and these are the kernels it takes. Absent, the agent has no `prepare_kernel`.
    */
   readonly nativeKernels?: Readonly<{ prepare: HostPrepareKernel; preparable: readonly HostPreparableKernel[] }>;
+  /**
+   * Runtime telemetry (T19): the API this utility reports to, the app's release and the CLI config directory that
+   * holds `tau telemetry on|off`. Reports go under route `desktop`, only under the renderer's consent as main relays it
+   * (`telemetryConsent`), so `unknown` and `denied` send nothing. Absent, the machine host's operations and refused
+   * admissions and the agent's `prepare_kernel` are not reported.
+   */
+  readonly runtimeTelemetry?: Readonly<{
+    apiOrigin: string;
+    release: string;
+    configDir: string;
+    /** The build's `tauTelemetryHostCloudBuild`. */
+    cloudBuild: boolean;
+    /** The environment the device preference is read from; `process.env` unless a test names another. */
+    env?: Readonly<Record<string, string | undefined>>;
+    fetch?: typeof globalThis.fetch;
+  }>;
   /** Reply to main once one project launcher has fully stopped. */
   readonly agentHostReleased?: (requestId: string, error?: string) => void;
   /** Reply to main with one binding ceremony's outcome, or why it failed. */
@@ -346,6 +376,8 @@ export type ServicesHostOptions = {
   readonly shell?: DesktopShell | undefined;
   /** The desktop shell probe the `terminal` concern opens human sessions through; absent, each is refused. */
   readonly terminalShell?: TerminalConcernOptions['shell'];
+  /** The shell's one-time setup a person starts from the Terminal pane (`DesktopShell.provision`); absent, none runs. */
+  readonly terminalProvision?: TerminalConcernOptions['provision'];
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -613,6 +645,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     heldStarts?.();
     heldStarts = undefined;
   };
+  /* The API's deployment answer, asked at each run's admission (D1): it, not the build, chooses whether a run carries
+   * the billing layer. One per host, in memory, so every project it opens shares the channel's cached answer. */
+  const deployment = createDeploymentModeResolver();
   let authToken: string | undefined;
   /** The signed-in account's user id, which main reads from `get-session` and sends with the bearer. */
   let sessionPrincipal: string | undefined;
@@ -623,6 +658,37 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * settled sync attempt, so a change applies to every open project; until main says it, `unknown` sends nothing.
    */
   let telemetryConsent: ReportingConsent = 'unknown';
+  /**
+   * T19: the utility's runtime reporter, under route `desktop`: one `machine` entry per new machine operation, one
+   * `admit` entry per refused machine admission and one `prepare` entry per settled agent preparation. Consent is the
+   * renderer's, read at every record and send; the bearer and principal are main's, read per identity check.
+   */
+  const telemetryTarget = options.runtimeTelemetry;
+  const runtimeTelemetry: NodeHostTelemetry | undefined =
+    telemetryTarget === undefined
+      ? undefined
+      : createNodeHostTelemetry({
+          route: 'desktop',
+          release: telemetryTarget.release,
+          apiOrigin: telemetryTarget.apiOrigin,
+          configDir: telemetryTarget.configDir,
+          env: telemetryTarget.env ?? process.env,
+          cloudBuild: telemetryTarget.cloudBuild,
+          /*
+           * Main already read the principal from `get-session` and sends it with the bearer. A bearer main published
+           * before its `get-session` answered is not signed out: entries stay held until the principal, and with it
+           * the account's usage-metrics preference, resolves.
+           */
+          readIdentity: async () =>
+            authToken === undefined
+              ? { kind: 'signed-out' }
+              : sessionPrincipal === undefined
+                ? { kind: 'unresolved', reason: 'session-failed' }
+                : { kind: 'signed-in', authorization: `Bearer ${authToken}`, principalId: sessionPrincipal },
+          rendererConsent: () => telemetryConsent,
+          platform: process.platform,
+          ...(telemetryTarget.fetch === undefined ? {} : { fetch: telemetryTarget.fetch }),
+        });
   let agentHostConfig: AgentHostConfig | undefined;
   /* One machine host per utility lifetime: opened on the first machines
    * concern or ceremony, surviving every renderer reload, closed on quiesce.
@@ -691,16 +757,36 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     if (!isAbsolute(root)) {
       return false;
     }
+    /* Until its background `realpath` settles, the exact spelling main
+     * published is admitted as is: its physical spelling can differ (Windows
+     * short names such as `C:\\Users\\RUNNER~1`, macOS `/var` → `/private/var`).
+     * Once settled, the physical target is checked against the settled
+     * canonical spelling, so a retargeted link is refused. */
+    const published = trustedRoots.get(resolve(root));
+    if (published !== undefined && !published.isSettled) {
+      return true;
+    }
     const candidate = canonicalPath(root);
+    const spelled = resolve(root);
     /* Descendants are admitted because projects live inside Home
      * (`userData/home/<project>`); the `sep` suffix keeps `…/home-evil` from
      * matching `…/home`. */
-    const within = (trusted: string): boolean => candidate === trusted || candidate.startsWith(trusted + sep);
+    const isWithin = (path: string, trusted: string): boolean => path === trusted || path.startsWith(trusted + sep);
     /* A root is matched by the spelling main published and, once its background
      * `realpath` settles, by its canonical spelling. No root is canonicalised on
-     * a request's path: a hung mount would hold this event loop (blueprint D8). */
+     * a request's path ahead of need: a hung mount would hold this event loop
+     * (blueprint D8). */
     for (const [stored, entry] of trustedRoots) {
-      if (within(stored) || (entry.canonical !== undefined && within(entry.canonical))) {
+      if (isWithin(candidate, stored) || (entry.canonical !== undefined && isWithin(candidate, entry.canonical))) {
+        return true;
+      }
+      /* A request that names the root by its published, non-canonical spelling
+       * before that root has settled (an 8.3 `RUNNER~1` profile on Windows,
+       * `/var` for `/private/var` on macOS). Its own `realpath` above has just
+       * answered on the same mount, so the root is canonicalised here, and the
+       * comparison stays physical: a symlink under the root that leaves it is
+       * still refused. */
+      if (entry.canonical === undefined && isWithin(spelled, stored) && isWithin(candidate, canonicalPath(stored))) {
         return true;
       }
     }
@@ -736,6 +822,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   const terminals = createTerminalConcern({
     shell: options.terminalShell,
+    provision: options.terminalProvision,
     isTrustedRoot,
     canonicalRoot: canonicalPath,
     /* Read at each open: a session opened after a sign-in, a sign-out or an account switch commits as the new state. */
@@ -903,7 +990,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   const openMachineHost = async (storeRoot: string): Promise<MachineHostServices> => {
     const identity = await openMachineHostIdentity(storeRoot);
-    const admission = createHostAdmissionAuthority({ hostId: identity.hostId });
+    const authority = createHostAdmissionAuthority({ hostId: identity.hostId });
+    /* T19: each refused admission is one `admit` entry; the refusal itself is the authority's own. */
+    const admission =
+      runtimeTelemetry === undefined
+        ? authority
+        : observeAdmissionRefusals(authority, admissionRefusalReporter(runtimeTelemetry));
     /* Main's allowlist forwards `TAU_SECRET_VAULT`, so automated runs keep
      * codes out of the person's keychain. Codes saved before the vault stay
      * readable from this directory's `secrets.json`. */
@@ -941,6 +1033,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       onError: (error) => {
         log('machines.error', error instanceof Error ? error.message : String(error), 'warn');
       },
+      ...(runtimeTelemetry === undefined ? {} : { onOperation: machineOperationReporter(runtimeTelemetry) }),
     });
     log('machine-host-opened', { hostId: identity.hostId });
     return { host, admission, identity, secrets, providers };
@@ -1226,31 +1319,45 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       systemSkillBundles,
       ...(nativeKernels === undefined
         ? {}
-        : { prepareKernel: nativeKernels.prepare, preparableKernels: nativeKernels.preparable }),
+        : {
+            /* T19: each settled preparation the agent asks for is one `prepare` entry. */
+            prepareKernel:
+              runtimeTelemetry === undefined
+                ? nativeKernels.prepare
+                : reportingPrepareKernel(nativeKernels.prepare, preparationReporter(runtimeTelemetry)),
+            preparableKernels: nativeKernels.preparable,
+          }),
       apiBaseUrl: config.tauApiUrl,
+      ...(config.safeMode === true ? { safeMode: true } : {}),
       syncTelemetryPlacement: 'desktop',
       /* PR-7 follow-up (AR-W6-02): sync attempts under the renderer's one consent rule, read per attempt. */
       syncTelemetryConsent: () => telemetryConsent,
       /* B1: every revision this host records names the desktop app as its leg. */
       via: 'desktop',
+      /* W8 diagnostics: each turn admission's phases and the Git it waited on, ids and milliseconds only. */
+      admissionTimed: (timing) => {
+        log('turn-admission-timed', timing);
+      },
       tauCredential: () => {
         const token = authToken;
         return token === undefined ? undefined : { apiBaseUrl: config.tauApiUrl, authorization: `Bearer ${token}` };
       },
       systemPrompt: config.systemPrompt,
-      /* The build defines this; a missing define must fail loudly rather than
-       * quietly running a Cloud build on the self-host transport. The bearer is
-       * resolved per request, never captured: main refreshes it. The project id
-       * is the renderer's, which `GET /v1/projects` lists, so every receipt
-       * attributes to a project the usage page can name. */
-      modelTransport: (tauCloudBuildEnabled ? createTauCloudGatewayModelTransport : createGatewayModelTransport)({
+      /* The channel's API answers whether a run is funded (D1), never the build. The bearer is resolved per
+       * request, never captured: main refreshes it. The project id is the renderer's, which `GET /v1/projects`
+       * lists, so every receipt attributes to a project the usage page can name. */
+      modelTransport: createGatewayModelTransport({
         baseUrl: config.gatewayBaseUrl,
         projectId,
         auth: () => authToken,
-        /* The funded build names the account an attempt charges (GI-Q6); the self-host transport ignores it. */
-        principal: () => sessionPrincipal,
         /* LW17: the host and build the desktop's own evidence reports, so one run reads one release. */
         hostLabels: desktopHostLabels(),
+        billing: {
+          /* An unknown answer refuses the run before any model call (I1). */
+          deployment: async () => deployment.mode(config.gatewayBaseUrl),
+          /* A funded run names the account an attempt charges (GI-Q6). */
+          principal: () => sessionPrincipal,
+        },
       }),
       /* The desktop rides the signed-in session (RH-R13), naming its account so a resume refuses another's
        * attempt (GI-Q6). Read per admission: main re-sends both on every sign-in, refresh and sign-out. */
@@ -1929,6 +2036,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
      * effect, and closing drains its queue before the writer lock is released. */
     await settleAll([closeMachineHost()], failures);
     await settleAll([stopAuthority()], failures);
+    /* Bounded by `nodeShutdownWait`; never rejects. */
+    await runtimeTelemetry?.shutdown();
     if (failures.length > 0) {
       throw new AggregateError(failures, 'The services host could not quiesce every accepted operation.');
     }

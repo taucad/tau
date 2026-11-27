@@ -14,5 +14,6 @@ Shared utilities for the Tau platform. Exposed as granular subpaths so consumers
 - `@taucad/utils/cache` — cache helpers
 - `@taucad/utils/worktree-database` — per-worktree local Postgres forks (node only)
 - `@taucad/utils/keyed-mutex` — per-key serialiser for asynchronous tasks
+- `@taucad/utils/origin-answer` — per-API-origin, `maxAge`-bounded answer cache and resolver (browser-safe)
 
 Part of the [Tau](https://github.com/taucad/tau) monorepo.

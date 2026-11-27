@@ -430,6 +430,97 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
     expect(harness.redis.keys('telemetry:hll:').length).toBeGreaterThan(0);
   });
 
+  /* T05: every limit id with a producer is counted as a capacity refusal at the limit -1, at and +1. */
+  it.each([
+    [
+      'host.utility.resident',
+      'By',
+      1000,
+      { operation: 'render', outcome: 'terminated', code: 'HOST_LIMIT_EXCEEDED', transport: 'electron-utility' },
+    ],
+    [
+      'picovoxel.tape.instructions',
+      '{instruction}',
+      65_536,
+      { kernel: 'picovoxel', outcome: 'issue', code: 'RESOURCE_LIMIT' },
+    ],
+    [
+      'geospec.work.units',
+      '{unit}',
+      1000,
+      {
+        operation: 'verify',
+        outcome: 'issue',
+        code: 'RESOURCE_LIMIT',
+        caller: 'geospec',
+        verify: { selected: 1, passed: 0, failed: 1 },
+      },
+    ],
+  ] as const)(
+    'should count %s refusals and their demand ratio at the limit -1, at and +1',
+    async (id, unit, maximum, facet) => {
+      const harness = await createApp();
+      const values = [maximum - 1, maximum, maximum + 1];
+      const response = await post(
+        harness,
+        {
+          batch: batchId(),
+          entries: values.map((value) =>
+            operation({
+              ...facet,
+              limit: { id, unit, maximum, demand: { kind: 'measured', value }, origin: 'default' },
+            }),
+          ),
+        },
+        { user: 'user-1' },
+      );
+      expect(response.json()).toMatchObject({ recorded: 3, rejected: 0 });
+      expect(counted(harness, 'runtimeCapacityRefusals').map(({ attributes }) => attributes)).toMatchObject(
+        values.map(() => ({ 'tau.runtime.limit': id, 'tau.runtime.demand_kind': 'measured' })),
+      );
+      expect(
+        harness.runtimeMetrics.record.mock.calls
+          .filter(([name]) => name === 'runtimeCapacityDemandRatio')
+          .map(([, ratio, attributes]) => ({ ratio, attributes })),
+      ).toEqual(values.map((value) => ({ ratio: value / maximum, attributes: { 'tau.runtime.limit': id } })));
+    },
+  );
+
+  it('should count a PicoVoxel tape refusal with unknown demand and record no ratio', async () => {
+    const harness = await createApp();
+    const limit = {
+      id: 'picovoxel.tape.instructions',
+      unit: '{instruction}',
+      maximum: 65_536,
+      demand: { kind: 'unknown' },
+      origin: 'default',
+    };
+    const response = await post(
+      harness,
+      {
+        batch: batchId(),
+        entries: [operation({ kernel: 'picovoxel', outcome: 'issue', code: 'RESOURCE_LIMIT', limit })],
+      },
+      { user: 'user-1' },
+    );
+    expect(response.json()).toMatchObject({ recorded: 1, rejected: 0 });
+    expect(counted(harness, 'runtimeCapacityRefusals')).toMatchObject([
+      {
+        value: 1,
+        attributes: {
+          'tau.runtime.limit': 'picovoxel.tape.instructions',
+          'tau.runtime.demand_kind': 'unknown',
+          'kernel.id': 'picovoxel',
+        },
+      },
+    ]);
+    expect(harness.runtimeMetrics.record).not.toHaveBeenCalledWith(
+      'runtimeCapacityDemandRatio',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it('should refuse an oversized body with 413 and never touch Redis', async () => {
     const harness = await createApp();
     const tooMany = await post(harness, { batch: batchId(), entries: Array.from({ length: 257 }, () => operation()) });
@@ -642,8 +733,8 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
             outcome: 'issue',
             code: 'RESOURCE_LIMIT',
             limit: {
-              id: 'occt.export.triangles',
-              unit: '{triangle}',
+              id: 'picovoxel.tape.instructions',
+              unit: '{instruction}',
               maximum: 10,
               demand: { kind: 'measured', value: 15 },
               origin: 'default',

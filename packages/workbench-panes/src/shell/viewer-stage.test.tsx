@@ -1,5 +1,6 @@
 import { createCallbackLogic } from 'xstate';
 import type { CanvasHostCommand } from '@taucad/viewer/machines/canvas.machine';
+import { hardwareRenderTier } from '@taucad/viewer/graphics/three/render-tier';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
@@ -117,6 +118,7 @@ describe('ViewerStage', () => {
         canvasOf()?.send({
           type: 'hostCreated',
           backend: 'webgpu',
+          tier: hardwareRenderTier('webgpu'),
           surface: { width: 800, height: 600, pixelRatio: 1 },
           domElement: document.createElement('canvas'),
           host: createCallbackLogic<CanvasHostCommand, undefined>(() => undefined),
@@ -327,6 +329,49 @@ describe('ViewerStage', () => {
       expect(onRetry).toHaveBeenCalledOnce();
     });
 
+    it('should draw a failure another live region announces as a group named by its summary, not a second alert', () => {
+      const { region } = renderStage({
+        status: {
+          kind: 'failed',
+          summary: 'Couldn’t open this project',
+          message: 'The download didn’t finish. Try again.',
+          action: <button type='button'>Try again</button>,
+          live: false,
+        },
+      });
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      const group = screen.getByRole('group', { name: 'Couldn’t open this project' });
+      expect(group).toHaveTextContent('The download didn’t finish. Try again.');
+      expect(region).toContainElement(group);
+      expect(group).toContainElement(screen.getByRole('button', { name: 'Try again' }));
+    });
+
+    it('should centre a failure with an action where the status pill sits while no model is drawn, and keep it at the top over one', () => {
+      const status = {
+        kind: 'failed',
+        summary: 'Couldn’t open this project',
+        message: 'The download didn’t finish. Try again.',
+        action: <button type='button'>Try again</button>,
+      } as const;
+      const { rerender, graphicsRef } = renderStage({ status, isModelShown: false });
+
+      expect(screen.getByRole('alert')).toHaveClass('top-1/2', '-translate-y-1/2');
+      expect(screen.getByRole('alert')).not.toHaveClass('top-4');
+
+      rerender(
+        <KeyboardProvider>
+          <TooltipProvider>
+            <GraphicsProvider graphicsRef={graphicsRef}>
+              <Stage graphicsRef={graphicsRef} status={status} isModelShown />
+            </GraphicsProvider>
+          </TooltipProvider>
+        </KeyboardProvider>,
+      );
+      expect(screen.getByRole('alert')).toHaveClass('top-4');
+      expect(screen.getByRole('alert')).not.toHaveClass('top-1/2');
+    });
+
     it('should keep the canvas region busy while the host waits for what it will draw (A15e)', () => {
       const { region, rerender, graphicsRef } = renderStage({
         isWaiting: true,
@@ -363,6 +408,69 @@ describe('ViewerStage', () => {
       expect(container.querySelector('[data-slot="viewer-controls"]')).toContainElement(
         screen.getByRole('button', { name: 'Fit' }),
       );
+    });
+  });
+
+  describe('before the host has a graphics actor', () => {
+    function LateStage({
+      graphicsRef,
+      status,
+    }: {
+      readonly graphicsRef: ViewerGraphics | undefined;
+      readonly status?: ViewerStageProps['status'];
+    }): React.JSX.Element {
+      const partMenu = useViewerPartMenu({ graphicsRef });
+      return (
+        <ViewerStage
+          graphicsRef={graphicsRef}
+          regionId='viewer-canvas-test'
+          renderCanvas={renderCanvas}
+          partMenu={partMenu}
+          status={status}
+          statusExtra={<span data-testid='wait-pill' />}
+        />
+      );
+    }
+    const renderLate = (ui: React.ReactElement): React.ReactElement => (
+      <KeyboardProvider>
+        <TooltipProvider>{ui}</TooltipProvider>
+      </KeyboardProvider>
+    );
+
+    it('should lay out the stage with its status and failure, open no part menu, and keep it when the actor arrives', () => {
+      const failed: ViewerStageProps['status'] = {
+        kind: 'failed',
+        summary: 'You’re offline',
+        message: 'Go online, then try again.',
+        action: <button type='button'>Try again</button>,
+      };
+      const view = render(
+        renderLate(
+          <GraphicsProvider graphicsRef={undefined}>
+            <LateStage graphicsRef={undefined} status={failed} />
+          </GraphicsProvider>,
+        ),
+      );
+      const region = screen.getByRole('application', { name: 'CAD canvas' });
+      const layout = region.closest<HTMLElement>('[data-slot="viewer-stage"]')!;
+      expect(screen.getByTestId('wait-pill')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('You’re offline');
+      firePointer(region, 'pointerdown', { button: 2, pointerId: 3, clientX: 50, clientY: 50 });
+      firePointer(region, 'pointerup', { button: 2, pointerId: 3, clientX: 50, clientY: 50 });
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+      graphics = createViewerGraphics();
+      view.rerender(
+        renderLate(
+          <GraphicsProvider graphicsRef={graphics}>
+            <LateStage graphicsRef={graphics} />
+          </GraphicsProvider>,
+        ),
+      );
+      expect(screen.getByRole('application', { name: 'CAD canvas' }).closest('[data-slot="viewer-stage"]')).toBe(
+        layout,
+      );
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
   });
 });

@@ -27,6 +27,7 @@ let stackParserLoad: Promise<StackParser | undefined> | undefined;
 /** Import the parser's chunk; a failure clears the memo so the next load tries again. */
 const importStackParser = async (): Promise<StackParser | undefined> => {
   try {
+    // oxlint-disable-next-line tau-lint/code-loading-owner -- the error tracker's own code: its failure is handed over by `recoverFromSdkLoadFailure` and never reported, which the owner would do.
     const parserModule = await import('#lib/sentry-stack-parser.js');
     stackParser = parserModule.parseSentryStack;
     return stackParser;

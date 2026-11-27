@@ -47,6 +47,7 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 
 - Layer `feature`: never import `apps/ui` (`#components/*`, `#hooks/*`, `#lib/*`, `#routes/*`, `#environment.config`). A module moves here only when everything it imports, tests included, is already a package or an app-lib.
 - Lib-internal imports use `#<path>.js`; `package.json` maps `#*` to `./src/*`, and TypeScript and Vite resolve `.js` to the `.ts`/`.tsx` source.
+- `tsconfig.lib.json` and `tsconfig.spec.json` load `vite/client` types for the CSS side-effect imports and `@taucad/api-extractor/kcl-stdlib`'s `?raw` JSON.
 - CodeMirror modules stay off every route's static graph: `.oxlintrc.json` lists them as `no-static-heavy-import` deferred leaves, and `apps/ui/app/lib/critical-graph.node.test.ts` holds them there.
 - `apps/ui/vite.config.ts` applies the React Compiler to `src/**`, and `apps/ui/app/styles/global.css` scans it with `@source`, as when these files lived in `apps/ui/app`.
 

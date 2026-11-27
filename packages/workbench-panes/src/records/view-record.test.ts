@@ -93,9 +93,9 @@ describe('view-record', () => {
     ).toBeUndefined();
   });
 
-  it('should keep a saved Tumble pose rolled, and a named preset upright (TA5)', () => {
-    // A pose saved after a Tumble drag over the top: the view is upside down about the z up.
-    const tumbled = record({
+  it('should keep a saved Free orbit pose rolled, and a named preset upright (TA5)', () => {
+    // A pose saved after a Free orbit drag over the top: the view is upside down about the z up.
+    const rolled = record({
       camera: {
         kind: 'pose',
         frameId: 'tau:root',
@@ -106,7 +106,7 @@ describe('view-record', () => {
         perspectiveZoom: 1,
       },
     });
-    expect(graphicsSettingsForView(tumbled).cameraView).toMatchObject({ up: [-0.2, 0, -1] });
+    expect(graphicsSettingsForView(rolled).cameraView).toMatchObject({ up: [-0.2, 0, -1] });
     for (const preset of ['front', 'top', 'isometric'] as const) {
       const { up } = viewCameraOrientation(record({ camera: { kind: 'preset', preset }, upDirection: 'z' }))!;
       // Upright: the up leans toward +z (straight along it unless the view looks down the z axis).

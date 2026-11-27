@@ -1,0 +1,9 @@
+--- a/apps/ui/src/parse.test.ts
++++ b/apps/ui/src/parse.test.ts
+@@
+ import { expect, it } from 'vitest';
+
+ it('parses the header', () => {
+   expect(parse(header)).toEqual({ version: 1 });
++  expect(parse(header, { skip: true })).toEqual({});
+ });

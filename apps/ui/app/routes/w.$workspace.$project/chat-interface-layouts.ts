@@ -1,5 +1,6 @@
 import type * as ChatInterfaceDesktopModule from '#routes/w.$workspace.$project/chat-interface-desktop.js';
 import type * as ChatInterfaceMobileModule from '#routes/w.$workspace.$project/chat-interface-mobile.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * The workspace layouts' imports, shared by the layout's `lazy` and the open's warm-up (STO-25 SP5).
@@ -50,13 +51,13 @@ const sharedLoad = <T>(importLayout: LayoutLoad<T>): LayoutLoad<T> => {
 };
 
 /** @returns The desktop shell's module. */
-export const loadChatInterfaceDesktop: LayoutLoad<typeof ChatInterfaceDesktopModule> = sharedLoad(
-  async () => import('#routes/w.$workspace.$project/chat-interface-desktop.js'),
+export const loadChatInterfaceDesktop: LayoutLoad<typeof ChatInterfaceDesktopModule> = sharedLoad(async () =>
+  loadCode(async () => import('#routes/w.$workspace.$project/chat-interface-desktop.js')),
 );
 
 /** @returns The phone shell's module. */
-export const loadChatInterfaceMobile: LayoutLoad<typeof ChatInterfaceMobileModule> = sharedLoad(
-  async () => import('#routes/w.$workspace.$project/chat-interface-mobile.js'),
+export const loadChatInterfaceMobile: LayoutLoad<typeof ChatInterfaceMobileModule> = sharedLoad(async () =>
+  loadCode(async () => import('#routes/w.$workspace.$project/chat-interface-mobile.js')),
 );
 
 /* `useIsMobile`'s query (`@taucad/ui/hooks/use-mobile`): the layout this viewport mounts is the one warmed. */

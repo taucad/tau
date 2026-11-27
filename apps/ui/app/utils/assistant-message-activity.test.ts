@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { parseLogEvent } from '@taucad/agent-host';
 import type { AgentLiveEvent } from '@taucad/agent-host';
-import { readUIMessageStream } from 'ai';
+import { reduceChunks } from '@taucad/chat-ui/services/ui-message-reducer';
 import type { UIMessageChunk } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
-import { initialChatProjection, materializeTranscript, reduceChatProjection } from '#machines/chat-projection.logic.js';
+import type { ActivityGroup } from '@taucad/chat-ui/utils/assistant-message-activity';
+import { initialChatProjection, reduceChatProjection, selectTranscript } from '#machines/chat-projection.logic.js';
 import { projectAgentHostEvent, projectAgentHostLiveEvent } from '@taucad/chat-ui/services/agent-host-event-projection';
 import {
   activityFamily,
@@ -12,6 +13,7 @@ import {
   describeActivity,
   findLastMeaningfulPartIndex,
   groupAssistantParts,
+  splitWorkingNarrative,
 } from '@taucad/chat-ui/utils/assistant-message-activity';
 import { finalizeInterruptedToolParts } from '#utils/chat.utils.js';
 import pingPongTurnLog from '#utils/__fixtures__/in-project-ping-pong-turn.jsonl?raw';
@@ -174,7 +176,18 @@ describe('assistant message activity', () => {
   it('keeps approvals, mixed failures, and denials truthful', () => {
     expect(describeActivity([tool('tool-edit_file', 'approval-requested')])).toBe('File edits awaiting approval');
     expect(describeActivity([tool('tool-read_file'), tool('tool-read_file', 'output-error')])).toBe(
-      'Read files (some failed)',
+      'Read files (1 of 2 failed)',
+    );
+    expect(
+      describeActivity([
+        tool('tool-read_file', 'output-error'),
+        tool('tool-read_file', 'output-error'),
+        tool('tool-read_file', 'input-available'),
+        tool('tool-shell'),
+      ]),
+    ).toBe('Reading files (2 of 3 failed), ran commands');
+    expect(describeActivity([tool('tool-shell'), tool('tool-shell', 'output-denied'), tool('tool-shell')])).toBe(
+      'Ran commands (1 of 3 denied)',
     );
     expect(describeActivity([tool('tool-test_model', 'output-denied')])).toBe('Tests denied');
   });
@@ -188,6 +201,38 @@ describe('assistant message activity', () => {
     expect(active).toBe('Index dependency graph — running');
     expect(completed).toBe('Index dependency graph');
     expect(`${active} ${completed}`).not.toMatch(/\b(?:Activity|Working|Stopped)\b/u);
+  });
+
+  it('folds a task-list update into the activity around it, native or through Tau MCP', () => {
+    const groups = groupAssistantParts([
+      tool('tool-read_file'),
+      tool('tool-update_todos'),
+      dynamic({ nativeName: 'update_todos' }),
+      tool('tool-shell'),
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ kind: 'aggregated', summary: 'Read files, updated tasks, ran commands' });
+    expect(describeActivity([tool('tool-update_todos', 'input-available')])).toBe('Updating tasks');
+  });
+
+  it('lets a session record without a plan pass without splitting activity, and keeps one with a plan visible', () => {
+    type SessionPart = Extract<Part, { type: 'data-acp-session' }>;
+    const session = (plan?: SessionPart['data']['plan']): SessionPart => ({
+      type: 'data-acp-session',
+      data: { type: 'acp-session', id: 'state-1', agentId: 'codex', commands: [], configOptions: [], plan },
+    });
+
+    expect(classifyActivityPart(session())).toBe('skip');
+    expect(groupAssistantParts([tool('tool-read_file'), session(), tool('tool-shell')])).toHaveLength(1);
+    expect(findLastMeaningfulPartIndex([text('Done'), session()])).toBe(0);
+
+    const plan: SessionPart['data']['plan'] = {
+      type: 'items',
+      entries: [{ content: 'Inspect', priority: 'high', status: 'pending' }],
+    };
+    expect(classifyActivityPart(session(plan))).toBe('data');
+    expect(groupAssistantParts([tool('tool-read_file'), session(plan), tool('tool-shell')])).toHaveLength(3);
   });
 
   it('keeps export artifacts standalone while ordinary edits stay in the activity stack', () => {
@@ -210,6 +255,124 @@ describe('assistant message activity', () => {
   });
 });
 
+describe('a finished turn split at its last tool call', () => {
+  const partsOf = (groups: readonly ActivityGroup[]): Part[] =>
+    groups.flatMap((group) => (group.kind === 'singleton' ? [group.part] : [...group.parts]));
+
+  it('folds commentary and activity before the last tool call, and keeps the answer after it', () => {
+    const parts = [
+      text('Reading first.'),
+      tool('tool-read_file'),
+      text('Now the tests.'),
+      tool('tool-shell', 'output-error'),
+      text('It is 8 mm across flats.'),
+      text('Anything else?'),
+    ];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(split?.summary).toBe('Commands failed, read files');
+    expect(split?.shortfall).toBe('1 failed');
+    expect(partsOf(split!.narrative)).toEqual(parts.slice(0, 4));
+    expect(split?.kept).toEqual([]);
+    expect(partsOf(split!.answer)).toEqual(parts.slice(4));
+  });
+
+  it('keeps a deliverable, a decision and an attachment in view, in their order, below the fold', () => {
+    const exported = tool('tool-export_model');
+    const question = tool('tool-ask_questions');
+    const file: Part = { type: 'file', mediaType: 'image/png', url: 'blob:x' };
+    const parts = [
+      text('Exporting.'),
+      exported,
+      tool('tool-read_file'),
+      question,
+      file,
+      tool('tool-read_file'),
+      text('Done.'),
+    ];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(partsOf(split!.kept)).toEqual([exported, question, file]);
+    expect(partsOf(split!.narrative)).toEqual([parts[0], parts[2], parts[5]]);
+  });
+
+  it.each([
+    ['no tool call', [text('Just an answer.')]],
+    ['one thought and nothing else before the answer', [reasoning('Plan'), text('Answer')]],
+  ])('leaves a turn with %s alone', (_label, parts) => {
+    expect(splitWorkingNarrative(groupAssistantParts(parts))).toBeUndefined();
+  });
+
+  it('leads the summary with what did not go through, so a cut-off line still shows it', () => {
+    const parts = [tool('tool-read_file'), tool('tool-edit_file'), tool('tool-shell', 'output-error'), text('Done.')];
+
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(split?.summary).toBe('Commands failed, read files, edited files');
+    expect(split?.shortfall).toBe('1 failed');
+  });
+
+  it('splits a one-line narrative and leaves the caller to decide whether a time makes it worth folding', () => {
+    const parts = [tool('tool-read_file'), text('Done.')];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(partsOf(split!.narrative)).toEqual([parts[0]]);
+    expect(partsOf(split!.answer)).toEqual([parts[1]]);
+  });
+
+  it('folds a stopped turn that never wrote a word', () => {
+    const parts = [tool('tool-read_file'), tool('tool-shell', 'output-error')];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(partsOf(split!.narrative)).toEqual(parts);
+    expect(split?.answer).toEqual([]);
+  });
+
+  it('keeps the last text in view, and folds the tool calls after it, when the turn ends on a tool call', () => {
+    const parts = [
+      text('Reading first.'),
+      tool('tool-read_file'),
+      text('Done. The bracket is now 4 mm thick.'),
+      tool('tool-update_todos'),
+    ];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(partsOf(split!.narrative)).toEqual([parts[0], parts[1], parts[3]]);
+    expect(partsOf(split!.answer)).toEqual([parts[2]]);
+  });
+
+  it("keeps a stopped turn's last words in view and folds the work around them", () => {
+    const parts = [text('Trying.'), tool('tool-read_file'), text('Now the tests.'), tool('tool-shell', 'output-error')];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(partsOf(split!.narrative)).toEqual([parts[0], parts[1], parts[3]]);
+    expect(partsOf(split!.answer)).toEqual([parts[2]]);
+  });
+
+  it('folds a turn whose only text opened it, in the order it happened', () => {
+    const parts = [text('Let me look.'), tool('tool-read_file'), tool('tool-shell', 'output-error')];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(partsOf(split!.narrative)).toEqual(parts);
+    expect(split?.answer).toEqual([]);
+  });
+
+  it('reads a call the turn ended without settling as done, not still running', () => {
+    const parts = [tool('tool-read_file'), tool('tool-shell', 'input-available'), text('Steered elsewhere.')];
+
+    expect(splitWorkingNarrative(groupAssistantParts(parts))?.summary).toBe('Read files, ran commands');
+  });
+
+  it('keeps a decision that came before any of the work above the fold line', () => {
+    const question = tool('tool-ask_questions');
+    const parts = [question, text('Reading.'), tool('tool-read_file'), text('Done.')];
+    const split = splitWorkingNarrative(groupAssistantParts(parts));
+
+    expect(partsOf(split!.leading)).toEqual([question]);
+    expect(split?.kept).toEqual([]);
+  });
+});
+
 /*
  * The durable log of the desktop in-project run whose transcript rendered a
  * bare "File edits failed" over four `create_file`/`evaluate_model` rounds
@@ -218,7 +381,7 @@ describe('assistant message activity', () => {
  * reads, then its interrupted tool parts are finalized.
  */
 describe('desktop in-project turn replay', () => {
-  const replayed = async (): Promise<readonly MyUIMessage[]> => {
+  const replayed = (): readonly MyUIMessage[] => {
     const events = pingPongTurnLog
       .split('\n')
       .filter((line) => line.trim() !== '')
@@ -233,7 +396,7 @@ describe('desktop in-project turn replay', () => {
         events,
       },
     }).state;
-    const derived = await materializeTranscript(projected);
+    const derived = selectTranscript(projected);
     return finalizeInterruptedToolParts([...derived], 'chat_31RN18nUqDU3WBOn8v3Bn', 'success');
   };
 
@@ -252,8 +415,8 @@ describe('desktop in-project turn replay', () => {
     input: { targetFile: 'main.scad', content: '' },
   } satisfies Extract<AgentLiveEvent, { readonly type: 'tool-input-end' }>;
 
-  it('should leave every tool part of the replayed turn settled, never output-error', async () => {
-    const messages = await replayed();
+  it('should leave every tool part of the replayed turn settled, never output-error', () => {
+    const messages = replayed();
     const states = messages
       .flatMap((message) => message.parts)
       .filter((part) => part.type.startsWith('tool-') || part.type === 'dynamic-tool')
@@ -262,8 +425,8 @@ describe('desktop in-project turn replay', () => {
     expect(states).toEqual(Array.from({ length: 6 }, () => 'output-available'));
   });
 
-  it('should summarize the ping-pong turn as its four successful rounds, never as a failure', async () => {
-    const messages = await replayed();
+  it('should summarize the ping-pong turn as its four successful rounds, never as a failure', () => {
+    const messages = replayed();
     const summaries = messages
       .filter((message) => message.role === 'assistant')
       .map((message) =>
@@ -286,17 +449,17 @@ describe('desktop in-project turn replay', () => {
    * `for await` loops — nothing orders one against the other. The transport
    * feeds both into one queue in arrival order and returns from `enqueueEvent`
    * for a live event *before* its `leaderEpoch:sequence` dedup
-   * (`browser-agent-host-transport.ts:652-661`), so a live row is never
+   * (the since-deleted `browser-agent-host-transport.ts`), so a live row was never
    * deduplicated or dropped on the native path. Projected late
    * (`agent-host-event-projection.ts:583-592`), `tool-input-end` becomes a
    * second `tool-input-available`, and the AI SDK rewinds the settled part to
-   * `input-available` and drops its output — after which the clean-finish
+   * `input-available` and drops its output (as the transcript fold does, T4) — after which the clean-finish
    * finalize stamps `ORPHANED_TOOL_CALL` over a tool that succeeded. One tool
    * call loses the race, which is why only the third round was mislabelled.
    *
    * The projection fences every settled call, so the late row projects to nothing.
    */
-  it('should ignore a live tool-input row that arrives after the tool settled', async () => {
+  it('should ignore a live tool-input row that arrives after the tool settled', () => {
     const blocks = new Map();
     const chunks: UIMessageChunk[] = [];
     for (const event of pingPongTurnLog
@@ -313,18 +476,7 @@ describe('desktop in-project turn replay', () => {
         chunks.push(...projectAgentHostLiveEvent(lateToolInputEnd, blocks));
       }
     }
-    const stream = new ReadableStream<UIMessageChunk>({
-      start: (controller) => {
-        for (const chunk of chunks) {
-          controller.enqueue(chunk);
-        }
-        controller.close();
-      },
-    });
-    let streamed: MyUIMessage | undefined;
-    for await (const next of readUIMessageStream<MyUIMessage>({ stream })) {
-      streamed = next;
-    }
+    const streamed = reduceChunks(chunks).message;
     const [message] = finalizeInterruptedToolParts([streamed!], 'chat_31RN18nUqDU3WBOn8v3Bn', 'success');
 
     expect(

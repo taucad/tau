@@ -11,8 +11,9 @@ import { useModels } from '#hooks/use-models.js';
 import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { reportProjectCreationFailure } from '#lib/project-creation-failure-reporting.js';
+import { useProjectNameAhead } from '#components/chat/use-project-name-ahead.js';
 
 type NewProjectChatComposerProperties = {
   readonly enableAutoFocus?: boolean;
@@ -44,6 +45,7 @@ export function NewProjectChatComposer({
     execution: { execution },
     consumeDraft,
   } = useChatComposer();
+  const nameAhead = useProjectNameAhead();
 
   const focusComposer = useCallback((): void => {
     textareaRef.current?.focus();
@@ -105,8 +107,12 @@ export function NewProjectChatComposer({
         .getSnapshot()
         .context.draftAttachments.map(({ byteLength: _byteLength, ...stored }) => stored);
       try {
+        /* C1: a name asked for while the prompt was written, unawaited so the create's setup overlaps it; without one,
+         * the create asks and overlaps the wait itself. */
+        const projectName = nameAhead.take({ text: content, attachments });
         const created = await projectManager.createProject({
           kernel: creationKernel,
+          ...(projectName === undefined ? {} : { projectName }),
           /* The chip's value verbatim — not a Tau execution rebuilt from the
            * model. Rebuilding dropped `hostId` (and any `acp` choice),
            * so a project started from a "Tau Host · …" chip ran its first turn
@@ -142,6 +148,7 @@ export function NewProjectChatComposer({
       execution,
       creationKernel,
       location,
+      nameAhead,
       navigate,
       presentLocationError,
       projectManager,
@@ -150,16 +157,19 @@ export function NewProjectChatComposer({
   );
 
   return (
-    <ChatTextarea
-      enableEarlyInput={enableEarlyInput}
-      adoptedEarlyInput={adoptedEarlyInput}
-      ref={textareaRef}
-      enableAutoFocus={enableAutoFocus}
-      enableContextActions={false}
-      creationLocationControl={creationLocationControl}
-      isSubmitDisabled={!location.canCreate}
-      className={className}
-      onSubmit={onSubmit}
-    />
+    /* `contents` keeps the textarea's layout; the wrapper only hears a paste, which asks for the name at once (C1). */
+    <div className='contents' onPasteCapture={nameAhead.onPasteCapture}>
+      <ChatTextarea
+        enableEarlyInput={enableEarlyInput}
+        adoptedEarlyInput={adoptedEarlyInput}
+        ref={textareaRef}
+        enableAutoFocus={enableAutoFocus}
+        enableContextActions={false}
+        creationLocationControl={creationLocationControl}
+        isSubmitDisabled={!location.canCreate}
+        className={className}
+        onSubmit={onSubmit}
+      />
+    </div>
   );
 }

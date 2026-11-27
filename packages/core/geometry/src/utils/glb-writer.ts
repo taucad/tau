@@ -90,6 +90,19 @@ export type GlbInputExtensions =
  */
 export type GlbInput = GlbResources & {
   nodes: GlbNode[];
+  /**
+   * The primitives come from a producer that guarantees finite attribute values and unit tangents. The writer then
+   * skips scanning NORMAL, TEXCOORD and TANGENT values; it still computes POSITION bounds and checks vector lengths,
+   * index range, element counts, placements, materials and resources. A non-finite value marked trusted is written
+   * instead of refused.
+   */
+  trustedGeometry?: boolean;
+  /**
+   * Called before each node is laid out and once more before the scene is serialized, so a caller can stop a long
+   * write by throwing (for example a cooperative abort check). The writer has no state of its own to leave behind,
+   * and it never changes the output; the copy into the final buffer that follows the last call is not covered.
+   */
+  checkpoint?: () => void;
   extras?: JSONObject;
   extensions?: GlbInputExtensions;
   extensionsUsed?: string[];
@@ -441,6 +454,7 @@ function buildGltf(input: GlbInput): GltfLayout {
   const floatValidation = new Map<ArrayBufferLike, Map<string, ReturnType<typeof computeMinMax> | undefined>>();
   const validatedPrimitives = new Set<GlbPrimitive>();
   const validatedTangents = new Set<number>();
+  const trusted = input.trustedGeometry === true;
 
   function isNumberArray(value: unknown): value is number[] {
     if (!Array.isArray(value)) {
@@ -513,7 +527,7 @@ function buildGltf(input: GlbInput): GltfLayout {
       return undefined;
     }
     const bounds = position ? computeMinMax(data) : undefined;
-    if (!position && data.some((value) => !Number.isFinite(value))) {
+    if (!position && !trusted && data.some((value) => !Number.isFinite(value))) {
       throw new TypeError('Attribute must contain finite components');
     }
     cache.set(key, bounds);
@@ -694,7 +708,7 @@ function buildGltf(input: GlbInput): GltfLayout {
         throw new TypeError('TANGENT requires matching NORMAL attributes');
       }
       const tangentView = addBufferView(primitive.tangents, targetArrayBuffer, '4:false');
-      if (!validatedTangents.has(tangentView)) {
+      if (!trusted && !validatedTangents.has(tangentView)) {
         for (let index = 0; index < primitive.tangents.length; index += 4) {
           const [x, y, z, w] = primitive.tangents.subarray(index, index + 4);
           if (
@@ -712,6 +726,7 @@ function buildGltf(input: GlbInput): GltfLayout {
   }
 
   for (const node of input.nodes) {
+    input.checkpoint?.();
     if (node.matrix !== undefined) {
       validateMatrix(node.matrix);
     }
@@ -966,6 +981,7 @@ function buildGltf(input: GlbInput): GltfLayout {
  */
 export function writeGlb(input: GlbInput): Uint8Array<ArrayBuffer> {
   const { json, binByteLength, writeBin } = buildGltf(input);
+  input.checkpoint?.();
 
   const jsonString = JSON.stringify(json);
   const jsonBytes = new TextEncoder().encode(jsonString);
@@ -1023,6 +1039,7 @@ export function writeGlb(input: GlbInput): Uint8Array<ArrayBuffer> {
  */
 export function writeGltfJson(input: GlbInput): Uint8Array<ArrayBuffer> {
   const { json, binByteLength, writeBin } = buildGltf(input);
+  input.checkpoint?.();
   const binBuffer = new Uint8Array(binByteLength);
   writeBin(binBuffer, 0);
 

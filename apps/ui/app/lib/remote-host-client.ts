@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 
 import { ENV } from '#environment.config.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 const hostDeviceSchema = z.object({
   id: z.string(),
@@ -69,9 +69,9 @@ export class RemoteHostApiError extends Error {
  */
 const refusalMessages: Readonly<Record<string, string>> = {
   agentNotFound: 'That computer is no longer paired with your account.',
-  busy: 'That computer is already running another Tau session. Try again in a moment.',
-  childUnavailable: 'That computer could not start its Tau runtime.',
-  cloudHostUnavailable: 'Tau Cloud is unavailable.',
+  busy: 'That computer is busy. Try again in a moment.',
+  childUnavailable: 'That computer couldn’t start Tau.',
+  cloudHostUnavailable: 'Couldn’t start the cloud agent.',
   deviceOffline: 'That computer is offline. Start `tau serve` on it and try again.',
   versionMismatch: 'That computer runs a different Tau version. Update it and try again.',
 };

@@ -10,7 +10,7 @@ vi.mock('@better-auth-ui/react', () => ({
   useAuth: () => ({ authClient: {} }),
   useListAccounts: () => ({ data: [{ id: 'account', providerId: 'github', scopes: ['gist'] }], isPending: false }),
 }));
-vi.mock('#components/auth/settings/security/linked-account.js', () => ({
+vi.mock('@taucad/settings-ui/components/auth/settings/security/linked-account', () => ({
   LinkedAccount: () => <div>Connected sign-in account</div>,
 }));
 vi.mock('#lib/share-providers.js', () => ({

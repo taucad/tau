@@ -168,7 +168,7 @@ const followupMessages = (input: {
 
 describe('billable model request contract', () => {
   it.each([
-    { name: 'Responses', providerKind: 'openai', modelId: 'openai-gpt-5.6-luna', supplierModelId: 'gpt-5.6-luna' },
+    { name: 'Responses', providerKind: 'openai', modelId: 'openai-gpt-6-luna', supplierModelId: 'gpt-6-luna' },
     {
       name: 'Anthropic',
       providerKind: 'anthropic',
@@ -260,7 +260,7 @@ describe('billable model request contract', () => {
 
   it('rejects unsupported chargeable fields and non-data image URLs', () => {
     const base = {
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       stream: true,
       max_output_tokens: 16,
     } as const;
@@ -337,7 +337,7 @@ describe('billable model request contract', () => {
     expect(
       safeParseBillableModelRequest(
         {
-          model: 'gpt-5.6-luna',
+          model: 'gpt-6-luna',
           stream: true,
           max_output_tokens: 16,
           instructions: 'é'.repeat(2_000_001),
@@ -354,7 +354,7 @@ describe('billable model request contract', () => {
 
   it('accepts native Responses string inputs, string message content, instructions, and encrypted reasoning inclusion', () => {
     const base = {
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       stream: true,
       store: false,
       max_output_tokens: 64,
@@ -385,7 +385,7 @@ describe('billable model request contract', () => {
    */
   it('admits a bounded Responses prompt cache key and still refuses the retention controls', () => {
     const base = {
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       stream: true,
       store: false,
       max_output_tokens: 64,
@@ -747,7 +747,7 @@ describe('billable model request contract', () => {
     adapterExecutions = 0;
     const responses = await capture({
       providerKind: 'openai',
-      modelId: 'openai-gpt-5.6-luna',
+      modelId: 'openai-gpt-6-luna',
       messages: initialMessages,
     });
     const anthropic = await capture({
@@ -764,7 +764,7 @@ describe('billable model request contract', () => {
     expect(() =>
       qualify({
         providerKind: 'openai',
-        modelId: 'openai-gpt-5.6-luna',
+        modelId: 'openai-gpt-6-luna',
         body: { ...(responses as Record<string, unknown>), messages: [] },
       }),
     ).toThrow();
@@ -805,7 +805,7 @@ const anthropicBody = (block: unknown) => ({
   messages: [{ role: 'user', content: [{ type: 'text', text: 'read it' }, block] }],
 });
 const responsesBody = (block: unknown) => ({
-  model: 'gpt-5.6-luna',
+  model: 'gpt-6-luna',
   stream: true,
   max_output_tokens: 16,
   input: [{ role: 'user', content: [{ type: 'input_text', text: 'read it' }, block] }],
@@ -1008,7 +1008,7 @@ const utf8 = (value: unknown): bigint => BigInt(new TextEncoder().encode(JSON.st
 describe('billableModelInputBound', () => {
   it('bounds a text request by its own serialized bytes plus the ratified overheads', () => {
     const body = {
-      model: 'openai-gpt-5.6-luna',
+      model: 'openai-gpt-6-luna',
       input: [{ role: 'user', content: 'hello' }],
       max_output_tokens: 16,
       stream: true,
@@ -1020,7 +1020,7 @@ describe('billableModelInputBound', () => {
   it('replaces image bytes with the documented per-image maximum', () => {
     const element = { type: 'input_image', image_url: `data:image/png;base64,${validPng}` };
     const body = {
-      model: 'openai-gpt-5.6-luna',
+      model: 'openai-gpt-6-luna',
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'hello' }, element] }],
       max_output_tokens: 16,
       stream: true,
@@ -1033,7 +1033,7 @@ describe('billableModelInputBound', () => {
 
   it('bounds free-form tool schemas by bytes without reading their JSON-Schema types', () => {
     const body = {
-      model: 'openai-gpt-5.6-luna',
+      model: 'openai-gpt-6-luna',
       input: 'hello',
       max_output_tokens: 16,
       stream: true,
@@ -1051,7 +1051,7 @@ describe('billableModelInputBound', () => {
 
   it('fails closed on a request element that carries no documented bound', () => {
     const body = {
-      model: 'openai-gpt-5.6-luna',
+      model: 'openai-gpt-6-luna',
       input: [{ role: 'user', content: [{ type: 'input_audio', audio: 'AAAA' }] }],
       max_output_tokens: 16,
       stream: true,

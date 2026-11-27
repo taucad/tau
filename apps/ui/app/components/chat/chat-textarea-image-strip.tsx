@@ -6,8 +6,8 @@ import { cn } from '@taucad/ui/utils/cn';
 import { focusTrapAttribute } from '@taucad/chat-ui/components/use-composer-exit';
 import { AttachmentFileChip, AttachmentImage } from '#components/chat/attachment-preview.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import type { DraftAttachment, PendingDraftImage } from '#hooks/draft.machine.js';
-import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import type { DraftAttachment, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
+import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { attachmentKind, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 
 type ChatTextareaAttachmentRailSize = 'desktop' | 'mobile';
@@ -138,7 +138,9 @@ export const ChatTextareaAttachmentRail = memo(function ({
                   type='button'
                   aria-label={`Open uploaded image ${imageIndex + 1}`}
                   className={cn(
-                    'overflow-hidden rounded-md border bg-background hover:bg-accent',
+                    // `block`: an inline-block button sits on the wrapper's text line, whose descender space would add
+                    // height under the thumbnail that the pending tile does not have, moving the composer as it lands.
+                    'block overflow-hidden rounded-md border bg-background hover:bg-accent',
                     'outline-none focus-visible:focus-outline',
                     thumbnailSize[size],
                   )}

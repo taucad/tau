@@ -3,5 +3,15 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/libs/planetary-gearbox",
   "projectType": "library",
-  "tags": ["scope:ui", "type:app-lib", "layer:util"]
+  "tags": ["scope:ui", "type:app-lib", "layer:util", "ui:unlayered"],
+  "targets": {
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts"
+      ]
+    }
+  }
 }

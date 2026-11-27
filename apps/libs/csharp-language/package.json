@@ -46,6 +46,7 @@
   "dependencies": {
     "@taucad/lsp": "workspace:*",
     "@taucad/lsp-fs": "workspace:*",
+    "@taucad/ui-core": "workspace:*",
     "@taucad/utils": "workspace:*",
     "json-rpc-2.0": "^1.7.1",
     "vscode-languageserver-protocol": "^3.18.0",

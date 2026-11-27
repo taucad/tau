@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { EditorDocument, DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
+import type { EditorDocument, DocumentChange, DocumentTransaction } from '@taucad/editor-ui/lib/editor-document';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 
 export type FileViewerProbe = {

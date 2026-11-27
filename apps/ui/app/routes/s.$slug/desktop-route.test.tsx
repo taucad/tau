@@ -3,8 +3,8 @@
  * `/s/:slug` in the desktop shell — the landing site of `tau://s/<slug>` (R4).
  *
  * The properties this suite exists to hold: a share a provider resolves in the
- * browser never reaches the API; a Tau publication does, through the same
- * `/v1/publications/<id>` the web loader calls; and every refusal is a sentence
+ * browser never reaches the API; a cloud link does, through the same
+ * `/v1/shares/<shareId>` the web loader calls; and every refusal is a sentence
  * with a way onwards, with the signed-out one holding the link across the
  * browser sign-in the desktop shell owns.
  */
@@ -76,23 +76,34 @@ describe('desktop /s/:slug', () => {
       vi.fn(async () => Response.json(publicationBody)),
     );
 
-    mountAt('tau~pub_123');
+    mountAt('tau~shr_123');
 
     expect(screen.getByText('Opening shared project…')).toBeInTheDocument();
     expect(await screen.findByText('workbench: Persisted project')).toBeInTheDocument();
   });
 
-  it('opens a Tau publication through the API the web loader calls', async () => {
+  it('opens a cloud link through the API the web loader calls', async () => {
     const fetchMock = vi.fn(async () => Response.json(publicationBody));
+    vi.stubGlobal('fetch', fetchMock);
+
+    mountAt('tau~shr_123');
+
+    expect(await screen.findByText('workbench: Persisted project')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.host.test/v1/shares/shr_123',
+      expect.objectContaining({ credentials: 'include' }),
+    );
+  });
+
+  /* Old per-version links are not found, with no redirect and no request (stable cloud link D2). */
+  it('says an old per-version link does not exist without asking the API', async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
     mountAt('tau~pub_123');
 
-    expect(await screen.findByText('workbench: Persisted project')).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.host.test/v1/publications/pub_123',
-      expect.objectContaining({ credentials: 'include' }),
-    );
+    expect(await screen.findByText("This design doesn't exist")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each(['direct', 'github-gist~0123456789abcdef', 'builtin~replicad.birdhouse'])(
@@ -110,13 +121,13 @@ describe('desktop /s/:slug', () => {
 
   /* The desktop shell owns `/auth/sign-in`: landing there opens the system
      browser, and `redirectTo` is what brings the shell back to this link. */
-  it('holds the link through the browser sign-in when the publication is private', async () => {
+  it('holds the link through the browser sign-in when the link is private', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response('', { status: 401 })),
     );
 
-    mountAt('tau~pub_123');
+    mountAt('tau~shr_123');
 
     expect(await screen.findByText('Sign in to open this link.')).toBeInTheDocument();
     expect(
@@ -126,20 +137,20 @@ describe('desktop /s/:slug', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
       'href',
-      '/auth/sign-in?redirectTo=%2Fs%2Ftau~pub_123',
+      '/auth/sign-in?redirectTo=%2Fs%2Ftau~shr_123',
     );
   });
 
-  it('says an unpublished share link is no longer valid', async () => {
+  it('says a stopped link is no longer shared', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response('', { status: 410 })),
     );
 
-    mountAt('tau~pub_123');
+    mountAt('tau~shr_123');
 
-    expect(await screen.findByText('This share link is no longer valid.')).toBeInTheDocument();
-    expect(screen.getByText('The owner unpublished it. Ask them for a new link.')).toBeInTheDocument();
+    expect(await screen.findByText('This link is no longer shared.')).toBeInTheDocument();
+    expect(screen.getByText('Ask the owner for a new link.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Go to projects' })).toHaveAttribute('href', '/projects');
   });
 
@@ -167,7 +178,7 @@ describe('desktop /s/:slug', () => {
       vi.fn(async () => new Response('', { status })),
     );
 
-    mountAt('tau~pub_123');
+    mountAt('tau~shr_123');
 
     expect(await screen.findByText(headline)).toBeInTheDocument();
   });
@@ -180,7 +191,7 @@ describe('desktop /s/:slug', () => {
       }),
     );
 
-    mountAt('tau~pub_123');
+    mountAt('tau~shr_123');
 
     expect(await screen.findByText("We can't load this design right now")).toBeInTheDocument();
   });

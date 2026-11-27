@@ -1,9 +1,11 @@
+import { frameHintKey } from '#lib/frame-hint.js';
 import { chatComposerTrayClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
-import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { useLocation } from 'react-router';
+import { projectChatIdFromSearch } from '@taucad/files-ui/utils/project-url.utils';
 import { XIcon } from 'lucide-react';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
@@ -24,6 +26,7 @@ import type { ChatTranscriptState } from '#services/chat-session-store.js';
 import { ChatQuestionQueue } from '#components/chat/chat-question-queue.js';
 import { ChatQuestionsProvider } from '#components/chat/chat-questions-context.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
+import { useOptionalChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
 import { toggleChatKeyCombination } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
@@ -49,6 +52,11 @@ import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { ArchivedChats } from '#routes/w.$workspace.$project/archived-chats.js';
+import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import { isInOpen, openWaitContext } from '#hooks/use-wait-start.js';
+import type { OpenWait } from '#hooks/use-wait-start.js';
+import { WaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
+import type { WaitClock } from '@taucad/ui/hooks/use-wait-clock';
 
 // One conversational turn per virtual row, sized only by its content.
 const TurnGroup = memo(function ({
@@ -64,6 +72,7 @@ const TurnGroup = memo(function ({
         <ChatMessage
           key={id}
           messageId={id}
+          isPastTurn={!isLast}
           // The request's revision summary is a card attached under the user
           // message, so appending assistant messages never moves it.
           footer={index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : undefined}
@@ -97,6 +106,8 @@ const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: st
         ref={ref}
         role='region'
         aria-label='Chat history'
+        /* Session replay blocks this transcript while the account's chats may not be recorded (`replay-content.lib`). */
+        data-replay-content='chat'
         aria-busy={context === 'loading' ? true : undefined}
         data-transcript-state={context}
         className={cn('[scrollbar-gutter:stable]', props.className)}
@@ -132,13 +143,141 @@ const virtuosoComponents = {
   EmptyPlaceholder: ChatHistoryEmptyPlaceholder,
 };
 
+/** One transcript wait as the header indicator times it. */
+type TranscriptWait = Readonly<{ active: boolean; startedAt: number; isGesture: boolean }>;
+
+/** The parts of the Navigation API read here; absent where the browser has none. */
+type HistoryEntryNavigation = Readonly<{
+  activation?: Readonly<{ entry?: Readonly<{ key: string }> }>;
+  currentEntry?: Readonly<{ key: string }>;
+}>;
+
+/**
+ * Whether the page is on the history entry its document loaded, as the Navigation API says: a `replaceState` keeps the
+ * entry's key, so the route's rewrites (the chat query, canonical slugs) leave it the same entry.
+ *
+ * @returns `true` on the document's own entry, `false` on another, `undefined` where the API is missing.
+ */
+const isOnDocumentEntry = (): boolean | undefined => {
+  const { navigation } = globalThis as { navigation?: HistoryEntryNavigation };
+  const loaded = navigation?.activation?.entry?.key;
+  return loaded === undefined ? undefined : loaded === navigation?.currentEntry?.key;
+};
+
+/**
+ * Whether the page is still on the project its document loaded: the route open the document began with, whose waits
+ * are timed from navigation start (0). A client navigation to another project has its own start.
+ *
+ * @returns `true` while the document's own project is the current one.
+ */
+const isOnDocumentProject = (): boolean => {
+  /* The history entry first: the route corrects the URL's slugs to the canonical ones with `replaceState`, which keeps
+   * the entry but changes the project's path. */
+  const isDocumentEntry = isOnDocumentEntry();
+  if (isDocumentEntry !== undefined) {
+    return isDocumentEntry;
+  }
+  const [entry] = globalThis.performance.getEntriesByType('navigation');
+  if (entry === undefined) {
+    return false;
+  }
+  /* Without the Navigation API, the project's path: the chat query rewrite keeps it, a slug correction does not. */
+  const opened = frameHintKey(new URL(entry.name).pathname);
+  return opened !== undefined && opened === frameHintKey(globalThis.location.pathname);
+};
+
+/**
+ * The wait clocks whose document open is over: a lane held a settled transcript, or a lane on the document's project
+ * unmounted after the page left that project, so a lane mounted loading again (a return from Home or another project,
+ * the lane reopened over another chat) is a later wait, timed from its own start. Keyed by clock, which is the document's performance clock in the application.
+ */
+const endedDocumentOpens = new WeakSet<WaitClock>();
+
+/**
+ * Whether a lane mounting now is part of the document's own open: the page is on the project the document loaded, and
+ * has not left it since.
+ *
+ * @param clock - The wait clock the lane reads.
+ * @returns `true` during the open.
+ */
+const isDocumentOpen = (clock: WaitClock): boolean => !endedDocumentOpens.has(clock) && isOnDocumentProject();
+
+const startTranscriptWait = (
+  clock: WaitClock,
+  isFirst: boolean,
+  open: OpenWait | undefined,
+): Omit<TranscriptWait, 'active'> => {
+  if (isFirst && isDocumentOpen(clock)) {
+    return { startedAt: 0, isGesture: false };
+  }
+  const { navigator } = globalThis;
+  const activation = 'userActivation' in navigator ? navigator.userActivation : undefined;
+  const isGesture = activation?.isActive ?? false;
+  const startedAt = clock.now();
+  /* A lane that mounts loading during a later project open is part of that open (`isInOpen`): its wait counts from
+   * the open's start, as the frame's bars it takes over did. */
+  if (isFirst && open !== undefined && isInOpen(open, { startedAt })) {
+    return { startedAt: open.startedAt, isGesture: false };
+  }
+  return { startedAt, isGesture };
+};
+
+/**
+ * When the chat's current transcript wait started (loading states UX blueprint, § Chat lane; one clock per wait, never
+ * per mount): a lane that mounts loading during the document's own open counts from navigation start, so its
+ * indicator shows 1,000 ms after it whenever the lane mounted; every later wait (a chat switch, a reload of the log)
+ * counts from now. Read in render with React's "information from previous renders" pattern: no effect, no timer.
+ *
+ * @param active - Whether the transcript is loading now.
+ * @returns The wait's start on the wait clock, and whether a person's gesture started it.
+ */
+function useTranscriptWaitStart(active: boolean): Omit<TranscriptWait, 'active'> {
+  const clock = useWaitClockSource();
+  const open = useContext(openWaitContext);
+  const [tracked, setTracked] = useState<TranscriptWait>(() => ({
+    active,
+    ...startTranscriptWait(clock, true, open),
+  }));
+  /* A lane unmounted once the page has left the document's project (to Home, to another project) ends the open. */
+  useEffect(
+    () => () => {
+      if (!isOnDocumentProject()) {
+        endedDocumentOpens.add(clock);
+      }
+    },
+    [clock],
+  );
+  /* So does a transcript a lane holds settled: a lane mounted loading later on the same entry (the lane reopened over
+   * another chat, a replace to it) is a later wait, timed from its own start. */
+  useEffect(() => {
+    if (!active) {
+      endedDocumentOpens.add(clock);
+    }
+  }, [active, clock]);
+  let current = tracked;
+  if (tracked.active !== active) {
+    current = active ? { active, ...startTranscriptWait(clock, false, open) } : { ...tracked, active };
+    setTracked(current);
+  }
+  return { startedAt: current.startedAt, isGesture: current.isGesture };
+}
+
 type ChatHistoryProps = {
   readonly className?: string;
+  /** Classes for the pane's header row, such as the inset a host's fixed titlebar controls need. */
+  readonly headerClassName?: string;
+  /** Classes for the archived-chats view, which has no header row to take that inset. */
+  readonly archiveClassName?: string;
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 };
 
-export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ...props }: ChatHistoryProps) {
+export const ChatHistory = memo(function ({
+  isExpanded = true,
+  setIsExpanded,
+  archiveClassName,
+  ...props
+}: ChatHistoryProps) {
   const toggleChatHistory = useCallback(() => {
     setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
@@ -148,7 +287,7 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
 
   return isExpanded && isArchiveOpen ? (
     <FloatingPanel isOpen side='right' className={props.className} onOpenChange={setIsExpanded}>
-      <FloatingPanelContent className='min-h-0 overflow-hidden'>
+      <FloatingPanelContent className={cn('min-h-0 overflow-hidden', archiveClassName)}>
         <ArchivedChats key={projectId} />
       </FloatingPanelContent>
     </FloatingPanel>
@@ -164,6 +303,7 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
 
 const ExpandedChatHistory = memo(function ({
   className,
+  headerClassName,
   isExpanded,
   setIsExpanded,
   formattedKeyCombination,
@@ -173,7 +313,7 @@ const ExpandedChatHistory = memo(function ({
   const { treeService } = useFileManager();
   const { projectId } = useProject();
   const { chats } = useChatRecords(projectId);
-  const { activeChatId, persistenceActorRef } = useChatContext();
+  const { activeChatId } = useChatContext();
   const skillsCatalog = useSkillsCatalog();
   const agentInvocations = useChatSelector((state) => state.agentInvocations);
   const skillInvocations = skillsCatalog.map((skill) => `/${skill.name}`).join('\n');
@@ -197,23 +337,28 @@ const ExpandedChatHistory = memo(function ({
     chatTextareaRef.current?.focus();
   }, []);
   const location = useLocation();
+  /* A same-project switch keeps the previous chat on screen, inert, until the new chat is prepared, so a focus given
+   * when the navigation commits lands on an inert composer and is dropped. It is given once per navigation, once the
+   * requested chat is the one presented (a URL naming no chat presents whatever it opens). */
+  const requestedChatId = projectChatIdFromSearch(location.search);
+  const isRequestedChatPresented = requestedChatId === undefined || requestedChatId === activeChatId;
+  const composerFocusRequest =
+    location.state?.focusChatComposer === true && isRequestedChatPresented ? location.key : undefined;
   useEffect(() => {
-    if (location.state?.focusChatComposer === true) {
+    if (composerFocusRequest !== undefined) {
       chatTextareaRef.current?.focus();
     }
-  }, [location.state]);
+  }, [composerFocusRequest]);
 
-  // Empty-cancel: the persistence machine has lifted the cancelled user
-  // message back into the composer draft (via the store's
-  // `restoreCancelledDraft` listener), so refocus the composer in the next
-  // animation frame so Tiptap/HTMLTextArea can finish reflowing the restored
-  // draft text before the cursor lands.
+  // A stopped send's message is back in the composer (the store's `subscribeDraftReturned`): refocus the composer
+  // in the next animation frame, so the editor finishes reflowing the restored draft before the cursor lands.
+  const sessionStore = useOptionalChatSessionStore();
   useEffect(() => {
-    if (!persistenceActorRef) {
+    if (!sessionStore) {
       return;
     }
     let frame: number | undefined;
-    const subscription = persistenceActorRef.on('restoreCancelledDraft', () => {
+    const unsubscribe = sessionStore.subscribeDraftReturned(activeChatId, () => {
       if (frame !== undefined) {
         cancelAnimationFrame(frame);
       }
@@ -226,23 +371,29 @@ const ExpandedChatHistory = memo(function ({
       if (frame !== undefined) {
         cancelAnimationFrame(frame);
       }
-      subscription.unsubscribe();
+      unsubscribe();
     };
-  }, [persistenceActorRef]);
+  }, [activeChatId, sessionStore]);
 
   // The turn host owns request configuration; the client exposes action verbs.
   // Memoising the call site avoids re-rendering tooltip-heavy children.
   const submitChat = cadChat.submit;
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
-    async ({ content, attachments, references }) => {
+    async ({ content, attachments, references, annotations }) => {
       // Pending until the message lands, so the composer stays busy through admission (R8).
-      await submitChat({ text: content, attachments, ...(references === undefined ? {} : { references }) });
+      await submitChat({
+        text: content,
+        attachments,
+        ...(references === undefined ? {} : { references }),
+        ...(annotations === undefined ? {} : { annotations }),
+      });
     },
     [submitChat],
   );
 
   const groups = useChatSelector((state) => state.turnGroups);
   const transcript = useChatSelector((state) => state.transcript);
+  const transcriptWait = useTranscriptWaitStart(transcript === 'loading');
   const reservesTaskList = useChatSelector((state) => state.rememberedComposerTrays.includes('todo'));
 
   const renderItem = useCallback(
@@ -294,7 +445,7 @@ const ExpandedChatHistory = memo(function ({
             <div data-chat-drop-zone='' className='relative flex min-h-0 flex-1 flex-col'>
               {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
               {/* The one header row: name, rename in place, chat menu, close. */}
-              <FloatingPanelContentHeader className='gap-1'>
+              <FloatingPanelContentHeader className={cn('gap-1', headerClassName)}>
                 <ChatTitleBar
                   closeButton={
                     <FloatingPanelClose
@@ -309,6 +460,21 @@ const ExpandedChatHistory = memo(function ({
                     />
                   }
                 />
+                {/* While the transcript loads the feed below draws its shape (Progressive Loading Policy rules 15 and 17):
+                 * the bars hang below the header over the empty feed, take no layout, and appear from 300 ms into the
+                 * wait on its own clock, which a lane mounted during the open shares with the open. No words: the
+                 * viewer is the open's one status, and the feed carries `aria-busy`. */}
+                {transcript === 'loading' ? (
+                  <div className='pointer-events-none absolute inset-x-0 top-full z-10'>
+                    <WaitSkeleton
+                      isActive
+                      startedAt={transcriptWait.startedAt}
+                      shape='transcript'
+                      label='Chat'
+                      className='h-auto'
+                    />
+                  </div>
+                ) : null}
               </FloatingPanelContentHeader>
 
               {/* Main chat content area */}

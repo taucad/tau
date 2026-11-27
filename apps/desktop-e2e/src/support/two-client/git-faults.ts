@@ -64,7 +64,7 @@ export type GitFault = Readonly<{
  */
 const serverSentences = new Map<string, string>([
   ['UNAUTHORIZED', 'Unauthorized'],
-  ['GIT_SYNC_NOT_ENTITLED', 'Syncing files to Tau Cloud is a paid plan feature.'],
+  ['GIT_SYNC_NOT_ENTITLED', 'Syncing files to the cloud is a paid plan feature.'],
   ['GIT_REPOSITORY_NOT_FOUND', 'Repository not found'],
   ['FORBIDDEN', 'Forbidden'],
 ]);

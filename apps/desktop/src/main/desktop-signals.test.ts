@@ -2,11 +2,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   appLoadFailureSignal,
+  bootstrapFailedSignal,
+  errnoOf,
+  mainUncaughtSignal,
+  optionalStepFailedSignal,
+  probeLeftoverIgnoredSignal,
+  storeQuarantinedSignal,
   gitSubcommandOf,
   redactGitErrorLine,
   rendererGoneSignal,
+  rendererHangOngoingSignal,
   rendererHangSignal,
   rendererHangThreshold,
+  rendererReloadPolicySignal,
   revisionEngineFailureSignal,
   scrubFailureText,
   updaterFailureSignal,
@@ -40,6 +48,29 @@ describe('rendererHangSignal', () => {
       fingerprint: ['desktop-renderer-hang'],
       tags: { hang_seconds: '12' },
       contexts: { hang: { milliseconds: 12_400 } },
+    });
+  });
+});
+
+describe('rendererHangOngoingSignal (T-B24.1)', () => {
+  it('should report a hang that has not ended as an error, beside the ended one', () => {
+    expect(rendererHangOngoingSignal(30_000)).toStrictEqual({
+      message: 'Renderer unresponsive',
+      level: 'error',
+      fingerprint: ['desktop-renderer-hang'],
+      tags: { hang_seconds: '30', ongoing: 'true' },
+      contexts: { hang: { milliseconds: 30_000 } },
+    });
+  });
+});
+
+describe('rendererReloadPolicySignal (T-B11.1)', () => {
+  it('should name the step, the exit reason and the count', () => {
+    expect(rendererReloadPolicySignal('home', 'oom', 2)).toStrictEqual({
+      message: 'Renderer reload policy: home',
+      level: 'error',
+      fingerprint: ['desktop-renderer-reload-policy', 'home'],
+      tags: { step: 'home', reason: 'oom', count: '2' },
     });
   });
 });
@@ -236,5 +267,38 @@ describe('revisionEngineFailureSignal', () => {
     expect(revisionEngineFailureSignal({ type: 'permission-answered' })).toBeUndefined();
     expect(revisionEngineFailureSignal({ type: 'revision-engine-failed', code: 'REMOTE_NOT_FOUND' })).toBeUndefined();
     expect(revisionEngineFailureSignal(undefined)).toBeUndefined();
+  });
+});
+
+describe('boot hardening signals', () => {
+  it('should carry codes and names only, never the path or message of what failed', () => {
+    const failure = Object.assign(new Error("EACCES: permission denied, mkdir '/Users/someone/Library/Tau/home'"), {
+      code: 'EACCES',
+    });
+    const built = [
+      bootstrapFailedSignal('home-directory', failure),
+      optionalStepFailedSignal('legacy-machines', failure),
+      mainUncaughtSignal('exception', failure),
+      probeLeftoverIgnoredSignal('ota', failure),
+      storeQuarantinedSignal('granted-roots'),
+    ];
+    expect(built.map((signal) => signal.fingerprint[0])).toEqual([
+      'desktop-bootstrap-failed',
+      'desktop-optional-step-failed',
+      'desktop-main-uncaught',
+      'desktop-probe-leftover-ignored',
+      'desktop-store-quarantined',
+    ]);
+    expect(built[0]?.tags).toEqual({ step: 'home-directory', errno: 'EACCES' });
+    expect(built[2]?.tags).toEqual({ kind: 'exception', error_name: 'Error' });
+    for (const signal of built) {
+      expect(JSON.stringify(signal)).not.toContain('someone');
+    }
+  });
+
+  it('should read an unusual code or a non-error throw as nothing in particular', () => {
+    expect(errnoOf(Object.assign(new Error('x'), { code: '/tmp/path' }))).toBe('none');
+    expect(errnoOf('a string')).toBe('none');
+    expect(mainUncaughtSignal('rejection', '/Users/someone').tags).toEqual({ kind: 'rejection', error_name: 'string' });
   });
 });

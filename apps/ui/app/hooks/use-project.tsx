@@ -1,10 +1,11 @@
 /**
- * The open project: its context and the hooks that read it. The providers that build it are in
+ * The open project: its type and the hooks that read it from the shared `ProjectContext`
+ * (`@taucad/ui-core/contexts/project-context`), cast to the app's type. The providers that build it are in
  * `hooks/project-provider.tsx`, so this module reaches no project runtime, editor or viewer and the shared composer on
  * Home can read the project through it (progressive loading PL1).
  */
 /* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
-import { createContext, useContext, useSyncExternalStore } from 'react';
+import { useContext, useSyncExternalStore } from 'react';
 import type { ActorRefFrom } from 'xstate';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { WorkbenchEntries, WorkbenchView } from '@taucad/workbench';
@@ -19,8 +20,9 @@ import type { modelInteractionMachine } from '@taucad/viewer/machines/model-inte
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
 import type { ProjectRuntime } from '#runtime/project-runtime.js';
+import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
 
-/** What a project provider gives its subtree. @public */
+/** What a project provider gives its subtree; the shared context types only what library components read. @public */
 export type ProjectContextType = {
   manifestObservationError: string | undefined;
   retryManifestObservation: () => void;
@@ -84,16 +86,13 @@ export type ProjectContextType = {
   setFocusedChatId: (chatId: string | undefined) => void;
 };
 
-/** The open project, as `ProjectProvider` and `SessionProjectProvider` provide it (`hooks/project-provider.tsx`). @public */
-export const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
-
 /**
  * Find the graphics actor for the viewer panel displaying the main entry path.
  * Returns undefined when the main entry has no live viewer.
  * Used by external consumers (headless capture, RPC handlers, parameters) that are NOT inside a GraphicsProvider.
  */
 export function useMainGraphics(): ActorRefFrom<typeof graphicsMachine> | undefined {
-  const context = useContext(ProjectContext);
+  const context = useContext(ProjectContext) as ProjectContextType | undefined;
   if (!context) {
     throw new Error('useMainGraphics must be used within a ProjectProvider');
   }
@@ -126,7 +125,7 @@ export function useProject<T extends ProjectContextType = ProjectContextType>(op
 export function useProject({ enableNoContext = false }: { readonly enableNoContext?: boolean } = {}):
   | ProjectContextType
   | undefined {
-  const context = useContext(ProjectContext);
+  const context = useContext(ProjectContext) as ProjectContextType | undefined;
   if (context === undefined && !enableNoContext) {
     throw new Error('useProject must be used within a ProjectProvider');
   }

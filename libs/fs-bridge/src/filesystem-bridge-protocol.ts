@@ -427,6 +427,7 @@ type WorkspaceBridgeMethodName =
   | 'recheckRoots'
   | 'listProjectManifests'
   | 'verifyProjectRoute'
+  | 'verifyAbsent'
   | 'commitPendingProjectDirectory'
   | 'adoptProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
@@ -1134,7 +1135,10 @@ const fileTreeNodeSchema: z.ZodType<FileTreeNode> = z.custom<FileTreeNode>((valu
       Array.isArray(node['children']) && node['children'].every((child) => fileTreeNodeSchema.safeParse(child).success)
     );
   }
+  /* Facts arrive only when already known (`StatContentMetadata`): an unmeasured file, as every raw provider
+   * listing gives, carries neither, and refusing it rejected a whole directory for one plain file. */
   return (
+    (node['contentKind'] === undefined && node['lineCount'] === undefined) ||
     (node['contentKind'] === 'binary' && node['lineCount'] === undefined) ||
     (node['contentKind'] === 'text' &&
       (node['lineCount'] === undefined || finiteNumberSchema.safeParse(node['lineCount']).success))
@@ -1588,10 +1592,21 @@ const callSchemas = {
       z.object({
         status: z.literal('verified'),
         project: z.object({ projectId: projectIdSchema, manifest: projectManifestSchema }),
+        /* Optional on the wire: an authority from before they were sent still answers, and its proof names no copy. */
+        storageRootKey: z.string().optional(),
+        providerBasePath: projectDirectoryPathSchema.optional(),
       }),
       z.object({ status: z.literal('discovery-required') }),
       z.object({ status: z.literal('unavailable') }),
       z.object({ status: z.literal('superseded') }),
+    ]),
+  },
+  verifyAbsent: {
+    args: z.tuple([projectIdSchema]),
+    result: discriminatedResultUnion('status', [
+      z.looseObject({ status: z.literal('absent') }),
+      z.looseObject({ status: z.literal('present'), locators: z.array(projectLocatorSchema) }),
+      z.looseObject({ status: z.literal('unknown'), reason: z.string() }),
     ]),
   },
   commitPendingProjectDirectory: {
@@ -1763,6 +1778,13 @@ export const fileSystemLongCalls: Readonly<Record<string, number | undefined>> =
   /* A read of a pending entry waits for its large object (D9) under the
    * authority's own no-progress bound; its signature has no options slot. */
   readFile: undefined,
+  /* A read of a path a tree write still owes waits for it to land (D10, STO-25) under the same bound, so do these. */
+  readFileWithDigest: undefined,
+  readRange: undefined,
+  stat: undefined,
+  lstat: undefined,
+  exists: undefined,
+  readdir: undefined,
   /* Its controls ride `ApplyOptions` and the changeset's own signal;
    * `prepareApplyCall` takes them out. */
   apply: undefined,

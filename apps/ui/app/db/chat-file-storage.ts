@@ -14,7 +14,7 @@ import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { registrationProbeChatId } from '@taucad/ui-core/lib/chat-observation-guard';
-import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
+import type { ChatStorage, CommitCancelledDraftRestoreInput } from '@taucad/project-library/types/chat-storage.types';
 import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '@taucad/chat-ui/utils/chat-execution';
 
@@ -662,6 +662,16 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       return chat?.purgedAt === undefined ? chat : undefined;
     },
 
+    readChatLog: async (chatId, projectId) => {
+      try {
+        return await options.client.readFile(`${chatDirectory(projectId, chatId)}/${chatLogFileName}`);
+      } catch (error) {
+        if (isNotFound(error)) {
+          return new Uint8Array();
+        }
+        throw error;
+      }
+    },
     getChatsForResource: async (resourceId, listOptions) => {
       const chats = await listProjectChats(resourceId);
       return listOptions?.includeDeleted === true ? chats : chats.filter((chat) => !isDeleted(chat));

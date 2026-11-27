@@ -1,16 +1,22 @@
 import { useId } from 'react';
-import { SettingsGroup, SettingsItem, SettingsRow } from '#components/settings/settings-item.js';
-import type { SettingId } from '#components/settings/settings-registry.js';
+import { SettingsGroup, SettingsItem, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
+import type { SettingId } from '@taucad/settings-ui/components/settings/settings-catalogue';
 import { Switch } from '@taucad/ui/components/switch';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
-import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
+import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
 import { DefaultPermissionsSetting } from '#components/settings/default-permissions-setting.js';
 import { desktopPermissions } from '@taucad/files-ui/filesystem/desktop-permissions';
-import { SetupAnswersRow } from '#components/settings/setup-answers-row.js';
+import { SetupAnswersRow } from '@taucad/settings-ui/components/settings/setup-answers-row';
+import type { SetupAnswerNames } from '@taucad/settings-ui/components/settings/setup-answers-row';
+import { PersonSettingsHost } from '#components/settings/person-settings-host.js';
+import { goalCopy, languageCopy, toolCopy } from '#components/onboarding/setup-copy.js';
 import { setupAnswersCopy } from '@taucad/settings-ui/components/settings/setup-answers-copy';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
+
+/** Setup's names for each answer, so the Setup answers row reads as setup does. */
+const setupAnswerNames: SetupAnswerNames = { goals: goalCopy, tools: toolCopy, languages: languageCopy };
 
 function SwitchSetting({
   settingId,
@@ -62,13 +68,16 @@ function SetupAnswersGroup(): React.JSX.Element {
           telemetry.setupAnswersSwitchChanged({ enabled: isChecked });
         }}
       />
-      <SetupAnswersRow />
+      <PersonSettingsHost>
+        <SetupAnswersRow names={setupAnswerNames} />
+      </PersonSettingsHost>
     </SettingsGroup>
   );
 }
 
 export function AgentSettings(): React.JSX.Element {
-  const isOnboardingEnabled = useFeature('onboarding');
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
+  const isFunded = useDeploymentMode().state === 'funded';
   const [showCredits, setShowCredits] = useCookie(cookieName.chatModelCost, true);
   const [includeFileSystem, setIncludeFileSystem] = useCookie(cookieName.chatCtxFs, true);
   const [includeActiveFile, setIncludeActiveFile] = useCookie(cookieName.chatCtxActive, true);
@@ -78,7 +87,7 @@ export function AgentSettings(): React.JSX.Element {
   return (
     <div className='flex flex-col gap-6 pb-6'>
       <SettingsGroup title='Chat'>
-        {tauCloudEnabled ? (
+        {isFunded ? (
           <SwitchSetting
             settingId='show-credits'
             title='Show credits'

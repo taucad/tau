@@ -13,7 +13,7 @@
     "@rjsf/core": "6.11.0",
     "@rjsf/utils": "6.11.0",
     "@rjsf/validator-ajv8": "6.11.0",
-    "@react-router/node": "catalog:react-router8",
+    "@react-router/node": "catalog:",
     "@taucad/esbuild": "workspace:*",
     "@taucad/middleware": "workspace:*",
     "@taucad/react": "workspace:*",
@@ -22,18 +22,18 @@
     "isbot": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "react-router": "catalog:react-router8",
+    "react-router": "catalog:",
     "three": "catalog:",
     "tslib": "catalog:"
   },
   "devDependencies": {
-    "@react-router/dev": "catalog:react-router8",
+    "@react-router/dev": "catalog:",
     "@tailwindcss/vite": "^4.3.1",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@types/three": "catalog:",
     "tailwindcss": "^4.3.1",
     "typescript": "catalog:",
-    "vite": "catalog:react-router8"
+    "vite": "catalog:"
   }
 }

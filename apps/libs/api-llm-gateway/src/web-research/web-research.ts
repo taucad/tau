@@ -8,7 +8,14 @@
  * @module
  */
 import { lookup as dnsLookup } from 'node:dns/promises';
+import { request as httpRequest } from 'node:http';
+import type { IncomingMessage } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { BlockList, isIP } from 'node:net';
+import type { LookupFunction } from 'node:net';
+import { pipeline, Readable } from 'node:stream';
+import type { Transform } from 'node:stream';
+import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 
 import { z } from 'zod';
 
@@ -27,15 +34,153 @@ const tavilySearchUrl = 'https://api.tavily.com/search';
 /** One resolved address, as `dns.lookup(host, { all: true })` returns it. */
 export type ResolvedAddress = Readonly<{ address: string; family: number }>;
 
-/** Injected I/O, so tests run without the network. */
+/**
+ * Injected I/O, so tests run without the network.
+ *
+ * A page fetch passes `addresses`: every address its host was checked to resolve to. The fetch must connect to one of
+ * them and nowhere else, so a name that resolves somewhere else the second time it is asked cannot steer it; it may
+ * fall back from one to the next, as a connection to a host with several addresses does.
+ */
 export type WebResearchDependencies = Readonly<{
-  fetch: (url: string, init: RequestInit) => Promise<Response>;
+  fetch: (url: string, init: RequestInit, addresses?: readonly ResolvedAddress[]) => Promise<Response>;
   lookup: (hostname: string) => Promise<readonly ResolvedAddress[]>;
 }>;
 
-/** The default dependencies: the platform fetch and the system resolver. */
+/* The content codings a page fetch decodes, as the platform fetch it replaces did. */
+const decoders: Readonly<Record<string, () => Transform>> = {
+  gzip: createGunzip,
+  'x-gzip': createGunzip,
+  deflate: createInflate,
+  br: createBrotliDecompress,
+};
+
+/**
+ * A response's body as its reader should see it: decoded when it is gzip, deflate or brotli, with the headers rewritten
+ * to describe the decoded body, as the platform fetch's do. The decoded body is what a reader counts against its bound,
+ * so a small compressed body cannot expand past it unread.
+ *
+ * @param response - The raw response.
+ * @param headers - The response's headers, rewritten in place when the body is decoded.
+ * @returns The body, or the refusal of a coding nothing here decodes.
+ */
+const decodedBody = (response: IncomingMessage, headers: Headers): Readable | Error => {
+  const coding = (headers.get('content-encoding') ?? '').trim().toLowerCase();
+  if (coding === '' || coding === 'identity') {
+    return response;
+  }
+  const decoder = decoders[coding];
+  if (decoder === undefined) {
+    return new Error(`Unsupported content encoding: ${coding}`);
+  }
+  headers.delete('content-encoding');
+  headers.delete('content-length');
+  /* `pipeline` ends both together: a reader that cancels the decoded body, or a body that fails to decode, also
+   * closes the raw response and its connection. */
+  return pipeline(response, decoder(), () => undefined);
+};
+
+/**
+ * GET `url` over a connection to one of `addresses`, whatever its host resolves to now: Node tries them in turn
+ * (`autoSelectFamily`, on by default), as it does any host with several addresses. TLS still verifies the certificate
+ * against the URL's host name. A gzip, deflate or brotli body is decoded, as the platform fetch decodes it, and one in
+ * any other coding is refused rather than handed on as bytes no reader can use.
+ *
+ * @param url - The URL to request.
+ * @param init - The request's headers and signal; the method is always GET and redirects are returned, not followed.
+ * @param addresses - The checked addresses to connect to.
+ * @returns The response, with its body as a web stream.
+ */
+export const fetchAtAddress = async (
+  url: string,
+  init: RequestInit,
+  addresses: readonly ResolvedAddress[],
+): Promise<Response> =>
+  new Promise<Response>((resolve, reject) => {
+    const target = new URL(url);
+    /* Node's connect asks with `all: true` (happy eyeballs) and wants the list back; otherwise one address, of the
+     * family it asks for when it names one. */
+    const lookup: LookupFunction = (_hostname, options, callback) => {
+      const listed = addresses.map(({ address, family }) => ({ address, family }));
+      const one = listed.find(
+        ({ family }) => options.family === undefined || options.family === 0 || family === options.family,
+      );
+      if (options.all === true) {
+        callback(null, listed);
+      } else if (one === undefined) {
+        callback(
+          Object.assign(new Error(`No checked address of family ${String(options.family)}`), { code: 'ENOTFOUND' }),
+          '',
+          0,
+        );
+      } else {
+        callback(null, one.address, one.family);
+      }
+    };
+    const request = (target.protocol === 'https:' ? httpsRequest : httpRequest)(
+      target,
+      {
+        method: 'GET',
+        headers: { ...Object.fromEntries(new Headers(init.headers).entries()), 'accept-encoding': 'gzip, deflate, br' },
+        lookup,
+        /* No pooled socket: a kept-alive one to this host may have been opened to an address checked for an earlier
+         * request, and reusing it would skip this lookup. */
+        agent: false,
+      },
+      (response) => {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(response.headers)) {
+          for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+            headers.append(name, item);
+          }
+        }
+        const status = response.statusCode ?? 502;
+        /* A null-body status cannot carry a stream; drain it. */
+        const empty = status === 204 || status === 205 || status === 304;
+        if (empty) {
+          response.resume();
+        }
+        const body = empty ? undefined : decodedBody(response, headers);
+        if (body instanceof Error) {
+          response.destroy();
+          reject(body);
+          return;
+        }
+        try {
+          resolve(
+            new Response(body === undefined ? null : (Readable.toWeb(body) as unknown as ReadableStream), {
+              status,
+              statusText: response.statusMessage,
+              headers,
+            }),
+          );
+        } catch (error) {
+          /* A status the Fetch API cannot represent: fail this fetch, not the process. */
+          body?.destroy();
+          response.destroy();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      },
+    );
+    request.once('error', reject);
+    const { signal } = init;
+    const abort = (): void => {
+      request.destroy(signal?.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError'));
+    };
+    if (signal?.aborted === true) {
+      abort();
+    } else {
+      signal?.addEventListener('abort', abort, { once: true });
+      request.once('close', () => {
+        signal?.removeEventListener('abort', abort);
+      });
+    }
+    request.end();
+  });
+
+/** The default dependencies: the platform fetch (a page fetch connects to its checked address) and the system resolver. */
 export const defaultWebResearchDependencies: WebResearchDependencies = {
-  fetch: async (url, init) => globalThis.fetch(url, init),
+  fetch: async (url, init, addresses) =>
+    addresses === undefined ? globalThis.fetch(url, init) : fetchAtAddress(url, init, addresses),
   lookup: async (hostname) => dnsLookup(hostname, { all: true, verbatim: true }),
 };
 
@@ -184,7 +329,12 @@ export const isPublicAddress = (address: string): boolean => {
   return !blocked.check(address, family === 4 ? 'ipv4' : 'ipv6');
 };
 
-const assertPublicUrl = async (url: URL, lookup: WebResearchDependencies['lookup']): Promise<void> => {
+/* Check that `url` may be fetched and return the addresses to connect to: every address of its host, all of which
+ * must be public. The fetch connects to one of them, falling back across them, rather than resolving the name again. */
+const assertPublicUrl = async (
+  url: URL,
+  lookup: WebResearchDependencies['lookup'],
+): Promise<readonly ResolvedAddress[]> => {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(`Unsupported URL scheme ${url.protocol}`);
   }
@@ -196,6 +346,7 @@ const assertPublicUrl = async (url: URL, lookup: WebResearchDependencies['lookup
   if (addresses.length === 0 || !addresses.every(({ address }) => isPublicAddress(address))) {
     throw new Error(`${url.hostname} does not resolve to a public address`);
   }
+  return addresses;
 };
 
 const entities: Readonly<Record<string, string>> = {
@@ -298,6 +449,17 @@ const truncate = (content: string): string =>
     ? `${content.slice(0, maxPageCharacters)}\n\n[Truncated: ${String(content.length - maxPageCharacters)} more characters]`
     : content;
 
+/** How a page's body is read, by its media type; `undefined` for one the tool cannot read. */
+const pageKind = (mimeType: string): 'html' | 'pdf' | 'text' | undefined => {
+  if (mimeType === 'text/html' || mimeType === 'application/xhtml+xml') {
+    return 'html';
+  }
+  if (mimeType === 'application/pdf') {
+    return 'pdf';
+  }
+  return mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === '' ? 'text' : undefined;
+};
+
 /**
  * Fetch one page, re-checking every redirect hop, and return its text.
  *
@@ -315,18 +477,31 @@ const fetchPage = async (
   const bounded = withTimeout(signal);
   for (let hop = 0; ; hop += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each redirect hop is checked before it is followed.
-    await assertPublicUrl(current, dependencies.lookup);
+    const addresses = await assertPublicUrl(current, dependencies.lookup);
     // oxlint-disable-next-line no-await-in-loop -- each redirect hop is checked before it is followed.
-    const response = await dependencies.fetch(current.href, {
-      redirect: 'manual',
-      signal: bounded,
-      headers: {
-        'user-agent': userAgent,
-        accept: 'text/html, text/markdown, application/pdf, text/*;q=0.9, */*;q=0.1',
+    const response = await dependencies.fetch(
+      current.href,
+      {
+        redirect: 'manual',
+        signal: bounded,
+        headers: {
+          'user-agent': userAgent,
+          accept: 'text/html, text/markdown, application/pdf, text/*;q=0.9, */*;q=0.1',
+        },
       },
-    });
+      addresses,
+    );
     const location = response.headers.get('location');
-    if (response.status >= 300 && response.status < 400 && location !== null) {
+    const mimeType = (response.headers.get('content-type') ?? '').split(';', 1)[0]?.trim().toLowerCase() ?? '';
+    const kind = pageKind(mimeType);
+    const followed = response.status >= 300 && response.status < 400 && location !== null;
+    if (followed || !response.ok || kind === undefined) {
+      /* A body nobody reads is released now: each hop has its own connection, which would otherwise stay open until
+       * the fetch's deadline. */
+      // oxlint-disable-next-line no-await-in-loop -- one unread body is released before the next hop.
+      await response.body?.cancel().catch(() => undefined);
+    }
+    if (followed) {
       if (hop >= maxRedirects) {
         throw new Error(`Too many redirects (over ${String(maxRedirects)})`);
       }
@@ -336,20 +511,18 @@ const fetchPage = async (
     if (!response.ok) {
       throw new Error(`HTTP ${String(response.status)}${response.statusText === '' ? '' : ` ${response.statusText}`}`);
     }
-    const mimeType = (response.headers.get('content-type') ?? '').split(';', 1)[0]?.trim().toLowerCase() ?? '';
-    // oxlint-disable-next-line no-await-in-loop -- the final hop's body is read once.
-    const bytes = await readBounded(response);
-    let content: string;
-    if (mimeType === 'text/html' || mimeType === 'application/xhtml+xml') {
-      content = htmlToText(new TextDecoder().decode(bytes));
-    } else if (mimeType === 'application/pdf') {
-      // oxlint-disable-next-line no-await-in-loop -- the final hop's body is parsed once.
-      content = await extractPdfText(bytes);
-    } else if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === '') {
-      content = new TextDecoder().decode(bytes);
-    } else {
+    if (kind === undefined) {
       throw new Error(`Unsupported content type: ${mimeType}`);
     }
+    // oxlint-disable-next-line no-await-in-loop -- the final hop's body is read once.
+    const bytes = await readBounded(response);
+    const content =
+      kind === 'html'
+        ? htmlToText(new TextDecoder().decode(bytes))
+        : kind === 'pdf'
+          ? // oxlint-disable-next-line no-await-in-loop -- the final hop's body is parsed once.
+            await extractPdfText(bytes)
+          : new TextDecoder().decode(bytes);
     return { url: current.href, content: truncate(content) };
   }
 };

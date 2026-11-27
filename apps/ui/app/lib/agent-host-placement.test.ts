@@ -311,7 +311,7 @@ describe('listAgentHostPlacements', () => {
         listHosts: async () => [
           {
             id: 'agent_cloud',
-            label: 'Tau Cloud',
+            label: 'Cloud',
             createdAt: new Date(0),
             lastSeenAt: null,
             revokedAt: null,
@@ -335,7 +335,7 @@ describe('listAgentHostPlacements', () => {
       {
         hostId: 'agent_cloud',
         rung: 2,
-        label: 'Tau Cloud',
+        label: 'Cloud',
         workspaceRoot: '/workspace',
         online: true,
         cloudProjectId: 'project-a',

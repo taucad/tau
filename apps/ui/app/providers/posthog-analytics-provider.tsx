@@ -1,19 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useLocation } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
+import { urlCarriesCredential } from '@taucad/ui-core/lib/url-credential.lib';
 import type { PostHog, PostHogConfig } from 'posthog-js';
 import { authClient } from '#lib/auth-client.js';
 import { clearPostHogStorage, posthogConfig } from '#lib/posthog.lib.js';
 import { setAnalyticsLinkSource } from '#lib/analytics-link.lib.js';
 import type { AnalyticsLink } from '#lib/analytics-link.lib.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
-import { connectRemoteFlags, disconnectRemoteFlags } from '#flags/remote-flags.js';
+import { replayBlockSelector } from '#lib/replay-content.lib.js';
+import { connectRemoteFlags, disconnectRemoteFlags, failRemoteFlags, releaseRemoteFlags } from '#flags/remote-flags.js';
 import { connectBaselineTelemetry, disconnectBaselineTelemetry } from '#telemetry/onboarding-telemetry.js';
 import {
   connectAttachmentIntakeTelemetry,
   disconnectAttachmentIntakeTelemetry,
 } from '#telemetry/attachment-intake-telemetry.js';
 import type { Analytics } from '#hooks/use-analytics.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog configuration keys are SDK wire names. */
 
@@ -29,7 +33,7 @@ let sdk: PostHog | undefined;
 /** Resolves the singleton, fetching it on first admission. */
 const loadSdk = async (): Promise<PostHog> => {
   if (sdk === undefined) {
-    const module_ = await import('posthog-js');
+    const module_ = await loadCode(async () => import('posthog-js'));
     sdk = module_.posthog;
   }
   return sdk;
@@ -101,19 +105,27 @@ const whenIdle = (start: () => void): (() => void) => {
 
 /**
  * Applies the host's analytics decision to the PostHog singleton. It renders nothing,
- * so a change never moves the product between React trees.
+ * so a change never moves the product between React trees. While the host has not read its decision
+ * (`isActive` undefined) it does nothing at all: no start, no withdrawal, no storage cleared, no flag state published.
  */
 function PostHogLifecycle({
   isActive,
   options,
   isReplayEnabled,
+  isReplayContentAllowed,
 }: {
-  readonly isActive: boolean;
+  readonly isActive: boolean | undefined;
   readonly options: Partial<PostHogConfig>;
   readonly isReplayEnabled: boolean;
+  readonly isReplayContentAllowed: boolean | undefined;
 }): undefined {
   const { data: sessionData, isPending } = useSession(authClient);
   const user = sessionData?.user;
+  const location = useLocation();
+  /* #2290: a replay serialises the whole document, and the browser resolves every relative `href` on it against the
+     address bar, so a page whose address holds a credential leaks it through attributes no event hook reads. Replay
+     therefore never runs at such an address: it does not start there, and it stops on the way in. */
+  const isCredentialAddress = urlCarriesCredential(`${location.pathname}${location.search}${location.hash}`);
   /* Identification must not run before the admission it belongs to has configured the SDK, and the
      fetch resolves after the effect that starts it has returned. A boolean cannot say that: one that
      only turns true would let a re-acceptance identify through a singleton still opted out, and
@@ -129,6 +141,11 @@ function PostHogLifecycle({
   const [admittedGeneration, setAdmittedGeneration] = useState(0);
 
   useEffect(() => {
+    /* F2c: not a decision. Withdrawing here would clear a consenting visitor's PostHog storage, count their admission
+       as a new grant, and publish every PostHog-backed flag as a final off that a redirect cannot take back. */
+    if (isActive === undefined) {
+      return undefined;
+    }
     const { apiKey } = posthogConfig;
     decision.current += 1;
     const generation = decision.current;
@@ -156,14 +173,14 @@ function PostHogLifecycle({
     }
 
     let withdrawn = false;
-    let cancelReplay: (() => void) | undefined;
     const admit = async (): Promise<void> => {
       let posthog: PostHog;
       try {
         posthog = await loadSdk();
       } catch {
-        // Optional analytics must not prevent the product from opening.
-        disconnectRemoteFlags();
+        // Optional analytics must not prevent the product from opening. Nothing was decided about the visitor, so
+        // the flags read unknown, not off.
+        failRemoteFlags();
         return;
       }
       if (withdrawn) {
@@ -196,27 +213,55 @@ function PostHogLifecycle({
       connectBaselineTelemetry(captureAdmitted);
       // The composer's attachment intake counter (outcome, probed format, declared type) follows admission too.
       connectAttachmentIntakeTelemetry(captureAdmitted);
+      // Replay follows admission in its own effect below, which also follows the address.
       setAdmittedGeneration(generation);
-      if (!isReplayEnabled) {
-        return;
-      }
-      cancelReplay = whenIdle(() => {
-        posthog.startSessionRecording();
-      });
     };
     // async-iife: bootstrap — React effects cannot await the fetch; `withdrawn` owns its lifecycle.
     void admit();
     return () => {
       withdrawn = true;
-      cancelReplay?.();
       setAnalyticsLinkSource(undefined);
-      disconnectRemoteFlags();
+      /* A cleanup is not a decision: a re-run or a remount follows the client again, and a withdrawal publishes the
+         defaults in the branch above. Releasing keeps the answer PostHog gave, so no flag reads off in between. */
+      releaseRemoteFlags();
       disconnectBaselineTelemetry();
       disconnectAttachmentIntakeTelemetry();
       setConsoleClient(undefined);
     };
-    // `options` and `isReplayEnabled` are fixed per host, so only `isActive` re-runs this.
-  }, [isActive, options, isReplayEnabled]);
+    // `options` is fixed per host, so only `isActive` re-runs this.
+  }, [isActive, options]);
+
+  useEffect(() => {
+    if (
+      !isActive ||
+      !isReplayEnabled ||
+      isReplayContentAllowed === undefined ||
+      admittedGeneration !== decision.current ||
+      sdk?.__loaded !== true
+    ) {
+      return undefined;
+    }
+    const posthog = sdk;
+    if (isCredentialAddress) {
+      posthog.stopSessionRecording();
+      return undefined;
+    }
+    const recording = posthog.config.session_recording;
+    const blockSelector = replayBlockSelector(recording.blockSelector ?? undefined, isReplayContentAllowed);
+    if (recording.blockSelector !== blockSelector) {
+      /* The recorder (rrweb) reads its block selector once, when it starts, and keeps what it already serialised. A
+         changed decision therefore ends the running recording and starts a new one, whose full snapshot follows the
+         new selector. */
+      posthog.set_config({ session_recording: { ...recording, blockSelector } });
+      if (posthog.sessionRecordingStarted()) {
+        posthog.stopSessionRecording();
+      }
+    }
+    // Started outside the critical rendering path; a second start on an already-running recorder is a no-op.
+    return whenIdle(() => {
+      posthog.startSessionRecording();
+    });
+  }, [isActive, isReplayEnabled, isReplayContentAllowed, admittedGeneration, isCredentialAddress]);
 
   useEffect(() => {
     if (!isActive || isPending || admittedGeneration !== decision.current || sdk?.__loaded !== true) {
@@ -250,28 +295,33 @@ export const admittedAnalytics: Analytics = {
 
 /**
  * PostHog analytics boundary shared by the web and desktop hosts: stable ancestry, with the SDK
- * running only while `isActive`.
+ * running only while `isActive`. `isActive` is `undefined` while the host cannot know its decision yet (the hydration
+ * render of a server-rendered document); nothing is started, withdrawn or published then.
  *
- * @param props - The host's decision, its SDK options and whether to start session replay.
+ * @param props - The host's decision, its SDK options, whether to start session replay and whether that replay may
+ *   record the chat transcript and code (`undefined` while the host is still reading it: replay waits).
  * @returns The analytics context around `children`.
  */
 export function PostHogAnalyticsProvider({
   isActive,
   options,
   isReplayEnabled,
+  isReplayContentAllowed,
   children,
 }: {
-  readonly isActive: boolean;
+  readonly isActive: boolean | undefined;
   readonly options: Partial<PostHogConfig>;
   readonly isReplayEnabled: boolean;
+  readonly isReplayContentAllowed?: boolean | undefined;
   readonly children: ReactNode;
 }): React.JSX.Element {
   return (
     <AnalyticsContextProvider analytics={admittedAnalytics}>
       <PostHogLifecycle
-        isActive={isActive && posthogConfig.apiKey !== ''}
+        isActive={posthogConfig.apiKey === '' ? false : isActive}
         options={options}
         isReplayEnabled={isReplayEnabled}
+        isReplayContentAllowed={isReplayContentAllowed}
       />
       {children}
     </AnalyticsContextProvider>

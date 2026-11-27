@@ -25,14 +25,14 @@ import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
  * @returns Whether there is a transcript to export, and the action that downloads it as Markdown.
  */
 export function useExportTranscript(): { readonly canExport: boolean; readonly exportTranscript: () => void } {
-  const { chat, activeChatId } = useChatContext();
+  const { persistenceActorRef, activeChatId } = useChatContext();
   const messages = useChatSelector((state) => state.messages);
   const { projectId } = useProject();
   const { chats } = useChatRecords(projectId);
   const chatName = chats.find((c) => c.id === activeChatId)?.name ?? 'Chat Transcript';
 
   const exportTranscript = useCallback(() => {
-    if (!chat) {
+    if (!persistenceActorRef) {
       return;
     }
     const transcript = serializeTranscript(messages, chatName);
@@ -42,9 +42,9 @@ export function useExportTranscript(): { readonly canExport: boolean; readonly e
     const timestamp = new Date().toISOString().slice(0, 16).replaceAll(':', '-');
     const snakeName = toSnakeCase(chatName) || 'chat_transcript';
     downloadBlob(blob, `${snakeName}_${timestamp}.md`);
-  }, [messages, chat, chatName]);
+  }, [messages, persistenceActorRef, chatName]);
 
-  return { canExport: Boolean(chat) && messages.length > 0, exportTranscript };
+  return { canExport: Boolean(persistenceActorRef) && messages.length > 0, exportTranscript };
 }
 
 /**

@@ -1,7 +1,7 @@
 import type { UIMatch } from 'react-router';
 import type { ReactNode } from 'react';
 import type { SetNonNullable } from 'type-fest';
-import type { FeatureFlags } from '#flags/flag.constants.js';
+import type { LocalFeatureFlags } from '#flags/flag.constants.js';
 import type { ResolvedAuth } from '#hooks/use-resolved-auth.js';
 
 /**
@@ -10,7 +10,7 @@ import type { ResolvedAuth } from '#hooks/use-resolved-auth.js';
  */
 export type PageChromeContext = {
   readonly authState: ResolvedAuth;
-  readonly flags: FeatureFlags;
+  readonly flags: LocalFeatureFlags;
 };
 
 export type Handle = {

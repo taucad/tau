@@ -23,6 +23,37 @@ import type { ProviderRegistry } from '#provider-registry.js';
 import type { ResolvedDiscoveryRoot } from '#project-directories.js';
 import type { ProjectIndexes } from '#project-index/project-indexes.js';
 import type { WatchRegistry } from '#watch-registry.js';
+import { parseRoute } from '#project-routes.js';
+
+/**
+ * Where the discovery index takes a sibling's facts: from their physical authority, before the mount filter drops
+ * the ones this tab does not route (discovery index A2 b, c). Paths are provider-relative.
+ *
+ * @public
+ */
+export type RemoteDiscoveryEvidence = Readonly<{
+  note: (storageRootKey: string, paths: readonly string[]) => void;
+  cold: (storageRootKey: undefined, reason: 'gap') => void;
+}>;
+
+/**
+ * The provider path one sibling fact names in its root: the physical authority's base, extended by the part of the
+ * logical path below its route. A base of `''` names the root only through the root's own path; anything else on it
+ * is a root fact, which names no directory. A route grammar this cannot read names the base itself.
+ *
+ * @param notification - One fact.
+ * @returns The provider-relative path.
+ */
+export const physicalPathOf = (notification: ChangeNotification): string => {
+  const base = notification.authority.providerBasePath;
+  const route = parseRoute(notification.path);
+  const below =
+    notification.path === '/' ? '' : route.kind === 'project' || route.kind === 'checkout' ? route.rest : undefined;
+  if (base === '') {
+    return '';
+  }
+  return below === undefined || below === '' ? base : `${base}/${below}`;
+};
 
 /**
  * The local event one peer mutation notification stands for.
@@ -67,6 +98,7 @@ export class RemoteChanges {
   private readonly _discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
   private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
   private _remoteChangeTail: Promise<void> = Promise.resolve();
+  private readonly _discovery: RemoteDiscoveryEvidence | undefined;
 
   /**
    * Create the receive arm over the authority's own collaborators.
@@ -81,6 +113,7 @@ export class RemoteChanges {
     watchRegistry: WatchRegistry;
     discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
     revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
+    discovery?: RemoteDiscoveryEvidence;
   }) {
     this._registry = options.registry;
     this._mountTable = options.mountTable;
@@ -89,6 +122,7 @@ export class RemoteChanges {
     this._watchRegistry = options.watchRegistry;
     this._discoveryRoots = options.discoveryRoots;
     this._revokeProjectRoute = options.revokeProjectRoute;
+    this._discovery = options.discovery;
   }
 
   /**
@@ -98,6 +132,7 @@ export class RemoteChanges {
    * @param notice - Every fact one sibling changeset published.
    */
   public apply(notice: ChangeNotice): void {
+    this._takeDiscoveryEvidence(notice);
     const predecessor = this._remoteChangeTail;
     const applyInOrder = async (): Promise<void> => {
       try {
@@ -136,6 +171,27 @@ export class RemoteChanges {
     for (const group of byStorageRoot.values()) {
       // oxlint-disable-next-line no-await-in-loop -- storage roots apply in arrival order on the one tail.
       await this._applyRemoteFacts(group);
+    }
+  }
+
+  /**
+   * The discovery index's tap, in arrival order and before any filter: a notice that follows a lost one makes every
+   * root cold, since the lost notice could have named any of them; otherwise each root's facts are evidence.
+   */
+  private _takeDiscoveryEvidence(notice: ChangeNotice): void {
+    if (this._discovery === undefined) {
+      return;
+    }
+    if (notice.gap === true) {
+      this._discovery.cold(undefined, 'gap');
+      return;
+    }
+    const facts = notice.changes.filter(({ type }) => type !== 'project-unavailable');
+    for (const [storageRootKey, group] of Map.groupBy(facts, ({ authority }) => authority.storageRootKey)) {
+      this._discovery.note(
+        storageRootKey,
+        group.map((notification) => physicalPathOf(notification)),
+      );
     }
   }
 

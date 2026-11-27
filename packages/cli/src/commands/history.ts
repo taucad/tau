@@ -420,7 +420,7 @@ const versionCreateCommand = defineCommand({
   meta: {
     name: 'create',
     description:
-      'Create a version: a named, permanent point in history, and back it up (set TAU_API_URL and TAU_AUTH_TOKEN to back up to Tau Cloud)',
+      'Create a version: a named, permanent point in history, and back it up (set TAU_API_URL and TAU_AUTH_TOKEN to back up to the cloud)',
   },
   args: {
     ...projectArguments,
@@ -702,7 +702,7 @@ const saveCommand = defineCommand({
   meta: {
     name: 'save',
     description:
-      'Save this project’s files in history and back them up (set TAU_API_URL and TAU_AUTH_TOKEN to back up to Tau Cloud)',
+      'Save this project’s files in history and back them up (set TAU_API_URL and TAU_AUTH_TOKEN to back up to the cloud)',
   },
   args: projectArguments,
   async run({ args }) {

@@ -13,9 +13,9 @@ import {
 } from '@taucad/chat-ui/components/chat-tool-card';
 import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
-import { FileLink } from '#components/files/file-link.js';
-import { ViewerLink } from '#components/files/viewer-link.js';
-import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
+import { ViewerLink } from '@taucad/files-ui/components/files/viewer-link';
+import { MarkdownViewer } from '@taucad/editor-ui/components/markdown/markdown-viewer';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 
 /**

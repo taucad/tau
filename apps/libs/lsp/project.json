@@ -3,7 +3,7 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/libs/lsp",
   "projectType": "library",
-  "tags": ["scope:ui", "type:app-lib", "layer:data-access", "ci:browser"],
+  "tags": ["scope:ui", "type:app-lib", "layer:data-access", "ci:browser", "ui:infra"],
   "targets": {
     "verify-browser": {
       "command": "vitest run --config src/typescript-worker/vitest.browser.config.ts",

@@ -252,10 +252,42 @@ export type InvocationFunding =
       principal(): Promise<string | undefined>;
     };
 
+/**
+ * The billing mode one run starts under, recorded on its `run.lifecycle` row as `deployment` and kept by every attempt
+ * of the run (I3). @public
+ */
+export type RunBillingMode = 'funded' | 'unfunded';
+
+/**
+ * What a host's deployment port answers for the transport's API origin (D1). `unfunded` only for an explicit answer
+ * (I2); `unknown` for anything else, which ends the run `DEPLOYMENT_UNKNOWN` before any model call (I1). @public
+ */
+export type DeploymentModeAnswer = RunBillingMode | 'unknown';
+
+/**
+ * A transport whose billing layer is chosen per run from the API's deployment answer (D1). The run's owner resolves the
+ * mode at admission, records it, and drives the run on {@link ModelDeployment.forRun}'s transport. @public
+ */
+export type ModelDeployment = {
+  /**
+   * Ask the host's deployment port, bounded at 10 s. A port that throws, answers outside the vocabulary, passes the
+   * bound or is stopped through `signal` answers `unknown`.
+   */
+  resolve(signal?: AbortSignal): Promise<DeploymentModeAnswer>;
+  /** The transport every call of a run under this mode uses; it carries no `deployment` of its own. */
+  forRun(mode: RunBillingMode): ModelTransport;
+};
+
 /** W3: bearer/local model boundary with normalized streaming and usage. @public */
 export type ModelTransport = {
   /** Whether Tau's gateway ledger funds this transport's calls, and how an attempt is resolved (GI-S4, RA-S11). */
   readonly funding: InvocationFunding;
+  /**
+   * Present when the billing layer follows the deployment answer per run (D1). Such a transport's own `funding` is the
+   * funded facet, so attempts an earlier funded run left are still resolved; its own `stream` refuses
+   * `DEPLOYMENT_UNKNOWN`, since a call is made only on a run's {@link ModelDeployment.forRun} transport.
+   */
+  readonly deployment?: ModelDeployment | undefined;
   /** Start one provider stream. */
   stream(request: ModelStreamRequest): AsyncIterable<ModelStreamEvent>;
 };

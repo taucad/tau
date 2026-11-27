@@ -551,9 +551,12 @@ const startTracker = async (tab: Tab): Promise<void> => {
 /**
  * I10: a failure is decided genuine (`current`) only on the server's word or its silence. A decision
  * that landed within the lookup's budget, while every answer the edge gave named another build, must
- * have been decided by that build, whatever peer claimed what meanwhile.
+ * have been decided by that build, whatever peer claimed what meanwhile. A decision that lands after
+ * its page left is not checked: the page closed its guard, which then applies no answer (`build-skew`),
+ * and nothing acts on that decision any more.
  */
 const watchDecision = (tab: Tab, failure: unknown, decision: Promise<StaleBuildRecovery.StaleBuildOutcome>): void => {
+  const page = tab.recovery;
   const asked = tab.answers.length;
   // The lookup's budget, on the same fake clock: a decision that waited it out may rest on silence.
   const budget = { isOpen: true };
@@ -564,6 +567,9 @@ const watchDecision = (tab: Tab, failure: unknown, decision: Promise<StaleBuildR
   // async-iife: bootstrap -- the check runs when the decision lands, as the decision itself does.
   void (async () => {
     const outcome = await decision;
+    if (tab.recovery !== page) {
+      return;
+    }
     const given = tab.answers.slice(asked);
     if (outcome === 'current' && budget.isOpen && given.length > 0 && given.every((named) => named === other)) {
       tab.violations.push(

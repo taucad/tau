@@ -7,6 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const requested = vi.hoisted(() => [] as string[]);
 
+/*
+ * A test that needs another desktop import sets it here, and the one mock `beforeEach` registers calls it. A second
+ * `vi.doMock` of the same path is not deterministic: Vitest resolves consecutive `vi.doMock` calls in parallel and
+ * registers each one when its path resolves, so the test's mock could lose to the `beforeEach` one and import the
+ * working layout (run 44134956458).
+ */
+let importDesktop: (() => Promise<unknown>) | undefined;
+
 function stubViewport(phone: boolean | undefined): void {
   vi.stubGlobal(
     'matchMedia',
@@ -20,7 +28,11 @@ describe('warmWorkspaceLayout', () => {
   beforeEach(() => {
     requested.length = 0;
     vi.resetModules();
-    vi.doMock('#routes/w.$workspace.$project/chat-interface-desktop.js', () => {
+    importDesktop = undefined;
+    vi.doMock('#routes/w.$workspace.$project/chat-interface-desktop.js', async () => {
+      if (importDesktop !== undefined) {
+        return importDesktop();
+      }
       requested.push('desktop');
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock the React component's exported name.
       return { ChatInterfaceDesktop: () => null };
@@ -109,7 +121,7 @@ describe('warmWorkspaceLayout', () => {
     const importLayout = vi.fn(async () => {
       throw new Error('chunk unavailable');
     });
-    vi.doMock('#routes/w.$workspace.$project/chat-interface-desktop.js', importLayout);
+    importDesktop = importLayout;
     const unhandled = vi.fn();
     process.on('unhandledRejection', unhandled);
     const { loadChatInterfaceDesktop, warmWorkspaceLayout } =

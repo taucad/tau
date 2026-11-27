@@ -1,0 +1,156 @@
+// @vitest-environment node
+import { describe, expect, it } from 'vitest';
+import type {
+  WorkerRevisionRequest,
+  WorkerRevisionResponse,
+  WorkerRevisionResult,
+} from '@taucad/revisions-ui/types/revision-worker-protocol';
+import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
+
+type RevisionRow = Extract<WorkerRevisionResult, { kind: 'log' }>['rows'][number];
+
+const row = (revisionNumber: number, revisionId: string): RevisionRow => ({
+  revisionNumber,
+  revisionId,
+  changeId: `change-${revisionId}`,
+  who: { kind: 'recorded', identity: { kind: 'user', id: 'person' } },
+  source: 'user',
+  createdAt: 0,
+  summary: revisionId,
+  conflicted: false,
+  turnId: undefined,
+  tags: [],
+});
+
+describe('createPortRevisionsClient', () => {
+  it('keeps candidate fetch and publication on correlated private revision frames', async () => {
+    const { port1, port2 } = new MessageChannel();
+    const seen: WorkerRevisionRequest[] = [];
+    const candidate = new TextEncoder().encode('{"schema":"test"}');
+    port2.addEventListener('message', ({ data }: MessageEvent<WorkerRevisionRequest>) => {
+      seen.push(data);
+      if (data.id === undefined) {
+        return;
+      }
+      if (data.command === 'fetchGeoSpecCandidates') {
+        port2.postMessage({
+          type: 'result',
+          id: data.id,
+          result: { kind: 'geoSpecCandidates', candidates: [candidate] },
+        } satisfies WorkerRevisionResponse);
+      } else if (data.command === 'publishGeoSpecCandidate') {
+        port2.postMessage({
+          type: 'result',
+          id: data.id,
+          result: { kind: 'geoSpecCandidatePublication', status: 'updated' },
+        } satisfies WorkerRevisionResponse);
+      }
+    });
+    port2.start();
+    const client = createPortRevisionsClient(port1);
+    await expect(client.fetchGeoSpecCandidates()).resolves.toEqual([candidate]);
+    await expect(client.publishGeoSpecCandidate(candidate)).resolves.toBe('updated');
+    expect(seen[0]).toMatchObject({ command: 'fetchGeoSpecCandidates' });
+    expect(seen[1]).toMatchObject({ command: 'publishGeoSpecCandidate', candidate });
+    client.close();
+    port1.close();
+    port2.close();
+  });
+
+  it('should read log, diff and the place line over a revision port', async () => {
+    const { port1, port2 } = new MessageChannel();
+    const seen: WorkerRevisionRequest[] = [];
+    port2.addEventListener('message', ({ data }: MessageEvent<WorkerRevisionRequest>) => {
+      seen.push(data);
+      if (!('command' in data) || data.id === undefined) {
+        return;
+      }
+      const { id } = data;
+      const answer = (frame: WorkerRevisionResponse): void => {
+        port2.postMessage(frame);
+      };
+      if (data.command === 'log') {
+        const rows = data.branch === 'feature' ? [row(2, 'rev-f')] : [row(3, 'rev-m')];
+        answer({ type: 'result', id, result: { kind: 'log', rows } });
+      } else if (data.command === 'diff') {
+        answer({ type: 'result', id, result: { kind: 'diff', entries: [] } });
+      }
+    });
+    port2.start();
+    port2.postMessage({
+      type: 'status',
+      status: {
+        line: { kind: 'branch', name: 'main' },
+        headRevisionId: 'rev-m',
+        branches: [
+          { name: 'main', head: 'rev-m' },
+          { name: 'feature', head: 'rev-f' },
+          { name: 'unborn', head: undefined },
+        ],
+      },
+    });
+    const client = createPortRevisionsClient(port1);
+
+    await expect(client.log({ branch: 'main', limit: 5 })).resolves.toEqual([row(3, 'rev-m')]);
+    await expect(client.diff(undefined, 'rev-m')).resolves.toEqual([]);
+    /* M11: the place names the branch and no number. */
+    await expect(client.describe()).resolves.toEqual({
+      branch: 'main',
+      revisionId: 'rev-m',
+      branches: [
+        { name: 'main', revisionId: 'rev-m' },
+        { name: 'feature', revisionId: 'rev-f' },
+      ],
+      line: 'main',
+    });
+    expect(seen[1]).toMatchObject({ command: 'diff', revisionId: 'rev-m' });
+
+    client.close();
+    await expect.poll(() => seen.at(-1)).toEqual({ command: 'close' });
+    port1.close();
+  });
+});
+
+it('should release status waits and reject new reads when the revision connection is replaced', async () => {
+  const { port1, port2 } = new MessageChannel();
+  const client = createPortRevisionsClient(port1);
+  const describing = client.describe();
+  const conflict = client.conflict(undefined);
+  const describeCheck = expect(describing).rejects.toMatchObject({
+    code: 'PROJECT_HOST_CLOSED',
+    message: 'The project host closed.',
+  });
+  const conflictCheck = expect(conflict).rejects.toMatchObject({ code: 'PROJECT_HOST_CLOSED' });
+  try {
+    client.close();
+    await Promise.all([describeCheck, conflictCheck]);
+    await expect(client.log({})).rejects.toMatchObject({ code: 'PROJECT_HOST_CLOSED' });
+  } finally {
+    port1.close();
+    port2.close();
+  }
+});
+
+it("should answer the newest status's large objects, and none once closed", async () => {
+  const { port1, port2 } = new MessageChannel();
+  port2.start();
+  const client = createPortRevisionsClient(port1);
+  expect(client.largeObjects()).toBeUndefined();
+  const facet = {
+    phase: 'fetching',
+    paths: ['models/a.step'],
+    objects: 0,
+    totalObjects: 1,
+    bytes: 0,
+    totalBytes: 9,
+  } as const;
+  port2.postMessage({ type: 'status', status: { largeObjects: facet } });
+  await expect.poll(() => client.largeObjects()).toEqual(facet);
+  port2.postMessage({ type: 'status', status: {} });
+  await expect.poll(() => client.largeObjects()).toBeUndefined();
+  port2.postMessage({ type: 'status', status: { largeObjects: facet } });
+  await expect.poll(() => client.largeObjects()).toEqual(facet);
+  client.close();
+  expect(client.largeObjects()).toBeUndefined();
+  port2.close();
+});

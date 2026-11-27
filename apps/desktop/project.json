@@ -62,9 +62,6 @@
         "production",
         "^production",
         {
-          "env": "TAU_CLOUD_ENABLED"
-        },
-        {
           "env": "TAU_TELEMETRY_HOST"
         },
         {
@@ -75,9 +72,6 @@
         },
         {
           "env": "SENTRY_RELEASE"
-        },
-        {
-          "runtime": "git rev-parse HEAD"
         }
       ],
       "dependsOn": [
@@ -191,6 +185,14 @@
         "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts --resources apps/desktop/resources/store-guard/linux-x64"
       }
     },
+    "prepare-windows-sandbox": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/windows-sandbox/win32-x64"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-windows-sandbox.mts --resources apps/desktop/resources/windows-sandbox/win32-x64"
+      }
+    },
     "test-git-payload": {
       "executor": "nx:run-commands",
       "options": {
@@ -226,7 +228,8 @@
             "TAU_DESKTOP_CHANNEL": "staging"
           }
         }
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "package-macos-release": {
       "executor": "nx:run-commands",
@@ -256,7 +259,8 @@
         "staging-notarized": {
           "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
         }
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "package-macos-unsigned": {
       "executor": "nx:run-commands",
@@ -278,7 +282,8 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --unsigned"
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "package-linux": {
       "executor": "nx:run-commands",
@@ -307,7 +312,8 @@
           "target": "check-desktop-payload"
         },
         "prepare-build123d-python-windows",
-        "prepare-git-windows"
+        "prepare-git-windows",
+        "prepare-windows-sandbox"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {
@@ -327,6 +333,19 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-package.test.mts"
+      }
+    },
+    "publish-intel-beta-dmg": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/publish-intel-beta-dmg.mts"
+      }
+    },
+    "test-intel-beta-dmg": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/publish-intel-beta-dmg.test.mts"
       }
     },
     "test-publish-desktop": {
@@ -416,7 +435,8 @@
             "TAU_DESKTOP_CHANNEL": "staging"
           }
         }
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "package-macos-release-intel": {
       "executor": "nx:run-commands",
@@ -441,7 +461,8 @@
         "staging-notarized": {
           "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
         }
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "package-macos-unsigned-intel": {
       "executor": "nx:run-commands",
@@ -458,7 +479,8 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --unsigned"
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "render-dmg-background": {
       "executor": "nx:run-commands",
@@ -757,6 +779,20 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-profile-access.test.mts"
+      }
+    },
+    "collect-qualification-recovery": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/collect-qualification-recovery.mts"
+      }
+    },
+    "test-qualification-recovery": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-recovery.test.mts"
       }
     },
     "test-qualification-linux": {

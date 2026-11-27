@@ -1,0 +1,14 @@
+--- a/apps/ui-e2e/vitest.config.ts
++++ b/apps/ui-e2e/vitest.config.ts
+@@
+ import { defineConfig } from 'vitest/config';
+
+ const attempts = 3;
+
+ export default defineConfig({
+   test: {
+     testTimeout: 180_000,
+-    retry: 1,
++    retry: attempts,
+   },
+ });

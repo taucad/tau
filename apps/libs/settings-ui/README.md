@@ -1,24 +1,40 @@
 # @taucad/settings-ui
 
-The settings feature of the Tau UI app: the settings copy and the viewer settings' analytics person properties, the settings modules that read no app state. Private and source-consumed (`scope:ui type:app-lib layer:feature`): `apps/ui` imports it; it imports only app-libs and packages, never `apps/ui`.
+The settings feature of the Tau UI app: the settings catalogue and its search, the settings layout primitives, the browser storage status row, the settings copy and the viewer settings' analytics person properties, Settings → Viewer and the Setup answers row over a person record the host provides, and the Security rows that read only the auth client. Private and source-consumed (`scope:ui type:app-lib layer:feature`): `apps/ui` imports it; it imports only app-libs and packages, never `apps/ui`.
 
 Cut from `apps/ui/app/components/settings` in UI wave D (CI decomposition blueprint, Part 3 P2 row D). It grows as the modules it waits on leave the app. Billing settings stay out: they belong to the billing library.
 
 ## Entrypoints
 
-One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (Settings → Agents and Settings → Viewer, and the onboarding setup steps that reuse their copy and person properties).
+One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (Settings → Agents, Settings → Viewer and Settings → Security, and the onboarding setup steps that reuse their copy and person properties).
 
-| Subpath                                                 | Contents                                                                                                         |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `./components/settings/setup-answers-copy`              | Copy of the setup-answers switch and row in Settings → Agents                                                    |
-| `./components/settings/viewer/viewer-settings-copy`     | Settings → Viewer copy as data: mouse presets, orbit and gizmo styles, view-default rows                         |
-| `./components/settings/viewer/viewer-person-properties` | Analytics person property names and `setViewerPersonProperties`; the host passes its analytics in as an argument |
+| Subpath                                                 | Contents                                                                                                                                                                         |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./components/settings/settings-section`                | `settingsSectionSchema` and `SettingsSection`: the sections the dialog can show, the single source of truth for `?settings=`                                                     |
+| `./components/settings/settings-catalogue`              | The ungated catalogue (`createSettingsCatalogue`, with the host's Experimental flags and their copy passed in), `SettingId` and `searchSettings`                                 |
+| `./components/settings/settings-item`                   | `SettingsItem`, `SettingsRow`, `SettingsGroup`, `SettingsInfo` and the loading skeletons; `SettingsSectionsProvider` takes the host's gated sections                             |
+| `./components/settings/person-settings`                 | `PersonSettingsProvider` and `usePersonSettings`: the person record, its writers, the onboarding events as plain functions, analytics and the OS class, all supplied by the host |
+| `./components/settings/browser-storage-status`          | `BrowserStorageStatus`: the Settings → Filesystem row that says how well the browser protects local files from automatic cleanup                                                 |
+| `./components/settings/setup-answers-copy`              | Copy of the setup-answers switch and row in Settings → Agents                                                                                                                    |
+| `./components/settings/setup-answers-row`               | `SetupAnswersRow`: the Settings → Agents row with the three setup answers, Edit and Clear; the host passes setup's names for each answer                                         |
+| `./components/settings/viewer/viewer-settings`          | `ViewerSettings`: the Settings → Viewer section                                                                                                                                  |
+| `./components/settings/viewer/navigation-groups`        | The Navigation and Gizmo groups of Settings → Viewer                                                                                                                             |
+| `./components/settings/viewer/view-defaults-group`      | The View defaults group of Settings → Viewer                                                                                                                                     |
+| `./components/settings/viewer/viewer-settings-copy`     | Settings → Viewer copy as data: mouse presets, orbit and gizmo styles, view-default rows                                                                                         |
+| `./components/settings/viewer/viewer-person-properties` | Analytics person property names and `setViewerPersonProperties`; the host passes its analytics in as an argument                                                                 |
+| `./components/auth/settings/security/active-session`    | `ActiveSession`: one signed-in session row with its browser, OS and Revoke or Sign out                                                                                           |
+| `./components/auth/settings/security/change-password`   | `ChangePassword`: the Settings → Security password group                                                                                                                         |
+| `./components/auth/settings/security/linked-account`    | `LinkedAccount`: one sign-in provider row with Link, or Unlink behind a confirmation                                                                                             |
+| `./components/auth/settings/security/linked-accounts`   | `LinkedAccounts`: a row per sign-in provider the auth client offers, GitHub excepted                                                                                             |
 
 ## Still in the app
 
-- `settings-registry.ts`, the catalogue for navigation and search, reads `tauCloudBuildEnabled` (through `cloud/cloud-enabled`), `lib/build-target`, the app's feature flags (`flags/flag.constants`, `flags/use-feature`) and `hooks/use-settings-dialog`. `settings-item.tsx` (the `SettingsGroup`, `SettingsRow` and `SettingsInfo` primitives) looks up each row's label in it, and every other settings component renders `settings-item`, so the whole dialog stays until the registry splits into a pure catalogue in this library and the gating that stays in the app.
-- `hooks/use-settings-dialog.ts`: `tauCloudBuildEnabled` and the registry's `SettingId`.
-- `machine-details.tsx`, its fixture and test qualify, but need `components/print/machine-facts` and the print test fixtures. They move with the print domain.
-- `billing-settings.tsx`: billing, which gets its own library.
+- `settings-registry.ts` keeps the deployment gates: the Experimental rows from the app's feature flags (`flags/flag.constants`), the deployment-mode gate (`cloud/deployment-mode`), the desktop gate (`lib/build-target`), the build-time flag defaults and the runtime flags (`flags/use-feature`). `deployment-settings-provider.tsx` hands its gated sections to `SettingsSectionsProvider`.
+- `hooks/use-settings-dialog.ts`: the deployment mode and React Router search parameters.
+- Every other settings component reads app state (`#hooks/*`, `#lib/*`, `#cloud/*`, `#flags/*`, `#preferences/*`, `#telemetry/*`, `#routes/*`, `#runtime/*`) or renders one that does.
+- `machine-details.tsx`, its fixture and test need `components/print/machine-facts` and the print test fixtures. They move with the print domain.
+- `model-settings.tsx`: `hooks/use-models`.
+- `person-settings-host.tsx` is the app's side of `PersonSettingsProvider`: it reads the person record store (`preferences/use-person-record`), the onboarding events (`telemetry/onboarding-telemetry`), analytics (`hooks/use-analytics`) and the OS class (`telemetry/platform-class`). `agent-settings.tsx` passes setup's answer names from `components/onboarding/setup-copy`, which the onboarding flow owns.
+- `components/auth/settings`: `active-sessions.tsx` reads `hooks/use-auth-links`, `github-permissions.tsx` reads `lib/share-providers`, `email-deliverability-banner.tsx` reads `environment.config`, and `change-avatar.tsx` renders the user button's `auth/user/user-avatar`. `user-profile.tsx`, `account-settings.tsx`, `security-settings.tsx` and `settings.tsx` render one of these. `change-email.tsx` has no importer, since email changes are off.
 
 Part of the [Tau](https://github.com/taucad/tau) monorepo.

@@ -36,9 +36,9 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
-import { tauStoreSkills } from '@taucad/ui-core/lib/tau-plugin-store-catalog';
+import { tauStoreSkills } from '@taucad/agent-tools/skills';
 import type { SystemSkill } from '#lib/system-skills-catalog.js';
-import type { TauStoreSkill } from '@taucad/ui-core/lib/tau-plugin-store-catalog';
+import type { TauStoreSkill } from '@taucad/agent-tools/skills';
 
 export const meta: MetaFunction = () => [{ title: 'Plugins · Tau' }];
 
@@ -222,19 +222,25 @@ function StoreSection({
   columns = 2,
   getStatus,
   onInstall,
+  notice,
 }: {
   readonly title: string;
   readonly items: StoreItem[];
   readonly columns?: 1 | 2;
   readonly getStatus?: (item: StoreItem) => 'available' | 'installed' | 'shadowed';
   readonly onInstall?: (slug: string) => void;
+  /** The state of what feeds this section, such as *Skill updates pending*, beside its heading. */
+  readonly notice?: React.ReactNode;
 }): React.JSX.Element {
   return (
     <section className='space-y-3'>
       <div>
-        <Heading level={2} variant='label'>
-          {title}
-        </Heading>
+        <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-1'>
+          <Heading level={2} variant='label'>
+            {title}
+          </Heading>
+          {notice ? <div className='flex flex-wrap items-center gap-x-3'>{notice}</div> : null}
+        </div>
         <Separator className='mt-2' />
       </div>
       <ul className={cn('grid gap-x-10', columns === 2 ? 'md:grid-cols-2' : 'md:grid-cols-1')}>
@@ -418,12 +424,23 @@ export function PluginStoreView({
     setBuiltByTau(false);
     searchRef.current?.focus();
   };
+  /* The shared index shell (page composition Rule 14, as Community lays it out): the title carries the count, the
+   * filters share its row, and the first collection follows at once. The match line sits in that row too, and the
+   * update notices sit with the Skills they describe, so neither pushes the first row past its budget (#2291). */
   return (
-    <PageContent className='space-y-6'>
+    <PageContent className='space-y-3'>
       <PageHeader
         title='Plugins'
+        count={total}
+        className='gap-x-4 gap-y-3'
         action={
           <div className='ml-auto flex w-full flex-wrap items-center gap-2 sm:w-auto'>
+            <p
+              role='status'
+              className={cn('text-sm text-muted-foreground tabular-nums', isFiltered ? undefined : 'sr-only')}
+            >
+              {isFiltered ? `${matchCount} of ${total} match` : `${total} plugins and skills`}
+            </p>
             <div className='flex items-center gap-1'>
               <Button
                 size='sm'
@@ -483,10 +500,6 @@ export function PluginStoreView({
         }
       />
 
-      {statusContent}
-      <p role='status' className='text-sm text-muted-foreground tabular-nums'>
-        {isFiltered ? `${matchCount} of ${total} match` : `${total} plugins and skills`}
-      </p>
       {matchCount === 0 ? (
         <div className='h-64'>
           <PanelEmptyState
@@ -504,8 +517,16 @@ export function PluginStoreView({
       {featuredMatches.length > 0 ? <StoreSection title='Featured' items={featuredMatches} /> : null}
       {systemMatches.length > 0 ? <StoreSection title='System' items={systemMatches} /> : null}
       {skillMatches.length > 0 ? (
-        <StoreSection title='Skills' items={skillMatches} getStatus={getSkillInstallStatus} onInstall={installSkill} />
-      ) : null}
+        <StoreSection
+          title='Skills'
+          items={skillMatches}
+          getStatus={getSkillInstallStatus}
+          onInstall={installSkill}
+          notice={statusContent}
+        />
+      ) : (
+        statusContent
+      )}
 
       {/* Below the collections: the first viewport belongs to the lists (page composition Rule 14). */}
       <section className='flex h-40 items-center justify-center overflow-hidden rounded-md border bg-[linear-gradient(135deg,color-mix(in_oklab,var(--information)_18%,var(--background)),color-mix(in_oklab,var(--feature)_14%,var(--background)),color-mix(in_oklab,var(--warning)_12%,var(--background)))]'>

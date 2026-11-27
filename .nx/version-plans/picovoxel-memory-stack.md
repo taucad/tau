@@ -1,0 +1,5 @@
+---
+picovoxel: minor
+---
+
+PicoVoxel's grid pager now runs in every Tau PicoVoxel runtime at its default budget of 2 GiB of resident grids, so a model whose grids outgrow the heap's headroom parks the least recently used ones outside the WebAssembly heap instead of failing; below the budget nothing changes, and exact bytes are the same. A runtime is now recycled when its heap plus the bytes the pager parked outside it pass `recycleHeapBytes`, and the session memory log reports `far=` beside `heap=`. A pager that runs out of memory reports `PICO_OUT_OF_MEMORY` through the existing `RESOURCE_LIMIT` path. Uniform meshes, and so every export, are read out of the heap in batches (`voxels.streamMesh`) instead of being built whole beside their grid; their bytes are unchanged. The authoring skill teaches `pico.scope()` and `{ consume: true }` for freeing intermediates as an efficiency practice, not a requirement: a model that frees nothing usually still builds with the same bytes, at about three times the peak memory, and can still run out of memory if it keeps enough grids alive.

@@ -12,7 +12,7 @@ import { resolveTelemetryConsent } from '@taucad/telemetry/client';
 import type { DevicePreference, ReportingConsent, TelemetryConsentInputs } from '@taucad/telemetry/client';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { useCookie } from '#hooks/use-cookie.js';
-import { useCookieConsent } from '#hooks/use-cookie-consent.js';
+import { useCookieConsent } from '#hooks/use-privacy-choices.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
 import { authClient } from '#lib/auth-client.js';
 import { isGlobalPrivacyControlEnabled } from '@taucad/ui-core/lib/global-privacy-control.lib';

@@ -13,7 +13,8 @@ import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import process from 'node:process';
-import { setTimeout as delay } from 'node:timers/promises';
+
+import { fetchVerified, integrityFromHex, unattendedFetchRetry } from '@taucad/archive-core';
 
 /** One host's pinned wasi-sdk release archive. */
 export type WasiSdkPin = { readonly archive: string; readonly sha256: string };
@@ -28,8 +29,8 @@ export const wasiSdkPins = JSON.parse(
   readFileSync(resolve(import.meta.dirname, 'wasi-sdk.json'), 'utf8'),
 ) as WasiSdkPins;
 
-/** Download a URL's bytes; the default is {@link downloadWithRetry}. */
-export type Download = (url: string) => Promise<Uint8Array<ArrayBuffer>>;
+/** Download a URL's bytes that must match an SRI pin; the default is {@link downloadWithRetry}. */
+export type Download = (url: string, integrity: string) => Promise<Uint8Array<ArrayBuffer>>;
 
 const sha256 = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
 
@@ -42,37 +43,12 @@ const exists = async (path: string): Promise<boolean> => {
   }
 };
 
-const downloadAttempts = 4;
-
 /**
- * Fetch a release asset, retrying a network error or a 5xx with backoff (2 s, 4 s, 8 s).
- * GitHub release downloads answer 502/503 for minutes at a time; a 4xx is final.
+ * Fetch a release asset through Tau's shared verified download, on its unattended retry schedule: a transport error
+ * (a failed name resolution included), a 429 or a 5xx is retried for about two minutes; a 4xx is final.
  */
-export const downloadWithRetry: Download = async (url) => {
-  let failure = 'no attempt';
-  for (let attempt = 1; attempt <= downloadAttempts; attempt += 1) {
-    if (attempt > 1) {
-      // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
-      await delay(1000 * 2 ** (attempt - 1));
-    }
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
-      const response = await fetch(url);
-      if (response.ok) {
-        // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
-        return new Uint8Array(await response.arrayBuffer());
-      }
-      failure = `HTTP ${String(response.status)}`;
-      if (response.status < 500) {
-        break;
-      }
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-    }
-    console.log(`wasi-sdk download attempt ${String(attempt)} failed (${failure})`);
-  }
-  throw new Error(`wasi-sdk download failed with ${failure}`);
-};
+export const downloadWithRetry: Download = async (url, integrity) =>
+  fetchVerified({ url, integrity, retry: unattendedFetchRetry, signal: AbortSignal.timeout(30 * 60 * 1000) });
 
 /** The GitHub release URL of a pinned archive. */
 export const wasiSdkUrl = (pins: WasiSdkPins, pin: WasiSdkPin): string =>
@@ -98,7 +74,7 @@ export const ensureWasiSdkArchive = async (options: {
     console.log(`Replacing ${pin.archive}: its bytes do not match the pin`);
   }
   console.log(`Downloading ${pin.archive}`);
-  const bytes = await download(wasiSdkUrl(pins, pin));
+  const bytes = await download(wasiSdkUrl(pins, pin), integrityFromHex('sha256', pin.sha256));
   if (sha256(bytes) !== pin.sha256) {
     throw new Error('wasi-sdk integrity mismatch');
   }

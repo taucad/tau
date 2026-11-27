@@ -41,7 +41,8 @@ import { storedPublicationManifestSchema } from '#publications/publications.dto.
 import { isS3ObjectMissing } from '@taucad/api-object-storage';
 import type { ObjectStorageService, StorageTier } from '@taucad/api-object-storage';
 import type { StorageNamespace } from '@taucad/api-object-storage/constants';
-import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
+import { servedBlobKey, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
+import type { ServedBlobContentType } from '@taucad/api-object-storage/sha256';
 
 /** Everything this module logs: an over-release, and nothing else. */
 const logger = new Logger('PublicationMaterializer');
@@ -313,8 +314,27 @@ const readStream = async (body: Readable): Promise<Uint8Array<ArrayBuffer>> => {
   return new Uint8Array(Buffer.concat(chunks));
 };
 
-const publicationContentType = (relativePath: string): string =>
+/**
+ * How a published file is served: the thumbnail as an image, everything else as
+ * bytes the viewer reads.
+ *
+ * @param relativePath - The file's path in the version.
+ * @returns Its served content type.
+ */
+export const publicationContentType = (relativePath: string): ServedBlobContentType =>
   relativePath === 'thumbnail.webp' ? 'image/webp' : 'application/octet-stream';
+
+/**
+ * The `blobs` key a published file's bytes are served from. The content type is
+ * part of the key, because the blob is shared by every publication holding the
+ * same bytes and one of them must never change how another's is served (#2008).
+ *
+ * @param relativePath - The file's path in the version.
+ * @param sha256Hex - The file's SHA-256.
+ * @returns The namespace-relative key.
+ */
+export const publicationBlobKey = (relativePath: string, sha256Hex: string): string =>
+  servedBlobKey(sha256Hex, publicationContentType(relativePath));
 
 /** A RIFF/WEBP container, as the viewer's `image/webp` content type promises. */
 const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
@@ -693,7 +713,7 @@ const readLfsObject = async (
 };
 
 /** One blob the publication store must hold, under one content type. */
-type BlobUpload = Readonly<{ file: PublishedFile; contentType: string }>;
+type BlobUpload = Readonly<{ file: PublishedFile; contentType: ServedBlobContentType; key: string }>;
 
 const cacheControlFor = (tier: StorageTier): string =>
   tier === 'private' ? 'private, no-cache' : 'public, max-age=31536000, immutable';
@@ -707,21 +727,21 @@ const cacheControlFor = (tier: StorageTier): string =>
  * ever hold the bytes it names.
  *
  * @param dependencies - Storage.
- * @param upload - The object and its content type.
- * @param destination - The blob key and tier.
+ * @param upload - The object, its content type and the key that type is served from.
+ * @param tier - Which bucket the blob goes to.
  */
 const putLfsBlob = async (
   dependencies: MaterializerDependencies,
   upload: BlobUpload,
-  destination: Readonly<{ key: string; tier: StorageTier }>,
+  tier: StorageTier,
 ): Promise<void> => {
   const { file, contentType } = upload;
   if (file.source.kind !== 'lfs') {
     return;
   }
   const { storage } = dependencies;
-  const target = { namespace: 'blobs', key: destination.key, tier: destination.tier } as const;
-  const cacheControl = cacheControlFor(destination.tier);
+  const target = { namespace: 'blobs', key: upload.key, tier } as const;
+  const cacheControl = cacheControlFor(tier);
   if (file.source.verified) {
     try {
       /* Copied only if the object is still the one its HEAD vouched for. */
@@ -738,7 +758,7 @@ const putLfsBlob = async (
         throw lfsObjectNotUploaded();
       }
       /* A store that cannot copy between these buckets still takes a stream. */
-      logger.warn({ key: destination.key, error }, 'A server-side LFS copy was refused; streaming the object instead');
+      logger.warn({ key: upload.key, error }, 'A server-side LFS copy was refused; streaming the object instead');
     }
   }
   let stored: Awaited<ReturnType<ObjectStorageService['getBlob']>>;
@@ -782,29 +802,33 @@ const uploadPublishedBlobs = async (
 ): Promise<void> => {
   const { directory, tree, tier } = upload;
   const { storage } = dependencies;
+  /* One object per key, and the key carries how it is served (#2008): a key
+     that is already there holds these bytes served this way, so it is never
+     written again, whoever wrote it. */
   const uploads = [
     ...new Map(
       tree.files.map((file) => {
-        const contentType = publicationContentType(file.path);
-        return [`${file.sha}:${contentType}`, { file, contentType }] as const;
+        const key = publicationBlobKey(file.path, file.sha);
+        return [key, { file, contentType: publicationContentType(file.path), key }] as const;
       }),
     ).values(),
   ];
-  const missing: Array<BlobUpload & { exists: boolean }> = [];
+  const missing: BlobUpload[] = [];
   await forEachLimited(uploads, uploadConcurrency, async (upload) => {
-    const existing = await storage.headBlob({ namespace: 'blobs', key: blobKeyFromSha256Hex(upload.file.sha), tier });
-    if (existing === undefined || existing.contentType !== upload.contentType) {
-      missing.push({ ...upload, exists: existing !== undefined });
+    if ((await storage.headBlob({ namespace: 'blobs', key: upload.key, tier })) === undefined) {
+      missing.push(upload);
     }
   });
 
-  const putGitBlob = async (upload: BlobUpload & { exists: boolean }, body: Uint8Array<ArrayBuffer>): Promise<void> => {
+  /* `If-None-Match: *`, so a publisher racing this one to the same key loses
+     to it rather than overwriting it, and both have written the same thing. */
+  const putGitBlob = async (upload: BlobUpload, body: Uint8Array<ArrayBuffer>): Promise<void> => {
     await storage.putBlob({
       namespace: 'blobs',
-      key: blobKeyFromSha256Hex(upload.file.sha),
+      key: upload.key,
       body,
       contentType: upload.contentType,
-      ...(upload.exists ? {} : { ifNoneMatch: '*' }),
+      ifNoneMatch: '*',
       cacheControl: cacheControlFor(tier),
       tier,
     });
@@ -812,15 +836,13 @@ const uploadPublishedBlobs = async (
 
   const lfs = missing.filter((upload) => upload.file.source.kind === 'lfs');
   const gitUploads = missing.filter(
-    (upload): upload is BlobUpload & { exists: boolean; file: PublishedFile & { source: { kind: 'git' } } } =>
+    (upload): upload is BlobUpload & { file: PublishedFile & { source: { kind: 'git' } } } =>
       upload.file.source.kind === 'git',
   );
   const kept = gitUploads.filter((upload) => tree.retained.has(upload.file.source.objectId));
   const reread = gitUploads.filter((upload) => !tree.retained.has(upload.file.source.objectId));
 
-  await forEachLimited(lfs, uploadConcurrency, async (upload) =>
-    putLfsBlob(dependencies, upload, { key: blobKeyFromSha256Hex(upload.file.sha), tier }),
-  );
+  await forEachLimited(lfs, uploadConcurrency, async (upload) => putLfsBlob(dependencies, upload, tier));
   await forEachLimited(kept, uploadConcurrency, async (upload) =>
     putGitBlob(upload, tree.retained.get(upload.file.source.objectId) ?? new Uint8Array()),
   );
@@ -943,7 +965,7 @@ export const materializePublication = async (
   await uploadPublishedBlobs(dependencies, { directory: input.directory, tree, tier });
 
   const thumbnail = uploads.find((upload) => upload.path === 'thumbnail.webp');
-  const thumbnailKey = thumbnail ? `blobs/${blobKeyFromSha256Hex(thumbnail.sha)}` : 'defaults/thumb.webp';
+  const thumbnailKey = thumbnail ? `blobs/${publicationBlobKey(thumbnail.path, thumbnail.sha)}` : 'defaults/thumb.webp';
   const kernels = detectKernelIdsFromRelativePaths(uploads.map((upload) => upload.path));
   const runtimePin = resolveRuntimePin();
 
@@ -1195,6 +1217,20 @@ export const materializePublishedTags = async (
         if (fresh === undefined || fresh.unpublishedAt !== null || fresh.manifestKey !== superseded) {
           return undefined;
         }
+        /* Only the version the link shows follows its tier, read under the same
+           lock a change of who can open it takes. An earlier version is served
+           by nothing, so it repairs to the private tier, as does a project with
+           no link (stable cloud link blueprint, storage tier). */
+        const [link] = await transaction
+          .select({
+            visibility: schema.projectShare.visibility,
+            currentPublicationId: schema.project.currentPublicationId,
+          })
+          .from(schema.project)
+          .leftJoin(schema.projectShare, eq(schema.projectShare.projectId, schema.project.id))
+          .where(eq(schema.project.id, input.projectId))
+          .limit(1);
+        const visibility = link?.visibility === 'public' && link.currentPublicationId === row.id ? 'public' : 'private';
         /* Inside the transaction, and first, so the reference counts are taken
            before any blob is looked up or written (D10). */
         const written = await materializePublication(
@@ -1205,7 +1241,7 @@ export const materializePublishedTags = async (
             ownerId: input.ownerId,
             directory: input.directory,
             tag: row.tag,
-            visibility: row.visibility === 'private' ? 'private' : 'public',
+            visibility,
             entryPath: row.entryPath,
           },
           transaction,
@@ -1221,6 +1257,7 @@ export const materializePublishedTags = async (
             /* The name moved, so the row must say which revision a viewer is
              * now being served (the manifest is keyed by it). */
             revisionId: written.revisionId,
+            visibility,
           })
           .where(and(eq(schema.publication.id, row.id), eq(schema.publication.manifestKey, superseded)))
           .returning({ id: schema.publication.id });

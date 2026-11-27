@@ -15,11 +15,28 @@
 export const acknowledgeMilliseconds = 100;
 
 /**
+ * A region whose content has a known shape draws its `Skeleton` bars once a wait that started on the client passes
+ * this mark; before it, the region shows its frame alone, so a fast read draws no bars at all. Bars have no minimum:
+ * content replaces them the moment it arrives. Milliseconds.
+ *
+ * @public
+ */
+export const skeletonDelayMilliseconds = 300;
+
+/**
  * No wait indicator appears before this much of the wait has passed. Milliseconds.
  *
  * @public
  */
 export const indicatorDelayMilliseconds = 1000;
+
+/**
+ * A measurable wait's detail line (its numbers, such as "189 of 295 files") appears under the indicator once the wait
+ * passes this mark. A wait with no known total has no detail line. Milliseconds.
+ *
+ * @public
+ */
+export const detailDelayMilliseconds = 3000;
 
 /**
  * A shown indicator stays at least this long. It holds the indicator only: content that arrives inside the minimum
@@ -31,7 +48,9 @@ export const indicatorDelayMilliseconds = 1000;
 export const indicatorMinimumMilliseconds = 500;
 
 /**
- * At this point the indicator's words say the wait is long and Retry appears beside it. Milliseconds.
+ * Once a wait has made no progress for this long, the indicator's words say the wait is long and "Try again" appears
+ * beside them. Counted from the wait's start, or from its last progress for a wait that reports progress, so a wait
+ * whose numbers still move is never called slow. Milliseconds.
  *
  * @public
  */
@@ -45,7 +64,7 @@ export const slowWaitMilliseconds = 10_000;
 export const indicatorEntranceMilliseconds = 150;
 
 /**
- * What a wait indicator shows at one moment: nothing, its words, or its slow words with Retry.
+ * What a wait indicator shows at one moment: nothing, its words, or its slow words with "Try again".
  *
  * @public
  */
@@ -103,7 +122,9 @@ export function waitPhaseAt({ elapsed, settledAt, shownAt = indicatorDelayMillis
  * and nothing on the page runs a timer for it.
  *
  * - `idle`: no wait, or a wait that ended before its indicator showed or after it served its minimum. The slot is empty.
- * - `waiting`: the wait is running. The words reveal after `revealDelay` and the slow words after `slowDelay`.
+ * - `waiting`: the wait is running. Skeleton bars reveal after `skeletonDelay`, the words after `revealDelay`, a
+ *   detail line after `detailDelay` and the slow words after `slowDelay`. The slow delay is measured from the wait's
+ *   last progress where it has one: key the elements that swap at it on the progress, so their animations restart.
  * - `holding`: the wait ended while the indicator was showing; the words stay until `hideDelay`. `isSlow` keeps the
  *   slow words for a hold that starts after the slow mark.
  *
@@ -114,7 +135,14 @@ export function waitPhaseAt({ elapsed, settledAt, shownAt = indicatorDelayMillis
  */
 export type WaitIndicatorTiming =
   | Readonly<{ state: 'idle' }>
-  | Readonly<{ state: 'waiting'; revealDelay: string; slowDelay: string; entrance: string }>
+  | Readonly<{
+      state: 'waiting';
+      skeletonDelay: string;
+      revealDelay: string;
+      detailDelay: string;
+      slowDelay: string;
+      entrance: string;
+    }>
   | Readonly<{ state: 'holding'; hideDelay: string; isSlow: boolean }>;
 
 const idleTiming: WaitIndicatorTiming = { state: 'idle' };
@@ -135,6 +163,11 @@ export type WaitingTimingInput =
        * a hold, or a Retry soon after a late-mounted indicator showed), so it starts revealed, with no entrance.
        */
       isShowing?: boolean;
+      /**
+       * When the wait last made progress, on the same timeline: the slow mark is 10,000 ms after the later of this and
+       * `startedAt`. Omit for a wait that reports no progress. Milliseconds.
+       */
+      progressedAt?: number;
     }>
   | Readonly<{
       /** When the wait started, on the performance timeline. Milliseconds. */
@@ -146,30 +179,46 @@ export type WaitingTimingInput =
        */
       now?: undefined;
       isShowing?: never;
+      progressedAt?: never;
     }>;
 
 /**
  * The timing of a running wait.
  *
- * @param input - When the wait started, the current time, and whether it takes over a showing indicator.
- * @returns Reveal and slow delays measured from now, or from navigation start before hydration.
+ * @param input - When the wait started and last made progress, the current time, and whether it takes over a showing
+ *   indicator.
+ * @returns The ladder's delays measured from now, or from navigation start before hydration.
  * @public
  */
 export function waitingTiming(input: WaitingTimingInput): WaitIndicatorTiming {
   const { startedAt, now } = input;
-  const revealAt = startedAt + indicatorDelayMilliseconds;
-  const slowAt = startedAt + slowWaitMilliseconds;
+  const marks = {
+    skeletonDelay: startedAt + skeletonDelayMilliseconds,
+    revealDelay: startedAt + indicatorDelayMilliseconds,
+    detailDelay: startedAt + detailDelayMilliseconds,
+    slowDelay: Math.max(startedAt, input.progressedAt ?? startedAt) + slowWaitMilliseconds,
+  };
   const entrance = `${indicatorEntranceMilliseconds}ms`;
   if (now === undefined) {
+    const fromNavigation = (at: number): string => `calc(${at}ms + var(--wait-offset, 0ms))`;
     return {
       state: 'waiting',
-      revealDelay: `calc(${revealAt}ms + var(--wait-offset, 0ms))`,
-      slowDelay: `calc(${slowAt}ms + var(--wait-offset, 0ms))`,
+      skeletonDelay: fromNavigation(marks.skeletonDelay),
+      revealDelay: fromNavigation(marks.revealDelay),
+      detailDelay: fromNavigation(marks.detailDelay),
+      slowDelay: fromNavigation(marks.slowDelay),
       entrance,
     };
   }
-  const revealDelay = input.isShowing === true ? -indicatorEntranceMilliseconds : revealAt - now;
-  return { state: 'waiting', revealDelay: `${revealDelay}ms`, slowDelay: `${slowAt - now}ms`, entrance };
+  const fromNow = (at: number): string => `${at - now}ms`;
+  return {
+    state: 'waiting',
+    skeletonDelay: fromNow(marks.skeletonDelay),
+    revealDelay: input.isShowing === true ? `${-indicatorEntranceMilliseconds}ms` : fromNow(marks.revealDelay),
+    detailDelay: fromNow(marks.detailDelay),
+    slowDelay: fromNow(marks.slowDelay),
+    entrance,
+  };
 }
 
 /**

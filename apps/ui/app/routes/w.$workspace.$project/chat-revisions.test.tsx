@@ -22,13 +22,13 @@ import {
   groupRevisionHistory,
 } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
-import { requestBranchControl } from '#routes/w.$workspace.$project/revision-pane-requests.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import { requestBranchControl } from '@taucad/revisions-ui/lib/revision-pane-requests';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { consumeRevisionReveal, requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
-import type { EditorDocument } from '#lib/editor-document.js';
+import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import type * as UseFeatureModule from '#flags/use-feature.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
@@ -60,7 +60,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 }));
 /* CodeMirror and syntax highlighting are the editor's, not this pane's: the conflict rows are
  * asserted by their verbs and the bytes they hand back (P43). */
-vi.mock('#components/code/code-editor.client.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/code-editor.client', () => ({
   CodeEditor: ({ document }: { readonly document: EditorDocument }) => (
     <pre data-testid='conflict-buffer'>{document.text}</pre>
   ),
@@ -585,7 +585,7 @@ describe('Revisions pane', () => {
     renderPane();
 
     const alert = screen.getByRole('alert', { name: 'Turn outcome' });
-    expect(alert).toHaveTextContent('Tau could not save this project’s earlier edits first.');
+    expect(alert).toHaveTextContent('Couldn’t save this project’s earlier edits first.');
     expect(alert.textContent).not.toMatch(/checkout/iu);
   });
 
@@ -754,15 +754,15 @@ describe('Revisions pane', () => {
     };
 
     renderPane();
-    expect(screen.queryByRole('radio', { name: 'Tau Cloud' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Tau' })).not.toBeInTheDocument();
     const header = await screen.findByRole('region', { name: 'Where you are' });
     expect(within(header).queryByRole('button', { name: /Back up/u })).not.toBeInTheDocument();
     const line = screen.getByRole('region', { name: 'Backup' });
     expect(line).toHaveTextContent('This device only');
 
-    await user.click(within(line).getByRole('button', { name: 'Back up to Tau Cloud' }));
+    await user.click(within(line).getByRole('button', { name: 'Back up to the cloud' }));
 
-    expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Tau' })).toBeChecked();
   });
 
   it('names no git word in what a person reads (A18, I12)', async () => {
@@ -1243,9 +1243,12 @@ describe('Revisions pane vocabulary and History', () => {
 
     const card = await screen.findByRole('group', { name: 'History' });
     expect(within(card).getAllByTestId('history-skeleton')).toHaveLength(1);
-    expect(
-      screen.getByRole('region', { name: 'Where you are' }).querySelector('[data-slot="skeleton"]'),
-    ).not.toBeNull();
+    /* The bars show from the wait ladder's 300 ms mark, by CSS, not with the frame (Progressive Loading Policy rule 16). */
+    expect(within(card).getByTestId('history-skeleton')).toHaveClass('wait-skeleton');
+    const chip = screen.getByRole('region', { name: 'Where you are' }).querySelector('[data-slot="skeleton"]');
+    expect(chip).not.toBeNull();
+    /* The branch pill shows from the 300 ms mark too, on a wrapper: its own pulse keeps its animation. */
+    expect(chip?.parentElement).toHaveClass('wait-skeleton');
     expect(card).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByText('No history yet')).not.toBeInTheDocument();
   });
@@ -1497,7 +1500,7 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.getByRole('button', { name: /^Thicker base 1 · /u })).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('keeps a removed collaborator calm: the strip and Sync say Cloud copy unavailable and what to do (HQ3)', async () => {
+  it('keeps a removed collaborator calm: the strip and Sync say Backup unavailable and what to do (HQ3)', async () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
     revisionStatusHarness.role = 'revoked';
     revisionStatusHarness.status = {
@@ -1510,13 +1513,11 @@ describe('Revisions pane vocabulary and History', () => {
     renderPane();
 
     await waitFor(() => {
-      expect(screen.getByRole('status', { name: 'History status' })).toHaveTextContent(
-        'Saved · Cloud copy unavailable',
-      );
+      expect(screen.getByRole('status', { name: 'History status' })).toHaveTextContent('Saved · Backup unavailable');
     });
     const backup = screen.getByRole('status', { name: 'Backup status' });
-    expect(backup).toHaveTextContent('Cloud copy unavailable');
-    expect(backup).toHaveTextContent('The cloud copy was deleted or your access changed.');
+    expect(backup).toHaveTextContent('Backup unavailable');
+    expect(backup).toHaveTextContent('This project was deleted from the cloud, or your access changed.');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
   });
@@ -1613,7 +1614,7 @@ describe('Backup by default (D19)', () => {
     await waitFor(() => {
       expect(screen.getByRole('status', { name: 'History status' })).toHaveTextContent('Saved · Backed up');
     });
-    expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Backs up to the cloud automatically.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Turn off backup' })).not.toBeInTheDocument();
   });
 });

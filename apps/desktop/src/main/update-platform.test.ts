@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as files from 'node:fs/promises';
@@ -11,17 +11,25 @@ import {
   fetchUpdateDescriptor,
   launchWindowsUpdate,
   relaunchAppImage,
+  relaunchSelf,
   relaunchSwitches,
   verifyDownloadedUpdate,
   startPlatformUpdater,
 } from '#main/update-platform.js';
 import type { DesktopUpdateDescriptor } from '#main/update-identity.js';
+import { desktopArtifactName } from '#shared/desktop-release.js';
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   spawn: vi.fn(),
   markHealthy: vi.fn(),
+  authenticate: vi.fn(),
   checkForUpdates: vi.fn(),
+  /* The provider the updater was built with, so a check can read the feed through it as electron-updater does. */
+  provider: undefined as
+    | undefined
+    | { updateProvider: new (...args: unknown[]) => { getLatestVersion(): Promise<unknown> } },
   managed: vi.fn().mockResolvedValue(false),
+  relaunch: vi.fn(),
 }));
 /* eslint-disable @typescript-eslint/naming-convention -- Mirror the upstream constructor export names. */
 // oxlint-disable-next-line typescript/no-extraneous-class -- Mock actual constructor identities used by extends and instanceof.
@@ -29,18 +37,26 @@ vi.mock('electron-updater', () => ({ Provider: class {}, NsisUpdater: class {} }
 /* eslint-enable @typescript-eslint/naming-convention -- End upstream constructor exports. */
 vi.mock('#main/managed-appimage.js', () => ({ isManagedAppImage: mocks.managed }));
 vi.mock('#main/update-appimage.js', () => ({
-  createSafeAppImageUpdater: () => ({
-    markHealthy: mocks.markHealthy,
-    checkForUpdates: mocks.checkForUpdates,
-    on: vi.fn(),
-    netSession: { webRequest: { onBeforeRequest: vi.fn() } },
-  }),
+  createSafeAppImageUpdater: (provider: typeof mocks.provider) => {
+    mocks.provider = provider;
+    return {
+      markHealthy: mocks.markHealthy,
+      authenticate: mocks.authenticate,
+      checkForUpdates: mocks.checkForUpdates,
+      downloadUpdate: vi.fn(async () => ['/cache/Tau.AppImage']),
+      on: vi.fn(),
+      netSession: { webRequest: { onBeforeRequest: vi.fn() } },
+    };
+  },
 }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof files>();
   return { ...original, readFile: vi.fn(original.readFile), realpath: vi.fn(original.realpath) };
 });
-vi.mock('electron', () => ({ app: { getAppPath: () => '/app' }, net: { fetch: mocks.fetch } }));
+vi.mock('electron', () => ({
+  app: { getAppPath: () => '/app', relaunch: mocks.relaunch },
+  net: { fetch: mocks.fetch },
+}));
 vi.mock('node:child_process', async (importOriginal) => ({
   ...(await importOriginal<typeof ChildProcess>()),
   spawn: mocks.spawn,
@@ -69,6 +85,38 @@ describe('platform update transport and launch', () => {
       '--enable-unsafe-swiftshader',
       '--tau-route-qualification=nonce',
     ]);
+  });
+
+  it('drops --safe-mode, so the launch after an update is a normal one (T-R12.8)', () => {
+    expect(relaunchSwitches(['/usr/bin/tau', '--safe-mode', '--ozone-platform=x11'])).toEqual(['--ozone-platform=x11']);
+  });
+
+  it('restarts with switches through the AppImage relauncher when APPIMAGE is set, and app.relaunch otherwise (T-R12.8)', async () => {
+    // oxlint-disable-next-line unicorn/prefer-event-target -- Node child_process delivers spawn/error through EventEmitter.
+    const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
+    mocks.spawn.mockReturnValue(child);
+    vi.stubEnv('APPIMAGE', '/home/tau/Tau.AppImage');
+    try {
+      const relaunched = relaunchSelf(['--safe-mode'], ['/tmp/.mount/tau', '--safe-mode', '--no-sandbox', 'file.step']);
+      child.emit('spawn');
+      await relaunched;
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      ['-c', appImageRelaunchScript, 'tau-relaunch', '/home/tau/Tau.AppImage', '--no-sandbox', '--safe-mode'],
+      expect.anything(),
+    );
+    expect(mocks.relaunch).not.toHaveBeenCalled();
+
+    vi.stubEnv('APPIMAGE', undefined);
+    try {
+      await relaunchSelf([], ['/Applications/Tau.app/Contents/MacOS/Tau', '--safe-mode', '--enable-logging']);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(mocks.relaunch).toHaveBeenCalledExactlyOnceWith({ args: ['--enable-logging'] });
   });
 
   it.each([
@@ -276,6 +324,118 @@ describe('platform update transport and launch', () => {
     expect(child.unref).toHaveBeenCalled();
   });
 });
+describe('AppImage update from a launch that is not healthy (T-B22.1)', () => {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const marker = {
+    schemaVersion: 1,
+    route: 'linux-appimage',
+    tag: 'desktop@0.1.0',
+    channel: 'production',
+    version: '0.1.0',
+    sourceCommit: 'a'.repeat(40),
+    arch: 'x64',
+    trust: 'release',
+    cache: 'tau-updater',
+    keys: { fixture: publicKey.export({ type: 'spki', format: 'pem' }).toString() },
+  };
+  /** A signed feed entry for 0.2.0, issued a minute ago by this machine's clock. */
+  const signedNewer = (): unknown => {
+    const now = Date.now();
+    const descriptor = {
+      schemaVersion: 1,
+      keyId: 'fixture',
+      tag: 'desktop@0.2.0',
+      channel: 'production',
+      version: '0.2.0',
+      sourceCommit: 'b'.repeat(40),
+      arch: 'x64',
+      route: 'linux-appimage',
+      path: `releases/${encodeURIComponent('desktop@0.2.0')}/${desktopArtifactName({ kind: 'linux-appimage', channel: 'production', version: '0.2.0', arch: 'x64' })}`,
+      size: 10,
+      sha512: Buffer.alloc(64).toString('base64'),
+      issuedAt: new Date(now - 60_000).toISOString(),
+      expiresAt: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+    };
+    const bytes = Buffer.from(JSON.stringify(descriptor));
+    return {
+      schemaVersion: 1,
+      keyId: 'fixture',
+      descriptor: bytes.toString('base64'),
+      signature: sign(null, bytes, privateKey).toString('base64'),
+    };
+  };
+  const baseline = { signed: 'immutable installed 0.1.0 envelope' };
+  let reader: { mockRestore: () => void } | undefined;
+  const start = async (confirmHealthy: () => Promise<boolean>) => {
+    Object.defineProperty(process, 'resourcesPath', { value: '/resources', configurable: true });
+    reader = vi
+      .spyOn(files, 'readFile')
+      .mockImplementation(async (path) =>
+        JSON.stringify(
+          path === '/app/package.json'
+            ? { version: marker.version, tauDesktop: { sourceCommit: marker.sourceCommit } }
+            : marker,
+        ),
+      );
+    mocks.fetch.mockImplementation(
+      async (url: string) =>
+        new Response(
+          JSON.stringify(url.endsWith('/latest/desktop-update-linux-appimage-x64.json') ? signedNewer() : baseline),
+        ),
+    );
+    mocks.checkForUpdates.mockImplementation(async () => {
+      /* The downloader asks its provider for the latest version; the provider reads and admits the feed. */
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- A constructor, so new-cap wants PascalCase.
+      const { updateProvider: InstalledProvider } = mocks.provider!;
+      await new InstalledProvider(undefined, undefined, {}).getLatestVersion();
+    });
+    return startPlatformUpdater({
+      platform: 'linux',
+      arch: 'x64',
+      currentVersion: '0.1.0',
+      packaged: true,
+      environment: {},
+      autoUpdater: { on: vi.fn(), setFeedURL: vi.fn(), checkForUpdates: vi.fn(), quitAndInstall: vi.fn() },
+      fetchJson: vi.fn(),
+      prepareToRestart: vi.fn(),
+      prepareToInstall: vi.fn(),
+      openExternal: vi.fn(),
+      log: vi.fn(),
+      schedule: vi.fn(),
+      retry: vi.fn(),
+      confirmHealthy,
+    });
+  };
+  const original = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
+  afterEach(() => {
+    reader?.mockRestore();
+    reader = undefined;
+    mocks.fetch.mockReset();
+    mocks.checkForUpdates.mockReset();
+    if (original) {
+      Object.defineProperty(process, 'resourcesPath', original);
+    } else {
+      Reflect.deleteProperty(process, 'resourcesPath');
+    }
+  });
+
+  it('should find a newer release without writing the health record when the launch is not healthy', async () => {
+    const updater = await start(async () => false);
+    const found = await updater!.check();
+    expect(found).toEqual(expect.objectContaining({ version: '0.2.0', tag: 'desktop@0.2.0' }));
+    expect(mocks.markHealthy).not.toHaveBeenCalled();
+    expect(mocks.authenticate).toHaveBeenCalledWith(baseline);
+    expect(updater!.snapshot()).toEqual(expect.objectContaining({ phase: 'ready', version: '0.2.0' }));
+  });
+
+  it('should write the health record when the launch is healthy', async () => {
+    const updater = await start(async () => true);
+    const found = await updater!.check();
+    expect(found).toEqual(expect.objectContaining({ version: '0.2.0' }));
+    expect(mocks.markHealthy).toHaveBeenCalledWith(baseline);
+  });
+});
+
 describe('AppImage relaunch', () => {
   const mount = '/tmp/.mount_Tau.Ap1fvY1k';
   it('drops the running image identity and every search path under its mount', () => {

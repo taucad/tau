@@ -96,7 +96,10 @@ import { grokPromptUsageOf, grokVendorCostOf } from '#acp/grok-usage.js';
 import type { GrokPromptUsage } from '#acp/grok-usage.js';
 import { initialGrokNotificationState, grokNotificationAfter, finishGrokPresentation } from '#acp/grok-presentation.js';
 import type { GrokPresentation } from '#acp/grok-presentation.js';
+import { acpAdapterEnvironment } from '#acp/spawn.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
+import { resolveAcpAdapterExecutable } from '#acp/locate.js';
+import type { AcpExecutableFileSystem } from '#acp/locate.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import { maskedPathCode } from '@taucad/agent-tools/registry';
 import { seemsBinary } from '@taucad/filesystem/content-metadata';
@@ -233,6 +236,12 @@ export const advertised = (capability: unknown): boolean => capability !== null 
 
 /** @internal */
 export const isPresent = <Value>(value: Value): value is NonNullable<Value> => value !== null && value !== undefined;
+
+/* A vendor string a durable row requires to be non-empty: an empty one is absent (launch audit E-3). */
+const named = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
+
+/** The `call.toolCallId` recorded for a vendor call that names none. */
+export const unnamedVendorCallId = 'unnamed';
 
 /**
  * A path is inside the session's own directory, and reachable there at the
@@ -717,6 +726,90 @@ export const loginOf = (
 };
 
 /**
+ * Session variables a sign-in CLI needs to hand its page to the default browser.
+ *
+ * Linux's `xdg-open` finds the desktop session through these; the adapter
+ * itself never opens a browser, so its allowlist does not carry them. None
+ * names a credential.
+ */
+const acpLoginBrowserEnvironment: readonly string[] = ['DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS'];
+
+/**
+ * What Tau's sign-in tab starts for one agent: its own CLI, never a shell (ACP agent policy rule 10).
+ *
+ * @public
+ */
+export type AcpLoginLaunch = {
+  /** Absolute path of the agent's CLI, the same file its adapter runs. */
+  readonly file: string;
+  /** The profile's `loginArgs`, exactly as the CLI receives them. */
+  readonly args: readonly string[];
+  /** The adapter's own environment, plus the browser-session variables. */
+  readonly env: NodeJS.ProcessEnv;
+  /**
+   * The command the login card shows, shown before the user presses Enter: the bare login command for a CLI on
+   * `PATH`, the quoted absolute path for one found outside it (D10). `file` is what runs either way.
+   */
+  readonly commandLine: string;
+};
+
+/**
+ * The agent's own sign-in, as a structured launch rather than a shell line.
+ *
+ * The CLI is located again first, so a file that moved or vanished since
+ * discovery is found anew or refused (ACP agent policy rule 4), and the
+ * environment is the one {@link acpAdapterEnvironment} gives the adapter, so the
+ * login lands in the configuration directory the agent reads. Tau reads no
+ * variable value here; it forwards names.
+ *
+ * @param adapter - A discovered adapter.
+ * @param options - Environment, platform and file system; this process's by default.
+ * @returns The launch, or `undefined` when the profile declares no `loginArgs`.
+ * @throws An error with `code: 'CLI_NOT_FOUND'` when the CLI is no longer anywhere it is searched for.
+ * @public
+ */
+export const acpLoginLaunch = (
+  adapter: AcpAdapter,
+  options: {
+    readonly environment?: NodeJS.ProcessEnv | undefined;
+    readonly platform?: NodeJS.Platform | undefined;
+    readonly fileSystem?: AcpExecutableFileSystem | undefined;
+  } = {},
+): AcpLoginLaunch | undefined => {
+  if (adapter.loginArgs === undefined || adapter.cli === undefined) {
+    return undefined;
+  }
+  /* Treated as a fallback so a PATH file that vanished is searched for again too. */
+  const resolved = resolveAcpAdapterExecutable(
+    adapter.executablePath === undefined ? adapter : { ...adapter, executableSource: 'fallback' },
+    options,
+  );
+  const file = resolved.executablePath;
+  if (file === undefined) {
+    return undefined;
+  }
+  const base = options.environment ?? process.env;
+  const env = acpAdapterEnvironment(base, resolved);
+  /* The CLI is its own program, never this process's runtime. */
+  delete env['ELECTRON_RUN_AS_NODE'];
+  for (const name of acpLoginBrowserEnvironment) {
+    if (base[name] !== undefined) {
+      env[name] = base[name];
+    }
+  }
+  const platform = options.platform ?? process.platform;
+  /* The card names the CLI by where discovery found it; a file found anew names where it was found. */
+  const executableSource = file === adapter.executablePath ? adapter.executableSource : resolved.executableSource;
+  const shown = cliLoginCommandOf({ ...resolved, executableSource }, { platform, execPath: process.execPath });
+  return {
+    file,
+    args: adapter.loginArgs,
+    env,
+    commandLine: shown ?? shellCommandLine(file, adapter.loginArgs, platform),
+  };
+};
+
+/**
  * The login a URL elicitation is asking the user to complete.
  *
  * Codex offers its device-code flow *only* to a client that advertised
@@ -924,20 +1017,18 @@ const mcpResult = (
       : undefined;
   }
   if (tool.claude === true) {
-    /* Claude Code replaces a result's content with its `structuredContent` as
-     * JSON, and a failure keeps its `CODE: message` text. */
+    /* Claude Code replaces a result's text with its `structuredContent` as
+     * JSON, in the final block after any non-text block it rendered (a
+     * screenshot's `[Resource link: …]` lines), and a failure keeps its
+     * `CODE: message` text. */
     const blocks: readonly unknown[] | undefined =
       typeof rawOutput === 'string'
         ? [{ type: 'text', text: rawOutput }]
         : Array.isArray(rawOutput)
           ? rawOutput
           : undefined;
-    const text = (blocks ?? [])
-      .flatMap((block) => {
-        const value = asRecord(block)?.['text'];
-        return typeof value === 'string' ? [value] : [];
-      })
-      .join('\n');
+    const value = asRecord(blocks?.at(-1))?.['text'];
+    const text = typeof value === 'string' ? value : '';
     let structuredContent: unknown;
     if (!failed && text !== '') {
       try {
@@ -1543,6 +1634,18 @@ export const createTurnProjection = (options: {
       rawOutput?: unknown;
     }
   >();
+  /**
+   * Vendor ids the agent gave a second call while an earlier one was open (two calls with no id share one). A later
+   * update under such an id cannot say which call it means, so for the rest of the turn none is attributed to a call
+   * and no stored input describes a permission request.
+   */
+  const ambiguousToolCalls = new Set<string>();
+  /** Marks a reused open id ambiguous, dropping any persistent decision recorded for it, which no readback can pair. */
+  const markAmbiguous = (toolCallId: string): void => {
+    ambiguousToolCalls.add(toolCallId);
+    ambiguousPermissionCalls.add(toolCallId);
+    permissionDecisions.delete(toolCallId);
+  };
   const externalMetadata = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: options.agentId } };
   const tauMcpMetadata = {
     tauInternal: { ...externalMetadata.tauInternal, presentation: 'tau-mcp' },
@@ -1779,15 +1882,17 @@ export const createTurnProjection = (options: {
    */
   const callFacts = (update: AcpToolUpdate): NonNullable<ToolInputProviderMessage['call']> => {
     const nativeName = nativeToolName(update, options.nativeToolName ?? acpNativeToolNamePaths);
+    /* The row schema refuses an empty id or path; a refused row would blind the rest of the turn (E-3). */
+    const locations = update.locations?.filter((location) => location.path !== '');
     return {
-      toolCallId: update.toolCallId,
+      toolCallId: named(update.toolCallId) ?? unnamedVendorCallId,
       ...(isPresent(update.kind) ? { kind: update.kind } : {}),
       ...(isPresent(update.title) ? { title: update.title } : {}),
       ...(isPresent(update.status) ? { status: update.status } : {}),
       ...(nativeName ? { nativeName } : {}),
-      ...(isPresent(update.locations)
+      ...(isPresent(locations)
         ? {
-            locations: update.locations.map(({ line, ...location }) =>
+            locations: locations.map(({ line, ...location }) =>
               typeof line === 'number' ? { ...location, line } : location,
             ),
           }
@@ -1904,13 +2009,28 @@ export const createTurnProjection = (options: {
     openToolCalls.delete(update.toolCallId);
   };
 
+  /** Ends an open call without a result, keeping the fullest facts seen, as a turn's end does. */
+  const closeAsItStands = async (open: {
+    readonly facts: NonNullable<ToolInputProviderMessage['call']>;
+    readonly inputMessage: ToolInputProviderMessage;
+  }): Promise<void> =>
+    append([
+      {
+        type: 'message.envelope-replaced',
+        messageId: open.inputMessage.id,
+        replacement: { ...open.inputMessage, call: open.facts },
+      },
+    ]);
+
   const projectToolCall = async (update: Extract<SessionUpdate, { sessionUpdate: 'tool_call' }>): Promise<void> => {
     await flushBoundary();
     const callId = options.createId();
     const inputMessageId = options.createId();
     const facts = callFacts(update);
     const tauMcp = normalizedTauMcpCall(update, options.tauMcpServerName, options.agentId);
-    const callToolName = tauMcp?.toolName ?? facts.nativeName ?? update.title;
+    /* The first non-empty name: an empty title is no name, and the row schema refuses an empty one (E-3). */
+    const callToolName =
+      named(tauMcp?.toolName) ?? named(facts.nativeName) ?? named(update.title) ?? named(update.kind) ?? 'tool';
     const input = tauMcp?.arguments ?? asJson(update.rawInput ?? { title: update.title });
     const inputMessage: ToolInputProviderMessage = {
       id: inputMessageId,
@@ -1921,7 +2041,18 @@ export const createTurnProjection = (options: {
       content: input,
       metadata: tauMcp === undefined ? externalMetadata : tauMcpMetadata,
     };
+    const earlier = openToolCalls.get(update.toolCallId);
+    /* The agent named a call it has not finished (two calls with no id share one): no later update can say which call
+     * it means. Both calls close as they stand, as a turn's end closes an open call, rather than either showing the
+     * other's result; only this notification's own facts are the newer call's. */
+    const ambiguous = earlier !== undefined || ambiguousToolCalls.has(update.toolCallId);
+    if (ambiguous) {
+      markAmbiguous(update.toolCallId);
+    }
     openToolCalls.set(update.toolCallId, { toolName: callToolName, callId, facts, tauMcp, input, inputMessage });
+    if (earlier !== undefined) {
+      await closeAsItStands(earlier);
+    }
     await append([
       {
         type: 'message.appended',
@@ -1932,6 +2063,11 @@ export const createTurnProjection = (options: {
      * `tool-input` row with no `tool-output` is a part that hangs until the next
      * user message demotes it to an interruption the user never caused. */
     await projectToolResult(update);
+    const unfinished = openToolCalls.get(update.toolCallId);
+    if (ambiguous && unfinished !== undefined) {
+      openToolCalls.delete(update.toolCallId);
+      await closeAsItStands(unfinished);
+    }
   };
 
   // oxlint-disable-next-line eslint/complexity -- one branch per `session/update` variant is the point (V13): every variant carries an explicit ruling here, and a `default` would turn the next protocol addition into a silent drop.
@@ -2085,6 +2221,10 @@ export const createTurnProjection = (options: {
           return;
         }
         if (update.sessionUpdate === 'tool_call_update' || update.sessionUpdate === 'tool_call') {
+          /* A call that reuses an open id must not have its readback paired with the earlier call's decision. */
+          if (update.sessionUpdate === 'tool_call' && openToolCalls.has(update.toolCallId)) {
+            markAmbiguous(update.toolCallId);
+          }
           const decision = permissionDecisions.get(update.toolCallId);
           const terminal = update.status === 'completed' || update.status === 'failed';
           let observation = options.permissionReadback
@@ -2199,7 +2339,7 @@ export const createTurnProjection = (options: {
       const toolCallId = requestedCall?.['toolCallId'];
       const open = typeof toolCallId === 'string' ? openToolCalls.get(toolCallId) : undefined;
       if (typeof toolCallId === 'string') {
-        if (requestedPermissionCalls.has(toolCallId)) {
+        if (requestedPermissionCalls.has(toolCallId) || ambiguousToolCalls.has(toolCallId)) {
           ambiguousPermissionCalls.add(toolCallId);
         }
         requestedPermissionCalls.add(toolCallId);
@@ -2284,13 +2424,7 @@ export const createTurnProjection = (options: {
       for (const open of openToolCalls.values()) {
         // Preserve undecided media if cancellation or transport loss prevents a terminal result.
         // oxlint-disable-next-line no-await-in-loop -- durable call order is retained.
-        await append([
-          {
-            type: 'message.envelope-replaced',
-            messageId: open.inputMessage.id,
-            replacement: { ...open.inputMessage, call: open.facts },
-          },
-        ]);
+        await closeAsItStands(open);
       }
       openToolCalls.clear();
       const open = [...assistantBlocks.values()].filter((block) => block.text !== '' && !block.finalCommitted);

@@ -75,7 +75,7 @@ describe('HostsController cloud placement', () => {
     const provisionCloudHost = vi.fn(
       async (): Promise<{ deviceId: string; label: string; state: 'existing' | 'provisioned' }> => ({
         deviceId: 'agent_cloud',
-        label: 'Tau Cloud',
+        label: 'Cloud',
         state: 'provisioned',
       }),
     );
@@ -84,7 +84,7 @@ describe('HostsController cloud placement', () => {
     const response = await controller.provisionCloudHost({ projectId: 'project-a' }, 'owner-1');
 
     expect(provisionCloudHost).toHaveBeenCalledWith({ userId: 'owner-1', projectId: 'project-a' });
-    expect(response).toEqual({ deviceId: 'agent_cloud', label: 'Tau Cloud', state: 'provisioned' });
+    expect(response).toEqual({ deviceId: 'agent_cloud', label: 'Cloud', state: 'provisioned' });
     expect(Object.keys(response)).not.toContain('credential');
   });
 

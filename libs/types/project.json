@@ -10,6 +10,9 @@
       "options": {
         "command": "node --import tsx libs/types/scripts/generate-project-manifest-schema.mts"
       }
+    },
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "{workspaceRoot}/apps/ui/public/schemas/tau-v1.json"]
     }
   }
 }

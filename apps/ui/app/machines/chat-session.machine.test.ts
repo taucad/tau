@@ -420,6 +420,34 @@ describe('chatSessionMachine run ownership', () => {
     actor.stop();
   });
 
+  it('should abandon an admission when its queued send is withdrawn, holding nothing', async () => {
+    const admission = Promise.withResolvers<ChatTurn>();
+    const script = turnActors({ admit: async () => admission.promise });
+    const actor = startOwning(script.actors);
+    const dispatched: unknown[] = [];
+    actor.on('startTurnRequest', (event) => dispatched.push(event));
+    const message: MyUIMessage = { id: 'msg-q', role: 'user', parts: [{ type: 'text', text: 'hi' }] };
+
+    actor.send({ type: 'requestTurn', gesture: { kind: 'send', message, queueId: 'msg-q' } });
+    expect(runState(actor)).toBe('queued.admitting');
+    /* Another send's Stop leaves this admission alone. */
+    actor.send({ type: 'withdrawTurn', queueId: 'other' });
+    expect(runState(actor)).toBe('queued.admitting');
+
+    actor.send({ type: 'withdrawTurn', queueId: 'msg-q' });
+    expect(runState(actor)).toBe('idle');
+    expect(actor.getSnapshot().context).toMatchObject({ turn: undefined, pendingGesture: undefined });
+
+    /* The abandoned admission answers late; nothing is dispatched. */
+    admission.resolve(turnOf('run-1', 'msg-q'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(dispatched).toEqual([]);
+    expect(runState(actor)).toBe('idle');
+
+    actor.stop();
+  });
+
   it('records a failed run without invoking page settlement', async () => {
     const script = turnActors();
     const actor = startOwning(script.actors);
@@ -683,6 +711,7 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
       turn: { runId: 'r', leaseTurnId: 't', request: { kind: 'continue' } },
     },
     { type: 'adoptRun', runId: 'r' },
+    { type: 'withdrawTurn', queueId: 'q' },
     { type: 'interruptRecorded', state: 'requested' },
     { type: 'interruptRecorded', state: 'resolved' },
     { type: 'toolParts', inFlight: 1, approvals: 0 },

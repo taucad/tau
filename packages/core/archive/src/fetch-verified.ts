@@ -28,11 +28,51 @@ export type FetchVerifiedInput = {
   readonly redirect?: FetchRedirectPolicy;
   /** Transport; defaults to the global `fetch`. */
   readonly fetch?: typeof fetch;
+  /** How often and how patiently a retryable failure is retried; defaults to three attempts 100 ms then 200 ms apart. */
+  readonly retry?: FetchRetryPolicy;
   readonly signal: AbortSignal;
 };
 
+/**
+ * Retry schedule of {@link fetchVerified}: `attempts` in all, the first retry after `initialDelayMilliseconds` and
+ * each later one after twice the previous wait, at most `maximumDelayMilliseconds`. The signal ends a wait early.
+ * @public
+ */
+export type FetchRetryPolicy = {
+  /** Attempts in all, a positive integer. */
+  readonly attempts: number;
+  readonly initialDelayMilliseconds: number;
+  readonly maximumDelayMilliseconds: number;
+};
+
+const interactiveFetchRetry: FetchRetryPolicy = {
+  attempts: 3,
+  initialDelayMilliseconds: 100,
+  maximumDelayMilliseconds: 200,
+};
+
+/**
+ * The retry schedule for a download nobody is waiting on (CI, a seed, a build script): eight attempts with waits of
+ * 2, 4, 8, 16, 30, 30 and 30 s, so a failure of name resolution or of the origin that lasts about two minutes costs
+ * retries rather than the run, and one that lasts longer still fails it.
+ * @public
+ */
+export const unattendedFetchRetry: FetchRetryPolicy = {
+  attempts: 8,
+  initialDelayMilliseconds: 2000,
+  maximumDelayMilliseconds: 30_000,
+};
+
+/**
+ * The wait before retry `retry` (one-based) of a policy.
+ * @param policy - Retry schedule.
+ * @param retry - One-based retry number.
+ * @returns Milliseconds.
+ */
+const retryDelay = (policy: FetchRetryPolicy, retry: number): number =>
+  Math.min(policy.initialDelayMilliseconds * 2 ** (retry - 1), policy.maximumDelayMilliseconds);
+
 const stallTimeoutMilliseconds = 60_000;
-const attempts = 3;
 
 // Only known platform codes may cross the diagnostic boundary; messages, addresses and URLs never do.
 const transportCodes = new Set([
@@ -75,7 +115,7 @@ const ownData = (value: unknown, key: string): unknown => {
  * @param attempt - One-based attempt number.
  * @returns A fresh cause containing only recognized codes and attempt context.
  */
-const transportCause = (error: unknown, attempt: number): Error => {
+const transportCause = (error: unknown, attempt: number, attempts: number): Error => {
   const pending: unknown[] = [error];
   const seen = new Set<unknown>();
   const codes = new Set<string>();
@@ -109,9 +149,24 @@ const transportCause = (error: unknown, attempt: number): Error => {
   return new Error(`Transport attempt ${attempt}/${attempts}; codes: ${[...codes].join(', ') || 'unknown'}`);
 };
 
-const delay = async (milliseconds: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
+// A wait the signal ends early, rejecting with its reason.
+const delay = async (milliseconds: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the signal's own reason, as fetch rejects
+      reject(signal.reason);
+      return;
+    }
+    const abort = (): void => {
+      clearTimeout(timer);
+      // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the signal's own reason, as fetch rejects
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener('abort', abort, { once: true });
   });
 
 const downloadFailure = (
@@ -181,26 +236,37 @@ const request = async (input: FetchVerifiedInput, signal: AbortSignal): Promise<
 };
 
 /**
- * Download bytes and verify them against their SRI pin before returning them. Transport errors, 429 and 5xx are
- * retried (three attempts, 100 ms then 200 ms apart); other statuses are not. An attempt fails once 60 s pass with
- * neither a response nor a body chunk, so a slow body that keeps arriving is never cut off. No credentials are sent.
- * Nothing is returned unless the whole body matched `integrity`.
- * @param input - URL, pin, size policy, redirect policy, transport and signal.
+ * Download bytes and verify them against their SRI pin before returning them. Transport errors (a failed name
+ * resolution such as `ENOTFOUND` or `EAI_AGAIN` included), a stalled or short body, 429 and 5xx are retried on
+ * `input.retry` (default three attempts, 100 ms then 200 ms apart; {@link unattendedFetchRetry} outlasts a
+ * two-minute outage); other statuses are not. An attempt fails once 60 s pass with neither a response nor a body
+ * chunk, so a slow body that keeps arriving is never cut off. No credentials are sent. Nothing is returned unless the
+ * whole body matched `integrity`.
+ * @param input - URL, pin, size policy, redirect policy, retry policy, transport and signal.
  * @returns The verified bytes.
  * @throws {ArchiveError} `DOWNLOAD_FAILED` when no attempt returned an acceptable body; `INTEGRITY_MISMATCH` when it
- * did not match `integrity`. An abort rejects with the signal's reason.
+ * did not match `integrity`. An abort rejects with the signal's reason, also during a wait between attempts.
+ * @throws {TypeError} When `input.retry` is not a positive whole number of attempts with non-negative waits.
  * @public
  */
 export const fetchVerified = async (input: FetchVerifiedInput): Promise<Uint8Array<ArrayBuffer>> => {
+  const retry = input.retry ?? interactiveFetchRetry;
+  const { attempts } = retry;
+  if (
+    !Number.isSafeInteger(attempts) ||
+    attempts < 1 ||
+    !(retry.initialDelayMilliseconds >= 0) ||
+    !(retry.maximumDelayMilliseconds >= 0)
+  ) {
+    throw new TypeError('fetchVerified retry needs a positive whole number of attempts and non-negative waits.');
+  }
   const maximumBytes = input.byteLength ?? input.maximumBytes ?? Number.POSITIVE_INFINITY;
   let failure: ArchiveError = downloadFailure(input, 'no response', 'transport');
   let bytes: Uint8Array<ArrayBuffer> | undefined;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (attempt > 0) {
-      // ponytail: backoff ignores abort for at most 200 ms; the signal is checked right after.
       // oxlint-disable-next-line no-await-in-loop -- bounded retry backoff avoids hammering the origin
-      await delay(100 * 2 ** (attempt - 1));
-      input.signal.throwIfAborted();
+      await delay(retryDelay(retry, attempt), input.signal);
     }
     const watch = stallWatch(stallTimeoutMilliseconds);
     try {
@@ -230,7 +296,7 @@ export const fetchVerified = async (input: FetchVerifiedInput): Promise<Uint8Arr
       if (error instanceof ArchiveError && error.reason === 'redirect') {
         throw error;
       }
-      const cause = transportCause(error, attempt + 1);
+      const cause = transportCause(error, attempt + 1, attempts);
       failure =
         error instanceof ArchiveError && error.code === 'DOWNLOAD_FAILED'
           ? error

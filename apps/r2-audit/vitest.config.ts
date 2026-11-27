@@ -1,3 +1,4 @@
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /*
@@ -10,7 +11,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    reporters: ['default'],
+    reporters: testReporters('default'),
+    retry: testRetry(),
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../out/reports/coverage/apps/r2-audit',

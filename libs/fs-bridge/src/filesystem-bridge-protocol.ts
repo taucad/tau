@@ -1631,8 +1631,13 @@ const callSchemas = {
       z.object({ status: z.literal('superseded') }),
     ]),
   },
+  /* Fast-path FW4: the options are additive. A peer that predates them refuses a call that sends them, and the orphan
+   * sweep reads that refusal as `unknown`, which reclaims nothing. */
   verifyAbsent: {
-    args: z.tuple([projectIdSchema]),
+    args: z.union([
+      z.tuple([projectIdSchema]),
+      z.tuple([projectIdSchema, z.looseObject({ lane: z.enum(['interactive', 'background']).optional() })]),
+    ]),
     result: discriminatedResultUnion('status', [
       z.looseObject({ status: z.literal('absent') }),
       z.looseObject({ status: z.literal('present'), locators: z.array(projectLocatorSchema) }),

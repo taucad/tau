@@ -53,6 +53,18 @@ describe('project root configuration results (T-R1.1)', () => {
   });
 });
 
+describe('identity sweep lanes (fast path FW4)', () => {
+  it('should take verifyAbsent with no options or with a lane, and refuse an unknown lane', () => {
+    const { args } = fileSystemBridgeSchemas.calls.verifyAbsent;
+    const projectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
+
+    expect(args.safeParse([projectId]).success).toBe(true);
+    expect(args.safeParse([projectId, { lane: 'background' }]).success).toBe(true);
+    expect(args.safeParse([projectId, {}]).success).toBe(true);
+    expect(args.safeParse([projectId, { lane: 'urgent' }]).success).toBe(false);
+  });
+});
+
 describe('archive ceilings', () => {
   it('carries a caller byte ceiling on both archive calls and refuses a malformed one', () => {
     const { archive, getScopedZippedDirectory } = fileSystemBridgeSchemas.calls;

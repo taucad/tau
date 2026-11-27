@@ -1120,9 +1120,44 @@ describe('createPreparationHost', () => {
         detail: { axis: 'os', nearest: linuxTarget },
       });
       expect(refused).toMatchObject({ status: 'blocked', reason: 'unsupported-target', detail: { axis: 'os' } });
-      expect(refused.status === 'blocked' && refused.message).toContain('Native kernels do not run on Windows yet');
+      expect(refused.status === 'blocked' && refused.message).toContain(
+        'Native kernels do not run on Windows in this Tau: it has no Windows sandbox',
+      );
       expect(darwin.registry.calls).toEqual([]);
       await expect(darwin.host.describe()).resolves.toMatchObject([{ state: 'unsupported' }]);
+    });
+
+    it('should ask the host whether it contains native workers, and refuse with its answer before downloading', async () => {
+      const windows = {
+        os: 'win32',
+        arch: 'x64',
+        osVersion: '10.0.26100',
+        translated: false,
+        wasm: { threads: false },
+      } as const;
+      const asked: Array<readonly [string, string]> = [];
+      const contained = await scenario({
+        host: {
+          indicators: windows,
+          nativeContainment: (indicators, name) => {
+            asked.push([indicators.os, name]);
+            return undefined;
+          },
+        },
+      });
+      const uncontained = await scenario({
+        host: { indicators: windows, nativeContainment: () => 'The Windows sandbox is not set up.' },
+      });
+
+      const passed = await prepare(contained.host);
+      const refused = await prepare(uncontained.host);
+
+      /* A Windows host that contains native workers reaches variant selection; this fixture declares Linux only. */
+      expect(passed).toMatchObject({ status: 'blocked', reason: 'unsupported-target', detail: { axis: 'os' } });
+      expect(passed.status === 'blocked' && passed.message).toContain('declares no');
+      expect(asked).toEqual([['win32', packageName]]);
+      expect(refused).toMatchObject({ status: 'blocked', message: 'The Windows sandbox is not set up.' });
+      expect(uncontained.registry.calls).toEqual([]);
     });
 
     it('should record the host snapshot, the candidates and the emulation flag in every receipt', async () => {

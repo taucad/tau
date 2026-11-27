@@ -41,6 +41,8 @@
     "./native-store": "./src/native-store.ts",
     "./project-roots": "./src/project-roots.ts",
     "./services-host": "./src/services-host.ts",
+    "./windows-native-sandbox": "./src/windows-native-sandbox.ts",
+    "./windows-native-sandbox-main": "./src/windows-native-sandbox-main.ts",
     "./package.json": "./package.json"
   },
   "imports": {
@@ -72,6 +74,7 @@
     "@taucad/picogk": "workspace:*",
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
+    "@taucad/revisions": "workspace:*",
     "@taucad/rpc": "workspace:*",
     "@taucad/shell-service": "workspace:*",
     "@taucad/skills": "workspace:*",

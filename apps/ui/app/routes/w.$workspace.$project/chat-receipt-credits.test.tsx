@@ -44,14 +44,30 @@ const unavailableReceipt = (operationId: string) => ({
 
 type Answer = { readonly ok: boolean; readonly status: number; readonly json?: () => Promise<unknown> };
 
-/** Answers each `/v1/billing/operations/:id` read through `answer`, which a row may change. */
+const ok = (body: unknown): Answer => ({ ok: true, status: 200, json: async () => body });
+const refused: Answer = { ok: false, status: 503 };
+
+/**
+ * Answers receipt reads through `answer`, which a row may change: the batch route (`/v1/billing/operations?…`) fails
+ * with the first refused answer and otherwise lists every receipt; `/v1/billing/operations/:id` answers one.
+ */
 const stubReceipts = (answer: (operationId: string) => Answer | Promise<Answer>): ReturnType<typeof vi.fn> => {
-  const fetch = vi.fn(async (input: string) => answer(decodeURIComponent(input.split('/').at(-1) ?? '')));
+  const fetch = vi.fn(async (input: string): Promise<Answer> => {
+    const url = new URL(input);
+    if (url.pathname !== '/v1/billing/operations') {
+      return answer(decodeURIComponent(url.pathname.split('/').at(-1) ?? ''));
+    }
+    const answers = await Promise.all(url.searchParams.getAll('operationIds').map(async (id) => answer(id)));
+    const refusal = answers.find((one) => !one.ok);
+    if (refusal !== undefined) {
+      return refusal;
+    }
+    const receipts = await Promise.all(answers.map(async (one) => one.json?.()));
+    return ok({ receipts });
+  });
   vi.stubGlobal('fetch', fetch);
   return fetch;
 };
-const ok = (body: unknown): Answer => ({ ok: true, status: 200, json: async () => body });
-const refused: Answer = { ok: false, status: 503 };
 
 const renderWithSession = (node: ReactNode, bound = true): void => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

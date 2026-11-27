@@ -22,6 +22,7 @@ import {
   Trash2,
   TriangleAlert,
   Unplug,
+  WifiOff,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
@@ -35,6 +36,8 @@ import { SidebarTrigger } from '#components/ui/sidebar.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFocus, useSessions } from '#hooks/use-sessions.js';
+import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
+import { projectFilesCopy } from '#lib/project-open-copy.js';
 import type { SessionsActorRef } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
@@ -44,7 +47,15 @@ import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.
 import type { PendingProjectRecoveryReason } from '@taucad/project-library/types/pending-project-operation.types';
 
 /** Every verb a notice may offer. Closed on purpose: the table cannot invent an effect. @public */
-export type NoticeActionRun = 'reopen' | 'restore' | 'retry' | 'back' | 'projects' | 'trash-view' | 'desktop';
+export type NoticeActionRun =
+  | 'reopen'
+  | 'restore'
+  | 'retry'
+  | 'reload'
+  | 'back'
+  | 'projects'
+  | 'trash-view'
+  | 'desktop';
 
 /** One button in a notice's action row. Exactly one row member is primary. @public */
 export type ProjectRouteNoticeAction = Readonly<{
@@ -126,12 +137,14 @@ const recoveryFailure: Record<
  *
  * @param state - What the route is showing.
  * @param idleWindowMilliseconds - The registry's idle window, for the closed-on-idle line.
+ * @param isOffline - Whether the page reads offline, which names why an open failed.
  * @returns The notice to render, or undefined for the editor, which is not a notice.
  * @public
  */
 export const describeProjectRouteNotice = (
   state: ProjectRouteState,
   idleWindowMilliseconds: number = projectSessionIdleWindowMilliseconds,
+  isOffline = false,
 ): ProjectRouteNoticeSpec | undefined => {
   switch (state.kind) {
     case 'editor': {
@@ -148,6 +161,21 @@ export const describeProjectRouteNotice = (
         title: 'Project closed',
         description: closedDescription(state.reason, idleWindowMilliseconds),
         actions: [{ label: 'Reopen project', run: 'reopen', isPrimary: true }],
+      };
+    }
+    case 'session-failed': {
+      /* Nobody closed this project: its open failed. The open's own words, offline or not, said once by this region
+       * with its one action (Progressive Loading Policy rules 19, 21 and 22). The action reloads: code that failed to
+       * load stays failed for the page's life, so a reopen in place cannot finish the open (`code-loading.ts`).
+       * Offline the reload shows this notice again from the offline shell; online it opens the project. */
+      const [title, description] = projectFilesCopy(isOffline ? 'offline' : 'failed', undefined);
+      return {
+        icon: isOffline ? WifiOff : TriangleAlert,
+        tone: 'neutral',
+        live: 'alert',
+        title,
+        description,
+        actions: [{ label: 'Try again', run: 'reload', icon: RefreshCw, isPrimary: true }],
       };
     }
     case 'trashed': {
@@ -308,6 +336,10 @@ export const useProjectRouteNoticeActions = (projectId: string | undefined): ((r
           retry();
           return;
         }
+        case 'reload': {
+          globalThis.location.reload();
+          return;
+        }
         case 'back': {
           void navigate(-1);
           return;
@@ -354,7 +386,8 @@ export const ProjectRouteNotice = ({ state }: { readonly state: ProjectRouteStat
   const sessions = useSessions();
   const isMobile = useIsMobile();
   const runAction = useProjectRouteNoticeActions('projectId' in state ? state.projectId : undefined);
-  const spec = describeProjectRouteNotice(state, sessions.getSnapshot().context.idleWindowMilliseconds);
+  const isOnline = useNetworkConnectivity();
+  const spec = describeProjectRouteNotice(state, sessions.getSnapshot().context.idleWindowMilliseconds, !isOnline);
 
   if (spec === undefined) {
     return undefined;

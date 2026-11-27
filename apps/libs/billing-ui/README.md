@@ -25,7 +25,6 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 | `./components/usage/credits`                     | Credit display helpers for the usage charts                                                                                                 |
 | `./components/usage/provider-colors`             | Provider colours for the usage charts                                                                                                       |
 | `./components/usage/columns`                     | The usage table's columns and row helpers                                                                                                   |
-| `./components/usage/reserved-table`              | `ReservedTable`, the open credit holds                                                                                                      |
 | `./components/usage/usage-summary-cards`         | `UsageSummaryCards`                                                                                                                         |
 | `./components/usage/usage-table`                 | `UsageTable`, the activity rows and each row's credit explanation                                                                           |
 | `./components/usage/use-chat-name`               | `useChatName` and the `ChatRecordsReader` it is given                                                                                       |

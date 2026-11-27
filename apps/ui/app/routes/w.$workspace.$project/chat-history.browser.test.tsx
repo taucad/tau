@@ -102,6 +102,8 @@ vi.doMock('#routes/w.$workspace.$project/chat-message.js', () => ({
 }));
 vi.doMock('#routes/w.$workspace.$project/chat-revision-marker.js', () => ({ ChatRevisionMarker: () => null }));
 vi.doMock('#routes/w.$workspace.$project/chat-error.js', () => ({ ChatError: () => null }));
+// The zero-balance note has its own suite and reads the account's plan; the row measures the trays.
+vi.doMock('#components/chat/chat-credits-notice.js', () => ({ ChatCreditsNotice: () => null }));
 // A settled chat has no activity cue; the row measures the trays, not the activity line.
 vi.doMock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({ ChatMessagePlanning: () => null }));
 vi.doMock('#components/chat/chat-message-queue.js', () => ({ ChatMessageQueue: () => null }));
@@ -358,5 +360,52 @@ describe('chat composer across the transcript load', () => {
 
     expect(screen.queryByRole('button', { name: /Tasks:/u })).toBeNull();
     expect(after.composer).toBe(screen.getByTestId('chat-textarea').getBoundingClientRect().height);
+  });
+});
+
+describe('transcript shape while the transcript loads', () => {
+  /* Staging QA on an iPhone 13 (viewport 390 x 664): the chat sheet's surface spans y 341 to 620, its composer 566 to
+   * 612. The transcript's bars ran past the feed's foot: one crossed the composer's top edge and one sat behind it.
+   * Clipping hid only part of a bar, so a bar is measured as drawn (its own box, as `checkVisibility` sees it): every
+   * bar in the feed's box ends above the composer, and one that does not fit is outside that box altogether. */
+  it('draws every bar whole above the composer in the phone sheet', async () => {
+    await page.viewport(390, 664);
+    publishChatSession({
+      messages: [],
+      transcript: 'loading',
+      todoList: { kind: 'loading' },
+      rememberedComposerTrays: [],
+    });
+    render(
+      <TooltipProvider>
+        {/* The live sheet's surface at half: fixed at the detent, the sheet's height less its grabber and the nav. */}
+        <section
+          data-slot='mobile-surface'
+          className='flex flex-col overflow-hidden'
+          style={{ position: 'fixed', top: 341, left: 0, width: 390, height: 279 }}
+        >
+          <div className='relative flex h-full flex-1 flex-col'>
+            <ChatHistory />
+          </div>
+        </section>
+      </TooltipProvider>,
+    );
+
+    const composer = screen.getByRole('region', { name: 'Chat composer' }).getBoundingClientRect();
+    expect(Math.round(composer.bottom)).toBeLessThanOrEqual(620);
+    const shape = document.querySelector<HTMLElement>('[data-slot="transcript-shape"]');
+    const feed = (shape ?? document.querySelector<HTMLElement>('[data-slot="project-wait"]'))!.getBoundingClientRect();
+    const bars = [
+      ...document.querySelectorAll<HTMLElement>('[data-slot="project-wait-skeleton"] [data-slot="skeleton"]'),
+    ]
+      .map((bar) => bar.getBoundingClientRect())
+      .filter((box) => box.width > 0 && box.height > 0);
+    const inFeed = bars.filter((box) => box.left < feed.right && box.right > feed.left);
+    /* The request card at least is drawn. */
+    expect(inFeed.length).toBeGreaterThan(0);
+    for (const box of inFeed) {
+      expect(box.bottom).toBeLessThanOrEqual(composer.top);
+      expect(box.bottom).toBeLessThanOrEqual(feed.bottom);
+    }
   });
 });

@@ -631,7 +631,7 @@ describe('WorkspaceFileService', () => {
           providerBasePath: directory,
           scope,
         }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
 
       expect(await rootProvider.exists(directory)).toBe(false);
     });
@@ -643,7 +643,7 @@ describe('WorkspaceFileService', () => {
           providerBasePath: directory,
           scope,
         }),
-      ).resolves.toEqual({ status: 'absent' });
+      ).resolves.toEqual({ status: 'absent', remaining: [], absence: 'absent' });
     });
 
     it('preserves every byte when the manifest belongs to another project', async () => {
@@ -669,7 +669,7 @@ describe('WorkspaceFileService', () => {
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
       expect(await rootProvider.exists(directory)).toBe(false);
     });
 
@@ -688,14 +688,15 @@ describe('WorkspaceFileService', () => {
       expect(decoder.decode(await rootProvider.readFile(`${directory}/user-file.txt`))).toBe('keep me');
     });
 
-    it('preserves an empty manifest-less directory', async () => {
+    /* Fast-path FW3 review m2: a directory holding nothing names no id, so its husk goes and the answer is absent. */
+    it('removes an empty manifest-less directory and answers absent', async () => {
       await rootProvider.mkdir(directory, { recursive: true });
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
-      ).resolves.toEqual({ status: 'unidentifiable' });
+      ).resolves.toEqual({ status: 'absent', remaining: [], absence: 'absent' });
 
-      expect(await rootProvider.exists(directory)).toBe(true);
+      expect(await rootProvider.exists(directory)).toBe(false);
     });
 
     it.each([
@@ -720,7 +721,11 @@ describe('WorkspaceFileService', () => {
     });
 
     it.each([
-      { name: 'an absent directory', fixture: 'absent', expected: { status: 'absent' } },
+      {
+        name: 'an absent directory',
+        fixture: 'absent',
+        expected: { status: 'absent', remaining: [], absence: 'absent' },
+      },
       {
         name: 'a foreign manifest',
         fixture: 'foreign',
@@ -736,6 +741,10 @@ describe('WorkspaceFileService', () => {
       context.eventBus.subscribe((event) => events.push(event));
       if (fixture !== 'absent') {
         await deleteProvider.mkdir(directory, { recursive: true });
+      }
+      if (fixture === 'unidentifiable') {
+        /* Holding something besides an identity record, a manifest-less directory is not provably the id's. */
+        await deleteProvider.writeFile(`${directory}/notes.txt`, encoder.encode('keep'));
       }
       if (fixture === 'foreign') {
         await deleteProvider.writeFile(
@@ -789,7 +798,7 @@ describe('WorkspaceFileService', () => {
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
       expect(await rootProvider.exists(directory)).toBe(false);
     });
 
@@ -806,7 +815,9 @@ describe('WorkspaceFileService', () => {
       expect(await rootProvider.readFile(ambiguousPath, 'utf8')).toBe('foreign marker casing');
     });
 
-    it('restores the exact manifest bytes when final directory removal fails', async () => {
+    /* Fast-path FW3 review M2: a failed removal puts the identity back and never the manifest, so a gutted directory
+     * never looks whole again; the replay finishes it from the identity record. */
+    it('restores the identity record, not the manifest, when final directory removal fails', async () => {
       await writePhysicalProject();
       const manifestPath = `${directory}/tau.json`;
       const manifest = await rootProvider.readFile(manifestPath);
@@ -823,14 +834,15 @@ describe('WorkspaceFileService', () => {
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
       ).rejects.toThrow('final directory removal failed');
-      expect(await rootProvider.readFile(manifestPath)).toEqual(manifest);
+      expect(await rootProvider.exists(manifestPath)).toBe(false);
+      expect(manifest.byteLength).toBeGreaterThan(0);
       expect(
         parseProjectIdentityBytes(await rootProvider.readFile(`${directory}/${projectIdentityPath}`)).projectId,
       ).toBe(projectId);
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
     });
 
     it('holds both the logical project lock and exact physical-directory lock', async () => {
@@ -880,7 +892,16 @@ describe('WorkspaceFileService', () => {
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: 'other-copy', scope }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({
+        status: 'deleted',
+        remaining: [
+          {
+            backend: 'indexeddb',
+            storageRootKey: providerRegistry.resolveStorageRootKey(scope),
+            relativeDirectory: 'bound-copy',
+          },
+        ],
+      });
       expect(await rootProvider.exists('other-copy')).toBe(false);
       await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).resolves.toBe(
         "export const copy = 'bound-copy';",
@@ -888,7 +909,7 @@ describe('WorkspaceFileService', () => {
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: 'bound-copy', scope }),
-      ).resolves.toEqual({ status: 'deleted' });
+      ).resolves.toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
       await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).rejects.toThrow();
     });
   });

@@ -1077,9 +1077,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * Settles once the project's `revision` stream knows its tail (D13, W5b a1b).
    * The open pull waits for it: the pull and the tail read are two reads of the
    * remote, and a push between them would be in neither. Tail first, so a push
-   * after it is an entry and a push before it is in the pull.
+   * after it is an entry and a push before it is in the pull. A pull that stops
+   * waiting at its bound says so (`outwaited`), and the tail that settles after
+   * it pulls once more: the push between the two reads is then in that pull.
    */
-  let streamTail: Promise<void> | undefined;
+  let streamTail: Readonly<{ known: Promise<void>; outwaited: () => void }> | undefined;
   let lastReading = 0;
   /* Monotonic per process: a bounded `log` walk stops on committer time, so a
    * clock that went backwards would truncate a history (W3a review R39). */
@@ -7114,20 +7116,26 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           /* ponytail: a stream that never answers holds the pull at most this long; the gap reopens only then.
            * A stopped pull stops waiting at once (RV-W5b F9): a close waits on `settled()`. */
           let bound: ReturnType<typeof setTimeout> | undefined;
-          const stopped = Promise.withResolvers<void>();
+          const stopped = Promise.withResolvers<'stopped'>();
           const abandon = (): void => {
-            stopped.resolve();
+            stopped.resolve('stopped');
           };
           signal.addEventListener('abort', abandon, { once: true });
-          await Promise.race([
-            tail,
+          const waited = await Promise.race([
+            tail.known.then((): 'known' => 'known'),
             stopped.promise,
-            new Promise((resolve) => {
-              bound = setTimeout(resolve, streamTailWaitMilliseconds);
+            new Promise<'bound'>((resolve) => {
+              bound = setTimeout(() => {
+                resolve('bound');
+              }, streamTailWaitMilliseconds);
             }),
           ]);
           clearTimeout(bound);
           signal.removeEventListener('abort', abandon);
+          if (waited === 'bound') {
+            /* Reads before the tail does (a slow host or stream): the tail that settles later pulls again (D13). */
+            tail.outwaited();
+          }
         }
         await ensureStore();
         signal.throwIfAborted();
@@ -7678,7 +7686,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
          * `watch`, and a stream that refuses this credential must not become one
          * request per pull (F5). `unwatch` — a disconnect — ends it.
          */
-        type Session = { remote: string; stop: () => void; tailKnown: () => void; refused: boolean };
+        type Session = {
+          remote: string;
+          stop: () => void;
+          tailKnown: () => void;
+          refused: boolean;
+          /* An open pull stopped waiting for this session's tail and read the remote before it. */
+          outwaited: boolean;
+        };
         let session: Session | undefined;
         const unwatch = (): void => {
           session?.stop();
@@ -7700,17 +7715,34 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (options.remoteMoves === undefined || remoteKindOf(remote) !== 'tau') {
             return;
           }
-          const current: Session = { remote, stop: () => undefined, tailKnown: () => undefined, refused: false };
+          const current: Session = {
+            remote,
+            stop: () => undefined,
+            tailKnown: () => undefined,
+            refused: false,
+            outwaited: false,
+          };
           session = current;
-          streamTail = new Promise<void>((resolve) => {
-            current.tailKnown = resolve;
-          });
+          streamTail = {
+            known: new Promise<void>((resolve) => {
+              current.tailKnown = resolve;
+            }),
+            outwaited: () => {
+              current.outwaited = true;
+            },
+          };
           const live = (): boolean => session === current && !current.refused;
           current.stop = options.remoteMoves(
             { projectId: input.projectId },
             {
               watching: () => {
                 current.tailKnown();
+                /* The open pull read the remote before this tail did, so a push between the two reads is in
+                 * neither: pull again, once (D13). */
+                if (current.outwaited && live()) {
+                  current.outwaited = false;
+                  sendBack({ type: 'remoteMoved', generation: 0, refs: [] });
+                }
               },
               moved: (move) => {
                 if (!live()) {

@@ -71,7 +71,7 @@ describe('defineNativeKernelDeployment', () => {
     });
     expect(deployment).not.toHaveProperty('seal');
     expect(deployment.optionsSchema.parse(deployment.optionsFromClosure(closure))).toEqual({
-      executable: '/store/closures/sha256/abc/bin/worker',
+      executable: join('/store/closures/sha256/abc', 'bin', 'worker'),
       runtimePath: '/store/closures/sha256/abc',
     });
     expectTypeOf(deployment).toEqualTypeOf<

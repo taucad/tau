@@ -4,6 +4,7 @@ import type { DockviewApi } from 'dockview-react';
 import { LayoutPriority } from 'allotment';
 import type { AllotmentHandle } from 'allotment';
 import { Allotment } from '#components/panes/allotment.js';
+import { DockviewStyles } from '#components/panes/dockview-styles.js';
 import { useSelector } from '@xstate/react';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
@@ -143,13 +144,14 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
       ?.focus();
   }, [areLanesLaidOut]);
 
-  /* Allotment sizes the panes it adds at their preferred widths before it applies `visible`, so a
-   * hidden workbench still takes its width on the first layout and squeezes the chat lane to its
-   * minimum (280 px rather than 320 px at a 1056 px workspace). Once that first layout lands, the chat
-   * lane gets its preferred width back from the viewer, in the same commit that reveals the panes. */
+  /* Allotment sizes the panes it adds at their preferred widths before it applies `visible`, so a hidden lane still
+   * takes its width on the first layout and squeezes a shown one toward its minimum: the chat lane to 280 px rather
+   * than 320 px at a 1056 px workspace, and a compact workspace's Workbench lane below its 420 px. Once that first
+   * layout lands, each shown lane gets its preferred width back from the viewer, in the same commit that reveals the
+   * panes, so the live lanes land on the workspace frame's boxes. */
   const lanesRef = useRef<AllotmentHandle>(null);
   useLayoutEffect(() => {
-    if (!areLanesLaidOut || !chatVisible) {
+    if (!areLanesLaidOut) {
       return;
     }
     const views = containerRef.current?.querySelector('.split-view-container')?.children;
@@ -158,10 +160,12 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     }
     const sizes = Array.from(views, (view) => view.getBoundingClientRect().width);
     const [chat = 0, viewer = 0, workbench = 0] = sizes;
-    const missing = desktopLayout.chatWidth - chat;
+    const chatTarget = chatVisible ? Math.max(chat, desktopLayout.chatWidth) : chat;
+    const workbenchTarget = workbenchVisible ? Math.max(workbench, desktopLayout.workbenchWidth) : workbench;
+    const missing = chatTarget - chat + (workbenchTarget - workbench);
     const viewerMinimum = isTight ? panelMinSizeViewerTight : panelMinSizeViewer;
     if (missing > 0 && viewer - missing >= viewerMinimum) {
-      lanesRef.current?.resize([desktopLayout.chatWidth, viewer - missing, workbench]);
+      lanesRef.current?.resize([chatTarget, viewer - missing, workbenchTarget]);
     }
     // Only the first layout: later widths are the person's own, and persisted on drag end.
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- runs once, when the lanes first lay out
@@ -204,6 +208,11 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
 
   return (
     <ChatContextInsertionProvider>
+      {/* The docks' stylesheet, loaded with the layout: a sheet with a precedence holds its nearest boundary until it
+          loads. Each dock renders it too, inside its lane, where that boundary is the split view's per-pane one and its
+          fallback a spinner in place of the lane (Progressive Loading Policy rule 15). Here it holds this layout's
+          boundary instead, whose fallback draws nothing, so the frame's lanes stay until the docks can draw. */}
+      <DockviewStyles />
       <WorkspaceLanesContext.Provider value={lanes}>
         <div
           ref={containerRef}

@@ -418,6 +418,34 @@ describe('hooks resolution rules', () => {
     expect(result.current.text).toBe('hello world');
   });
 
+  it('useDraftSelector re-renders a reader only when the value it selects changes', () => {
+    let renders = 0;
+    const { result } = renderHook(
+      () => {
+        renders += 1;
+        return {
+          actions: useDraftActions(),
+          attachments: useDraftSelector((s) => s.draftAttachments),
+          pending: useDraftSelector((s) => s.pendingMain),
+        };
+      },
+      { wrapper: createComposerWrapper() },
+    );
+    const before = renders;
+    const { attachments, pending } = result.current;
+
+    act(() => {
+      result.current.actions.setDraftText('h');
+    });
+    act(() => {
+      result.current.actions.setDraftText('he');
+    });
+
+    expect(renders).toBe(before);
+    expect(result.current.attachments).toBe(attachments);
+    expect(result.current.pending).toBe(pending);
+  });
+
   it('useChatActions throws when used outside an ActiveChatProvider (composer-only subtree)', () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(() => renderHook(() => useChatActions(), { wrapper: createComposerWrapper() })).toThrow(

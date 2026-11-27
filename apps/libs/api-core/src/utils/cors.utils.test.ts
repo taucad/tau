@@ -15,12 +15,14 @@ it('should expose the durable chat run identity and bearer session token to cros
   expect(corsBaseConfiguration.exposedHeaders).toEqual([
     'x-tau-chat-run-id',
     'x-tau-operation-id',
+    'x-tau-accept-encoding',
     'set-auth-token',
     'retry-after',
     'request-id',
     'x-tau-commit',
   ]);
   expect(corsBaseConfiguration.allowedHeaders).toContain('x-tau-attempt-id');
+  expect(corsBaseConfiguration.allowedHeaders).toContain('content-encoding');
 });
 
 /* SB13: the browser tags the error a failed call raises with this id, which the API's own Sentry event carries as

@@ -29,7 +29,7 @@ import type {
   RevisionUserActor,
   RevisionVia,
 } from '#revision-authority.js';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import { encodeCommit, parseChangeId } from '#git-objects.js';
 import type { GitSignature } from '#git-objects.js';
@@ -216,7 +216,10 @@ describe('the conformance table', () => {
 });
 
 const conformance = (adapter: Adapter): void => {
-  describe.runIf(adapter.enabled)(`RevisionPort conformance — ${adapter.name}`, () => {
+  /* One store per adapter, built once: each case reads the tags, refs and
+   * checkouts the cases before it left, so the suite runs in source order even
+   * under `--sequence.shuffle` (burn-in on tau#2909). */
+  describe.runIf(adapter.enabled)(`RevisionPort conformance — ${adapter.name}`, { shuffle: false }, () => {
     let harness: Harness;
     let port: RevisionPort;
     let base: RevisionId;
@@ -246,6 +249,41 @@ const conformance = (adapter: Adapter): void => {
       await harness.dispose();
     });
 
+    /**
+     * A store of its own holding the suite's two revisions, for a row that
+     * reads store-wide state — the versions, or HEAD — other rows also move,
+     * so it holds in whatever order the rows run.
+     *
+     * @param body - The row, over its own store.
+     * @returns Once the row has run and its store is disposed.
+     */
+    const onItsOwnStore = async (
+      body: (
+        own: Readonly<{ port: RevisionPort; harness: Harness; base: RevisionId; child: RevisionId }>,
+      ) => Promise<void>,
+    ): Promise<void> => {
+      const own = await adapter.create();
+      try {
+        await own.port.init({ author });
+        const first = await own.port.writeRevision({
+          parents: [],
+          tree: tree({ 'a.txt': 'a\n', 'nested/b.txt': 'b\n' }),
+          provenance: provenance('user'),
+          summary: summary('Base revision'),
+        });
+        const ownBase = revisionId(first.commitId);
+        const second = await own.port.writeRevision({
+          parents: [ownBase],
+          tree: tree({ 'a.txt': 'a2\n', 'c.txt': 'c\n' }),
+          provenance: provenance('agent'),
+          summary: summary('Child revision'),
+        });
+        await body({ port: own.port, harness: own, base: ownBase, child: revisionId(second.commitId) });
+      } finally {
+        await own.dispose();
+      }
+    };
+
     it('describes a recorded object format, change ids, conflict handling and checkouts', async () => {
       const descriptor = await port.describe();
       expect(descriptor.engine).toBe(adapter.name);
@@ -257,12 +295,9 @@ const conformance = (adapter: Adapter): void => {
 
     it('generates the ignore file', async () => {
       const ignore = await harness.readGenerated(generatedIgnorePath);
-      expect(ignore).toContain('/.tau/cache/');
-      /* Unanchored and without a trailing slash: the control plane is excluded
-       * at any depth, as a directory or as a worktree pointer file (PP5, G0-8).
-       * The block's exact content is `workspace-config.test.ts`'s pin; this one
+      /* The block's exact content is `workspace-config.test.ts`'s pin; this one
        * is that the port wrote it. */
-      expect(ignore).toContain('**/.git');
+      expect(ignore).toContain('/.tau/*');
       expect(ignore).toContain('node_modules/');
     });
 
@@ -403,71 +438,77 @@ const conformance = (adapter: Adapter): void => {
      * number, the entry, the time and who made it.
      */
     it('round-trips a version named with spaces, and renames it at the same ref', async () => {
-      const actor = { kind: 'user', id: 'user-lane', name: 'Lane Person' } as const;
-      const created = await port.tag({
-        name: 'Ready for print',
-        revisionId: child,
-        note: 'First cut of the bracket',
-        actor,
-        createdAt,
+      await onItsOwnStore(async ({ port, base, child }) => {
+        const actor = { kind: 'user', id: 'user-lane', name: 'Lane Person' } as const;
+        const created = await port.tag({
+          name: 'Ready for print',
+          revisionId: child,
+          note: 'First cut of the bracket',
+          actor,
+          createdAt,
+        });
+
+        expect(created.id).toMatch(/^[\da-f]{32}$/u);
+        expect(created).toStrictEqual({
+          /* A fresh id, which a rename keeps (R1). */
+          id: created.id,
+          /* The first version after Start is V2 (B6). */
+          number: 2,
+          name: 'Ready for print',
+          revisionId: child,
+          note: 'First cut of the bracket',
+          actor,
+          createdAt,
+        });
+        expect(await port.listTags()).toStrictEqual([created]);
+        const before = await port.listRefs('refs/tags');
+        expect(before.map((ref) => ref.name)).toStrictEqual(['refs/tags/v2']);
+
+        const renamed = await port.tag({ number: 2, name: 'Final fit', revisionId: child });
+        expect(renamed).toStrictEqual({ ...created, name: 'Final fit' });
+        expect(await port.listTags()).toStrictEqual([renamed]);
+        const after = await port.listRefs('refs/tags');
+        expect(after.map((ref) => ref.name)).toStrictEqual(['refs/tags/v2']);
+        expect(after[0]?.head).not.toBe(before[0]?.head);
+        const named = await port.readRevision(child);
+        expect(named?.id).toBe(child);
+
+        /* A version never moves to another entry (Q13). */
+        await expect(port.tag({ number: 2, name: 'Moved', revisionId: base })).rejects.toMatchObject({
+          code: 'UNSUPPORTED_OPERATION',
+        });
+        /* The next version takes the next number. */
+        const next = await port.tag({ name: 'Ready for print', revisionId: base, createdAt });
+        expect(next.number).toBe(3);
+
+        /* Renumbering's own primitive: the tag for one number goes, twice is the outcome asked for. */
+        await port.deleteTag(3);
+        await port.deleteTag(2);
+        expect(await port.listTags()).toStrictEqual([]);
+        await expect(port.deleteTag(2)).resolves.toBeUndefined();
       });
-
-      expect(created.id).toMatch(/^[\da-f]{32}$/u);
-      expect(created).toStrictEqual({
-        /* A fresh id, which a rename keeps (R1). */
-        id: created.id,
-        /* The first version after Start is V2 (B6). */
-        number: 2,
-        name: 'Ready for print',
-        revisionId: child,
-        note: 'First cut of the bracket',
-        actor,
-        createdAt,
-      });
-      expect(await port.listTags()).toStrictEqual([created]);
-      const before = await port.listRefs('refs/tags');
-      expect(before.map((ref) => ref.name)).toStrictEqual(['refs/tags/v2']);
-
-      const renamed = await port.tag({ number: 2, name: 'Final fit', revisionId: child });
-      expect(renamed).toStrictEqual({ ...created, name: 'Final fit' });
-      expect(await port.listTags()).toStrictEqual([renamed]);
-      const after = await port.listRefs('refs/tags');
-      expect(after.map((ref) => ref.name)).toStrictEqual(['refs/tags/v2']);
-      expect(after[0]?.head).not.toBe(before[0]?.head);
-      const named = await port.readRevision(child);
-      expect(named?.id).toBe(child);
-
-      /* A version never moves to another entry (Q13). */
-      await expect(port.tag({ number: 2, name: 'Moved', revisionId: base })).rejects.toMatchObject({
-        code: 'UNSUPPORTED_OPERATION',
-      });
-      /* The next version takes the next number. */
-      const next = await port.tag({ name: 'Ready for print', revisionId: base, createdAt });
-      expect(next.number).toBe(3);
-
-      /* Renumbering's own primitive: the tag for one number goes, twice is the outcome asked for. */
-      await port.deleteTag(3);
-      await port.deleteTag(2);
-      expect(await port.listTags()).toStrictEqual([]);
-      await expect(port.deleteTag(2)).resolves.toBeUndefined();
     }, 180_000);
 
     it('never replaces or numbers over a tag that is not a version, and refuses a bad name or number first (R2, R10)', async () => {
-      /* A lightweight v4: not a version, but it holds its number. */
-      await port.updateRef({ name: 'refs/tags/v4', expectedHead: undefined, head: base });
-      expect(await port.listTags()).toStrictEqual([]);
-      const created = await port.tag({ name: 'Lid', revisionId: child });
-      expect(created.number).toBe(5);
-      await expect(port.tag({ number: 4, name: 'Lid', revisionId: base })).rejects.toMatchObject({
-        code: 'UNSUPPORTED_OPERATION',
+      await onItsOwnStore(async ({ port, base, child }) => {
+        /* A lightweight v4: not a version, but it holds its number. */
+        await port.updateRef({ name: 'refs/tags/v4', expectedHead: undefined, head: base });
+        expect(await port.listTags()).toStrictEqual([]);
+        const created = await port.tag({ name: 'Lid', revisionId: child });
+        expect(created.number).toBe(5);
+        await expect(port.tag({ number: 4, name: 'Lid', revisionId: base })).rejects.toMatchObject({
+          code: 'UNSUPPORTED_OPERATION',
+        });
+        await expect(port.tag({ name: '', revisionId: child })).rejects.toMatchObject({
+          code: 'UNSUPPORTED_OPERATION',
+        });
+        await expect(port.tag({ number: 1, name: 'Start', revisionId: child })).rejects.toMatchObject({
+          code: 'UNSUPPORTED_OPERATION',
+        });
+        const tagReferences = await port.listRefs('refs/tags');
+        expect(tagReferences.map((ref) => ref.name)).toStrictEqual(['refs/tags/v4', 'refs/tags/v5']);
+        expect(await port.readRef('refs/tags/v4')).toBe(base);
       });
-      await expect(port.tag({ name: '', revisionId: child })).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
-      await expect(port.tag({ number: 1, name: 'Start', revisionId: child })).rejects.toMatchObject({
-        code: 'UNSUPPORTED_OPERATION',
-      });
-      const tagReferences = await port.listRefs('refs/tags');
-      expect(tagReferences.map((ref) => ref.name)).toStrictEqual(['refs/tags/v4', 'refs/tags/v5']);
-      expect(await port.readRef('refs/tags/v4')).toBe(base);
     }, 180_000);
 
     it('gives versions made at once their own numbers: choosing and claiming are one step (R3)', async () => {
@@ -862,22 +903,24 @@ const conformance = (adapter: Adapter): void => {
     }, 180_000);
 
     it('tracks the live tree on a branch, and a reopened store reads the same head', async () => {
-      // The product's other branch shape carries a slash (c2-review N4).
-      const name = 'agent/tau-conformance-head';
-      /* `init` leaves HEAD symbolic on an unborn `main`, exactly as `git init`
-       * does — the head is a name, and the branch behind it need not exist. */
-      expect(await port.readHead()).toEqual({ branch: 'main', head: undefined });
-      // Symbolic: the head is set before the branch is born, and follows it.
-      await port.setHead(name);
-      expect(await port.readHead()).toEqual({ branch: name, head: undefined });
-      await port.updateRef({ name, expectedHead: undefined, head: base });
-      expect(await port.readHead()).toEqual({ branch: name, head: base });
-      /* The next process opening this project reads the same head, and moving
-       * it there — what a checkout does — is what this one then reads. */
-      const reopened = harness.reopen();
-      expect(await reopened.readHead()).toEqual({ branch: name, head: base });
-      await reopened.setHead('main');
-      expect(await port.readHead()).toEqual({ branch: 'main', head: undefined });
+      await onItsOwnStore(async ({ port, harness, base }) => {
+        // The product's other branch shape carries a slash (c2-review N4).
+        const name = 'agent/tau-conformance-head';
+        /* `init` leaves HEAD symbolic on an unborn `main`, exactly as `git init`
+         * does — the head is a name, and the branch behind it need not exist. */
+        expect(await port.readHead()).toEqual({ branch: 'main', head: undefined });
+        // Symbolic: the head is set before the branch is born, and follows it.
+        await port.setHead(name);
+        expect(await port.readHead()).toEqual({ branch: name, head: undefined });
+        await port.updateRef({ name, expectedHead: undefined, head: base });
+        expect(await port.readHead()).toEqual({ branch: name, head: base });
+        /* The next process opening this project reads the same head, and moving
+         * it there — what a checkout does — is what this one then reads. */
+        const reopened = harness.reopen();
+        expect(await reopened.readHead()).toEqual({ branch: name, head: base });
+        await reopened.setHead('main');
+        expect(await port.readHead()).toEqual({ branch: 'main', head: undefined });
+      });
     }, 180_000);
 
     it('never shows a head between two concurrent moves (c2-review S2)', async () => {
@@ -1572,14 +1615,16 @@ describe.runIf(gitToolchainOnPath)('native-git store isolation (review 4 R2)', (
  */
 describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture', () => {
   for (const adapter of adapters) {
-    describe.runIf(adapter.enabled)(adapter.name, () => {
+    /* One remote fixture per adapter, whose refs each case moves: source order, as above. */
+    describe.runIf(adapter.enabled)(adapter.name, { shuffle: false }, () => {
       let harness: Harness;
       let port: RevisionPort;
       let fixture: Awaited<ReturnType<typeof startGitHttpBackend>>;
       let root: string;
       let head: RevisionId;
 
-      beforeAll(async () => {
+      /* Each row has its own store and its own remote, so it holds in whatever order the rows run. */
+      beforeEach(async () => {
         harness = await adapter.create();
         port = harness.withTransport();
         root = await mkdtemp(join(tmpdir(), 'tau-revisions-remote-'));
@@ -1597,11 +1642,21 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         await port.setRemote({ name: 'tau', url: fixture.url });
       }, 180_000);
 
-      afterAll(async () => {
+      afterEach(async () => {
         await fixture.close();
         await harness.dispose();
         await rm(root, { force: true, recursive: true });
       });
+
+      /** Puts `main`, a kept chat record and version 2 on the remote, as a first push does. */
+      const publish = async (): Promise<void> => {
+        await harness.writeRawRef('refs/tau/chats/kept', head);
+        const published = await port.push({
+          remote: 'tau',
+          refs: [{ name: 'refs/tau/chats/kept' }, { name: 'refs/tags/v2' }, { name: 'refs/heads/main' }],
+        });
+        expect(published.refs.map((entry) => entry.status)).toStrictEqual(['updated', 'updated', 'updated']);
+      };
 
       it('records the remote in git’s own remotes list', async () => {
         expect(await port.listRemotes()).toStrictEqual([{ name: 'tau', url: fixture.url, kind: 'tau' }]);
@@ -1652,6 +1707,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       }, 180_000);
 
       it('reads an address not recorded yet, under the name it would have, and records nothing (R2)', async () => {
+        await publish();
         const advertised = await port.listRemoteRefs({ name: 'candidate', url: fixture.url });
 
         expect(advertised.find((entry) => entry.name === 'refs/heads/main')?.head).toBe(head);
@@ -1659,6 +1715,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       }, 180_000);
 
       it('lists the remote’s refs and re-offers an unchanged one as up to date', async () => {
+        await publish();
         const advertised = await port.listRemoteRefs('tau');
 
         expect(advertised.find((entry) => entry.name === 'refs/heads/main')?.head).toBe(head);
@@ -1667,6 +1724,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       }, 180_000);
 
       it('fetches into refs/remotes/<remote>/* and leaves every branch where it was', async () => {
+        await publish();
         const second = await adapter.create();
         try {
           const reader = second.withTransport();
@@ -1689,6 +1747,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       }, 180_000);
 
       it('enforces a browser fetch ceiling and refuses native budgets before remote contact', async () => {
+        await publish();
         const second = await adapter.create();
         try {
           const reader = second.withTransport();
@@ -1723,6 +1782,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       it.runIf(adapter.name === 'isomorphic-git')(
         'fetches every wanted ref in one upload-pack, and sends none when nothing is new',
         async () => {
+          await publish();
           const second = await adapter.create();
           const requests = (from: number, to?: number): string[] =>
             fixture
@@ -1756,9 +1816,10 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
         180_000,
       );
 
-      /* The lease, on both legs (A32, S24, D14 `push(expected)`). It runs last
-       * because the held half deliberately moves the remote's `main`. */
+      /* The lease, on both legs (A32, S24, D14 `push(expected)`). The held half
+       * deliberately moves the remote's `main`. */
       it('refuses a stale lease without touching the remote ref, and takes a held one', async () => {
+        await publish();
         const receipt = await port.writeRevision({
           parents: [head],
           tree: tree({ 'a.txt': 'b\n' }),
@@ -1793,6 +1854,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
        * the remote as an update of `refs/tags/v2` under the lease on what the
        * remote holds there; without the lease it is a tag that already exists. */
       it('pushes a renamed version to the same ref under its lease, never unleased', async () => {
+        await publish();
         await port.push({ remote: 'tau', refs: [{ name: 'refs/tags/v2' }] });
         const pushed = await fixture.git(['rev-parse', 'refs/tags/v2']);
         await port.tag({ number: 2, name: 'Ready for print', revisionId: head });
@@ -1814,6 +1876,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
        * per push, whatever the ref count — every extra request is a whole
        * lease hydrate on the Tau API. Counted off the server's own trail. */
       it('makes one advertisement and one receive-pack for a three-ref push', async () => {
+        await publish();
         const names = ['refs/heads/w13-a', 'refs/heads/w13-b', 'refs/tau/chats/w13'] as const;
         const advance = async (parent: RevisionId | undefined, body: string): Promise<RevisionId> => {
           const receipt = await port.writeRevision({
@@ -1868,6 +1931,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
       /* R6: a fetch handed the listing it follows reuses that advertisement on
        * the browser leg; any other value is ignored and the port asks again. */
       it('fetches against the listing it is handed, with no second advertisement', async () => {
+        await publish();
         const name = 'refs/heads/r6-shared';
         const receipt = await port.writeRevision({
           parents: [head],
@@ -1900,6 +1964,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
        * the disk leg: one stale lease refuses every ref, and a rewind without a
        * lease is refused per ref, before anything is sent. */
       it('refuses an atomic set whole on one stale lease, and a rewind without a lease', async () => {
+        await publish();
         const mint = async (parents: RevisionId[], body: string): Promise<RevisionId> => {
           const receipt = await port.writeRevision({
             parents,
@@ -1941,6 +2006,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
 
       /* B3 (O5 inverted): a commit Tau did not write reads as its own git author, with no identity standing in. */
       it('reads a commit Tau did not record as its git author', async () => {
+        await publish();
         const cwd = fixture.repositoryPath;
         const env = {
           ...process.env,
@@ -1983,6 +2049,7 @@ describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture
 
       /* A commit made with stock git under the identity Tau gives a person names that person's account. */
       it('reads a commit made with git under a Tau no-reply address as that account', async () => {
+        await publish();
         const cwd = fixture.repositoryPath;
         const address = 'usr_git@users.noreply.tau.new';
         const env = {

@@ -41,7 +41,8 @@ on its own (formal verification policy § 6). A project with a TLA+ spec at `spe
 `formal:nightly:check` is cached: its configs and Apalache commands read no seed, so its inputs (the
 specs, the project's `src/**/*.json`, the runner, the lock, `run-seconds.json` and the toolchain id)
 decide the verdict. `formal-nightly.yml` runs it as four `--shard` jobs, each with the runner's two
-JVMs; `run-seconds.json` holds each run's measured seconds (agent-host's from CI job 134332529778),
+JVMs; `run-seconds.json` holds each run's measured seconds (agent-host's from CI job 134332529778,
+api-billing's from CI job 140275188452, with `target-three-attempts` at its 900 s watchdog so it holds a shard alone),
 and a run it does not list weighs its `defaultSeconds`. Re-measure it when a long config is added.
 
 ## Library

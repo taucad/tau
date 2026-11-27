@@ -2954,7 +2954,7 @@ describe('authentication, initialize and prompt content', () => {
       systemPrompt: 'You are Tau. The kernel is OpenSCAD.',
       contextPayload: {
         skills: [{ name: 'brep-design', description: 'Design manufacture-ready parts.' }],
-        memory: { '.tau/AGENTS.md': 'Keep all dimensions in millimetres.' },
+        memory: { 'AGENTS.md': 'Keep all dimensions in millimetres.' },
       },
       snapshot: {
         files: ['main.scad'],
@@ -3072,7 +3072,7 @@ describe('authentication, initialize and prompt content', () => {
       chatId: 'chat-text-context',
       runId: 'run-text-context',
       text: 'noask',
-      config: { contextPayload: { memory: { '.tau/AGENTS.md': 'Prefer symmetric parts.' } } },
+      config: { contextPayload: { memory: { 'AGENTS.md': 'Prefer symmetric parts.' } } },
     });
 
     const [prompt] = promptFrames(harness.frames);

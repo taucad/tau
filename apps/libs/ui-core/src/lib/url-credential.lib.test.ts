@@ -30,9 +30,16 @@ describe('redactUrlCredentials', () => {
       '/auth/verify-email?callbackURL=%2F&token=[redacted]#done',
     );
     expect(redactUrlCredentials('/api/auth/callback/github?code=gho_1&state=s')).toBe(
-      '/api/auth/callback/github?code=[redacted]&state=s',
+      '/api/auth/callback/github?code=[redacted]&state=[redacted]',
     );
     expect(redactUrlCredentials('/auth/cli?user_code=ABCD-EFGH')).toBe('/auth/cli?user_code=[redacted]');
+  });
+
+  it("removes a Tau Desktop sign-in's signed request and state", () => {
+    expect(redactUrlCredentials('https://tau.new/auth/desktop?client_id=tau-desktop&state=s1A&exp=1&sig=AbC_-1')).toBe(
+      'https://tau.new/auth/desktop?client_id=tau-desktop&state=[redacted]&exp=1&sig=[redacted]',
+    );
+    expect(urlCarriesCredential('/auth/sign-in?client_id=tau-desktop&sig=AbC')).toBe(true);
   });
 
   it('removes a sign-in token whose parameter name is percent-encoded', () => {

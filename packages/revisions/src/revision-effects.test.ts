@@ -2248,11 +2248,25 @@ describe('restore, through the machine that owns it', () => {
           });
         }
       };
+      /*
+       * A check that throws arms its next step only after it has released what it held, a real disk write, so the
+       * clock waits for that: moved on first, the step would be armed late (a retried pass on the Node 24 floor, CI
+       * run 45982997323). `before` is the timers waiting before the check started.
+       */
+      const rearmed = async (before: number): Promise<void> => {
+        for (let turn = 0; turn < 200 && control.failReads > 0 && vi.getTimerCount() < before; turn += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- until the throwing check has armed its next step.
+          await settle();
+        }
+      };
       const advance = async (milliseconds: number): Promise<void> => {
         for (let elapsed = 0; elapsed < milliseconds; elapsed += 50) {
+          const waiting = vi.getTimerCount();
           vi.advanceTimersByTime(50);
           // oxlint-disable-next-line no-await-in-loop -- each step's checks finish before the next is due.
           await settle();
+          // oxlint-disable-next-line no-await-in-loop -- and a throwing one has armed its next step.
+          await rearmed(waiting);
         }
       };
       const press = async (): Promise<void> => {
@@ -2263,6 +2277,7 @@ describe('restore, through the machine that owns it', () => {
           await settle();
         }
         expect(control.failed).toBe(failed + 1);
+        await rearmed(1);
       };
       control.failReads = Number.POSITIVE_INFINITY;
       /* Three Try agains, 100 ms apart, each check throwing: each arms the first backoff step. */

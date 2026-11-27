@@ -19,15 +19,17 @@ import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { RevisionId } from '#algorithms/index.js';
 import { lfsObjectPath, lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
-import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { gitToolchainOnPath, removalRetries } from '#test/native-git-harness.js';
 import { generatedGitattributesContent, generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { recordedBy } from '#test/identity.js';
+import { shellWord, writeShellExecutable } from '#test/script-executable.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+  /* Windows can hold a just-exited Git's files for a moment (`ENOTEMPTY` under `.git/refs`). */
+  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true, ...removalRetries })));
 });
 
 const git = (cwd: string, args: readonly string[]): string =>
@@ -395,6 +397,99 @@ describe.runIf(gitToolchainOnPath)('a store this port creates', () => {
     expect(git(root, ['status', '--porcelain', '--untracked-files=all'])).toBe(`?? ${generatedIgnorePath}`);
   });
 
+  /* `git lfs install --local --skip-repo` is one git-lfs process and the eight to thirteen Git processes it starts,
+   * which on a host where a process takes seconds is a store's whole open (L4 run 44058328613). A `git` that logs
+   * each subcommand, the first argument that is neither an option nor an option's value, then runs the real one. */
+  const countingGit = async (
+    root: string,
+  ): Promise<Readonly<{ executable: string; verbs: () => Promise<string[]> }>> => {
+    const log = join(root, 'commands.log');
+    const executable = await writeShellExecutable(join(root, 'git-counting'), [
+      'verb=',
+      'skip=0',
+      'for argument in "$@"; do',
+      '  if [ "$skip" = 1 ]; then skip=0; continue; fi',
+      '  case "$argument" in',
+      '    -C|-c) skip=1 ;;',
+      '    -*) ;;',
+      '    *) verb="$argument"; break ;;',
+      '  esac',
+      'done',
+      `echo "$verb" >> ${shellWord(log)}`,
+      'exec git "$@"',
+    ]);
+    return {
+      executable,
+      verbs: async () => {
+        const logged = await readFile(log, 'utf8').catch(() => '');
+        return logged.split('\n').filter((verb) => verb !== '');
+      },
+    };
+  };
+  /* Sorted: which order git-lfs writes them in differs between its versions, and Git reads them by name. */
+  const lfsKeys = (repository: string): string =>
+    git(repository, ['config', '--local', '--get-regexp', String.raw`^(lfs|filter\.lfs)\.`])
+      .split('\n')
+      .toSorted()
+      .join('\n');
+
+  it("writes git-lfs's own filter keys itself when the host found git-lfs, and starts no git-lfs to do it", async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-filters-'));
+    roots.push(root);
+    const reference = join(root, 'reference');
+    await mkdir(reference);
+    git(reference, ['init', '--quiet']);
+    git(reference, ['lfs', 'install', '--local', '--skip-repo']);
+    const project = join(root, 'project');
+    await mkdir(project);
+    const counting = await countingGit(root);
+    const port = createNativeGitRevisionPort({
+      repositoryPath: project,
+      gitExecutable: counting.executable,
+      gitLfsInstalled: async () => true,
+    });
+
+    await port.init({ author });
+
+    expect(await counting.verbs()).not.toContain('lfs');
+    expect(lfsKeys(project)).toBe(lfsKeys(reference));
+  });
+
+  it('reopens a store that holds the filters without starting git-lfs', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-filters-'));
+    roots.push(root);
+    const project = join(root, 'project');
+    await mkdir(project);
+    await createNativeGitRevisionPort({ repositoryPath: project }).init({ author });
+    const configured = lfsKeys(project);
+    const counting = await countingGit(root);
+
+    await createNativeGitRevisionPort({ repositoryPath: project, gitExecutable: counting.executable }).init({ author });
+
+    expect(configured).toContain('filter.lfs.process git-lfs filter-process');
+    expect(await counting.verbs()).not.toContain('lfs');
+    expect(lfsKeys(project)).toBe(configured);
+  });
+
+  it('leaves a filter somebody changed to git-lfs, which keeps their value', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-filters-'));
+    roots.push(root);
+    const project = join(root, 'project');
+    await mkdir(project);
+    await createNativeGitRevisionPort({ repositoryPath: project }).init({ author });
+    git(project, ['config', '--local', 'filter.lfs.required', 'false']);
+    const counting = await countingGit(root);
+
+    await createNativeGitRevisionPort({
+      repositoryPath: project,
+      gitExecutable: counting.executable,
+      gitLfsInstalled: async () => true,
+    }).init({ author });
+
+    expect(await counting.verbs()).toContain('lfs');
+    expect(git(project, ['config', '--local', 'filter.lfs.required'])).toBe('false');
+  });
+
   /* Git-lfs installs its four hooks under `core.hooksPath` whenever its filter runs, as a linked checkout over a
    * tracked large file does: into an empty directory it writes them and Git then runs them, under `/dev/null` on
    * Windows it planted `dev/null/*` in the project, and with the device path `\\.\NUL` a packaged Windows turn
@@ -405,7 +500,9 @@ describe.runIf(gitToolchainOnPath)('a store this port creates', () => {
     return paths.filter((path) => lfsHookNames.has(path.split(/[\\/]/u).at(-1) ?? '')).toSorted();
   };
   /** A store whose own hooks directory holds a hook that leaves `marker` behind if Git ever runs it. */
-  const storeWithLargeFile = async (): Promise<{
+  const storeWithLargeFile = async (
+    gitLfsInstalled?: () => Promise<boolean>,
+  ): Promise<{
     root: string;
     marker: string;
     port: ReturnType<typeof createNativeGitRevisionPort>;
@@ -419,6 +516,7 @@ describe.runIf(gitToolchainOnPath)('a store this port creates', () => {
     const port = createNativeGitRevisionPort({
       repositoryPath: project,
       checkouts: { projectId: 'hooks', directory: join(root, 'checkouts') },
+      ...(gitLfsInstalled === undefined ? {} : { gitLfsInstalled }),
     });
     await port.init({ author });
     await mkdir(join(project, '.git', 'hooks'), { recursive: true });
@@ -452,6 +550,17 @@ describe.runIf(gitToolchainOnPath)('a store this port creates', () => {
     const hooksFile = await lstat(join(root, 'project', '.git', 'tau-hooks-disabled'));
     expect(hooksFile.isFile()).toBe(true);
     expect(hooksFile.size).toBe(0);
+  });
+
+  it('gains no hook either when the filters are ones the port wrote itself', async () => {
+    const { root, marker, port, head } = await storeWithLargeFile(async () => true);
+
+    const linked = await port.addCheckout!({ branch: 'agent/one', from: head });
+
+    expect(readLfsPointer(new Uint8Array(await readFile(join(linked.root, 'scan.stl'))))).toBeDefined();
+    expect(await hookFilesUnder(join(root, 'checkouts'))).toStrictEqual([]);
+    expect(await hookFilesUnder(join(root, 'project'))).toStrictEqual([join('.git', 'hooks', 'post-checkout')]);
+    await expect(lstat(marker)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('replaces a hooks directory left at that path, which git-lfs would fill and Git would run', async () => {

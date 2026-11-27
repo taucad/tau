@@ -87,7 +87,9 @@ describe('message queue busy and enlarged text', () => {
       expect(box.right).toBeLessThanOrEqual(bounds.right);
     }
     if (sending) {
-      expect(screen.getByRole('status').textContent).toBe('Sending…');
+      // An automatic send shows its words without a live region: only the person's own Send now speaks.
+      expect(screen.getByText('Sending…')).toBeTruthy();
+      expect(screen.queryByRole('status')).toBeNull();
     }
     expect(getComputedStyle(screen.getByRole('button', { name: 'Send now' })).opacity).toBe('1');
   });

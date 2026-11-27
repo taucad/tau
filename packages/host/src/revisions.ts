@@ -555,6 +555,8 @@ export const createProjectRevisionPort = (
     tauCredential?: (() => TauApiCredential | undefined) | undefined;
     /** Exact third-party repository credential, held only for the next native Git spawn. */
     remoteCredential?: (() => NativeGitRemoteCredential | undefined) | undefined;
+    /** Whether the toolchain probe found git-lfs, so the port can write its filters without running it. */
+    gitLfsInstalled?: (() => Promise<boolean>) | undefined;
   }>,
 ): RevisionPort => {
   const { projectId } = options;
@@ -568,6 +570,7 @@ export const createProjectRevisionPort = (
     ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),
     ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
     ...(options.remoteCredential === undefined ? {} : { remoteCredential: options.remoteCredential }),
+    ...(options.gitLfsInstalled === undefined ? {} : { gitLfsInstalled: options.gitLfsInstalled }),
   });
 };
 
@@ -628,6 +631,24 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   let channelRemoteCredential: NativeGitRemoteCredential | undefined;
   let channelWriteCredential: NativeGitRemoteCredential | undefined;
   const toolchain = options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable };
+  /* The early named refusal, on every disk host rather than only in the CLI:
+   * a machine with no `git` records nothing, and a person who is told that
+   * when the project opens can fix it before the first turn. Probed once, and
+   * only for the port this host builds; the port reads the same answer before
+   * it writes git-lfs's filters itself rather than starting git-lfs.
+   *
+   * async-iife: bootstrap -- two version probes at open, answered once for the report and the port alike. */
+  const toolchainProbe =
+    options.port === undefined
+      ? (async (): Promise<Error | undefined> => {
+          try {
+            await requireRevisionToolchain(toolchain);
+            return undefined;
+          } catch (error) {
+            return error instanceof Error ? error : new Error(String(error));
+          }
+        })()
+      : undefined;
   const unobservedPort =
     options.port ??
     createProjectRevisionPort({
@@ -638,6 +659,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       ...(options.checkoutMutation === undefined ? {} : { checkoutMutation: options.checkoutMutation }),
       ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
       remoteCredential: () => channelWriteCredential ?? channelRemoteCredential ?? options.remoteCredential?.(),
+      gitLfsInstalled: async () => (await toolchainProbe) === undefined,
     });
   /* Every verb's engine failure, for the host's reporter: the only place a failed `git worktree add` is seen with
    * git's own words, since the checkout's refusal keeps the port's sentence alone. */
@@ -657,21 +679,17 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       listener(event);
     }
   };
-  if (options.port === undefined) {
-    /* The early named refusal, on every disk host rather than only in the CLI:
-     * a machine with no `git` records nothing, and a person who is told that
-     * when the project opens can fix it before the first turn. Reported once,
-     * as a fact about this machine — the turn itself still runs.
+  if (toolchainProbe !== undefined) {
+    /* Reported once, as a fact about this machine — the turn itself still runs.
      *
-     * async-iife: bootstrap -- two version probes at open; nothing waits on
-     * them, and a host that cannot record must still serve its files. */
+     * async-iife: bootstrap -- nothing waits on the report, and a host that
+     * cannot record must still serve its files. */
     void (async (): Promise<void> => {
-      try {
-        await requireRevisionToolchain(toolchain);
-      } catch (error) {
+      const error = await toolchainProbe;
+      if (error !== undefined) {
         options.events?.({
           type: 'revision.unavailable',
-          reason: error instanceof Error ? error.message : String(error),
+          reason: error.message,
           missing: error instanceof GitToolchainError ? error.missing : ['git', 'git-lfs'],
         });
       }

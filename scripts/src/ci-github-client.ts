@@ -5,6 +5,7 @@
  *
  * Only `node:` modules, so a workflow can run it from a sparse checkout without installing the workspace.
  */
+import process from 'node:process';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { splitWindow } from '#ci-queue-health.js';
@@ -16,6 +17,37 @@ const rateReserve = 50;
 export const retries = 6;
 /** The longest wait a `retry-after` header may ask for before the request is given up. */
 const maximumRetryAfterSeconds = 120;
+
+/**
+ * The workflow token's account. It wrote every flake marker before `tau-flake-bot` existed, and still writes them
+ * when the App's secrets are absent (the fallback path of `flake-ledger.yml`).
+ */
+export const workflowTokenLogin = 'github-actions[bot]';
+/** The `tau-flake-bot` App's account, unless the repository variable `FLAKE_BOT_LOGIN` names another. */
+export const defaultFlakeBotLogin = 'tau-flake-bot[bot]';
+/** An App's bot account: `<app-slug>[bot]`. A person's login cannot hold brackets, so no person matches it. */
+const botLogin = /^[a-z\d][a-z\d-]*\[bot\]$/iu;
+
+/**
+ * The accounts whose issue comments may carry the flake automation's markers: the flake bot (`FLAKE_BOT_LOGIN`, by
+ * default `tau-flake-bot[bot]`) and the workflow token's account. Any other author, another App's bot included, is
+ * ignored, so no comment can pose as the automation's record (taucad/tau#2878). A `FLAKE_BOT_LOGIN` that is not a bot
+ * login throws: it would admit a person.
+ */
+export const markerAuthors = (flakeBotLogin = process.env['FLAKE_BOT_LOGIN']): ReadonlySet<string> => {
+  const given = flakeBotLogin?.trim() ?? '';
+  const login = given === '' ? defaultFlakeBotLogin : given;
+  if (!botLogin.test(login)) {
+    throw new Error(`FLAKE_BOT_LOGIN must be an App's bot login (<app-slug>[bot]), not ${JSON.stringify(login)}`);
+  }
+  return new Set([login, workflowTokenLogin]);
+};
+
+/** Whether a comment's author may write the automation's markers; a deleted account has no `user`. */
+export const isMarkerAuthor = (
+  user: { readonly login?: string | undefined } | undefined,
+  authors: ReadonlySet<string>,
+): boolean => typeof user?.login === 'string' && authors.has(user.login);
 
 /** A GitHub API error with its status, so a caller can tell a missing ref (404) or a conflict (409, 422) apart. */
 export class GitHubError extends Error {

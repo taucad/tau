@@ -106,6 +106,45 @@ describe('installTauHeaderInjection', () => {
     return listener!;
   };
 
+  it('should name the bearer a refused request carried, not the current one, and only for a 401 (E12)', () => {
+    type Send = (
+      details: { id: number; url: string; requestHeaders: Record<string, string> },
+      callback: () => void,
+    ) => void;
+    let send: Send | undefined;
+    let completed: ((details: { id: number; statusCode: number }) => void) | undefined;
+    let failed: ((details: { id: number }) => void) | undefined;
+    const credential = { token: 'access-1' };
+    const onUnauthorized = vi.fn();
+    installTauHeaderInjection(
+      {
+        onBeforeSendHeaders: (_filter, installed) => {
+          send = installed as Send;
+        },
+        onCompleted: (_filter, installed) => {
+          completed = installed;
+        },
+        onErrorOccurred: (_filter, installed) => {
+          failed = installed;
+        },
+      },
+      { ...options, token: () => credential.token, onUnauthorized },
+    );
+
+    send!({ id: 1, url: 'http://localhost:4000/v1/projects', requestHeaders: {} }, vi.fn());
+    send!({ id: 2, url: 'http://localhost:4000/v1/projects', requestHeaders: {} }, vi.fn());
+    send!({ id: 3, url: 'http://localhost:4000/v1/projects', requestHeaders: {} }, vi.fn());
+    send!({ id: 4, url: 'https://example.com/', requestHeaders: {} }, vi.fn());
+    credential.token = 'access-2';
+    completed!({ id: 1, statusCode: 401 });
+    completed!({ id: 2, statusCode: 200 });
+    failed!({ id: 3 });
+    completed!({ id: 3, statusCode: 401 });
+    completed!({ id: 4, statusCode: 401 });
+
+    expect(onUnauthorized.mock.calls).toEqual([['access-1']]);
+  });
+
   it('should hold an authenticated request until the credential is read, and let others through at once (B32)', async () => {
     const ready = Promise.withResolvers<void>();
     const credential: { token?: string } = {};

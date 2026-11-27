@@ -18,6 +18,7 @@ const hoisted = vi.hoisted(() => {
     readonly setOpaqueSort: ReturnType<typeof vi.fn>;
     readonly init: ReturnType<typeof vi.fn>;
     readonly dispose: ReturnType<typeof vi.fn>;
+    readonly stopAnimation?: ReturnType<typeof vi.fn>;
     readonly options: unknown;
     readonly kind: 'webgl' | 'webgpu';
   };
@@ -51,6 +52,13 @@ vi.mock('three/webgpu', async (importOriginal) => {
     public backend: ThreeWebGpuModule.WebGPUBackend | { readonly isWebGLBackend: true; readonly gl: unknown } =
       new actual.WebGPUBackend();
     public readonly dispose = vi.fn();
+    // Three's internal loop and its bookkeeping, which `renderOnDemand` takes over on viewport and offscreen surfaces.
+    // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Three's own field holds `null` when stopped.
+    public readonly _animation = { _requestId: 1 as number | null, start: vi.fn(), stop: vi.fn() };
+    public readonly _nodes = { nodeFrame: { frameId: 0, update: vi.fn() } };
+    public readonly info = { autoReset: true, frame: 0, reset: vi.fn() };
+    public render = vi.fn();
+    public setAnimationLoop = vi.fn(async () => undefined);
     public get coordinateSystem() {
       return hoisted.nativeBackend ? actual.WebGPUCoordinateSystem : actual.WebGLCoordinateSystem;
     }
@@ -119,6 +127,7 @@ vi.mock('three/webgpu', async (importOriginal) => {
         setOpaqueSort: this.setOpaqueSort,
         init: this.init,
         dispose: this.dispose,
+        stopAnimation: this._animation.stop,
         options,
         kind: 'webgpu',
       });
@@ -176,22 +185,22 @@ describe('createRenderer', () => {
     hoisted.webGlContextUnavailable = false;
   });
 
-  // First in this file: no test before it has reported a canvas loss to the shared module.
   it('should fail a first frame that throws without a device loss as an ordinary start, keeping WebGPU on', async () => {
     const { createRenderer } = await import('#graphics/three/renderer.js');
-    const { probeWebGpuSupport, webGpuFallbackReason } = await import('#graphics/graphics-backend.js');
+    const { onWebGpuCanvasLoss } = await import('#graphics/graphics-backend.js');
+    // A listener rather than the page-wide answer, which another test in a shuffled order may already have set.
+    const canvasLoss = vi.fn();
+    const stopListening = onWebGpuCanvasLoss(canvasLoss);
     hoisted.presentationThrows = true;
-    const creation = createRenderer('viewport', 'webgpu', document.createElement('canvas'));
-    await expect(creation).rejects.toBeInstanceOf(WebGpuInitializationError);
-    await expect(creation).rejects.toThrow('could not present its first frame: Canvas texture unavailable');
-    expect(hoisted.createdRenderers[0]?.dispose).toHaveBeenCalledOnce();
-    expect(hoisted.destroyDevice).toHaveBeenCalledOnce();
-    expect(webGpuFallbackReason()).toBeUndefined();
-    Object.defineProperty(navigator, 'gpu', { configurable: true, value: { requestAdapter: async () => ({}) } });
     try {
-      expect(await probeWebGpuSupport()).toBe(true);
+      const creation = createRenderer('viewport', 'webgpu', document.createElement('canvas'));
+      await expect(creation).rejects.toBeInstanceOf(WebGpuInitializationError);
+      await expect(creation).rejects.toThrow('could not present its first frame: Canvas texture unavailable');
+      expect(hoisted.createdRenderers[0]?.dispose).toHaveBeenCalledOnce();
+      expect(hoisted.destroyDevice).toHaveBeenCalledOnce();
+      expect(canvasLoss).not.toHaveBeenCalled();
     } finally {
-      Reflect.deleteProperty(navigator, 'gpu');
+      stopListening();
     }
   });
 
@@ -270,6 +279,15 @@ describe('createRenderer', () => {
       samples: 0,
     });
     expect(hoisted.createdRenderers[0]?.setTransparentSort).not.toHaveBeenCalled();
+  });
+
+  it('should stop the per-vsync loop on viewport and offscreen node renderers and keep it on a showcase', async () => {
+    const { createRenderer } = await import('#graphics/three/renderer.js');
+    await createRenderer('viewport', 'webgpu', document.createElement('canvas'));
+    await createRenderer('offscreen', 'webgpu', document.createElement('canvas'));
+    await createRenderer('showcase', 'webgpu', document.createElement('canvas'));
+
+    expect(hoisted.createdRenderers.map((renderer) => renderer.stopAnimation?.mock.calls.length)).toEqual([1, 1, 0]);
   });
 
   it('should reject a node-WebGL fallback instead of labeling it WebGPU', async () => {

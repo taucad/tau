@@ -1,4 +1,5 @@
 /* oxlint-disable no-await-in-loop, max-lines, complexity -- financial mutations execute sequentially in one lock order */
+import { isBilledStop } from '#billable-stop-charge.js';
 import { turnStepTokenType } from '#turn-step-telemetry.js';
 import { spendBlockingFinancialCaseKinds } from '#billing-cash-reconciliation.service.js';
 import {
@@ -39,6 +40,7 @@ import { MetricsService } from '@taucad/api-observability/metrics';
 import { invocationEvidenceRecorderToken } from '@taucad/api-llm-gateway';
 import type { InvocationEvidenceRecorder } from '@taucad/api-llm-gateway';
 import type { ObservedSettlement } from '#observed-settlement.js';
+import type { PreviousSettledInput } from '#billable-model-invocation.types.js';
 import { BillingPolicyService, PolicyRouteUnavailableError } from '#billing-policy.service.js';
 import {
   billingFinancialCase,
@@ -179,6 +181,13 @@ const supplierRateSchema = z
   })
   .strict();
 const supplierRatesSchema = z.array(supplierRateSchema).min(1).max(128);
+const inputPrefixSchema = z
+  .object({
+    version: z.literal('input-prefix-v1'),
+    digest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    items: z.number().int().min(1).max(4096),
+  })
+  .strict();
 const invocationSchema = z
   .object({
     contractVersion: financialIdentitySchema,
@@ -214,6 +223,9 @@ const invocationSchema = z
       })
       .strict()
       .optional(),
+    /* WP-15 step 6: the conversation prefix this request offers the next step. Never priced. */
+    inputPrefix: inputPrefixSchema.optional(),
+    holdBasis: z.enum(['prefix', 'bytes', 'context', 'count']).optional(),
     // Matches the BILLING_INVOCATION_DEADLINE schema maximum (deploy-cut charter D15).
     executionTimeout: z.number().int().min(1).max(600_000),
   })
@@ -1154,6 +1166,61 @@ export class CreditLedgerService {
     });
   }
 
+  /**
+   * The chat's latest settled model step within the hour, with the prefix its request offered and every input token
+   * the supplier reported for it (chat performance WP-15 step 6, ruling O-6). It walks the account's usage index
+   * newest first, so it reads only the recent rows of one account. The match itself is the digest, so a wrong or
+   * forged chat hint can only find no match: the bound it earns is still that exact prefix's own reported count.
+   *
+   * @param input - The owner and the chat.
+   * @returns The step, or `undefined` when the chat has none this hour.
+   */
+  public async previousSettledInput(input: {
+    environment: BillingEnvironment;
+    authUserId: string;
+    chatHint: string;
+  }): Promise<PreviousSettledInput | undefined> {
+    const [row] = await this.databaseService.database
+      .select({
+        modelId: creditOperation.modelId,
+        providerId: creditOperation.providerId,
+        prefix: sql<unknown>`${creditOperation.invocation} -> 'inputPrefix'`,
+        inputTokens: creditOperation.inputTokens,
+      })
+      .from(creditOperation)
+      .innerJoin(
+        billingOwnerBinding,
+        and(
+          eq(billingOwnerBinding.accountId, creditOperation.accountId),
+          eq(billingOwnerBinding.environment, creditOperation.environment),
+        ),
+      )
+      .where(
+        and(
+          eq(billingOwnerBinding.environment, input.environment),
+          eq(billingOwnerBinding.authUserId, input.authUserId),
+          sql`${billingOwnerBinding.revokedAt} is null`,
+          eq(creditOperation.category, 'llm'),
+          sql`${creditOperation.terminalRevision} is not null`,
+          eq(creditOperation.customerState, 'settled'),
+          eq(creditOperation.chatHint, input.chatHint),
+          sql`${creditOperation.inputTokens} is not null`,
+          sql`${creditOperation.invocation} ? 'inputPrefix'`,
+          sql`${creditOperation.usageOccurredAt} > now() - interval '1 hour'`,
+        ),
+      )
+      .orderBy(desc(creditOperation.usageOccurredAt), desc(creditOperation.terminalRevision), desc(creditOperation.id))
+      .limit(1);
+    const prefix = inputPrefixSchema.safeParse(row?.prefix);
+    if (row === undefined) {
+      return undefined;
+    }
+    if (row.providerId === null || row.inputTokens === null || !prefix.success) {
+      return undefined;
+    }
+    return { modelId: row.modelId, providerId: row.providerId, prefix: prefix.data, inputTokens: row.inputTokens };
+  }
+
   /** Finds the authenticated attempt without creating a financial account. */
   public async getOperationForAttempt(input: {
     environment: BillingEnvironment;
@@ -1560,7 +1627,7 @@ export class CreditLedgerService {
       const customerState =
         input.evidence.kind === 'provider_rejected'
           ? 'released'
-          : input.evidence.kind === 'absorbed_unknown'
+          : input.evidence.kind === 'absorbed_unknown' && charge === 0n
             ? 'absorbed'
             : 'settled';
       const supplierCost = supplierCostOf(operation, input.evidence);
@@ -1654,6 +1721,18 @@ export class CreditLedgerService {
             reasonRequestDigest: operation.requestDigest,
           },
         );
+      }
+      /* WP-15 step 6 (O-6): the hold is meant to be a true upper bound; this count must stay 0 for every basis. */
+      for (const kind of [
+        ...(priced.reportedRetailAtoms > operation.authorizedAtoms ? (['customer_bound'] as const) : []),
+        ...(priced.inputOverflow === undefined ? [] : (['input_bound'] as const)),
+      ]) {
+        this.metrics?.billingFundedOperationAboveHold.add(1, {
+          'deployment.environment': operation.environment as BillingEnvironment,
+          'tau.billing.hold_basis': operation.invocation?.holdBasis ?? 'unknown',
+          'tau.billing.above_hold.kind': kind,
+          'tau.billing.sku': operation.sku,
+        });
       }
       if (priced.reportedRetailAtoms > operation.authorizedAtoms) {
         await tx
@@ -2854,7 +2933,9 @@ export class CreditLedgerService {
     overrun: boolean;
     inputOverflow?: { observed: bigint; maximum: bigint };
   } {
-    if (evidence.kind !== 'final_usage' && evidence.kind !== 'authorized_exhausted') {
+    // A stop the person chose is billed for what it used (D-3); every other absorbed end stays free.
+    const billedStop = isBilledStop(evidence);
+    if (evidence.kind !== 'final_usage' && evidence.kind !== 'authorized_exhausted' && !billedStop) {
       return { chargedAtoms: 0n, actualRetailAtoms: null, reportedRetailAtoms: 0n, overrun: false };
     }
     const meterItems = evidence.meterItems ?? [];
@@ -2869,6 +2950,10 @@ export class CreditLedgerService {
        * authorization here would bill the maximum for a truncated answer on the wires that report
        * usage only in their final event, so the customer pays what the stream proved: nothing.
        * The operator's case (opened by the terminalizer) is where a mis-sized ceiling surfaces. */
+      return { chargedAtoms: 0n, actualRetailAtoms: null, reportedRetailAtoms: 0n, overrun: false };
+    }
+    if (billedStop && !priceable) {
+      // The collector prices a stop over the supplier's meters; one the customer tariff does not match stays free.
       return { chargedAtoms: 0n, actualRetailAtoms: null, reportedRetailAtoms: 0n, overrun: false };
     }
     if (!sized) {
@@ -2896,7 +2981,7 @@ export class CreditLedgerService {
         : undefined;
     const chargedAtoms =
       computedRetailAtoms < operation.authorizedAtoms ? computedRetailAtoms : operation.authorizedAtoms;
-    if (evidence.kind === 'authorized_exhausted') {
+    if (evidence.kind === 'authorized_exhausted' || billedStop) {
       // Usage the provider reported before the cut only ever lowers the charge; the cut itself is
       // the authorization being spent, so it raises no exception and pauses no route.
       return {
@@ -3189,7 +3274,7 @@ const supplierCostOf = (
   if (evidence.kind === 'provider_rejected' || operation.dispatchIntentAt === null) {
     return { picoUsd: 0n, unpricedReason: null };
   }
-  const meterItems = evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
+  const meterItems = evidence.kind === 'absorbed_unknown' && !isBilledStop(evidence) ? [] : (evidence.meterItems ?? []);
   if (meterItems.length === 0) {
     return { picoUsd: null, unpricedReason: 'absorbed' };
   }

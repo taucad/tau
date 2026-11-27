@@ -258,7 +258,7 @@ describe('the index mirror feed', () => {
   });
 
   it('names what the index never holds on every message, read afresh each time', async () => {
-    const excluded = ['.tau/index', '.tau-staging'];
+    const excluded = ['.tau/index', '.tau/staging'];
     const { index, fire } = source(async (since) =>
       since === 0 ? changes(1, { entries: [entry('a.ts', 1)] }) : changes(2, { entries: [entry('b.ts', 2)] }),
     );
@@ -272,8 +272,8 @@ describe('the index mirror feed', () => {
       expect(received).toHaveLength(2);
     });
 
-    expect(received[0]?.excluded).toEqual(['.tau/index', '.tau-staging']);
-    expect(received[1]?.excluded).toEqual(['.tau/index', '.tau-staging', 'mounted']);
+    expect(received[0]?.excluded).toEqual(['.tau/index', '.tau/staging']);
+    expect(received[1]?.excluded).toEqual(['.tau/index', '.tau/staging', 'mounted']);
   });
 
   it('sends an empty directory a listed index names', async () => {

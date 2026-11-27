@@ -199,7 +199,12 @@ it('should evaluate, test, capture and export shell-authored bytes through one r
       expect(size).toBeCloseTo(0.01, 6);
     }
     phase = 'captured image';
-    await page.getByRole('button', { name: 'Captured images', exact: true }).click();
+    // The finished turn rests folded behind its "Worked for …" line (#2860), and its only capture is a group of one,
+    // which stands as its own line with no "Captured images" header (#2816).
+    await page
+      .getByRole('button', { name: /^Worked\b/u })
+      .last()
+      .click();
     await page.getByRole('button', { name: /Captured 1 screenshot of main\.scad/u }).click();
     const image = page.getByRole('img', { name: 'isometric view', exact: true });
     await expectVisible(image);

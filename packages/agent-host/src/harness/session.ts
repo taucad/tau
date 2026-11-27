@@ -86,6 +86,7 @@ import { createToolResultBatchBudget } from '#harness/tool-result-budget.js';
 import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
 import { codedFailureDetail as codedFailure } from '#harness/coded-failure.js';
 import { emptyChatLedger, foldChatLedger, isForeignInvocation, unresolvedInvocations } from '#log/chat-ledger.js';
+import type { ChatLedger } from '#log/chat-ledger.js';
 import { turnLabelsOf } from '#harness/turn-labels.js';
 import { snapshotKernel } from '#log/snapshot-kernel.js';
 import type { GatewayTurnLabels, InvocationResolution } from '#wire/gateway.js';
@@ -467,6 +468,8 @@ type CreateTransportStreamOptions = {
   readonly kernel?: (() => string | undefined) | undefined;
   /** E9: the longest silence between transport events before the call fails `MODEL_STREAM_STALLED`. */
   readonly stallBound?: StreamStallBound | undefined;
+  /** WP-10 step B: resolves once every row written so far is durable; the request is sent only after it. */
+  readonly durable?: (() => Promise<void>) | undefined;
 };
 
 /** The timers a stall bound runs on: an actor's clock, so the incarnation's (or a `StepClock`) fits. @public */
@@ -852,6 +855,10 @@ export const createTransportStreamFunction =
         const kernel = options.kernel?.();
         signal.throwIfAborted();
         const documents = options.documents?.();
+        /* WP-10 step B, the dispatch barrier: the prepared row, and every row before it, is durable before the request
+         * leaves (ChatRunSlot.tla `dispatch`; without it a crash can lose a sent attempt's record). */
+        await options.durable?.();
+        signal.throwIfAborted();
         /* The transport's own signal: pi's abort reaches it, and so does the stall bound's. */
         const request = new AbortController();
         const forward = (): void => {
@@ -1277,6 +1284,7 @@ const compactionModelsWithTransport = (options: {
   readonly runAttemptId?: CreateTransportStreamOptions['runAttemptId'];
   readonly bindInvocation?: CreateTransportStreamOptions['bindInvocation'];
   readonly kernel?: CreateTransportStreamOptions['kernel'];
+  readonly durable?: CreateTransportStreamOptions['durable'];
   /** The session's side table, so a summarised document keeps its name (P32). */
   readonly documents: () => ReadonlyMap<string, MaterializedDocument>;
 }): Models => {
@@ -1296,6 +1304,9 @@ const compactionModelsWithTransport = (options: {
         signal.throwIfAborted();
         const documents = options.documents();
         const kernel = options.kernel?.();
+        /* The dispatch barrier, as for a generation call. */
+        await options.durable?.();
+        signal.throwIfAborted();
         const stream = options.transport.stream({
           attemptId,
           ...(options.chatId === undefined ? {} : { chatId: options.chatId }),
@@ -1439,6 +1450,16 @@ export type CreateAgentSessionOptions = {
   readonly appendEvent?: ((event: SessionLogEvent) => Promise<void>) | undefined;
   /** The owner's writer for rows that go together, with `appendEvent` (WP-10): one write and one flush. */
   readonly appendEvents?: ((events: readonly SessionLogEvent[]) => Promise<void>) | undefined;
+  /**
+   * WP-10 step B: resolves once every row the owner's writer took is durable, where that writer answers before (its rows'
+   * order fixed). A model request, a tool's start and the attempt's outcome each wait for it; a rejection fails them.
+   */
+  readonly durable?: (() => Promise<void>) | undefined;
+  /**
+   * WP-11: the owner's incrementally folded ledger of this chat, with every row its writer took. Given, a step reads it
+   * instead of folding the log from empty; the fold is a left fold, so both are the same ledger (`replayLog_append`).
+   */
+  readonly ledger?: (() => Promise<ChatLedger>) | undefined;
   readonly clientContext?: ClientContext | undefined;
   readonly recentSkills?: RecentSkillsPort | undefined;
   readonly substituteToolResult?: ToolResultSubstituter | undefined;
@@ -1835,6 +1856,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         }
         return settled.value;
       }
+      /* WP-10 step B: the call's rows are durable before the tool acts. */
+      await options.durable?.();
       return tool.execute(toolCallId, input, signal, onUpdate);
     },
   }));
@@ -1890,6 +1913,11 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       prestartedToolResults.delete(toolCallId);
     }
   };
+  /** The chat's ledger after this session's own rows: the owner's (WP-11), else folded from the log. */
+  const ledgerNow = async (): Promise<ChatLedger> => {
+    const events = await record.events();
+    return options.ledger === undefined ? foldChatLedger(emptyChatLedger, events) : options.ledger();
+  };
   const bindInvocation = async (attemptId: string, metadata: ProviderMessageMetadata): Promise<void> => {
     const binding = metadata.tauInternal;
     if (binding?.['kind'] !== 'billing-invocation' || binding['attemptId'] !== attemptId) {
@@ -1899,15 +1927,13 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     if (typeof operationId !== 'string') {
       throw new TypeError('Tau gateway returned malformed invocation metadata.');
     }
-    const currentEvents = await record.events();
-    const prior = currentEvents.find(
-      (event) =>
-        event.runId === options.runId && event.type === 'model.invocation-bound' && event.attemptId === attemptId,
-    );
-    if (prior?.type === 'model.invocation-bound' && prior.operationId !== operationId) {
+    /* The ledger keeps the first binding of a prepared attempt, as the first bound row of this run's attempt id. */
+    const ledger = await ledgerNow();
+    const bound = ledger.invocations[attemptId]?.operationId;
+    if (bound !== undefined && bound !== operationId) {
       throw new Error(`Model invocation ${attemptId} has a conflicting operation binding.`);
     }
-    if (!prior) {
+    if (bound === undefined) {
       /* Bind is the only producer, and it always says `pending`; older readers still read the field (GI-R6). */
       await record.append({ type: 'model.invocation-bound', attemptId, operationId, status: 'pending' });
     }
@@ -1931,7 +1957,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     /* One compaction's summarizer calls are closed together by its `history.compacted` row: only a generation call
      * waits on the attempts before it (the gate's PrepareOnlyWhenResolved). */
     if (purpose === 'generation') {
-      const ledger = foldChatLedger(emptyChatLedger, await record.events());
+      const ledger = await ledgerNow();
       const unresolved = unresolvedInvocations(ledger);
       /* Every attempt is checked before any is recorded: another account's attempt leaves the log untouched (RV5-F2). */
       const foreign = unresolved.find((attemptId) => isForeignInvocation(ledger.invocations[attemptId]!, principal));
@@ -2008,6 +2034,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     documents: () => documents,
     runAttemptId,
     ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
+    durable: options.durable,
     committedContext: () => committedContext,
     committedTurns: async () => committedTurnContexts(await record.rows()),
     turnLabels,
@@ -2070,6 +2097,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       // async-iife: bootstrap -- eager dispatch must settle without an unhandled rejection before Pi awaits it.
       const result = (async (): Promise<PrestartedToolResult> => {
         try {
+          /* WP-10 step B: the tool's input row is durable before the tool acts. */
+          await options.durable?.();
           const value = await tool.execute(
             toolCall.id,
             input,
@@ -2162,6 +2191,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           runAttemptId,
           ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
           kernel: runKernel,
+          durable: options.durable,
         }),
     settleDiscardedToolCalls: settlePrestartedTools,
     onCompaction: options.onCompaction,
@@ -2343,6 +2373,14 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       }
     } catch (error) {
       outcome = abortRequested ? aborted() : { outcome: 'failed', failure: codedFailure(error) };
+    }
+    /* WP-10 step B: the attempt's rows are durable before its outcome is told; if they cannot be, it did not complete. */
+    try {
+      await options.durable?.();
+    } catch (error) {
+      if (outcome.outcome === 'completed') {
+        outcome = { outcome: 'failed', failure: codedFailure(error) };
+      }
     }
     state = outcome.outcome === 'completed' ? 'completed' : outcome.outcome === 'failed' ? 'failed' : 'cancelled';
     return outcome;

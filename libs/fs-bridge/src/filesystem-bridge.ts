@@ -1460,6 +1460,7 @@ const workspaceWireMembers = {
   listProjectManifests: 'listProjectManifests',
   verifyProjectRoute: 'verifyProjectRoute',
   verifyAbsent: 'verifyAbsent',
+  probeProjectDirectories: 'probeProjectDirectories',
   commitPendingProjectDirectory: 'commitPendingProjectDirectory',
   adoptProjectDirectory: 'adoptProjectDirectory',
   permanentlyDeleteProjectDirectory: 'permanentlyDeleteProjectDirectory',

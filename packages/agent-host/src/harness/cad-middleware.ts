@@ -77,9 +77,9 @@ Skills follow a **progressive disclosure** pattern - you know they exist (name +
 
 Only activate a skill when you're about to perform that task. Don't activate all skills upfront.`;
 
+/* Descriptive, not prescriptive (operator ruling U4): the reminder says what the file is and that this is how it reads
+ * now. When to add to it is the agent's judgement, and the convention itself is described once in the system prompt. */
 const memoryPrompt = (memory: Readonly<Record<string, string>>): string => `<system-reminder>
-IMPORTANT: this context may or may not be relevant to your current task.
-
 <agent_memory>
 ${Object.entries(memory)
   .filter(([, content]) => content.length > 0)
@@ -87,18 +87,7 @@ ${Object.entries(memory)
   .join('\n\n')}
 </agent_memory>
 
-<memory_guidelines>
-    The above <agent_memory> was loaded in from files in your filesystem. As you learn from your interactions with the user, you can save new knowledge by calling the \`edit_file\` tool.
-
-    **Learning from feedback:**
-    - One of your MAIN PRIORITIES is to learn from your interactions with the user. These learnings can be implicit or explicit. This means that in the future, you will remember this important information.
-    - When you need to remember something, updating memory must be your FIRST, IMMEDIATE action - before responding to the user, before calling other tools, before doing anything else. Just update memory immediately.
-    - When user says something is better/worse, capture WHY and encode it as a pattern.
-    - Each correction is a chance to improve permanently - don't just fix the immediate issue, update your instructions.
-    - A great opportunity to update your memories is when the user interrupts a tool call and provides feedback. You should update your memories immediately before revising the tool call.
-    - Look for the underlying principle behind corrections, not just the specific mistake.
-    - The user might not explicitly ask you to remember something, but if they provide information that is useful for future use, you should update your memories immediately.
-</memory_guidelines>
+The above is the project's instruction file as it reads now, under its path. It may or may not bear on the current task.
 </system-reminder>`;
 
 /** One previously activated skill retained by the host. @public */
@@ -485,6 +474,12 @@ const withModelContent = (message: ToolResultMessage, content: ToolResultMessage
 /** What a model that takes no image input reads in place of a capture. */
 const imageOmittedText = '[screenshot image omitted: this model takes no image input]';
 
+/*
+ * WP-11 item 2: a text result's trim, by message. A step sends the whole history, so each result was parsed again on
+ * every step; history messages are not mutated once recorded, so the trim is taken once in the result's life.
+ */
+const trimmedResults = new WeakMap<AgentMessage, AgentMessage>();
+
 /**
  * Apply Tau's CAD-specific historical tool-result reductions to a provider view.
  *
@@ -521,11 +516,16 @@ export function trimToolResultContext(
           )
         : message;
     }
+    const known = trimmedResults.get(message);
+    if (known !== undefined) {
+      return known;
+    }
     const structured = toolJson(message);
     const trimmed = trimStructuredResult(message.toolName, structured);
-    return trimmed === structured
-      ? message
-      : withModelContent(message, [{ type: 'text', text: JSON.stringify(trimmed) }]);
+    const sent =
+      trimmed === structured ? message : withModelContent(message, [{ type: 'text', text: JSON.stringify(trimmed) }]);
+    trimmedResults.set(message, sent);
+    return sent;
   });
 }
 

@@ -53,18 +53,32 @@ describe('dealRuns', () => {
     expect(weightOf('packages/example/specs/New.cfg', table)).toBe(table.defaultSeconds);
   });
 
+  /** The measured runs of one project, and the slowest of four shards when they are dealt alone. */
+  const ownerRuns = (prefix: string): { names: string[]; seconds: number[]; slowest: number } => {
+    const own = names.filter((name) => name.startsWith(prefix));
+    const walls = dealRuns(own, 4, table).map((shard) => twoJvmWall(shard.map((index) => table.seconds[own[index]!]!)));
+    return { names: own, seconds: own.map((name) => table.seconds[name]!), slowest: Math.max(...walls) };
+  };
+
   it("should hold agent-host's measured nightly runs on four runners to the longest run", () => {
-    const seconds = Object.values(table.seconds);
-    const longest = Math.max(...seconds);
-    const walls = dealRuns(names, 4, table).map((shard) =>
-      twoJvmWall(shard.map((index) => table.seconds[names[index]!]!)),
-    );
+    const { names: own, seconds, slowest } = ownerRuns('packages/agent-host/');
 
     // 46 runs, 2,797 JVM-seconds measured on one runner (job 134332529778); dealt to four runners the
     // slowest runs only the 392 s config, against about 1,400 s of wall time on one.
-    expect(names).toHaveLength(46);
-    expect(Math.max(...walls)).toBe(longest);
+    expect(own).toHaveLength(46);
+    expect(slowest).toBe(Math.max(...seconds));
     expect(twoJvmWall(seconds.toSorted((left, right) => right - left))).toBeGreaterThan(1350);
+  });
+
+  it("should give api-billing's three-attempts configuration a runner of its own", () => {
+    const { names: own, seconds, slowest } = ownerRuns('apps/libs/api-billing/');
+    const threeAttempts = 'apps/libs/api-billing/specs/GatewayInvocation.target-three-attempts.cfg';
+    const shardOf = dealRuns(own, 4, table).find((shard) => shard.some((index) => own[index] === threeAttempts));
+
+    // 22 runs measured on one runner (job 140275188452), where three-attempts hit the 900 s watchdog.
+    expect(own).toHaveLength(22);
+    expect(shardOf?.map((index) => own[index])).toEqual([threeAttempts]);
+    expect(slowest).toBe(Math.max(...seconds));
   });
 });
 

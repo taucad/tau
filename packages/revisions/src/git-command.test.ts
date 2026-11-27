@@ -2,8 +2,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { CommandAbortedError, gitCommandActivity, runCommand, runGitCommand } from '#git-command.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CommandAbortedError, gitCommandActivity, meteredGitCommand, runCommand, runGitCommand } from '#git-command.js';
+import type { GitActivityEvent, GitCommandResult } from '#git-command.js';
 import { removalRetries } from '#test/native-git-harness.js';
 import { writeShellExecutable } from '#test/script-executable.js';
 
@@ -145,5 +146,103 @@ describe('gitCommandActivity', () => {
     expect(totals.longestMilliseconds).toBeGreaterThan(0);
     expect(totals.totalMilliseconds).toBeGreaterThanOrEqual(totals.longestMilliseconds);
     expect(gitCommandActivity.open().close()).toStrictEqual({ count: 0, totalMilliseconds: 0, longestMilliseconds: 0 });
+  });
+});
+
+describe('gitCommandActivity phases and slow processes', () => {
+  const heard: GitActivityEvent[] = [];
+  let stop = (): void => undefined;
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['performance'] });
+    stop = gitCommandActivity.observe((event) => {
+      heard.push(event);
+    });
+  });
+  afterEach(() => {
+    stop();
+    heard.length = 0;
+    vi.useRealTimers();
+  });
+  /* A process that takes `milliseconds` of the faked clock, then exits with `exitCode` or throws `error`. */
+  const lasting =
+    (milliseconds: number, ending: number | Error = 0) =>
+    async (): Promise<GitCommandResult> => {
+      vi.advanceTimersByTime(milliseconds);
+      if (ending instanceof Error) {
+        throw ending;
+      }
+      return { exitCode: ending, stdout: new Uint8Array(), stderr: new Uint8Array() };
+    };
+
+  it('should report a process of a second or more by its subcommand and phase alone, and each phase as it ends', async () => {
+    await gitCommandActivity.during('open', async () => {
+      await meteredGitCommand(
+        ['-c', 'core.hooksPath=/home/ada/secret/hooks', '-C', '/home/ada/secret', 'lfs', 'install', '--local'],
+        lasting(1500),
+      );
+      await meteredGitCommand(['cat-file', '--batch'], lasting(10));
+    });
+    await meteredGitCommand(['--literal-pathspecs', 'ls-files', '--', 'secret.txt'], lasting(1000, 1));
+    await meteredGitCommand(['--version'], lasting(1200));
+
+    expect(heard).toStrictEqual([
+      { type: 'command', command: 'lfs install', milliseconds: 1500, outcome: 'exited', exitCode: 0, phase: 'open' },
+      {
+        type: 'phase',
+        phase: 'open',
+        status: 'completed',
+        milliseconds: 1510,
+        git: { count: 2, totalMilliseconds: 1510, longestMilliseconds: 1500 },
+      },
+      { type: 'command', command: 'ls-files', milliseconds: 1000, outcome: 'exited', exitCode: 1, phase: 'other' },
+      { type: 'command', command: '--version', milliseconds: 1200, outcome: 'exited', exitCode: 0, phase: 'other' },
+    ]);
+    expect(JSON.stringify(heard)).not.toContain('secret');
+  });
+
+  it('should never label a process with a path given to an option that takes the next argument', async () => {
+    await meteredGitCommand(['--git-dir', '/home/ada/secret/.git', 'status'], lasting(1000));
+    await meteredGitCommand(['--work-tree', '/home/ada/secret', '--namespace', 'ada', 'log'], lasting(1000));
+    await meteredGitCommand(['--config-env', 'core.sshCommand=SECRET_SSH', 'fetch'], lasting(1000));
+    await meteredGitCommand(['--exec-path=/home/ada/secret/libexec'], lasting(1000));
+    await meteredGitCommand(['--unknown-valued', '/home/ada/secret', 'status'], lasting(1000));
+    await meteredGitCommand(['lfs', '/home/ada/secret'], lasting(1000));
+
+    expect(heard.map((event) => (event.type === 'command' ? event.command : event.type))).toStrictEqual([
+      'status',
+      'log',
+      'fetch',
+      '--exec-path',
+      '--unknown-valued',
+      'lfs',
+    ]);
+    expect(JSON.stringify(heard)).not.toMatch(/secret/iu);
+  });
+
+  it('should report the bound that stopped a process, and a phase that threw as failed', async () => {
+    const stopped = gitCommandActivity.during('admission', async () =>
+      meteredGitCommand(['lfs', 'install'], lasting(30_000, new CommandAbortedError('deadline', 'stopped'))),
+    );
+
+    await expect(stopped).rejects.toBeInstanceOf(CommandAbortedError);
+    expect(heard).toStrictEqual([
+      { type: 'command', command: 'lfs install', milliseconds: 30_000, outcome: 'deadline', phase: 'admission' },
+      {
+        type: 'phase',
+        phase: 'admission',
+        status: 'failed',
+        milliseconds: 30_000,
+        git: { count: 1, totalMilliseconds: 30_000, longestMilliseconds: 30_000 },
+      },
+    ]);
+  });
+
+  it('should count in a phase only the processes its own work started', async () => {
+    await Promise.all([
+      gitCommandActivity.during('open', async () => meteredGitCommand(['status'], lasting(5))),
+      meteredGitCommand(['fetch'], lasting(7)),
+    ]);
+
+    expect(heard).toMatchObject([{ type: 'phase', git: { count: 1 } }]);
   });
 });

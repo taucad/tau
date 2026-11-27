@@ -1,5 +1,7 @@
 import {
   archiveDownloads,
+  betaDownloadHref,
+  betaDownloads,
   createDesktopDownloadCatalog,
   desktopDownloadHref,
   desktopDownloadLabel,
@@ -48,6 +50,33 @@ export const initializeHostDownload = (hostname: string): void => {
   }
   if (note) {
     note.textContent = download.updates;
+  }
+};
+
+/**
+ * Keep the Intel beta line truthful on a channel that has not published its DMG yet: a missing DMG (404) falls back to
+ * the release's Intel update ZIP. A probe that cannot complete leaves the rendered DMG link unchanged.
+ * @param signal - The page lifetime.
+ */
+export const initializeBetaDownloads = async (signal: AbortSignal): Promise<void> => {
+  const link = document.querySelector<HTMLAnchorElement>('a[data-download-beta="macIntel"]');
+  if (!link) {
+    return;
+  }
+  try {
+    const response = await fetch(link.href, {
+      method: 'HEAD',
+      signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+      redirect: 'error',
+      credentials: 'omit',
+      cache: 'no-store',
+    });
+    if (response.status === 404 && !signal.aborted) {
+      link.href = environmentHref(betaDownloadHref('macIntel', 'fallback'), location.hostname);
+      link.textContent = betaDownloads.macIntel.fallbackLabel;
+    }
+  } catch {
+    // An unreachable probe keeps the DMG link: the page never guesses that a file is missing.
   }
 };
 

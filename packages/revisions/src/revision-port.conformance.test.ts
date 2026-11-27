@@ -246,6 +246,41 @@ const conformance = (adapter: Adapter): void => {
       await harness.dispose();
     });
 
+    /**
+     * A store of its own holding the suite's two revisions, for a row that
+     * reads store-wide state — the versions, or HEAD — other rows also move,
+     * so it holds in whatever order the rows run.
+     *
+     * @param body - The row, over its own store.
+     * @returns Once the row has run and its store is disposed.
+     */
+    const onItsOwnStore = async (
+      body: (
+        own: Readonly<{ port: RevisionPort; harness: Harness; base: RevisionId; child: RevisionId }>,
+      ) => Promise<void>,
+    ): Promise<void> => {
+      const own = await adapter.create();
+      try {
+        await own.port.init({ author });
+        const first = await own.port.writeRevision({
+          parents: [],
+          tree: tree({ 'a.txt': 'a\n', 'nested/b.txt': 'b\n' }),
+          provenance: provenance('user'),
+          summary: summary('Base revision'),
+        });
+        const ownBase = revisionId(first.commitId);
+        const second = await own.port.writeRevision({
+          parents: [ownBase],
+          tree: tree({ 'a.txt': 'a2\n', 'c.txt': 'c\n' }),
+          provenance: provenance('agent'),
+          summary: summary('Child revision'),
+        });
+        await body({ port: own.port, harness: own, base: ownBase, child: revisionId(second.commitId) });
+      } finally {
+        await own.dispose();
+      }
+    };
+
     it('describes a recorded object format, change ids, conflict handling and checkouts', async () => {
       const descriptor = await port.describe();
       expect(descriptor.engine).toBe(adapter.name);
@@ -403,71 +438,77 @@ const conformance = (adapter: Adapter): void => {
      * number, the entry, the time and who made it.
      */
     it('round-trips a version named with spaces, and renames it at the same ref', async () => {
-      const actor = { kind: 'user', id: 'user-lane', name: 'Lane Person' } as const;
-      const created = await port.tag({
-        name: 'Ready for print',
-        revisionId: child,
-        note: 'First cut of the bracket',
-        actor,
-        createdAt,
+      await onItsOwnStore(async ({ port, harness, base, child }) => {
+        const actor = { kind: 'user', id: 'user-lane', name: 'Lane Person' } as const;
+        const created = await port.tag({
+          name: 'Ready for print',
+          revisionId: child,
+          note: 'First cut of the bracket',
+          actor,
+          createdAt,
+        });
+
+        expect(created.id).toMatch(/^[\da-f]{32}$/u);
+        expect(created).toStrictEqual({
+          /* A fresh id, which a rename keeps (R1). */
+          id: created.id,
+          /* The first version after Start is V2 (B6). */
+          number: 2,
+          name: 'Ready for print',
+          revisionId: child,
+          note: 'First cut of the bracket',
+          actor,
+          createdAt,
+        });
+        expect(await port.listTags()).toStrictEqual([created]);
+        const before = await port.listRefs('refs/tags');
+        expect(before.map((ref) => ref.name)).toStrictEqual(['refs/tags/v2']);
+
+        const renamed = await port.tag({ number: 2, name: 'Final fit', revisionId: child });
+        expect(renamed).toStrictEqual({ ...created, name: 'Final fit' });
+        expect(await port.listTags()).toStrictEqual([renamed]);
+        const after = await port.listRefs('refs/tags');
+        expect(after.map((ref) => ref.name)).toStrictEqual(['refs/tags/v2']);
+        expect(after[0]?.head).not.toBe(before[0]?.head);
+        const named = await port.readRevision(child);
+        expect(named?.id).toBe(child);
+
+        /* A version never moves to another entry (Q13). */
+        await expect(port.tag({ number: 2, name: 'Moved', revisionId: base })).rejects.toMatchObject({
+          code: 'UNSUPPORTED_OPERATION',
+        });
+        /* The next version takes the next number. */
+        const next = await port.tag({ name: 'Ready for print', revisionId: base, createdAt });
+        expect(next.number).toBe(3);
+
+        /* Renumbering's own primitive: the tag for one number goes, twice is the outcome asked for. */
+        await port.deleteTag(3);
+        await port.deleteTag(2);
+        expect(await port.listTags()).toStrictEqual([]);
+        await expect(port.deleteTag(2)).resolves.toBeUndefined();
       });
-
-      expect(created.id).toMatch(/^[\da-f]{32}$/u);
-      expect(created).toStrictEqual({
-        /* A fresh id, which a rename keeps (R1). */
-        id: created.id,
-        /* The first version after Start is V2 (B6). */
-        number: 2,
-        name: 'Ready for print',
-        revisionId: child,
-        note: 'First cut of the bracket',
-        actor,
-        createdAt,
-      });
-      expect(await port.listTags()).toStrictEqual([created]);
-      const before = await port.listRefs('refs/tags');
-      expect(before.map((ref) => ref.name)).toStrictEqual(['refs/tags/v2']);
-
-      const renamed = await port.tag({ number: 2, name: 'Final fit', revisionId: child });
-      expect(renamed).toStrictEqual({ ...created, name: 'Final fit' });
-      expect(await port.listTags()).toStrictEqual([renamed]);
-      const after = await port.listRefs('refs/tags');
-      expect(after.map((ref) => ref.name)).toStrictEqual(['refs/tags/v2']);
-      expect(after[0]?.head).not.toBe(before[0]?.head);
-      const named = await port.readRevision(child);
-      expect(named?.id).toBe(child);
-
-      /* A version never moves to another entry (Q13). */
-      await expect(port.tag({ number: 2, name: 'Moved', revisionId: base })).rejects.toMatchObject({
-        code: 'UNSUPPORTED_OPERATION',
-      });
-      /* The next version takes the next number. */
-      const next = await port.tag({ name: 'Ready for print', revisionId: base, createdAt });
-      expect(next.number).toBe(3);
-
-      /* Renumbering's own primitive: the tag for one number goes, twice is the outcome asked for. */
-      await port.deleteTag(3);
-      await port.deleteTag(2);
-      expect(await port.listTags()).toStrictEqual([]);
-      await expect(port.deleteTag(2)).resolves.toBeUndefined();
     }, 180_000);
 
     it('never replaces or numbers over a tag that is not a version, and refuses a bad name or number first (R2, R10)', async () => {
-      /* A lightweight v4: not a version, but it holds its number. */
-      await port.updateRef({ name: 'refs/tags/v4', expectedHead: undefined, head: base });
-      expect(await port.listTags()).toStrictEqual([]);
-      const created = await port.tag({ name: 'Lid', revisionId: child });
-      expect(created.number).toBe(5);
-      await expect(port.tag({ number: 4, name: 'Lid', revisionId: base })).rejects.toMatchObject({
-        code: 'UNSUPPORTED_OPERATION',
+      await onItsOwnStore(async ({ port, harness, base, child }) => {
+        /* A lightweight v4: not a version, but it holds its number. */
+        await port.updateRef({ name: 'refs/tags/v4', expectedHead: undefined, head: base });
+        expect(await port.listTags()).toStrictEqual([]);
+        const created = await port.tag({ name: 'Lid', revisionId: child });
+        expect(created.number).toBe(5);
+        await expect(port.tag({ number: 4, name: 'Lid', revisionId: base })).rejects.toMatchObject({
+          code: 'UNSUPPORTED_OPERATION',
+        });
+        await expect(port.tag({ name: '', revisionId: child })).rejects.toMatchObject({
+          code: 'UNSUPPORTED_OPERATION',
+        });
+        await expect(port.tag({ number: 1, name: 'Start', revisionId: child })).rejects.toMatchObject({
+          code: 'UNSUPPORTED_OPERATION',
+        });
+        const tagReferences = await port.listRefs('refs/tags');
+        expect(tagReferences.map((ref) => ref.name)).toStrictEqual(['refs/tags/v4', 'refs/tags/v5']);
+        expect(await port.readRef('refs/tags/v4')).toBe(base);
       });
-      await expect(port.tag({ name: '', revisionId: child })).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
-      await expect(port.tag({ number: 1, name: 'Start', revisionId: child })).rejects.toMatchObject({
-        code: 'UNSUPPORTED_OPERATION',
-      });
-      const tagReferences = await port.listRefs('refs/tags');
-      expect(tagReferences.map((ref) => ref.name)).toStrictEqual(['refs/tags/v4', 'refs/tags/v5']);
-      expect(await port.readRef('refs/tags/v4')).toBe(base);
     }, 180_000);
 
     it('gives versions made at once their own numbers: choosing and claiming are one step (R3)', async () => {
@@ -862,22 +903,24 @@ const conformance = (adapter: Adapter): void => {
     }, 180_000);
 
     it('tracks the live tree on a branch, and a reopened store reads the same head', async () => {
-      // The product's other branch shape carries a slash (c2-review N4).
-      const name = 'agent/tau-conformance-head';
-      /* `init` leaves HEAD symbolic on an unborn `main`, exactly as `git init`
-       * does — the head is a name, and the branch behind it need not exist. */
-      expect(await port.readHead()).toEqual({ branch: 'main', head: undefined });
-      // Symbolic: the head is set before the branch is born, and follows it.
-      await port.setHead(name);
-      expect(await port.readHead()).toEqual({ branch: name, head: undefined });
-      await port.updateRef({ name, expectedHead: undefined, head: base });
-      expect(await port.readHead()).toEqual({ branch: name, head: base });
-      /* The next process opening this project reads the same head, and moving
-       * it there — what a checkout does — is what this one then reads. */
-      const reopened = harness.reopen();
-      expect(await reopened.readHead()).toEqual({ branch: name, head: base });
-      await reopened.setHead('main');
-      expect(await port.readHead()).toEqual({ branch: 'main', head: undefined });
+      await onItsOwnStore(async ({ port, harness, base, child }) => {
+        // The product's other branch shape carries a slash (c2-review N4).
+        const name = 'agent/tau-conformance-head';
+        /* `init` leaves HEAD symbolic on an unborn `main`, exactly as `git init`
+         * does — the head is a name, and the branch behind it need not exist. */
+        expect(await port.readHead()).toEqual({ branch: 'main', head: undefined });
+        // Symbolic: the head is set before the branch is born, and follows it.
+        await port.setHead(name);
+        expect(await port.readHead()).toEqual({ branch: name, head: undefined });
+        await port.updateRef({ name, expectedHead: undefined, head: base });
+        expect(await port.readHead()).toEqual({ branch: name, head: base });
+        /* The next process opening this project reads the same head, and moving
+         * it there — what a checkout does — is what this one then reads. */
+        const reopened = harness.reopen();
+        expect(await reopened.readHead()).toEqual({ branch: name, head: base });
+        await reopened.setHead('main');
+        expect(await port.readHead()).toEqual({ branch: 'main', head: undefined });
+      });
     }, 180_000);
 
     it('never shows a head between two concurrent moves (c2-review S2)', async () => {

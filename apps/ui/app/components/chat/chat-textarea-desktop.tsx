@@ -12,8 +12,8 @@ import {
 } from '@taucad/chat-ui/components/chat-input-styles';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { queuedSendStatus } from '#components/hand-off/hand-off.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import { queuedSendCancelledStatus } from '#components/hand-off/hand-off.js';
 import type { Editor, JSONContent } from '@tiptap/core';
 import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
@@ -401,6 +401,8 @@ export const ChatTextareaDesktop = memo(function ({
     queuedSubmitRef.current = false;
     setIsQueuedSubmitShown(false);
   }, []);
+  /* Escape cancelled the queued send: its status says so once (an emptied status says nothing), until the next edit. */
+  const [isQueuedSendCancelled, setIsQueuedSendCancelled] = useState(false);
   /* A painted draft that changed under its queued Enter before the send could go (Home's record read after adoption
    * with another text or an attachment): the Enter was not for this draft, so it is cancelled, and says so. */
   const [isPaintedDraftReplaced, setIsPaintedDraftReplaced] = useState(false);
@@ -411,6 +413,7 @@ export const ChatTextareaDesktop = memo(function ({
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
       cancelQueuedSubmit();
+      setIsQueuedSendCancelled(false);
       unconfirmedTextsRef.current.push(content.text);
       setDraftText(content.text);
     },
@@ -799,6 +802,7 @@ export const ChatTextareaDesktop = memo(function ({
     (event: React.KeyboardEvent): void => {
       if (event.key === 'Escape' && queuedSubmitRef.current) {
         cancelQueuedSubmit();
+        setIsQueuedSendCancelled(true);
       }
     },
     [cancelQueuedSubmit],
@@ -977,10 +981,16 @@ export const ChatTextareaDesktop = memo(function ({
         <ChatDropFeedback dragKind={dragKind} dropZone={dropZone} className={radius} />
 
         <DictationFeedback transcript={dictation.transcript} />
-        {/* Present from mount for an input that queued a send, so the status is read when it changes. */}
+        {/* Present from mount for an input that queued a send, so the status is read when it changes. The queued send
+            itself was said by the input that queued it (the served or early input's status): adopting it says nothing
+            again, and Send's pending state shows it. Only a cancellation is new. */}
         {earlyInput?.submitQueued === true ? (
           <span role='status' className='sr-only'>
-            {isQueuedSendShown ? queuedSendStatus : isPaintedSendCancelled ? paintedSendCancelledStatus : ''}
+            {isPaintedSendCancelled
+              ? paintedSendCancelledStatus
+              : isQueuedSendCancelled
+                ? queuedSendCancelledStatus
+                : ''}
           </span>
         ) : null}
         <ChatTextareaBar

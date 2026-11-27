@@ -131,6 +131,13 @@ export type ExternalTurnOutcome = {
   /** Why the agent stopped, in its own protocol's vocabulary (ACP's `max_tokens`, …). */
   readonly stopReason?: string | undefined;
 };
+/**
+ * A chat's session to open ahead of its first turn (chat performance WP-18): what a turn would resume it from.
+ *
+ * @public
+ */
+export type ExternalAgentPrewarm = Pick<ExternalAgentTurn, 'agentId' | 'agent' | 'chatId' | 'state' | 'history'>;
+
 /** Runs external agents of one kind. @public */
 export type ExternalAgentPort = {
   /**
@@ -154,6 +161,14 @@ export type ExternalAgentPort = {
    * close.
    */
   closeChat?(chatId: string): Promise<void>;
+  /**
+   * Open the chat's session before its turn arrives, so the turn finds it open (WP-18).
+   *
+   * Best effort: a runner with no room, no such agent or an agent that cannot open without the person answers
+   * without opening anything, and the turn opens its own session as before. Optional, because a runner that keeps
+   * nothing between turns has nothing to open early.
+   */
+  prewarm?(input: ExternalAgentPrewarm): Promise<void>;
 };
 
 /**

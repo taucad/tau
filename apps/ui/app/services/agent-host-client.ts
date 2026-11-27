@@ -571,6 +571,8 @@ export type ResidentAgentWorker = Readonly<{
   rated: (rating: BrowserRunRating) => Promise<void>;
   /** Tell a running worker that a composer took focus, so its hosts refresh the deployment answer (C7); never boots one. */
   composerFocused: () => Promise<void>;
+  /** Start the worker and wait for its `init`, with no project host (WP-12 step 3); a running one is left as it is. */
+  prewarm: () => Promise<void>;
   /**
    * Count one client of a project and remember its latest bridges and defaults. The returned release, called once,
    * sends `release` for the project's host when it was the last client (T3, RH-R4).
@@ -1226,6 +1228,9 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       await live.ready;
       await live.channel.call('composerFocus', {});
     },
+    prewarm: async () => {
+      await incarnation();
+    },
     recover: async (projectId) => {
       const live = current;
       const opening = live?.provided.get(projectId);
@@ -1314,6 +1319,22 @@ export const noteBrowserComposerFocused = async (): Promise<void> => {
     await residentAgentWorker().composerFocused();
   } catch {
     /* A closing worker loses only this hint; admission still refreshes an expired answer. */
+  }
+};
+
+/**
+ * Start the document's agent-host worker ahead of a new project's first turn (WP-12 step 3): its script loads and its
+ * `init` answers while the project is created and its route opens, so the first `connect` finds it running. Best
+ * effort and idempotent; never rejects. A worker whose code fails to load is retired as on any use, and the turn's own
+ * `connect` reports it.
+ *
+ * @public
+ */
+export const prewarmBrowserAgentHost = async (): Promise<void> => {
+  try {
+    await residentAgentWorker().prewarm();
+  } catch {
+    /* The first real use starts or reports the worker. */
   }
 };
 

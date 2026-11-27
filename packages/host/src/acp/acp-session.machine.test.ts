@@ -594,6 +594,28 @@ describe('acpSession', () => {
     harness.parent.stop();
   });
 
+  it('holds a turn lent while a prewarm opens and prompts it once open (WP-18)', async () => {
+    const harness = start({ lend: undefined });
+    const { actor, fakes, parent } = harness;
+    await flush();
+    actor.send({ type: 'lend', lend: lent });
+    /* A second turn while one is held is the chat's live run. */
+    actor.send({ type: 'lend', lend: { ...lent, requestId: 'run-1:1' } });
+    expect(parent.events).toMatchObject([
+      { type: 'turnEnded', requestId: 'run-1:1', outcome: { ok: false, failure: { code: 'CHAT_RUN_LIVE' } } },
+    ]);
+    expect(fakes.active('lentTurn')).toBe(0);
+
+    harness.answer({ protocolVersion, agentCapabilities: {} });
+    harness.answer({ sessionId: 'acp-1' });
+    fakes.sendBack('lentTurn', { type: 'lentReady' });
+
+    expect(parent.events.at(-1)).toEqual({ type: 'opened', key: 'fake:chat-1' });
+    expect(harness.lastCall()).toMatchObject({ method: 'session/prompt', params: { sessionId: 'acp-1' } });
+    actor.stop();
+    parent.stop();
+  });
+
   it('should leave unsupported model discovery unanswered without a vendor call', async () => {
     const harness = start({ lend: undefined });
     const probed: unknown[] = [];

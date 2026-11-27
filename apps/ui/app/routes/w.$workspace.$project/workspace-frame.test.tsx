@@ -10,6 +10,8 @@ import { handOffStore, resetHandOffStoreForTest } from '#components/hand-off/han
 import { frameTabAttribute, writePhoneFrameHint, writeWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { arriveFirstMessage, departFirstMessage } from '#lib/departing-first-message.js';
+import { replayContentSelector } from '#lib/replay-content.lib.js';
 
 /*
  * The persisted `workbenchOpen` lives in the project's own layout record and is read only once the session is live.
@@ -390,6 +392,75 @@ describe('WorkspaceFrame', () => {
     const frame = document.querySelector<HTMLElement>('[data-slot=workspace-frame]')!;
     expect(frame).toHaveAttribute('data-workspace-pending');
     expect(frame.className).toContain(':not([data-slot=workspace-frame-composer])]:invisible');
+  });
+
+  /* WP-12 with WP-07 step 5: a new project's first message, on its way from Home, takes the chat lane's feed from the
+   * frame drawn ahead of the route, so Enter never blanks the person's words. */
+  it("draws the destination's first message in the chat lane's feed while the route is still Home", () => {
+    departFirstMessage('home/two', 'A wall bracket\nfor a pipe');
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    render(
+      <MemoryRouter initialEntries={['/w/home/one']}>
+        <Routes>
+          <Route
+            path='/w/:workspace/:project'
+            element={
+              <WorkspaceFrame isPending pathname='/w/home/two'>
+                <p>home</p>
+              </WorkspaceFrame>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const chatLane = document.querySelector<HTMLElement>('[data-slot=workspace-lane][data-lane=chat]')!;
+    const departing = chatLane.querySelector('[data-slot=departing-first-message]');
+    expect(departing).not.toBeNull();
+    // Session replay blocks the stand-in as it blocks the transcript.
+    expect(departing!.matches(replayContentSelector)).toBe(true);
+    expect([...departing!.querySelectorAll('p')].map((row) => row.textContent)).toEqual([
+      'A wall bracket',
+      'for a pipe',
+    ]);
+    act(() => {
+      arriveFirstMessage('home/two');
+    });
+    expect(chatLane.querySelector('[data-slot=departing-first-message]')).toBeNull();
+  });
+
+  it("draws the destination's first message in the phone frame's chat sheet too", () => {
+    departFirstMessage('home/two', 'A wall bracket');
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    render(
+      <MemoryRouter initialEntries={['/w/home/one']}>
+        <Routes>
+          <Route
+            path='/w/:workspace/:project'
+            element={
+              <WorkspaceFrame isPending pathname='/w/home/two'>
+                <p>home</p>
+              </WorkspaceFrame>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const sheet = document.querySelector<HTMLElement>('[data-slot=workspace-frame-phone] [data-frame-part=sheet]')!;
+    expect(sheet.querySelector('[data-slot=departing-first-message]')?.textContent).toBe('A wall bracket');
+    act(() => {
+      arriveFirstMessage('home/two');
+    });
+    expect(sheet.querySelector('[data-slot=departing-first-message]')).toBeNull();
+  });
+
+  it("does not draw another project's first message", () => {
+    departFirstMessage('home/two', 'A wall bracket');
+    renderFrame('/w/home/one');
+
+    expect(document.querySelector('[data-slot=departing-first-message]')).toBeNull();
+    arriveFirstMessage('home/two');
   });
 
   // ── A15c: the phone frame (blueprint P-h; C6) ──

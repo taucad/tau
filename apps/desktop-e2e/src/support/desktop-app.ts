@@ -1123,6 +1123,27 @@ export const deliverDesktopDeepLink = async (session: DesktopSession, link: stri
 };
 
 /**
+ * Where an authorization answer sends the browser. A browser navigation gets a 302; a `fetch` (which always says
+ * `sec-fetch-mode: cors`) gets Better Auth's JSON form of the same redirect, `{ redirect: true, url }`, with HTTP 200.
+ *
+ * @param response - The provider's answer to the authorization request.
+ * @returns The redirect target, or `undefined` when the answer is neither form.
+ */
+const redirectTarget = async (response: Response): Promise<string | undefined> => {
+  const location = response.headers.get('location');
+  if (response.status >= 300 && response.status < 400 && location !== null) {
+    return location;
+  }
+  if (!response.ok) {
+    return undefined;
+  }
+  const body = (await response.json().catch(() => undefined)) as
+    | { readonly redirect?: unknown; readonly url?: unknown }
+    | undefined;
+  return body?.redirect === true && typeof body.url === 'string' ? body.url : undefined;
+};
+
+/**
  * Complete the production sign-in for a packaged app (desktop sign-in DSI-4).
  *
  * The shell opens the API's OAuth authorization URL in the system browser (captured here by the
@@ -1157,8 +1178,8 @@ export const authenticatePackagedDesktop = async (session: DesktopSession, beare
   );
   const browser = { authorization: `Bearer ${bearerToken}` };
   const authorize = await fetch(externalUrl, { headers: browser, redirect: 'manual' });
-  const consentPage = authorize.headers.get('location');
-  if (authorize.status !== 302 || consentPage === null || !consentPage.includes('/auth/desktop?')) {
+  const consentPage = await redirectTarget(authorize);
+  if (consentPage === undefined || !consentPage.includes('/auth/desktop?')) {
     throw new Error(
       `Packaged desktop authorization did not reach the consent page (HTTP ${String(authorize.status)}).`,
     );

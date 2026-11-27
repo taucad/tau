@@ -17,6 +17,7 @@ import { ProjectDirectories, discoveryAuditIntervalMilliseconds } from '#project
 import type { ProjectDirectoryReading, ProjectDiscoveryEntry } from '#project-directories.js';
 import { workerTimings } from '#worker-timings.js';
 import type { WorkerTimingCounter } from '#worker-timings.js';
+import type { FileSystemProvider } from '#types.js';
 
 /**
  * Acceptance tests of the discovery index (project-library fast-path blueprint FW2) against the amendments of the
@@ -623,6 +624,40 @@ describe('A4: the audit', () => {
     expect(counter('discovery.auditMismatch.exclusive') - before.exclusive).toBe(1);
     expect(profile.index.entry(homeKey, 'home-005')?.reading).toMatchObject({ projectId: discoveryProfileHomeId(66) });
     expect(listedIds(await listedEntries(profile)).get('opfs:home-005')).toBe(discoveryProfileHomeId(66));
+  });
+});
+
+describe('the audit names count (FW4 review m9)', () => {
+  it('should count no names mismatch for a listing that evidence overtook, which it does not install', async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    const homeKey = await homeKeyOf(profile);
+    const before = counter('discovery.auditMismatch');
+    /* A directory appears behind the authority's back, and evidence of it arrives while the audit lists the root. */
+    await profile.writeBehind('home', 'home-new/tau.json', new TextEncoder().encode('{}'));
+    const listing = Promise.withResolvers<void>();
+    const listed = Promise.withResolvers<void>();
+    const reader = profile.providers.home as FileSystemProvider & {
+      readdirEntries: NonNullable<FileSystemProvider['readdirEntries']>;
+    };
+    const readdirEntries = reader.readdirEntries.bind(profile.providers.home);
+    vi.spyOn(reader, 'readdirEntries').mockImplementation(async (path) => {
+      const entries = await readdirEntries(path);
+      if (path === '') {
+        listed.resolve();
+        await listing.promise;
+      }
+      return entries;
+    });
+    const directories = (profile.service as unknown as { _projectDirectories: ProjectDirectories })._projectDirectories;
+
+    const audit = directories.auditDiscovery(0);
+    await listed.promise;
+    profile.index.note(homeKey, ['', 'home-new']);
+    listing.resolve();
+    await audit;
+
+    expect(counter('discovery.auditMismatch') - before).toBe(0);
   });
 });
 

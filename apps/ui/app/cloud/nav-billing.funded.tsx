@@ -80,10 +80,7 @@ export function NavCreditsMeter(): React.JSX.Element | undefined {
   }
   if (credits?.balance) {
     const monthly = monthlyCreditsFromBalance(credits.balance, tier);
-    const purchased =
-      BigInt(credits.balance.debtCreditAtoms) > 0n
-        ? 0n
-        : BigInt(credits.balance.purchasedCreditAtoms) - BigInt(credits.balance.purchasedHeldCreditAtoms);
+    const purchased = BigInt(credits.balance.debtCreditAtoms) > 0n ? 0n : BigInt(credits.balance.purchasedCreditAtoms);
     const availablePurchased = purchased > 0n ? purchased : 0n;
     if (monthly === undefined && BigInt(credits.balance.purchasedCreditAtoms) === 0n) {
       return undefined;
@@ -94,19 +91,11 @@ export function NavCreditsMeter(): React.JSX.Element | undefined {
           <span className='text-muted-foreground'>Purchased credits</span>
           <span className='font-medium tabular-nums'>{formatCreditAtomsDisplay(availablePurchased)}</span>
         </div>
-        {BigInt(credits.balance.purchasedHeldCreditAtoms) > 0n ? (
-          <p className='text-muted-foreground'>
-            {formatCreditAtomsDisplay(BigInt(credits.balance.purchasedHeldCreditAtoms))} more on hold for work in
-            progress
-          </p>
-        ) : undefined}
       </div>
     ) : (
       <MonthlyCreditsMeter
         state={{ status: 'ready', monthly }}
         purchasedCreditAtoms={BigInt(credits.balance.purchasedCreditAtoms) > 0n ? availablePurchased : undefined}
-        purchasedHeldCreditAtoms={BigInt(credits.balance.purchasedHeldCreditAtoms)}
-        monthlyHeldCreditAtoms={BigInt(credits.balance.planHeldCreditAtoms)}
         isInMenu
         addCredits={<AddCreditsItem />}
       />

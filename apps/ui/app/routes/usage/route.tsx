@@ -24,7 +24,6 @@ import type { WireUsageSnapshot } from '@taucad/billing';
 import { UsageBarChart } from '@taucad/billing-ui/components/usage/charts/usage-bar-chart';
 import { UsageLineChart } from '@taucad/billing-ui/components/usage/charts/usage-line-chart';
 import { UsagePieChart } from '@taucad/billing-ui/components/usage/charts/usage-pie-chart';
-import { ReservedTable } from '@taucad/billing-ui/components/usage/reserved-table';
 import { UsageSummaryCards } from '@taucad/billing-ui/components/usage/usage-summary-cards';
 import { UsageTable } from '@taucad/billing-ui/components/usage/usage-table';
 import {
@@ -261,8 +260,6 @@ function UsageContent(): React.JSX.Element {
           )}
 
           <UsageSummaryCards snapshot={snapshot} balance={balance} />
-
-          <ReservedTable />
 
           <div className='grid gap-4 lg:grid-cols-2'>
             <UsageLineChart days={snapshot.days?.items ?? []} description='Credits per day' />

@@ -290,7 +290,7 @@ describe('own segment source: absence judged against the record (HA-I3a)', () =>
 
     disk.write(log, line(admitted()) + line(completed()) + line(finalized()));
     await pass(clock, unsettledReadPollMilliseconds);
-    expect(chat.projection().ledger.runs.run_1?.appendState).toBe('settled');
+    expect(chat.projection().ledger.runs['run_1']?.appendState).toBe('settled');
 
     const reads = vi.spyOn(disk.client, 'readFile');
     await pass(clock, 10 * unsettledReadPollMilliseconds);
@@ -303,7 +303,7 @@ describe('own segment source: absence judged against the record (HA-I3a)', () =>
     const disk = createDisk({ [log]: line(admitted(old)) + line(completed(old)) });
     const chat = follow(disk, clock);
     await pass(clock);
-    expect(chat.projection().ledger.runs.run_1?.appendState).toBe('terminal');
+    expect(chat.projection().ledger.runs['run_1']?.appendState).toBe('terminal');
     const reads = vi.spyOn(disk.client, 'readFile');
     await pass(clock, 10 * unsettledReadPollMilliseconds);
     expect(reads).not.toHaveBeenCalled();

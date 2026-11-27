@@ -61,6 +61,7 @@
     "@ai-sdk/provider-utils": "catalog:",
     "@ai-sdk/react": "^3.0.210",
     "@better-auth/api-key": "catalog:",
+    "@better-auth/oauth-provider": "catalog:",
     "@cfworker/json-schema": "catalog:",
     "@fastify/cookie": "catalog:",
     "@fastify/cors": "^11.2.0",

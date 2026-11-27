@@ -53,10 +53,6 @@ const tierName = {
 const formatBalance = (atoms: bigint): string =>
   formatCreditAtomsDisplay(atoms) === '<1' ? 'Less than 1 credit' : formatCredits(atoms);
 
-/** Credits on hold, as the sentence every billing surface uses for them. */
-const formatHeld = (atoms: bigint): string =>
-  `${formatCreditAtomsDisplay(atoms)} more are on hold for work in progress.`;
-
 /**
  * Billing overview: the plan, monthly credits, purchased credits, auto-reload and cancellation.
  *
@@ -131,9 +127,7 @@ export function BillingSettings({
     availableBalance && entitlements.isResolved
       ? monthlyCreditsFromBalance(availableBalance, entitlements.tier)
       : undefined;
-  const purchased = availableBalance
-    ? BigInt(availableBalance.purchasedCreditAtoms) - BigInt(availableBalance.purchasedHeldCreditAtoms)
-    : 0n;
+  const purchased = availableBalance ? BigInt(availableBalance.purchasedCreditAtoms) : 0n;
   const availablePurchased =
     availableBalance && BigInt(availableBalance.debtCreditAtoms) === 0n && purchased > 0n ? purchased : 0n;
 
@@ -176,8 +170,6 @@ export function BillingSettings({
         </a>
       </Button>
     );
-  const purchasedHeld = BigInt(availableBalance?.purchasedHeldCreditAtoms ?? '0');
-  const promoHeld = BigInt(availableBalance?.promoHeldCreditAtoms ?? '0');
 
   return (
     <div className='flex flex-col gap-8 pb-4'>
@@ -275,7 +267,6 @@ export function BillingSettings({
             <CardContent className='flex flex-col gap-3'>
               <MonthlyCreditsMeter
                 className='p-0 text-sm'
-                monthlyHeldCreditAtoms={BigInt(availableBalance?.planHeldCreditAtoms ?? '0')}
                 state={
                   monthly ? { status: 'ready', monthly } : { status: isBalanceLoading ? 'loading' : 'unavailable' }
                 }
@@ -302,11 +293,8 @@ export function BillingSettings({
           <SettingsSectionCard>
             <CardContent className='flex flex-col gap-1 text-sm'>
               <span className='font-medium tabular-nums'>
-                {formatBalance(hasDebt ? 0n : BigInt(availableBalance.promoGrantCreditAtoms) - promoHeld)}
+                {formatBalance(hasDebt ? 0n : BigInt(availableBalance.promoGrantCreditAtoms))}
               </span>
-              {promoHeld > 0n ? (
-                <span className='text-xs text-muted-foreground'>{formatHeld(promoHeld)}</span>
-              ) : undefined}
             </CardContent>
           </SettingsSectionCard>
         </div>
@@ -323,10 +311,7 @@ export function BillingSettings({
                   <span className='font-medium tabular-nums' data-testid='credit-balance'>
                     {formatBalance(availablePurchased)}
                   </span>
-                  <span className='text-xs text-muted-foreground'>
-                    {purchasedHeld > 0n ? `${formatHeld(purchasedHeld)} ` : ''}
-                    Purchased credits never expire.
-                  </span>
+                  <span className='text-xs text-muted-foreground'>Purchased credits never expire.</span>
                 </div>
               ) : isBalanceLoading ? (
                 <div role='status' aria-busy='true' className='flex flex-col gap-2'>

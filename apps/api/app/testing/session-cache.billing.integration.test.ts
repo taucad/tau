@@ -18,7 +18,6 @@ const billingGets = [
   '/v1/billing/entitlements',
   '/v1/billing/credits',
   '/v1/billing/model-estimates',
-  '/v1/billing/holds',
   '/v1/billing/usage',
   '/v1/billing/operations/operation_missing',
   '/v1/billing/reload-consent',
@@ -206,12 +205,12 @@ describe('session cookie cache over PostgreSQL (H2, flag 0)', () => {
   it('case 17: should add no Set-Cookie and no Cache-Control from a Tau route, and ignore a snapshot', async () => {
     const { jar, userId } = await client.signUp();
     expect(jar.get(dataCookie)).toBeUndefined();
-    const response = await client.request({ url: '/v1/billing/holds', jar });
+    const response = await client.request({ url: '/v1/billing/model-estimates', jar });
     expect(response.status).toBe(200);
     expect(response.headers.getSetCookie()).toEqual([]);
     // A snapshot from elsewhere is ignored: the deleted row refuses the GET.
     jar.set(dataCookie, 'eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2Q0JDLUhTNTEyIn0..a.b.c');
     await client.deleteSessions(userId);
-    expect(await statusOf(client.request({ url: '/v1/billing/holds', jar }))).toBe(401);
+    expect(await statusOf(client.request({ url: '/v1/billing/model-estimates', jar }))).toBe(401);
   });
 });

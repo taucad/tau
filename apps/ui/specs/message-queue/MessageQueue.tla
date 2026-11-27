@@ -301,6 +301,22 @@
 \* H-1 review (2026-11-27): `Deliver` may now be refused on any try, including a fresh key on an idle host, so `Refuse`
 \* is reached from the state the runtime meets. `RefuseOnlyUnapplied` gates `Refuse`'s `m \notin Accepted`; the
 \* `refuse-accepted` witness (pinned with the other tables) drops it and must violate `ComposerExclusive`.
+\* One voice during an open (2026-11-27): `chat-message-queue-view.tsx` makes a queued row's busy label a live region
+\* only for the person's own Send now or a failed send; an automatic send shows the same words without speaking.
+\* Presentation only. No action or verdict changes.
+\* Host attachment HA1 (2026-11-27): a composer pick made while the chat's own run is unsettled waits, whole, for
+\* the run to settle (HA-I7); the outbox holds its head with a `pick-deferred` reason meanwhile, and the queue wakes
+\* only after the pick's writes and route restart. A chat this device holds reads its own segment from the file, and
+\* `attach` and the in-page route are new host commands. Dispatch, acknowledgement and the gate are untouched; the
+\* new hold refines `Ready`, as the gate's other holds do. No action or verdict changes.
+\* HA1 review (2026-11-27): the hold is lifted only by the pick that set it, so a newer pick that supersedes a deferred
+\* one keeps the queue held until its own writes are done. Only a chat whose own run the file shows defers a pick.
+\* The pick's mark is a symbol of its own. No action or verdict changes.
+\* HA1 review round 3 (2026-11-27): an applied pick decides again whether the chat is read from the file before its
+\* observer restarts, so a chat moved to a paired computer reads that host, and the own watch follows new
+\* dependencies. No action or verdict changes.
+\* HA1 review round 4 (2026-11-27): overlapping picks start one own source, the newest; while it decides, a chat whose
+\* own run was unsettled keeps deferring picks; an older start stands down. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

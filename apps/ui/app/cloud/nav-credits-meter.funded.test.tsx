@@ -83,7 +83,7 @@ describe('NavCreditsMeter', () => {
     expect(screen.queryByText('Purchased credits')).not.toBeInTheDocument();
   });
 
-  it('should keep a fractional monthly balance distinct from zero and subtract purchased holds', () => {
+  it('should keep a fractional monthly balance distinct from zero and never show purchased holds', () => {
     useCredits.mockReturnValue(
       balanceOf({
         planGrantCreditAtoms: '1',
@@ -93,7 +93,8 @@ describe('NavCreditsMeter', () => {
     );
     renderInMenu(<NavCreditsMeter />);
     expect(screen.getByText('<1% left')).toBeInTheDocument();
-    expect(screen.getByText('480')).toBeInTheDocument();
+    expect(screen.getByText('500')).toBeInTheDocument();
+    expect(screen.queryByText(/hold/iu)).not.toBeInTheDocument();
   });
 
   it('should not offer Add credits while monthly credits are healthy', () => {
@@ -145,7 +146,7 @@ describe('NavCreditsMeter', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('should retain a fully reserved purchased balance and expose the monthly allowance in a tooltip', async () => {
+  it('should show a purchased balance whole while work holds all of it, and the monthly allowance in a tooltip', async () => {
     useCredits.mockReturnValue(
       balanceOf({
         planGrantCreditAtoms: '236726',
@@ -155,8 +156,8 @@ describe('NavCreditsMeter', () => {
     );
     renderInMenu(<NavCreditsMeter />);
     expect(screen.getByText('Purchased credits')).toBeInTheDocument();
-    expect(screen.getByText('0')).toBeInTheDocument();
-    expect(screen.getByText('20 more on hold for work in progress')).toBeInTheDocument();
+    expect(screen.getByText('20')).toBeInTheDocument();
+    expect(screen.queryByText(/hold/iu)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('menuitem', { name: 'About monthly credits' }));
     expect(await screen.findByRole('tooltip')).toHaveTextContent('24 credits left this month');
     expect(screen.getByRole('tooltip')).toHaveTextContent('2,000 credits a month');

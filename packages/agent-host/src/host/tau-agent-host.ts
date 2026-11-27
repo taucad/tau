@@ -1719,6 +1719,38 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       if (target === undefined) {
         return;
       }
+      /* HA-I10: the writer's marker stays fresh on every tick, shared or not, outside `serial` and before any publish,
+       * so a held chain or a hung publish never delays it. Fire and forget; a failed touch only ages the marker. */
+      const touch = async (): Promise<void> => {
+        try {
+          const log = await store.log;
+          await log?.touch?.();
+        } catch {
+          /* A failed touch only ages the marker. */
+        }
+      };
+      void touch();
+      /* A held chain or a hung recheck stalls this tick and so the next: the marker keeps its cadence meanwhile. */
+      const touchingWhile = async <T>(work: Promise<T>): Promise<T> => {
+        let timer: unknown;
+        /* Only while the chat still has a live run to mark: a settled or closed one stops touching. */
+        const again = (): void => {
+          if (!closed && heartbeatTarget(store, chatId, deliver) !== undefined) {
+            void touch();
+            arm();
+          }
+        };
+        const arm = (): void => {
+          timer = clock.setTimeout(again, heartbeatInterval); // Bound: runHeartbeatMilliseconds.
+          (timer as { unref?: () => void } | undefined)?.unref?.();
+        };
+        arm();
+        try {
+          return await work;
+        } finally {
+          clock.clearTimeout(timer);
+        }
+      };
       const { wrote } = store;
       /* What this tick decided on: a heartbeat is written only if no row lands before it does. */
       const decided = wrote;
@@ -1759,7 +1791,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const rechecked = sharing === 'recheck';
       if (rechecked) {
         store.publishedAt = elapsed();
-        await publishChat(store, chatId, target.runId);
+        await touchingWhile(publishChat(store, chatId, target.runId));
         if (sharingOf(store) === 'not-shared') {
           armHeartbeat(chatId);
           return;
@@ -1769,16 +1801,18 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       try {
         /* Checked again inside the chat's chain: a settlement or a `closeLog` queued ahead of this row wins, and a
          * closed log is never reopened for a heartbeat. */
-        const committed = await serial(chatId, async () => {
-          const current = heartbeatTarget(store, chatId, deliver);
-          /* A row written while this tick waited (for the chain, or for a recheck's answer) is the run's liveness
-           * already, and its write armed the next tick: this one writes and publishes nothing, so two ticks never
-           * both publish. */
-          if (current === undefined || store.wrote !== decided) {
-            return undefined;
-          }
-          return write(chatId, current.leaderEpoch, [{ runId: current.runId, body: heartbeat }]);
-        });
+        const committed = await touchingWhile(
+          serial(chatId, async () => {
+            const current = heartbeatTarget(store, chatId, deliver);
+            /* A row written while this tick waited (for the chain, or for a recheck's answer) is the run's liveness
+             * already, and its write armed the next tick: this one writes and publishes nothing, so two ticks never
+             * both publish. */
+            if (current === undefined || store.wrote !== decided) {
+              return undefined;
+            }
+            return write(chatId, current.leaderEpoch, [{ runId: current.runId, body: heartbeat }]);
+          }),
+        );
         if (committed === undefined) {
           return;
         }

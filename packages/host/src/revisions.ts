@@ -26,7 +26,8 @@ import { jsonValueSchema } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
 import type { AgentChannelRevisionEvent } from '@taucad/agent-host/wire';
 import type { FileMode } from '@taucad/filesystem';
-import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { NodeFsProvider, watchTree } from '@taucad/filesystem/backend/node';
+import type { TreeWatcher } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';
 import type { ParameterRecordCodec } from '@taucad/revisions/algorithms';
@@ -121,8 +122,6 @@ import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
 import { actorFor, hostRevisionActor, revisionUserActorSchema } from '#revision-actor.js';
-import { watchTree } from '#watch-tree.js';
-import type { TreeWatcher } from '#watch-tree.js';
 import { observeRevisionEngineFailures } from '#revision-engine-failures.js';
 import type { RevisionEngineFailure } from '#revision-engine-failures.js';
 import type { HostRevisionActorResolver } from '#revision-actor.js';
@@ -1191,9 +1190,8 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const watchRoot = (key: WatchKey, root: string): void => {
     watchedRoots.set(key, root);
     try {
-      const watcher = watchTree(
-        root,
-        (path) => {
+      const watcher = watchTree(root, {
+        onChange: (path) => {
           if (path === undefined) {
             lose(key);
             return;
@@ -1211,12 +1209,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           }
           reportWrite(key, path);
         },
-        () => {
+        onError: () => {
           lose(key);
           watcher.close();
           watchers.set(key, undefined);
         },
-      );
+      });
       watchers.set(key, watcher);
     } catch {
       /* A platform or a filesystem with no recursive watch records revisions on

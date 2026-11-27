@@ -1,17 +1,17 @@
 /**
- * The host's tree watch survives a path that changes type under it.
+ * A tree watch survives a path that changes type under it.
  *
  * On Linux, Node's own recursive watcher throws ENOTDIR from an internal event
  * handler when a watched directory is replaced by a file, which kills the
- * process; the host's watcher reports the change and keeps watching.
+ * process; `watchTree` reports the change and keeps watching.
  */
 import { rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { watchTree } from '#watch-tree.js';
-import type { TreeWatcher } from '#watch-tree.js';
+import { watchTree } from '#backend/node/watch-tree.js';
+import type { TreeWatcher } from '#backend/node/watch-tree.js';
 
 const roots: string[] = [];
 const watchers: TreeWatcher[] = [];
@@ -28,15 +28,14 @@ const open = async () => {
   roots.push(root);
   await writeFile(join(root, 'main.ts'), 'file\n');
   const seen: Array<string | undefined> = [];
-  const watcher = watchTree(
-    root,
-    (path) => {
+  const watcher = watchTree(root, {
+    onChange: (path) => {
       seen.push(path);
     },
-    (error) => {
+    onError: (error) => {
       throw error;
     },
-  );
+  });
   watchers.push(watcher);
   /*
    * Events arrive in order, so a marker's event means every earlier write's

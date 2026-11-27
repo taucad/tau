@@ -66,6 +66,14 @@ type RouteClassBase = Readonly<{
    * `warm-next-step.ts`): the step a visitor most likely takes next. It names a class with {@link interactive} roots.
    */
   warms?: string;
+  /**
+   * The modules a first send that opens this class loads after Enter, app-relative (WP-12 step 2): their static
+   * closures, less the interactive tier, are the warm manifest's send tier, which Home prefetches when its composer
+   * is first typed in. Measured on staging, 2026-11-26: 70 files and 1.4 MB fetched after Enter.
+   */
+  send?: readonly string[];
+  /** The worker bundles a first send boots, by their entry's file stem (`agent-host.worker`), for the send tier. */
+  sendWorkers?: readonly string[];
   /** How the service worker answers the class's documents; absent when it never does. */
   worker?: WorkerDelivery;
 }>;
@@ -149,6 +157,16 @@ const projectClass: StaticShellClass = {
     'routes/w.$workspace.$project/chat-interface-desktop.tsx',
     'routes/w.$workspace.$project/chat-interface-mobile.tsx',
   ],
+  send: [
+    'runtime/host-connector.ts',
+    'runtime/session-revisions.ts',
+    'routes/w.$workspace.$project/chat-viewer.tsx',
+    'routes/w.$workspace.$project/chat-parameters.tsx',
+    'components/geometry/loader/metal-morph-spinner.tsx',
+    'services/part-thumbnail.service.ts',
+    'chat-clients/debug-probes.tsx',
+  ],
+  sendWorkers: ['agent-host.worker'],
 };
 
 /**

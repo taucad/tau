@@ -80,7 +80,8 @@ export const publishForbiddenPathPrefixes = ['node_modules/', '.git/objects/', '
 /**
  * The single subdirectory under `.tau/` that ships with publications (parameter overrides
  * consumed by `parameterFileResolverMiddleware`). Everything else under `.tau/` (artifacts,
- * cache, transcripts, skills, exports, AGENTS.md, etc.) is local-only.
+ * cache, chats, exports, etc.) is local-only. The project's agent files are not under `.tau/`:
+ * `AGENTS.md` and `.agents/skills/**` publish with the project, so a remix continues from them.
  *
  * @public
  */

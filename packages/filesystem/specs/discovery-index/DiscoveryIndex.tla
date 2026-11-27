@@ -87,6 +87,29 @@
 \* FW3 re-review (2026-11-27): the probe's install guard asks the index whether the root's names hold the directory
 \* (`hasName`); a same-root surviving copy is listed, one in another root or found by the sweep is not. Reads only;
 \* every action and verdict is unchanged.
+\* FW4 (2026-11-27, I/O lanes): a full read, the audit, a snapshot poll and the orphan sweep issue their provider calls
+\* through the background lane, and a sole copy's sweep through its own window (`io-scheduler.ts`); the registry counts
+\* interactive calls and gates background ones at the provider call, below every lock. A read still takes its capture
+\* before its first call is issued and a write's tap still fires before its bytes move, so the lane only delays a
+\* `ReadStart`'s I/O or a write, which the model already lets interleave arbitrarily (untimed). Every action and verdict
+\* is unchanged.
+\* FW4 stall deadline (2026-11-27, coordinator ruling): a background call in flight past 5 s releases its slot and a
+\* root with stalled calls is admitted one call at a time; the snapshot walk names its root to the lane. Timing only:
+\* every action and verdict is unchanged.
+\* FW4 review (2026-11-27): a background operation ages once, a lock-holding sweep is promoted, sweep and interactive
+\* calls stall too, a stalling root's deadline doubles and it holds at most four stalled calls; a read's writes under
+\* the identity's locks go through the interactive provider; a warm pass's evidence reads are 16 wide and its
+\* unretained re-reads background; the audit counts a names mismatch only for a listing it installed. Reads keep
+\* their capture before their first call and the tap still fires before a write. The index keeps which dirty
+\* directories are dirty only because the budget did not retain them (`unretained`), which evidence or an install
+\* clears; it moves no counter. Every action and verdict is unchanged.
+\* FW4 re-review (2026-11-27): an operation ages only while interactive calls hold it back, a disposed root's lane is
+\* forgotten and its queued calls cancelled, a call stalled past the longest deadline stops holding its root's ceiling,
+\* and a background orphan sweep waits once for the lane before it takes its lock. Timing and cancellation only: every
+\* action and verdict is unchanged.
+\* FW4 re-verification (2026-11-27): a call releases into the lane that admitted it, the sweep's pre-lock wait is the
+\* discovery lane's and maps its failure to `unknown`, aging restarts after a quiet period, and a hung root's probes
+\* back off to one per 10 minutes. Timing only: every action and verdict is unchanged.
 \* Staging path (2026-11-27): `project-directories.ts` names the storage root's import staging `.tau/staging/` instead
 \* of `.tau-staging/` (taucad/tau#2909), in a comment only. Discovery still skips every dot-named root entry; no action
 \* or verdict changes.

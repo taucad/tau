@@ -418,6 +418,42 @@ describe('revision machine composition (S48 Node set)', () => {
     tree.actor.stop();
   });
 
+  /* 7b — a merge that lands moves the checkout it wrote (RM-R5). The registry's re-read on `branchMerged` lags the
+   * verb going idle, so a cut asked in between (a close: T12-custody in merge-queue run 46044566514) must find the
+   * checkout re-reading its head rather than minting over the head the merge replaced and losing the compare-and-swap. */
+  it('re-reads the head a landed merge moved before the next cut, without waiting for the registry', async () => {
+    const tree = startTree();
+    await openRegistry(tree, [{ ...live, headRevisionId: 'rev-1' }]);
+
+    tree.actor.send({ type: 'branch', event: { type: 'merge', requestId: 'merge-1', branch: 'bracket-fillet' } });
+    await flush();
+    tree.promises.settle('checkBranch', { output: {} });
+    await flush();
+    tree.promises.settle('mergeBranch', {
+      output: { status: 'merged', revisionId: 'rev-theirs', checkoutId: 'checkout-live', before: 'rev-1' },
+    });
+    await flush();
+
+    /* The registry has not answered its re-read yet; the close's cut arrives now. */
+    expect(tree.promises.running('listCheckouts')).toBe(1);
+    tree.actor.send({ type: 'cut', requestId: 'close-1', trigger: 'close', checkoutId: 'checkout-live', leaseIds: [] });
+    await flush();
+    expect(tree.promises.running('readHead')).toBe(1);
+    expect(tree.promises.running('cut')).toBe(0);
+    tree.promises.settle('readHead', { output: { revisionId: 'rev-theirs', treeId: 'tree-theirs', branch: 'main' } });
+    await flush();
+    tree.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    tree.promises.settle('cut', { output: { treeId: 'tree-theirs', cutId: 'cut-close' } });
+    await flush();
+
+    /* The merged files are the new head's: nothing to record, and no compare-and-swap to lose. */
+    expect(tree.promises.inputsFor('writeRevision')).toEqual([]);
+    expect(types(tree.emitted)).not.toContain('casLost');
+    expect(tree.emitted).toContainEqual(expect.objectContaining({ type: 'nothingToSave', requestId: 'close-1' }));
+
+    tree.actor.stop();
+  });
+
   /* 8 — deterministic scripted actors, complementing the two real ports below. */
   it('produces the same sequence on every run of the same script', async () => {
     const run = async (): Promise<Readonly<{ calls: readonly string[]; emitted: readonly string[] }>> => {

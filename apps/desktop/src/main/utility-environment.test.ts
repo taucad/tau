@@ -174,8 +174,11 @@ describe('packagedEsbuildEnvironment', () => {
         platform: 'darwin',
       }),
     ).toEqual({
-      ESBUILD_BINARY_PATH:
-        '/Applications/Tau.app/Contents/Resources/app.asar.unpacked/node_modules/@esbuild/darwin-x64/bin/esbuild',
+      ESBUILD_BINARY_PATH: join(
+        '/Applications/Tau.app/Contents/Resources',
+        'app.asar.unpacked/node_modules',
+        '@esbuild/darwin-x64/bin/esbuild',
+      ),
     });
   });
 

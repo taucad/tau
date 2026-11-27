@@ -91,25 +91,35 @@ describe('platform update transport and launch', () => {
     expect(relaunchSwitches(['/usr/bin/tau', '--safe-mode', '--ozone-platform=x11'])).toEqual(['--ozone-platform=x11']);
   });
 
-  it('restarts with switches through the AppImage relauncher when APPIMAGE is set, and app.relaunch otherwise (T-R12.8)', async () => {
-    // oxlint-disable-next-line unicorn/prefer-event-target -- Node child_process delivers spawn/error through EventEmitter.
-    const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
-    mocks.spawn.mockReturnValue(child);
-    vi.stubEnv('APPIMAGE', '/home/tau/Tau.AppImage');
-    try {
-      const relaunched = relaunchSelf(['--safe-mode'], ['/tmp/.mount/tau', '--safe-mode', '--no-sandbox', 'file.step']);
-      child.emit('spawn');
-      await relaunched;
-    } finally {
-      vi.unstubAllEnvs();
-    }
-    expect(mocks.spawn).toHaveBeenCalledWith(
-      '/bin/bash',
-      ['-c', appImageRelaunchScript, 'tau-relaunch', '/home/tau/Tau.AppImage', '--no-sandbox', '--safe-mode'],
-      expect.anything(),
-    );
-    expect(mocks.relaunch).not.toHaveBeenCalled();
+  /* Off Windows by design, as the host bash waiter below: `relaunchAppImage` checks the host's real `/bin/bash` before
+   * it quits (ENOENT on windows-2025, run 45923570791). The app.relaunch half runs on every platform. */
+  it.skipIf(process.platform === 'win32')(
+    'restarts with switches through the AppImage relauncher when APPIMAGE is set (T-R12.8)',
+    async () => {
+      // oxlint-disable-next-line unicorn/prefer-event-target -- Node child_process delivers spawn/error through EventEmitter.
+      const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
+      mocks.spawn.mockReturnValue(child);
+      vi.stubEnv('APPIMAGE', '/home/tau/Tau.AppImage');
+      try {
+        const relaunched = relaunchSelf(
+          ['--safe-mode'],
+          ['/tmp/.mount/tau', '--safe-mode', '--no-sandbox', 'file.step'],
+        );
+        child.emit('spawn');
+        await relaunched;
+      } finally {
+        vi.unstubAllEnvs();
+      }
+      expect(mocks.spawn).toHaveBeenCalledWith(
+        '/bin/bash',
+        ['-c', appImageRelaunchScript, 'tau-relaunch', '/home/tau/Tau.AppImage', '--no-sandbox', '--safe-mode'],
+        expect.anything(),
+      );
+      expect(mocks.relaunch).not.toHaveBeenCalled();
+    },
+  );
 
+  it('restarts with switches through app.relaunch when APPIMAGE is not set (T-R12.8)', async () => {
     vi.stubEnv('APPIMAGE', undefined);
     try {
       await relaunchSelf([], ['/Applications/Tau.app/Contents/MacOS/Tau', '--safe-mode', '--enable-logging']);
@@ -372,7 +382,7 @@ describe('AppImage update from a launch that is not healthy (T-B22.1)', () => {
       .spyOn(files, 'readFile')
       .mockImplementation(async (path) =>
         JSON.stringify(
-          path === '/app/package.json'
+          path === join('/app', 'package.json')
             ? { version: marker.version, tauDesktop: { sourceCommit: marker.sourceCommit } }
             : marker,
         ),

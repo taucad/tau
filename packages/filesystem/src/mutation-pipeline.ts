@@ -905,6 +905,52 @@ export class MutationPipeline {
     this._crossTabCoordinator.notifyChanges(notices);
   }
 
+  /**
+   * Publish a directory a permanent delete removed from a storage root at every
+   * logical path a current mount gives it, attributed to that mount so every
+   * view that captured it hears the removal (project-library fast-path FW5): a
+   * Home project directory is seen through the Home connection as well as
+   * through its route. A mount whose own directory lay inside the removed one
+   * loses its whole tree, so it hears the removal at its prefix.
+   *
+   * @param storageRootKey - The storage root the directory was removed from.
+   * @param provider - The storage root's provider.
+   * @param providerPath - The removed directory's provider path.
+   */
+  public publishRemovedDirectory(storageRootKey: string, provider: FileSystemProvider, providerPath: string): void {
+    const events: AttributedChangeEvent[] = [];
+    for (const entry of this._mountTable.listMounts()) {
+      if (entry.storageRootKey !== storageRootKey || entry.provider !== provider) {
+        continue;
+      }
+      const base = entry.providerBasePath;
+      let path: string | undefined;
+      if (base === providerPath || base.startsWith(`${providerPath}/`)) {
+        path = entry.prefix;
+      } else if (base === '' || providerPath.startsWith(`${base}/`)) {
+        const suffix = base === '' ? providerPath : providerPath.slice(base.length + 1);
+        path = entry.prefix === '/' ? `/${suffix}` : `${entry.prefix}/${suffix}`;
+        /* A deeper mount over the same logical path shadows it: what it shows is not the removed directory. */
+        try {
+          if (this._mountTable.resolve(path).entry !== entry) {
+            continue;
+          }
+        } catch {
+          continue;
+        }
+      }
+      if (path === undefined) {
+        continue;
+      }
+      const resolution: MountResolution = { provider, path: providerPath, backend: entry.backend, entry };
+      events.push({
+        event: { type: 'directoryDeleted', path, backend: entry.backend },
+        operations: [{ path, resolution }],
+      });
+    }
+    this.emitChangeEvents(events);
+  }
+
   public async writeFileResolved({
     path,
     resolution,

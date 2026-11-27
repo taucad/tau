@@ -117,6 +117,9 @@
 \* removed directory (`ProjectIndexes.forgetRemovedDirectory`) instead of every one. Project Indexes are not the
 \* discovery index; the delete's probes, removal order, discovery taps and notices are untouched. Every action and
 \* verdict is unchanged.
+\* FW5 review (2026-11-27): after the removal the permanent delete also publishes the removed directory as deleted at
+\* each logical path a current mount gives it, attributed to that mount, beside the unchanged root summary and notices.
+\* A local change event, not evidence the index takes: every action and verdict is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

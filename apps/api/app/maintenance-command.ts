@@ -43,6 +43,7 @@ import {
 import { activeLfsReservationPages } from '@taucad/api-git-mirror/maintenance/lfs-reservation-scope';
 import { applicationNameOf } from '@taucad/api-database/application-name';
 import { reapExpiredEmailEvents } from '@taucad/api-email/retention';
+import { pruneDesktopRefreshTokens } from '@taucad/api-auth/desktop-sign-in-retention';
 import { optionValue, optionalOperand as optionalOperandOf, requiredOperand } from '#maintenance-arguments.js';
 
 /**
@@ -458,6 +459,16 @@ async function main(): Promise<void> {
                 JSON.stringify({
                   event: 'revisions_maintenance.email_events_reaped',
                   ...reaped,
+                }),
+              );
+              stop.signal.throwIfAborted();
+              // Tau Desktop's rotated refresh tokens (desktop sign-in DSI-10): dead families whole, expired rows of
+              // live ones, never a live family's earliest row (the 90-day cap counts from it); one bounded batch a day.
+              const desktopTokens = await pruneDesktopRefreshTokens(database, { now: new Date(), limit: 10_000 });
+              await writeLine(
+                JSON.stringify({
+                  event: 'revisions_maintenance.desktop_refresh_tokens_pruned',
+                  ...desktopTokens,
                 }),
               );
             },

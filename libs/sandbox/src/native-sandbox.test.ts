@@ -70,6 +70,8 @@ afterEach(() => {
   sandbox.wrapFailure = undefined;
   sandbox.wrapped = undefined;
   sandbox.wrap.mockClear();
+  /* A rejection a case queued and never consumed would otherwise answer the next case's first initialization. */
+  sandbox.initialize.mockReset();
   sandbox.reset.mockClear();
   sandbox.dependencyCheck.mockClear();
   vi.useRealTimers();
@@ -79,10 +81,13 @@ afterEach(() => {
 
 describe('launchInNativeSandbox', () => {
   it('should fail closed before initialization succeeds, then initialize once', async () => {
+    /* A fresh module, so no earlier case's successful initialization is already memoized. */
+    vi.resetModules();
+    const fresh = await import('#index.js');
     // Concurrent launches share one attempt: both observe its failure, the memo is reset once, and
     // the second observer must not clobber whatever a later launch has already started.
     sandbox.initialize.mockRejectedValueOnce(new Error('proxy bind failed'));
-    const shared = await Promise.allSettled([launchInNativeSandbox(launch), launchInNativeSandbox(launch)]);
+    const shared = await Promise.allSettled([fresh.launchInNativeSandbox(launch), fresh.launchInNativeSandbox(launch)]);
     expect(shared.map(({ status }) => status)).toEqual(['rejected', 'rejected']);
     expect(sandbox.initialize).toHaveBeenCalledTimes(1);
 
@@ -128,13 +133,15 @@ describe('launchInNativeSandbox', () => {
     for (const { arrange, message } of failures) {
       arrange();
       // oxlint-disable-next-line no-await-in-loop -- each failure mode is arranged sequentially.
-      const error: unknown = await launchInNativeSandbox(launch).then(
+      const error: unknown = await fresh.launchInNativeSandbox(launch).then(
         () => undefined,
         (error: unknown) => error,
       );
-      expect(error).toBeInstanceOf(NativeRuntimeUnavailableError);
-      expect((error as NativeRuntimeUnavailableError).code).toBe('NATIVE_RUNTIME_UNAVAILABLE');
-      expect((error as NativeRuntimeUnavailableError).message).toMatch(message);
+      expect(error).toBeInstanceOf(fresh.NativeRuntimeUnavailableError);
+      expect((error as InstanceType<typeof fresh.NativeRuntimeUnavailableError>).code).toBe(
+        'NATIVE_RUNTIME_UNAVAILABLE',
+      );
+      expect((error as InstanceType<typeof fresh.NativeRuntimeUnavailableError>).message).toMatch(message);
       Object.defineProperty(process, 'platform', platformDescriptor);
       sandbox.supported = true;
       sandbox.dependencyErrors = [];
@@ -143,7 +150,7 @@ describe('launchInNativeSandbox', () => {
     // Each rejected initialization was retried by the next launch; the success is then reused.
     expect(sandbox.initialize).toHaveBeenCalledTimes(3);
     expect(sandbox.initialize).toHaveBeenLastCalledWith(nativeSandboxPolicy());
-    await launchInNativeSandbox(launch);
+    await fresh.launchInNativeSandbox(launch);
     expect(sandbox.initialize).toHaveBeenCalledTimes(3);
   });
 

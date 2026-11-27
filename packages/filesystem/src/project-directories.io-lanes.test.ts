@@ -487,6 +487,49 @@ describe('I/O lanes on the 386-directory profile', () => {
       expect(settled[1]! - settled[0]!).toBeLessThanOrEqual(backgroundIoAgingMilliseconds + 20);
     });
 
+    /* Re-verification F (probes N7, N7b): the sweep's pre-lock wait is the discovery lane's, never Home's. */
+    it('should make an orphan sweep’s pre-lock wait on no root, so a capped Home neither delays it nor is reset by it', async () => {
+      await profile.service.listProjectManifests();
+      const [home] = await profile.service.getRootStatuses();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      const hangs = async (): Promise<void> =>
+        new Promise<void>(() => {
+          /* Home's calls hang. */
+        });
+      for (let index = 0; index < backgroundIoConcurrency; index += 1) {
+        void profile.ioScheduler.runBackground(home!.storageRootKey, hangs);
+      }
+      /* Stalled, then abandoned: Home is probed at most once a minute now. */
+      await vi.advanceTimersByTimeAsync(ioStallMilliseconds + 60_000);
+      const deadline = profile.ioScheduler.backgroundDeadline(home!.storageRootKey);
+      expect(deadline).toBeGreaterThan(ioStallMilliseconds);
+      /* Only the pre-lock call reaches the lane: the sweep's reads are refused, so it answers and releases its lock
+       * without touching Home, whose real reads would answer in time and reset it. */
+      const runBackground = profile.ioScheduler.runBackground.bind(profile.ioScheduler);
+      const run = vi
+        .spyOn(profile.ioScheduler, 'runBackground')
+        .mockImplementationOnce(runBackground)
+        .mockRejectedValue(new DOMException('Refused by the test.', 'AbortError'));
+
+      const sweep = await profile.service.verifyAbsent(homeProjectId, { lane: 'background' });
+
+      expect(run.mock.calls[0]?.[0]).toBe('discovery');
+      expect(sweep).toMatchObject({ status: 'unknown' });
+      expect(profile.ioScheduler.backgroundDeadline(home!.storageRootKey)).toBe(deadline);
+    });
+
+    /* Re-verification H: the pre-lock wait failing is an answer the sweep maps like any other failure. */
+    it('should answer unknown when an orphan sweep’s pre-lock wait for the lane fails', async () => {
+      await profile.service.listProjectManifests();
+      vi.spyOn(profile.ioScheduler, 'runBackground').mockRejectedValueOnce(
+        new DOMException('The background call was cancelled.', 'AbortError'),
+      );
+
+      await expect(profile.service.verifyAbsent(homeProjectId, { lane: 'background' })).resolves.toMatchObject({
+        status: 'unknown',
+      });
+    });
+
     it('should let an interactive operation that holds the project lock finish while a background sweep waits for it', async () => {
       await profile.service.listProjectManifests();
       let probeGate: Gate | undefined;

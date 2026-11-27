@@ -794,9 +794,14 @@ export class ProjectDirectories {
     }
     if (options?.lane === 'background') {
       /* A promoted sweep yields before it takes its lock: one call's wait for the lane, aging behind interactive calls
-       * as any background call does, so consecutive orphan sweeps never run back to back past them (re-review C). */
-      const [first] = this._discoveryRoots();
-      await this._registry.ioScheduler.runBackground(first?.storageRootKey ?? 'discovery', () => undefined);
+       * as any background call does, so consecutive orphan sweeps never run back to back past them (re-review C). It is
+       * the discovery lane's, on no root, so a root's stall accounting neither delays it nor is reset by it
+       * (re-verification F), and a failure of it is an answer like any other (H). */
+      try {
+        await this._registry.ioScheduler.runBackground('discovery', () => undefined);
+      } catch (error) {
+        return { status: 'unknown', reason: errorMessage(error) };
+      }
     }
     const locks = [`project:${projectId}`];
     return this._crossTabCoordinator.withLocks(locks, async () => this._resourceQueue.queueForMany(locks, sweep));

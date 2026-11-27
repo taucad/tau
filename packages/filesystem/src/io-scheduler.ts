@@ -71,6 +71,15 @@ export const ioStallMilliseconds = 5000;
 export const ioMaxStallMilliseconds = 60_000;
 
 /**
+ * The longest interval between probes of a root whose calls were abandoned (it hangs while still configured): it starts
+ * at {@link ioMaxStallMilliseconds} and doubles with each probe up to this, so such a root costs one new call at most
+ * every 10 minutes, and is back to normal once a call settles in time (FW4 re-verification nit).
+ *
+ * @public
+ */
+export const ioMaxProbeMilliseconds = 600_000;
+
+/**
  * One background operation's admission state: when it first had to wait, whether it is promoted, and the signal that
  * cancels its queued calls. Calls of one operation share it, so it ages once.
  *
@@ -79,6 +88,8 @@ export const ioMaxStallMilliseconds = 60_000;
 export type IoOperation = {
   /** When a call of the operation was first left queued behind interactive calls. */
   blockedSince: number | undefined;
+  /** The scheduler's quiet count when `blockedSince` was set: a quiet period since makes it stale. */
+  blockedQuiet: number;
   /** Admitted without aging: the operation holds a lock other work waits on. */
   readonly promoted: boolean;
   /** Aborted when nobody can use the operation's answers any more (its connection closed). */
@@ -93,7 +104,7 @@ type Waiter = {
   readonly storageRootKey: string;
   readonly queuedAt: number;
   readonly operation: IoOperation;
-  readonly admit: () => void;
+  readonly admit: (lane?: RootLane) => void;
   readonly reject: (error: unknown) => void;
   admitted: boolean;
 };
@@ -103,7 +114,16 @@ type Waiter = {
  * {@link ioMaxStallMilliseconds} stalled, which still keep it to one call at a time until a call settles in time
  * (`generation` moves then, so an abandoned call that settles later changes nothing).
  */
-type RootLane = { counted: number; stalled: number; abandoned: number; generation: number; deadline: number };
+type RootLane = {
+  counted: number;
+  stalled: number;
+  abandoned: number;
+  generation: number;
+  deadline: number;
+  /** While calls are abandoned: the earliest next probe, and the interval after it. */
+  nextProbeAt: number;
+  probeInterval: number;
+};
 
 const abortError = (): DOMException => new DOMException('The background call was cancelled.', 'AbortError');
 
@@ -131,6 +151,11 @@ export class IoScheduler {
   private _agingTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly _stallTimers = new Set<ReturnType<typeof setTimeout>>();
   private _disposed = false;
+  /**
+   * How many times the interactive count has reached zero: aging taken before the last time is stale (re-verification
+   * G). A count, not a clock reading, so a quiet moment and a new hold in the same millisecond stay ordered.
+   */
+  private _quiet = 0;
   private readonly _timings: WorkerTimings;
   private readonly _clock: () => number;
 
@@ -213,7 +238,7 @@ export class IoScheduler {
    * @returns The operation, to pass with each of its calls.
    */
   public operation(options?: Readonly<{ promoted?: boolean; signal?: AbortSignal }>): IoOperation {
-    return { blockedSince: undefined, promoted: options?.promoted === true, signal: options?.signal };
+    return { blockedSince: undefined, blockedQuiet: 0, promoted: options?.promoted === true, signal: options?.signal };
   }
 
   /**
@@ -259,9 +284,9 @@ export class IoScheduler {
     operation?: IoOperation,
   ): Promise<Awaited<Result>> {
     const issuedAt = this._timings.now();
-    await this._enqueue(this._backgroundQueue, { storageRootKey, operation });
+    /* The lane that admitted the call, which its release settles into, even if its root is forgotten in between. */
+    const root = (await this._enqueue(this._backgroundQueue, { storageRootKey, operation }))!;
     this._timings.record('io.wait.background', issuedAt);
-    const root = this._root(storageRootKey);
     let state: 'counted' | 'stalled' | 'abandoned' = 'counted';
     let abandonedIn = 0;
     return this._run(call, {
@@ -274,6 +299,8 @@ export class IoScheduler {
           root.deadline = ioStallMilliseconds;
           root.abandoned = 0;
           root.generation += 1;
+          root.nextProbeAt = 0;
+          root.probeInterval = ioMaxStallMilliseconds;
         } else if (state === 'stalled') {
           root.stalled -= 1;
         } else if (abandonedIn === root.generation) {
@@ -384,6 +411,9 @@ export class IoScheduler {
     }
     entry.counted = false;
     this._interactive.delete(entry);
+    if (this._interactive.size === 0) {
+      this._quiet += 1;
+    }
     const count = (this._interactiveByRoot.get(entry.storageRootKey) ?? 1) - 1;
     if (count === 0) {
       this._interactiveByRoot.delete(entry.storageRootKey);
@@ -406,7 +436,15 @@ export class IoScheduler {
   private _root(storageRootKey: string): RootLane {
     let root = this._roots.get(storageRootKey);
     if (root === undefined) {
-      root = { counted: 0, stalled: 0, abandoned: 0, generation: 0, deadline: ioStallMilliseconds };
+      root = {
+        counted: 0,
+        stalled: 0,
+        abandoned: 0,
+        generation: 0,
+        deadline: ioStallMilliseconds,
+        nextProbeAt: 0,
+        probeInterval: ioMaxStallMilliseconds,
+      };
       this._roots.set(storageRootKey, root);
     }
     return root;
@@ -510,7 +548,11 @@ export class IoScheduler {
     if (root === undefined || (root.stalled === 0 && root.abandoned === 0)) {
       return true;
     }
-    return root.stalled < backgroundIoConcurrency && root.counted === 0;
+    return (
+      root.stalled < backgroundIoConcurrency &&
+      root.counted === 0 &&
+      (root.abandoned === 0 || this._clock() >= root.nextProbeAt)
+    );
   }
 
   /**
@@ -529,7 +571,7 @@ export class IoScheduler {
   private async _enqueue(
     queue: Waiter[],
     call: Readonly<{ storageRootKey: string; operation?: IoOperation | undefined; onAdmitted?: () => void }>,
-  ): Promise<void> {
+  ): Promise<RootLane | undefined> {
     const { storageRootKey, onAdmitted } = call;
     /* A call of no operation is an operation of its own: it ages alone. */
     const operation = call.operation ?? this.operation();
@@ -537,7 +579,7 @@ export class IoScheduler {
     if (signal?.aborted === true) {
       throw abortError();
     }
-    const admitted = Promise.withResolvers<void>();
+    const admitted = Promise.withResolvers<RootLane | undefined>();
     const cancel = (): void => {
       const index = queue.indexOf(waiter);
       if (index !== -1) {
@@ -550,11 +592,11 @@ export class IoScheduler {
       storageRootKey,
       queuedAt: this._clock(),
       operation,
-      admit: () => {
+      admit: (lane) => {
         waiter.admitted = true;
         signal?.removeEventListener('abort', cancel);
         onAdmitted?.();
-        admitted.resolve();
+        admitted.resolve(lane);
       },
       reject: (error) => {
         signal?.removeEventListener('abort', cancel);
@@ -581,11 +623,23 @@ export class IoScheduler {
     let agesAt = Number.POSITIVE_INFINITY;
     for (let index = 0; index < this._backgroundQueue.length && this._background < backgroundIoConcurrency; ) {
       const waiter = this._backgroundQueue[index]!;
+      const { operation } = waiter;
+      /* Aging from before a quiet period does not carry over it: the operation was not held back since (re-verify G). */
+      if (operation.blockedSince !== undefined && operation.blockedQuiet !== this._quiet) {
+        operation.blockedSince = undefined;
+      }
       if (!this._rootAdmits(waiter.storageRootKey)) {
+        const probeAt = this._roots.get(waiter.storageRootKey)?.nextProbeAt ?? 0;
+        if (probeAt > this._clock()) {
+          agesAt = Math.min(agesAt, probeAt);
+        }
         index += 1;
       } else if (this._interactive.size > 0 && !this._aged(waiter)) {
         /* Held back by interactive calls: the operation's aging starts now, once (re-review A). */
-        waiter.operation.blockedSince ??= this._clock();
+        if (waiter.operation.blockedSince === undefined) {
+          waiter.operation.blockedSince = this._clock();
+          waiter.operation.blockedQuiet = this._quiet;
+        }
         agesAt = Math.min(agesAt, waiter.operation.blockedSince + backgroundIoAgingMilliseconds);
         index += 1;
       } else {
@@ -594,16 +648,22 @@ export class IoScheduler {
           waiter.operation.blockedSince = undefined;
         }
         this._background += 1;
-        this._root(waiter.storageRootKey).counted += 1;
+        const lane = this._root(waiter.storageRootKey);
+        lane.counted += 1;
+        if (lane.abandoned > 0) {
+          /* A probe of a root whose calls hang: the next one waits longer (re-verification nit). */
+          lane.nextProbeAt = this._clock() + lane.probeInterval;
+          lane.probeInterval = Math.min(lane.probeInterval * 2, ioMaxProbeMilliseconds);
+        }
         this._backgroundQueue.splice(index, 1);
-        waiter.admit();
+        waiter.admit(lane);
       }
     }
     clearTimeout(this._agingTimer);
     this._agingTimer = undefined;
     if (!this._disposed && Number.isFinite(agesAt) && this._background < backgroundIoConcurrency) {
-      /* Held back only by interactive calls: wake when the first such call has aged. A full lane, or a capped root, is
-       * woken by a release instead. */
+      /* Held back by interactive calls, or by a hung root's probe interval: wake when the first such call may go. A
+       * full lane, or a root capped by its calls in flight, is woken by a release instead. */
       this._agingTimer = setTimeout(
         () => {
           this._agingTimer = undefined;

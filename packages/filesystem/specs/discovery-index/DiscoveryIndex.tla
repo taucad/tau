@@ -107,6 +107,9 @@
 \* forgotten and its queued calls cancelled, a call stalled past the longest deadline stops holding its root's ceiling,
 \* and a background orphan sweep waits once for the lane before it takes its lock. Timing and cancellation only: every
 \* action and verdict is unchanged.
+\* FW4 re-verification (2026-11-27): a call releases into the lane that admitted it, the sweep's pre-lock wait is the
+\* discovery lane's and maps its failure to `unknown`, aging restarts after a quiet period, and a hung root's probes
+\* back off to one per 10 minutes. Timing only: every action and verdict is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

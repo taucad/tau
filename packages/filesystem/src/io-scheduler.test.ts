@@ -3,6 +3,7 @@ import {
   IoScheduler,
   backgroundIoAgingMilliseconds,
   backgroundIoConcurrency,
+  ioMaxProbeMilliseconds,
   ioMaxStallMilliseconds,
   ioStallMilliseconds,
   sweepIoConcurrency,
@@ -59,6 +60,15 @@ describe('IoScheduler', () => {
     scheduler.dispose();
     vi.useRealTimers();
   });
+
+  /** Issue one background call on `root` that holds its slot until settled; `started` counts the admitted ones. */
+  const issueBackgroundOn = async (root: string, calls: HeldCall[], started: { count: number }): Promise<void> =>
+    scheduler.runBackground(root, async () => {
+      started.count += 1;
+      const call = held();
+      calls.push(call);
+      await call.promise;
+    });
 
   /** Issue one background call that holds its slot until settled; `started` counts the admitted ones. */
   const issueBackground = async (calls: HeldCall[], started: { count: number }): Promise<void> =>
@@ -885,14 +895,15 @@ describe('IoScheduler', () => {
       }
       await drain();
       await vi.advanceTimersByTimeAsync(10 * 60_000);
-      /* Four at once, then one per 60 s once their stalls are abandoned: never zero, never a flood. */
-      expect(started.count).toBeGreaterThanOrEqual(backgroundIoConcurrency + 8);
-      expect(started.count).toBeLessThanOrEqual(backgroundIoConcurrency + 10);
+      /* Four at once, then probes once their stalls are abandoned, backing off from 60 s (at 65, 125, 245 and 485 s):
+       * never zero, never a flood. */
+      expect(started.count).toBeGreaterThanOrEqual(backgroundIoConcurrency + 3);
+      expect(started.count).toBeLessThanOrEqual(backgroundIoConcurrency + 5);
       expect(scheduler.backgroundStalled('folder')).toBeLessThanOrEqual(backgroundIoConcurrency);
 
       const hung = started.count;
       mode.hang = false;
-      await vi.advanceTimersByTimeAsync(2 * ioMaxStallMilliseconds);
+      await vi.advanceTimersByTimeAsync(ioMaxProbeMilliseconds + ioMaxStallMilliseconds);
       /* Every call left runs and settles; only the hung ones never do. */
       expect(started.count).toBe(100);
       expect(started.settled).toBe(100 - hung);
@@ -913,6 +924,167 @@ describe('IoScheduler', () => {
       await drain();
       expect(other).toBe(true);
       expect(scheduler.backgroundInFlight()).toBeLessThanOrEqual(1);
+    });
+  });
+
+  describe('re-verification fixes (FW4 E, G, mutants, probe back-off)', () => {
+    const neverSettles = async (): Promise<void> =>
+      new Promise<void>(() => {
+        /* Never settles. */
+      });
+
+    /* E (probe N6): a call admitted in the same tick as its root is forgotten releases into the lane that admitted it. */
+    it('should release a call admitted just before its root was forgotten into that lane, not into the next one', async () => {
+      const admittedThenForgotten = scheduler.runBackground('folder', async () => undefined);
+      scheduler.forgetRoot('folder');
+      await admittedThenForgotten;
+
+      /* One hung call stalls; the root, counted at zero, is then admitted its next call. */
+      void scheduler.runBackground('folder', neverSettles);
+      await drain();
+      await vi.advanceTimersByTimeAsync(ioStallMilliseconds);
+      expect(scheduler.backgroundStalled('folder')).toBe(1);
+      let ran = false;
+      void scheduler.runBackground('folder', async () => {
+        ran = true;
+      });
+      await drain();
+      expect(ran).toBe(true);
+    });
+
+    /* Mutant at the abandoned generation check: a late abandoned settle never drives `abandoned` below zero. */
+    it('should not let an abandoned call that settles after a timely one leave its root capped', async () => {
+      const hung: HeldCall[] = [];
+      const hang = async (): Promise<void> => {
+        const call = held();
+        hung.push(call);
+        await call.promise;
+      };
+      /* A stalls at 5 s and is abandoned at 65 s; B, admitted then, stalls 10 s later and keeps the lane alive. */
+      void scheduler.runBackground('folder', hang);
+      await drain();
+      await vi.advanceTimersByTimeAsync(ioStallMilliseconds + ioMaxStallMilliseconds);
+      void scheduler.runBackground('folder', hang);
+      await drain();
+      await vi.advanceTimersByTimeAsync(2 * ioStallMilliseconds);
+      expect(scheduler.backgroundStalled('folder')).toBe(1);
+      /* A timely call clears what was abandoned; it is the root's next probe, 60 s after B's (65 s). */
+      const timely = scheduler.runBackground('folder', async () => undefined);
+      await vi.advanceTimersByTimeAsync(ioMaxStallMilliseconds - 2 * ioStallMilliseconds);
+      await timely;
+      expect(scheduler.backgroundStalled('folder')).toBe(1);
+      /* A, then B, settle late. */
+      hung[0]!.settle();
+      await drain();
+      hung[1]!.settle();
+      await drain();
+
+      const started = { count: 0 };
+      for (let index = 0; index < backgroundIoConcurrency; index += 1) {
+        void issueBackgroundOn('folder', [], started);
+      }
+      await drain();
+      expect(started.count).toBe(backgroundIoConcurrency);
+    });
+
+    /* Mutant at the lane identity in `_dropRoot`: a dropped lane's settle never removes its replacement. */
+    it('should keep a forgotten root’s new lane when a call of its old lane settles', async () => {
+      const old: HeldCall[] = [];
+      void scheduler.runBackground('folder', async () => {
+        const call = held();
+        old.push(call);
+        await call.promise;
+      });
+      await drain();
+      scheduler.forgetRoot('folder');
+      for (let index = 0; index < backgroundIoConcurrency - 1; index += 1) {
+        void scheduler.runBackground('folder', neverSettles);
+      }
+      await drain();
+
+      /* The old lane's call settles in time, before anything stalls: only the old lane is done with. */
+      await vi.advanceTimersByTimeAsync(1000);
+      old[0]!.settle();
+      await drain();
+      await vi.advanceTimersByTimeAsync(ioStallMilliseconds - 1000);
+      expect(scheduler.backgroundStalled('folder')).toBe(backgroundIoConcurrency - 1);
+      expect(scheduler.backgroundDeadline('folder')).toBe(2 ** (backgroundIoConcurrency - 1) * ioStallMilliseconds);
+    });
+
+    /* G (probe N1b): an operation's aging from before a quiet period does not carry over it. */
+    it('should restart an operation’s aging after a quiet period in which it made no call', async () => {
+      const operation = scheduler.operation();
+      const admitted: number[] = [];
+      const startedAt = Date.now();
+      const record = async (): Promise<void> => {
+        admitted.push(Date.now() - startedAt);
+      };
+      /* Held back, then admitted by aging while the interactive call is still in flight: its aging stands. */
+      const first = scheduler.beginInteractive('home');
+      const waiting = scheduler.runBackground('home', record, operation);
+      await vi.advanceTimersByTimeAsync(backgroundIoAgingMilliseconds);
+      await waiting;
+      first();
+      expect(operation.blockedSince).toBeDefined();
+      /* A quiet period with no call of the operation. */
+      await vi.advanceTimersByTimeAsync(3000);
+
+      const second = scheduler.beginInteractive('home');
+      void scheduler.runBackground('home', record, operation);
+      await drain();
+      expect(admitted).toEqual([backgroundIoAgingMilliseconds]);
+      await vi.advanceTimersByTimeAsync(backgroundIoAgingMilliseconds - 1);
+      expect(admitted).toEqual([backgroundIoAgingMilliseconds]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(admitted).toEqual([backgroundIoAgingMilliseconds, 3000 + 2 * backgroundIoAgingMilliseconds]);
+      second();
+    });
+
+    /* G, same millisecond: a quiet moment just before a new hold does not make that hold stale. */
+    it('should age a call held right after a quiet moment in the same millisecond in one aging wait', async () => {
+      scheduler.beginInteractive('home')();
+      const settleInteractive = scheduler.beginInteractive('home');
+      let admittedAt = -1;
+      const startedAt = Date.now();
+      void scheduler.runBackground('home', async () => {
+        admittedAt = Date.now() - startedAt;
+      });
+      await vi.advanceTimersByTimeAsync(2 * backgroundIoAgingMilliseconds);
+      expect(admittedAt).toBe(backgroundIoAgingMilliseconds);
+      settleInteractive();
+    });
+
+    /* Nit: a root whose calls hang forever is probed less and less often, at most every 10 minutes. */
+    it('should back off the probes of a root whose calls hang forever, and reset when one settles in time', async () => {
+      const mode = { hang: true };
+      const startedAt: number[] = [];
+      const origin = Date.now();
+      const probe = async (): Promise<void> => {
+        startedAt.push(Date.now() - origin);
+        if (mode.hang) {
+          await neverSettles();
+        }
+      };
+      for (let index = 0; index < 100; index += 1) {
+        void scheduler.runBackground('folder', probe);
+      }
+      await drain();
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      const probes = startedAt.slice(backgroundIoConcurrency);
+      const gaps = probes.slice(1).map((at, index) => at - probes[index]!);
+      expect(gaps.length).toBeGreaterThanOrEqual(3);
+      for (const [index, gap] of gaps.entries()) {
+        expect(gap).toBeGreaterThanOrEqual(
+          index === 0 ? ioMaxStallMilliseconds : Math.min(gaps[index - 1]!, ioMaxProbeMilliseconds),
+        );
+        expect(gap).toBeLessThanOrEqual(ioMaxProbeMilliseconds + ioMaxStallMilliseconds);
+      }
+      expect(gaps.at(-1)).toBeGreaterThanOrEqual(ioMaxProbeMilliseconds);
+
+      mode.hang = false;
+      await vi.advanceTimersByTimeAsync(ioMaxProbeMilliseconds + ioMaxStallMilliseconds);
+      expect(startedAt).toHaveLength(100);
+      expect(scheduler.backgroundDeadline('folder')).toBe(ioStallMilliseconds);
     });
   });
 

@@ -2,13 +2,13 @@
   "alphabet": [],
   "sources": {
     "external-change-ingest.ts": "247c172ab2ec2af89e016215246e49450d800b8a06d4a4b3378d8e7f2ea82b95",
-    "project-directories.ts": "6d1af927b845b532c8a2f9773e9d160261fdfa258e80ac7e7cfb2ebb04d8e602",
+    "project-directories.ts": "63ea4b7b07e58ea38efcf9380a4ff54a2e127646b877601c6e7226f9b0453ca0",
     "project-directory-index.ts": "8e327d7e5c76394bf1e348e1967928431479daf9e94d65b4b3ceaf52223f1761",
     "provider-registry.ts": "56f33995b52918b4fc5e042835f9349ad73eb893ae12c8d811d360483e013234",
     "remote-changes.ts": "ebc68b16410668908d6db6ec1de960ce9be0f95f8943f8d3bc16793dc125538d"
   },
   "specs": {
-    "DiscoveryIndex.tla": "1668299e06604c66c99200d1de570a2863436e2b8a610e1497cfc6e5af2aba2b"
+    "DiscoveryIndex.tla": "2e7c0a5411f01d56b3866ab28ae9beec390e8d18720c6283eb7567b55c7e6e41"
   },
   "tables": {
     "DiscoveryIndex.clear-unconditional.cfg": "ae5f8ccff48d6df9915b53466edc6f3ddd04d478ebbbf77950d9007feb3b82f2",

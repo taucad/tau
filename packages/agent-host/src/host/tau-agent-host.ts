@@ -320,6 +320,14 @@ export type TauAgentHost = {
   /** Abort one chat and close its cached appender after leadership loss. */
   relinquish(chatId: string): Promise<void>;
   /**
+   * Open an external agent's session for a chat before its turn (chat performance WP-18), from the session the chat's
+   * rows name for this device. Best effort: a host without that runner, or a runner that opens nothing, answers
+   * without effect, and the turn opens its own session.
+   */
+  prewarmExternal(
+    input: Readonly<{ chatId: string; agent: ExternalRunKind; history: readonly AgentLogEvent[] }>,
+  ): Promise<void>;
+  /**
    * Close an idle chat's log, releasing its writer lock, and drop its ledger; the next use reopens and refolds
    * (L2a D18). A chat with a run under way is refused `CHAT_RUN_LIVE`: its idle policy and close barrier are its
    * owner's (W6, W7).
@@ -3814,6 +3822,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         };
       }
       return registry.claim(chatId);
+    },
+    prewarmExternal: async ({ chatId, agent, history }) => {
+      const port = options.externalRunners?.[agent.kind];
+      if (closed || port?.prewarm === undefined || port.list?.().includes(agent.id) === false) {
+        return;
+      }
+      const state = await resumedSession(history, { agentId: agent.id, agent, admission: undefined });
+      /* Relinquishing or closing the chat closes what the prewarm opened, as it does a turn's session. */
+      storeOf(chatId).externalKind = agent.kind;
+      await port.prewarm({ agentId: agent.id, agent, chatId, history, ...(state === undefined ? {} : { state }) });
     },
     relinquish: async (chatId) => {
       if (closed) {

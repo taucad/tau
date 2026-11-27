@@ -28,7 +28,7 @@ import { guardActors, recordTransitions, validated } from '@taucad/xstate-testin
 
 import type { acpSessionMachine } from '#acp/acp-session.machine.js';
 import { acpSessionsIgnoredEvents, acpSessionsMachine } from '#acp/acp-sessions.machine.js';
-import type { AcpAcquire, AcpSessionsInput, AcpSlot } from '#acp/acp-sessions.machine.js';
+import type { AcpAcquire, AcpPrewarm, AcpSessionsInput, AcpSlot } from '#acp/acp-sessions.machine.js';
 import type { AcpAdapter } from '#acp/registry.js';
 
 /** `AcpSessions.export.cfg`'s scope. */
@@ -127,6 +127,7 @@ const settled = (harness: AcpSessionsHarness, requestId: string | undefined): bo
 
 /* The spec's slot state for each parent slot status: opening and lent are busy, resting is idle. */
 const entState: Readonly<Record<AcpSlot['status'], string>> = {
+  warming: 'warming',
   opening: 'busy',
   lent: 'busy',
   resting: 'idle',
@@ -140,8 +141,11 @@ export const viewOf = (harness: AcpSessionsHarness): SpecView => {
   const ent = Object.fromEntries(
     keys.map((key) => {
       const slot = slots[implKey(key)];
-      /* An opening slot has no process yet. */
-      const pid = slot === undefined || slot.status === 'opening' ? 0 : (harness.pidOf.get(key) ?? 0);
+      /* An opening or warming slot has no process yet. */
+      const pid =
+        slot === undefined || slot.status === 'opening' || slot.status === 'warming'
+          ? 0
+          : (harness.pidOf.get(key) ?? 0);
       return [key, { pid, st: slot === undefined ? 'none' : entState[slot.status] }];
     }),
   );
@@ -177,8 +181,11 @@ export const viewOf = (harness: AcpSessionsHarness): SpecView => {
   };
 };
 
-/* The `at` that puts the key's process in its spec capability bucket. */
+/* The `at` that puts the key's process in its spec capability bucket; a warming key has no process yet. */
 const atFor = (harness: AcpSessionsHarness, key: string): number => {
+  if (slotsOf(harness)[implKey(key)]?.status === 'warming') {
+    return 0;
+  }
   switch (procOf(harness, key)?.cap) {
     case 'margin': {
       return expiresAt - acpSessionsInput.renewalMargin / 2;
@@ -206,6 +213,16 @@ const acquireOf = (harness: AcpSessionsHarness, key: string): AcpAcquire => {
   };
 };
 
+/* A prewarm opens the key's session where its turns run, with a fresh capability (WP-18). */
+const prewarmOf = (key: string): AcpPrewarm => ({
+  key: implKey(key),
+  chatId: key,
+  cwd: '/work',
+  at: 0,
+  capabilityExpiresAt: expiresAt,
+  opening: { adapter, cwd: '/work', mcpServers: [], sessionMessageId: 'm', sessionCommitted: false, notices: true },
+});
+
 /** Start the parent over stub children. */
 export const startAcpSessions = (): AcpSessionsHarness => {
   const guard = guardActors({ ignore: acpSessionsIgnoredEvents });
@@ -218,7 +235,13 @@ export const startAcpSessions = (): AcpSessionsHarness => {
     const self = built.harness!;
     const proc = procOf(self, key);
     const queued = self.runs.find((run) => run.key === key && run.phase === 'queued');
-    if (event.type === 'lend' && proc) {
+    const unopened = children.get(key)?.opened === false;
+    if (event.type === 'lend' && unopened) {
+      /* A prewarm still opening holds the lend; its process binds when it opens (Opened). */
+    } else if (event.type === 'close' && unopened) {
+      /* An abandoned prewarm: the child closes the adapter it spawned (CloseChat's warming branch). */
+      allocate(self, key, { st: 'closing', cap: 'fresh', bound: false });
+    } else if (event.type === 'lend' && proc) {
       proc.bound = queued === undefined;
     } else if (event.type === 'cancel' && queued !== undefined) {
       /* A cancelled queued lend: the child ends it resting, before it prompts. */
@@ -323,13 +346,29 @@ const resolve = (current: SpecView, act: string, target: SpecView): AcpOp => {
     }
     return key;
   };
+  /* The prewarm that opened: an eviction in the same step moves another slot too. */
+  const warmed = (): string => {
+    const was = current['ent'] as Record<string, { st: string }>;
+    const is = target['ent'] as Record<string, { st: string }>;
+    const key = keys.find((candidate) => was[candidate]?.st === 'warming' && is[candidate]?.st !== 'warming');
+    if (key === undefined) {
+      throw new Error(`No prewarm opens for ${act}.`);
+    }
+    return key;
+  };
   switch (act) {
     case 'Acquire': {
       const r = run('free');
       return { act, r, key: after[r]!.key, queued: after[r]!.pc === 'queued' };
     }
     case 'Opened': {
-      return { act, r: run('opening') };
+      /* A run's open, or a prewarm's (WP-18), which moves only its slot. */
+      return before.some((entry, at) => entry.pc === 'opening' && after[at]?.pc !== 'opening')
+        ? { act, r: run('opening') }
+        : { act, key: warmed() };
+    }
+    case 'Prewarm': {
+      return { act, key: slot() };
     }
     case 'Dequeued': {
       return { act, r: run('queued') };
@@ -394,7 +433,18 @@ export const perform = (harness: AcpSessionsHarness, op: AcpOp): void => {
       procOf(harness, run.key)!.bound = true;
       return;
     }
+    case 'Prewarm': {
+      actor.send({ type: 'prewarm', prewarm: prewarmOf(op.key!) });
+      return;
+    }
     case 'Opened': {
+      if (op.key !== undefined) {
+        /* A prewarm opens: its session rests, unbound. */
+        allocate(harness, op.key, { st: 'open', cap: 'fresh', bound: false });
+        harness.children.get(op.key)!.opened = true;
+        report(harness, op.key, { type: 'opened', key: implKey(op.key) });
+        return;
+      }
       allocate(harness, run.key, { st: 'open', cap: 'fresh', bound: true });
       harness.children.get(run.key)!.opened = true;
       run.phase = 'prompting';
@@ -562,9 +612,15 @@ export const enabledOps = (harness: AcpSessionsHarness): AcpOp[] => {
     if (timer[key] === true) {
       ops.push({ act: 'IdleExpired', key });
     }
-    /* W7 closes a chat only once its run settled. */
-    if (!active.has(key)) {
+    const warming = ent[key]?.st === 'warming';
+    /* W7 closes a chat only once its run settled; closing a prewarm still opening spawns its close. */
+    if (!active.has(key) && (!warming || room)) {
       ops.push({ act: 'CloseChat', key });
+    }
+    /* The page may name any agent; the parent decides whether it opens (WP-18). */
+    ops.push({ act: 'Prewarm', key });
+    if (warming && room) {
+      ops.push({ act: 'Opened', key });
     }
   }
   return ops;

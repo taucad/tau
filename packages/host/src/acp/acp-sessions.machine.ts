@@ -14,6 +14,10 @@
  *   is cancelled in the same step as every exit from resting.
  * - **Freshness and cwd are decided at acquire** from `event.at` (EA-R5).
  * - **A second turn for a chat is refused** `CHAT_RUN_LIVE` (EA-R11).
+ * - **A prewarm opens a key's session with no turn** (chat performance WP-18 step 1): one at a time, only into room
+ *   the limit has or a resting child can give, so it never closes a lent one. The acquire that follows adopts it,
+ *   opening or open, when it runs where the prewarm opened and names the same vendor session; otherwise it closes
+ *   and the acquire waits for `closed`, as a stale capability does. An opened prewarm rests oldest in the LRU order.
  */
 
 import { setup, types } from 'xstate';
@@ -44,10 +48,22 @@ export type AcpAcquire = {
   readonly lend: AcpLend;
 };
 
+/** What a turn must match to adopt a prewarmed session: the vendor session it opened, and where. */
+export type AcpWarmth = {
+  readonly acpSessionId?: string | undefined;
+  readonly hostId?: string | undefined;
+  readonly mode?: string | undefined;
+};
+
+/** A session opened ahead of its chat's first turn (WP-18): an acquire without its request and lend. */
+export type AcpPrewarm = Omit<AcpAcquire, 'requestId' | 'lend'>;
+
 type SlotBase = {
   readonly chatId: string;
   readonly cwd: string;
   readonly capabilityExpiresAt?: number | undefined;
+  /** Present on a prewarmed child until its first lend. */
+  readonly warm?: AcpWarmth | undefined;
   /* The ref `spawn` returned: it types the payload (RV4 t1–t3). */
   readonly ref: AnyActorRef;
 };
@@ -56,6 +72,8 @@ type SlotBase = {
 export type AcpSlot = SlotBase &
   (
     | { readonly status: 'opening' | 'lent'; readonly requestId: string }
+    /* A prewarm still opening: no turn holds it yet. */
+    | { readonly status: 'warming' }
     | { readonly status: 'resting' }
     | { readonly status: 'closing'; readonly queued?: AcpAcquire | undefined }
   );
@@ -92,7 +110,9 @@ export type AcpSessionsInput = {
 export type AcpSessionsEmitted =
   | { readonly type: 'turnSettled'; readonly requestId: string; readonly outcome: AcpTurnResult }
   | { readonly type: 'chatClosed'; readonly requestId: string }
-  | { readonly type: 'refused'; readonly requestId: string; readonly failure: AcpFailure };
+  | { readonly type: 'refused'; readonly requestId: string; readonly failure: AcpFailure }
+  /** A prewarm closed before any turn was lent it, and why (WP-18: the facade stops prewarming a logged-out agent). */
+  | { readonly type: 'warmClosed'; readonly key: string; readonly failure: AcpFailure | undefined };
 
 type Slots = Readonly<Record<string, AcpSlot>>;
 type Enqueue = EnqueueObject<AcpSessionsEvent, AcpSessionsEmitted>;
@@ -121,8 +141,37 @@ const base = (slot: AcpSlot): SlotBase => ({
   chatId: slot.chatId,
   cwd: slot.cwd,
   ...(slot.capabilityExpiresAt === undefined ? {} : { capabilityExpiresAt: slot.capabilityExpiresAt }),
+  ...(slot.warm === undefined ? {} : { warm: slot.warm }),
   ref: slot.ref,
 });
+
+/* A lent slot is no longer a prewarm. */
+const lentFrom = (slot: AcpSlot, requestId: string, status: 'opening' | 'lent'): AcpSlot => {
+  const { warm: _warm, ...kept } = base(slot);
+  return { ...kept, status, requestId };
+};
+
+const warmthOf = (opening: AcpOpening): AcpWarmth => ({
+  ...(opening.acpSessionId === undefined ? {} : { acpSessionId: opening.acpSessionId }),
+  ...(opening.hostId === undefined ? {} : { hostId: opening.hostId }),
+  ...(opening.mode === undefined ? {} : { mode: opening.mode }),
+});
+
+/* Whether this acquire may be lent the child its slot holds: fresh enough, the same tree, and, for a prewarm, the
+ * vendor session the turn's record names (EA-R5). */
+const lendable = (context: AcpSessionsContext, slot: AcpSlot, acquire: AcpAcquire): boolean => {
+  const fresh =
+    slot.capabilityExpiresAt === undefined || slot.capabilityExpiresAt - acquire.at >= context.renewalMargin;
+  const wanted = warmthOf(acquire.opening);
+  return (
+    fresh &&
+    slot.cwd === acquire.cwd &&
+    (slot.warm === undefined ||
+      (slot.warm.acpSessionId === wanted.acpSessionId &&
+        slot.warm.hostId === wanted.hostId &&
+        slot.warm.mode === wanted.mode))
+  );
+};
 
 /* Close a child: its slot keeps the key while it closes (EA-R3). */
 const closeSlot = (
@@ -156,6 +205,28 @@ type SpawnArgs = Readonly<{
   self: AnyActorRef;
   actors: { readonly acpSession: typeof acpSessionMachine };
 }>;
+
+/* A prewarmed child: opened with no lend, so it rests once open (WP-18). */
+const spawnWarm = (args: SpawnArgs, enq: Enqueue, prewarm: AcpPrewarm): AcpSlot => {
+  const ref = enq.spawn(args.actors.acpSession, {
+    id: prewarm.key,
+    input: { key: prewarm.key, parentRef: args.self, opening: prewarm.opening },
+  });
+  return {
+    chatId: prewarm.chatId,
+    cwd: prewarm.cwd,
+    ...(prewarm.capabilityExpiresAt === undefined ? {} : { capabilityExpiresAt: prewarm.capabilityExpiresAt }),
+    warm: warmthOf(prewarm.opening),
+    ref,
+    status: 'warming',
+  };
+};
+
+/* Room for one more open child without closing a lent one: under the limit, or a resting child to evict. */
+const hasRoom = (slots: Slots, limit: number): boolean => {
+  const open = Object.values(slots).filter((slot) => slot.status === 'lent' || slot.status === 'resting');
+  return open.length < limit || open.some((slot) => slot.status === 'resting');
+};
 
 /* A child for this acquire, by logic value with id = key (W2 form f). */
 const spawnFor = (args: SpawnArgs, enq: Enqueue, acquire: AcpAcquire): AcpSlot => {
@@ -219,7 +290,7 @@ const machineDefinition = setup({
  */
 export const acpSessionsMachine = machineDefinition.createMachine({
   id: 'acpSessions',
-  version: '1',
+  version: '2',
   context: ({ input }) => ({
     limit: input.limit,
     idleTimeout: input.idleTimeout,
@@ -267,21 +338,36 @@ export const acpSessionsMachine = machineDefinition.createMachine({
           if (slot.status === 'closing') {
             return { context: { slots: { ...context.slots, [key]: { ...slot, queued: acquire } } } };
           }
+          /* A prewarm still opening: the child holds the lend and prompts once open (WP-18). */
+          if (slot.status === 'warming' && lendable(context, slot, acquire)) {
+            enq.sendTo(slot.ref, { type: 'lend', lend: acquire.lend });
+            return { context: { slots: { ...context.slots, [key]: lentFrom(slot, acquire.requestId, 'opening') } } };
+          }
           /* Resting (a lent or opening slot is the chat's live run, refused above). */
-          const fresh =
-            slot.capabilityExpiresAt === undefined || slot.capabilityExpiresAt - acquire.at >= context.renewalMargin;
-          if (fresh && slot.cwd === acquire.cwd) {
+          if (slot.status === 'resting' && lendable(context, slot, acquire)) {
             enq.cancel(idleId(key));
             enq.sendTo(slot.ref, { type: 'lend', lend: acquire.lend });
             return {
               context: {
                 order: recent(context.order, key),
-                slots: { ...context.slots, [key]: { ...base(slot), status: 'lent', requestId: acquire.requestId } },
+                slots: { ...context.slots, [key]: lentFrom(slot, acquire.requestId, 'lent') },
               },
             };
           }
-          /* EA-R5: a stale capability or another tree closes the child; this acquire waits for `closed`. */
+          /* EA-R5: a stale capability, another tree or a prewarm of another vendor session closes the child; this
+           * acquire waits for `closed`. */
           return { context: { slots: closeSlot(context.slots, enq, { key, queued: acquire }) } };
+        }),
+        prewarm: refines('Prewarm', ({ context, event, self, actors }, enq) => {
+          const { prewarm } = event;
+          const warming = Object.values(context.slots).some((slot) => slot.status === 'warming');
+          if (context.slots[prewarm.key] !== undefined || warming || !hasRoom(context.slots, context.limit)) {
+            /* The key is already held, another prewarm is opening, or only a lent child could make room. */
+            return {};
+          }
+          return {
+            context: { slots: { ...context.slots, [prewarm.key]: spawnWarm({ self, actors }, enq, prewarm) } },
+          };
         }),
         cancel: refines('Cancel', ({ context, event }, enq) => {
           for (const [key, slot] of Object.entries(context.slots)) {
@@ -304,7 +390,7 @@ export const acpSessionsMachine = machineDefinition.createMachine({
           }
           let slots: Record<string, AcpSlot> = { ...context.slots };
           for (const [key, slot] of Object.entries(context.slots)) {
-            if (slot.chatId === event.chatId && slot.status === 'resting') {
+            if (slot.chatId === event.chatId && (slot.status === 'resting' || slot.status === 'warming')) {
               slots = closeSlot(slots, enq, { key });
             }
           }
@@ -323,6 +409,20 @@ export const acpSessionsMachine = machineDefinition.createMachine({
         ),
         opened: refines('Opened', ({ context, event }, enq) => {
           const slot = context.slots[event.key];
+          if (slot?.status === 'warming') {
+            /* Room is made from the other resting children first; the prewarm then rests oldest, so the next open
+             * evicts it first, and it idle-expires like any resting child. */
+            const resting: AcpSlot = { ...base(slot), status: 'resting' };
+            const slots = evict(context, enq, {
+              slots: { ...context.slots, [event.key]: resting },
+              order: recent(context.order, event.key),
+            });
+            const order = [event.key, ...context.order.filter((key) => key !== event.key)];
+            if (slots[event.key]?.status === 'resting') {
+              enq.raise({ type: 'idleExpired', key: event.key }, { id: idleId(event.key), delay: context.idleTimeout });
+            }
+            return { context: { order, slots } };
+          }
           if (slot?.status !== 'opening') {
             return {};
           }
@@ -356,6 +456,9 @@ export const acpSessionsMachine = machineDefinition.createMachine({
           if (slot.status === 'opening' || slot.status === 'lent') {
             /* Defensive: the child always ends its turn first. */
             settled(enq, slot.requestId, { ok: false, failure: event.failure ?? failed });
+          }
+          if (slot.status === 'warming' || (slot.status === 'resting' && slot.warm !== undefined)) {
+            enq.emit({ type: 'warmClosed', key: event.key, failure: event.failure });
           }
           enq.cancel(idleId(event.key));
           enq.stop(slot.ref);

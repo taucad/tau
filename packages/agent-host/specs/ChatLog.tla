@@ -20,6 +20,12 @@
 (* build does not know, or whose lifecycle state, interrupt phase or       *)
 (* invocation purpose is not in its enum, is consumed without effect: only *)
 (* the envelope rules (term, sequence and epoch) apply to it.              *)
+(*                                                                         *)
+(* Compact rows (WP-17): a turn context is written once per distinct value *)
+(* in a file, with `contextDigest`; a later row of the same value carries  *)
+(* the digest alone. A metadata-only rewrite sets `contentKept` and omits  *)
+(* its content. The parser restores both from earlier rows of the same     *)
+(* file, so the two rules below are what makes a compact file readable.    *)
 (***************************************************************************)
 EXTENDS Integers, Sequences, FiniteSets, Json, IOUtils, TLC
 
@@ -56,9 +62,12 @@ VARIABLES
   resolved,  \* <<run id, interrupt id>> with a recorded resolution
   inv,       \* model attempt id -> [run, attempt, purpose, settled, shown]
   open,      \* run id -> its last prepared attempt id until shown or settled ("" when none): `openInvocation`
-  opened     \* command ids that opened an effect
+  opened,    \* command ids that opened an effect
+  digests,   \* context digests a row of this file wrote with their context (WP-17)
+  messages   \* message ids a row of this file wrote with content (WP-17)
 
-vars == <<i, epoch, seq, closed, maxEpoch, termEpoch, lifecycle, att, code, settled, current, pending, resolved, inv, open, opened>>
+vars == <<i, epoch, seq, closed, maxEpoch, termEpoch, lifecycle, att, code, settled, current, pending, resolved, inv, open,
+          opened, digests, messages>>
 
 Has(r, f) == f \in DOMAIN r
 Known(e) ==
@@ -118,6 +127,21 @@ ShownIdOf(e) ==
   ELSE IF e.type = "message.appended" THEN e.message.metadata.tauInternal.attemptId
   ELSE e.replacement.metadata.tauInternal.attemptId
 
+(* WP-17: the context a row carries or names, as written. *)
+ContextHolder(e) ==
+  IF Known(e) /\ e.type = "turn.history-projection-committed" THEN e
+  ELSE IF IsLifecycle(e) /\ e.state = "admitted" /\ Has(e, "admission") THEN e.admission
+  ELSE [none |-> TRUE]
+NamesContext(e) == LET h == ContextHolder(e) IN Has(h, "contextDigest") /\ ~Has(h, "context")
+CarriesContext(e) == LET h == ContextHolder(e) IN Has(h, "contextDigest") /\ Has(h, "context")
+KeepsContent(e) == Known(e) /\ e.type = "message.envelope-replaced" /\ Has(e, "contentKept") /\ e.contentKept = TRUE
+\* A row that writes a message's content: an append, or a rewrite that carries its content.
+WritesContent(e) ==
+  /\ Known(e)
+  /\ \/ e.type = "message.appended"
+     \/ e.type = "message.envelope-replaced" /\ ~KeepsContent(e)
+ContentId(e) == IF e.type = "message.appended" THEN e.message.id ELSE e.messageId
+
 (* Each rule, for the row about to be appended. *)
 Holds(rule, e) ==
   CASE rule = "SequenceContiguous" -> e.leaderEpoch = epoch => e.sequence = seq + 1   \* EVENT_OUT_OF_ORDER
@@ -144,10 +168,13 @@ Holds(rule, e) ==
                                         IF FirstOfAttempt(e) THEN ~\E id \in DOMAIN inv : Unresolved(id)  \* gateCode
                                         ELSE ~\E id \in DOMAIN inv : Unresolved(id) /\ inv[id].run = e.runId  \* EQ1: any,
                                                                      /\ inv[id].purpose = "generation"   \* not the last
+    [] rule = "ContextResolves"    -> NamesContext(e) => ContextHolder(e).contextDigest \in digests     \* WP-17
+    [] rule = "ContentKeptResolves" -> KeepsContent(e) => e.messageId \in messages                     \* WP-17
 
 Rules == {"SequenceContiguous", "EpochNotReopened", "EpochStartsAtZero", "EpochsIncrease", "AdmittedOnce",
           "OneRunAtATime", "ReopenOnlyByRunning", "SettlementNeedsRun", "SettledOnce", "InterruptResolvedOnce", "RowsNeedRun",
-          "InvocationSettledOnce", "CommandOpensOnce", "PrepareOnlyWhenResolved"}
+          "InvocationSettledOnce", "CommandOpensOnce", "PrepareOnlyWhenResolved", "ContextResolves",
+          "ContentKeptResolves"}
 
 \* Evaluated as a value: in an action TLC branches on both sides of a disjunction, and some rules
 \* read a map only where a left disjunct fails (`lifecycle[current]`, `e.attempt`).
@@ -160,7 +187,7 @@ Init ==
   /\ i = 0 /\ epoch = "" /\ seq = -1 /\ closed = {} /\ maxEpoch = 0 /\ termEpoch = 0
   /\ lifecycle = [r \in {} |-> "none"] /\ att = [r \in {} |-> 0] /\ code = [r \in {} |-> ""]
   /\ settled = {} /\ current = "" /\ pending = {} /\ resolved = {} /\ inv = [a \in {} |-> {}] /\ open = [r \in {} |-> ""]
-  /\ opened = {}
+  /\ opened = {} /\ digests = {} /\ messages = {}
 
 NextInv(e) ==
   CASE Known(e) /\ e.type = "model.invocation-prepared" /\ e.attemptId \notin DOMAIN inv ->
@@ -212,6 +239,8 @@ Write(e) ==
   /\ inv' = NextInv(e)
   /\ open' = NextOpen(e)
   /\ opened' = IF OpensEffect(e) /\ Has(e, "commandId") THEN opened \cup {e.commandId} ELSE opened
+  /\ digests' = IF CarriesContext(e) THEN digests \cup {ContextHolder(e).contextDigest} ELSE digests
+  /\ messages' = IF WritesContent(e) THEN messages \cup {ContentId(e)} ELSE messages
 
 Done == i = Len(Log) /\ UNCHANGED vars
 

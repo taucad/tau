@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { recordConnectionsOf } from '#runtime/file-manager-record-connections.js';
@@ -17,7 +18,8 @@ vi.mock('@taucad/fs-bridge', async (importOriginal) => ({
 describe('record connections', () => {
   /* Fast path FW4: a background record client's connections declare the lane when they open. */
   it('should open a background client’s connection with the lane, and an interactive one without it', async () => {
-    const connection: FileSystemBridgeConnection = { port: new MessageChannel().port1, dispose: () => undefined };
+    /* The proxy is mocked above, so the port is never read. */
+    const connection = mock<FileSystemBridgeConnection>();
     const opener = vi.fn<RecordBridgeOpener>(() => connection);
     const fallback = vi.fn<RecordBridgeOpener>(() => connection);
     const connections = recordConnectionsOf({} as FileManagerRef, fallback, async () => undefined);

@@ -1932,6 +1932,33 @@ describe('the external slot through its driver handle (RA-S14, with W10 EA-S8)',
     expect(log.some((event) => event.type === 'message.appended' && event.message.id === 'session-2')).toBe(false);
   });
 
+  it('should prewarm a chat on the session its rows remember for the agent, and nothing for another (WP-18)', async () => {
+    const file = createMemoryLogFile();
+    const prewarmed: Array<readonly [agentId: string, chatId: string, acpSessionId: unknown]> = [];
+    const port: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        await turn.remember({ acpSessionId: 'vendor-1' });
+        return undefined;
+      },
+      prewarm: async ({ agentId, chatId, state }) => {
+        prewarmed.push([agentId, chatId, state?.['acpSessionId']]);
+      },
+    };
+    const host = externalHost(file, port, 'prewarm');
+    await startExternal(host, { chatId: 'chat-prewarm', runId: 'run-1' });
+    await vi.waitFor(async () => {
+      expect(await host.describeRun('chat-prewarm')).toMatchObject({ state: 'completed' });
+    });
+    const history = await readLog(file);
+
+    await host.prewarmExternal({ chatId: 'chat-prewarm', agent: { kind: 'acp', id: 'stub-agent' }, history });
+    await host.prewarmExternal({ chatId: 'chat-prewarm', agent: { kind: 'acp', id: 'other-agent' }, history });
+
+    expect(prewarmed).toEqual([['stub-agent', 'chat-prewarm', 'vendor-1']]);
+    await host.close();
+  });
+
   it('should call closeChat only after the external run settled', async () => {
     const file = createMemoryLogFile();
     const order: string[] = [];

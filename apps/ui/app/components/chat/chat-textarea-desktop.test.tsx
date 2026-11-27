@@ -1002,7 +1002,9 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       await waitFor(() => {
         expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
       });
-      expect(screen.getByRole('status')).toHaveTextContent('Send queued. Press Escape to cancel.');
+      /* Staging QA 2026-11-27 (recheck 3): the served input already said the queued send; adopting it says nothing
+       * again. Send's pending state still shows it. */
+      expect(screen.getByRole('status')).toBeEmptyDOMElement();
       await act(async () => {
         await Promise.resolve();
       });
@@ -1143,6 +1145,31 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     view.rerenderWith(codexSession, 'Make a bracket.', false);
     await Promise.resolve();
     expect(handleSubmit).not.toHaveBeenCalled();
+  });
+
+  /* Staging re-check 4: Escape emptied the status, and an emptied region says nothing. It says the cancellation once,
+   * and the next edit clears it. */
+  it('should say a queued send cancelled on Escape, and clear the words on the next edit', async () => {
+    const view = renderComposer('Make a bracket.', codexSession, {
+      earlyInput: queuedEarlyInput,
+      handleSubmit: vi.fn(asyncNoop),
+      isSubmitDisabled: true,
+    });
+    const box = await waitFor(() => {
+      const queued = view.container.querySelector('[data-queued-send]');
+      expect(queued).not.toBeNull();
+      return queued!;
+    });
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+
+    fireEvent.keyDown(box, { key: 'Escape' });
+
+    expect(screen.getByRole('status')).toHaveTextContent('Send cancelled.');
+    const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+    act(() => {
+      editor!.commands.insertContent(' Twice');
+    });
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
   });
 
   it('should not send for an early input that queued none', async () => {

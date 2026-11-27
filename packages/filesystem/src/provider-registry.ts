@@ -1,4 +1,4 @@
-import type { FileSystemProvider } from '#types.js';
+import type { FileReadStreamOptions, FileSystemProvider } from '#types.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { OPFSProvider } from '#backend/opfs-provider.js';
@@ -9,6 +9,8 @@ import type { WorkspaceScope } from '#mount-table.js';
 import { resolveStorageRootKey } from '#storage-root-key.js';
 import { MissingWorkspaceHandleError } from '#workspace-errors.js';
 import type { BatchEntry } from '#changeset.js';
+import { IoScheduler } from '#io-scheduler.js';
+import type { IoLane, IoOperation } from '#io-scheduler.js';
 
 /**
  * Told of every mutating call on a provider the registry hands out, before the call is issued (discovery index A2 a).
@@ -55,6 +57,69 @@ const mutatingMethods: Readonly<Record<string, (arguments_: readonly unknown[]) 
     }),
 };
 /**
+ * The provider methods that read: counted while in flight when an interactive caller makes them, and admitted by the
+ * lane when a background or sweep caller does (fast path FW4).
+ */
+const readMethods: ReadonlySet<string | symbol> = new Set([
+  'readdirWithStats',
+  'readFile',
+  'readdir',
+  'stat',
+  'exists',
+  'lstat',
+  'getFileMode',
+  'hashFiles',
+  'readdirEntries',
+]);
+
+/**
+ * The provider methods that write: counted while in flight, and never deferred by a lane. A write a background caller
+ * makes is made at once as an interactive one: it is usually made under a lock (an identity established while a full
+ * read converts a legacy declaration), which a lane must never stretch.
+ */
+const writeMethods: ReadonlySet<string | symbol> = new Set([
+  'writeFile',
+  'writeFileChecked',
+  'deleteFileChecked',
+  'appendFile',
+  'writeFileStream',
+  'mkdir',
+  'unlink',
+  'rmdir',
+  'rename',
+  'setFileMode',
+  'applyBatch',
+]);
+
+type AnyFunction = (...arguments_: unknown[]) => unknown;
+
+/** `Function.prototype`'s own members: a call through them must reach the wrapper's `apply`, so they are never bound. */
+const functionMembers: ReadonlySet<string | symbol> = new Set(Reflect.ownKeys(Function.prototype));
+
+/**
+ * `method` wrapped so that every call runs `apply` with the provider as `this`, while everything else read from it (a
+ * test's spy state, `mock`) reads the method itself.
+ */
+const wrapMethod = (method: AnyFunction, apply: (method: AnyFunction, arguments_: unknown[]) => unknown): AnyFunction =>
+  new Proxy(method, {
+    apply: (target, _this, arguments_: unknown[]) => apply(target, arguments_),
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      return typeof value === 'function' && !functionMembers.has(property)
+        ? (value as AnyFunction).bind(target)
+        : value;
+    },
+  });
+
+/**
+ * Which lane a caller's provider calls run in: `interactive` and `background` (FW4), or `sweep`, an identity sweep a
+ * person is waiting on, which runs in its own bounded window ({@link IoScheduler.runSweep}).
+ *
+ * @public
+ */
+export type ProviderLane = IoLane | 'sweep';
+
+/**
  * Configuration for {@link ProviderRegistry}.
  * @public
  */
@@ -67,6 +132,8 @@ export type ProviderRegistryOptions = {
    * Absent on the web build, where a `node` scope is simply unreachable.
    */
   createNodeFsPort?: () => Promise<NodeFsPort>;
+  /** The lanes' admission rule (FW4); one is made when omitted. */
+  ioScheduler?: IoScheduler;
 };
 
 /**
@@ -85,6 +152,8 @@ export type ProviderRegistryOptions = {
  * @public
  */
 export class ProviderRegistry {
+  /** The lanes' admission rule: interactive calls are counted, background and sweep calls admitted (FW4). */
+  public readonly ioScheduler: IoScheduler;
   private readonly _providers = new Map<string, Promise<FileSystemProvider>>();
   private readonly _databasePrefix: string;
   private readonly _createNodeFsPort: (() => Promise<NodeFsPort>) | undefined;
@@ -96,6 +165,17 @@ export class ProviderRegistry {
   private _recoveryListener: ((storageRootKey: string, providerPaths: readonly string[]) => void) | undefined;
   /** Told of every mutating provider call (FW2). */
   private _writeTap: ProviderWriteTap | undefined;
+  /** Each provider's gated views for calls of no operation, made once per provider and lane. */
+  private readonly _laneViews = new WeakMap<
+    FileSystemProvider,
+    Map<Exclude<ProviderLane, 'interactive'>, FileSystemProvider>
+  >();
+  /** The counting view of each provider this registry made: what `getProvider` hands out. */
+  private readonly _countingViews = new WeakMap<FileSystemProvider, FileSystemProvider>();
+  /** The provider behind each view this registry made. */
+  private readonly _providerOf = new WeakMap<FileSystemProvider, FileSystemProvider>();
+  /** The root each provider this registry made serves. */
+  private readonly _rootOf = new WeakMap<FileSystemProvider, string>();
   /** Recoveries that finished before a listener was set. */
   private readonly _pendingRecoveries: Array<Readonly<{ storageRootKey: string; providerPaths: readonly string[] }>> =
     [];
@@ -108,6 +188,7 @@ export class ProviderRegistry {
   public constructor(options?: ProviderRegistryOptions) {
     this._databasePrefix = options?.databasePrefix ?? 'tau';
     this._createNodeFsPort = options?.createNodeFsPort;
+    this.ioScheduler = options?.ioScheduler ?? new IoScheduler();
   }
 
   /**
@@ -144,6 +225,88 @@ export class ProviderRegistry {
       }
       throw error;
     }
+  }
+
+  /**
+   * The provider of a root as a caller in `lane` sees it (FW4).
+   *
+   * @param scope - Workspace scope.
+   * @param lane - The caller's lane.
+   * @param operation - The background operation its calls belong to; see {@link ProviderRegistry.inLane}.
+   * @returns The provider's view for the lane.
+   */
+  public async getLaneProvider(
+    scope: WorkspaceScope,
+    lane: ProviderLane,
+    operation?: IoOperation,
+  ): Promise<FileSystemProvider> {
+    return this.inLane(await this.getProvider(scope), lane, operation);
+  }
+
+  /**
+   * A provider as a caller in `lane` sees it (FW4). The interactive view, the one `getProvider` hands out, counts each
+   * I/O call while it is in flight. A background or sweep view admits each read through
+   * {@link ProviderRegistry.ioScheduler} and then makes it on the provider itself, makes each write at once through the
+   * interactive view, and opens a stream once the lane admits it (its chunks are pulled unranked). Calls a provider
+   * makes on itself, before or after an await, are never counted or gated: every view calls the provider with the
+   * provider as `this`. Gating sits at the provider call, below every lock a caller holds.
+   *
+   * @param provider - A provider or one of its views, normally from this registry.
+   * @param lane - The caller's lane.
+   * @param operation - For a background view, the operation its calls belong to, which ages once
+   *   ({@link IoScheduler.operation}); each call is its own operation when omitted. Such a view is made afresh.
+   * @returns The view for the lane; for no operation, the same object each time.
+   */
+  public inLane(provider: FileSystemProvider, lane: ProviderLane, operation?: IoOperation): FileSystemProvider {
+    const instance = this._providerOf.get(provider) ?? provider;
+    if (lane === 'interactive') {
+      return this._countingViews.get(instance) ?? instance;
+    }
+    if (operation !== undefined && lane === 'background') {
+      return this._gatedView(instance, lane, operation);
+    }
+    let views = this._laneViews.get(instance);
+    if (views === undefined) {
+      views = new Map();
+      this._laneViews.set(instance, views);
+    }
+    let view = views.get(lane);
+    if (view === undefined) {
+      view = this._gatedView(instance, lane, undefined);
+      views.set(lane, view);
+    }
+    return view;
+  }
+
+  /**
+   * A background view of a provider whose every call is an operation of its own, cancelled with `signal` while it is
+   * still queued (FW4): a connection that declared the background lane reads through one, and its queued reads end
+   * when it closes.
+   *
+   * @param provider - A provider or one of its views.
+   * @param signal - Aborted when nobody can use the answers any more.
+   * @returns A fresh background view.
+   */
+  public backgroundCalls(provider: FileSystemProvider, signal: AbortSignal | undefined): FileSystemProvider {
+    const instance = this._providerOf.get(provider) ?? provider;
+    return signal === undefined
+      ? this.inLane(instance, 'background')
+      : this._gatedView(instance, 'background', () => this.ioScheduler.operation({ signal }));
+  }
+
+  /**
+   * A background operation's view of a provider: its calls age together (FW4).
+   *
+   * @param provider - A provider or one of its views.
+   * @param options - `promoted` for an operation that holds a lock other work waits on; `signal` to cancel its queued
+   *   calls.
+   * @returns A fresh background view bound to a new operation.
+   */
+  public backgroundOperation(
+    provider: FileSystemProvider,
+    options?: Readonly<{ promoted?: boolean; signal?: AbortSignal }>,
+  ): FileSystemProvider {
+    return this.inLane(provider, 'background', this.ioScheduler.operation(options));
   }
 
   /**
@@ -201,6 +364,8 @@ export class ProviderRegistry {
   public disposeRoot(storageRootKey: string): void {
     const pending = this._providers.get(storageRootKey);
     this._providers.delete(storageRootKey);
+    /* A root revoked or reconnected starts its lane afresh; its queued background calls end (FW4 re-review B). */
+    this.ioScheduler.forgetRoot(storageRootKey);
     if (pending) {
       // async-iife: bootstrap -- revocation is synchronous; a provider still initializing is disposed on settlement.
       void (async () => {
@@ -218,6 +383,7 @@ export class ProviderRegistry {
   public disposeAll(): void {
     const pending = [...this._providers.values()];
     this._providers.clear();
+    this.ioScheduler.dispose();
     for (const provider of pending) {
       // async-iife: bootstrap -- registry teardown cannot await providers that are still initializing.
       void (async () => {
@@ -313,7 +479,129 @@ export class ProviderRegistry {
         },
       });
     }
-    return provider;
+    return this._countingView(storageRootKey, provider);
+  }
+
+  /**
+   * The view of a provider this registry made that counts each I/O call while it is in flight (FW4): the interactive
+   * lane's count, which a background call waits on. Counted at the view, never on the provider, so a call the provider
+   * makes on itself is not counted again, before or after an await.
+   */
+  private _countingView(storageRootKey: string, provider: FileSystemProvider): FileSystemProvider {
+    this._rootOf.set(provider, storageRootKey);
+    const scheduler = this.ioScheduler;
+    const counted = (method: AnyFunction, arguments_: unknown[]): unknown => {
+      const settle = scheduler.beginInteractive(storageRootKey);
+      try {
+        const result = Reflect.apply(method, provider, arguments_);
+        if (result instanceof Promise) {
+          return result.finally(settle);
+        }
+        settle();
+        return result;
+      } catch (error) {
+        settle();
+        throw error;
+      }
+    };
+    const plain = (method: AnyFunction, arguments_: unknown[]): unknown => Reflect.apply(method, provider, arguments_);
+    const wrapped = new WeakMap<AnyFunction, AnyFunction>();
+    const view = new Proxy(provider, {
+      get(target, property) {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        /* Cached by the method itself, so a replaced one (a test's spy) is wrapped in its turn and stays observable. */
+        let method = wrapped.get(value as AnyFunction);
+        if (method === undefined) {
+          const io = readMethods.has(property) || writeMethods.has(property);
+          method = wrapMethod(value as AnyFunction, io ? counted : plain);
+          wrapped.set(value as AnyFunction, method);
+        }
+        return method;
+      },
+    });
+    this._countingViews.set(provider, view);
+    this._providerOf.set(view, provider);
+    return view;
+  }
+
+  /** A view of `provider` whose reads the lane admits; see {@link ProviderRegistry.inLane}. */
+  private _gatedView(
+    provider: FileSystemProvider,
+    lane: Exclude<ProviderLane, 'interactive'>,
+    operation: IoOperation | (() => IoOperation) | undefined,
+  ): FileSystemProvider {
+    const scheduler = this.ioScheduler;
+    const storageRootKey = this._rootOf.get(provider) ?? provider.id;
+    const interactive = this._countingViews.get(provider) ?? provider;
+    const admit = async <Result>(call: () => Result): Promise<Awaited<Result>> =>
+      lane === 'sweep'
+        ? scheduler.runSweep(storageRootKey, call)
+        : scheduler.runBackground(storageRootKey, call, typeof operation === 'function' ? operation() : operation);
+    const gated = new Map<string | symbol, AnyFunction>();
+    const plain = new WeakMap<AnyFunction, AnyFunction>();
+    const openStream = (path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> => {
+      let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
+      /* Set once the stream is cancelled: a reader opened after that, by an open that was still queued, is cancelled. */
+      let cancelled: { reason: unknown } | undefined;
+      return new ReadableStream<Uint8Array<ArrayBuffer>>(
+        {
+          async pull(controller) {
+            /* The open waits for the lane, as a read does; the chunks it then streams are pulled unranked. */
+            reader ??= await admit(() => provider.readFileStream!(path, options).getReader());
+            if (cancelled !== undefined) {
+              await reader.cancel(cancelled.reason);
+              return;
+            }
+            const chunk = await reader.read();
+            if (chunk.done) {
+              controller.close();
+            } else {
+              controller.enqueue(chunk.value);
+            }
+          },
+          async cancel(reason) {
+            cancelled = { reason };
+            await reader?.cancel(reason);
+          },
+        },
+        { highWaterMark: 0 },
+      );
+    };
+    const view = new Proxy(provider, {
+      get(target, property) {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        if (writeMethods.has(property)) {
+          return Reflect.get(interactive, property) as unknown;
+        }
+        if (readMethods.has(property) || property === 'readFileStream') {
+          let call = gated.get(property);
+          if (call === undefined) {
+            /* The method is looked up when admitted, so a replaced one (a test's spy) is the one called. */
+            call =
+              property === 'readFileStream'
+                ? (openStream as AnyFunction)
+                : async (...arguments_: unknown[]) =>
+                    admit(() => Reflect.apply(Reflect.get(target, property) as AnyFunction, target, arguments_));
+            gated.set(property, call);
+          }
+          return call;
+        }
+        let method = plain.get(value as AnyFunction);
+        if (method === undefined) {
+          method = wrapMethod(value as AnyFunction, (inner, arguments_) => Reflect.apply(inner, target, arguments_));
+          plain.set(value as AnyFunction, method);
+        }
+        return method;
+      },
+    });
+    this._providerOf.set(view, provider);
+    return view;
   }
 
   private _recovered(storageRootKey: string, providerPaths: readonly string[]): void {

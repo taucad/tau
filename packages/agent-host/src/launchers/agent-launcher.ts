@@ -14,7 +14,7 @@ import { sameSourceHealth } from '#log/projection-facts.js';
 import type { ProjectionSourceHealth } from '#log/projection-facts.js';
 import { isOrphaned } from '#host/chat-run.machine.js';
 import { createTauAgentHost } from '#host/tau-agent-host.js';
-import type { ExternalAgentPort } from '#host/external-agent.js';
+import type { ExternalAgentPort, ExternalRunKind } from '#host/external-agent.js';
 import type { CreateTauAgentHostOptions, TauAgentHost } from '#host/tau-agent-host.js';
 import { externalTurnOf, latestTurnId } from '#host/run-history.js';
 import { createPortableId, transportFailureOfRun } from '#harness/session-record.js';
@@ -133,6 +133,11 @@ export type AgentLauncher = {
   execute(command: HostCommand): Promise<CommandAnswer>;
   /** One long-poll read (SC-R14). It never creates a chat, takes no lock and assumes no leadership (RH-R1). */
   read(input: ReadInput): Promise<ReadAnswer>;
+  /**
+   * Open an external agent's session for a chat ahead of its turn (chat performance WP-18). Like a read it creates no
+   * chat, takes no lock and assumes no leadership; best effort, so it answers once asked, opened or not.
+   */
+  prewarm(input: Readonly<{ chatId: string; agent: ExternalRunKind }>): Promise<void>;
   /**
    * One bounded page of this device's own rows, answered at once: from this process's writer while it holds one, else
    * from the log's bytes as they are. Like {@link AgentLauncher.read} it takes no lock and assumes no leadership
@@ -1464,6 +1469,16 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       }
       requireChatPathSegment(input.chatId);
       return port.read(input, async () => readLocal(input));
+    },
+    prewarm: async ({ chatId, agent }) => {
+      requireChatPathSegment(chatId);
+      if (closed) {
+        return;
+      }
+      /* The log's bytes as they are: a writer's newest rows may be missing, which only costs the prewarm a reopen. */
+      const chat = await view(chatId);
+      const history = await chat.log.read();
+      await host.prewarmExternal({ chatId, agent, history });
     },
     readEvents: async ({ chatId, cursor, limit, maxBytes }) => {
       if (closed) {

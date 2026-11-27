@@ -28,6 +28,7 @@ import {
   fileSystemBridgeProtocolVersion,
   fileSystemBridgeSchemas,
   filesystemBridgeConnectMessageType,
+  openFileSystemBridge,
 } from '@taucad/fs-bridge';
 import { createBridgeCall, createBridgeServer } from '@taucad/rpc/bridge';
 import {
@@ -449,6 +450,28 @@ describe('createFileSystemBridge', () => {
       postSpy.mockRestore();
       closeSpy.mockRestore();
     }
+  });
+
+  it('sends a rooted connection’s background lane in its envelope, and no lane for an interactive or unrooted one (FW4)', () => {
+    const postMessage = vi.fn<(message: unknown, transfer: Transferable[]) => void>();
+    const worker = { postMessage } as unknown as Worker;
+
+    const background = openFileSystemBridge(worker, { root: '/projects/alpha', consumer: 'user', lane: 'background' });
+    const interactive = openFileSystemBridge(worker, {
+      root: '/projects/alpha',
+      consumer: 'user',
+      lane: 'interactive',
+    });
+    const workspace = openFileSystemBridge(worker);
+
+    expect(postMessage.mock.calls.map(([envelope]) => (envelope as { lane?: unknown }).lane)).toEqual([
+      'background',
+      undefined,
+      undefined,
+    ]);
+    background.dispose();
+    interactive.dispose();
+    workspace.dispose();
   });
 
   it('sends the requested root and its consumer in the trusted connection envelope', () => {
@@ -2132,6 +2155,35 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       user.cleanup();
       agent.cleanup();
       workingCopy.cleanup();
+    }
+  });
+
+  it('should hand the handler the background lane a rooted envelope declared, and the interactive lane otherwise (FW4)', async () => {
+    const background = connectRooted({ consumer: 'working-copy', lane: 'background' });
+    const interactive = connectRooted({ consumer: 'working-copy' });
+    const unknown = connectRooted({ consumer: 'working-copy', lane: 'urgent' });
+
+    try {
+      await Promise.all([background.proxy.ready, interactive.proxy.ready, unknown.proxy.ready]);
+      const contextOf = (connection: typeof background): Readonly<Record<string, unknown>> =>
+        (connection.handlerForRoot.mock.calls[0] as unknown as [string, Readonly<Record<string, unknown>>])[1];
+      expect(contextOf(background)['originClientId']).toMatch(/^port_/u);
+      expect(contextOf(background)['lane']).toBe('background');
+      /* Absent, or any value but `'background'`, is the interactive lane: the connection is still served. */
+      expect(Object.keys(contextOf(interactive))).toEqual(['originClientId']);
+      expect(Object.keys(contextOf(unknown))).toEqual(['originClientId']);
+      /* A background connection's queued reads end with it: its context's signal aborts when the port closes. */
+      const signal = contextOf(background)['signal'] as AbortSignal;
+      expect(signal.aborted).toBe(false);
+      background.cleanup();
+      await vi.waitFor(() => {
+        expect(signal.aborted).toBe(true);
+      });
+      expect(unknown.proxy.hello.payload).toMatchObject({ state: 'ready' });
+    } finally {
+      background.cleanup();
+      interactive.cleanup();
+      unknown.cleanup();
     }
   });
 

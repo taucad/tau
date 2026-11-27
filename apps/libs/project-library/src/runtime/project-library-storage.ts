@@ -96,7 +96,10 @@ export type ProjectListing = {
   readonly workspaceBindingRepairs: readonly WorkspaceBindingRepairGroup[];
 };
 
-/** Concurrent disk-side library-state recoveries after IndexedDB eviction. */
+/**
+ * Disk-side library-state recoveries after IndexedDB eviction issued at once. They read through the background lane
+ * (FW4), which admits their provider calls a few at a time, so this bounds only the reads queued.
+ */
 const libraryRecoveryConcurrency = 16;
 
 export const pendingStorageToConfig = (projectId: string, storage: PendingProjectStorage): ProjectFileSystemConfig => {
@@ -1269,7 +1272,16 @@ export const readProjectLibraryStateFromDisk = async (
 
 /** Enrich a pass's listing into what the library shows: library rows, slugs, conflicts, recoveries and repairs. */
 export const buildProjectListing = async (
-  { recordFiles, worker }: Readonly<{ recordFiles: ProjectLibraryFileClient; worker: ProjectLibraryObjectStore }>,
+  {
+    recordFiles,
+    backgroundRecordFiles,
+    worker,
+  }: Readonly<{
+    recordFiles: ProjectLibraryFileClient;
+    /** The records in the background lane, for the recovery reads nobody waits on one by one (FW4). */
+    backgroundRecordFiles?: ProjectLibraryFileClient | undefined;
+    worker: ProjectLibraryObjectStore;
+  }>,
   discovery: ProjectDiscoveryResult,
   recoveries: () => readonly PendingProjectRecovery[],
 ): Promise<ProjectListing> => {
@@ -1282,7 +1294,7 @@ export const buildProjectListing = async (
   const [workspaces, libraryStates, workspaceBindingRepairs] = await Promise.all([
     listWorkspaces(),
     ensureProjectLibraryStates(
-      recordFiles,
+      backgroundRecordFiles ?? recordFiles,
       worker,
       validEntries.map(({ projectId }) => projectId),
     ),

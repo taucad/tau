@@ -66,7 +66,7 @@ from smlibpy import (
 import worker
 from tau_kernel.protocol import Artifacts, WorkerContext
 
-PINNED = re.search(r"^smlibpy==(\S+)$", (PYTHON_ROOT / "requirements.in").read_text(), re.MULTILINE)
+PINNED = re.search(r"^smlibpy==(\S+)$", (PYTHON_ROOT / "requirements.in").read_text(encoding="utf-8"), re.MULTILINE)
 
 
 @contextmanager
@@ -116,7 +116,7 @@ class Project:
             # `triangles` is the [offset, length] of its little-endian uint32 indices in the bundle's body.
             case.assertEqual(sum(group["count"] for group in groups), shape["faces"]["triangles"][1] // 4)
         step = self.worker.dispatch("export", {"handleId": handle, "format": "step"})
-        case.assertIn("ISO-10303-21", Path(step["artifactPath"]).read_text())
+        case.assertIn("ISO-10303-21", Path(step["artifactPath"]).read_text(encoding="utf-8"))
         stl = self.worker.dispatch(
             "export", {"handleId": handle, "format": "stl", "linearTolerance": 0.1, "angularTolerance": 15}
         )
@@ -130,7 +130,7 @@ def snippets() -> list[tuple[str, str]]:
 
     found = []
     for path in sorted(SKILL_ROOT.rglob("*.md")):
-        for index, block in enumerate(re.findall(r"```python\n(.*?)```", path.read_text(), re.DOTALL)):
+        for index, block in enumerate(re.findall(r"```python\n(.*?)```", path.read_text(encoding="utf-8"), re.DOTALL)):
             if "def main" in block:
                 found.append((f"{path.relative_to(SKILL_ROOT)}#{index}", block))
     return found
@@ -139,7 +139,7 @@ def snippets() -> list[tuple[str, str]]:
 def documented_symbols() -> list[str]:
     """Every qualified name the generated API index lists."""
 
-    index = (SKILL_ROOT / "cad-smlibpy" / "api-index.md").read_text()
+    index = (SKILL_ROOT / "cad-smlibpy" / "api-index.md").read_text(encoding="utf-8")
     return re.findall(r"^\s*(smlibpy(?:\.\w+)+) \(", index, re.MULTILINE)
 
 
@@ -164,7 +164,7 @@ class PinTest(unittest.TestCase):
         self.assertEqual(importlib.metadata.version("smlibpy"), PINNED[1])
 
     def test_the_api_index_describes_the_pinned_wheel(self) -> None:
-        index = (SKILL_ROOT / "cad-smlibpy" / "api-index.md").read_text()
+        index = (SKILL_ROOT / "cad-smlibpy" / "api-index.md").read_text(encoding="utf-8")
         self.assertIn(f"smlibpy {PINNED[1]} ·", index)
 
 

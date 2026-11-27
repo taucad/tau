@@ -1,5 +1,5 @@
 import { act, render } from '@testing-library/react';
-import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { ContextSuggestionItem } from '@taucad/chat-ui/components/tiptap/suggestion-types';
 import { toast } from '@taucad/ui/components/sonner';
 import { captureCadImages } from '#services/headless-capture.js';
@@ -39,6 +39,9 @@ const mocks = vi.hoisted(() => {
     recordDraftFile: false,
     paintedSendVerdict: undefined as unknown,
     cloudIntent: undefined as 'open' | undefined,
+    execution: undefined as Record<string, unknown> | undefined,
+    handleTextareaFocus: undefined as (() => void) | undefined,
+    prewarm: vi.fn(async () => undefined),
   };
 });
 
@@ -75,13 +78,16 @@ vi.mock('#components/chat/chat-textarea-desktop.js', () => ({
     earlyInput,
     onEarlyInputAdopted,
     paintedSendVerdict,
+    handleTextareaFocus,
   }: {
     readonly onScreenshotAction: (item: ContextSuggestionItem) => void;
     readonly actionItems: ContextSuggestionItem[];
     readonly earlyInput?: unknown;
     readonly onEarlyInputAdopted?: () => boolean;
     readonly paintedSendVerdict?: unknown;
+    readonly handleTextareaFocus?: () => void;
   }) => {
+    mocks.handleTextareaFocus = handleTextareaFocus;
     mocks.earlyInput = earlyInput;
     mocks.paintedSendVerdict = paintedSendVerdict;
     mocks.onEarlyInputAdopted = onEarlyInputAdopted;
@@ -151,11 +157,12 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
         ? undefined
         : { activeChatId: mocks.activeChatId, composerRecordRef: recordRefMock },
     homeRecordRef: mocks.isHome ? recordRefMock : undefined,
-    execution: { execution: { kind: 'native' } },
+    execution: { execution: mocks.execution ?? { kind: 'native' } },
     runElsewhere: mocks.runElsewhere,
     draftActorRef: { send: mocks.draftSend, getSnapshot: () => ({ context: { draftText: mocks.inputText } }) },
   }),
 }));
+vi.mock('#chat-clients/_internal/external-agent-prewarm.js', () => ({ prewarmExternalAgent: mocks.prewarm }));
 vi.mock('#hooks/use-chat-session.js', () => ({ useChatSessionSnapshot: () => undefined }));
 vi.mock('@taucad/chat-ui/services/agent-host-event-projection', () => ({ latestAcpSessionData: () => undefined }));
 vi.mock('#providers/headless-image-provider.js', () => ({ useHeadlessImageService: () => ({ export: vi.fn() }) }));
@@ -528,5 +535,39 @@ describe('ChatTextarea while a Tau Cloud open writes the files', () => {
     render(<ChatTextarea onSubmit={vi.fn()} />);
 
     expect(mocks.logicOptions?.isSubmitDisabled).toBe(true);
+  });
+});
+
+describe('ChatTextarea external agent prewarm (WP-18)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /* The other suites read a native execution with no chat: leave them that, in any order. */
+  afterEach(() => {
+    mocks.activeChatId = undefined;
+    mocks.execution = undefined;
+  });
+
+  it("should ask the focused chat's ACP agent to open its session when the composer takes focus", () => {
+    mocks.activeChatId = 'chat';
+    mocks.execution = { kind: 'acp', hostId: 'hst_daemon', agentId: 'claude' };
+    render(<ChatTextarea onSubmit={vi.fn()} />);
+    expect(mocks.prewarm).not.toHaveBeenCalled();
+
+    act(() => {
+      mocks.handleTextareaFocus?.();
+    });
+
+    expect(mocks.prewarm).toHaveBeenCalledWith({ projectId: 'project', chatId: 'chat', execution: mocks.execution });
+  });
+
+  it('should ask nothing from a composer with no chat session, such as Home', () => {
+    mocks.execution = { kind: 'acp', hostId: 'hst_daemon', agentId: 'claude' };
+    render(<ChatTextarea onSubmit={vi.fn()} />);
+    act(() => {
+      mocks.handleTextareaFocus?.();
+    });
+    expect(mocks.prewarm).not.toHaveBeenCalled();
   });
 });

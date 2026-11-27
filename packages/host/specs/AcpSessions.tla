@@ -12,7 +12,7 @@
 (* through the external admission gap (L2a D2) until W0.6. The target must *)
 (* hold I33 even then: M3 refuses the second acquire with CHAT_RUN_LIVE.   *)
 (*                                                                         *)
-(* Seven knobs each switch one mechanism off (a `witness` or `defect`      *)
+(* Eight knobs each switch one mechanism off (a `witness` or `defect`      *)
 (* configuration turns exactly one of them FALSE):                         *)
 (*   LEASE        the endpoint admits a bound turn past token expiry       *)
 (*   EVICT_ON_END eviction also runs when a turn ends, not only on open    *)
@@ -25,9 +25,24 @@
 (*                session record never answers is ended from `closed`      *)
 (*                (launch audit E-1, E-11: `finishing` had no timer, and   *)
 (*                the model assumed WF on TurnEnded in its place)          *)
+(*   ADOPT_WARMING an acquire adopts a prewarm still opening for its key   *)
+(*                (chat performance WP-18 step 1, F-9): without it the     *)
+(*                prewarm blocks the turn it was opened for                *)
 (*                                                                         *)
-(* Action names are M3's events (MC-R27): Acquire, Opened, Dequeued,       *)
-(* Bound, PromptAnswered, TurnEnded, IdleExpired, CloseChat,               *)
+(* Prewarm (WP-18 step 1): the page names an agent before its first turn, *)
+(* and the parent opens that key's session with no run. The slot is       *)
+(* `warming` until the child opens, then an idle session like any other:  *)
+(* it counts toward the limit, is evicted (first: LRU puts it oldest) and *)
+(* idle-expires. One prewarm opens at a time per port, and only when the  *)
+(* limit has room or an idle victim exists, so it never closes a lent     *)
+(* session. An acquire for a warming key adopts the open in flight, and   *)
+(* one for an opened prewarm is lent it as any idle session is (a session *)
+(* the turn's record does not name folds into the reopen branch, as a cwd *)
+(* change does). A prewarm that fails to open is an adapter failure       *)
+(* (Unmodelled); a closeChat abandons one still opening.                   *)
+(*                                                                         *)
+(* Action names are M3's events (MC-R27): Prewarm, Acquire, Opened,        *)
+(* Dequeued, Bound, PromptAnswered, TurnEnded, IdleExpired, CloseChat,     *)
 (* AdapterExited, Cancel, CancelBinding, CancelQueued, CancelSettled,      *)
 (* CancelTimedOut and DrainTimedOut;                                        *)
 (* Tick is the environment, and SoftCloseDone exists only for the          *)
@@ -61,7 +76,8 @@
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Keys, Runs, Limit, MaxProcs, ONE_RUN,
-          LEASE, EVICT_ON_END, KEEP_KEY, BUSY_GUARD, HARD_CLOSE, QUEUED_CANCEL, DRAIN_BOUND
+          LEASE, EVICT_ON_END, KEEP_KEY, BUSY_GUARD, HARD_CLOSE, QUEUED_CANCEL, DRAIN_BOUND,
+          ADOPT_WARMING
 
 Procs == 1..MaxProcs
 NoProc == 0
@@ -91,7 +107,7 @@ Init ==
 TypeOK ==
   /\ \A p \in Procs : proc[p].st \in {"unused", "open", "closing", "closed"}
                       /\ proc[p].cap \in {"fresh", "margin", "expired"}
-  /\ \A k \in Keys : ent[k].st \in {"none", "busy", "idle", "closing"} /\ ent[k].pid \in Procs \cup {NoProc}
+  /\ \A k \in Keys : ent[k].st \in {"none", "warming", "busy", "idle", "closing"} /\ ent[k].pid \in Procs \cup {NoProc}
   /\ \A r \in Runs : run[r].pc \in {"free", "opening", "waitClose", "queued", "prompting", "cancelling", "finishing"}
                     /\ run[r].cx \in BOOLEAN /\ run[r].bound \in BOOLEAN
   /\ next \in 1..(MaxProcs + 1)
@@ -162,11 +178,49 @@ Acquire(r, k) ==
         /\ proc' = [proc EXCEPT ![e.pid].st = "closing"]
         /\ timer' = [timer EXCEPT ![k] = FALSE]
         /\ UNCHANGED next
+     \* A prewarm still opening: the turn adopts the open in flight and prompts once it opens.
+     \/ /\ ADOPT_WARMING
+        /\ e.st = "warming"
+        /\ run' = [run EXCEPT ![r] = [Free(k) EXCEPT !.pc = "opening"]]
+        /\ ent' = [ent EXCEPT ![k] = [pid |-> NoProc, st |-> "busy"]]
+        /\ UNCHANGED <<proc, timer, next>>
      \/ /\ KEEP_KEY
         /\ e.st = "closing"
         /\ Waiting(k) = {}                         \* one queued acquire per key
         /\ run' = [run EXCEPT ![r] = [Free(k) EXCEPT !.pc = "waitClose", !.pid = e.pid]]
         /\ UNCHANGED <<proc, ent, timer, next>>
+
+(* `prewarm`: the page named key k's agent; its session opens with no run. *)
+(* Only one opens at a time, and only into room the limit has or an idle   *)
+(* victim makes, so a prewarm never closes a lent session.                 *)
+Prewarm(k) ==
+  /\ ent[k].st = "none"
+  /\ \A j \in Keys : ent[j].st # "warming"
+  /\ Cardinality(Live) < Limit \/ \E j \in Keys : ent[j].st = "idle" /\ ent[j].pid # NoProc
+  /\ ent' = [ent EXCEPT ![k] = [pid |-> NoProc, st |-> "warming"]]
+  /\ act' = "Prewarm"
+  /\ UNCHANGED <<proc, timer, run, next>>
+
+(* `opened` of a prewarm: the session rests, its idle timer armed, and the  *)
+(* parent evicts in the same step: other idle sessions first, the          *)
+(* prewarmed one itself only if the limit filled with lent ones meanwhile. *)
+WarmVictims(e, k) ==
+  LET others == {V \in EvictSets(e) : k \notin V}
+  IN IF others # {} THEN others ELSE EvictSets(e)
+
+WarmOpened(k) ==
+  /\ ent[k].st = "warming"
+  /\ next <= MaxProcs
+  /\ act' = "Opened"
+  /\ LET n == next
+         p2 == [proc EXCEPT ![n] = [key |-> k, st |-> "open", cap |-> "fresh", bound |-> FALSE, soft |-> FALSE]]
+         e2 == [ent EXCEPT ![k] = [pid |-> n, st |-> "idle"]]
+     IN /\ next' = next + 1
+        /\ \E V \in WarmVictims(e2, k) :
+             /\ ent' = [j \in Keys |-> IF j \in V THEN ClosingOf(e2[j].pid) ELSE e2[j]]
+             /\ proc' = [q \in Procs |-> IF \E j \in V : e2[j].pid = q THEN [p2[q] EXCEPT !.st = "closing"] ELSE p2[q]]
+             /\ timer' = [j \in Keys |-> IF j \in V THEN FALSE ELSE IF j = k THEN TRUE ELSE timer[j]]
+             /\ UNCHANGED run
 
 (* `opened`: the adapter is initialized and the session restored or        *)
 (* created; the parent evicts in the same step.                             *)
@@ -241,17 +295,31 @@ IdleExpired(k) ==
   /\ act' = "IdleExpired"
   /\ UNCHANGED <<run, next>>
 
-(* `closeChat`: rewind, relinquish, host close.                              *)
-CloseChat(k) ==
-  /\ ONE_RUN => ActiveOn(k) = {}
+(* `closeChat`: rewind, relinquish, host close. A prewarm still opening is   *)
+(* abandoned: the child closes the adapter it spawned (the ladder).          *)
+CloseWarming(k) ==
+  /\ ent[k].st = "warming"
+  /\ next <= MaxProcs
+  /\ next' = next + 1
+  /\ proc' = [proc EXCEPT ![next] = [key |-> k, st |-> "closing", cap |-> "fresh", bound |-> FALSE,
+                                     soft |-> ~HARD_CLOSE]]
+  /\ ent' = [ent EXCEPT ![k] = ClosingOf(next)]
+  /\ UNCHANGED <<run, timer>>
+
+CloseOpen(k) ==
   /\ ent[k].st \in {"busy", "idle"}
   /\ ent[k].pid # NoProc
   /\ BUSY_GUARD => ent[k].st = "idle"             \* a lent child refuses CHAT_RUN_LIVE
   /\ proc' = [proc EXCEPT ![ent[k].pid].st = "closing"]
   /\ ent' = [ent EXCEPT ![k] = ClosingOf(ent[k].pid)]
   /\ timer' = [timer EXCEPT ![k] = FALSE]
-  /\ act' = "CloseChat"
   /\ UNCHANGED <<run, next>>
+
+CloseChat(k) ==
+  /\ ONE_RUN => ActiveOn(k) = {}
+  /\ act' = "CloseChat"
+  /\ \/ CloseWarming(k)
+     \/ CloseOpen(k)
 
 (* `adapterExited` after the close ladder (session/close, SIGTERM to the    *)
 (* group, SIGKILL after E17, the E18 backstop); the child reports `closed`. *)
@@ -365,6 +433,7 @@ DrainTimedOut(r) ==
 
 Next ==
   \/ \E r \in Runs, k \in Keys : Acquire(r, k)
+  \/ \E k \in Keys : Prewarm(k) \/ WarmOpened(k)
   \/ \E r \in Runs : Opened(r) \/ Dequeued(r) \/ Bound(r) \/ PromptAnswered(r) \/ TurnEnded(r) \/ Cancel(r)
                      \/ CancelBinding(r) \/ CancelQueued(r) \/ CancelSettled(r) \/ CancelTimedOut(r)
                      \/ DrainTimedOut(r)
@@ -398,6 +467,13 @@ AtMostLimitIdle == Cardinality(Live) <= Max(Limit, Cardinality(Busy))
 (* One session per key: at most one adapter process per key that has not exited. *)
 OneSessionPerKey ==
   \A k \in Keys : Cardinality({p \in Procs : proc[p].key = k /\ proc[p].st \in {"open", "closing"}}) <= 1
+
+(* A prewarm never blocks a turn (F-9): an acquire that an absent slot would *)
+(* admit is admitted while the key's prewarm opens or rests.                  *)
+PrewarmNeverBlocks ==
+  \A k \in Keys, r \in Runs :
+    (ent[k].st \in {"warming", "idle"} /\ run[r].pc = "free" /\ (ONE_RUN => ActiveOn(k) = {}))
+      => ENABLED Acquire(r, k)
 
 (* A cancelled turn never prompts. *)
 NoPromptAfterCancel == \A r \in Runs : run[r].pc = "prompting" => ~run[r].cx

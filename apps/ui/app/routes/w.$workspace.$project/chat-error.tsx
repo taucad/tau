@@ -1,4 +1,5 @@
-import { memo } from 'react';
+import { memo, useCallback, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { Topic } from '@taucad/events';
 import type React from 'react';
 import { Bot, CircleAlert, MonitorSmartphone, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
@@ -18,7 +19,7 @@ import {
 import { selectVisibleChatErrorEntry, selectVisibleFailureResumable } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan, AutoResumeTarget } from '#utils/run-auto-resume-plan.js';
 import { useChatAutoResume } from '#hooks/active-chat-provider.js';
-import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
+import { ChatErrorCard, chatErrorAnnouncedContext } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-details.js';
 import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
@@ -549,20 +550,113 @@ const countdownOf = (
   kind: 'rateLimit' | 'providerUnavailable',
 ): { countdown?: Readonly<{ resumeAt: number }> } => (waiting?.kind === kind ? { countdown: waiting } : {});
 
+/** How long a copy of a failure must stay shown to count as said: an alert removed sooner may go unheard. */
+const failureHeardMilliseconds = 1000;
+
+/** Each failure's copies on the page, by decision: the mounted ones in mount order, and the copy that said it. */
+type FailureVoice = { copies: symbol[]; mountedAt: Map<symbol, number>; saidBy: symbol | undefined };
+const failureVoices = new Map<string, FailureVoice>();
+const failureVoiceChanges = new Topic<void>({ name: 'ChatError.failureVoices' });
+
+const notifyFailureVoices = (): void => {
+  failureVoiceChanges.emit();
+};
+const subscribeFailureVoices = (listener: () => void): (() => void) => failureVoiceChanges.subscribe(listener);
+
+/** A copy of a failure is shown. */
+const showFailureCopy = (decisionId: string, copy: symbol): void => {
+  const voice: FailureVoice = failureVoices.get(decisionId) ?? { copies: [], mountedAt: new Map(), saidBy: undefined };
+  failureVoices.set(decisionId, voice);
+  voice.copies.push(copy);
+  voice.mountedAt.set(copy, performance.now());
+  notifyFailureVoices();
+};
+
+/** A copy of a failure is gone: if it was the one saying it and stayed long enough to be heard, the failure is said. */
+const hideFailureCopy = (decisionId: string, copy: symbol): void => {
+  const voice = failureVoices.get(decisionId);
+  if (voice === undefined) {
+    return;
+  }
+  const mountedAt = voice.mountedAt.get(copy) ?? performance.now();
+  if (
+    voice.saidBy === undefined &&
+    voice.copies[0] === copy &&
+    performance.now() - mountedAt >= failureHeardMilliseconds
+  ) {
+    voice.saidBy = copy;
+  }
+  voice.copies = voice.copies.filter((candidate) => candidate !== copy);
+  voice.mountedAt.delete(copy);
+  notifyFailureVoices();
+};
+
+/**
+ * Whether a copy says its failure. One failure is said once per page, by its first copy shown. A refused send's turn
+ * leaves the transcript and the failure moves between the last turn and the slot under the empty transcript, possibly
+ * across commits: a copy that leaves before it could be heard hands the saying on to the next copy, which is drawn
+ * afresh as the alert; one that stayed keeps every later copy quiet.
+ *
+ * @param decisionId - The failure's identity.
+ * @param copy - This copy.
+ * @returns Whether to announce it.
+ */
+const saysFailure = (decisionId: string, copy: symbol): boolean => {
+  const voice = failureVoices.get(decisionId);
+  if (voice === undefined) {
+    return true;
+  }
+  if (voice.saidBy !== undefined) {
+    return false;
+  }
+  return voice.copies.length === 0 || voice.copies[0] === copy;
+};
+
+/** Forget every failure said on this page. */
+export const resetFailureVoicesForTest = (): void => {
+  failureVoices.clear();
+  notifyFailureVoices();
+};
+
+function useAnnouncesFailure(decisionId: string | undefined): boolean {
+  const [copy] = useState(() => Symbol('failure copy'));
+  /* Only this copy's own answer re-renders it. */
+  const says = useCallback(
+    (): boolean => decisionId === undefined || saysFailure(decisionId, copy),
+    [decisionId, copy],
+  );
+  const announces = useSyncExternalStore(subscribeFailureVoices, says, says);
+  useLayoutEffect(() => {
+    if (decisionId === undefined) {
+      return undefined;
+    }
+    showFailureCopy(decisionId, copy);
+    return () => {
+      hideFailureCopy(decisionId, copy);
+    };
+  }, [decisionId, copy]);
+  return announces;
+}
+
 /**
  * The run's failure, a decision the phone sheet never folds away (I5, `chat-interface-mobile.tsx`): the marker renders
- * only while a card does.
+ * only while a card does. Its card is the alert only where it says the failure (`useAnnouncesFailure`); elsewhere it is
+ * a group labelled by its title.
  */
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector(selectVisibleChatError);
   const decisionId = useChatSelector(selectVisibleChatErrorId);
+  const announces = useAnnouncesFailure(parsedError ? decisionId : undefined);
   if (!parsedError) {
     return null;
   }
   return (
     <div data-decision='run-error' data-decision-id={decisionId} className='shrink-0'>
-      <ChatErrorBody parsedError={parsedError} className={className} />
+      {/* Keyed by the voice, so a copy handed the saying is drawn afresh as the alert. */}
+      <chatErrorAnnouncedContext.Provider key={announces ? 'said' : 'quiet'} value={announces}>
+        <ChatErrorBody parsedError={parsedError} className={className} />
+      </chatErrorAnnouncedContext.Provider>
     </div>
   );
 });

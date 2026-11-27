@@ -5,7 +5,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { joinPath } from '@taucad/utils/path';
 import { createRootedContentClient, rootedPathOf } from '#rooted-content-client.js';
-import type { RootedConnection, RootedFiles } from '#rooted-content-client.js';
+import type { RootedConnection, RootedConnectionOptions, RootedFiles } from '#rooted-content-client.js';
 
 const encoder = new TextEncoder();
 
@@ -23,7 +23,7 @@ const rootedAddressArbitrary = oneof(
 
 /** One recording connection per root, so a row can assert both the root and the namespace. */
 const recordingOpener = (): {
-  readonly open: (root: string, consumer: string) => Promise<RootedConnection>;
+  readonly open: (root: string, consumer: string, options?: RootedConnectionOptions) => Promise<RootedConnection>;
   readonly opened: Map<string, RootedFiles>;
   readonly disposed: string[];
   readonly opens: string[];
@@ -39,9 +39,9 @@ const recordingOpener = (): {
     disposed,
     opens,
     openKeys,
-    open: async (root, consumer) => {
+    open: async (root, consumer, options) => {
       opens.push(root);
-      openKeys.push(`${consumer} ${root}`);
+      openKeys.push(options?.lane === undefined ? `${consumer} ${root}` : `${consumer} ${options.lane} ${root}`);
       const files = {
         readFile: vi.fn().mockResolvedValue(encoder.encode('bytes')),
         writeFile: vi.fn().mockResolvedValue(undefined),
@@ -175,6 +175,24 @@ describe('rooted content client', () => {
     await owner.files('working-copy').stat('/projects/proj_a/src/main.ts');
 
     expect(opener.openKeys).toEqual(['working-copy /projects/proj_a', 'agent /projects/proj_a']);
+  });
+
+  /* Fast path FW4: a background client's reads are ranked behind interactive ones, so it never shares a connection. */
+  it('should open a background client’s connections apart from the interactive ones, declaring the lane', async () => {
+    const opener = recordingOpener();
+    const owner = createRootedContentClient({ open: opener.open });
+
+    await owner.files('working-copy').stat('/projects/proj_a/tau.json');
+    await owner.files('working-copy', { lane: 'background' }).stat('/projects/proj_a/tau.json');
+    await owner.files('working-copy', { lane: 'background' }).stat('/projects/proj_a/src/main.ts');
+    await owner.files('working-copy', { lane: 'interactive' }).stat('/projects/proj_a/src/main.ts');
+
+    expect(opener.openKeys).toEqual(['working-copy /projects/proj_a', 'working-copy background /projects/proj_a']);
+    expect(owner.files('working-copy', { lane: 'background' })).toBe(
+      owner.files('working-copy', { lane: 'background' }),
+    );
+    expect(owner.files('working-copy', { lane: 'background' })).not.toBe(owner.files('working-copy'));
+    expect(owner.files('working-copy', { lane: 'interactive' })).toBe(owner.files('working-copy'));
   });
 
   it('should answer one consumer with the same client every time', () => {

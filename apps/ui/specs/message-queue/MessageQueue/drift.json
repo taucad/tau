@@ -22,21 +22,21 @@
     "withdrawTurn"
   ],
   "sources": {
-    "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx": "906912b6183fd14c754d80e5ca84b67daacdbf20d260bbb42335d1a7ea7d7db1",
+    "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx": "b44a781d3813b51d49b0af4fb70f7c07db3c323b255182dc86fc58c9fff1e2ac",
     "apps/libs/chat-ui/src/db/chat-message-queue-store.ts": "7f5887a1f65eea460b3463f445a3aef19dd7843ea1b379940e0273eebc1c32f7",
     "apps/libs/chat-ui/src/machines/chat-message-queue.machine.ts": "b8ff03658a2db816af1d7e34ad621d548653e48784d5c7b2ce7801a26bbfeb0f",
     "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "53443348c954ec1cb4656dda9569385dd0af65c39356e1cfadd5ddb44ded8d0a",
     "apps/ui/app/chat-clients/chat-turn-host.tsx": "f2037dc8f438aa8a006009909def50e9ba4d558896e77fe539f1613ecb030cd8",
     "apps/ui/app/chat-clients/use-cad-chat-client.ts": "3749ada815f745fed131d6990868df4733e3279a16f073a780a34513c6b3cbff",
     "apps/ui/app/components/chat/chat-message-queue.tsx": "77c8164d742b8c64dc79ae0969fa71721be0c3bc64ea908cb0b812b8c42c081b",
-    "apps/ui/app/components/chat/chat-textarea.tsx": "ef3dc868083fdfe1c606d9682e50316323e9ef939aa60ad6b2d9982418ff4bf2",
+    "apps/ui/app/components/chat/chat-textarea.tsx": "74075a3b9d435a31944da35b53fc0e47939c09edde2ad9fe194f4a52c5aca4cf",
     "apps/ui/app/hooks/use-chat.tsx": "62ae68a00adebfe89e6c620421d5a9d447135ac81b8c4e0cfd885f1d1c933f40",
     "apps/ui/app/machines/chat-session.machine.ts": "2076bc41cb203f45c0049297df17be9a4a4eed966d704f34423e3a2aa3f733cf",
     "apps/ui/app/services/chat-session-store.ts": "3497ffacb2d69eebc80b06ed1716534c608b016a9254e11b63407d1dc661d5a2",
     "apps/ui/app/services/outbox-gate.ts": "c9d5a33f02c06d6bb45657f76e30a6c3a28b31bf6403d7dc0e9d3c840c4e357e"
   },
   "specs": {
-    "MessageQueue.tla": "a259a3f05fb516d8514ef0994dc18ef4332d481a5528b56f23c53e160e1e3b61",
+    "MessageQueue.tla": "20aee8610cbec351595051dcda230df34812471c4f7ad259def5ac1442bb3a21",
     "QueuePlacement.tla": "deb7d4f4fcd0de459b5c490eae7ec417bffb9ed99f7eca969e0141443648c952"
   },
   "tables": {

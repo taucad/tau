@@ -537,17 +537,23 @@ describe('hand-off queued send and stored draft (A15d, C10)', () => {
     expect(statusOf(box)).toBe(status);
     expect(captureHandOff(input).submitQueued).toBe(true);
 
+    /* Staging re-check 4: an emptied region says nothing, so Escape says the cancellation once. */
     play(input, [{ kind: 'key', init: { key: 'Escape' } }]);
     expect(Object.hasOwn(box.dataset, 'queuedSend')).toBe(false);
-    expect(statusOf(box)).toBe('');
+    expect(statusOf(box)).toBe('Send cancelled.');
     expect(captureHandOff(input).submitQueued).toBe(false);
     expect(input.value).toBe('Make a bracket.');
+    /* A second Escape has nothing to cancel and says nothing new. */
+    play(input, [{ kind: 'key', init: { key: 'Escape' } }]);
+    expect(statusOf(box)).toBe('Send cancelled.');
 
     play(input, [
       { kind: 'key', init: { key: 'Enter' } },
       { kind: 'type', text: ' Twice' },
     ]);
     expect(Object.hasOwn(box.dataset, 'queuedSend')).toBe(false);
+    /* The next typing clears the words, so they do not stick. */
+    expect(statusOf(box)).toBe('');
     expect(captureHandOff(input).submitQueued).toBe(false);
   });
 

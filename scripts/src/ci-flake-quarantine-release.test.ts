@@ -43,7 +43,7 @@ import type {
   QuarantinedTest,
   RemovalPlan,
 } from '#ci-flake-quarantine-release.js';
-import { GitHubError } from '#ci-github-client.js';
+import { GitHubError, isMarkerAuthor, markerAuthors } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
 
 const hour = 60 * 60 * 1000;
@@ -863,7 +863,8 @@ describe('the release job', () => {
 
   it('should close the owner issue of a merged release, recover one never labelled, and strip the rest', async () => {
     const branch = 'flake-release/2026-11-24-aaaa';
-    const bot = { type: 'Bot' };
+    // The flake bot writes the records once its App is configured.
+    const bot = { login: 'tau-flake-bot[bot]', type: 'Bot' };
     const releasing = [{ name: 'flake' }, { name: 'flake:releasing' }];
     const { github, requests } = fakeGitHub({
       'labels=flake%3Areleasing': [12, 13, 14].map((number) => ({ number, state: 'open', labels: releasing })),
@@ -983,8 +984,8 @@ describe('the release job', () => {
       'labels=flake%3Areleasing': [],
       // Released once, returned (reopened for the operator), then released again.
       '/issues/30/comments': [
-        { body: removalMarker('released', first), user: { type: 'Bot' } },
-        { body: `${returnMarker(first)}\nReturned.`, user: { type: 'Bot' } },
+        { body: removalMarker('released', first), user: { login: 'github-actions[bot]', type: 'Bot' } },
+        { body: `${returnMarker(first)}\nReturned.`, user: { login: 'github-actions[bot]', type: 'Bot' } },
       ],
     });
     const landed: LandedRemoval[] = [
@@ -1065,10 +1066,10 @@ describe('the release job', () => {
       'labels=flake%3Areleasing': [],
       // #33: WebKit's release was recorded and closed the issue; Firefox then returned and reopened it.
       '/issues/33/comments': [
-        { body: removalMarker('released', webkitRecord), user: { type: 'Bot' } },
+        { body: removalMarker('released', webkitRecord), user: { login: 'github-actions[bot]', type: 'Bot' } },
         {
           body: `${returnMarker({ identity: identityHashOf(id), released: '2026-11-22', variant: firefox })}\nReturned.`,
-          user: { type: 'Bot' },
+          user: { login: 'github-actions[bot]', type: 'Bot' },
         },
       ],
       '/issues/33': {
@@ -1121,7 +1122,9 @@ describe('the release job', () => {
     const { github, requests } = fakeGitHub({
       'labels=flake%3Areleasing': [],
       // #34: the record was written, its label was not; WebKit is still on main.
-      '/issues/34/comments': [{ body: removalMarker('released', record), user: { type: 'Bot' } }],
+      '/issues/34/comments': [
+        { body: removalMarker('released', record), user: { login: 'github-actions[bot]', type: 'Bot' } },
+      ],
       '/issues/34': { number: 34, state: 'open', labels: [{ name: 'flake' }] },
       // #35: Firefox returned before WebKit's release was recorded: open, with the operator.
       '/issues/35/comments': [],
@@ -1153,6 +1156,66 @@ describe('the release job', () => {
       ['POST', '/repos/taucad/tau/issues/35/comments'],
       ['POST', '/repos/taucad/tau/issues/35/labels'],
     ]);
+  });
+
+  it('should accept removal records only from the flake bot and the workflow token (taucad/tau#2878)', async () => {
+    const branch = 'flake-release/2026-11-26-cccc';
+    const record = {
+      identity: identityHashOf(`host › ${testName}`),
+      path,
+      created: '2026-11-20',
+      expires: '2026-12-04',
+      branch,
+      released: '2026-11-26',
+    };
+    const forged = removalMarker('released', record);
+    const done = [{ name: 'flake' }, { name: 'flake:released' }];
+    const { github, requests } = fakeGitHub({
+      'labels=flake%3Areleasing': [],
+      // #40: only a person and another App posed as the record, so the release is still unrecorded.
+      '/issues/40/comments': [
+        { body: forged, user: { login: 'someone', type: 'User' } },
+        { body: forged, user: { login: 'coderabbitai[bot]', type: 'Bot' } },
+      ],
+      '/issues/40': { number: 40, state: 'closed', labels: done },
+      // #41 and #42: the flake bot's record and the workflow token's (written before the switch) both settle it.
+      '/issues/41/comments': [{ body: forged, user: { login: 'tau-flake-bot[bot]', type: 'Bot' } }],
+      '/issues/41': { number: 41, state: 'closed', labels: done },
+      '/issues/42/comments': [{ body: forged, user: { login: 'github-actions[bot]', type: 'Bot' } }],
+      '/issues/42': { number: 42, state: 'closed', labels: done },
+    });
+    const landed: LandedRemoval[] = [
+      {
+        kind: 'release',
+        branch,
+        mergedAt: '2026-11-26T08:00:00Z',
+        removed: [40, 41, 42].map((issue) => ({ path, entry: entryOf({ issue }) })),
+      },
+    ];
+
+    await closeReleased(github, { tests: [], landed, identityOf: (_file, test) => `host › ${test}` });
+
+    const writes = requests.filter((request) => request.method !== 'GET').map((request) => request.path);
+    expect(writes).toContain('/repos/taucad/tau/issues/40/comments');
+    expect(writes.filter((write) => /\/issues\/4[12]\b/u.test(write))).toEqual([]);
+  });
+
+  it('should allow the flake bot and the workflow token only, and refuse a flake bot login that is not a bot', () => {
+    expect([...markerAuthors(undefined)]).toEqual(['tau-flake-bot[bot]', 'github-actions[bot]']);
+    expect([...markerAuthors('')]).toEqual(['tau-flake-bot[bot]', 'github-actions[bot]']);
+    expect([...markerAuthors('tau-flake-bot-staging[bot]')]).toEqual([
+      'tau-flake-bot-staging[bot]',
+      'github-actions[bot]',
+    ]);
+    expect(() => markerAuthors('rifont')).toThrow('FLAKE_BOT_LOGIN must be an App');
+    expect(() => markerAuthors('[bot]')).toThrow('FLAKE_BOT_LOGIN must be an App');
+    const authors = markerAuthors(undefined);
+    expect(isMarkerAuthor({ login: 'tau-flake-bot[bot]' }, authors)).toBe(true);
+    expect(isMarkerAuthor({ login: 'github-actions[bot]' }, authors)).toBe(true);
+    expect(isMarkerAuthor({ login: 'coderabbitai[bot]' }, authors)).toBe(false);
+    expect(isMarkerAuthor({ login: 'rifont' }, authors)).toBe(false);
+    expect(isMarkerAuthor({}, authors)).toBe(false);
+    expect(isMarkerAuthor(undefined, authors)).toBe(false);
   });
 
   it('should request a deferred auto-merge once, and only on a pull request the ledger meant to auto-merge', async () => {
@@ -1211,7 +1274,9 @@ describe('the release job', () => {
     const noted = { identity, path, created: '2026-11-20', expires: '2026-12-04', branch };
     // #12 has its note (the handoff is done; the operator has since removed the label): nothing is written.
     const done = fakeGitHub({
-      '/issues/12/comments': [{ body: removalMarker('expiry', noted), user: { type: 'Bot' } }],
+      '/issues/12/comments': [
+        { body: removalMarker('expiry', noted), user: { login: 'github-actions[bot]', type: 'Bot' } },
+      ],
     });
     await ensureOwnerNotes(done.github, [{ kind: 'expiry', removal, branch, where: 'There.' }]);
     expect(done.requests.filter((request) => request.method !== 'GET')).toEqual([]);
@@ -1219,7 +1284,10 @@ describe('the release job', () => {
     // Another variant's note on the same branch is not this entry's: the label, then the note.
     const other = fakeGitHub({
       '/issues/12/comments': [
-        { body: removalMarker('expiry', { ...noted, variant: { browser: 'firefox' } }), user: { type: 'Bot' } },
+        {
+          body: removalMarker('expiry', { ...noted, variant: { browser: 'firefox' } }),
+          user: { login: 'github-actions[bot]', type: 'Bot' },
+        },
       ],
     });
     await ensureOwnerNotes(other.github, [{ kind: 'expiry', removal, branch, where: 'There.' }]);

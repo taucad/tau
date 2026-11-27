@@ -252,9 +252,13 @@ export const ChatTextarea = memo(function ({
       }),
     [paintedSend, composerRecordRef, composerSession, recordDraftText, recordDraftHasMore],
   );
+  /* A chat session the store disposed while a boundary above hid the shown chat leaves this composer one render with
+   * its stopped draft actor before the live session arrives: the adopted text must not go into it. */
+  const isDraftLive = useSelector(draftActorRef, (state) => state.status !== 'stopped');
   const handOff = useHandOffAdoption(
     handOffTarget(handOffTargetProperty, adoptedEarlyInput, enableEarlyInput),
     handleHandOffAdopted,
+    isDraftLive,
   );
   const logic = useChatTextareaLogic({
     ref,

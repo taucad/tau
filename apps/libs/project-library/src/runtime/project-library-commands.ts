@@ -779,7 +779,8 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
 
   /**
    * Give an `adoption-required` directory an identity so it becomes a real project (R11): the id its route last bound
-   * when no other directory claims it, otherwise a fresh one.
+   * when no other directory carries it, otherwise a fresh one. The authority decides, under that id's project lock and
+   * from storage (`verifyAbsent`), never from a listing (fast-path FW2, index-contract review A1).
    *
    * @param locator - The directory.
    * @returns The adopted project.
@@ -787,14 +788,13 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
   public readonly adoptProject = async (locator: ProjectLocator): Promise<Project> => {
     await this.#host.whenDiscoveryReady();
     // The route that last bound this directory keys its chats, library row and
-    // editor state: restore that id unless another directory now claims it (R6).
-    const [configs, discovery] = await Promise.all([getAllProjectFileSystemConfigs(), this.#host.discover()]);
+    // editor state: the authority restores that id unless another directory now carries it (R6).
+    const configs = await getAllProjectFileSystemConfigs();
     const remembered = configs.find((config) => routeBindsLocator(config, locator))?.projectId;
-    const claimed = discovery.entries.some((entry) => 'projectId' in entry && entry.projectId === remembered);
     const fileManager = await this.#host.facade();
     const manifest = await fileManager.client.adoptProjectDirectory(
       locator,
-      remembered === undefined || claimed ? undefined : { id: remembered },
+      remembered === undefined ? undefined : { id: remembered },
     );
     // The next discovery pass reconciles the route config from the manifest
     // now on disk, so nothing else has to be written here.
@@ -946,8 +946,10 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
    * The target and the root statuses come from the current pass, with no scan (fast-path blueprint FW1). A stale pass
    * can only make this stricter: `survives`, the one fact that loosens a delete (no Trash needed), is read from disk.
    * When the route binds another copy, `verifyProjectRoute` proves that copy with two reads under the project's locks,
-   * and counts only when the directory it read is that copy and not the target. Only when the pass shows another
-   * copy that no route binds does the precheck still scan, as before.
+   * and counts only when the directory it read is that copy and not the target. When the pass shows another copy that
+   * no route binds, storage proves it: `verifyAbsent` reads every directory's identity under the project's lock, and
+   * only a `present` answer naming a directory other than the target counts. The pass is the discovery index, which
+   * may still list a copy that is gone, so it never proves one (fast-path FW2, index-contract review A1).
    */
   async #discoverPermanentDeleteStorage(
     projectId: string,
@@ -978,13 +980,17 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
         !namesDirectory(verification, target.locator);
       return { storage: locatorToPendingStorage(target.locator), survives: proven };
     }
-    /* Another copy that no route binds: no read proves it without a scan until the authority can probe (FW3). */
-    const scanned = await fileManager.client.listProjectManifests();
-    const scannedTarget = this.#permanentDeleteTarget({ projectId, locator, configured }, scanned);
-    return {
-      storage: locatorToPendingStorage(scannedTarget.locator),
-      survives: projectOccurrences(scanned, projectId).length > 1,
-    };
+    /* Another copy that no route binds: one identity sweep proves it until the authority can probe (FW3). `unknown`
+     * and `absent` prove nothing, and the delete stays a sole copy's, which asks for the Trash. */
+    const absence = await fileManager.client.verifyAbsent(projectId);
+    const survives =
+      absence.status === 'present' &&
+      absence.locators.some(
+        (other) =>
+          other.storageRootKey !== target.locator.storageRootKey ||
+          other.relativeDirectory !== target.locator.relativeDirectory,
+      );
+    return { storage: locatorToPendingStorage(target.locator), survives };
   }
 
   /**
@@ -1047,10 +1053,11 @@ export class ProjectCommands<ObjectStore extends ProjectLibraryWorker = ProjectL
     if (config === undefined || !(await isOrphanedProjectRoute(config, fileManager.scopedStorage))) {
       return;
     }
-    /* A discovered identity naming the project elsewhere is not an orphan:
-     * releasing its route would let this import create a second copy. */
-    const { entries } = await this.#host.discover();
-    if (entries.some((entry) => 'projectId' in entry && entry.projectId === projectId)) {
+    /* An identity naming the project elsewhere is not an orphan: releasing its route would let this import create a
+     * second copy. Storage proves it, every directory read under the project's lock; a root that is not available, or
+     * a read that failed, keeps the refusal (fast-path FW2, index-contract review A1). */
+    const absence = await fileManager.client.verifyAbsent(projectId);
+    if (absence.status !== 'absent') {
       return;
     }
     await worker.deleteProjectResources(projectId);

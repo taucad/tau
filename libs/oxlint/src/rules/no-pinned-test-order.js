@@ -174,10 +174,10 @@ const findPin = (node) => {
  * @returns {[number, number]} The range to remove.
  */
 const propertyRemovalRange = (object, property) => {
-  /** @type {{ properties: any[] }} */
-  const { properties } = object;
+  /** @type {{ properties: any[], range: [number, number] }} */
+  const { properties, range } = object;
   if (properties.length === 1) {
-    return [object.range[0] + 1, object.range[1] - 1];
+    return [range[0] + 1, range[1] - 1];
   }
   const index = properties.indexOf(property);
   const next = properties[index + 1];

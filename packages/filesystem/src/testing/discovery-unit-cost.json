@@ -1,5 +1,5 @@
 {
-  "$comment": "What discovery costs on the 386-directory profile (packages/filesystem/src/testing/discovery-profile.ts), held to the measurement by project-directories.discovery-cost.test.ts. `scan` is one full read of every directory with warm handles: the first pass after a reload or a reset of the discovery index (FW2). `warmPass` is a pass with no evidence. `directoryRead` is one directory a warm pass re-reads because evidence marked it. `sweep` is one `verifyAbsent`: a fresh listing of each root and one identity read per directory. `verification` is one targeted route verification. apps/libs/project-library/src/discovery-budget.test.ts holds its ceiling's unit rows to these figures.",
+  "$comment": "What discovery costs on the 386-directory profile (packages/filesystem/src/testing/discovery-profile.ts), held to the measurement by project-directories.discovery-cost.test.ts. `scan` is one full read of every directory with warm handles: the first pass after a reload or a reset of the discovery index (FW2). `warmPass` is a pass with no evidence. `directoryRead` is one directory a warm pass re-reads because evidence marked it. `sweep` is one `verifyAbsent`: a fresh listing of each root and one identity read per directory. `verification` is one targeted route verification. `probe` is one known location of an id read under its locks, and `listing` one fresh listing of a root's child names (fast-path FW3). apps/libs/project-library/src/discovery-budget.test.ts holds its ceiling's unit rows to these figures.",
   "scan": {
     "fileReads": 772,
     "listings": 2,
@@ -24,5 +24,15 @@
     "fileReads": 2,
     "listings": 0,
     "browserCalls": 8
+  },
+  "probe": {
+    "fileReads": 2,
+    "listings": 0,
+    "browserCalls": 8
+  },
+  "listing": {
+    "fileReads": 0,
+    "listings": 1,
+    "browserCalls": 1
   }
 }

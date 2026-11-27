@@ -294,6 +294,18 @@ describe('billing authenticated reporting endpoints', () => {
         operationId: 'operation-b',
         rawQuery: { snapshotRevision: '5' },
       });
+      usage.getOperationReceipts.mockResolvedValue({ receipts: [] });
+      const batch = await app.inject({
+        method: 'GET',
+        url: '/v1/billing/operations?operationIds=operation-b&operationIds=operation-a',
+      });
+      expect(batch.statusCode).toBe(200);
+      expect(batch.headers['cache-control']).toBe('private, no-store');
+      /* A repeated query key reaches the service as a list; the owner is the session's, never the query's. */
+      expect(usage.getOperationReceipts).toHaveBeenCalledWith({
+        authUserId: owner.id,
+        rawQuery: { operationIds: ['operation-b', 'operation-a'] },
+      });
       const holds = await app.inject({ method: 'GET', url: '/v1/billing/holds?accountId=other' });
       expect(holds.statusCode).toBe(200);
       expect(holds.json()).toEqual(openHolds);
@@ -336,5 +348,146 @@ describe('billing authenticated reporting endpoints', () => {
       ),
     ).rejects.toThrow(ForbiddenException);
     expect(payments.prepareTopup).not.toHaveBeenCalled();
+  });
+});
+
+/* Operator ruling D1=A: Tau Desktop uses the account and does not govern it. Its OAuth access token is refused where
+ * billing sets up standing payment consent, opens the payment-method portal or closes the account, and never receives
+ * the page that sets up automatic reload; purchases and reads stay open to it. */
+describe('billing routes for Tau Desktop', () => {
+  const reloadSetupAction = {
+    version: 'payment-action-v1',
+    actionId: 'consent-a',
+    environment: 'development',
+    ownerId: owner.id,
+    subjectId: 'account-a',
+    purpose: 'reload_setup',
+    state: 'redirect_required',
+    frozen: {
+      offerId: 'offer-a',
+      currency: 'usd',
+      principalMinor: '500',
+      taxMinor: '0',
+      grossMinor: '500',
+      maximumGrossMinor: '500',
+      creditAtoms: '5000000',
+      paymentMethod: null,
+    },
+    redirectUrl: 'https://checkout.stripe.com/setup',
+    attention: null,
+    receipt: null,
+    updatedAt: instant.toISOString(),
+  } as const;
+
+  const withApp = async (
+    client: 'web' | 'desktop',
+    run: (input: {
+      app: NestFastifyApplication;
+      payments: ReturnType<typeof mock<BillingPaymentsService>>;
+      closure: ReturnType<typeof mock<BillingAccountClosureService>>;
+    }) => Promise<void>,
+  ): Promise<void> => {
+    const payments = mock<BillingPaymentsService>();
+    const closure = mock<BillingAccountClosureService>();
+    const getSession = vi.fn<FakeSessionLookup>();
+    getSession.mockResolvedValue({ user: owner, session, client });
+    const module = await Test.createTestingModule({
+      controllers: [BillingController],
+      providers: [
+        Reflector,
+        AuthGuard,
+        { provide: SessionResolver, useValue: fakeSessionResolver(getSession) },
+        { provide: BillingService, useValue: mock<BillingService>() },
+        { provide: BillingUsageService, useValue: mock<BillingUsageService>() },
+        { provide: BillingPaymentsService, useValue: payments },
+        { provide: BillingAccountClosureService, useValue: closure },
+        { provide: BillingEstimatesService, useValue: mock<BillingEstimatesService>() },
+      ],
+    }).compile();
+    const app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+    app.useGlobalFilters(new HttpExceptionFilter());
+    app.enableVersioning({ type: VersioningType.URI });
+    try {
+      await app.init();
+      await run({ app, payments, closure });
+    } finally {
+      await app.close();
+    }
+  };
+
+  it.each([
+    ['/v1/billing/payment-actions/portal', { requestId: 'portal-a', returnPath: '/' }],
+    ['/v1/billing/account-closure', { requestId: 'closure-a' }],
+    ['/v1/billing/reload-consent', { requestId: 'reload-a', returnPath: '/' }],
+  ])('should refuse POST %s with WEB_SESSION_REQUIRED', async (url, payload) => {
+    await withApp('desktop', async ({ app, payments, closure }) => {
+      const response = await app.inject({ method: 'POST', url, headers: { origin: 'https://tau.test' }, payload });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({ code: 'WEB_SESSION_REQUIRED' });
+      expect(payments.createPortal).not.toHaveBeenCalled();
+      expect(payments.prepareReloadConsent).not.toHaveBeenCalled();
+      expect(closure.prepare).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(['confirm', 'recover'] as const)(
+    'should refuse to %s a reload consent and allow it for a purchase',
+    async (verb) => {
+      await withApp('desktop', async ({ app, payments }) => {
+        payments.isReloadConsentAction.mockImplementation(async (_userId, actionId) => actionId === 'consent-a');
+
+        const consent = await app.inject({
+          method: 'POST',
+          url: `/v1/billing/payment-actions/consent-a/${verb}`,
+          headers: { origin: 'https://tau.test' },
+        });
+        const purchase = await app.inject({
+          method: 'POST',
+          url: `/v1/billing/payment-actions/purchase-a/${verb}`,
+          headers: { origin: 'https://tau.test' },
+        });
+
+        expect(consent.statusCode).toBe(403);
+        expect(consent.json()).toMatchObject({ code: 'WEB_SESSION_REQUIRED' });
+        expect(purchase.statusCode).toBe(200);
+        const service = verb === 'confirm' ? payments.confirmAction : payments.recoverAction;
+        expect(service).toHaveBeenCalledTimes(1);
+        expect(service).toHaveBeenCalledWith(owner.id, 'purchase-a');
+      });
+    },
+  );
+
+  it('should withhold the reload setup link from the desktop and keep it for the web', async () => {
+    for (const client of ['desktop', 'web'] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one app per client, in turn
+      await withApp(client, async ({ app, payments }) => {
+        payments.getAction.mockResolvedValue(reloadSetupAction);
+        payments.listActions.mockResolvedValue([reloadSetupAction]);
+
+        const single = await app.inject({ method: 'GET', url: '/v1/billing/payment-actions/consent-a' });
+        const list = await app.inject({ method: 'GET', url: '/v1/billing/payment-actions' });
+
+        const expected = client === 'desktop' ? null : reloadSetupAction.redirectUrl;
+        expect(single.json()).toMatchObject({ redirectUrl: expected });
+        expect(list.json()).toMatchObject([{ redirectUrl: expected }]);
+      });
+    }
+  });
+
+  it('should still let the desktop top up', async () => {
+    await withApp('desktop', async ({ app, payments }) => {
+      const topup = { requestId: 'request-a', returnPath: '/', amountMinor: '500', method: 'checkout' };
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/billing/payment-actions/topup',
+        headers: { origin: 'https://tau.test' },
+        payload: topup,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(payments.prepareTopup).toHaveBeenCalledWith(owner.id, topup);
+    });
   });
 });

@@ -59,6 +59,7 @@ import {
   visibleRevisionsPanel,
 } from '#support/revision-session.js';
 import * as target from '#support/external-target.js';
+import { expectWithinBudget, openSpanWindow, readSpanBreakdown } from '#support/span-breakdown.js';
 
 /*
  * The baseline OQ5 asks the first run to record, measured 2026-09-16 on an Apple
@@ -282,6 +283,7 @@ test('records how long *Saved* takes after Mod+S in a project with bulk in it (B
   const coldDuration = await readPageClock();
 
   const warmSamples: Array<Readonly<{ page: number; harness: number }>> = [];
+  const warmWindow = await openSpanWindow();
   for (let sample = 0; sample < warmSaves; sample += 1) {
     await editSource();
     await armPageClock('saved');
@@ -307,13 +309,16 @@ test('records how long *Saved* takes after Mod+S in a project with bulk in it (B
         harnessDuration,
         budgetMilliseconds: savedBudgetMilliseconds,
         loadedBaselineMilliseconds: savedLoadedBaselineMilliseconds,
+        warmSpans: await readSpanBreakdown(warmWindow),
       },
       undefined,
       2,
     ),
   );
-  expect(warmDuration).toBeLessThanOrEqual(savedBudgetMilliseconds);
-  expect(warmDuration).toBeLessThan(savedLoadedBaselineMilliseconds * ceilingOverLoadedBaseline);
+  await expectWithinBudget(warmWindow, () => {
+    expect(warmDuration).toBeLessThanOrEqual(savedBudgetMilliseconds);
+    expect(warmDuration).toBeLessThan(savedLoadedBaselineMilliseconds * ceilingOverLoadedBaseline);
+  });
 });
 
 test('records how long the History region takes to open at D11 (B4)', async () => {
@@ -357,6 +362,7 @@ test('records how long the History region takes to open at D11 (B4)', async () =
     const harness = performance.now() - openedAt;
     return { page: await readPageClock(), harness };
   };
+  const openWindow = await openSpanWindow();
   const firstOpen = await openHistory();
   /* The header chip's menu lists every branch to switch to (C2, D3); the Branches card is gone. */
   await target.click(branchChip());
@@ -391,6 +397,7 @@ test('records how long the History region takes to open at D11 (B4)', async () =
         harnessDuration,
         budgetMilliseconds: historyBudgetMilliseconds,
         loadedBaselineMilliseconds: historyLoadedBaselineMilliseconds,
+        openSpans: await readSpanBreakdown(openWindow),
       },
       undefined,
       2,
@@ -399,6 +406,8 @@ test('records how long the History region takes to open at D11 (B4)', async () =
   /* Short of D11 is a failed fixture, never a reading at a smaller one. */
   expect(depth).toBe(depthTarget);
   expect(branchRows).toBe(branchTarget);
-  expect(openDuration).toBeLessThanOrEqual(historyBudgetMilliseconds);
-  expect(openDuration).toBeLessThan(historyLoadedBaselineMilliseconds * ceilingOverLoadedBaseline);
+  await expectWithinBudget(openWindow, () => {
+    expect(openDuration).toBeLessThanOrEqual(historyBudgetMilliseconds);
+    expect(openDuration).toBeLessThan(historyLoadedBaselineMilliseconds * ceilingOverLoadedBaseline);
+  });
 });

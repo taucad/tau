@@ -36,9 +36,26 @@ const showHistory = async (): Promise<void> => {
     await target.click(selectors.getByRole('button', { name: /^Open History\./u }));
   }
 };
-const expectCurrentAtStart = async (): Promise<void> => {
+const branchFilter = (name: 'This branch' | 'All branches') =>
+  selectors.getByRole('radiogroup', { name: 'Which branches to show' }).getByRole('radio', { name });
+const showBranches = async (name: 'This branch' | 'All branches'): Promise<void> => {
   await showHistory();
+  await target.click(branchFilter(name), { timeout: 60_000 });
+  await target.expectAttribute(branchFilter(name), 'aria-checked', 'true');
+};
+/* The branch the files are on (`main`) holds only V1 · Start, and Current is there. */
+const expectCurrentAtStart = async (): Promise<void> => {
+  await showBranches('This branch');
   await target.expectCount(historyEntries(), 1, 30_000);
+  await target.expectCount(startEntry().getByText('Current', { exact: true }), 1, 30_000);
+};
+/* A stopped turn's writes are cut once, as an agent entry named after its request, beside Start and off the files. */
+const expectStoppedWorkOnChatBranch = async (): Promise<void> => {
+  await showBranches('All branches');
+  const stoppedEntry = () => selectors.getByCss(`[data-revision-row][aria-label^="${prompt}"]`);
+  await target.expectCount(stoppedEntry(), 1, 30_000);
+  await target.expectCount(historyEntries(), 2, 30_000);
+  await target.expectCount(stoppedEntry().getByText('Current', { exact: true }), 0);
   await target.expectCount(startEntry().getByText('Current', { exact: true }), 1, 30_000);
 };
 const filesPane = () => selectors.getByRole('region', { name: /^Files for /u }).first();
@@ -213,7 +230,7 @@ test('runs the production chat vertical and publishes exactly one reload-safe re
   // suite-wide 300 s budget is for a page interaction, not for a CAD vertical.
 }, 600_000);
 
-test('discards the isolated workspace when the production chat run is cancelled', async () => {
+test('keeps a cancelled production chat run off the files and its work on the chat branch', async () => {
   // Gated at the kernel turn: both files are written and the run is provably
   // mid-flight when the cancel lands, instead of racing the tools.
   await prepare(gatedCubeCylinderCutoutScript);
@@ -228,12 +245,16 @@ test('discards the isolated workspace when the production chat run is cancelled'
    * the default path. */
   await placeChatOnNewBranch('isolated-run');
   await submitPrompt();
-  // The transcript's write row reads "Created main.geospec.ts +N"; the file's name alone is already in the tree.
-  await target.expectVisible(selectors.getByText(/^Created main\.geospec\.ts\b/u).first(), 60_000);
+  /* The kernel turn parks at its gate only once the turn before it has written both files and the model was asked
+   * again: the run is provably mid-flight. Activity rests closed (#2816), so its write row is no signal to wait on. */
+  await target.waitForAgentHostGatewayGate({ kind: 'stream' }, 60_000);
   await target.click(stopButton());
   await target.expectCount(stopButton(), 0, 60_000);
-  // Nothing was published: History still holds only V1 · Start, and the files are still there.
+  /* The person's files never took the stopped run's writes: their branch still holds only V1 · Start, Current. The
+   * stopped turn's own writes are not lost either: its settlement cuts them (every completion cuts, RM-R13) as one
+   * agent entry on the chat's branch, never a version. */
   await expectCurrentAtStart();
+  await expectStoppedWorkOnChatBranch();
   // History, opened to place the branch, shares the editor's group: the source is read by opening it again.
   expect(await openAndReadSource()).toBe(baselineSource);
   await target.expectCount(fileTreeItem('main.geospec.ts'), baselineGeoSpecCount);
@@ -241,6 +262,7 @@ test('discards the isolated workspace when the production chat run is cancelled'
   await target.reload();
   await waitForComposer();
   await expectCurrentAtStart();
+  await expectStoppedWorkOnChatBranch();
   expect(await openAndReadSource()).toBe(baselineSource);
   await target.expectCount(fileTreeItem('main.geospec.ts'), baselineGeoSpecCount);
   await target.expectCount(selectors.getByText(cubeCylinderSuccessSentence, { exact: true }), 0);

@@ -5,6 +5,12 @@ import z from 'zod';
  * Schema for a single skill's metadata as discovered from `.agents/skills/`
  * SKILL.md frontmatter — the only filesystem skills root.
  *
+ * `name` and `description` are the Agent Skills specification's own fields;
+ * `source`, `version` and `enabled` are read from the frontmatter's `metadata`
+ * mapping. `diagnostics` lists where a loaded skill departs from the
+ * specification: such a skill still loads, and the list is there to show its
+ * author.
+ *
  * @public
  */
 export const skillMetadataSchema = z.object({
@@ -18,6 +24,7 @@ export const skillMetadataSchema = z.object({
   whenToUse: z.string().optional(),
   fingerprint: z.string().optional(),
   enabled: z.boolean().optional(),
+  diagnostics: z.array(z.string()).optional(),
   shadowedSources: z
     .array(
       z.object({
@@ -32,9 +39,9 @@ export const skillMetadataSchema = z.object({
 });
 
 /**
- * Context payload assembled client-side from ZenFS and attached to message metadata.
- * Carries skills catalog and memory (AGENTS.md) content so the API can inject them
- * into the system prompt without RPC round-trips.
+ * Context payload assembled client-side from the project filesystem and attached to message metadata.
+ * Carries the skills catalog and the project's root `AGENTS.md` (as `memory`, keyed by its path) so the
+ * agent host can place them in the turn context without RPC round-trips.
  * @public
  */
 /**

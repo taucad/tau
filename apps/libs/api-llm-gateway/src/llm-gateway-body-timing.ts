@@ -1,10 +1,11 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase */
-import { Transform } from 'node:stream';
+import { PassThrough, Transform } from 'node:stream';
 import type { Readable } from 'node:stream';
+import { createGunzip } from 'node:zlib';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { llmGatewayWires, llmRequestEncodings } from '@taucad/telemetry';
 import { MetricsService } from '@taucad/api-observability/metrics';
 
@@ -49,6 +50,53 @@ export const requestEncodingOf = (header: string | string[] | undefined): Reques
   return value === '' || value === 'identity' ? 'identity' : value === 'gzip' ? 'gzip' : 'other';
 };
 
+/**
+ * The response header a gateway answer carries to say it inflates a gzip request body (WP-15 step 2). A client sends
+ * `content-encoding: gzip` only after it has seen this, so a browser that runs ahead of the API's deploy keeps
+ * sending identity bodies to an API that cannot read gzip.
+ */
+export const gatewayAcceptEncodingHeader = 'x-tau-accept-encoding';
+
+/** An error Fastify and Nest answer with its own status, before any route or billing code runs. */
+const bodyError = (statusCode: number, message: string, cause?: unknown): Error =>
+  Object.assign(new Error(message, cause === undefined ? undefined : { cause }), { statusCode });
+
+/**
+ * `preParsing`: inflates a gzip gateway body (chat performance WP-15 step 2, ruling O-3 "gzip only").
+ *
+ * Fastify counts `bodyLimit` on the stream this returns, so the decompressed size is checked while inflating and a
+ * small body that inflates past the limit is refused at the limit, never held whole. `receivedEncodedLength` carries
+ * the wire bytes so Fastify still checks them against `content-length`. Any coding other than identity or gzip is
+ * refused with 415; a body that is not valid gzip with 400.
+ *
+ * @param request - The gateway request.
+ * @param payload - The wire stream, already counted by the timing pass-through when metrics are on.
+ * @returns The stream the JSON parser reads.
+ */
+export const decodeGatewayPayload = <T extends Readable>(
+  request: Pick<FastifyRequest, 'headers'>,
+  payload: T,
+): T | Transform => {
+  const encoding = requestEncodingOf(request.headers['content-encoding']);
+  if (encoding === 'identity') {
+    return payload;
+  }
+  if (encoding === 'other') {
+    throw bodyError(415, 'Unsupported request content encoding; send identity or gzip');
+  }
+  const inflate = createGunzip();
+  const decoded = Object.assign(new PassThrough(), { receivedEncodedLength: 0 });
+  const counted = new Transform({
+    transform(chunk: Uint8Array<ArrayBuffer>, _encoding, callback) {
+      decoded.receivedEncodedLength += chunk.byteLength;
+      callback(null, chunk);
+    },
+  });
+  payload.on('error', (error) => decoded.destroy(error));
+  inflate.on('error', (error) => decoded.destroy(bodyError(400, 'Request body is not valid gzip', error)));
+  return payload.pipe(counted).pipe(inflate).pipe(decoded);
+};
+
 /** The request members the hooks read; the request object itself keys its timing. */
 type GatewayRequest = Pick<FastifyRequest, 'url' | 'headers'>;
 
@@ -77,22 +125,28 @@ export class LlmGatewayBodyTiming implements OnModuleInit {
   ) {}
 
   public onModuleInit(): void {
-    if (!this.metrics) {
-      return;
-    }
     this.register(this.adapterHost.httpAdapter.getInstance<FastifyInstance>());
   }
 
   /**
-   * Adds the three hooks to a Fastify instance.
+   * Adds the three hooks to a Fastify instance. Timing runs only with metrics; gzip decoding always runs, after the
+   * timing pass-through, so the size histogram counts wire bytes.
    *
    * @param instance - The Fastify instance serving the gateway routes.
    */
   public register(instance: Pick<FastifyInstance, 'addHook'>): void {
-    instance.addHook('onRequest', async (request) => {
+    instance.addHook('onRequest', async (request, reply: Pick<FastifyReply, 'header'>) => {
+      if (gatewayWireOf(request.url) === undefined) {
+        return;
+      }
+      void reply.header(gatewayAcceptEncodingHeader, 'gzip');
       this.start(request);
     });
-    instance.addHook('preParsing', async (request, _reply, payload) => this.observe(request, payload));
+    instance.addHook('preParsing', async (request, _reply, payload) =>
+      gatewayWireOf(request.url) === undefined
+        ? payload
+        : decodeGatewayPayload(request, this.observe(request, payload)),
+    );
     instance.addHook('preValidation', async (request) => {
       this.finish(request);
     });
@@ -101,7 +155,7 @@ export class LlmGatewayBodyTiming implements OnModuleInit {
   /** `onRequest`: stamps the headers' arrival for a gateway call. */
   public start(request: GatewayRequest): void {
     const wire = gatewayWireOf(request.url);
-    if (wire === undefined) {
+    if (wire === undefined || !this.metrics) {
       return;
     }
     this.timings.set(request, {

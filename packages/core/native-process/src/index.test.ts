@@ -1,5 +1,6 @@
 // @vitest-environment node
 /* oxlint-disable no-await-in-loop -- native process cases are isolated and cleaned up sequentially. */
+import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -23,10 +24,12 @@ import { dirname, join } from 'node:path';
 
 import type { getDefaultWritePaths } from '@anthropic-ai/sandbox-runtime';
 import { createMockFileSystem, createMockLogger } from '@taucad/runtime-testing';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { acquireNativeSandbox, releaseNativeSandbox } from '@taucad/sandbox';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createWorkspaceMirror,
+  launchInNativeSandbox,
   NativeProcessSession,
   NativeRuntimeUnavailableError,
   nativeSandboxPolicy,
@@ -37,7 +40,7 @@ import {
   startNativeWorker,
   terminateProcessTree,
 } from '#index.js';
-import type { NativeRuntimeVerifier, NativeWorkerLaunch } from '#index.js';
+import type { NativeRuntimeVerifier, NativeWorkerEnd, NativeWorkerLaunch, NativeWorkerProcess } from '#index.js';
 
 const fsOverrides = vi.hoisted(() => ({
   readFile: undefined as undefined | (() => Promise<Uint8Array<ArrayBuffer>>),
@@ -126,8 +129,77 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   };
 });
 
+/**
+ * Whether Tau's sandbox layer starts on this host at all, asked of the product rather than read off the platform.
+ *
+ * The runtime underneath is the double above, so this is not about prerequisites: it is whether the layer refuses the
+ * host outright. It does on Windows today, by design (its backend cannot grant per-launch paths yet; lane R7 owns
+ * it), so every case that needs a launch through `startNativeWorker` runs where this holds and starts running on
+ * Windows once that refusal is lifted. The refusal itself is asserted on every platform under
+ * `NativeProcessSession.sampleResident`.
+ */
+const nativeSandboxAvailable = await (async (): Promise<boolean> => {
+  acquireNativeSandbox();
+  try {
+    await launchInNativeSandbox({
+      executablePath: process.execPath,
+      arguments: [],
+      readablePaths: [],
+      writablePath: tmpdir(),
+      workingDirectory: tmpdir(),
+      commandId: 'capability-probe',
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof NativeRuntimeUnavailableError) {
+      return false;
+    }
+    throw error;
+  } finally {
+    await releaseNativeSandbox();
+    sandbox.wrap.mockClear();
+    sandbox.initialize.mockClear();
+    sandbox.reset.mockClear();
+  }
+})();
+
+/**
+ * Where the sandbox layer refuses the host, sessions start their workers through this launcher instead: the product's
+ * own seam ({@link installNativeWorkerLauncher}), here spawning Node on the worker script unsandboxed. The session's
+ * framing, events, queueing, cancellation, recycling and artifact logic does not depend on how the worker started,
+ * so those cases run on every platform; what the sandbox path adds is covered where it exists.
+ */
+const directLauncher = async (launch: NativeWorkerLaunch): Promise<NativeWorkerProcess> => {
+  const child = spawn(process.execPath, [...launch.arguments], {
+    cwd: launch.workspacePath,
+    env: processEnvironment(launch.artifactPath),
+    /* Its own process group off Windows, as a sandboxed worker leads one, so `terminateProcessTree` can end it there. */
+    detached: process.platform !== 'win32',
+    shell: false,
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const ended = new Promise<NativeWorkerEnd>((resolve) => {
+    child.once('error', (error) => {
+      resolve({ error });
+    });
+    child.once('exit', (code, signal) => {
+      resolve({ ...(code === null ? {} : { exitCode: code }), ...(signal === null ? {} : { signal }) });
+    });
+  });
+  return {
+    stdin: child.stdin,
+    stdout: child.stdout,
+    stderr: child.stderr,
+    ended,
+    terminate: async () => terminateProcessTree(child),
+  };
+};
+
 type Issue = { readonly message: string };
 const roots: string[] = [];
+/** The real platform, for the cases that fake `process.platform`. */
+const hostPlatform = process.platform;
 const hash = (value: string): string => createHash('sha256').update(value).digest('hex');
 const ready = `process.stdout.write('{"protocolVersion":1,"type":"ready"}\\n');`;
 const keepAlive = `setInterval(()=>{},1000);`;
@@ -223,6 +295,14 @@ const privateSession = (session: NativeProcessSession<Issue>) =>
     pending: Map<string, unknown>;
     onStdout: (chunk: Uint8Array<ArrayBuffer>) => void;
   };
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 const delay = async (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
@@ -258,12 +338,23 @@ afterEach(() => {
   sandbox.initialize.mockClear();
   sandbox.reset.mockClear();
   vi.restoreAllMocks();
+  /* Windows releases an ended worker's handles on its folder a moment after the exit (EPERM, run 45922288926); a
+     worker still running keeps failing every retry. */
   for (const root of roots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
 describe('NativeProcessSession', () => {
+  beforeEach(() => {
+    if (!nativeSandboxAvailable) {
+      installNativeWorkerLauncher(directLauncher);
+    }
+  });
+  afterEach(() => {
+    installNativeWorkerLauncher(undefined);
+  });
+
   it('should accept a response above the default limit when the session allows it', async () => {
     const value = fixture(
       respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'x'.repeat(1_048_577)}}`),
@@ -512,6 +603,8 @@ ${keepAlive}`;
   });
 
   it('validates closure, resources, runtime confinement, and generation state', async () => {
+    /* Verification precedes the sandbox in `startNativeWorker`, so it is checked there on every platform. */
+    installNativeWorkerLauncher(undefined);
     const absent = fixture();
     expect(absent.session.isGenerationValid(0)).toBe(false);
     await absent.session.recycle();
@@ -538,84 +631,93 @@ ${keepAlive}`;
     }
   });
 
-  it('verifies one signed runtime payload once per process, not once per session', async () => {
-    const value = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
-    await request(value.session);
-    await value.session.cleanup();
-    /* D24: the payload is verified where it becomes trusted — once, for the whole process. A second
-     * session over the same signed root starts without re-hashing it, which is observable here as a
-     * post-verification edit that no longer fails the second session. */
-    writeFileSync(value.options.resources[0]!.path, 'tampered');
-    const second = new NativeProcessSession<Issue>(value.options);
-    await expect(request(second)).resolves.toBeDefined();
-    await second.cleanup();
-
-    const fresh = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
-    writeFileSync(fresh.options.resources[0]!.path, 'tampered');
-    const unverified = new NativeProcessSession<Issue>(fresh.options);
-    await expect(request(unverified)).rejects.toThrow(/support resource/);
-    await unverified.cleanup();
-  });
-
-  it('should stop the sandbox runtime only when the last started session is cleaned up', async () => {
-    // The Linux runtime's network bridge child holds the event loop open until reset, so a
-    // one-shot host would never exit after its last native worker stopped.
-    const first = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'a'}}`));
-    const second = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'b'}}`));
-    await expect(request(first.session)).resolves.toEqual({ value: 'a' });
-    await expect(request(second.session)).resolves.toEqual({ value: 'b' });
-
-    await first.session.cleanup();
-    expect(sandbox.reset).not.toHaveBeenCalled();
-    await second.session.cleanup();
-    expect(sandbox.reset).toHaveBeenCalledOnce();
-    await second.session.cleanup();
-    expect(sandbox.reset).toHaveBeenCalledOnce();
-
-    sandbox.initialize.mockClear();
-    const third = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'c'}}`));
-    try {
-      await expect(request(third.session)).resolves.toEqual({ value: 'c' });
-      expect(sandbox.initialize).toHaveBeenCalledOnce();
-    } finally {
-      await third.session.cleanup();
-    }
-    expect(sandbox.reset).toHaveBeenCalledTimes(2);
-  });
-
-  it('should hand the whole launch to an installed launcher, and neither verify, lease nor wrap here', async () => {
-    const value = fixture(
-      respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'brokered'}}`),
-    );
-    const launches: NativeWorkerLaunch[] = [];
-    installNativeWorkerLauncher(async (launch) => {
-      launches.push(launch);
-      return startNativeWorker(launch);
-    });
-    try {
-      await expect(request(value.session)).resolves.toEqual({ value: 'brokered' });
-      expect(launches).toEqual([
-        {
-          executablePath: value.options.executablePath,
-          executableSha256: value.options.executableSha256,
-          executableName: 'test executable',
-          arguments: value.options.arguments,
-          runtimePath: value.root,
-          resources: value.options.resources,
-          workspacePath: value.options.workspacePath,
-          artifactPath: value.artifactPath,
-          commandId: 'Test native#1',
-        },
-      ]);
-    } finally {
-      installNativeWorkerLauncher(undefined);
+  it.runIf(nativeSandboxAvailable)(
+    'verifies one signed runtime payload once per process, not once per session',
+    async () => {
+      const value = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
+      await request(value.session);
       await value.session.cleanup();
-    }
-    /* The worker's own lease ended with it; the session took none, so its cleanup stops nothing twice. */
-    await vi.waitFor(() => {
+      /* D24: the payload is verified where it becomes trusted — once, for the whole process. A second
+       * session over the same signed root starts without re-hashing it, which is observable here as a
+       * post-verification edit that no longer fails the second session. */
+      writeFileSync(value.options.resources[0]!.path, 'tampered');
+      const second = new NativeProcessSession<Issue>(value.options);
+      await expect(request(second)).resolves.toBeDefined();
+      await second.cleanup();
+
+      const fresh = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
+      writeFileSync(fresh.options.resources[0]!.path, 'tampered');
+      const unverified = new NativeProcessSession<Issue>(fresh.options);
+      await expect(request(unverified)).rejects.toThrow(/support resource/);
+      await unverified.cleanup();
+    },
+  );
+
+  it.runIf(nativeSandboxAvailable)(
+    'should stop the sandbox runtime only when the last started session is cleaned up',
+    async () => {
+      // The Linux runtime's network bridge child holds the event loop open until reset, so a
+      // one-shot host would never exit after its last native worker stopped.
+      const first = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'a'}}`));
+      const second = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'b'}}`));
+      await expect(request(first.session)).resolves.toEqual({ value: 'a' });
+      await expect(request(second.session)).resolves.toEqual({ value: 'b' });
+
+      await first.session.cleanup();
+      expect(sandbox.reset).not.toHaveBeenCalled();
+      await second.session.cleanup();
       expect(sandbox.reset).toHaveBeenCalledOnce();
-    });
-  });
+      await second.session.cleanup();
+      expect(sandbox.reset).toHaveBeenCalledOnce();
+
+      sandbox.initialize.mockClear();
+      const third = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'c'}}`));
+      try {
+        await expect(request(third.session)).resolves.toEqual({ value: 'c' });
+        expect(sandbox.initialize).toHaveBeenCalledOnce();
+      } finally {
+        await third.session.cleanup();
+      }
+      expect(sandbox.reset).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.runIf(nativeSandboxAvailable)(
+    'should hand the whole launch to an installed launcher, and neither verify, lease nor wrap here',
+    async () => {
+      const value = fixture(
+        respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'brokered'}}`),
+      );
+      const launches: NativeWorkerLaunch[] = [];
+      installNativeWorkerLauncher(async (launch) => {
+        launches.push(launch);
+        return startNativeWorker(launch);
+      });
+      try {
+        await expect(request(value.session)).resolves.toEqual({ value: 'brokered' });
+        expect(launches).toEqual([
+          {
+            executablePath: value.options.executablePath,
+            executableSha256: value.options.executableSha256,
+            executableName: 'test executable',
+            arguments: value.options.arguments,
+            runtimePath: value.root,
+            resources: value.options.resources,
+            workspacePath: value.options.workspacePath,
+            artifactPath: value.artifactPath,
+            commandId: 'Test native#1',
+          },
+        ]);
+      } finally {
+        installNativeWorkerLauncher(undefined);
+        await value.session.cleanup();
+      }
+      /* The worker's own lease ended with it; the session took none, so its cleanup stops nothing twice. */
+      await vi.waitFor(() => {
+        expect(sandbox.reset).toHaveBeenCalledOnce();
+      });
+    },
+  );
 
   it('should fail the request with the refusal of the launcher, starting nothing', async () => {
     const value = fixture();
@@ -631,134 +733,153 @@ ${keepAlive}`;
     }
   });
 
-  it('should verify digests before startNativeWorker wraps anything, and hold the sandbox until the worker ends', async () => {
-    const value = fixture();
-    const launch = {
-      ...value.options,
-      commandId: 'broker#1',
-    } satisfies NativeWorkerLaunch;
+  it.runIf(nativeSandboxAvailable)(
+    'should verify digests before startNativeWorker wraps anything, and hold the sandbox until the worker ends',
+    async () => {
+      const value = fixture();
+      const launch = {
+        ...value.options,
+        commandId: 'broker#1',
+      } satisfies NativeWorkerLaunch;
 
-    await expect(startNativeWorker({ ...launch, executableSha256: hash('tampered') })).rejects.toThrow(
-      'test executable failed its SHA-256 integrity check.',
-    );
-    await expect(
-      startNativeWorker({ ...launch, resources: [{ path: '/etc/hosts', sha256: hash(''), label: 'escaped' }] }),
-    ).rejects.toThrow('escaped is outside the native runtime root.');
-    expect(sandbox.wrap).not.toHaveBeenCalled();
-
-    const worker = await startNativeWorker(launch);
-    const firstLine = await new Promise<string>((resolve) => {
-      worker.stdout.once('data', (chunk: Uint8Array<ArrayBuffer>) => {
-        resolve(Buffer.from(chunk).toString('utf8'));
-      });
-    });
-    expect(firstLine).toBe('{"protocolVersion":1,"type":"ready"}\n');
-    expect(sandbox.reset).not.toHaveBeenCalled();
-    await worker.terminate();
-    await expect(worker.ended).resolves.toEqual({ signal: 'SIGTERM' });
-    await vi.waitFor(() => {
-      expect(sandbox.reset).toHaveBeenCalledOnce();
-    });
-  });
-
-  it('should hash again after a failed verification instead of failing every later launch', async () => {
-    const value = fixture();
-    const launch = { ...value.options, commandId: 'broker#1' } satisfies NativeWorkerLaunch;
-    const [resource] = value.options.resources;
-    const sealing = `${resource!.path}.sealing`;
-    /* The closure is still being sealed: its resource is not in place yet. */
-    renameSync(resource!.path, sealing);
-    await expect(startNativeWorker(launch)).rejects.toThrow(/ENOENT/u);
-    renameSync(sealing, resource!.path);
-
-    const worker = await startNativeWorker(launch);
-    await worker.terminate();
-    await expect(worker.ended).resolves.toEqual({ signal: 'SIGTERM' });
-  });
-
-  it('should grant the sandbox root instead of the requested paths, which a requester may have redirected', async () => {
-    const value = fixture();
-    const sandboxRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-broker-root-')));
-    const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-elsewhere-')));
-    roots.push(sandboxRoot, elsewhere);
-    const workspacePath = join(sandboxRoot, 'workspace');
-    const artifactPath = join(sandboxRoot, 'artifacts');
-    mkdirSync(workspacePath);
-    /* What the broker checked was a directory; by the spawn it points outside. */
-    symlinkSync(elsewhere, artifactPath);
-
-    const worker = await startNativeWorker({
-      ...value.options,
-      workspacePath,
-      artifactPath,
-      sandboxRoot,
-      commandId: 'broker#2',
-    });
-    await worker.terminate();
-
-    const policy = sandbox.wrap.mock.calls[0]![2] as ReturnType<typeof nativeSandboxPolicy>;
-    expect(policy.filesystem.allowWrite).toEqual([sandboxRoot]);
-    expect(policy.filesystem.allowRead).not.toContain(elsewhere);
-    expect(sandbox.wrap.mock.calls[0]![0]).toContain(`TMPDIR='${sandboxRoot}'`);
-  });
-
-  it('should not take a sandbox lease when cleanup lands while resources are being verified', async () => {
-    const closing = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'a'}}`));
-    const pending = request(closing.session);
-    // Let the queued start reach its resource hashing before the session closes.
-    await new Promise<void>((resolve) => {
-      setImmediate(resolve);
-    });
-    await closing.session.cleanup();
-    await expect(pending).rejects.toThrow(/session is closed/);
-
-    const next = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'b'}}`));
-    await expect(request(next.session)).resolves.toEqual({ value: 'b' });
-    await next.session.cleanup();
-    expect(sandbox.reset).toHaveBeenCalledOnce();
-  });
-
-  it('should refuse to spawn the worker when the sandbox cannot wrap it', async () => {
-    for (const failure of [new Error('profile rejected'), 'launcher exited']) {
-      const value = fixture(
-        `require('node:fs').writeFileSync(process.argv[1] + '.started', '');${ready}${keepAlive}`,
-        1500,
+      await expect(startNativeWorker({ ...launch, executableSha256: hash('tampered') })).rejects.toThrow(
+        'test executable failed its SHA-256 integrity check.',
       );
-      sandbox.wrapFailure = failure;
-      const rejection = request(value.session);
-      await expect(rejection).rejects.toBeInstanceOf(NativeRuntimeUnavailableError);
-      await expect(rejection).rejects.toThrow(/profile rejected|launcher exited/);
-      expect(existsSync(`${value.options.arguments[0]}.started`)).toBe(false);
-      expect(privateSession(value.session).child).toBeUndefined();
-      expect(value.session.generation).toBe(0);
-      // The next request retries the sandbox instead of remembering the failure.
-      sandbox.wrapFailure = undefined;
-      await expect(request(value.session)).rejects.toThrow(/timed out/);
-      expect(existsSync(`${value.options.arguments[0]}.started`)).toBe(true);
-      await value.session.cleanup();
-    }
-  }, 15_000);
+      await expect(
+        startNativeWorker({ ...launch, resources: [{ path: '/etc/hosts', sha256: hash(''), label: 'escaped' }] }),
+      ).rejects.toThrow('escaped is outside the native runtime root.');
+      expect(sandbox.wrap).not.toHaveBeenCalled();
 
-  it('should wrap only host-owned quoted arguments with the fixed capability profile', async () => {
-    const value = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
-    await request(value.session);
-    const [command, shell, policy, signal, workingDirectory, attribution] = sandbox.wrap.mock.calls[0]!;
-    const artifact = `'${value.options.artifactPath}'`;
-    expect(command).toBe(
-      `TMPDIR=${artifact} TEMP=${artifact} TMP=${artifact} exec '${value.options.executablePath}' '${value.options.arguments[0]}'`,
-    );
-    expect(shell).toBe('/bin/sh');
-    expect(signal).toBeUndefined();
-    expect(workingDirectory).toBe(value.options.workspacePath);
-    expect(attribution).toEqual({ commandId: 'Test native#1' });
-    expect(policy).toEqual(
-      nativeSandboxPolicy({
-        readablePaths: [value.root, value.options.workspacePath],
-        writablePath: value.artifactPath,
-      }),
-    );
-    await value.session.cleanup();
-  });
+      const worker = await startNativeWorker(launch);
+      const firstLine = await new Promise<string>((resolve) => {
+        worker.stdout.once('data', (chunk: Uint8Array<ArrayBuffer>) => {
+          resolve(Buffer.from(chunk).toString('utf8'));
+        });
+      });
+      expect(firstLine).toBe('{"protocolVersion":1,"type":"ready"}\n');
+      expect(sandbox.reset).not.toHaveBeenCalled();
+      await worker.terminate();
+      await expect(worker.ended).resolves.toEqual({ signal: 'SIGTERM' });
+      await vi.waitFor(() => {
+        expect(sandbox.reset).toHaveBeenCalledOnce();
+      });
+    },
+  );
+
+  it.runIf(nativeSandboxAvailable)(
+    'should hash again after a failed verification instead of failing every later launch',
+    async () => {
+      const value = fixture();
+      const launch = { ...value.options, commandId: 'broker#1' } satisfies NativeWorkerLaunch;
+      const [resource] = value.options.resources;
+      const sealing = `${resource!.path}.sealing`;
+      /* The closure is still being sealed: its resource is not in place yet. */
+      renameSync(resource!.path, sealing);
+      await expect(startNativeWorker(launch)).rejects.toThrow(/ENOENT/u);
+      renameSync(sealing, resource!.path);
+
+      const worker = await startNativeWorker(launch);
+      await worker.terminate();
+      await expect(worker.ended).resolves.toEqual({ signal: 'SIGTERM' });
+    },
+  );
+
+  it.runIf(nativeSandboxAvailable)(
+    'should grant the sandbox root instead of the requested paths, which a requester may have redirected',
+    async () => {
+      const value = fixture();
+      const sandboxRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-broker-root-')));
+      const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-elsewhere-')));
+      roots.push(sandboxRoot, elsewhere);
+      const workspacePath = join(sandboxRoot, 'workspace');
+      const artifactPath = join(sandboxRoot, 'artifacts');
+      mkdirSync(workspacePath);
+      /* What the broker checked was a directory; by the spawn it points outside. */
+      symlinkSync(elsewhere, artifactPath);
+
+      const worker = await startNativeWorker({
+        ...value.options,
+        workspacePath,
+        artifactPath,
+        sandboxRoot,
+        commandId: 'broker#2',
+      });
+      await worker.terminate();
+
+      const policy = sandbox.wrap.mock.calls[0]![2] as ReturnType<typeof nativeSandboxPolicy>;
+      expect(policy.filesystem.allowWrite).toEqual([sandboxRoot]);
+      expect(policy.filesystem.allowRead).not.toContain(elsewhere);
+      expect(sandbox.wrap.mock.calls[0]![0]).toContain(`TMPDIR='${sandboxRoot}'`);
+    },
+  );
+
+  it.runIf(nativeSandboxAvailable)(
+    'should not take a sandbox lease when cleanup lands while resources are being verified',
+    async () => {
+      const closing = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'a'}}`));
+      const pending = request(closing.session);
+      // Let the queued start reach its resource hashing before the session closes.
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+      await closing.session.cleanup();
+      await expect(pending).rejects.toThrow(/session is closed/);
+
+      const next = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'b'}}`));
+      await expect(request(next.session)).resolves.toEqual({ value: 'b' });
+      await next.session.cleanup();
+      expect(sandbox.reset).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.runIf(nativeSandboxAvailable)(
+    'should refuse to spawn the worker when the sandbox cannot wrap it',
+    async () => {
+      for (const failure of [new Error('profile rejected'), 'launcher exited']) {
+        const value = fixture(
+          `require('node:fs').writeFileSync(process.argv[1] + '.started', '');${ready}${keepAlive}`,
+          1500,
+        );
+        sandbox.wrapFailure = failure;
+        const rejection = request(value.session);
+        await expect(rejection).rejects.toBeInstanceOf(NativeRuntimeUnavailableError);
+        await expect(rejection).rejects.toThrow(/profile rejected|launcher exited/);
+        expect(existsSync(`${value.options.arguments[0]}.started`)).toBe(false);
+        expect(privateSession(value.session).child).toBeUndefined();
+        expect(value.session.generation).toBe(0);
+        // The next request retries the sandbox instead of remembering the failure.
+        sandbox.wrapFailure = undefined;
+        await expect(request(value.session)).rejects.toThrow(/timed out/);
+        expect(existsSync(`${value.options.arguments[0]}.started`)).toBe(true);
+        await value.session.cleanup();
+      }
+    },
+    15_000,
+  );
+
+  it.runIf(nativeSandboxAvailable)(
+    'should wrap only host-owned quoted arguments with the fixed capability profile',
+    async () => {
+      const value = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
+      await request(value.session);
+      const [command, shell, policy, signal, workingDirectory, attribution] = sandbox.wrap.mock.calls[0]!;
+      const artifact = `'${value.options.artifactPath}'`;
+      expect(command).toBe(
+        `TMPDIR=${artifact} TEMP=${artifact} TMP=${artifact} exec '${value.options.executablePath}' '${value.options.arguments[0]}'`,
+      );
+      expect(shell).toBe('/bin/sh');
+      expect(signal).toBeUndefined();
+      expect(workingDirectory).toBe(value.options.workspacePath);
+      expect(attribution).toEqual({ commandId: 'Test native#1' });
+      expect(policy).toEqual(
+        nativeSandboxPolicy({
+          readablePaths: [value.root, value.options.workspacePath],
+          writablePath: value.artifactPath,
+        }),
+      );
+      await value.session.cleanup();
+    },
+  );
 
   it('serializes chunked requests, validates results, redacts stderr, and shuts down gracefully', async () => {
     const worker = `${ready}
@@ -930,10 +1051,11 @@ ${keepAlive}`);
 
   it('bounds the queue and handles abort, timeout, spawn, and write failures', async () => {
     const stalled = fixture(`${ready}${keepAlive}`, 5000);
-    const operations = Array.from({ length: 16 }, async () => request(stalled.session));
+    /* Settled as one from the start: cleanup rejects the queued ones while it is still awaiting the worker's end. */
+    const operations = Promise.allSettled(Array.from({ length: 16 }, async () => request(stalled.session)));
     await expect(request(stalled.session)).rejects.toThrow(/queue exceeds/);
     await stalled.session.cleanup();
-    await Promise.allSettled(operations);
+    await operations;
 
     const sending = fixture(`${ready}${keepAlive}`);
     const sendController = new AbortController();
@@ -971,17 +1093,6 @@ ${keepAlive}`);
     await expect(request(writable.session)).rejects.toThrow(/not writable/);
     await writable.session.cleanup();
 
-    const spawnFailure = fixture();
-    chmodSync(spawnFailure.options.executablePath, 0o600);
-    await expect(request(spawnFailure.session)).rejects.toThrow();
-    await spawnFailure.session.cleanup();
-
-    const missingLauncher = fixture();
-    sandbox.launcher = join(missingLauncher.root, 'missing-sandbox-launcher');
-    await expect(request(missingLauncher.session)).rejects.toThrow(/ENOENT/);
-    sandbox.launcher = undefined;
-    await missingLauncher.session.cleanup();
-
     const writeFailure = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
     await request(writeFailure.session);
     const child = privateSession(writeFailure.session).child!;
@@ -992,6 +1103,22 @@ ${keepAlive}`);
     await expect(request(writeFailure.session)).rejects.toThrow(/write failed/);
     await writeFailure.session.cleanup();
   }, 15_000);
+
+  it.runIf(nativeSandboxAvailable)(
+    'should fail the request when the executable or the sandbox launcher cannot start',
+    async () => {
+      const spawnFailure = fixture();
+      chmodSync(spawnFailure.options.executablePath, 0o600);
+      await expect(request(spawnFailure.session)).rejects.toThrow();
+      await spawnFailure.session.cleanup();
+
+      const missingLauncher = fixture();
+      sandbox.launcher = join(missingLauncher.root, 'missing-sandbox-launcher');
+      await expect(request(missingLauncher.session)).rejects.toThrow(/ENOENT/);
+      sandbox.launcher = undefined;
+      await missingLauncher.session.cleanup();
+    },
+  );
 
   it('confines, validates, consumes, and removes private artifacts', async () => {
     const value = fixture();
@@ -1022,7 +1149,7 @@ ${keepAlive}`);
     await value.session.cleanup();
   });
 
-  it.skipIf(process.platform === 'win32')(
+  it.runIf(nativeSandboxAvailable)(
     'should kill a worker still inside a request when its host process exits',
     async () => {
       const value = fixture(
@@ -1056,6 +1183,64 @@ ${keepAlive}`);
         }
       } finally {
         await value.session.cleanup();
+      }
+    },
+    10_000,
+  );
+
+  it.runIf(nativeSandboxAvailable)(
+    'should end each worker tree with taskkill, or the worker itself without SystemRoot, when a Windows host exits',
+    async () => {
+      /* Windows has no process groups and does not end a child with its parent. Off Windows the platform is faked and
+       * `taskkill` is a stand-in that kills the process group of the pid it is handed, so the hook's Windows path is
+       * proven wherever a worker can start; on Windows the real one runs. */
+      const previous = process.env['SystemRoot'];
+      let systemRoot = previous;
+      if (process.platform !== 'win32') {
+        systemRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tau-taskkill-exit-')));
+        roots.push(systemRoot);
+        const taskkill = join(systemRoot, 'System32', 'taskkill.exe');
+        mkdirSync(dirname(taskkill), { recursive: true });
+        writeFileSync(taskkill, '#!/bin/sh\n[ "$1 $3 $4" = "/pid /T /F" ] || exit 2\nkill -9 "-$2"\n');
+        chmodSync(taskkill, 0o700);
+      }
+      try {
+        for (const root of [systemRoot, undefined]) {
+          const value = fixture(
+            `${ready}require('node:fs').writeFileSync(require('node:path').join(process.env.TMPDIR,'pid'),String(process.pid));${keepAlive}`,
+            30_000,
+          );
+          const settled = expect(request(value.session)).rejects.toBeInstanceOf(Error);
+          const pidPath = join(value.artifactPath, 'pid');
+          try {
+            while (!existsSync(pidPath)) {
+              await delay(5);
+            }
+            const pid = Number(readFileSync(pidPath, 'utf8'));
+            expect(alive(pid)).toBe(true);
+            const hook = process.listeners('exit').find((listener) => listener.name === 'killLiveProcessGroups');
+            if (root === undefined) {
+              delete process.env['SystemRoot'];
+            } else {
+              process.env['SystemRoot'] = root;
+            }
+            await withPlatform('win32', async () => {
+              hook!(0);
+            });
+            await settled;
+            while (alive(pid)) {
+              await delay(5);
+            }
+          } finally {
+            await value.session.cleanup();
+          }
+        }
+      } finally {
+        if (previous === undefined) {
+          delete process.env['SystemRoot'];
+        } else {
+          process.env['SystemRoot'] = previous;
+        }
       }
     },
     10_000,
@@ -1119,7 +1304,11 @@ ${keepAlive}`);
       chmodSync(taskkill, 0o700);
       process.env['SystemRoot'] = systemRoot;
       expect(processEnvironment('/tmp')).toHaveProperty('SystemRoot', systemRoot);
-      await terminateProcessTree(fakeChild());
+      const stub = fakeChild();
+      await terminateProcessTree(stub);
+      /* A shell script is no Win32 executable: there `spawn` throws (`UNKNOWN`) rather than emitting `'error'`, and
+       * the tree is still ended directly. Elsewhere the stub runs and exits, and nothing more is done. */
+      expect(stub.kill).toHaveBeenCalledTimes(hostPlatform === 'win32' ? 1 : 0);
       unlinkSync(taskkill);
       const fallback = fakeChild();
       await terminateProcessTree(fallback);
@@ -1131,13 +1320,49 @@ ${keepAlive}`);
         process.env['SystemRoot'] = previous;
       }
     });
-    const environment = processEnvironment('/artifacts');
-    expect(environment['LANG']).toBe('C.UTF-8');
-    expect(environment['TMPDIR']).toBe('/artifacts');
-    expect(environment['HOME']).toBe('/artifacts');
-    expect(environment['PATH']).toBe('/usr/bin:/bin');
+    await withPlatform('linux', async () => {
+      const environment = processEnvironment('/artifacts');
+      expect(environment['LANG']).toBe('C.UTF-8');
+      expect(environment['TMPDIR']).toBe('/artifacts');
+      expect(environment['HOME']).toBe('/artifacts');
+      expect(environment['PATH']).toBe('/usr/bin:/bin');
+    });
     await withPlatform('win32', async () => {
       expect(processEnvironment('/artifacts')).not.toHaveProperty('PATH');
+    });
+  });
+});
+
+/* `taskkill` exists only on Windows; the POSIX group path is proven against real processes by the cases above that
+ * terminate sandboxed workers. */
+describe.runIf(process.platform === 'win32')('terminateProcessTree on Windows', () => {
+  it('should end a real process tree, its grandchildren included, with taskkill', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-taskkill-tree-')));
+    roots.push(root);
+    const pidPath = join(root, 'grandchild');
+    const grandchild = `require('node:fs').writeFileSync(${JSON.stringify(pidPath)},String(process.pid));${keepAlive}`;
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(grandchild)}],{stdio:'ignore'});${keepAlive}`,
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
+    );
+    const exited = new Promise<void>((resolve) => {
+      child.once('exit', () => {
+        resolve();
+      });
+    });
+    while (!existsSync(pidPath) || readFileSync(pidPath, 'utf8') === '') {
+      await delay(5);
+    }
+    const grandchildPid = Number(readFileSync(pidPath, 'utf8'));
+    expect(alive(grandchildPid)).toBe(true);
+    await terminateProcessTree(child);
+    await exited;
+    await vi.waitFor(() => {
+      expect(alive(grandchildPid)).toBe(false);
     });
   });
 });
@@ -1279,23 +1504,26 @@ describe('NativeProcessSession.sampleResident', () => {
     }
   });
 
-  it('should give no reader to a worker spawned off Linux, and none once the worker has exited', async () => {
-    const value = fixture();
-    const launch = { ...value.options, commandId: 'platform#1' } satisfies NativeWorkerLaunch;
-    for (const platform of ['darwin', 'win32'] as const) {
-      await withPlatform(platform, async () => {
-        const worker = await startNativeWorker(launch).catch(() => undefined);
-        expect(worker?.sampleResident).toBeUndefined();
-        await worker?.terminate();
-      });
-    }
-    if (process.platform === 'linux') {
-      const worker = await startNativeWorker(launch);
-      await worker.terminate();
-      await worker.ended;
-      await expect(worker.sampleResident?.()).resolves.toBeUndefined();
-    }
-  });
+  it.runIf(nativeSandboxAvailable)(
+    'should give no reader to a worker spawned off Linux, and none once the worker has exited',
+    async () => {
+      const value = fixture();
+      const launch = { ...value.options, commandId: 'platform#1' } satisfies NativeWorkerLaunch;
+      for (const platform of ['darwin', 'win32'] as const) {
+        await withPlatform(platform, async () => {
+          const worker = await startNativeWorker(launch).catch(() => undefined);
+          expect(worker?.sampleResident).toBeUndefined();
+          await worker?.terminate();
+        });
+      }
+      if (process.platform === 'linux') {
+        const worker = await startNativeWorker(launch);
+        await worker.terminate();
+        await worker.ended;
+        await expect(worker.sampleResident?.()).resolves.toBeUndefined();
+      }
+    },
+  );
 
   // T35 (B19, PR-1c): no native runtime starts on Windows, so the child heap source there is `none`, never a reading
   // of some other process: the launch refuses before the sandbox wraps anything, and the session samples nothing.
@@ -1303,9 +1531,9 @@ describe('NativeProcessSession.sampleResident', () => {
     const value = fixture();
     try {
       await withPlatform('win32', async () => {
-        await expect(startNativeWorker({ ...value.options, commandId: 'win32#1' })).rejects.toBeInstanceOf(
-          NativeRuntimeUnavailableError,
-        );
+        const refusal = startNativeWorker({ ...value.options, commandId: 'win32#1' });
+        await expect(refusal).rejects.toBeInstanceOf(NativeRuntimeUnavailableError);
+        await expect(refusal).rejects.toMatchObject({ code: 'NATIVE_RUNTIME_UNAVAILABLE' });
         await expect(request(value.session)).rejects.toThrow('Windows is not yet a supported native runtime platform');
         await expect(value.session.sampleResident()).resolves.toBeUndefined();
       });

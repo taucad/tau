@@ -14,6 +14,7 @@ import type {
   OpenAIResponsesOptions,
 } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
+import { recordHostTiming } from '#timing.js';
 import { isClearedToolResult, isCompactionSummaryRow } from '#harness/compaction.js';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
 import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
@@ -961,6 +962,10 @@ const authenticatedFetch =
       if (gzipped !== undefined) {
         headers.set('content-encoding', 'gzip');
       }
+      recordHostTiming('model-request-sent', undefined, {
+        bytes: typeof body === 'string' ? body.length : 0,
+        ...(gzipped === undefined ? {} : { wireBytes: gzipped.byteLength }),
+      });
       const response = await options.fetch(withoutBetaMarker(input), {
         ...init,
         body: gzipped ?? body,

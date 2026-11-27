@@ -4,6 +4,7 @@ import type { SourceLiveEvent } from '@taucad/agent-host';
 import { agentWireLimits } from '@taucad/agent-host/wire';
 import type { ReadAnswer } from '@taucad/agent-host/wire';
 import type { AgentHostClient } from '#services/agent-host-client.js';
+import { markChatTiming } from '#chat-clients/_internal/chat-timing.js';
 import {
   initialChatProjection,
   reduceChatProjection,
@@ -68,7 +69,13 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
       input.projection.send({ type: 'clear-live', runId });
     }
   };
+  /* WP-00: the first live event of each run, for the chat timing marks; bounded by the runs this attachment sees. */
+  const liveRuns = new Set<string>();
   const publishLive = (event: SourceLiveEvent): void => {
+    if (!liveRuns.has(event.runId)) {
+      liveRuns.add(event.runId);
+      markChatTiming('first-live-event', { type: event.type });
+    }
     const { sourceGeneration: _sourceGeneration, ...modelEvent } = event;
     input.projection.send({ type: 'live', event: modelEvent });
   };

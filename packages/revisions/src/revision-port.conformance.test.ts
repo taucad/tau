@@ -438,7 +438,7 @@ const conformance = (adapter: Adapter): void => {
      * number, the entry, the time and who made it.
      */
     it('round-trips a version named with spaces, and renames it at the same ref', async () => {
-      await onItsOwnStore(async ({ port, harness, base, child }) => {
+      await onItsOwnStore(async ({ port, base, child }) => {
         const actor = { kind: 'user', id: 'user-lane', name: 'Lane Person' } as const;
         const created = await port.tag({
           name: 'Ready for print',
@@ -490,7 +490,7 @@ const conformance = (adapter: Adapter): void => {
     }, 180_000);
 
     it('never replaces or numbers over a tag that is not a version, and refuses a bad name or number first (R2, R10)', async () => {
-      await onItsOwnStore(async ({ port, harness, base, child }) => {
+      await onItsOwnStore(async ({ port, base, child }) => {
         /* A lightweight v4: not a version, but it holds its number. */
         await port.updateRef({ name: 'refs/tags/v4', expectedHead: undefined, head: base });
         expect(await port.listTags()).toStrictEqual([]);
@@ -903,7 +903,7 @@ const conformance = (adapter: Adapter): void => {
     }, 180_000);
 
     it('tracks the live tree on a branch, and a reopened store reads the same head', async () => {
-      await onItsOwnStore(async ({ port, harness, base, child }) => {
+      await onItsOwnStore(async ({ port, harness, base }) => {
         // The product's other branch shape carries a slash (c2-review N4).
         const name = 'agent/tau-conformance-head';
         /* `init` leaves HEAD symbolic on an unborn `main`, exactly as `git init`

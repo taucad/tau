@@ -1043,7 +1043,7 @@ const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<F
     type: z.literal(messageType),
     port: z.instanceof(MessagePort),
     root: z.unknown().optional(),
-    lane: z.unknown().optional(),
+    /* `lane` passes through the loose object unvalidated; only `'background'` changes anything (FW4). */
   });
 
 /**

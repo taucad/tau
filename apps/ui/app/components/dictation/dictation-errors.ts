@@ -18,14 +18,14 @@ export const dictationMessages = {
   microphoneStopped: 'Microphone capture stopped unexpectedly. Try dictation again.',
   microphoneDisconnected: 'The microphone disconnected. Reconnect it and try again.',
   microphoneUnfinished: 'Microphone did not finish recording. Try again.',
-  sessionExpired: 'Your session has expired. Sign in again to use dictation.',
+  sessionExpired: 'You’re signed out of Tau. Sign in again to use dictation.',
   recordingTooLong: 'That recording is too long to transcribe. Try a shorter one.',
   transcriptionFailed: 'Could not transcribe your recording. Try again.',
   serviceUnavailable: 'The dictation service is unavailable. Try again shortly.',
   transcriptionStopped: 'Transcription stopped unexpectedly. Try dictation again.',
   transcriptionUnfinished: 'Transcription ended before it finished. Try dictation again.',
-  offline: 'You are offline. Reconnect and try dictation again.',
-  unreachable: 'Could not reach Tau. Check your connection and try again.',
+  offline: 'You’re offline. Go online and try dictation again.',
+  unreachable: 'Couldn’t reach Tau. Check your connection and try again.',
   recordingLimit: 'Dictation stopped at the length limit. Transcribing what you recorded.',
 } as const;
 

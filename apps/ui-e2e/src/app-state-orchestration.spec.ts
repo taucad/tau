@@ -23,6 +23,7 @@ import {
 import type { StoredProjectConfig } from '#support/project-storage-state.js';
 import { awaitSaved, historyRow, revisionChip, visibleRevisionsPanel } from '#support/revision-session.js';
 import { filesPane, treeItem } from '#support/file-tree.js';
+import type { SectionViewTestCutValues } from '@taucad/app/test-bridges/section-view';
 
 const projectNames = { a: 'Project Navigation A', b: 'Project Navigation B' } as const;
 const entryPaths = { a: 'alpha.ts', b: 'beta.ts' } as const;
@@ -60,12 +61,35 @@ const routeOf = async (name: string): Promise<RegExp> => {
   return new RegExp(`${path.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`)}(?:\\?.*)?$`, 'u');
 };
 
+/**
+ * A project's tree, read again when a file goes or is replaced between the listing and its read. The app writes a file
+ * through a sibling it moves into place (a save, or A7e's replay on the next open), so a walk can find a listed sibling
+ * gone (`NotFoundError`) or a file replaced after its handle was taken (`NotReadableError`): that is a read of a tree
+ * mid-write, never an answer about the tree.
+ */
+const midWrite = /NotFoundError|NotReadableError/u;
+
+const readSettledTree = async (config: StoredProjectConfig): Promise<Readonly<Record<string, string>>> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each attempt reads after the last one failed.
+      return await readProjectTree(config);
+    } catch (error) {
+      if (attempt >= 8 || !midWrite.test(String(error))) {
+        throw error;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- each attempt reads after the last one failed.
+    await target.delay(100);
+  }
+};
+
 /** Each project's durable config, by its manifest name. */
 const configsByName = async (): Promise<Readonly<Record<string, StoredProjectConfig>>> => {
   const { configs } = await readProjectStorageState();
   const entries = await Promise.all(
     configs.map(async (config) => {
-      const tree = await readProjectTree(config);
+      const tree = await readSettledTree(config);
       const manifest = tree['/tau.json'];
       return manifest === undefined ? undefined : ([(JSON.parse(manifest) as { name: string }).name, config] as const);
     }),
@@ -74,7 +98,7 @@ const configsByName = async (): Promise<Readonly<Record<string, StoredProjectCon
 };
 
 const readLayout = async (config: StoredProjectConfig): Promise<{ lanes?: { workbench?: boolean } } | undefined> => {
-  const tree = await readProjectTree(config);
+  const tree = await readSettledTree(config);
   const text = tree[layoutPath];
   return text === undefined ? undefined : (JSON.parse(text) as { lanes?: { workbench?: boolean } });
 };
@@ -302,9 +326,9 @@ test('A0.1 row 3 (I8): a reload during a pending library operation recovers or r
   const configs = await configsByName();
   const configB = configs[projectNames.b]!;
 
-  /* The person moves B to the Trash, which a permanent delete requires. A project with chats is
-   * trashed only from a live session that has read them (`use-projects.ts` `requireQuiescentProject`),
-   * so B is opened first and left retained. */
+  /* The person moves B to the Trash, which a permanent delete requires. B is opened first and left
+   * retained, so its trash is verified through the live session that has read its chats; a closed
+   * project's chats are verified from their logs instead (`leaseQuiescentProject`, W30). */
   await target.click(projectLink(projectNames.b));
   await expectProjectReady('b');
   await target.click(projectLink(projectNames.a));
@@ -428,17 +452,12 @@ test('A0.1 row 4 (S34): a rename in a second tab reaches the first tab’s libra
   await target.expectCount(selectors.getByText(/doesn't exist|may have been deleted|project not found/iu), 0);
 });
 
-type SectionCut = Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>;
-type SectionBridge = Readonly<{
-  setSectionCuts(cuts: readonly SectionCut[]): string[];
-  getSectionState(): Readonly<{ isActive: boolean; cuts: ReadonlyArray<SectionCut & Readonly<{ id: string }>> }>;
-}>;
+type SectionCut = SectionViewTestCutValues;
 
 /** The live section's values; cut ids are made anew at every seed, so they are left out. */
 const readSection = async (): Promise<Readonly<{ isActive: boolean; cuts: readonly SectionCut[] }> | undefined> =>
   target.evaluate(() => {
-    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionBridge })
-      .__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       return undefined;
     }
@@ -512,9 +531,7 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
   await target.expectContainingText(source, 'makeBaseBox(18', 30_000);
   const chatToggle = selectors.getByRole('button', { name: 'Toggle Chat lane' }).first();
   await target.expectAttribute(chatToggle, 'aria-pressed', 'true');
-  await target.waitFor(() =>
-    Boolean((globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: unknown }).__TAU_SECTION_VIEW_TEST__),
-  );
+  await target.waitFor(() => Boolean(globalThis.__TAU_SECTION_VIEW_TEST__));
   const cut: SectionCut = { kind: 'plane', plane: 'xz', offset: 0.017, isFlipped: true };
 
   if (isAtOnce) {
@@ -535,9 +552,7 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
           const clock = (): number => performance.timeOrigin + performance.now();
           document.querySelector<HTMLButtonElement>('[data-a01-chat-toggle]')?.click();
           const toggledAt = clock();
-          (
-            globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionBridge }
-          ).__TAU_SECTION_VIEW_TEST__?.setSectionCuts([input.cut]);
+          globalThis.__TAU_SECTION_VIEW_TEST__?.setSectionCuts([input.cut]);
           const cutAt = clock();
           if (element instanceof HTMLElement) {
             element.focus();
@@ -610,8 +625,7 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
   await target.expectAttribute(chatToggle, 'aria-pressed', 'false');
   /* The view setting: a section cut on A's view. */
   await target.evaluate((nextCut) => {
-    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionBridge })
-      .__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     bridge?.setSectionCuts([nextCut]);
   }, cut);
   await expect.poll(readSection).toEqual({ isActive: true, cuts: [cut] });
@@ -668,7 +682,7 @@ test('A0.1 row 5a (S26, D26, A7c): an arrangement, a view setting and an edit ma
       if (configA === undefined) {
         return '';
       }
-      const tree = await readProjectTree(configA);
+      const tree = await readSettledTree(configA);
       return tree[`/${entryPaths.a}`] ?? '';
     },
     (current) => current.includes(marker),
@@ -682,7 +696,8 @@ test('A0.1 row 5a (S26, D26, A7c): an arrangement, a view setting and an edit ma
     viewKept:
       section?.isActive === true &&
       section.cuts.length === 1 &&
-      restored?.kind === cut.kind &&
+      restored?.kind === 'plane' &&
+      cut.kind === 'plane' &&
       restored.plane === cut.plane &&
       restored.offset === cut.offset &&
       restored.isFlipped === cut.isFlipped,
@@ -724,8 +739,8 @@ test('A0.1 row 5b (I6 / S26 / D26, A7d): the close revision holding the edit is 
   annotate,
 }) => {
   /* The at-once reload 5a measures: the edit is in the editor's state and owed, so the unload's producer stage writes
-   * it before the document goes, and the close cut has the edit's bytes to take. Row 5d is the path where the edit
-   * itself is lost (its save still in flight), which is lane A7e's, not this row's. */
+   * it before the document goes, and the close cut has the edit's bytes to take. Row 5d is the path where the edit's
+   * save is still in flight at the reload, which A7e's replay keeps. */
   const { marker } = await editViewArrangeAndReload(true);
   /* The edit's bytes are on disk: the producer stage wrote the editor's document before the cut. */
   const configs = await configsByName();
@@ -735,7 +750,7 @@ test('A0.1 row 5b (I6 / S26 / D26, A7d): the close revision holding the edit is 
       if (configA === undefined) {
         return '';
       }
-      const tree = await readProjectTree(configA);
+      const tree = await readSettledTree(configA);
       return tree[`/${entryPaths.a}`] ?? '';
     },
     (text) => text.includes(marker),
@@ -860,7 +875,7 @@ test('A0.1 row 5c (S26 / D17, A7d): an edit made just before an immediate reload
       if (configA === undefined) {
         return '';
       }
-      const tree = await readProjectTree(configA);
+      const tree = await readSettledTree(configA);
       return tree[`/${entryPaths.a}`] ?? '';
     },
     (current) => current.includes(marker),
@@ -892,13 +907,14 @@ test('A0.1 row 5c (S26 / D17, A7d): an edit made just before an immediate reload
 });
 
 /*
- * Expected failure (S26, D17, D26; programme control, 2026-11-15T20:40Z). The arrangement and the view setting go first,
- * then the edit, Escape and a reload by the harness: the lane record still owes its write, so `beforeunload` runs the
- * producer stage, which starts the editor's save beside the record writes, and the document goes before that save
- * answers. The edit is lost from disk and from the editor: 7 of 10 runs on f9a1bd11 (before A7c's `beforeunload`
- * stage) and 10 of 10 on 648a28ce. A follow-up the programme names owns the fix and flips this row.
+ * S26, D17, I6 (A7e; programme control, 2026-11-15T21:08Z). The arrangement and the view setting go first, then the
+ * edit, Escape and a reload by the harness: the lane record still owes its write, so `beforeunload` runs the producer
+ * stage, which starts the editor's save beside the record writes, and the document goes before that save answers. The
+ * edit used to be lost from disk and from the editor (7 of 10 runs on f9a1bd11, 10 of 10 on 648a28ce). Now `pagehide`
+ * records the unconfirmed text, the next open replays it through the checked save against its base, and the owed close
+ * cut waits for the replay, so History's newest close revision holds the edit.
  */
-test.fails('A0.1 row 5d (S26 / D17, expected failure): an edit whose save is in flight when the document goes is lost', async ({
+test('A0.1 row 5d (S26 / D17 / I6, A7e): an edit whose save is in flight when the document goes is kept', async ({
   annotate,
 }) => {
   const { marker } = await editViewArrangeAndReload(false);
@@ -909,23 +925,19 @@ test.fails('A0.1 row 5d (S26 / D17, expected failure): an edit whose save is in 
       if (configA === undefined) {
         return '';
       }
-      const tree = await readProjectTree(configA);
+      const tree = await readSettledTree(configA);
       return tree[`/${entryPaths.a}`] ?? '';
     },
     (current) => current.includes(marker),
     15_000,
   );
-  /* Read, not asserted: inside `test.fails` a failing wait here would pass the row, so a reload or an editor that
-   * never comes back reads as an empty text and fails only the row's own assertion. */
-  const source = await openSource().catch(() => undefined);
-  const shownText =
-    source === undefined
-      ? ''
-      : await readWithin(
-          async () => (await target.textContent(source).catch(() => '')) ?? '',
-          (current) => current.includes('makeBaseBox(18') && current.includes(marker),
-          60_000,
-        );
+  const source = await openSource();
+  await target.expectContainingText(source, 'makeBaseBox(18', 60_000);
+  const shownText = await readWithin(
+    async () => (await target.textContent(source)) ?? '',
+    (current) => current.includes(marker),
+    15_000,
+  );
   const reading = { editStored: storedText.includes(marker), editKept: shownText.includes(marker) };
   await annotate(`S26 edit with a save in flight at reload: ${JSON.stringify(reading)}`);
   await target.writeArtifact(`a01-row5d-report-${String(Date.now())}.json`, JSON.stringify(reading));
@@ -933,6 +945,30 @@ test.fails('A0.1 row 5d (S26 / D17, expected failure): an edit whose save is in 
     editStored: true,
     editKept: true,
   });
+
+  /* I6: the owed close cut waited for the replay, so the newest close revision changed the edited file. */
+  await target.click(revisionChip());
+  const panel = selectors.getByCss(visibleRevisionsPanel);
+  const trailerOf = () => panel.getByRole('definition').filter({ hasText: 'Tau-Trigger:' });
+  await target.expectVisible(historyRow(0), 60_000);
+  const newestTrailer = async (): Promise<string> => {
+    const newest = historyRow(0);
+    if (!(await target.isVisible(newest))) {
+      return '';
+    }
+    const expanded = await target.getAttribute(newest, 'aria-expanded').catch(() => undefined);
+    if (expanded === undefined) {
+      return '';
+    }
+    if (expanded !== 'true') {
+      await target.click(newest).catch(() => undefined);
+    }
+    return (await target.isVisible(trailerOf())) ? ((await target.textContent(trailerOf()).catch(() => '')) ?? '') : '';
+  };
+  const trailer = await readWithin(newestTrailer, (text) => /Tau-Trigger: close\b/u.test(text), 30_000);
+  await annotate(`I6 newest History trailer: ${trailer || '(none)'}`);
+  expect(trailer, 'I6: the newest History entry is the close cut').toMatch(/Tau-Trigger: close\b/u);
+  await target.expectContainingText(panel.getByRole('list', { name: 'Changed files' }), entryPaths.a, 30_000);
 });
 
 /*

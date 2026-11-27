@@ -1,3 +1,4 @@
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -6,6 +7,7 @@ export default defineConfig({
       reportsDirectory: '../../out/reports/coverage/tools/workspace-plugin',
     },
     environment: 'node',
-    reporters: ['verbose'],
+    reporters: testReporters('verbose'),
+    retry: testRetry(),
   },
 });

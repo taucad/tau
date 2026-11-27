@@ -1,10 +1,11 @@
-import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { Check, ChevronDown, Circle, Contrast, Laptop, Moon, Sun } from 'lucide-react';
 import { Theme, useTheme, themeOptions } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import { useColor } from '#hooks/use-color.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
+import { useClientFact, writeClientFacts } from '#lib/client-facts.js';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { ColorPicker } from '@taucad/ui-kit/components/color-picker';
 import { Switch } from '@taucad/ui/components/switch';
@@ -41,7 +42,7 @@ export function GeneralSettings(): React.JSX.Element {
   const { themeWithSystem, setTheme, currentOption } = useTheme();
   const { hue, setHue, resetHue } = useColor();
   const [areCodeInlayHintsEnabled, setCodeInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
-  const [usePointerCursors, setUsePointerCursors] = useCookie(cookieName.pointerCursors, false);
+  const usePointerCursors = useClientFact('pointerCursors') === true;
 
   const handleThemeChange = (value: string): void => {
     const newTheme = value === 'null' ? null : (value as Theme);
@@ -115,7 +116,13 @@ export function GeneralSettings(): React.JSX.Element {
           title='Pointer cursors'
           description='Show a hand cursor over buttons and links'
           control={
-            <Switch aria-label='Pointer cursors' checked={usePointerCursors} onCheckedChange={setUsePointerCursors} />
+            <Switch
+              aria-label='Pointer cursors'
+              checked={usePointerCursors}
+              onCheckedChange={(pointerCursors) => {
+                writeClientFacts({ pointerCursors });
+              }}
+            />
           }
         />
       </SettingsGroup>

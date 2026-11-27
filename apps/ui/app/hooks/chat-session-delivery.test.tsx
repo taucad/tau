@@ -86,7 +86,7 @@ it('should deliver a reply through the retained active session without a sidebar
   function Transcript(): React.JSX.Element {
     store = useChatSessionStore();
     useChatSession('mounted', 'project');
-    const messages = useChatSessionSnapshot('mounted', (session) => session?.chat.messages);
+    const messages = useChatSessionSnapshot('mounted', (session) => session?.messages);
     return (
       <div data-testid='transcript'>
         {messages
@@ -182,7 +182,7 @@ it('should deliver a reply through the retained active session without a sidebar
     await vi.waitFor(() => {
       expect(screen.getByTestId('transcript')).toHaveTextContent('hi|Unique mounted reply');
     });
-    expect(current.get('mounted')?.chat).toBe(session.chat);
+    expect(current.get('mounted')).toBe(session);
     expect(hostCommand).toHaveBeenCalledTimes(1);
     expect(subscribe).toHaveBeenCalledTimes(1);
     const releaseSidebar = current.observe('mounted', 'project');
@@ -350,7 +350,7 @@ it('should publish the first held live reasoning chunk through the actual SDK be
       expect.objectContaining({ type: 'reasoning', text: 'Unique mounted held reasoning' }),
     );
     expect(current.getLivenessSnapshot().chats['mounted']?.phase).toBe('running');
-    expect(current.get('mounted')?.chat).toBe(session.chat);
+    expect(current.get('mounted')).toBe(session);
     expect(hostCommand).toHaveBeenCalledTimes(1);
     expect(subscribe).toHaveBeenCalledTimes(1);
     const releaseSidebar = current.observe('mounted', 'project');

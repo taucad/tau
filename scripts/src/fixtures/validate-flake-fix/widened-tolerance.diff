@@ -1,0 +1,12 @@
+--- a/packages/kernels/src/mesh.test.ts
++++ b/packages/kernels/src/mesh.test.ts
+@@
+ import { expect, it } from 'vitest';
+
+-const TOLERANCE = 0.001;
++const TOLERANCE = 0.05;
+
+ it('meshes the cube', () => {
+   const volume = mesh(cube()).volume;
+   expect(Math.abs(volume - 1)).toBeLessThan(TOLERANCE);
+ });

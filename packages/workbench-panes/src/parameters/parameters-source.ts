@@ -144,6 +144,11 @@ export type ParametersSource = Readonly<{
   openInEditor?: (entryPath: string) => void;
   /** Stop rendering the entry. Absent, the menu has no "Close renderer"; it is disabled for the last entry. */
   closeEntry?: (entryPath: string) => void;
+  /**
+   * An entry's body while its parameter manifest is on its way, such as the parameter rows' skeleton. Words do not
+   * belong here: the body is already busy and named. Absent, the body is drawn empty while it waits.
+   */
+  ManifestWait?: ComponentType<Readonly<{ entryPath: string }>>;
   /** The body of an entry's "Quick export" submenu. Absent, the menu has no "Quick export". */
   QuickExport?: ComponentType<Readonly<{ entryPath: string }>>;
   /** Keeps section expansion and size. A hook: it is called during render. Absent, nothing is kept. */

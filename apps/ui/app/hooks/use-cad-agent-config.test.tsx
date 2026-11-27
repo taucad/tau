@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { CadAgentConfigInput, ChatSnapshot, ContextPayload } from '@taucad/chat';
 import type { GoalId, LanguageId, PersonField } from '@taucad/preferences';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
@@ -59,7 +59,8 @@ const personHarness = vi.hoisted((): { onboarding: boolean; profile: HarnessProf
   profile: { version: 1, goals: [], languages: [] },
 }));
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => (flag === 'onboarding' ? personHarness.onboarding : false),
+  useFeature: () => false,
+  useFeatureState: (flag: string) => (flag === 'onboarding' && personHarness.onboarding ? 'on' : 'off'),
 }));
 vi.mock('#preferences/use-person-record.js', () => ({
   usePersonRecord: () => ({ profile: personHarness.profile }),
@@ -75,7 +76,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     workspace: { syncProjectRoots: bridgeHarness.syncProjectRoots },
   }),
 }));
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectFileSystemConfig: async () => ({
     projectId: 'project-test',
     backend: 'indexeddb',
@@ -298,7 +299,8 @@ describe('useCadAgentConfig', () => {
     await waitFor(() => {
       expect(result.current).toEqual({
         status: 'unavailable',
-        reason: 'This project’s storage cannot hold a durable agent log.',
+        reason:
+          'The Tau agent can’t save its work in this project’s storage. Check that Tau can write to this project’s folder.',
       });
     });
   });
@@ -350,7 +352,8 @@ describe('useCadAgentConfig', () => {
 
     await expect(settled).resolves.toEqual({
       status: 'unavailable',
-      reason: 'This project’s storage cannot hold a durable agent log.',
+      reason:
+        'The Tau agent can’t save its work in this project’s storage. Check that Tau can write to this project’s folder.',
     });
   });
 
@@ -438,6 +441,73 @@ describe('useCadAgentConfig', () => {
       expect(result.current.targets).toEqual(recovered);
     });
     expect(directoryHarness.calls).toBe(2);
+  });
+
+  describe('a refused external agent', () => {
+    /* The host refused an agent, then the person fixed it outside Tau: main's
+     * re-discovery has the agent back, but only a fresh listing carries it to a
+     * window that is already open. */
+    const host = (agent: Readonly<Record<string, unknown>>) => ({
+      hostId: 'desktop',
+      rung: 'in-process',
+      label: 'This computer',
+      workspaceRoot: '',
+      online: true,
+      externalAgents: [{ id: 'agent-a', displayName: 'Agent A', ...agent }],
+    });
+    const refused = host({ models: [], refusal: 'EXTERNAL_AGENT_UNAVAILABLE' });
+    const recovered = host({ models: [{ id: 'model-a', name: 'Model A' }], defaultModel: 'model-a' });
+
+    it('should list again when the window regains focus', async () => {
+      directoryHarness.listings = [[refused], [recovered]];
+
+      const { result } = renderHook(() => useAgentHostPlacements());
+      await waitFor(() => {
+        expect(result.current.targets).toEqual([refused]);
+      });
+
+      globalThis.dispatchEvent(new Event('focus'));
+
+      await waitFor(() => {
+        expect(result.current.targets).toEqual([recovered]);
+      });
+      expect(directoryHarness.calls).toBe(2);
+    });
+
+    it('should list again when a surface that shows it asks', async () => {
+      directoryHarness.listings = [[refused], [recovered]];
+
+      const { result } = renderHook(() => useAgentHostPlacements());
+      await waitFor(() => {
+        expect(result.current.targets).toEqual([refused]);
+      });
+
+      act(() => {
+        result.current.refresh();
+      });
+
+      await waitFor(() => {
+        expect(result.current.targets).toEqual([recovered]);
+      });
+      expect(directoryHarness.calls).toBe(2);
+    });
+
+    it('should not list again once every agent is available', async () => {
+      directoryHarness.listings = [[recovered], [refused]];
+
+      const { result } = renderHook(() => useAgentHostPlacements());
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      globalThis.dispatchEvent(new Event('focus'));
+      act(() => {
+        result.current.refresh();
+      });
+
+      expect(directoryHarness.calls).toBe(1);
+      expect(result.current.targets).toEqual([recovered]);
+    });
   });
 
   it('bounds the dispatch wait rather than hanging a turn forever', async () => {

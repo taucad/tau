@@ -28,7 +28,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
-import { isTauDesktopReleased, tauDesktopDownloadUrl } from '#components/desktop/open-in-desktop.js';
+import { isTauDesktopReleased, tauDesktopDownloadUrl } from '#lib/desktop-release.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { SidebarTrigger } from '#components/ui/sidebar.js';
@@ -40,8 +40,8 @@ import { projectSessionIdleWindowMilliseconds } from '#machines/project-session.
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteState } from '#types/project-route-state.types.js';
-import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
-import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
+import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
+import type { PendingProjectRecoveryReason } from '@taucad/project-library/types/pending-project-operation.types';
 
 /** Every verb a notice may offer. Closed on purpose: the table cannot invent an effect. @public */
 export type NoticeActionRun = 'reopen' | 'restore' | 'retry' | 'back' | 'projects' | 'trash-view' | 'desktop';
@@ -363,10 +363,10 @@ export const ProjectRouteNotice = ({ state }: { readonly state: ProjectRouteStat
   const heading = noticeHeading(state);
   const isProgressOnly = spec.title === '';
 
-  /* Nothing to say yet, so this is the workspace arriving, not a notice about it: the same
-   * skeleton the session gate shows next, rather than a spinner and a header that both vanish. */
+  /* Nothing to say yet, so this is the workspace arriving, not a notice about it: the workspace frame above shows
+   * through, as it does under every gate that follows, rather than a spinner and a header that both vanish. */
   if (isProgressOnly) {
-    return <WorkspaceSkeleton />;
+    return <WorkspaceOpening />;
   }
 
   return (
@@ -375,7 +375,7 @@ export const ProjectRouteNotice = ({ state }: { readonly state: ProjectRouteStat
         className={cn(
           'flex h-9 shrink-0 items-center gap-1 border-b bg-sidebar pr-1 pl-2 text-sm font-medium text-muted-foreground',
           // Same clearance the page header takes under the fixed titlebar controls.
-          'md:group-data-[sidebar-open=false]/app-shell:pl-(--titlebar-controls-width)',
+          'md:sidebar-closed:pl-(--titlebar-controls-width)',
           isMobile && 'h-10',
         )}
       >

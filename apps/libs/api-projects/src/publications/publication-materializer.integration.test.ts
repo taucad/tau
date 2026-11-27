@@ -37,11 +37,12 @@ import { createMemoryRepositoryStore, seedLease } from '@taucad/api-git-core/tes
 import {
   materializePublication,
   materializePublishedTags,
+  publicationBlobKey,
   readPublishedTree,
 } from '#publications/publication-materializer.js';
 import type { MaterializerDependencies } from '#publications/publication-materializer.js';
 import type { ObjectStorageServiceContract, PutBlobResult, PutBlobStreamArgs } from '@taucad/api-object-storage';
-import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
+import { blobKeyFromSha256Hex, servedBlobKey, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
 
 // Real lifecycle lock interleavings live in publication-deletion.integration.test.ts.
 vi.mock('@taucad/api-database/project-lifecycle', () => ({ assertProjectActive: vi.fn() }));
@@ -177,6 +178,8 @@ const createRecordingStorage = (
 ): Readonly<{
   dependencies: MaterializerDependencies;
   written: Map<string, Uint8Array<ArrayBuffer>>;
+  /** The content type each written key is served with. */
+  contentTypes: ReadonlyMap<string, string>;
   read: string[];
   copied: Array<Readonly<{ from: string; to: string }>>;
   streamed: Array<Readonly<{ key: string; checksumSha256: string | undefined }>>;
@@ -322,6 +325,7 @@ const createRecordingStorage = (
   };
   return {
     written,
+    contentTypes,
     read,
     copied,
     streamed,
@@ -366,6 +370,7 @@ type PublicationFixture = {
  */
 const createPublicationDatabase = (
   rows: PublicationFixture[],
+  linkState?: Readonly<{ visibility: 'public' | 'private'; currentPublicationId: string | undefined }>,
 ): Readonly<{
   databaseService: MaterializerDependencies['databaseService'];
   increments: Array<Record<string, unknown>>;
@@ -375,6 +380,8 @@ const createPublicationDatabase = (
   const increments: Array<Record<string, unknown>> = [];
   const updates: Array<Record<string, unknown>> = [];
   const counters = { decrements: 0 };
+  /* By default a public link showing the first row. */
+  const link = linkState ?? { visibility: 'public', currentPublicationId: rows[0]?.id };
 
   /** One open transaction's statements, which only a commit makes visible. */
   const openTransaction = (): {
@@ -394,6 +401,10 @@ const createPublicationDatabase = (
           from: vi.fn(() => ({
             where: vi.fn(() => ({
               limit: vi.fn(async () => rows.map((row) => ({ ...row, unpublishedAt: row.unpublishedAt ?? null }))),
+            })),
+            /* The project joined to its cloud link: the tier the repair writes. */
+            leftJoin: vi.fn(() => ({
+              where: vi.fn(() => ({ limit: vi.fn(async () => [link]) })),
             })),
           })),
         })),
@@ -513,7 +524,9 @@ describe('publication materializer against real git', () => {
     for (const relativePath of cloned) {
       const fromClone = gitBytes(clonePath, 'show', `refs/tags/v1:${relativePath}`);
       expect(manifest.files[relativePath]).toBe(`sha256:${sha256HexFromBytes(fromClone)}`);
-      expect(written.get(`blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(fromClone))}`)).toStrictEqual(fromClone);
+      expect(written.get(`blobs/${publicationBlobKey(relativePath, sha256HexFromBytes(fromClone))}`)).toStrictEqual(
+        fromClone,
+      );
     }
     /* The manifest is keyed by the revision the tag resolves to, so a
        re-publish writes a new object instead of overwriting a live one. */
@@ -865,7 +878,7 @@ describe('publication materializer against real git', () => {
       expect(storage.dependencies.storage.getBlob).toHaveBeenCalledWith(
         expect.objectContaining({ key: key.slice('tenants/'.length), range: { start: 0, end: 11 } }),
       );
-      expect(materialized.thumbnailKey).toBe(`blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(webp))}`);
+      expect(materialized.thumbnailKey).toBe(`blobs/${servedBlobKey(sha256HexFromBytes(webp), 'image/webp')}`);
 
       const notWebp = await lfsFixture('proj_lfs_thumb_bad', utf8('x'.repeat(64)), 'thumbnail.webp');
       const refusing = createRecordingStorage(notWebp.objects);
@@ -1246,6 +1259,98 @@ describe('publication materializer against real git', () => {
   });
 });
 
+/* #2008 (F4): a blob is shared across tenants by its digest, so whatever
+   changes how it is served must be part of its key. */
+describe('served metadata in the blob key', () => {
+  const webp = (): Uint8Array<ArrayBuffer> => {
+    const bytes = new Uint8Array(64);
+    bytes.set([0x52, 0x49, 0x46, 0x46, 0x38, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+    return bytes;
+  };
+
+  const publishFile = async (
+    storage: ReturnType<typeof createRecordingStorage>,
+    projectId: string,
+    files: ReadonlyMap<string, Uint8Array<ArrayBuffer>>,
+  ): Promise<Awaited<ReturnType<typeof materializePublication>>> => {
+    const lease = await leaseFor(seed(new Map([['main.ts', utf8('// entry\n')], ...files])), projectId);
+    return materializePublication(
+      storage.dependencies,
+      {
+        publicationId: `pub_${projectId}`,
+        projectId,
+        ownerId: `user_${projectId}`,
+        directory: lease.directory,
+        tag: 'v1',
+        visibility: 'public',
+        entryPath: 'main.ts',
+      },
+      writerStub(),
+    );
+  };
+
+  it.each([
+    ['the thumbnail first', ['thumbnail', 'file']],
+    ['the plain file first', ['file', 'thumbnail']],
+  ] as const)('should serve two tenants the same bytes each with its own type, %s', async (_order, sequence) => {
+    const bytes = webp();
+    const storage = createRecordingStorage();
+    let thumbnailKey = '';
+    for (const which of sequence) {
+      // oxlint-disable-next-line no-await-in-loop -- the order is the point.
+      const published = await publishFile(
+        storage,
+        `proj_served_${which}`,
+        new Map([[which === 'thumbnail' ? 'thumbnail.webp' : 'art/cover.webp', bytes]]),
+      );
+      if (which === 'thumbnail') {
+        ({ thumbnailKey } = published);
+      }
+    }
+
+    const fileKey = `blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(bytes))}`;
+    expect(thumbnailKey).not.toBe(fileKey);
+    expect(storage.contentTypes.get(thumbnailKey)).toBe('image/webp');
+    expect(storage.contentTypes.get(fileKey)).toBe('application/octet-stream');
+    expect(storage.written.get(thumbnailKey)).toStrictEqual(bytes);
+    expect(storage.written.get(fileKey)).toStrictEqual(bytes);
+  });
+
+  it('should never rewrite a blob another publication already holds', async () => {
+    const bytes = webp();
+    const storage = createRecordingStorage();
+    const both = new Map([
+      ['thumbnail.webp', bytes],
+      ['art/cover.webp', bytes],
+    ]);
+    await publishFile(storage, 'proj_served_first', both);
+    vi.mocked(storage.dependencies.storage.putBlob).mockClear();
+
+    await publishFile(storage, 'proj_served_second', both);
+
+    const keys = vi.mocked(storage.dependencies.storage.putBlob).mock.calls.map(([args]) => args.key);
+    expect(keys.filter((key) => key.startsWith(blobKeyFromSha256Hex(sha256HexFromBytes(bytes))))).toStrictEqual([]);
+  });
+
+  it('should write one publication holding the same bytes at both types to two keys', async () => {
+    const bytes = webp();
+    const storage = createRecordingStorage();
+    const published = await publishFile(
+      storage,
+      'proj_served_both',
+      new Map([
+        ['thumbnail.webp', bytes],
+        ['art/cover.webp', bytes],
+      ]),
+    );
+
+    expect(storage.contentTypes.get(published.thumbnailKey)).toBe('image/webp');
+    expect(storage.contentTypes.get(`blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(bytes))}`)).toBe(
+      'application/octet-stream',
+    );
+  });
+});
+
 describe('materializing the tags a push moved', () => {
   it('should materialize a published tag from the lease and record the revision it served', async () => {
     const lease = await leaseFor(seed(new Map([['main.ts', utf8('// entry\n')]])), 'proj_push');
@@ -1382,6 +1487,46 @@ describe('materializing the tags a push moved', () => {
     const revision = git(lease.directory, 'rev-parse', 'refs/tags/v1^{commit}').trim();
     expect(materialized.map((version) => version.revisionId)).toStrictEqual([revision]);
     expect(rows[0]?.manifestKey).toBe(`publications/pub_retry/${revision}.json`);
+  });
+
+  /* Only the version the link shows follows its tier: an earlier private
+     version must not repair into public storage under a public link. */
+  it.each([
+    { name: 'the version the link shows', current: 'pub_tier', expected: 'public' },
+    { name: 'an earlier version', current: 'pub_newer', expected: 'private' },
+  ])('should repair $name to the $expected tier under a public link', async ({ current, expected }) => {
+    const lease = await leaseFor(seed(new Map([['main.ts', utf8('// entry\n')]])), 'proj_tier');
+    const { dependencies } = createRecordingStorage();
+    const database = createPublicationDatabase(
+      [
+        {
+          id: 'pub_tier',
+          projectId: 'proj_tier',
+          tag: 'v1',
+          visibility: 'private',
+          entryPath: 'main.ts',
+          manifestKey: '',
+          revisionId: '',
+        },
+      ],
+      { visibility: 'public', currentPublicationId: current },
+    );
+
+    await materializePublishedTags(
+      { ...dependencies, databaseService: database.databaseService },
+      { projectId: 'proj_tier', ownerId: 'user_w4c', directory: lease.directory, tags: movedTag(lease) },
+    );
+
+    expect(database.updates.map((update) => update['visibility'])).toStrictEqual([expected]);
+    /* The bytes went to the same tier the row records, so a mismatch in either direction fails. */
+    const blobTiers = [
+      ...vi.mocked(dependencies.storage.putBlob).mock.calls.map(([args]) => args),
+      ...vi.mocked(dependencies.storage.putBlobStream).mock.calls.map(([args]) => args),
+    ]
+      .filter((args) => args.namespace === 'blobs')
+      .map((args) => args.tier);
+    expect(blobTiers.length).toBeGreaterThan(0);
+    expect(new Set(blobTiers)).toStrictEqual(new Set([expected]));
   });
 
   it('should replace the version and move its reference counts when the tag moves', async () => {

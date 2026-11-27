@@ -4,11 +4,11 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import { CloudProjectUnavailableError, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { toLibraryRows } from '#routes/projects_/cloud-projects.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Deployment environment keys.
@@ -41,13 +41,23 @@ const trashed: ProjectListItem = {
   deletedAt: 5,
 };
 
-const { mockCreateProject, mockToastInfo, useProjectsOptions, mockGetConfig } = vi.hoisted(() => ({
-  mockCreateProject: vi.fn(),
-  mockGetConfig: vi.fn(),
-  mockToastInfo: vi.fn<(message: string, options: { action: { label: string; onClick: () => void } }) => void>(),
-  useProjectsOptions: [] as unknown[],
-}));
-vi.mock('#filesystem/handle-store.js', () => ({ getProjectFileSystemConfig: mockGetConfig }));
+const { mockCreateProject, mockToastInfo, useProjectsOptions, mockGetConfig, mockOpenAhead, mockRelease } = vi.hoisted(
+  () => {
+    const release = vi.fn<() => void>();
+    return {
+      mockRelease: release,
+      mockOpenAhead: vi.fn((_gesture: unknown) => release),
+      mockCreateProject: vi.fn(),
+      mockGetConfig: vi.fn(),
+      mockToastInfo: vi.fn<(message: string, options: { action: { label: string; onClick: () => void } }) => void>(),
+      useProjectsOptions: [] as unknown[],
+    };
+  },
+);
+/* STO-25 SP6: the registry's early open, as the runtime hands it to the gesture. */
+vi.mock('#runtime/app-runtime-provider.js', () => ({ useOptionalAppRuntime: () => ({ runtime: true }) }));
+vi.mock('#runtime/app-runtime.js', () => ({ selectRuntimeOpenAhead: () => mockOpenAhead }));
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({ getProjectFileSystemConfig: mockGetConfig }));
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: (options: unknown) => {
     useProjectsOptions.push(options);
@@ -85,6 +95,8 @@ describe('useOpenCloudProject', () => {
     mockCreateProject.mockReset();
     mockGetConfig.mockReset();
     mockToastInfo.mockReset();
+    mockOpenAhead.mockClear();
+    mockRelease.mockClear();
     mockCreateProject.mockResolvedValue({
       id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
       slugs: { workspaceSlug: 'home', projectSlug: 'bracket-beta' },
@@ -108,6 +120,47 @@ describe('useOpenCloudProject', () => {
     expect(result.current.location.search).toBe('');
     expect(tauCloudIntent.get(entry.id)).toBe('open');
     expect(result.current.location.state).toBeNull();
+  });
+
+  it('should start the open ahead of the route, the project asserted active after its stub (STO-25 SP6)', async () => {
+    const entry: CloudProject = { id: 'proj_bbbbbbbbbbbbbbbbbbbbb', name: 'Bracket Beta', role: 'owner' };
+    const { result } = renderOpen();
+
+    await act(async () => result.current.open(entry));
+
+    expect(mockOpenAhead).toHaveBeenCalledExactlyOnceWith({
+      projectId: entry.id,
+      slugs: { workspaceSlug: 'home', projectSlug: 'bracket-beta' },
+      asserted: true,
+    });
+    /* The navigation landed: the project's session takes the connection, so the gesture releases nothing. */
+    expect(mockRelease).not.toHaveBeenCalled();
+  });
+
+  it('should still navigate when the early open throws as it starts (STO-25 SP6 review)', async () => {
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockOpenAhead.mockImplementationOnce(() => {
+      throw new Error('composition not ready');
+    });
+    const entry: CloudProject = { id: 'proj_bbbbbbbbbbbbbbbbbbbbb', name: 'Bracket Beta', role: 'owner' };
+    const { result } = renderOpen();
+
+    await act(async () => result.current.open(entry));
+
+    expect(result.current.location.pathname).toBe('/w/home/bracket-beta');
+    expect(reported).toHaveBeenCalledWith(
+      expect.stringContaining('could not start'),
+      expect.objectContaining({ message: 'composition not ready' }),
+    );
+    reported.mockRestore();
+  });
+
+  it('should start the open ahead of the route for a project this device holds, asserting nothing (STO-25 SP6)', async () => {
+    const { result } = renderOpen();
+
+    await act(async () => result.current.open({ id: held.id, name: held.name, role: 'owner' }));
+
+    expect(mockOpenAhead).toHaveBeenCalledExactlyOnceWith({ projectId: held.id, slugs: held.slugs });
   });
 
   it.each(['present', 'unreadable'])('keeps a %s partial stub pending after creation fails', async (state) => {
@@ -227,7 +280,7 @@ describe('useOpenCloudProject', () => {
 
     await act(async () => result.current.open({ id: trashed.id, name: 'Old Hinge', role: 'owner' }));
 
-    expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: true });
+    expect(useProjectsOptions.at(-1)).toEqual({ scope: 'all' });
     expect(mockCreateProject).not.toHaveBeenCalled();
     expect(result.current.location.pathname).toBe('/projects');
     expect(mockToastInfo).toHaveBeenCalledOnce();

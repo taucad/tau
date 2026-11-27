@@ -290,6 +290,75 @@ const apiLibraryConstraints = Object.entries(apiLibraryDependencies).map(([name,
 }));
 
 /**
+ * Dependency direction between the UI app libraries (`apps/libs/*`, `scope:ui type:app-lib`, tagged
+ * `ui:<name>`), from docs/research/ui-app-lib-layering-blueprint.md. Four layers, the app above all of them:
+ * L0 foundation (`ui-core`, `ui-kit`), L1 features (the `*-ui` libraries), L2 composition
+ * (`chat-surfaces`, `project-library`, `project-workspace`) and L3 agent-host adapters
+ * (`agent-host-ui`). `layer:` tags leave the libraries of one layer unordered, so, as with the API
+ * libraries, each names the UI app libraries it may depend on. Every library may also depend on `ui:infra` (the
+ * file-system client, the language servers and the consent banner) and on `scope:shared` projects and packages.
+ * The two sideways L1 edges are declared: the revisions conflict editor is the editor, and settings is the
+ * billing pages' host shell. A `ui:unlayered` library belongs to another app (desktop, www) or only to the app
+ * itself, and no layered library may depend on one.
+ */
+export const uiLibraryDependencies = {
+  'ui-core': [],
+  'ui-kit': [],
+  'chat-ui': ['ui-core', 'ui-kit'],
+  'files-ui': ['ui-core', 'ui-kit'],
+  'editor-ui': ['ui-core'],
+  // Declared: the revisions conflict editor is the code editor.
+  'revisions-ui': ['editor-ui', 'ui-core'],
+  'publish-ui': ['ui-core', 'ui-kit'],
+  'settings-ui': ['ui-core', 'ui-kit'],
+  /*
+   * Declared: settings is the host shell of the billing pages. `billing-ui -> @taucad/chat` (`chat-message-usage`)
+   * is declared debt the operator keeps; the agent-protocol ban below applies to L0 only.
+   */
+  'billing-ui': ['settings-ui', 'ui-core', 'ui-kit'],
+  // L2 composes L1 features; no L2 library depends on another.
+  'chat-surfaces': ['chat-ui', 'editor-ui', 'files-ui', 'ui-core', 'ui-kit'],
+  'project-library': ['chat-ui', 'files-ui', 'ui-core', 'ui-kit'],
+  'project-workspace': ['ui-core', 'ui-kit'],
+  // L3 sits beside L2: an adapter implements an agent port over L0 and L1, never over a composed surface.
+  'agent-host-ui': ['revisions-ui', 'ui-core'],
+  infra: ['infra', 'ui-core'],
+};
+
+/**
+ * Today's UI app library edges that the layering refuses, each with the blueprint work item that removes it.
+ * The list only shrinks: scripts/src/ui-layering-graph.test.ts fails when a listed edge is gone from the graph
+ * and when an edge outside the allowlist and this list appears. Layering W5 cleared the last entry.
+ *
+ * @type {Array<{ source: string; target: string; work: string }>}
+ */
+export const uiLibraryDependencyDebt = [];
+
+const uiLibraryConstraints = Object.entries(uiLibraryDependencies).map(([name, dependencies]) => ({
+  sourceTag: `ui:${name}`,
+  onlyDependOnLibsWithTags: [
+    ...[
+      ...new Set([
+        ...dependencies,
+        ...uiLibraryDependencyDebt.filter(({ source }) => source === name).map(({ target }) => target),
+        'infra',
+      ]),
+    ].map((dependency) => `ui:${dependency}`),
+    'scope:shared',
+    ...unlayeredTargetTypes,
+  ],
+}));
+
+/**
+ * L0 carries no agent protocol: `ui-core` and `ui-kit` may not reach a `protocol:agent` project (`chat`,
+ * `agent-host`, `agent-tools`, `agent-observability`, `skills`), directly or transitively.
+ */
+const uiFoundationConstraints = ['ui-core', 'ui-kit'].map((name) => ({
+  sourceTag: `ui:${name}`,
+  notDependOnLibsWithTags: ['protocol:agent'],
+}));
+
+/**
  * Nx module boundaries. The options are shared so the runtime-e2e override can add its
  * own dynamic-dependency exceptions without restating the tag constraints.
  */
@@ -299,8 +368,11 @@ const moduleBoundaryOptions = {
    * The Quick Look extensions are a nested app project (`desktop-quick-look`,
    * `apps/desktop/macos`) that owns its format manifest. The desktop shell reads
    * that one JSON contract; nothing else crosses the app-to-app boundary.
+   *
+   * `@taucad/vitest-ci` is the reporter list every project's Vitest config imports (`testReporters`). It is
+   * test tooling read only by configs, so it crosses every tag boundary, including the sandbox's empty one.
    */
-  allow: ['#macos/quick-look-formats.json'],
+  allow: ['#macos/quick-look-formats.json', '@taucad/vitest-ci'],
   /*
    * Libraries that are deliberately lazy-loaded in one consumer and
    * statically imported in another: the UI keeps the runtime and the
@@ -396,6 +468,8 @@ const moduleBoundaryOptions = {
       onlyDependOnLibsWithTags: ['layer:util', ...unlayeredTargetTypes],
     },
     ...apiLibraryConstraints,
+    ...uiLibraryConstraints,
+    ...uiFoundationConstraints,
     /*
      * The shell split's libraries (shell split blueprint, graph pinning): the sandbox imports no workspace
      * project, the service only the sandbox and shared packages, the Terminal concern only the service and
@@ -615,6 +689,8 @@ const config = [
       // .NET build output beside C# projects (runtime bootstraps such as dotnet.js).
       '**/dotnet/**/bin',
       '**/dotnet/**/obj',
+      // The PL7 service worker as shipped before FP1: minified build output kept verbatim for the boot suite.
+      'apps/ui-e2e/fixtures/service-worker/**',
       '**/generated',
       // `@taucad/api-extractor` output, one per kernel package.
       '**/agent/resources.js',
@@ -707,12 +783,14 @@ const config = [
     /*
      * `headless-image-backend` reaches SVG rendering through `await import('@taucad/image/svg')`, so Nx
      * records a lazy edge to the image package and rejects every remaining static import of it. These
-     * four files sit outside the page graph that edge protects: each runtime definition reaches a bundle
-     * only through its own worker entry (`runtime.worker.ts`, `runtime-debug.worker.ts` and
-     * `image-runtime.worker.ts`), every other reader of those definitions imports them type-only, and the
-     * two converter suites ship nothing. Scoped to these files so the page keeps the lazy-load guarantee.
+     * five files sit outside the page graph that edge protects: each runtime definition reaches a bundle
+     * only through its own worker entry (`runtime.worker.ts`, `runtime-debug.worker.ts`,
+     * `image-runtime.worker.ts` and `attachment-image-runtime.worker.ts`) or a dynamic `import()` (the
+     * attachment image service reads its source list that way), every other reader of those definitions
+     * imports them type-only, and the two converter suites ship nothing. Scoped to these files so the page keeps the lazy-load guarantee.
      */
     files: [
+      'apps/ui/app/runtime/attachment-image-runtime.definition.ts',
       'apps/ui/app/runtime/image-runtime.definition.ts',
       'apps/ui/app/runtime/ui-runtime.definition.ts',
       'apps/ui/app/routes/w.$workspace.$project/chat-converter.test.tsx',
@@ -807,7 +885,8 @@ const config = [
      * Omitting `packageDir` reads the nearest `package.json`.
      */
     files: ['{packages,libs,apps/libs,examples}/**/*.{ts,tsx,mts,cts}'],
-    ignores: ['**/*.{spec,test,test-d,config,setup}.{ts,tsx,mts,cts}', '**/e2e/**', '**/scripts/**'],
+    // Test helpers (`*.test-utils.*`) are imported by tests only and are never a package entry or export.
+    ignores: ['**/*.{spec,test,test-d,test-utils,config,setup}.{ts,tsx,mts,cts}', '**/e2e/**', '**/scripts/**'],
     rules: {
       'import-x/no-extraneous-dependencies': ['error', { ...noExtraneousDependenciesOptions, peerDependencies: true }],
     },
@@ -1001,23 +1080,21 @@ const config = [
   },
 
   /**
-   * Restrict who may import the AI SDK raw `Chat` factory / shared transport.
+   * Restrict who may import the chat clients' internal modules.
    *
    * The blueprint (R9) collapses every UI site's per-call `body: { ... }` /
    * `metadata: { ... }` literal into a single profile-scoped chat client. The
-   * raw `Chat` instance, the shared `DefaultChatTransport`, and the
-   * `useActiveChatInstance` accessor live under `chat-clients/_internal/`
-   * and may only be imported by:
+   * turn admission and name-generator internals live under
+   * `chat-clients/_internal/` and may only be imported by:
    *
    *   1. The three profile-scoped clients (`use-cad-chat-client.ts`,
    *      `use-project-name-client.ts`, `use-commit-name-client.ts`) — these
    *      ARE the indirection layer.
    *   2. Their sibling internal modules (e.g. `name-generator-client.ts`,
-   *      `shared-chat-transport.ts` itself, `use-active-chat-instance.ts`).
-   *   3. `services/chat-session-store.ts` — the session store owns the
-   *      live `Chat<MyUIMessage>` instances that clients consume, so it
-   *      needs the factory at construction time. The store does NOT compose
-   *      `body: { agent }` itself; that stays inside the chat clients.
+   *      `use-turn-admission.ts`).
+   *   3. `services/chat-session-store.ts` — the session store dispatches the
+   *      admitted host commands. It does NOT compose the agent config itself;
+   *      that stays inside the chat clients.
    *
    * Any new UI site that wants to send a chat turn must add a chat-client
    * verb, not bypass via `_internal`.
@@ -1115,6 +1192,8 @@ const config = [
       'apps/ui/app/workers/geospec-runner.impl.ts',
       'packages/runtime-testing/src/kernel-testing.utils.ts',
       'apps/runtime-e2e/src/benchmarks/**/*.{ts,tsx,mts,cts}',
+      // The worker entry of replicad-handle-ledger.test.ts: test-only code that runs the ledger in the kernel's thread.
+      'apps/runtime-e2e/src/fixtures/replicad-ledger-worker.ts',
     ],
     rules: {
       'no-restricted-imports': 'off',

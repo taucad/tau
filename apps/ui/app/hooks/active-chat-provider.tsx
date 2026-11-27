@@ -30,6 +30,7 @@
  * [`docs/research/chat-composer-context-unification.md`](docs/research/chat-composer-context-unification.md).
  */
 
+import { ShownCommentsProvider } from '#components/comments/shown-comments.js';
 import { useActorRef, useSelector } from '@xstate/react';
 import {
   createContext,
@@ -41,7 +42,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import type { Chat } from '@ai-sdk/react';
+import type { ChatStatus } from 'ai';
 import { isResumableRun } from '@taucad/agent-host';
 import type { ForeignRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
@@ -53,22 +54,22 @@ import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { chatKernelPreference } from '#hooks/chat-kernel-preference.js';
 import { useProjectKernelOwner } from '#hooks/use-project-kernel-owner.js';
-import { draftMachine } from '#hooks/draft.machine.js';
-import { resizeImageActor } from '@taucad/chat-ui/hooks/resize-image.actor';
-import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
+import { draftMachine } from '@taucad/chat-ui/hooks/draft.machine';
+import { resizeImageActor } from '#hooks/attachment-image.actor.js';
+import { useDraftImageErrorToast } from '@taucad/chat-ui/hooks/use-draft-image-error-toast';
 import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
-import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import { selectCaughtUp, selectCurrentRun, selectRunElsewhere } from '#machines/chat-projection.logic.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
-import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
+import type { chatPersistenceMachine } from '@taucad/chat-ui/hooks/chat-persistence.machine';
 import { useModels } from '#hooks/use-models.js';
 import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { reportKernelOverride } from '#chat-clients/_internal/kernel-selection-telemetry.js';
+import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
 import { withTauExecutionModel } from '@taucad/chat-ui/utils/chat-execution';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
@@ -78,18 +79,16 @@ import {
   flushRecord,
   storeAttachmentActorFor,
   useComposerRecord,
-} from '#hooks/composer-record.js';
+} from '@taucad/chat-ui/hooks/composer-record';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
-import type { ComposerRecordRef } from '#hooks/composer-record.js';
+import type { ComposerRecordRef } from '@taucad/chat-ui/hooks/composer-record';
 import { createAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import type { AttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import { attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode, ReasoningLevel } from '@taucad/chat/constants';
 import { effectiveEffort } from '#utils/model-reasoning.js';
-import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
+import { useComposerRecordToasts } from '@taucad/chat-ui/hooks/use-composer-record-toasts';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
-
-type ChatInstance = Chat<MyUIMessage>;
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -179,9 +178,10 @@ export type ActiveChatKernel = {
  */
 export type ActiveChatSessionContextValue = {
   activeChatId: string;
-  chat: Chat<MyUIMessage>;
   persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine>;
   draftActorRef: ActorRefFrom<typeof draftMachine>;
+  /** This chat's composer record on this device: whether it is read yet decides whether a painted draft hint is taken. */
+  composerRecordRef: ComposerRecordRef;
 };
 
 /**
@@ -203,9 +203,9 @@ export type ChatComposerContextValue = {
   kernel: ActiveChatKernel;
   /**
    * Live chat status. `'ready'` under the composer provider (no session to
-   * stream); reflects the AI SDK `Chat.status` under the session provider.
+   * stream); the run phase, else the command in flight, under the session provider (T3).
    */
-  status: ChatInstance['status'];
+  status: ChatStatus;
   /** User-facing activity for the selected execution target. */
   agentActivity: ChatAgentActivity;
   /**
@@ -242,6 +242,11 @@ export type ChatComposerContextValue = {
   attachmentSource: string | undefined;
   /** Consume the current draft at its persistence owner. */
   consumeDraft: () => Promise<void>;
+  /**
+   * Home's own composer record, which its draft persists to; a chat's is on `session`. Read for record-wins: an Enter
+   * on Home's painted draft waits for it and is sent only when it holds that text (ruling 2026-11-17T03:43Z).
+   */
+  homeRecordRef?: ComposerRecordRef;
 };
 
 const ChatComposerContext = createContext<ChatComposerContextValue | undefined>(undefined);
@@ -422,8 +427,9 @@ export function HomeNewProjectComposerProvider({
       canSelectExecution: true,
       attachmentSource: undefined,
       consumeDraft,
+      homeRecordRef: recordRef,
     }),
-    [consumeDraft, draftActorRef, execution, kernel, model],
+    [consumeDraft, draftActorRef, execution, kernel, model, recordRef],
   );
   return <ChatComposerContext.Provider value={value}>{children}</ChatComposerContext.Provider>;
 }
@@ -488,11 +494,11 @@ function ActiveChatSessionProvider({
   const sessionValue = useMemo<ActiveChatSessionContextValue>(
     () => ({
       activeChatId: chatId,
-      chat: session.chat,
       persistenceActorRef: session.persistenceActorRef,
       draftActorRef: session.draftActorRef,
+      composerRecordRef: session.composerRecordRef,
     }),
-    [chatId, session.chat, session.persistenceActorRef, session.draftActorRef],
+    [chatId, session.persistenceActorRef, session.draftActorRef, session.composerRecordRef],
   );
 
   const composerValue = useMemo<ChatComposerContextValue>(
@@ -530,7 +536,9 @@ function ActiveChatSessionProvider({
 
   return (
     <ChatComposerContext.Provider value={composerValue}>
-      <ActiveChatSessionContext.Provider value={sessionValue}>{children}</ActiveChatSessionContext.Provider>
+      <ActiveChatSessionContext.Provider value={sessionValue}>
+        <ShownCommentsProvider chatId={chatId}>{children}</ShownCommentsProvider>
+      </ActiveChatSessionContext.Provider>
     </ChatComposerContext.Provider>
   );
 }
@@ -552,6 +560,14 @@ export function useChatComposer(): ChatComposerContextValue {
     throw new Error('useChatComposer must be used within <ChatComposerProvider> or <ActiveChatProvider>');
   }
   return context;
+}
+
+/**
+ * The unified composer contract, or `undefined` outside a composer provider: for a surface that offers a composer
+ * feature only where a composer is mounted.
+ */
+export function useOptionalChatComposer(): ChatComposerContextValue | undefined {
+  return useContext(ChatComposerContext);
 }
 
 /**
@@ -780,6 +796,8 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
           resolved: ownerKernel,
           manual: next,
           turnsSince: runs === undefined ? 0 : Object.keys(runs).length,
+          /* The page's resolved consent under the one rule (AR-W6-02); no page composition reads as `unknown`. */
+          consent: pageTelemetry()?.consent() ?? 'unknown',
         });
       }
       setActiveKernel(next);
@@ -801,16 +819,24 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
 }
 
 /**
- * One visible status for both composer controls: host projection takes precedence when a reattached run outlives the
- * SDK request. Returns `'ready'` while the session is mounting (and under the composer-only provider).
+ * One visible status for both composer controls: the run phase, else the command in flight (T3). Returns `'ready'`
+ * while the session is mounting (and under the composer-only provider).
  */
-function useSessionStatus(chatId: string): ChatInstance['status'] {
-  const sdkStatus = useChatSessionSnapshot(chatId, (s) => s?.chat.status ?? 'ready');
+function useSessionStatus(chatId: string): ChatStatus {
   const store = useChatSessionStore();
-  const subscribe = useCallback((listener: () => void) => store.subscribeProjection(chatId, listener), [chatId, store]);
-  const snapshot = useCallback(() => store.getProjection(chatId), [chatId, store]);
-  const projection = useSyncExternalStore(subscribe, snapshot, snapshot);
-  return selectVisibleChatStatus(sdkStatus, projection);
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const unsubscribeChat = store.subscribeChat(chatId, listener);
+      const unsubscribeProjection = store.subscribeProjection(chatId, listener);
+      return () => {
+        unsubscribeChat();
+        unsubscribeProjection();
+      };
+    },
+    [chatId, store],
+  );
+  const snapshot = useCallback(() => store.getChatStatus(chatId), [chatId, store]);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /**
@@ -833,13 +859,16 @@ function useSessionAgentActivity(session: ChatSession): ChatAgentActivity {
   );
   const readStop = useCallback(() => store.isStopping(session.chatId), [session.chatId, store]);
   const stopping = useSyncExternalStore(subscribeStop, readStop, readStop);
+  /* A send leaving for its own turn is work the person can stop before the machine has admitted it. */
+  const readSending = useCallback(() => store.departingSendOf(session.chatId) !== undefined, [session.chatId, store]);
+  const sending = useSyncExternalStore(subscribeStop, readSending, readSending);
   if (approvalRequired) {
     return 'approval-required';
   }
   if (stopping) {
     return 'stopping';
   }
-  return working ? 'working' : 'ready';
+  return working || sending ? 'working' : 'ready';
 }
 
 /**
@@ -870,8 +899,7 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
       turn === undefined &&
       persistence.matches({ requestLifecycle: 'idle', chatLoading: 'idle' }) &&
       !persistence.context.isLoadingChat &&
-      session.chat.status !== 'submitted' &&
-      session.chat.status !== 'streaming'
+      store.getChatStatus(chatId) === 'ready'
     );
   };
   const resume = useCallback(() => {
@@ -945,7 +973,7 @@ function useSessionContextUsage(chatId: string): ContextUsageData | undefined {
     if (!s) {
       return undefined;
     }
-    const { messages } = s.chat;
+    const { messages } = s;
     for (let i = messages.length - 1; i >= 0; i--) {
       const message = messages[i]!;
       for (let j = message.parts.length - 1; j >= 0; j--) {

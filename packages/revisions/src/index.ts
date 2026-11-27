@@ -49,6 +49,7 @@ export {
 export type { RevisionCommitAuthor, RevisionTrailer } from '#revision-headers.js';
 export { withCommitAuthor } from '#commit-author.js';
 export { RevisionPortError, versionTagName, versionTagRef } from '#revision-port.js';
+export { safeModeRefusal, withoutTauCloud } from '#safe-mode.js';
 export type {
   AddCheckoutInput,
   Checkout,
@@ -179,7 +180,6 @@ export {
   generatedIgnoreContent,
   generatedIgnorePath,
   generatedSetupPaths,
-  isTrackedLargeObjectPath,
   largeObjectThresholdBytes,
 } from '#workspace-config.js';
 

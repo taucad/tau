@@ -39,14 +39,22 @@ import {
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { ActionButton, disclosureMotion } from '@taucad/ui/components/actions';
-import { NamePopover } from '#components/revisions/name-popover.js';
-import { RevisionRegion } from '#components/revisions/revision-region.js';
-import { graphGeometry, gutterWidth, layoutRevisionGraph } from '#components/revisions/revision-graph-layout.js';
-import type { GraphNode, GraphRow, MarkerKind } from '#components/revisions/revision-graph-layout.js';
-import { HistoryGraph, HistoryLanesContext, useRowBoxes } from '#components/revisions/revision-graph-view.js';
-import type { BranchSlot } from '#components/revisions/revision-graph-view.js';
-import { conflictLinesOf, historyLanesOf, listedBranchesOf } from '#routes/w.$workspace.$project/history-lanes.js';
-import type { HistoryFilter, HistoryLanes } from '#routes/w.$workspace.$project/history-lanes.js';
+import { NamePopover } from '@taucad/revisions-ui/components/revisions/name-popover';
+import { RevisionRegion } from '@taucad/revisions-ui/components/revisions/revision-region';
+import {
+  graphGeometry,
+  gutterWidth,
+  layoutRevisionGraph,
+} from '@taucad/revisions-ui/components/revisions/revision-graph-layout';
+import type { GraphNode, GraphRow, MarkerKind } from '@taucad/revisions-ui/components/revisions/revision-graph-layout';
+import {
+  HistoryGraph,
+  HistoryLanesContext,
+  useRowBoxes,
+} from '@taucad/revisions-ui/components/revisions/revision-graph-view';
+import type { BranchSlot } from '@taucad/revisions-ui/components/revisions/revision-graph-view';
+import { conflictLinesOf, historyLanesOf, listedBranchesOf } from '@taucad/revisions-ui/lib/history-lanes';
+import type { HistoryFilter, HistoryLanes } from '@taucad/revisions-ui/lib/history-lanes';
 import { LaneStepRow, laneGraphRowOf, pendingStepsOf } from '#routes/w.$workspace.$project/history-lanes-rows.js';
 import type { LaneStep } from '#routes/w.$workspace.$project/history-lanes-rows.js';
 import {
@@ -58,7 +66,7 @@ import {
   timelineRowContent,
   timelineRowHover,
   timelineMarker,
-} from '#components/revisions/revision-timeline.js';
+} from '@taucad/revisions-ui/components/revisions/revision-timeline';
 import { RevisionRow, isAutosave, nextVersionNumber } from '#routes/w.$workspace.$project/revision-marker.js';
 import { ConflictDecision } from '#routes/w.$workspace.$project/revision-branches.js';
 import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
@@ -80,9 +88,9 @@ import {
   consumeBranchControl,
   useBranchControlRequest,
   useReportHistoryPaneShown,
-} from '#routes/w.$workspace.$project/revision-pane-requests.js';
+} from '@taucad/revisions-ui/lib/revision-pane-requests';
 import { useRevisionGraph, useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
-import type { RevisionCard, RevisionsView } from '#hooks/use-revisions.js';
+import type { RevisionCard, RevisionsView } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import {
   useProjectRole,
@@ -91,7 +99,7 @@ import {
   useRevisionStatus,
 } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import { useRevisionSessionUser } from '#lib/revision-actor.js';
+import { useRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { useChatRecords } from '#hooks/use-chat-records.js';
@@ -104,7 +112,7 @@ import { toast } from '@taucad/ui/components/sonner';
 
 /** Sync settings live in tau.json, which Tau refuses to write while it needs repair (R4). */
 const reportSyncSettingError = (error: unknown): void => {
-  toast.error('Could not change sync settings', {
+  toast.error('Couldn’t change backup settings', {
     description: error instanceof Error ? error.message : undefined,
   });
 };
@@ -118,13 +126,14 @@ const reportSyncSettingError = (error: unknown): void => {
  */
 /**
  * Loading is not empty (DESIGN, I6, S20): skeleton rows under the strip's one *Loading history…* sentence, never
- * *No revisions yet*.
+ * *No revisions yet*. The rows show from the wait ladder's skeleton mark (300 ms, `wait-skeleton`), counted from when
+ * they mount, so a History that answers at once draws its frame and then its rows (Progressive Loading Policy rule 16).
  *
  * @returns The loading geometry.
  */
 function HistoryLoading(): React.JSX.Element {
   return (
-    <div aria-hidden data-testid='history-skeleton' className='flex flex-col gap-2 px-2 py-1'>
+    <div aria-hidden data-testid='history-skeleton' className='flex wait-skeleton flex-col gap-2 px-2 py-1'>
       {[0, 1, 2].map((row) => (
         <div key={row} className='flex items-center gap-2'>
           <Skeleton className='size-2 rounded-full' />
@@ -247,7 +256,10 @@ function WhereYouAre(): React.JSX.Element {
   const commands = useRevisionCommands();
   const { restore, undo, isBusy } = useRestoreToPoint();
   const saveRevision = useSaveRevisionRequest();
-  const { requestUpgrade, canUpgradePlan } = useCommercialFeatures();
+  const plan = useCommercialFeatures();
+  /* C3: no Upgrade verb while the plan is unresolved. */
+  const canUpgradePlan = plan.isResolved && plan.canUpgradePlan;
+  const requestUpgrade = plan.isResolved ? plan.requestUpgrade : undefined;
   const { signIn } = useAuthLinks();
   const isAgentWorking = useAgentWorkHere(status) !== undefined;
   const isUnknown = line.kind === 'unknown';
@@ -296,7 +308,7 @@ function WhereYouAre(): React.JSX.Element {
         break;
       }
       case 'Upgrade': {
-        requestUpgrade();
+        requestUpgrade?.();
         break;
       }
       case 'Sign in': {
@@ -327,7 +339,10 @@ function WhereYouAre(): React.JSX.Element {
     <section aria-label='Where you are' className='flex shrink-0 flex-col gap-1 border-b bg-sidebar px-3 py-1.5'>
       <div data-slot='where-line' className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
         {isUnknown ? (
-          <Skeleton aria-hidden className='h-6 w-24 rounded-full' />
+          /* From the wait ladder's 300 ms mark, on a wrapper so the pill keeps its pulse (rule 16). */
+          <span aria-hidden className='inline-flex wait-skeleton'>
+            <Skeleton className='h-6 w-24 rounded-full' />
+          </span>
         ) : (
           <BranchChip projectId={projectId} branch={line.name} isBranchable={canBranch} />
         )}
@@ -1608,7 +1623,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const projectRole = useProjectRole();
   const isSignedOut = useRevisionSessionUser() === undefined;
   /* N4: the plan, read once here — the region itself stays presentational. */
-  const { canSyncFiles, storageLimitBytes, canUpgradePlan, requestUpgrade } = useCommercialFeatures();
+  const plan = useCommercialFeatures();
   const { signIn } = useAuthLinks();
   const conflicts = status?.conflicts ?? [];
   const conflictTexts = useConflictTexts();
@@ -1692,9 +1707,13 @@ export function RevisionsPanelBody(): React.JSX.Element {
             // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
             void updateProject(projectId, { syncChats: enabled }).catch(reportSyncSettingError);
           }}
-          canSyncFiles={canSyncFiles}
-          onUpgrade={canUpgradePlan ? requestUpgrade : undefined}
-          storageLimitBytes={storageLimitBytes}
+          {...(plan.isResolved
+            ? {
+                canSyncFiles: plan.canSyncFiles,
+                ...(plan.canUpgradePlan ? { onUpgrade: plan.requestUpgrade } : {}),
+                ...(plan.storageLimitBytes === undefined ? {} : { storageLimitBytes: plan.storageLimitBytes }),
+              }
+            : { planWait: { wait: plan.wait, retry: plan.retry } })}
           signInHref={signIn}
           role={projectRole}
           isSignedOut={isSignedOut}

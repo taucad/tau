@@ -1,46 +1,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-
-type SectionPlaneCut = Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>;
-
-type SectionViewBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST__?: {
-    setSectionCuts(cuts: readonly SectionPlaneCut[]): string[];
-    updateSectionCut(id: string, patch: Readonly<{ offset: number }>): void;
-    getSectionState(): { cuts: ReadonlyArray<{ id: string }>; isCommitted: boolean };
-    setCamera(camera: {
-      position: readonly [number, number, number];
-      target?: readonly [number, number, number];
-      fov?: number;
-      zoom?: number;
-    }): void;
-    projectWorldPoint(point: readonly [number, number, number]): {
-      x: number;
-      y: number;
-      visible: boolean;
-    };
-    getSectionCapStencilDiagnostics():
-      | {
-          sequence: number;
-          latest:
-            | {
-                drawnPieceCount: number;
-                crossingSourceCount: number;
-                overlapCandidateSourceCount: number;
-              }
-            | undefined;
-        }
-      | undefined;
-    getRenderFrame(): { metersPerRenderUnit: number };
-    getSectionHelperSummary(): {
-      sectionHelperMeshCount: number;
-      sectionHelperLineSegments2Count: number;
-      sectionHelperContourSegmentCount: number;
-    };
-    getSectionCapCompleteness(): unknown;
-  };
-};
+import type { SectionViewTestBridgeApi } from '@taucad/app/test-bridges/section-view';
 
 type CanvasSample = Readonly<{
   darkRedDiagnostic: number;
@@ -87,7 +48,7 @@ const webGpuValidationFailures = async (from: number): Promise<string[]> => {
 /** Cuts at `offsetMillimetres` on Z, removing +Z; a later call moves that cut, as a drag does. */
 const driveOverlapSectionView = async (offsetMillimetres: number): Promise<void> => {
   await target.evaluate((offset) => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -116,7 +77,7 @@ const overlapRegionForCanvas = async (): Promise<CanvasRegion> => {
   }
 
   const projected = await target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -140,10 +101,10 @@ const overlapRegionForCanvas = async (): Promise<CanvasRegion> => {
 };
 
 const getStencilDiagnostics = async (): Promise<
-  ReturnType<NonNullable<SectionViewBridgeWindow['__TAU_SECTION_VIEW_TEST__']>['getSectionCapStencilDiagnostics']>
+  ReturnType<SectionViewTestBridgeApi['getSectionCapStencilDiagnostics']>
 > =>
   target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -155,7 +116,7 @@ const waitForOverlapCandidates = async (): Promise<void> => {
   try {
     await target.waitFor(
       () => {
-        const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         return (bridge?.getSectionCapStencilDiagnostics()?.latest?.overlapCandidateSourceCount ?? 0) > 0;
       },
       undefined,
@@ -166,7 +127,7 @@ const waitForOverlapCandidates = async (): Promise<void> => {
       target.events(),
       getStencilDiagnostics(),
       target.evaluate(() => {
-        const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
         return {
           completeness: bridge.getSectionCapCompleteness(),
           frame: bridge.getRenderFrame(),
@@ -266,7 +227,7 @@ const captureAndSampleCanvas = async (options: CaptureCanvasOptions): Promise<Ca
         }
       }
 
-      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       if (!bridge) {
         throw new Error('Section view e2e bridge is not installed.');
       }

@@ -12,36 +12,54 @@ type Counts = { readonly liveProjectCount: number; readonly chatCount: number };
 const counts = vi.hoisted((): { value: Counts | undefined } => ({ value: { liveProjectCount: 2, chatCount: 5 } }));
 vi.mock('#lib/memory-kill-signal.js', () => ({ readDocumentSessionCounts: () => counts.value }));
 
-const { applyTauEventContext, readRouteId, setReportedUserId } = await import('#lib/sentry-context.lib.js');
+const {
+  applyTauEventContext,
+  onRoutePublished,
+  publishRoute,
+  readRouteId,
+  readRoutePattern,
+  routePathInstrumentation,
+  setReportedUserId,
+} = await import('#lib/sentry-context.lib.js');
 const { resetMemorySampler, setKernelHeapReader, setLiveCountsReader, takeMemorySample } =
   await import('@taucad/ui-core/lib/memory-sampler');
 
-type RouterWindow = Window & { __reactRouterDataRouter?: unknown };
+/** The routes as React Router's `HydratedRouter` hands them to a route instrumentation: id and relative path. */
+const routes: ReadonlyArray<{ id: string; path: string | undefined; index?: boolean }> = [
+  { id: 'root', path: '' },
+  { id: 'routes/w.$workspace', path: 'w/:workspace' },
+  { id: 'routes/w.$workspace.$project', path: ':project' },
+  { id: 'routes/_index', path: undefined, index: true },
+  { id: '../../app/routes/projects_', path: 'projects' },
+];
+for (const route of routes) {
+  routePathInstrumentation.route?.({ ...route, index: route.index, instrument: () => undefined });
+}
 
 afterEach(() => {
   resetMemorySampler();
-  delete (globalThis.window as RouterWindow).__reactRouterDataRouter;
+  publishRoute([]);
   setReportedUserId(undefined);
   environment.TAU_DEPLOY_CONTEXT = 'deploy-preview';
 });
 
 const publishRouter = (ids: readonly string[]): void => {
-  (globalThis.window as RouterWindow).__reactRouterDataRouter = {
-    state: { matches: ids.map((id) => ({ route: { id } })) },
-  };
+  publishRoute(ids);
 };
 
 const event = (patch: Partial<ErrorEvent> = {}): ErrorEvent => ({ type: undefined, ...patch });
 
 describe('applyTauEventContext', () => {
-  it('should tag the route, device class, build and deploy context', () => {
+  it('should tag the route, device class, build, deploy context and deployment ceiling', () => {
     publishRouter(['root', 'routes/w.$workspace', 'routes/w.$workspace.$project']);
 
     expect(applyTauEventContext(event()).tags).toStrictEqual({
       route: 'routes/w.$workspace.$project',
+      'route.pattern': '/w/:workspace/:project',
       device_class: 'constrained',
       build_id: '1792730113029',
       deploy_context: 'deploy-preview',
+      /* Unit tests build for the `cloud` ceiling. */
     });
   });
 
@@ -51,13 +69,37 @@ describe('applyTauEventContext', () => {
     expect(readRouteId()).toBe('routes/projects_');
   });
 
+  it('should name the pattern of the matched routes as React Router joins it, `/` for the index', () => {
+    publishRouter(['root', 'routes/_index']);
+    expect(readRoutePattern()).toBe('/');
+    publishRouter(['root', '../../app/routes/projects_']);
+    expect(readRoutePattern()).toBe('/projects');
+  });
+
+  it('should tell a listener each time the matched route changes, and stop once it unsubscribes', () => {
+    const listener = vi.fn<() => void>();
+    const unsubscribe = onRoutePublished(listener);
+
+    publishRouter(['root', 'routes/w.$workspace', 'routes/w.$workspace.$project']);
+    publishRouter(['root', 'routes/w.$workspace', 'routes/w.$workspace.$project']);
+    publishRouter(['root', 'routes/_index']);
+    unsubscribe();
+    publishRouter(['root', '../../app/routes/projects_']);
+
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
   it('should leave a value it cannot read absent rather than guess, and keep the tags an event has', () => {
     environment.TAU_DEPLOY_CONTEXT = undefined;
     device.constrained = false;
 
     const { tags } = applyTauEventContext(event({ tags: { device_class: 'from-event', e2e_run: 'e2e-1' } }));
 
-    expect(tags).toStrictEqual({ device_class: 'from-event', build_id: '1792730113029', e2e_run: 'e2e-1' });
+    expect(tags).toStrictEqual({
+      device_class: 'from-event',
+      build_id: '1792730113029',
+      e2e_run: 'e2e-1',
+    });
     expect(readRouteId()).toBeUndefined();
     device.constrained = true;
   });

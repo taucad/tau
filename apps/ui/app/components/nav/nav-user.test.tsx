@@ -10,6 +10,9 @@ import * as Cookies from 'es-cookie';
 import { metaConfig } from '#constants/meta.constants.js';
 import type * as UseFeatureModule from '#flags/use-feature.js';
 
+/* The funded rendering, as the Cloud chunk carries it (adaptive app deployment mode W12). */
+vi.mock('#cloud/nav-billing.js', async () => import('#cloud/nav-billing.funded.js'));
+
 const clientEnvironment = globalThis.window.ENV;
 const useNetworkConnectivityMock = vi.hoisted(() => vi.fn(() => true));
 const useEntitlementsMock = vi.hoisted(() => vi.fn(() => ({ tier: 'free', isResolved: true })));
@@ -47,8 +50,8 @@ vi.mock('#flags/use-feature.js', async (importOriginal) => {
   const actual = await importOriginal<typeof UseFeatureModule>();
   return {
     ...actual,
-    useFeature: (flag: Parameters<typeof actual.useFeature>[0]) =>
-      flag === 'onboarding' ? onboardingFlag.isEnabled : actual.useFeature(flag),
+    useFeatureState: (flag: Parameters<typeof actual.useFeatureState>[0]) =>
+      flag === 'onboarding' ? (onboardingFlag.isEnabled ? 'on' : 'off') : actual.useFeatureState(flag),
   };
 });
 
@@ -96,7 +99,7 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
 
 vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({ SvgIcon: () => <span aria-hidden /> }));
 
-vi.mock('#components/tier-badge.js', () => ({
+vi.mock('@taucad/billing-ui/components/tier-badge', () => ({
   ProBadge: () => <span>Pro</span>,
 }));
 
@@ -227,7 +230,8 @@ describe('NavUser', () => {
     render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByRole('status', { name: 'Offline' })).toBeInTheDocument();
-    expect(screen.getByText('Offline — online features unavailable')).toBeInTheDocument();
+    /* The footer tooltip and the user menu say the same sentence. */
+    expect(screen.getAllByText('You’re offline. Some features need a connection.')).toHaveLength(2);
   });
 });
 

@@ -1,11 +1,12 @@
 import { Fragment, useId } from 'react';
-import type { MousePresetId, PersonProfile, ViewerPreferences } from '@taucad/preferences';
+import type { MousePresetId, OrbitStyleId, PersonProfile, ViewerPreferences } from '@taucad/preferences';
 import {
   effectiveGizmoStyle,
   effectivePreset,
   familiarProducts,
   gizmoStyleIds,
   mousePresetIds,
+  orbitStyleIds,
   suggestedPreset,
 } from '@taucad/preferences';
 import type { CameraPresetId } from '@taucad/viewer/graphics/three/controls/camera-presets';
@@ -21,6 +22,7 @@ import {
 import type { GizmoChoiceId } from '#components/onboarding/setup-copy.js';
 import { gizmoChoice, legendBindings, presetReason } from '#components/onboarding/setup-model.js';
 import { SetupViewerPreview } from '#components/onboarding/setup-viewer-preview.js';
+import { orbitStyleCopy } from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
 import { resolveViewerCameraInput } from '#routes/w.$workspace.$project/use-viewer-camera-input.js';
 
 /** What step 3 reads and writes. */
@@ -29,12 +31,14 @@ export type SetupViewerStepProps = Readonly<{
   viewer: ViewerPreferences;
   onPresetChange: (preset: MousePresetId) => void;
   onGizmoChange: (choice: GizmoChoiceId) => void;
+  onOrbitStyleChange: (orbitStyle: OrbitStyleId) => void;
 }>;
 
 const gizmoChoices: readonly GizmoChoiceId[] = [...gizmoStyleIds, 'none'];
 
 const isPresetId = (value: string): value is MousePresetId => (mousePresetIds as readonly string[]).includes(value);
 const isGizmoChoice = (value: string): value is GizmoChoiceId => (gizmoChoices as readonly string[]).includes(value);
+const isOrbitStyle = (value: string): value is OrbitStyleId => (orbitStyleIds as readonly string[]).includes(value);
 
 /**
  * The binding legend: orbit, pan and zoom as key caps rendered from the preset data, then the bindings every preset
@@ -92,8 +96,9 @@ export function BindingLegend({
 }
 
 /**
- * Step 3: the mouse preset and gizmo, preselected from the tool answer, the binding legend and the preview. Choosing
- * a preset stores `viewer.controls.preset`, a style `viewer.gizmo.style`, and None
+ * Step 3: the mouse preset and gizmo, preselected from the tool answer, the orbit style (Turntable until chosen, each
+ * option with its hint so the two compare without a click), the binding legend and the preview. Choosing a preset
+ * stores `viewer.controls.preset`, an orbit style `viewer.controls.orbitStyle`, a style `viewer.gizmo.style`, and None
  * `viewDefaults['display.gizmo'] = false`.
  *
  * @param properties - The record and its writers.
@@ -104,11 +109,13 @@ export function SetupViewerStep({
   viewer,
   onPresetChange,
   onGizmoChange,
+  onOrbitStyleChange,
 }: SetupViewerStepProps): React.JSX.Element {
   const id = useId();
   const preset = effectivePreset(viewer, profile);
   const suggestion = suggestedPreset(profile.tool);
   const gizmo = gizmoChoice(viewer, profile);
+  const orbitStyle = viewer.controls.orbitStyle ?? 'turntable';
   const mapping = preset;
   /* The preview moves as every open viewer will: the same resolution the project viewer uses. */
   const navigation = resolveViewerCameraInput({ enabled: true, profile, viewer });
@@ -146,6 +153,41 @@ export function SetupViewerStep({
           <p className='text-xs text-muted-foreground' data-testid='setup-preset-reason'>
             {preset === suggestion ? presetReason(profile.tool) : familiarFromText(familiarProducts(preset))}
           </p>
+        </fieldset>
+
+        <fieldset className='flex min-w-0 flex-col gap-2'>
+          <legend className='mb-2 text-sm font-medium'>{viewerStepCopy.orbit}</legend>
+          <RadioGroup
+            value={orbitStyle}
+            onValueChange={(value) => {
+              if (isOrbitStyle(value)) {
+                onOrbitStyleChange(value);
+              }
+            }}
+            className='gap-1.5 sm:grid-cols-2'
+          >
+            {orbitStyleIds.map((option) => (
+              <label
+                key={option}
+                className='flex items-start gap-3 rounded-lg border bg-card px-3 py-2.5 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-accent/40'
+              >
+                <RadioGroupItem
+                  value={option}
+                  className='mt-0.5'
+                  aria-labelledby={`${id}-orbit-${option}`}
+                  aria-describedby={`${id}-orbit-${option}-hint`}
+                />
+                <span className='flex min-w-0 flex-col gap-0.5'>
+                  <span id={`${id}-orbit-${option}`} className='text-sm font-medium'>
+                    {orbitStyleCopy[option].name}
+                  </span>
+                  <span id={`${id}-orbit-${option}-hint`} className='text-xs text-muted-foreground'>
+                    {orbitStyleCopy[option].hint}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </RadioGroup>
         </fieldset>
 
         <div className='flex min-w-0 flex-col gap-2'>

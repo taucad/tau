@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { isDesktopFullscreen, onDesktopFullscreenChange } from '#filesystem/desktop-bridge.js';
+import { isDesktopFullscreen, onDesktopFullscreenChange } from '@taucad/files-ui/filesystem/desktop-bridge';
 
 const serverSnapshot = (): boolean => false;
 

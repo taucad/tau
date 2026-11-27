@@ -3,14 +3,13 @@
  * The runtime's import boundary (app state orchestration charter D5; plan § 4 A1a, R2-F16).
  *
  * The project runtime, the revision lifecycle and the host connector are lazy session children, loaded by dynamic
- * import. So neither entry nor the root route may reach them, or the project and editor machines, through a static
- * import: the welcome and root chunks are budgeted (`scripts/check-ssr-bundle-budget.mts`) and must not carry the
+ * import. So neither entry nor the root route may reach them, or the project and editor machines, through a static import: the welcome and root chunks are budgeted (`scripts/check-ssr-bundle-budget.mts`) and must not carry the
  * editor. The first three modules do not exist yet; their paths are named now so the lanes that add them (A6) land
  * behind this test.
  *
  * The walk follows the app's own specifiers (`#…` through the package imports map, and relative paths). For every
- * build-selected module it follows each variant beside it (`.cloud`, `.self-host`, `.desktop`), so the check holds
- * for every build. Declaration-level `import type` and `export type` erase, and `import()` is the lazy edge, so neither is followed.
+ * build-selected module it follows the `.desktop` variant beside it, so the check holds for the web and desktop
+ * builds. Declaration-level `import type` and `export type` erase, and `import()` is the lazy edge, so neither is followed.
  * Workspace packages never import `apps/ui/app`, so they are not walked.
  */
 
@@ -35,17 +34,19 @@ const roots = [
   '../serve/app/root.tsx',
 ] as const;
 
-/** Modules only a session's dynamic import may load (D5), and the two machines they compose. */
+/** Modules only a dynamic import may load (D5), and the two machines they compose. */
 const lazyOnly = [
   'runtime/project-runtime',
   'runtime/session-revisions',
   'runtime/host-connector',
   'machines/project.machine',
   'machines/editor.machine',
+  // The composer's image conversion runtime and its codecs load only when the first image needs converting (WP5 I6).
+  'runtime/attachment-image-runtime',
 ] as const;
 
 const extensions = ['.ts', '.tsx', '.js', '.jsx'];
-const variants = ['', '.cloud', '.self-host', '.desktop'];
+const variants = ['', '.desktop'];
 
 const toPosix = (path: string): string => path.split(sep).join('/');
 
@@ -152,15 +153,38 @@ describe('runtime import boundary', () => {
     expect(reached).toContain('runtime/app-runtime.ts');
     expect(reached).toContain('runtime/app-runtime-provider.tsx');
     expect(reached).toContain('hooks/use-sessions.tsx');
-    expect(reached).toContain('cloud/root-billing.cloud.tsx');
+    expect(reached).toContain('cloud/root-billing.tsx');
+  });
+
+  it('should keep the composer image step off the conversion runtime', () => {
+    /* The image step imports the conversion service on its first conversion, so walk the service as well. */
+    const composer = staticGraph([
+      'hooks/attachment-image.actor.ts',
+      'components/chat/chat-textarea-types.ts',
+      'services/attachment-image.service.ts',
+    ]);
+    const problems = lazyOnlyEdges(composer).filter((problem) =>
+      problem.startsWith('runtime/attachment-image-runtime'),
+    );
+    expect(problems, problems.join('\n')).toEqual([]);
+    expect([...composer.keys()].map((file) => toPosix(relative(appRoot, file)))).toContain(
+      'services/attachment-image-backend.ts',
+    );
+  });
+
+  it("should keep the composer's conversion service off Home's critical path", () => {
+    /* Both draft ownership sites and the composer render on Home; the service loads with the first conversion. */
+    const composer = staticGraph(['hooks/attachment-image.actor.ts', 'components/chat/chat-textarea-types.ts']);
+    const reached = [...composer.keys()].map((file) => toPosix(relative(appRoot, file)));
+    expect(reached).not.toContain('services/attachment-image.service.ts');
   });
 
   it('should find a static edge to a lazy-only module when one exists', () => {
     /* `ProjectProvider` builds its runtime (A6b), so it reaches the runtime and, through it, both machines. */
-    expect(lazyOnlyEdges(staticGraph(['hooks/use-project.tsx']))).toEqual([
-      'runtime/project-runtime is reached statically: hooks/use-project.tsx -> runtime/project-runtime.ts',
-      'machines/project.machine is reached statically: hooks/use-project.tsx -> runtime/project-runtime.ts -> machines/project.machine.ts',
-      'machines/editor.machine is reached statically: hooks/use-project.tsx -> runtime/project-runtime.ts -> machines/editor.machine.ts',
+    expect(lazyOnlyEdges(staticGraph(['hooks/project-provider.tsx']))).toEqual([
+      'runtime/project-runtime is reached statically: hooks/project-provider.tsx -> runtime/project-runtime.ts',
+      'machines/project.machine is reached statically: hooks/project-provider.tsx -> runtime/project-runtime.ts -> machines/project.machine.ts',
+      'machines/editor.machine is reached statically: hooks/project-provider.tsx -> runtime/project-runtime.ts -> machines/editor.machine.ts',
     ]);
   });
 });

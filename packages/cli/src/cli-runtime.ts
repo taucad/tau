@@ -43,12 +43,14 @@ export const createCliPlugins = async (options: CliRuntimeOptions = {}): Promise
     import('@taucad/smlib'),
     import('@taucad/gltf'),
     import('@taucad/brep'),
+    import('@taucad/cadmpeg'),
     import('@taucad/slicer'),
     import('@taucad/tscircuit'),
   ]);
-  const [{ assimp }, { image }, { zoo }, { smlibpy }, { build123d }, { picogk }] = await Promise.all([
+  const [{ assimp }, { image }, { heif }, { zoo }, { smlibpy }, { build123d }, { picogk }] = await Promise.all([
     import('@taucad/assimp'),
     import('@taucad/image'),
+    import('@taucad/heif'),
     import('@taucad/zoo'),
     import('@taucad/smlibpy'),
     import('@taucad/build123d'),
@@ -78,6 +80,8 @@ export const createCliPlugins = async (options: CliRuntimeOptions = {}): Promise
     picogk(),
     assimp({ preset: 'all' }),
     image(),
+    /* HEIC/HEIF stills to JPEG, PNG and WebP; libheif (LGPL-3.0) loads only for a HEIC source (operator ruling O1). */
+    heif(),
   ];
   const builtInNames = new Set(builtIns.map(({ meta }) => meta.name));
   const plugins: PluginInstance[] = [...builtIns];

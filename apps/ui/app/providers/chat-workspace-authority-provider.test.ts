@@ -23,7 +23,7 @@ import {
   waitForRootedBridgeOpener,
 } from '#providers/chat-workspace-authority-provider.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
-import type { WorkerRevisionCommand, WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
+import type { WorkerRevisionCommand, WorkerRevisionEvent } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
 const hookState = vi.hoisted(() => ({
   projectId: 'project_test',
@@ -35,30 +35,6 @@ const revisionRoot = vi.hoisted(() => ({
   commands: [] as WorkerRevisionCommand[],
   /** Listeners the provider registered for the root's events. */
   eventListeners: new Set<(event: WorkerRevisionEvent) => void>(),
-}));
-const settlementTransport = vi.hoisted(() => ({
-  subscribe: vi.fn(() => () => undefined),
-  get: vi.fn(() => [
-    {
-      type: 'turn.finalized',
-      turnId: 'turn_daemon',
-      runId: 'run_daemon',
-      chatId: 'chat_daemon',
-      projectId: 'project_test',
-      checkoutId: 'live',
-      revisionId: 'rev-daemon',
-      treeId: 'tree-daemon',
-      branch: 'main',
-      changedPaths: ['main.scad'],
-      trigger: 'turn',
-      runIds: ['run_daemon'],
-    },
-  ]),
-}));
-
-vi.mock('@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport', () => ({
-  subscribeHostTurnSettlements: settlementTransport.subscribe,
-  getHostFinalizedTurns: settlementTransport.get,
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -96,8 +72,6 @@ beforeEach(() => {
   hookState.refreshFromStorage.mockClear();
   hookState.patchChat.mockClear();
   revisionRoot.commands.length = 0;
-  settlementTransport.subscribe.mockClear();
-  settlementTransport.get.mockClear();
 });
 
 describe('ChatWorkspaceAuthorityProvider', () => {
@@ -119,8 +93,6 @@ describe('ChatWorkspaceAuthorityProvider', () => {
     renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
 
     expect(revisionRoot.commands).toEqual([]);
-    expect(settlementTransport.subscribe).not.toHaveBeenCalled();
-    expect(settlementTransport.get).not.toHaveBeenCalled();
   });
 
   it('should write a chat’s checkout once when it is placed by id', async () => {

@@ -45,6 +45,13 @@ export type ProjectRootRegistryOptions = {
    * Omitted, the registry lives only for this session.
    */
   readonly storePath?: string;
+  /**
+   * Called once when the store exists but cannot be read as a list of grants. The damaged file has already been
+   * renamed to `granted-roots.corrupt-<time>.json` beside it (R14), so the caller only reports it.
+   *
+   * @param quarantinePath - Where the damaged file now is.
+   */
+  readonly onQuarantine?: (quarantinePath: string) => void;
 };
 
 /**
@@ -88,17 +95,30 @@ export const createProjectRootRegistry = (options: ProjectRootRegistryOptions = 
   const admitted = new Set<string>();
 
   if (storePath !== undefined) {
+    let text: string | undefined;
     try {
-      const stored: unknown = JSON.parse(readFileSync(storePath, 'utf8'));
-      for (const entry of Array.isArray(stored) ? stored : []) {
-        if (typeof entry === 'string' && isAbsolute(entry)) {
-          admitted.add(resolve(entry));
-        }
-      }
+      text = readFileSync(storePath, 'utf8');
     } catch {
-      /* No grants yet, or a corrupt file: start empty rather than fail to boot.
-       * The user re-picks the folder, which is the same recovery the browser
-       * offers when a handle's permission lapses. */
+      /* No grants yet, or a file that cannot be read now: start empty rather than fail to boot. */
+    }
+    if (text !== undefined) {
+      let stored: unknown;
+      try {
+        stored = JSON.parse(text);
+      } catch {
+        stored = undefined;
+      }
+      if (Array.isArray(stored)) {
+        for (const entry of stored) {
+          if (typeof entry === 'string' && isAbsolute(entry)) {
+            admitted.add(resolve(entry));
+          }
+        }
+      } else {
+        /* A damaged file: start empty rather than fail to boot, but keep the damaged copy instead of letting the next
+         * admission overwrite it, so the folders it named can still be recovered by hand (B10). */
+        quarantine(storePath, options.onQuarantine);
+      }
     }
   }
 
@@ -141,31 +161,65 @@ export const createProjectRootRegistry = (options: ProjectRootRegistryOptions = 
     },
     roots: () => [...admitted],
     isTrusted(directory) {
-      if (!isAbsolute(directory)) {
-        return false;
-      }
-      const candidate = canonicalPath(directory);
-      /* Descendants are admitted because projects live *inside* a granted root
-       * (`userData/home/<project>`, `<picked>/<project>`); the `sep` suffix
-       * keeps `…/home-evil` from matching `…/home`. */
-      return [...admitted].some((root) => {
-        const canonicalRoot = canonicalPath(root);
-        return candidate === canonicalRoot || candidate.startsWith(canonicalRoot + sep);
-      });
+      return isAbsolute(directory) && trustedCanonical(admitted, directory) !== undefined;
     },
     canonical(directory) {
-      if (!isAbsolute(directory)) {
-        return undefined;
-      }
-      const candidate = canonicalPath(directory);
-      return [...admitted].some((root) => {
-        const canonicalRoot = canonicalPath(root);
-        return candidate === canonicalRoot || candidate.startsWith(canonicalRoot + sep);
-      })
-        ? candidate
-        : undefined;
+      return isAbsolute(directory) ? trustedCanonical(admitted, directory) : undefined;
     },
   };
+};
+
+/* Descendants are admitted because projects live *inside* a granted root (`userData/home/<project>`,
+ * `<picked>/<project>`); the `sep` suffix keeps `…/home-evil` from matching `…/home`. A filesystem root (`/`, `C:\`)
+ * already ends in the separator, so it is not given a second one. */
+const isWithin = (candidate: string, root: string): boolean =>
+  candidate === root || candidate.startsWith(root.endsWith(sep) ? root : root + sep);
+
+/**
+ * The canonical spelling of `directory` when it lies inside an admitted root, touching only the roots it names (B30).
+ *
+ * Canonicalising a root is a synchronous `realpath`, and on a mount that has stopped answering it blocks the whole
+ * process. So the roots whose stored spelling already contains the candidate are canonicalised first, which is
+ * normally one; every other root is canonicalised only when none of those admits it, which is the case of a path
+ * spelled through a different alias of its root (`/var` and `/private/var` on macOS).
+ *
+ * @param admitted - The admitted roots, as stored.
+ * @param directory - Absolute path the caller names.
+ * @returns The candidate's canonical spelling, or undefined when no root admits it.
+ */
+const trustedCanonical = (admitted: ReadonlySet<string>, directory: string): string | undefined => {
+  const named = resolve(directory);
+  const candidate = canonicalPath(directory);
+  const matched: string[] = [];
+  const others: string[] = [];
+  for (const root of admitted) {
+    (isWithin(named, root) || isWithin(candidate, root) ? matched : others).push(root);
+  }
+  for (const roots of [matched, others]) {
+    if (roots.some((root) => isWithin(candidate, canonicalPath(root)))) {
+      return candidate;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Move a damaged grant file aside as `granted-roots.corrupt-<time>.json` and report it. A rename that fails is
+ * skipped: the registry starts empty either way, as it always has.
+ *
+ * @param storePath - The damaged store.
+ * @param report - Told where the copy went.
+ */
+const quarantine = (storePath: string, report: ((quarantinePath: string) => void) | undefined): void => {
+  const stem = basename(storePath).replace(/\.json$/u, '');
+  const time = new Date().toISOString().replaceAll(/[:.]/gu, '-');
+  const quarantinePath = join(dirname(storePath), `${stem}.corrupt-${time}.json`);
+  try {
+    renameSync(storePath, quarantinePath);
+  } catch {
+    return;
+  }
+  report?.(quarantinePath);
 };
 
 /* Own, enumerable `__proto__` is what a structured-cloned IPC payload can

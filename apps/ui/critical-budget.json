@@ -1,0 +1,27 @@
+{
+  "$comment": "Guard G3 (scripts/check-critical-budget.mts): each route class's interactive tier on the web client build, in the one adaptive entry (adaptive app deployment mode W12; written from main with --write, gate G1). Growth past the tolerance fails, and so does landing under the budget by more than the ratchet margin until it is lowered (--write). Raising a budget names its reason in the commit.",
+  "tolerance": {
+    "bytes": 0.01,
+    "requests": 2
+  },
+  "ratchetMargin": {
+    "bytes": 0.05,
+    "requests": 5
+  },
+  "variants": {
+    "adaptive": {
+      "project": {
+        "brotliBytes": 2013000,
+        "requests": 311,
+        "largestChunkBrotliBytes": 167234,
+        "knownHeavy": {}
+      },
+      "home": {
+        "brotliBytes": 1275412,
+        "requests": 228,
+        "largestChunkBrotliBytes": 143390,
+        "knownHeavy": {}
+      }
+    }
+  }
+}

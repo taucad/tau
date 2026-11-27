@@ -65,21 +65,21 @@ describe('seeded end-to-end flag state', () => {
     ],
   ])('resolves the %s state in an undeployed debug build', async (_name, seed, expected) => {
     const { flags } = await load({ debug: true }, seed);
-    expect(flags.getAllFlags()).toMatchObject(expected);
+    expect(flags.resolveFlags()).toMatchObject(expected);
     expect((globalThis as Seeded).__tauFeatureFlags?.()).toMatchObject(expected);
   });
 
   it('keeps the seeded state when a PostHog client evaluates or is withdrawn', async () => {
     const { remote, flags } = await load({ debug: true }, { 'viewer-controls': true });
     remote.connectRemoteFlags(client({ 'viewer-controls': false, onboarding: true }));
-    expect(flags.getAllFlags()).toMatchObject({ viewerControls: true, onboarding: false });
+    expect(flags.resolveFlags()).toMatchObject({ viewerControls: true, onboarding: false });
     remote.disconnectRemoteFlags();
-    expect(flags.isFeatureEnabled('viewerControls')).toBe(true);
+    expect(flags.resolveFlags().viewerControls).toBe(true);
   });
 
   it('still applies requires to a seeded state', async () => {
     const { flags } = await load({ debug: true }, { 'onboarding-auto-open': true });
-    expect(flags.isFeatureEnabled('onboardingAutoOpen')).toBe(false);
+    expect(flags.resolveFlags().onboardingAutoOpen).toBe(false);
   });
 
   it.each([
@@ -88,11 +88,11 @@ describe('seeded end-to-end flag state', () => {
   ])('ignores the seed and installs no probe in %s', async (_name, env) => {
     const { remote, flags } = await load(env, { onboarding: true });
     expect(remote.isSeededFlagSourceAllowed).toBe(false);
-    expect(flags.isFeatureEnabled('onboarding')).toBe(false);
+    expect(flags.resolveFlags().onboarding).toBe(false);
     expect((globalThis as Seeded).__tauFeatureFlags).toBeUndefined();
     // PostHog stays the source there.
     remote.connectRemoteFlags(client({ onboarding: true }));
-    expect(flags.isFeatureEnabled('onboarding')).toBe(true);
+    expect(flags.resolveFlags().onboarding).toBe(true);
     remote.disconnectRemoteFlags();
   });
 
@@ -100,7 +100,7 @@ describe('seeded end-to-end flag state', () => {
     const { remote, flags } = await load({ debug: true }, 'viewer-controls');
     expect(remote.readRemoteFlagValues()).toBeUndefined();
     remote.connectRemoteFlags(client({ 'viewer-controls': true }));
-    expect(flags.isFeatureEnabled('viewerControls')).toBe(true);
+    expect(flags.resolveFlags().viewerControls).toBe(true);
     remote.disconnectRemoteFlags();
   });
 });

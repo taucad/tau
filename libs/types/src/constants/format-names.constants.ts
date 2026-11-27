@@ -274,4 +274,60 @@ export const formatConfigurations = {
     description:
       'Developed by RealityWave for use in web-based 3D visualization, providing an XML-based format for interactive 3D graphics.',
   },
+  sldprt: {
+    name: 'SolidWorks Part (SLDPRT)',
+    description:
+      'Native part file of Dassault Systèmes SolidWorks, holding the feature history and the exact boundary-representation solid.',
+  },
+  catpart: {
+    name: 'CATIA V5 Part (CATPART)',
+    description:
+      'Native part file of Dassault Systèmes CATIA V5, holding the feature specification tree and exact geometry.',
+  },
+  ipt: {
+    name: 'Autodesk Inventor Part (IPT)',
+    description: 'Native part file of Autodesk Inventor, holding the feature history and the exact solid.',
+  },
+  iam: {
+    name: 'Autodesk Inventor Assembly (IAM)',
+    description: 'Native assembly file of Autodesk Inventor, referencing part files and their placements.',
+  },
+  f3d: {
+    name: 'Autodesk Fusion Archive (F3D)',
+    description: 'Native design archive of Autodesk Fusion, holding the timeline and exact geometry of a design.',
+  },
+  f3z: {
+    name: 'Autodesk Fusion Bundle (F3Z)',
+    description: 'Autodesk Fusion bundle of a design together with the designs it references.',
+  },
+  fcstd: {
+    name: 'FreeCAD Document (FCSTD)',
+    description:
+      'Native document of the open-source FreeCAD modeler: a zip of the document graph and its OpenCASCADE shapes.',
+  },
+  '3dm': {
+    name: 'Rhino 3D Model (3DM)',
+    description:
+      'Native model file of Robert McNeel & Associates Rhino, holding NURBS curves, surfaces and polysurfaces.',
+  },
+  sat: {
+    name: 'ACIS Text (SAT)',
+    description: 'Text form of the Spatial ACIS boundary-representation kernel format.',
+  },
+  sab: {
+    name: 'ACIS Binary (SAB)',
+    description: 'Binary form of the Spatial ACIS boundary-representation kernel format.',
+  },
+  smt: {
+    name: 'ShapeManager Text (SMT)',
+    description: 'Text form of Autodesk ShapeManager, the ACIS-derived kernel format used by Autodesk products.',
+  },
+  smb: {
+    name: 'ShapeManager Binary (SMB)',
+    description: 'Binary form of Autodesk ShapeManager, the ACIS-derived kernel format used by Autodesk products.',
+  },
+  pvz: {
+    name: 'Creo View (PVZ)',
+    description: 'PTC Creo View package of product structure and lightweight geometry.',
+  },
 } as const satisfies Record<FileExtension, FormatConfiguration>;

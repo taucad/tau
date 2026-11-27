@@ -147,6 +147,9 @@ try {
     }
   });
   await navigationPage.goto(origin);
+  // Hydration waits for idle time or the first pointer or key press, and a link clicked before it is a native full
+  // page load that replaces the document and its probe. The client enhancement marks the page once React has hydrated.
+  await navigationPage.waitForFunction(() => document.body.dataset['page'] === '/');
   await navigationPage.evaluate(() => {
     document.documentElement.dataset['navigationProbe'] = 'retained';
   });
@@ -163,8 +166,14 @@ try {
   // React Router updates history before the destination route moves focus to its main landmark.
   await navigationPage.waitForFunction(() => document.activeElement?.id === 'main');
   assert.equal(await navigationPage.evaluate(() => document.documentElement.dataset['navigationProbe']), 'retained');
-  assert.ok(dataRequests.some((url) => url.includes('/pricing.data?_routes=www-pricing')));
-  assert.ok(dataRequests.some((url) => url.includes('/_root.data?_routes=www-home')));
+  // Trailing-slash-aware data requests (B5, RR4): `/pricing/` asks for `/pricing/_.data` and `/` for `/_.data`, the
+  // names the app's marketing edge function forwards here.
+  const requested = dataRequests.map((url) => {
+    const { pathname, searchParams } = new URL(url);
+    return `${pathname}?_routes=${searchParams.get('_routes') ?? ''}`;
+  });
+  assert.ok(requested.includes('/pricing/_.data?_routes=www-pricing'), requested.join(', '));
+  assert.ok(requested.includes('/_.data?_routes=www-home'), requested.join(', '));
   assert.equal(await navigationPage.locator('#main:focus').count(), 1);
   assert.deepEqual(navigationErrors, []);
   await navigationContext.close();
@@ -261,8 +270,14 @@ try {
     // oxlint-disable-next-line eslint/no-await-in-loop -- Inspect both SSR archive links in this one browser document.
     assert.equal(await nojsPage.locator(`#downloads a[href="https://downloads.tau.new/latest/${file}"]`).count(), 1);
   }
-  // A Mac has no archive fallback: without the catalog no Mac file is linked and the Mac entries stay hidden.
-  assert.equal(await nojsPage.locator('a[href*="Tau-macos"]').count(), 0);
+  // A Mac has no qualified archive fallback: without the catalog the only Mac file is the Intel beta ZIP.
+  assert.equal(await nojsPage.locator('a[href*="Tau-macos"]').count(), 1);
+  assert.equal(
+    await nojsPage
+      .locator('[data-beta-route="macIntel"] a[href="https://downloads.tau.new/latest/Tau-macos-x64.zip"]')
+      .count(),
+    1,
+  );
   assert.equal(await nojsPage.locator('[data-mac-route]:visible').count(), 0);
   await nojsPage.goto(origin + '/privacy/');
   assert.equal(await nojsPage.getByRole('button', { name: 'Reset analytics preference' }).isDisabled(), true);

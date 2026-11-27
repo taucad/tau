@@ -1,10 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { describe, it, expect, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { PublicationTopbar } from '#components/share/publication-topbar.js';
-import type { ParsedPublication } from '#components/share/parsed-publication.js';
+import type { ParsedPublication } from '@taucad/publish-ui/components/share/parsed-publication';
 
 vi.mock('#components/share/fork-action.js', () => ({
   ForkAction: () => <button type='button'>Remix</button>,
@@ -106,6 +106,30 @@ describe('PublicationTopbar', () => {
     expect(clipboard.writeText).toHaveBeenCalledExactlyOnceWith(shareUrl);
   });
 
+  it('starts the copy inside the press and, when the clipboard refuses, shows the link selected', async () => {
+    const clipboard = { writeText: vi.fn<Clipboard['writeText']>().mockRejectedValue(new Error('denied')) };
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: clipboard });
+    const shareUrl = 'https://tau.example/s/tau~shr_1';
+
+    render(
+      <TooltipProvider>
+        <MemoryRouter>
+          <PublicationTopbar publication={publication} files={new Map()} parameters={{}} shareUrl={shareUrl} />
+        </MemoryRouter>
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    expect(clipboard.writeText).toHaveBeenCalledExactlyOnceWith(shareUrl);
+
+    const field = await screen.findByRole('textbox', { name: 'Share link' });
+    expect(field).toHaveValue(shareUrl);
+    expect(screen.getByText('Select the link and copy it.')).toBeVisible();
+    await waitFor(() => {
+      expect(field).toHaveFocus();
+    });
+  });
+
   it('does not render viewer-page share controls, even for owners', () => {
     renderTopbar();
     expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument();
@@ -162,7 +186,7 @@ describe('PublicationTopbar', () => {
       const title = screen.getByText('Topbar fixture');
       expect(title.parentElement).not.toHaveClass('hidden');
       expect(title.parentElement).toHaveClass('order-last', 'w-full', 'sm:order-none');
-      expect(screen.getByText('Public Tau share')).toHaveClass('hidden', 'sm:block');
+      expect(screen.getByText('Cloud link · Anyone with the link')).toHaveClass('hidden', 'sm:block');
     });
   });
 });

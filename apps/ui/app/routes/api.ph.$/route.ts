@@ -33,6 +33,8 @@ export const posthogProxy = async (request: Request): Promise<Response> => {
   }
 
   const environment = await getEnvironment();
+  // `request.url`, not the `url` argument: a resource route is requested directly, never as `.data`, and its path and
+  // query are forwarded exactly as sent (B4).
   const url = new URL(request.url);
   const rawHost = url.pathname.startsWith('/api/ph/static/')
     ? environment.POSTHOG_ASSET_HOST

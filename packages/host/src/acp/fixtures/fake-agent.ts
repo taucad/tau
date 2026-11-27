@@ -32,6 +32,7 @@
  * | `abandon` | asks for permission and exits without answering it, leaving the request outstanding on the host |
  * | `tools` | emits a Codex-style `read`/`execute`/`think`/`fetch`/`edit` tool sequence with locations, diff and terminal content, each `pending → in_progress → completed` |
  * | `clear-title` | clears the write call title on its terminal update, exercising ACP presence semantics |
+ * | `update-while-asking` | refines the write call with an `in_progress` update while its permission request is outstanding, then says a line before the call completes, as claude-agent-acp can |
  * | `skills` / `skill-names` | reports complete native skill files, or only their names for packaged-host checks |
  * | `fail:quota` / `fail:rate` / `fail:context` / `fail:model` | stops on that provider failure the way both pinned adapters do: a typed AIR `sessionFailure` on an `end_turn` response when the client advertised it, else the provider sentence as text and a `-32603` rejection; `model` is a service failure whose title is a raw provider JSON body, as Codex sends one |
  * | `reset:soon` / `reset:lifted` / `reset:past` | reports Claude Code's `_claude/rateLimit` on `usage_update` before answering: rejected with a reset an hour out then a report no client can read, rejected then allowed again, or rejected with a reset that has already passed |
@@ -47,6 +48,7 @@
  * | Mode | Behaviour |
  * | --- | --- |
  * | `grouped` | `configOptions` offers the models as `SessionConfigSelectGroup[]` rather than a flat list |
+ * | `value-meta` | every mode value carries `_meta: { kind }`, as codex-acp 1.7.0 sends it |
  * | `pushed-models` | `session/new` offers two models, then Grok's `_x.ai/models/update` lists four a moment later, as grok 1.0.52 does after starting on a renewable sign-in; every later answer offers all four |
  * | `auth-required` | `initialize` advertises codex-acp 1.7.0's own methods (`api-key`, `chat-gpt`, and `chat-gpt-device-code` to a client that advertised `elicitation.url`), none with a terminal command, and `session/new` errors `-32000` |
  * | `claude-terminal-auth` | `initialize` advertises claude-agent-acp 0.70.0's two methods to a client that sent `_meta['terminal-auth']`, each naming *this* process (`process.execPath` and `process.argv.slice(1)`) as its command, exactly as the real adapter does |
@@ -371,6 +373,7 @@ const toolCallUpdate = async (
   result: {
     readonly toolCallId: string;
     readonly status: 'in_progress' | 'completed' | 'failed';
+    readonly rawInput?: unknown;
     readonly rawOutput?: unknown;
     readonly content?: readonly unknown[];
   },
@@ -394,6 +397,30 @@ const promptText = (blocks: readonly unknown[]): string =>
  * @param session - Session whose current values these are.
  * @returns The full option set, as `session/new` and friends must return it.
  */
+/** The adapter's own mode names, as claude-agent-acp 0.70.0 `buildAvailableModes` spells them. */
+const modeNames: Readonly<Record<string, string>> = {
+  auto: 'Auto',
+  default: 'Manual',
+  acceptEdits: 'Accept Edits',
+  plan: 'Plan Mode',
+  bypassPermissions: 'Bypass Permissions',
+};
+
+/**
+ * Modes offered on a model, Claude-shaped: `auto` only on the first model, as
+ * claude-agent-acp offers it only where `supportsAutoMode` is true.
+ *
+ * @param model - The session's model.
+ * @returns The mode ids, in the adapter's order.
+ */
+const modesOf = (model: string): string[] => [
+  ...(model === models[0] ? ['auto'] : []),
+  'default',
+  'acceptEdits',
+  'plan',
+  'bypassPermissions',
+];
+
 const configOptionsOf = (session: SessionState): readonly unknown[] => {
   const options = [...models, ...(modelsPushed ? pushedModels : [])].map((value) => ({ value, name: value }));
   return [
@@ -411,10 +438,11 @@ const configOptionsOf = (session: SessionState): readonly unknown[] => {
       category: 'mode',
       type: 'select',
       currentValue: String(session.config['mode']),
-      options: [
-        { value: 'default', name: 'Default' },
-        { value: 'plan', name: 'Plan' },
-      ],
+      options: modesOf(session.model).map((value) => ({
+        value,
+        name: modeNames[value] ?? value,
+        ...(inMode('value-meta') ? { _meta: { kind: value } } : {}),
+      })),
     },
     {
       id: 'thought_level',
@@ -741,9 +769,9 @@ const writeGatedFile = async (sessionId: string, session: SessionState, text: st
   await toolCall(sessionId, { toolCallId: 'write-1', title: 'write hello.txt', rawInput: { path: 'hello.txt' } });
   /* SP-4 Result 3: a real adapter under the user's own `approval_policy =
    * "never"` writes without asking at all, so the fixture models that too. */
-  const permission = text.includes('noask')
-    ? { result: { outcome: { outcome: 'selected', optionId: 'allow' } } }
-    : await request('session/request_permission', {
+  const asked = text.includes('noask')
+    ? Promise.resolve({ result: { outcome: { outcome: 'selected', optionId: 'allow' } } })
+    : request('session/request_permission', {
         sessionId,
         toolCall: { toolCallId: 'write-1', title: 'write hello.txt', _meta: { token: 'permission-metadata-canary' } },
         options: [
@@ -758,6 +786,17 @@ const writeGatedFile = async (sessionId: string, session: SessionState, text: st
           { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
         ],
       });
+  if (text.includes('update-while-asking')) {
+    /* Long enough for the host to record the request durably before the refinement lands. */
+    await pause(250);
+    await toolCallUpdate(sessionId, { toolCallId: 'write-1', status: 'in_progress', rawInput: { path: 'hello.txt' } });
+  }
+  const permission = await asked;
+  if (text.includes('update-while-asking')) {
+    await textChunk(sessionId, 'Writing hello.txt now.');
+    /* Past the host's idle flush, so the line is its own durable message before the call completes. */
+    await pause(400);
+  }
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the permission response shape is fixed by ACP.
   const outcome = (permission.result as { outcome?: { outcome?: string; optionId?: string } } | undefined)?.outcome;
   if (outcome?.outcome !== 'selected' || !outcome.optionId?.startsWith('allow')) {
@@ -1192,6 +1231,10 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       const configId = asString(params['configId']);
       if (configId === 'model') {
         session.model = asString(params['value'], session.model);
+        /* A model without the current mode clamps it to `default`, as claude-agent-acp does. */
+        if (!modesOf(session.model).includes(String(session.config['mode']))) {
+          session.config['mode'] = 'default';
+        }
         saveSessions();
       } else if (
         configId in session.config &&
@@ -1273,9 +1316,16 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
         if (limit !== undefined) {
           await textChunk(promptSessionId, `${limit.title}\n\n`);
         }
-        process.stderr.write(
-          `[SYSTEM_ERROR] Prompt for session ${promptSessionId} failed: RequestError: Internal error\n    at fake-agent\n`,
-        );
+        /* Flushed before the rejection, with no beat after it: the client reads stderr and stdout on separate pipes,
+         * and must still attach this line to the failure (`adapter-connection.ts`, `stderrWrittenBefore`). */
+        await new Promise<void>((resolve) => {
+          process.stderr.write(
+            `[SYSTEM_ERROR] Prompt for session ${promptSessionId} failed: RequestError: Internal error\n    at fake-agent\n`,
+            () => {
+              resolve();
+            },
+          );
+        });
         fail(-32_603, 'Internal error');
         return;
       }

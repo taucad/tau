@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- provider wire keys use native snake_case. */
+import { attachmentImageMediaTypes } from '@taucad/agent-host/wire';
 import { z } from 'zod';
 import type { ModelProviderWire } from '#model-invocation.types.js';
 
@@ -20,21 +21,63 @@ const cacheControlSchema = z.object({ type: z.literal('ephemeral'), ttl: z.enum(
 /* Routes a conversation to one supplier server so its prefix cache is found again. The caller
  * sends a hash, never a Tau identifier (I4). OpenAI documents at most 64 characters. */
 const promptCacheKeySchema = z.string().min(1).max(64);
-/* Linear on purpose: a backtracking group per quadruple overflows V8's regexp stack
- * on a multi-megabyte attachment. Length and padding position are checked apart. */
-const isBase64 = (value: string): boolean => value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/u.test(value);
+/**
+ * Whether `value` from `start` on is padded base64: a length and alphabet loop over the string in place (chat
+ * performance WP-14 step 6), with no regular expression and no substring of a multi-megabyte attachment.
+ *
+ * @param value - The string.
+ * @param start - Where the base64 begins (after a data URL's prefix).
+ * @returns True for padded standard base64, the empty string included.
+ */
+const isBase64From = (value: string, start = 0): boolean => {
+  if ((value.length - start) % 4 !== 0) {
+    return false;
+  }
+  let padding = 0;
+  for (let index = start; index < value.length; index += 1) {
+    const code = value.codePointAt(index) ?? 0;
+    if (code === 0x3d) {
+      padding += 1;
+    } else if (
+      padding > 0 ||
+      !(
+        (code >= 0x41 && code <= 0x5a) ||
+        (code >= 0x61 && code <= 0x7a) ||
+        (code >= 0x30 && code <= 0x39) ||
+        code === 0x2b ||
+        code === 0x2f
+      )
+    ) {
+      return false;
+    }
+  }
+  return padding <= 2;
+};
+const isBase64 = (value: string): boolean => isBase64From(value);
 /* Base64 spends four characters on every three bytes, with the final group padded out. */
 const base64Length = (bytes: number): number => 4 * Math.ceil(bytes / 3);
 /* D17: an image is capped at 4 MiB of raw bytes, captures included. */
 const maximumImageBase64Length = base64Length(4 * 1024 * 1024);
 const base64Schema = z.string().max(maximumImageBase64Length).refine(isBase64, 'Invalid base64 image data');
-const imageMediaTypeSchema = z.enum(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+/* The stored image types (`attachmentMedia`, I2): GIF stays so that chats which already hold one still send. */
+const imageMediaTypeSchema = z.enum(attachmentImageMediaTypes);
+const base64Marker = ';base64,';
+const dataImageUrlPrefixLength = Math.max(...attachmentImageMediaTypes.map((type) => `data:${type};base64,`.length));
 const dataImageUrlSchema = z
   .string()
-  .max('data:image/jpeg;base64,'.length + maximumImageBase64Length)
+  .max(dataImageUrlPrefixLength + maximumImageBase64Length)
   .refine((value) => {
-    const match = /^data:(image\/(?:jpeg|png|gif|webp));base64,(.*)$/u.exec(value);
-    return match !== null && base64Schema.safeParse(match[2]).success;
+    /* The media type is one of the stored image types, so its end is found within the longest prefix. */
+    const marker = value.startsWith('data:') ? value.slice(0, dataImageUrlPrefixLength).indexOf(base64Marker, 5) : -1;
+    if (marker === -1 || marker + base64Marker.length > dataImageUrlPrefixLength) {
+      return false;
+    }
+    const start = marker + base64Marker.length;
+    return (
+      imageMediaTypeSchema.safeParse(value.slice(5, marker)).success &&
+      value.length - start <= maximumImageBase64Length &&
+      isBase64From(value, start)
+    );
   }, 'Invalid image data URL');
 /* D24 (amended R1): a PDF attachment is capped at 16 MiB of raw bytes. */
 const maximumDocumentBase64Length = base64Length(16 * 1024 * 1024);
@@ -46,10 +89,13 @@ const documentBase64Schema = z
 const pdfDataUrlSchema = z
   .string()
   .max(pdfDataUrlPrefix.length + maximumDocumentBase64Length)
-  .refine((value) => {
-    const match = /^data:application\/pdf;base64,(.*)$/u.exec(value);
-    return match !== null && documentBase64Schema.safeParse(match[1]).success;
-  }, 'Invalid PDF data URL');
+  .refine(
+    (value) =>
+      value.startsWith(pdfDataUrlPrefix) &&
+      value.length - pdfDataUrlPrefix.length <= maximumDocumentBase64Length &&
+      isBase64From(value, pdfDataUrlPrefix.length),
+    'Invalid PDF data URL',
+  );
 const documentNameSchema = z.string().min(1).max(256);
 
 const textSchema = z
@@ -182,7 +228,8 @@ const anthropicOutputConfigSchema = z.object({ effort: z.enum(['low', 'medium', 
 const anthropicEffortMessageSchema = z
   .object({ role: z.literal('system'), content: z.array(z.never()).max(0), output_config: anthropicOutputConfigSchema })
   .strict();
-const responseReasoningEffortSchema = z.enum(['none', 'low', 'medium', 'high', 'xhigh']);
+/** OpenAI's Responses levels; `max` is model-dependent (GPT-6.1 Terra) and the provider refuses it elsewhere. */
+const responseReasoningEffortSchema = z.enum(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
 const responseConfigurationUpdateSchema = z
   .object({
     type: z.literal('configuration_update'),
@@ -196,7 +243,7 @@ const googleReasoningConfigSchema = z
         thinking_config: z
           .object({
             include_thoughts: z.literal(true),
-            thinking_level: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+            thinking_level: z.enum(['LOW', 'MEDIUM', 'HIGH', 'XHIGH']),
           })
           .strict(),
         thought_tag_marker: z.literal('think'),

@@ -39,6 +39,15 @@ export const canonicalCaptureViews = [
   captureView('bottom', 'Bottom — View From −Z'),
 ] as const;
 
+/**
+ * The note a `multi_angle` capture of a 2D view carries: a drawing has one canonical view, so the agent
+ * receives one image and is told why. Both hosts return it, so the wording cannot drift.
+ *
+ * @public
+ */
+export const planarMultiAngleNotice = (view: string): string =>
+  `View ${view} is a 2D drawing with one canonical view, so multi_angle returned one image; its six camera angles apply to 3D views only.`;
+
 /** Inputs the agent `screenshot` tool varies. @public */
 export type CaptureExportOptionsInput = {
   /** `screenshot`'s own mode discriminant. */

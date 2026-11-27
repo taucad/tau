@@ -3,14 +3,15 @@
  *
  * ```text
  * canvas: creating → ready → presented ; lost ; failed
- * context: canvasId, backend, surface, cameraSurface
+ * context: canvasId, backend, tier, surface, cameraSurface
  * ```
  *
  * - **creating**: the surface is in the document and R3F is building its renderer. A placeholder surface (the stage
  *   held while the WebGPU probe answers) stays here until it is removed.
  * - **ready**: R3F's `onCreated` handed over the host. The host adapter, a callback actor started with the R3F root in
  *   its input, holds the renderer, the DOM canvas and `invalidate` in its closure; none of them enters context.
- * - **presented**: the first frame with area reached the screen.
+ * - **presented**: the first frame with area reached the screen. From here the canvas's render tier (resolved in
+ *   `ready` from the renderer) is what the canvas presents on: {@link selectPresentedRenderTier}.
  * - **lost**: the browser took the GPU context; the canvas shows its context-lost fallback until Retry remounts it. A
  *   surface that re-attaches after its loss (a Suspense reveal) reports the loss again from `creating`.
  * - **failed**: the renderer could not start or its WebGPU device was destroyed; the viewer's error boundary takes it.
@@ -36,6 +37,7 @@ import { createCallbackLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, CallbackActorLogic, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import type { CameraClipPolicy, cameraMachine } from '@taucad/camera/machine';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
+import type { RenderTier } from '#graphics/three/render-tier.js';
 import {
   infiniteGridFadeEndVisibleSpans,
   infiniteGridPresentationPlaneByUpDirection,
@@ -55,12 +57,16 @@ import { describeFault } from '#machines/machine-fault.js';
 export type CanvasSurface = Readonly<{ width: number; height: number; pixelRatio: number }>;
 
 /**
- * Why a renderer could not run: a WebGPU start or device failure (the viewer then remounts on WebGL) or any other
- * failure (the viewer's failure screen shows it).
+ * Why a renderer could not run: a WebGPU start or device failure (the viewer then remounts on WebGL), a browser that
+ * gives no WebGL 2 context (`context-unavailable`, the failure screen explains it), or any other failure (the viewer's
+ * failure screen shows it).
  *
  * @public
  */
-export type CanvasFailure = Readonly<{ kind: 'webgpu-initialization' | 'renderer'; message: string }>;
+export type CanvasFailure = Readonly<{
+  kind: 'webgpu-initialization' | 'context-unavailable' | 'renderer';
+  message: string;
+}>;
 
 /**
  * What the surface is: a Three canvas, or the placeholder that holds its place while the WebGPU probe answers. A
@@ -146,6 +152,8 @@ export type CanvasEvent =
   | {
       type: 'hostCreated';
       backend: ResolvedGraphicsBackend;
+      /** The renderer's render tier, resolved once for this canvas incarnation. */
+      tier: RenderTier;
       surface: CanvasSurface;
       /** The DOM surface, passed on in `surfaceAttached` for adapters that bind input to it. */
       domElement: HTMLCanvasElement;
@@ -191,6 +199,8 @@ export interface CanvasContext {
   kind: CanvasSurfaceKind;
   /** The backend the renderer started on; set in `ready`. */
   backend: ResolvedGraphicsBackend | undefined;
+  /** The renderer's render tier; set in `ready`. */
+  tier: RenderTier | undefined;
   /** The last reported surface; set in `ready`. */
   surface: CanvasSurface | undefined;
   failure: CanvasFailure | undefined;
@@ -408,6 +418,7 @@ const canvasMachineDefinition = setup({
     canvasId: input.canvasId,
     kind: input.kind,
     backend: undefined,
+    tier: undefined,
     surface: undefined,
     failure: undefined,
     // A Three canvas presents the camera from the start, with no clip policy until its scene reports a grid. A
@@ -456,7 +467,10 @@ const canvasMachineDefinition = setup({
             surface: event.surface,
             domElement: event.domElement,
           });
-          return { target: 'ready', context: { backend: event.backend, surface: event.surface, host } };
+          return {
+            target: 'ready',
+            context: { backend: event.backend, tier: event.tier, surface: event.surface, host },
+          };
         },
         rendererFailed: ({ context, event }, enq) => ({
           target: 'failed',
@@ -621,3 +635,15 @@ export const selectCanvasAwaitingFrame = (snapshot: CanvasSnapshot | undefined):
  */
 export const selectCanvasBackend = (snapshot: CanvasSnapshot | undefined): ResolvedGraphicsBackend | undefined =>
   snapshot?.hasTag('rendering') ? snapshot.context.backend : undefined;
+
+/**
+ * The render tier this surface presents on: set once its first frame reached the screen and while it still draws.
+ * Before the first frame, and after loss or failure (a WebGPU canvas the browser destroyed remounts on WebGL as a new
+ * canvas incarnation), there is none, so a reader never takes a doomed renderer's tier for the one on screen.
+ *
+ * @param snapshot - The canvas snapshot, if a canvas is attached.
+ * @returns The tier, or `undefined` while no frame of a live renderer is on screen.
+ * @public
+ */
+export const selectPresentedRenderTier = (snapshot: CanvasSnapshot | undefined): RenderTier | undefined =>
+  snapshot?.matches('presented') ? snapshot.context.tier : undefined;

@@ -1,18 +1,34 @@
 import { kernelConfigurations } from '@taucad/types/constants';
 import { describe, it, expect } from 'vitest';
 import {
+  admissionPhases,
   agentToolKinds,
   clientMetricEntrySchema,
   ingestPayloadSchema,
   IngestEntryName,
+  retiredIngestEntryNames,
+  retiredIngestEntrySchema,
   kernelIds,
   tauToolNames,
 } from '#ingest.js';
 
 describe('IngestEntryName', () => {
-  it('should define canonical entry name constants', () => {
-    expect(IngestEntryName.KERNEL_CREATE_GEOMETRY).toBe('observability.createGeometry');
-    expect(IngestEntryName.KERNEL_EXPORT_GEOMETRY).toBe('observability.exportGeometry');
+  it('should not name a retired entry', () => {
+    for (const name of retiredIngestEntryNames) {
+      expect(Object.values(IngestEntryName)).not.toContain(name);
+    }
+  });
+});
+
+describe('retiredIngestEntrySchema', () => {
+  it.each(retiredIngestEntryNames)('should admit %s by name and strip what it carries', (name) => {
+    const entry = { name, duration: 5, detail: { status: 'error', error: 'Kernel crash' } };
+    expect(retiredIngestEntrySchema.parse(entry)).toEqual({ name });
+  });
+
+  it('should not admit a live or unknown entry name', () => {
+    expect(retiredIngestEntrySchema.safeParse({ name: IngestEntryName.AGENT_TURN }).success).toBe(false);
+    expect(retiredIngestEntrySchema.safeParse({ name: 'unknown.metric' }).success).toBe(false);
   });
 });
 
@@ -23,22 +39,8 @@ describe('kernelIds', () => {
 });
 
 describe('clientMetricEntrySchema', () => {
-  it('should accept a valid createGeometry entry', () => {
-    const entry = {
-      name: 'observability.createGeometry',
-      duration: 123.45,
-      detail: { status: 'success' },
-    };
-    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
-  });
-
-  it('should accept a valid exportGeometry entry', () => {
-    const entry = {
-      name: 'observability.exportGeometry',
-      duration: 50,
-      detail: { status: 'success', exportFormat: 'step' },
-    };
-    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
+  it.each(retiredIngestEntryNames)('should no longer accept the retired %s entry', (name) => {
+    expect(clientMetricEntrySchema.safeParse({ name, duration: 5, detail: { status: 'success' } }).success).toBe(false);
   });
 
   it('should accept a large-object fetch of counts only, and refuse one that names an object', () => {
@@ -126,31 +128,18 @@ describe('clientMetricEntrySchema', () => {
     expect(clientMetricEntrySchema.safeParse({ ...entry, duration: -1 }).success).toBe(false);
   });
 
-  it('should accept an entry without detail', () => {
-    const entry = { name: 'observability.createGeometry', duration: 10 };
-    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
-  });
-
-  it.each([IngestEntryName.KERNEL_CREATE_GEOMETRY, IngestEntryName.KERNEL_EXPORT_GEOMETRY])(
-    'should reject free-text error detail on %s',
-    (name) => {
-      expect(
-        clientMetricEntrySchema.safeParse({ name, duration: 5, detail: { status: 'error', error: 'Kernel crash' } })
-          .success,
-      ).toBe(false);
-    },
-  );
-
   it('should reject an entry with unknown name', () => {
     expect(() => clientMetricEntrySchema.parse({ name: 'unknown.metric', duration: 1 })).toThrow();
   });
 
   it('should reject an entry with negative duration', () => {
-    expect(() => clientMetricEntrySchema.parse({ name: 'observability.createGeometry', duration: -1 })).toThrow();
+    const detail = { direction: 'push', outcome: 'ok', placement: 'browser' };
+    expect(() => clientMetricEntrySchema.parse({ name: IngestEntryName.SYNC_ATTEMPT, duration: -1, detail })).toThrow();
   });
 
   it('should reject an entry missing duration', () => {
-    expect(() => clientMetricEntrySchema.parse({ name: 'observability.createGeometry' })).toThrow();
+    const detail = { direction: 'push', outcome: 'ok', placement: 'browser' };
+    expect(() => clientMetricEntrySchema.parse({ name: IngestEntryName.SYNC_ATTEMPT, detail })).toThrow();
   });
 
   it('should reject an entry missing name', () => {
@@ -162,8 +151,12 @@ describe('ingestPayloadSchema', () => {
   it('should accept a valid payload with multiple entries', () => {
     const payload = {
       entries: [
-        { name: 'observability.createGeometry', duration: 100, detail: { status: 'success' } },
-        { name: 'observability.exportGeometry', duration: 50, detail: { status: 'success', exportFormat: 'stl' } },
+        {
+          name: IngestEntryName.SYNC_ATTEMPT,
+          duration: 100,
+          detail: { direction: 'push', outcome: 'ok', placement: 'browser' },
+        },
+        { name: IngestEntryName.PROJECT_OPEN, duration: 50, detail: { phase: 'first_view', cache: 'warm' } },
       ],
     };
     expect(ingestPayloadSchema.parse(payload)).toEqual(payload);
@@ -276,6 +269,54 @@ describe('agent usage entries', () => {
         detail: { agentId: 'tau', placement: 'browser', outcome: 'completed', ...extra },
       }),
     ).toThrow();
+  });
+
+  /* B4, C3: tool-result delivery and admission phases, content-free and allowlisted field by field (rule 5). */
+  const delivered = {
+    agentId: 'tau',
+    placement: 'browser',
+    outcome: 'completed',
+    toolResults: 4,
+    toolResultsExcluded: 1,
+    toolResultsUnsettled: 1,
+    toolResultDelayMax: 0.42,
+    admissionDelay: { create: 1.2, page: 0.05, dispatch: 0.03, host: 0.08, delivery: 0.02 },
+    hostStart: 'cold',
+    chatState: 'reopened',
+    deploymentRefetched: true,
+  };
+
+  it('should accept a turn carrying every delivery and admission field', () => {
+    const entry = { name: IngestEntryName.AGENT_TURN, duration: 4000, detail: delivered };
+
+    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
+    expect(Object.keys(delivered.admissionDelay)).toEqual([...admissionPhases]);
+  });
+
+  it('should drop a detail field outside the allowlist, so it is never recorded', () => {
+    const parsed = clientMetricEntrySchema.parse({
+      name: IngestEntryName.AGENT_TURN,
+      duration: 4000,
+      detail: { ...delivered, chatId: 'chat_123', toolResultPaths: ['main.ts'] },
+    });
+
+    expect(parsed.detail).toEqual(delivered);
+  });
+
+  it.each([
+    ['an unknown admission phase', { admissionDelay: { model: 1 } }],
+    ['a negative admission delay', { admissionDelay: { host: -1 } }],
+    ['an unknown host start', { hostStart: 'lukewarm' }],
+    ['an unknown chat state', { chatState: 'evicted' }],
+    ['a fractional tool-result count', { toolResults: 1.5 }],
+  ])('should reject a turn with %s', (_label, extra) => {
+    expect(
+      clientMetricEntrySchema.safeParse({
+        name: IngestEntryName.AGENT_TURN,
+        duration: 1,
+        detail: { ...delivered, ...extra },
+      }).success,
+    ).toBe(false);
   });
 
   it('should clamp a turn longer than a day instead of dropping it', () => {

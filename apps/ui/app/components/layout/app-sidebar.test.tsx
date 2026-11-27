@@ -8,18 +8,17 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { featureFlagDefaults } from '#flags/flag.constants.js';
 import type { FeatureFlags } from '#flags/flag.constants.js';
+import { forgetClientFacts, writeClientFacts } from '#lib/client-facts.js';
+
+/* The funded rendering, as the Cloud chunk carries it (adaptive app deployment mode W12). */
+vi.mock('#cloud/nav-billing.js', async () => import('#cloud/nav-billing.funded.js'));
 
 const mockState = vi.hoisted(() => ({
   flags: undefined as FeatureFlags | undefined,
-  open: true,
 }));
 
 vi.mock('#flags/use-feature.js', () => ({
   useFeatureFlags: () => mockState.flags,
-}));
-
-vi.mock('#hooks/use-cookie.js', () => ({
-  useCookie: () => [mockState.open, vi.fn()] as const,
 }));
 
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({
@@ -78,7 +77,8 @@ async function getMoreItem(name: string): Promise<HTMLElement | undefined> {
 describe('AppSidebar', () => {
   beforeEach(() => {
     mockState.flags = featureFlagDefaults;
-    mockState.open = true;
+    localStorage.clear();
+    forgetClientFacts();
     vi.unstubAllEnvs();
   });
 
@@ -159,7 +159,7 @@ describe('AppSidebar', () => {
   });
 
   it('removes the hidden Allotment pane from interaction and the accessibility tree', () => {
-    mockState.open = false;
+    writeClientFacts({ sidebarOpen: false });
     const { container } = renderSidebar();
     const sidebar = container.querySelector('#app-sidebar');
 

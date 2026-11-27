@@ -7,7 +7,7 @@ import { Button } from '@taucad/ui/components/button';
 import { ENV } from '#environment.config.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { FloatingPanel, FloatingPanelContent } from '#components/ui/floating-panel.js';
-import { readApiRequestId, recordApiRequestId } from '#lib/api-request-id.js';
+import { readApiRequestId, recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { reportUiError, startErrorReporting } from '#lib/error-reporting.js';
 import { isObservabilityHarnessEnabled } from '#lib/observability-harness-context.js';
 import {
@@ -15,15 +15,17 @@ import {
   triggerObservabilityWorkerError,
   triggerObservabilityKernelTermination,
 } from '#lib/observability-harness-triggers.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 export const meta: MetaFunction = () => [{ title: 'Observability harness · Tau' }];
 
-export const loader = ({ request }: LoaderFunctionArgs): { trigger: string | undefined; hasDsn: boolean } => {
+// React Router's shared type, not `Route.LoaderArgs`: typegen leaves this route out of builds without the harness.
+export const loader = ({ url }: LoaderFunctionArgs): { trigger: string | undefined; hasDsn: boolean } => {
   if (!isObservabilityHarnessEnabled()) {
     // oxlint-disable-next-line @typescript-eslint/only-throw-error -- React Router turns thrown responses into HTTP statuses.
     throw new Response('Not found', { status: 404 });
   }
-  const url = new URL(request.url);
   if (url.searchParams.get('trigger') === 'ssr-loader') {
     throw new Error('Observability harness SSR loader error');
   }
@@ -78,10 +80,17 @@ const navigateToTrigger = (trigger: string): void => {
 
 /** Exercise the browser restore owner on a disposable in-memory project, never a user's filesystem. */
 const triggerObservabilityRevisionFailure = async (status: (message: string) => void): Promise<void> => {
-  const { getRevisionClient } = await import('#hooks/use-revision-status.js');
-  const worker = new Worker(new URL('../../lib/observability-harness-revision.worker.ts', import.meta.url), {
-    type: 'module',
+  const { getRevisionClient } = await loadCode(async () => {
+    const { getRevisionClient } = await import('#hooks/use-revision-status.js');
+    return { getRevisionClient };
   });
+  const worker = createModuleWorker(
+    () =>
+      new Worker(new URL('../../lib/observability-harness-revision.worker.ts', import.meta.url), {
+        type: 'module',
+      }),
+    { name: 'observability-harness-revision' },
+  );
   const projectId = `observability-${randomUuid()}`;
   const client = getRevisionClient({ projectId, worker });
   const failed = Promise.withResolvers<void>();

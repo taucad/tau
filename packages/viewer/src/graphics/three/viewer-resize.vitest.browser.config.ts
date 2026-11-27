@@ -3,6 +3,7 @@ import type {} from '../../test/webgpu-profile.test-utils.js';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 const webGpuProfile = process.env['TAU_E2E_WEBGPU_PROFILE'] ?? 'hardware';
@@ -39,6 +40,8 @@ export default defineConfig({
     },
   },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     provide: { webGpuProfile, surfaceAa },
     include: [
       'src/graphics/three/shader-cache.browser.test.ts',
@@ -46,16 +49,19 @@ export default defineConfig({
       'src/graphics/three/node-frame-reference.browser.test.ts',
       'src/graphics/three/webgpu-depth-sampling.browser.test.ts',
       'src/graphics/three/transmission-retirement.browser.test.ts',
-      'src/graphics/three/post-processing-antialias.browser.test.tsx',
+      // Not post-processing-antialias.browser.test.tsx: it runs alone (post-processing-antialias.vitest.browser.config.ts).
       'src/graphics/three/ao-denoise.browser.test.ts',
+      'src/graphics/three/gtao-falloff.browser.test.ts',
       'src/graphics/three/ao-normal.browser.test.ts',
       'src/graphics/three/materials/infinite-grid-material.browser.test.ts',
       'src/graphics/three/fxaa.browser.test.ts',
       'src/graphics/three/controls/viewport-gizmo-cube.browser.test.ts',
       'src/graphics/three/controls/camera-wheel-router.browser.test.ts',
       'src/graphics/three/controls/camera-input-router.browser.test.ts',
+      'src/graphics/three/controls/camera-orbit-style.browser.test.ts',
       'src/graphics/three/controls/camera-navigation.browser.test.tsx',
       'src/graphics/three/controls/viewport-gizmo-styles.browser.test.ts',
+      'src/graphics/three/controls/viewport-gizmo-navigation.browser.test.ts',
       'src/graphics/three/viewer-resize-continuation.browser.test.tsx',
       'src/graphics/three/shared-quad-camera.browser.test.ts',
       'src/graphics/svg/svg-grid-parity.browser.test.tsx',

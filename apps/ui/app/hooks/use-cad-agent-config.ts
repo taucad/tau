@@ -1,17 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CadAgentConfigInput, TauAgentHostId, ToolSelection } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { useCookie } from '#hooks/use-cookie.js';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { personFieldFromProfile } from '@taucad/preferences';
 import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
 import { useContextPayload } from '#hooks/use-context-payload.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { isBrowserAgentHostProviderKind, probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import {
@@ -55,11 +55,12 @@ const isModelResolved = (providerKind: string): boolean => providerKind !== unkn
 /* eslint-disable @typescript-eslint/naming-convention -- the keys are the host's own capability-probe codes. */
 /** Capability-probe codes rendered as the reason the user reads. */
 const capabilityReasons = {
-  WORKER_UNAVAILABLE: 'This browser cannot start the worker Tau runs the agent in.',
-  WEB_LOCKS_UNAVAILABLE: 'This browser does not provide the Web Locks the agent log needs.',
-  BROADCAST_CHANNEL_UNAVAILABLE: 'This browser cannot coordinate tabs for the agent log.',
-  STORAGE_NOT_WRITABLE: 'This project’s storage cannot hold a durable agent log.',
-  SYNC_ACCESS_HANDLE_UNAVAILABLE: 'This browser cannot append to the agent log in this project’s storage.',
+  WORKER_UNAVAILABLE: 'This browser can’t run the Tau agent.',
+  WEB_LOCKS_UNAVAILABLE: 'This browser can’t run the Tau agent.',
+  BROADCAST_CHANNEL_UNAVAILABLE: 'This browser can’t run the Tau agent.',
+  STORAGE_NOT_WRITABLE:
+    'The Tau agent can’t save its work in this project’s storage. Check that Tau can write to this project’s folder.',
+  SYNC_ACCESS_HANDLE_UNAVAILABLE: 'This browser can’t run the Tau agent.',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- back to Tau-authored names. */
 
@@ -270,23 +271,33 @@ export const useBrowserAgentHostProjectAvailability = (providerKind: string): Br
  * dispatch, where a refusal is a typed `AgentHostPlacementError` on the chat
  * banner rather than a row that quietly greys out.
  *
- * @returns The discovered targets, and whether discovery is still running.
+ * A listing that is incomplete or holds a refused agent is listed again on the
+ * next look — window focus, or `refresh` from a surface that shows it — since
+ * the person fixes a refusal outside Tau and only a fresh listing carries the
+ * fix to a window already open. The host bounds what a re-listing costs.
+ *
+ * @returns The discovered targets, whether discovery is still running, and `refresh`.
  * @public
  */
 export const useAgentHostPlacements = (): {
   readonly targets: readonly AgentHostPlacementTarget[];
   readonly loading: boolean;
+  /** List again if the current listing is incomplete or holds a refused agent; otherwise nothing. */
+  readonly refresh: () => void;
 } => {
   const { projectId } = useProject({ enableNoContext: true }) ?? {};
   const [state, setState] = useState<{
     readonly targets: readonly AgentHostPlacementTarget[];
     readonly loading: boolean;
   }>({ targets: [], loading: true });
+  const rediscoverIfStaleRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     let active = true;
+    let listed: readonly AgentHostPlacementTarget[] = [];
     const discover = async (): Promise<void> => {
       const targets = await listAgentHostPlacements().catch(() => []);
+      listed = targets;
       for (const target of targets) {
         publishAvailability(
           availabilityKey(projectId, target.hostId),
@@ -313,25 +324,35 @@ export const useAgentHostPlacements = (): {
     };
     void discover();
     /* A listing that lost a source is missing rows, not reporting their
-     * absence — so the next time the window is looked at, ask again. */
-    const rediscoverIfIncomplete = (): void => {
-      if (hostPlacementsIncomplete()) {
+     * absence, and a refused agent may since have been fixed — so the next
+     * time the window is looked at, ask again. */
+    const rediscoverIfStale = (): void => {
+      if (
+        hostPlacementsIncomplete() ||
+        listed.some((target) => target.externalAgents?.some((agent) => agent.refusal !== undefined))
+      ) {
         void discover();
       }
     };
-    globalThis.addEventListener('focus', rediscoverIfIncomplete);
+    rediscoverIfStaleRef.current = rediscoverIfStale;
+    globalThis.addEventListener('focus', rediscoverIfStale);
     /* A daemon handed to this page (X54) is a new row: list again. */
     const stopListening = onLoopbackAgentHostsChanged(() => {
       void discover();
     });
     return () => {
       active = false;
-      globalThis.removeEventListener('focus', rediscoverIfIncomplete);
+      rediscoverIfStaleRef.current = () => undefined;
+      globalThis.removeEventListener('focus', rediscoverIfStale);
       stopListening();
     };
   }, [projectId]);
 
-  return state;
+  const refresh = useCallback(() => {
+    rediscoverIfStaleRef.current();
+  }, []);
+
+  return useMemo(() => ({ ...state, refresh }), [state, refresh]);
 };
 
 /**
@@ -343,7 +364,8 @@ export const useAgentHostPlacements = (): {
  * @returns The field, or `undefined`.
  */
 const usePersonField = (executionKind: CadAgentConfigInput['execution']['kind']): CadAgentConfigInput['person'] => {
-  const isOnboardingEnabled = useFeature('onboarding');
+  /* Only a known `on` shares the person: a turn sent before PostHog answers carries no personal field. */
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
   const [isPersonShared] = useCookie(cookieName.chatCtxPerson, true);
   const { profile } = usePersonRecord();
   if (!isOnboardingEnabled || !isPersonShared || executionKind !== 'tau') {

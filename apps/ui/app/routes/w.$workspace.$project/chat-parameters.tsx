@@ -1,12 +1,12 @@
 import { useModelAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { PaneWaitSkeleton, ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { XIcon } from 'lucide-react';
 import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { toast } from '@taucad/ui/components/sonner';
-import { ExportSelector } from '#components/files/export-selector.js';
+import { ExportSelector } from '@taucad/files-ui/components/files/export-selector';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -378,6 +378,7 @@ function useProjectParametersSource(): ParametersSource {
         projectRef.send({ type: 'destroyGeometryUnit', entryPath });
       },
       QuickExport: ParametersQuickExport,
+      ManifestWait: ParametersManifestWait,
       usePaneviewPersistence: useParametersPaneviewPersistence,
     }),
     [
@@ -392,6 +393,11 @@ function useProjectParametersSource(): ParametersSource {
       switchParameterGroup,
     ],
   );
+}
+
+/** An entry's rows while its parameter manifest arrives: the parameter form's shape, no words (rule 15). */
+function ParametersManifestWait(): React.JSX.Element {
+  return <PaneWaitSkeleton shape='fields' label='Parameters' />;
 }
 
 function ProjectParametersPane(): React.JSX.Element {
@@ -457,7 +463,11 @@ export function ParametersPanelBody(): React.JSX.Element {
   const parametersAnchor = useTourAnchor('parameters');
   return (
     <div ref={parametersAnchor} className='flex size-full min-h-0 flex-col'>
-      {availability === 'ready' ? <ProjectParametersPane /> : <ProjectSyncPlaceholder state={availability} />}
+      {availability === 'ready' ? (
+        <ProjectParametersPane />
+      ) : (
+        <ProjectWaitSkeleton state={availability} shape='fields' label='Parameters' />
+      )}
     </div>
   );
 }

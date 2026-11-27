@@ -1,24 +1,31 @@
 import { PassThrough } from 'node:stream';
 
 import { createReadableStreamFromReadable } from '@react-router/node';
-import { applyHandleRequestHeaders } from '@taucad/runtime/react-router';
 import { isbot } from 'isbot';
 import { renderToPipeableStream } from 'react-dom/server';
 import type { RenderToPipeableStreamOptions } from 'react-dom/server';
 import { ServerRouter } from 'react-router';
-import type { AppLoadContext, EntryContext, HandleErrorFunction } from 'react-router';
+import type { EntryContext, HandleErrorFunction, RouterContextProvider } from 'react-router';
 import { cdnCacheControlResponseHeader } from '@taucad/ui-core/constants/cache.constants';
-import { reportOnlyContentSecurityPolicy } from '#lib/content-security-policy.server.js';
-import { reportingEndpoints } from '#lib/browser-reports.server.js';
 import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
 import { skewProtectionCookie, skewProtectionToken } from '#lib/skew-protection.server.js';
 import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '@taucad/ui-core/lib/module-preload-cap';
-import { claimSsrErrors, leafRouteId, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
+import {
+  claimSsrErrors,
+  leafRouteId,
+  queueSsrError,
+  reportSsrError,
+  routeErrorInstrumentation,
+} from '#lib/sentry.server.js';
 import { startDocumentTiming } from '#lib/server-timing.server.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
+import { parseDeploymentSeed } from '#cloud/deployment-seed.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 
 export const streamTimeout = 5000;
+
+/** RR7: the route a failed loader, action or middleware belongs to, for the SSR error report's route tags. */
+export const instrumentations = [routeErrorInstrumentation];
 
 /**
  * Server errors React Router saw in a loader, action or render (SB10). A request the client aborted is skipped, as
@@ -44,7 +51,7 @@ export default function handleRequest(
   responseStatusCode: number,
   responseHeaders: Headers,
   routerContext: EntryContext,
-  loadContext: AppLoadContext,
+  loadContext: RouterContextProvider,
 ): Promise<Response> | Response {
   /* LB0a: the cold-instance mark, the loader's catalog entry and the render time to the headers go out as
    * `Server-Timing`. A streamed document's headers leave at shell ready, so all-ready and bytes are not in them. */
@@ -52,17 +59,15 @@ export default function handleRequest(
   const routeId = leafRouteId(routerContext);
   // Errors `handleError` took for this document go out with its route and status (SB10).
   claimSsrErrors(request, routeId, responseStatusCode);
-  applyHandleRequestHeaders(responseHeaders);
-  responseHeaders.set('Content-Security-Policy-Report-Only', reportOnlyContentSecurityPolicy);
-  // SB6: CSP violations (`report-to default`) and Chromium crash reports go to the same-origin receiver.
-  responseHeaders.set('Reporting-Endpoints', reportingEndpoints);
+  /* Cross-origin isolation, the report-only CSP and `Reporting-Endpoints` are on every response, so the root
+   * middleware sets them (`#lib/root-middleware.server`); what follows is right on a document only. */
   /* TAU-UI-6: a document names its build's hashed chunks, and a deploy stops serving them, so no
    * cache may answer a load or refresh with a stored document without asking the server. It is
    * also rendered from the visitor's cookies, so no shared cache may keep it (`private`). The apex
    * `/` is chosen by a presentation cookie, so no cache keeps it at all (`no-store`), as the `/`
    * rule in `netlify.toml` says; that file's header blocks do not reach function responses, and the
-   * marketing edge function only covers Netlify. Routes that choose their own policy
-   * (`cdnBackedSsrRouteHeaders`) keep it. */
+   * marketing edge function only covers Netlify. Routes that choose their own policy (a loader's
+   * `Cache-Control`, such as the cloud link viewer's `private, no-store`) keep it. */
   if (!responseHeaders.has('Cache-Control')) {
     responseHeaders.set(
       'Cache-Control',
@@ -70,7 +75,7 @@ export default function handleRequest(
     );
   }
   /* TAU-UI-S: pin this page's later chunk, `.data` and manifest requests to the deploy that rendered it
-   * (production only). Never on a document the CDN may store (`cdnBackedSsrRouteHeaders`): a stored
+   * (production only). Never on a document the CDN may store (one carrying `Netlify-CDN-Cache-Control`): a stored
    * `Set-Cookie` would be replayed to every visitor, or keep the response out of the cache. */
   const skewCookie = responseHeaders.has(cdnCacheControlResponseHeader)
     ? undefined
@@ -107,7 +112,13 @@ export default function handleRequest(
   return new Promise<Response>((resolve: (value: Response) => void, reject: (reason: unknown) => void) => {
     let shellRendered = false;
     const userAgent = request.headers.get('user-agent');
-    const isBotAgent = userAgent ? isbot(userAgent) : false;
+    /*
+     * A prerender is not a bot. React Router 8 prerenders over HTTP through a Vite preview server, whose `fetch` sends
+     * `User-Agent: node`, which `isbot` matches; the shells must stream as the function's document does for a browser
+     * (shell invariant 1). React Router sets `IS_RR_BUILD_REQUEST` for the whole prerender pass.
+     */
+    const isBuildRequest = process.env['IS_RR_BUILD_REQUEST'] === 'yes';
+    const isBotAgent = userAgent && !isBuildRequest ? isbot(userAgent) : false;
     const readyOption: keyof RenderToPipeableStreamOptions =
       isBotAgent || routerContext.isSpaMode ? 'onAllReady' : 'onShellReady';
 
@@ -115,9 +126,15 @@ export default function handleRequest(
       abort();
     }, streamTimeout + 1000);
 
-    /* D5: one runtime per request, never started, so every reader renders the snapshot the client hydrates from. */
+    /* D5: one runtime per request, never started, so every reader renders the snapshot the client hydrates from. W11:
+     * it starts from the root loader's deployment answer, as the client's does from the document's copy of it. */
+    const deploymentSeed = parseDeploymentSeed(
+      (routerContext.staticHandlerContext.loaderData as Readonly<Record<string, { deployment?: unknown } | undefined>>)[
+        'root'
+      ]?.deployment,
+    );
     const app = (
-      <AppRuntimeProvider runtime={createAppRuntime()}>
+      <AppRuntimeProvider runtime={createAppRuntime({ deploymentSeed })}>
         <ServerRouter context={routerContext} url={request.url} />
       </AppRuntimeProvider>
     );

@@ -15,6 +15,7 @@ import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
+import { disconnectRemoteFlags } from '#flags/remote-flags.js';
 import { mock } from 'vitest-mock-extended';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
@@ -25,14 +26,15 @@ import type {
   ProjectRouteVerification,
   WatchEvent,
   WatchRequest,
+  ProjectAbsence,
 } from '@taucad/filesystem';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { Project } from '@taucad/types';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
-import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
-import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type { PendingProjectOperation } from '@taucad/project-library/types/pending-project-operation.types';
+import type { ProjectLibraryState } from '@taucad/project-library/types/project-library.types';
 
 const fakeProject: Project = createProjectFixture({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
@@ -165,6 +167,18 @@ const emitManifestChange = (path: string): void => {
 };
 const mockListProjectManifests = vi.fn<() => Promise<ProjectDiscoveryResult>>();
 const mockVerifyProjectRoute = vi.fn<(input: { projectId: string }) => Promise<ProjectRouteVerification>>();
+/*
+ * Storage's answer to `verifyAbsent` (fast-path FW2, index-contract review A1): this suite's disk is what its discovery
+ * double lists, read without consuming a queued result or counting a call. A row that tests the proof itself sets
+ * its own answer.
+ */
+const mockVerifyAbsent = vi.fn<(projectId: string) => Promise<ProjectAbsence>>(async (projectId) => {
+  const listed = await mockListProjectManifests.getMockImplementation()?.();
+  const locators = (listed?.entries ?? []).flatMap((entry) =>
+    'projectId' in entry && entry.projectId === projectId ? [entry.locator] : [],
+  );
+  return locators.length === 0 ? { status: 'absent' } : { status: 'present', locators };
+});
 const mockCommitPendingProjectDirectory = vi.fn<FileManagerProxy['commitPendingProjectDirectory']>();
 const mockPermanentlyDeleteProjectDirectory = vi.fn<FileManagerProxy['permanentlyDeleteProjectDirectory']>();
 const mockSyncProjectRoots = vi.fn<() => Promise<void>>();
@@ -199,6 +213,7 @@ const mockFileManager = {
   client: {
     listProjectManifests: mockListProjectManifests,
     verifyProjectRoute: mockVerifyProjectRoute,
+    verifyAbsent: mockVerifyAbsent,
     commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
     permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
   },
@@ -227,7 +242,7 @@ const mockGetWorkspace =
 /** Whether this tab may write through a held folder handle; `prompt` means the person must grant it again. */
 const mockCheckHandlePermission = vi.fn<(handle: unknown) => Promise<'granted' | 'prompt' | 'denied'>>();
 let projectRootConfigurationListener: (() => void) | undefined;
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   requestHomeStoragePersistence: vi.fn(async () => undefined),
   createWorkspace: vi.fn(),
   createNodeWorkspace: vi.fn(),
@@ -267,12 +282,14 @@ const announceRootConfigurationChange = (): void => {
 
 vi.mock('#filesystem/build-skew.js', () => ({
   buildId: 1,
+  // Read when `stale-build-recovery` loads, which the agent host client's worker replacement imports (FP10).
+  lookupBudget: 0,
   isBuildSuperseded: () => false,
   subscribeBuildSkew: () => () => undefined,
 }));
 /** Whether this browser can hold a workspace folder; only the workspace row turns it on. */
 let mockWebAccessAvailable = false;
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: false,
   directoryPicker: () => ({ available: mockWebAccessAvailable, backend: 'webaccess', pick: async () => undefined }),
   webAccessDirectoryPicker: () => undefined,
@@ -291,7 +308,7 @@ const mockResumeResources = vi.fn<(operationId: string) => Promise<readonly Chat
 const mockCompletePending = vi.fn<(operationId: string) => Promise<void>>();
 const mockBeginPermanentDeleteProject = vi.fn<(projectId: string, storage: unknown) => Promise<string>>();
 const mockPrepareProjectCreation = vi.fn<(input: unknown) => Promise<PendingProjectOperation>>();
-vi.mock('#hooks/project-manager.machine.js', async () => {
+vi.mock('@taucad/project-library/machines/project-manager.machine', async () => {
   const xstate = await import('xstate');
   return {
     projectManagerMachine: xstate.setup({}).createMachine({
@@ -397,6 +414,14 @@ const holdReplayAtResources = () => {
   };
 };
 
+/*
+ * No analytics boundary runs here, so the PostHog-backed flags would stay unknown for the whole file and every
+ * create would read the listing for the first-project tour. Settle them as a host without analytics does.
+ */
+beforeEach(() => {
+  disconnectRemoteFlags();
+});
+
 describe('useProjectManager recovery (I8)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -467,7 +492,7 @@ describe('useProjectManager recovery (I8)', () => {
             files: {},
             location: { kind: 'home' },
           }),
-        ).rejects.toThrow(`An earlier creation of this project has not finished on this device: ${fakeProject.id}`);
+        ).rejects.toThrow('This project is still being set up on this device. Try again in a moment.');
       });
 
       expect(mockCommitPendingProjectDirectory).toHaveBeenCalledOnce();
@@ -679,7 +704,7 @@ describe('useProjectManager recovery (I8)', () => {
         location: { kind: 'home' },
       });
       // Observed before the replay is released, so its refusal is never unhandled.
-      const refused = expect(creation).rejects.toThrow(`That project is already on this device: ${fakeProject.id}`);
+      const refused = expect(creation).rejects.toThrow('This project is already on this device.');
       await settle();
       // Held behind the replay: it has read nothing of the journal since bootstrap.
       expect(mockGetPendingProjectOperations).toHaveBeenCalledOnce();

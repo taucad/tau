@@ -158,8 +158,14 @@ const fixture = async (initial: Readonly<Record<string, string>>, options: Reado
       }) as typeof store.writeFile,
     });
     let statTrees = 0;
+    /* How many times the revision layer let go of the root without declaring it (D9). */
+    let releases = 0;
     const counted = Object.assign(Object.create(rooted) as RevisionFileSystem, {
       privateStore,
+      releaseDeclaration: () => {
+        releases += 1;
+        rooted.releaseDeclaration?.();
+      },
       statTree: (async (...arguments_: Parameters<NonNullable<RevisionFileSystem['statTree']>>) => {
         statTrees += 1;
         return rooted.statTree!(...arguments_);
@@ -211,7 +217,7 @@ const fixture = async (initial: Readonly<Record<string, string>>, options: Reado
     const close = async (): Promise<void> => {
       await actors.settled();
       await walking.settled();
-      service.dispose();
+      await service.close();
     };
     cleanups.push(close);
     return {
@@ -226,6 +232,7 @@ const fixture = async (initial: Readonly<Record<string, string>>, options: Reado
       hooks,
       reports,
       statTrees: () => statTrees,
+      releases: () => releases,
       close,
     };
   };
@@ -666,8 +673,152 @@ describe('the fill check of a warm reopen (Tau #2013)', () => {
     const second = await session();
     await second.fillChecked;
 
-    expect(second.reads).toEqual(['assets/part.stl']);
+    /* A pointer is found, so the attributes that say whether it is a placeholder are read too (D9). */
+    expect(second.reads).toEqual(['assets/part.stl', '.gitattributes']);
     expect(second.reports.map(({ facet }) => facet)).toEqual([undefined]);
+  });
+
+  /* A reopen the record answers walks nothing, so its fill check is what says which pointers are placeholders (D9). */
+  it('should declare the placeholders a record-answered reopen finds, by the attributes, walking nothing', async () => {
+    const pointer = pointerOf('a'.repeat(64), 123_456);
+    const { session } = await fixture({ ...files(10), 'assets/part.stl': pointer, 'notes/pointer.txt': pointer });
+    const first = await session();
+    await mint(first);
+    const treeId = await compare(first.actors);
+    await first.close();
+
+    const second = await session();
+    expect(await compare(second.actors)).toBe(treeId);
+    await second.fillChecked;
+
+    expect(
+      second.reads.filter((path) => !['assets/part.stl', 'notes/pointer.txt', '.gitattributes'].includes(path)),
+    ).toEqual([]);
+    expect(await second.rooted.pendingPaths!(['assets/part.stl', 'notes/pointer.txt'])).toStrictEqual([
+      'assets/part.stl',
+    ]);
+  });
+
+  /*
+   * A fill check reads a checkout a tree write may land in meanwhile: what it found is the older tree's, so it never
+   * declares over the newer one, whose placeholders the write's own capture declares (D9, D10, I7).
+   */
+  it('should never declare what a fill check found over a tree a write announced meanwhile', async () => {
+    const kept = pointerOf('a'.repeat(64), 123_456);
+    const added = pointerOf('b'.repeat(64), 654_321);
+    const { session } = await fixture({ ...files(10), 'assets/part.stl': kept });
+    const first = await session();
+    await mint(first);
+    await first.close();
+
+    const second = await session();
+    /* The fill check stops at its attributes read; a tree write announces its tree and lands a new placeholder. */
+    const paused = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    let wrote = false;
+    second.hooks.afterRead = async (path) => {
+      if (path === '.gitattributes' && second.reads.at(-2) === 'assets/part.stl' && !wrote) {
+        wrote = true;
+        paused.resolve();
+        await resume.promise;
+      }
+    };
+    await paused.promise;
+    await second.rooted.writeFile('assets/new.stl', added);
+    await second.rooted.expectEntries!([
+      { path: 'assets/part.stl', size: kept.length, pending: { oid: 'a'.repeat(64), size: 123_456 }, arriving: false },
+      { path: 'assets/new.stl', size: added.length, pending: { oid: 'b'.repeat(64), size: 654_321 }, arriving: false },
+    ]);
+    second.rooted.endExpectation!();
+    resume.resolve();
+    await second.fillChecked;
+    await second.actors.settled();
+
+    expect(wrote).toBe(true);
+    expect(await second.rooted.pendingPaths!(['assets/part.stl', 'assets/new.stl'])).toStrictEqual([
+      'assets/part.stl',
+      'assets/new.stl',
+    ]);
+  });
+
+  /* The fill check judges by a capture's own rule: an attributes file deeper down counts, an ignored one does not. */
+  it('should declare by nested attributes files and never by an ignored one', async () => {
+    const pointer = pointerOf('a'.repeat(64), 123_456);
+    const { session } = await fixture({
+      ...files(5),
+      'vendor/.gitattributes': '*.bin filter=lfs diff=lfs merge=lfs -text\n',
+      'vendor/blob.bin': pointer,
+      'extra/.gitattributes': '*.dat filter=lfs diff=lfs merge=lfs -text\n',
+      'extra/blob.dat': pointer,
+    });
+    const first = await session();
+    await first.rooted.writeFile('.gitignore', 'extra/.gitattributes\n');
+    await mint(first);
+    await first.close();
+
+    const second = await session();
+    await second.fillChecked;
+
+    expect(await second.rooted.pendingPaths!(['vendor/blob.bin', 'extra/blob.dat'])).toStrictEqual(['vendor/blob.bin']);
+  });
+
+  /* A look that fails before it declares lets go of the root, so no stat waits out the bound (D9; I7 by the reads). */
+  it('should let go of the checkout when the fill check’s look fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const pointer = pointerOf('a'.repeat(64), 123_456);
+    const { session } = await fixture({ ...files(10), 'assets/part.stl': pointer });
+    const first = await session();
+    await mint(first);
+    await first.close();
+
+    const second = await session();
+    let failed = false;
+    second.hooks.afterRead = async (path) => {
+      if (path === '.gitattributes' && !failed) {
+        failed = true;
+        throw new Error('the attributes could not be read');
+      }
+    };
+    await expect.poll(() => second.releases(), { timeout: 5000 }).toBeGreaterThan(0);
+
+    expect(failed).toBe(true);
+    expect(warn).toHaveBeenCalledWith('[revisions] large-object placeholders could not be checked', expect.any(Error));
+  });
+
+  /* A compare is not fenced against a tree write: what its capture read is the older tree's, and never declared over the newer one. */
+  it('should never declare what a compare captured over a tree a write announced meanwhile', async () => {
+    const kept = pointerOf('a'.repeat(64), 123_456);
+    const added = pointerOf('b'.repeat(64), 654_321);
+    const { session } = await fixture({ ...files(10), 'assets/part.stl': kept });
+    const first = await session();
+    /* The compare's walk stops at an ordinary file; a tree write announces its tree and lands a new placeholder. */
+    const paused = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    let wrote = false;
+    first.hooks.afterRead = async (path) => {
+      if (path === 'dir1/f1.txt' && !wrote) {
+        wrote = true;
+        paused.resolve();
+        await resume.promise;
+      }
+    };
+    const compared = compare(first.actors);
+    await paused.promise;
+    await first.rooted.writeFile('assets/new.stl', added);
+    await first.rooted.expectEntries!([
+      { path: 'assets/part.stl', size: kept.length, pending: { oid: 'a'.repeat(64), size: 123_456 }, arriving: false },
+      { path: 'assets/new.stl', size: added.length, pending: { oid: 'b'.repeat(64), size: 654_321 }, arriving: false },
+    ]);
+    first.rooted.endExpectation!();
+    resume.resolve();
+    await compared;
+    await first.actors.settled();
+
+    expect(wrote).toBe(true);
+    expect(await first.rooted.pendingPaths!(['assets/part.stl', 'assets/new.stl'])).toStrictEqual([
+      'assets/part.stl',
+      'assets/new.stl',
+    ]);
   });
 
   it('should still find a placeholder a pointer-sized file holds', async () => {
@@ -680,6 +831,7 @@ describe('the fill check of a warm reopen (Tau #2013)', () => {
     const second = await session();
     await second.fillChecked;
 
-    expect(second.reads).toEqual(['assets/part.stl']);
+    /* A pointer is found, so the attributes that say whether it is a placeholder are read too (D9). */
+    expect(second.reads).toEqual(['assets/part.stl', '.gitattributes']);
   });
 });

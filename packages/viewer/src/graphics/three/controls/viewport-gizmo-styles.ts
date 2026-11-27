@@ -1,7 +1,10 @@
 /**
  * The view cube's styles (blueprint G1 to G4). Hiding the gizmo is the view's `display.gizmo` switch, not a style.
  */
-import type { GizmoAxisOptions, GizmoOptions, ViewportGizmo } from 'three-viewport-gizmo';
+import { MeshBasicMaterial } from 'three';
+import { positionLocal } from 'three/tsl';
+import { MeshBasicNodeMaterial } from 'three/webgpu';
+import type { GizmoMaterial, GizmoOptions, GizmoTargetOptions } from 'three-viewport-gizmo';
 
 /**
  * The gizmo styles: Tau's rounded cube, the library's sharp cube, one ball per axis direction, and a triad that takes
@@ -19,18 +22,14 @@ export const gizmoStyleIds = ['cube', 'classic-cube', 'axis-balls', 'axes'] as c
 export type GizmoStyleId = (typeof gizmoStyleIds)[number];
 
 /**
- * How the view cube draws one style: the library options it takes on top of the shared ones, whether Tau's continuous
- * rounded surface replaces the library's faces, whether Tau's axis triad is drawn on it, whether it takes a click, and
- * the scale it is drawn at.
+ * How the view cube draws one style: the library options it takes on top of the shared ones, and whether it takes a
+ * click (`gizmo.enabled`).
  *
  * @public
  */
 export type ViewportGizmoStyleConfig = Readonly<{
-  options: Partial<GizmoOptions>;
-  surface: 'tau' | 'library';
-  triad: boolean;
+  options: GizmoOptions;
   clickable: boolean;
-  scale: number;
 }>;
 
 /**
@@ -49,55 +48,52 @@ export const resolveViewportGizmoStyleConfig = ({
   colors: ViewportGizmoColors;
   radius: number;
 }>): ViewportGizmoStyleConfig => {
-  const face = {
+  const hover = { color: colors.hover };
+  const face: GizmoTargetOptions = {
     color: colors.face,
     labelColor: colors.label,
     hover: { color: colors.hover, labelColor: colors.hoverLabel },
   };
-  const faces = {
-    corners: face,
-    edges: face,
-    right: face,
-    top: face,
-    front: face,
-    back: face,
-    left: face,
-    bottom: face,
-  };
+  const faces = { x: face, y: face, z: face, nx: face, ny: face, nz: face };
+  const triad = { enabled: true, colors: colors.axes };
+  // ponytail: corners keep the face colour and edges the bevel, as Tau's own surface drew them (S5 carry).
+  const cube = { ...faces, corners: { color: colors.face, hover }, edges: { color: colors.bevel, hover }, triad };
   switch (gizmoStyle) {
     case 'cube': {
-      return {
-        options: { type: 'rounded-cube', radius, ...faces },
-        surface: 'tau',
-        triad: true,
-        clickable: true,
-        scale: 0.7,
-      };
+      return { options: { type: 'rounded-cube', radius, ...cube }, clickable: true };
     }
     case 'classic-cube': {
-      return { options: { type: 'cube', ...faces }, surface: 'library', triad: true, clickable: true, scale: 0.7 };
+      return { options: { type: 'cube', ...cube }, clickable: true };
     }
     case 'axis-balls': {
-      const ball = (color: string): GizmoAxisOptions => ({
+      const ball = (color: string): GizmoTargetOptions => ({
         color,
         labelColor: colors.ballLabel,
         hover: { color: colors.hover, labelColor: colors.hoverLabel },
       });
       return {
         options: { type: 'sphere', x: ball(colors.axes.x), y: ball(colors.axes.y), z: ball(colors.axes.z) },
-        surface: 'library',
-        triad: false,
         clickable: true,
-        scale: 1,
       };
     }
     case 'axes': {
+      // The triad alone: every target hidden; `gizmo.enabled = false` makes it display-only.
+      const hidden = { enabled: false };
       return {
-        options: { type: 'rounded-cube', radius, ...faces },
-        surface: 'tau',
-        triad: true,
+        options: {
+          type: 'rounded-cube',
+          radius,
+          x: hidden,
+          y: hidden,
+          z: hidden,
+          nx: hidden,
+          ny: hidden,
+          nz: hidden,
+          corners: hidden,
+          edges: hidden,
+          triad,
+        },
         clickable: false,
-        scale: 0.7,
       };
     }
   }
@@ -110,6 +106,8 @@ export const resolveViewportGizmoStyleConfig = ({
  */
 export type ViewportGizmoColors = Readonly<{
   face: number;
+  /** The rounded cube's edges. */
+  bevel: number;
   label: number;
   hover: number;
   hoverLabel: number;
@@ -119,19 +117,34 @@ export type ViewportGizmoColors = Readonly<{
 }>;
 
 /**
- * Makes a gizmo the Axes style (G4): hides the cube's click targets, so only the triad added after shows, and turns
- * off the gizmo's pointer surface, so it takes no click or drag and a press there reaches the canvas.
+ * The gizmo's `onMaterial` on the WebGPU backend: each mesh material becomes a node material, so every gizmo style draws
+ * through the same explicit node path. Sprites (the axis balls) keep the renderer's own conversion. The replacement is
+ * the host's: the caller disposes it with the cube.
  *
- * @param gizmo - The newly constructed gizmo, before its triad is added.
+ * @param owned - Receives every material made here.
+ * @returns The `onMaterial` option.
  * @public
  */
-export const hideViewportGizmoTargets = (gizmo: ViewportGizmo): void => {
-  for (const child of gizmo.children) {
-    child.visible = false;
-  }
-  // The library keeps its pointer surface private.
-  const surface: unknown = Reflect.get(gizmo, '_domElement');
-  if (surface instanceof HTMLElement) {
-    surface.style.pointerEvents = 'none';
-  }
-};
+export const viewportGizmoNodeMaterials =
+  (owned: Set<GizmoMaterial>): NonNullable<GizmoOptions['onMaterial']> =>
+  (source) => {
+    if (!(source instanceof MeshBasicMaterial)) {
+      return source;
+    }
+    const material = new MeshBasicNodeMaterial({
+      map: source.map,
+      color: source.color,
+      vertexColors: source.vertexColors,
+      opacity: source.opacity,
+      transparent: source.transparent,
+      side: source.side,
+      depthTest: source.depthTest,
+      depthWrite: source.depthWrite,
+      toneMapped: source.toneMapped,
+    });
+    // Three r184 can skip a transform after draw order changes. Identity position
+    // keeps these moving control surfaces out of the stale observer shortcut.
+    material.positionNode = positionLocal;
+    owned.add(material as GizmoMaterial);
+    return material as GizmoMaterial;
+  };

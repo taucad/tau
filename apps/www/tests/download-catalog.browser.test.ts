@@ -57,7 +57,8 @@ type Visit = {
 
 /** What a visitor reads and follows on one rendered download page. */
 type Surface = {
-  readonly links: ReadonlyArray<{ text: string; href: string; visible: boolean }>;
+  /** `beta` marks a link inside an unqualified beta entry, which stands apart from the qualified Mac routes. */
+  readonly links: ReadonlyArray<{ text: string; href: string; visible: boolean; beta: boolean }>;
   readonly text: string;
 };
 
@@ -67,6 +68,7 @@ const surface = async (page: Page): Promise<Surface> => ({
       text: anchor.textContent.trim(),
       href: (anchor as HTMLAnchorElement).href,
       visible: anchor.checkVisibility(),
+      beta: anchor.closest('[data-beta-route]') !== null,
     })),
   ),
   text: (await page.locator('body').textContent()) ?? '',
@@ -163,7 +165,9 @@ describe('shipping installer catalog browser behavior', () => {
 
   /** Every Mac file link names the DMG its URL serves, and no DMG is claimed over another file. */
   const expectTruthfulMacLabels = (links: Surface['links']): void => {
-    const mac = links.filter((link) => /Apple silicon|Intel Mac/u.test(link.text) && link.text.startsWith('Download'));
+    const mac = links.filter(
+      (link) => !link.beta && /Apple silicon|Intel Mac/u.test(link.text) && link.text.startsWith('Download'),
+    );
     expect(mac.length).toBeGreaterThanOrEqual(3);
     for (const link of mac) {
       expect(link.text).toMatch(/^Download DMG for (?:Apple silicon|Intel Mac)$/u);
@@ -176,13 +180,30 @@ describe('shipping installer catalog browser behavior', () => {
     }
   };
 
-  /** Without an admitted DMG a Mac visitor is offered no Mac file at all: no ZIP fallback and no dead link. */
+  /**
+   * The Intel beta ZIP is the one Mac file listed without a qualified catalog route.
+   * @param links - The rendered page's links.
+   * @param shown - Whether the entry is expected visible: hidden once the catalog admits an Intel DMG.
+   */
+  const expectIntelBeta = (links: Surface['links'], shown: boolean): void => {
+    const beta = links.filter((link) => link.beta);
+    expect(beta).toHaveLength(1);
+    expect(beta[0]).toMatchObject({ text: 'Download ZIP for Intel Mac', visible: shown });
+    expect(new URL(beta[0]!.href).pathname).toBe('/latest/Tau-macos-x64.zip');
+  };
+
+  /**
+   * Without an admitted DMG a Mac visitor is offered no qualified Mac file: no ZIP fallback and no dead link. Only the
+   * separately listed Intel beta ZIP remains.
+   */
   const expectNoMacFallback = async (page: Page, links: Surface['links']): Promise<void> => {
-    expect(links.filter((link) => /macos/u.test(link.href))).toEqual([]);
-    const visibleMac = links.filter(
+    const qualified = links.filter((link) => !link.beta);
+    expect(qualified.filter((link) => /macos/u.test(link.href))).toEqual([]);
+    const visibleMac = qualified.filter(
       (link) => link.visible && /Apple silicon|Intel Mac|\bMac\b|\bIntel\b/u.test(link.text),
     );
     expect(visibleMac).toEqual([]);
+    expectIntelBeta(links, true);
     const shown = await page
       .locator('[data-mac-route]')
       .evaluateAll((nodes) => nodes.map((node) => node.checkVisibility()));
@@ -197,7 +218,7 @@ describe('shipping installer catalog browser behavior', () => {
     expect(off.requests).toHaveLength(0);
     const disabled = await surface(off.page);
     await expectNoMacFallback(off.page, disabled.links);
-    expect(disabled.text).not.toMatch(/DMG|ZIP for/u);
+    expect(disabled.text).not.toMatch(/DMG|ZIP for Apple silicon/u);
     await off.close();
 
     const { page, requests, close } = await open();
@@ -219,7 +240,36 @@ describe('shipping installer catalog browser behavior', () => {
     expect(await page.locator('[data-qualified-downloads] a[href$=".deb"]').count()).toBe(2);
     expect(await page.locator('[data-qualified-downloads] a[href$=".AppImage"]').count()).toBe(1);
     expect(await page.locator('[data-qualified-downloads] a[href$=".zip"]').count()).toBe(3);
+    // Untested Windows and Linux routes carry the page's own Beta badge; Mac routes do not.
+    const staticBadge = await page
+      .locator('.download-title [data-slot="badge"]')
+      .first()
+      .evaluate((node) => node.outerHTML);
+    const summaries = await page
+      .locator('[data-qualified-downloads] summary')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => [node.firstChild?.textContent, node.querySelector('[data-slot="badge"]')?.outerHTML]),
+      );
+    expect(summaries).toEqual([
+      ['Mac — installation and archive downloads', undefined],
+      ['Intel — installation and archive downloads', undefined],
+      ['Windows — installation and archive downloads', staticBadge],
+      ['Linux — installation and archive downloads', staticBadge],
+      ['Linux portable — installation and archive downloads', staticBadge],
+    ]);
     await close();
+
+    // A Windows visitor's recommended download says beta, before and after the catalog upgrade.
+    const windows = await open({ platform: 'Win32', enabled: false });
+    expect(await windows.page.locator('[data-download-detail="host"]').textContent()).toBe(
+      'Windows x64 · ZIP download · beta',
+    );
+    await windows.close();
+    const windowsCatalog = await open({ platform: 'Win32' });
+    expect(await windowsCatalog.page.locator('[data-download-detail="host"]').textContent()).toBe(
+      'Windows x64 · per-user installer · beta',
+    );
+    await windowsCatalog.close();
 
     const unpromoted = await open({ catalog: { ...projection(), promoted: false } });
     expect(await unpromoted.page.locator('[data-download-platform="windows"]').getAttribute('href')).toContain('.zip');
@@ -274,6 +324,8 @@ describe('shipping installer catalog browser behavior', () => {
     ]);
     const upgraded = await surface(page);
     expectTruthfulMacLabels(upgraded.links);
+    // A qualified Intel DMG replaces the beta ZIP entry.
+    expectIntelBeta(upgraded.links, false);
     const instructions = await page.locator('[data-install-instructions]').textContent();
     expect(instructions).toMatch(
       /Open the DMG to mount it, drag Tau to Applications, eject the disk image, then launch/u,
@@ -313,7 +365,12 @@ describe('shipping installer catalog browser behavior', () => {
     const { page, close } = await open({ origin: 'https://taucad.dev', catalog: appleSilicon });
     const after = await surface(page);
     const visible = after.links.filter((link) => link.visible);
-    expect(visible.filter((link) => /Intel Mac|macos-x64/u.test(`${link.text} ${link.href}`))).toEqual([]);
+    expect(visible.filter((link) => !link.beta && /Intel Mac|macos-x64/u.test(`${link.text} ${link.href}`))).toEqual(
+      [],
+    );
+    // Without a qualified Intel DMG the Intel beta ZIP stays listed, served from the staging origin.
+    expectIntelBeta(after.links, true);
+    expect(visible.find((link) => link.beta)?.href).toBe('https://downloads.taucad.dev/latest/Tau-macos-x64.zip');
     const apple = visible.filter((link) => link.text === 'Download DMG for Apple silicon');
     expect(apple.length).toBeGreaterThanOrEqual(2);
     for (const link of apple) {

@@ -153,7 +153,7 @@ Let each producer delete only the descendants it owns. Never use broad root glob
 
 Upload required CI reports and diagnostics before cleanup. Verify root hygiene after representative tasks have run; checking only before execution cannot detect a producer that writes to the wrong location.
 
-The root-hygiene check permits the reviewed 25 authored top-level entries plus `.git`, `node_modules`, `out`, `out-tsc`, `.nx`, and the documented persistent `repos` checkout directory. It rejects unexpected tracked and untracked root entries; committing a scratch file does not exempt it. The tracked `.nx` entry may disappear when a release consumes every version plan; that is the sole optional authored root. Update the existing validator’s approved authored set deliberately when the repository architecture changes.
+The root-hygiene check permits the reviewed 25 authored top-level entries plus `.git`, `node_modules`, `out`, `out-tsc`, `.nx`, the documented persistent `repos` checkout directory, and `.tau-ci`, the CI-only sparse checkout of the workflow's own apt installer. It rejects unexpected tracked and untracked root entries; committing a scratch file does not exempt it. The tracked `.nx` entry may disappear when a release consumes every version plan; that is the sole optional authored root. Update the existing validator’s approved authored set deliberately when the repository architecture changes.
 
 **Why**: Narrow ownership prevents one tool from deleting another tool's evidence or human work.
 

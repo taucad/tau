@@ -66,6 +66,15 @@ if (!databaseUrl) {
 const client = postgres(databaseUrl, { max: 1 });
 const database = drizzle(client, { schema });
 class CheckpointLedger extends CreditLedgerService {
+  public override async admitOperation(
+    ...args: Parameters<CreditLedgerService['admitOperation']>
+  ): ReturnType<CreditLedgerService['admitOperation']> {
+    const admitted = await super.admitOperation(...args);
+    if (admitted.status === 'admitted' && admitted.dispatch !== undefined) {
+      await continueAfter('intent_recorded');
+    }
+    return admitted;
+  }
   public override async markDispatchIntent(operationId: string, generation: bigint): Promise<boolean> {
     const marked = await super.markDispatchIntent(operationId, generation);
     if (marked) {
@@ -97,7 +106,7 @@ const resolver = new CodeOwnedBillableModelQualificationResolver({
     ? {
         inputCounters: new Map([
           [
-            'openai-gpt-5.6-luna',
+            'openai-gpt-6-luna',
             {
               qualification: 'controlled-local-zero',
               environment: 'development',
@@ -123,7 +132,7 @@ try {
     attempt: { version: 1, key: command.attemptKey },
     providerWire: 'openai-responses',
     body: {
-      model: 'openai-gpt-5.6-luna',
+      model: 'openai-gpt-6-luna',
       stream: true,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI Responses wire field
       max_output_tokens: 1,

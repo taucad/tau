@@ -2,6 +2,8 @@
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  supplierConnectionAgent,
+  supplierFetch,
   executeGatewayProviderRequest,
   fundedGatewayProviderIds,
   gatewayModelRoutes,
@@ -16,7 +18,7 @@ const pdfDataUrl = 'data:application/pdf;base64,JVBERg==';
 describe('vertexUpstreamBody', () => {
   it('should send a Vertex PDF as an image_url data URI', () => {
     const body = {
-      model: 'google/gemini-3.8-flash',
+      model: 'google/gemini-4-hydrogen',
       messages: [
         {
           role: 'user',
@@ -29,7 +31,7 @@ describe('vertexUpstreamBody', () => {
     };
 
     expect(vertexUpstreamBody(body)).toEqual({
-      model: 'google/gemini-3.8-flash',
+      model: 'google/gemini-4-hydrogen',
       messages: [
         {
           role: 'user',
@@ -105,7 +107,7 @@ describe('Vertex self-signed access token', () => {
       executeGatewayProviderRequest({
         config: config(),
         providerId: 'vertexai',
-        body: { model: 'google/gemini-3.8-flash', messages: [] },
+        body: { model: 'google/gemini-4-hydrogen', messages: [] },
         headers: {},
         signal: new AbortController().signal,
         fetch: fetchOnce,
@@ -129,7 +131,7 @@ describe('Vertex self-signed access token', () => {
     const failure = executeGatewayProviderRequest({
       config: config('fixture-not-a-key'),
       providerId: 'vertexai',
-      body: { model: 'google/gemini-3.8-flash', messages: [] },
+      body: { model: 'google/gemini-4-hydrogen', messages: [] },
       headers: {},
       signal: new AbortController().signal,
       fetch: fetchOnce,
@@ -213,5 +215,26 @@ describe('provider targets', () => {
     expect(isGatewayProviderId('ollama')).toBe(false);
     expect(fundedGatewayProviderIds).not.toContain('ollama');
     expect(gatewayModelRoutes().map((route) => route.providerId)).not.toContain('ollama');
+  });
+});
+
+/* Chat performance WP-05 (server audit S-07): supplier sockets outlive the 4 s default between model steps. */
+describe('supplierFetch', () => {
+  it('sends every supplier request through the one keep-alive agent and keeps the caller options', async () => {
+    const fetchSpy = vi.fn(async () => new Response('ok'));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const { signal } = new AbortController();
+      await supplierFetch('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}', signal });
+
+      expect(fetchSpy).toHaveBeenCalledWith('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        body: '{}',
+        signal,
+        dispatcher: supplierConnectionAgent,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

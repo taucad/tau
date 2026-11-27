@@ -27,6 +27,10 @@ const request: RequestPermissionRequest = {
   ],
 };
 
+/** ACP's own once kinds always mean once; every other kind is unspecified without a reviewed adapter. */
+const unreviewedScope = (kind: string): 'once' | 'unspecified' =>
+  kind === 'allow_once' || kind === 'reject_once' ? 'once' : 'unspecified';
+
 describe('provider permission presentation', () => {
   it('should distinguish reviewed Codex requested scopes without claiming any save', () => {
     const original = structuredClone(request);
@@ -59,7 +63,7 @@ describe('provider permission presentation', () => {
     expect(providerPermissionPayload(request, adapter)).toMatchObject({
       providerPermission: {
         persistence: 'unverified',
-        options: request.options.map(({ optionId }) => ({ optionId, requestedScope: 'unspecified' })),
+        options: request.options.map(({ optionId, kind }) => ({ optionId, requestedScope: unreviewedScope(kind) })),
       },
     });
   });
@@ -67,7 +71,7 @@ describe('provider permission presentation', () => {
   it('should not classify non-MCP or incompatible Codex choices as persistent', () => {
     expect(providerPermissionPayload({ ...request, _meta: {} }, codex)).toMatchObject({
       providerPermission: {
-        options: request.options.map(({ optionId }) => ({ optionId, requestedScope: 'unspecified' })),
+        options: request.options.map(({ optionId, kind }) => ({ optionId, requestedScope: unreviewedScope(kind) })),
       },
     });
     expect(
@@ -81,6 +85,30 @@ describe('provider permission presentation', () => {
     ).toMatchObject({
       providerPermission: { options: [{ optionId: 'allow_always', requestedScope: 'unspecified' }] },
     });
+  });
+});
+
+it('should mark ACP once choices as once for an adapter with no reviewed persistence, such as Claude', () => {
+  const claude = { id: 'claude', package: '@agentclientprotocol/claude-agent-acp', version: '0.0.0' };
+  const claudeRequest: RequestPermissionRequest = {
+    sessionId: 'session-1',
+    toolCall: { toolCallId: 'toolu_1', title: 'Write hello.txt' },
+    options: [
+      { optionId: 'allow_always', name: 'Always Allow', kind: 'allow_always' },
+      { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+      { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+    ],
+  };
+  expect(providerPermissionPayload(claudeRequest, claude)).toMatchObject({
+    providerPermission: {
+      owner: 'provider',
+      persistence: 'unverified',
+      options: [
+        { optionId: 'allow_always', requestedScope: 'unspecified' },
+        { optionId: 'allow', requestedScope: 'once' },
+        { optionId: 'reject', requestedScope: 'once' },
+      ],
+    },
   });
 });
 
@@ -152,7 +180,7 @@ it('should classify Grok persistence only when the host prepared exact native re
   });
   expect(providerPermissionPayload(grokRequest, { id: 'grok' })).toMatchObject({
     providerPermission: {
-      options: grokRequest.options.map(({ optionId }) => ({ optionId, requestedScope: 'unspecified' })),
+      options: grokRequest.options.map(({ optionId, kind }) => ({ optionId, requestedScope: unreviewedScope(kind) })),
     },
   });
 });

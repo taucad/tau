@@ -18,6 +18,8 @@ const readyMessageSchema = z.object({
   type: z.literal('ready'),
   url: z.url(),
   runtimeVersion: z.string().min(1),
+  /* What the child's runtime converts to JPEG (`HostRuntimeHandle.transcodeSources`); an older child sends none. */
+  transcodeSources: z.array(z.string().min(1)).optional(),
 });
 
 const errorMessageSchema = z.object({
@@ -29,6 +31,8 @@ const errorMessageSchema = z.object({
 export type RuntimeChildHandle = {
   readonly url: URL;
   readonly runtimeVersion: string;
+  /** The formats the child's runtime converts to JPEG; empty when it reported none. */
+  readonly transcodeSources: readonly string[];
   readonly authorizationToken: string;
   /** Settles when the process exits, before its temp directory is removed: the signal that attributes a crash. */
   readonly exited: Promise<{ readonly exitCode?: number; readonly signal?: NodeJS.Signals }>;
@@ -590,6 +594,24 @@ const runtimeNetworkArguments = (modulePath: string): string[] =>
     ? ['--allow-net']
     : [];
 
+/**
+ * Whether `exited` settles within `grace` milliseconds. The grace timer is cancelled once the child exits: a timer left
+ * pending would hold the daemon's event loop open for the rest of the grace after everything else has stopped.
+ *
+ * @param exited - Settles when the child exits.
+ * @param grace - Milliseconds to wait at most.
+ * @returns `true` when the child exited in time.
+ * @internal
+ */
+export const exitsWithin = async (exited: Promise<void>, grace: number): Promise<boolean> => {
+  const elapsed = new AbortController();
+  try {
+    return await Promise.race([exited.then(() => true), delay(grace, false, { signal: elapsed.signal })]);
+  } finally {
+    elapsed.abort();
+  }
+};
+
 const killChild = async (child: ChildProcess): Promise<void> => {
   if (child.exitCode !== null || child.signalCode !== null) {
     return;
@@ -604,11 +626,11 @@ const killChild = async (child: ChildProcess): Promise<void> => {
       resolve();
     });
   });
-  if (await Promise.race([exited.then(() => true), delay(childCloseGrace, false)])) {
+  if (await exitsWithin(exited, childCloseGrace)) {
     return;
   }
   child.kill('SIGTERM');
-  if (await Promise.race([exited.then(() => true), delay(childCloseGrace, false)])) {
+  if (await exitsWithin(exited, childCloseGrace)) {
     return;
   }
   child.kill('SIGKILL');
@@ -767,6 +789,7 @@ export const startRuntimeChild = async (options: {
   return {
     url,
     runtimeVersion: message.runtimeVersion,
+    transcodeSources: message.transcodeSources ?? [],
     authorizationToken,
     exited,
     closed,

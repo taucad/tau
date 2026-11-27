@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ProjectLibraryCard } from '#components/project-library/project-library.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 
 const routerContent = createContext<React.ReactNode>(null);
 
@@ -288,7 +288,8 @@ describe('ProjectLibraryCard live preview', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Preview model' }));
 
     expect(screen.queryByLabelText('No saved preview')).not.toBeInTheDocument();
-    expect(screen.getByTestId('shared-worker-gate')).toBeInTheDocument();
+    // The live preview is its own chunk (PL5): it mounts once the lazy import settles.
+    expect(await screen.findByTestId('shared-worker-gate')).toBeInTheDocument();
 
     const fm = screen.getByTestId('file-manager-provider');
     expect(fm).toHaveAttribute('data-project-id', mockProject.id);
@@ -306,7 +307,7 @@ describe('ProjectLibraryCard live preview', () => {
 
     const previewToggle = screen.getByRole('button', { name: 'Preview model' });
     await userEvent.click(previewToggle);
-    expect(screen.getByTestId('file-manager-provider')).toBeInTheDocument();
+    expect(await screen.findByTestId('file-manager-provider')).toBeInTheDocument();
 
     await userEvent.click(previewToggle);
     expect(screen.getByLabelText('No saved preview')).toBeInTheDocument();
@@ -317,7 +318,8 @@ describe('ProjectLibraryCard live preview', () => {
   it('should remount the scoped file manager when an open card is retargeted to another project', async () => {
     const view = renderCard();
     await userEvent.click(screen.getByRole('button', { name: 'Preview model' }));
-    const firstToken = screen.getByTestId('file-manager-provider').dataset['mountToken'];
+    const firstProvider = await screen.findByTestId('file-manager-provider');
+    const firstToken = firstProvider.dataset['mountToken'];
     const nextProject: ProjectListItem = {
       ...mockProject,
       id: 'proj_bbbbbbbbbbbbbbbbbbbbb',

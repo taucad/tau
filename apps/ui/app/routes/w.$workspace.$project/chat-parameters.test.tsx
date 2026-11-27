@@ -447,7 +447,7 @@ vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
   ) => defaults,
 }));
 
-vi.mock('#components/files/export-selector.js', () => ({
+vi.mock('@taucad/files-ui/components/files/export-selector', () => ({
   ExportSelector: () => <div data-testid='export-selector'>ExportSelector</div>,
 }));
 

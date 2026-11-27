@@ -23,7 +23,7 @@ type ProviderCase = {
 
 const defaults: Record<ProviderCase['providerKind'], Omit<ProviderCase, 'providerKind'>> = {
   openai: {
-    modelId: 'openai-gpt-5.6-luna',
+    modelId: 'openai-gpt-6-luna',
     contextWindow: 200_000,
     reasoning: { effort: 'high', summary: 'detailed' },
   },
@@ -33,7 +33,7 @@ const defaults: Record<ProviderCase['providerKind'], Omit<ProviderCase, 'provide
     reasoning: { budgetTokens: 4000, display: 'summarized' },
   },
   vertexai: {
-    modelId: 'google-gemini-3.8-flash',
+    modelId: 'google-gemini-4-hydrogen',
     contextWindow: 200_000,
     reasoning: { effort: 'high' },
   },

@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
-import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 import { setComputeReuseMode, useComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import type { ComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import { useFocusedProjectSession } from '#routes/w.$workspace.$project/focused-project-view.session.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { desktopProjectRoot } from '#constants/desktop-kernel-options.js';
 import { Button } from '@taucad/ui/components/button';
 

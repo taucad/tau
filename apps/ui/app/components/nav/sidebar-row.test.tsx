@@ -82,3 +82,33 @@ describe('SidebarRowMenuButton on a phone', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
+
+describe('SidebarRowActions', () => {
+  it('shows only once the row is reached when the row has no standing status', () => {
+    render(
+      <SidebarRowActions>
+        <button type='button'>More actions for Bracket</button>
+      </SidebarRowActions>,
+    );
+    const slot = screen.getByRole('button', { name: 'More actions for Bracket' }).closest('[data-slot=row-actions]');
+    expect(slot).toHaveAttribute('data-slot', 'row-actions');
+    expect(slot).toHaveClass('fade-action', 'absolute', 'hidden', 'group-hover/row:flex', 'pointer-coarse:flex');
+  });
+
+  /* D13: a project's sync exception sits in the slot over the name, shown at rest; the actions join it on reach. */
+  it('keeps a standing status shown at rest and reveals the actions beside it on reach', () => {
+    render(
+      <SidebarRowActions status={<button type='button'>Offline</button>}>
+        <button type='button'>More actions for Bracket</button>
+      </SidebarRowActions>,
+    );
+    const status = screen.getByRole('button', { name: 'Offline' });
+    const slot = status.parentElement;
+    expect(slot).toHaveClass('fade-action', 'absolute', 'flex');
+    expect(slot).not.toHaveClass('hidden');
+    const actions = screen.getByRole('button', { name: 'More actions for Bracket' }).parentElement;
+    expect(actions).not.toBe(slot);
+    expect(actions).toHaveClass('hidden', 'group-hover/row:flex', 'group-focus-within/row:flex', 'pointer-coarse:flex');
+    expect(status.compareDocumentPosition(actions!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+});

@@ -1,0 +1,8 @@
+---
+native-process-core: patch
+host: patch
+---
+
+A sandbox shell provider can release the custody it still holds: `ShellProvider` gains an optional `close`, which `createSandboxShellProvider` implements. Custody keeps an open lock file per execution, such as a recovered execution waiting for `release`. A provider dropped without `close` left those files to garbage collection, which Node 26 turns into an uncaught `ERR_INVALID_STATE` (DEP0137 on Node 24). Call `close` before dropping a provider.
+
+The shell service in `@taucad/host` also stops opening a call's log file once its capture has finished: an output reader that outlived an unconfirmed stop could open a handle nothing would close. Output that arrives after the capture finished is no longer counted either, so a saved log's byte count matches the file.

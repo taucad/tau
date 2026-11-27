@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { ReadinessSource } from '#open/readiness.js';
 import { projectReadinessStates, reachesReadiness, readinessOf, settleReadiness } from '#open/readiness.js';
 
-const remote = (phase: ReadinessSource['remote']['phase']): ReadinessSource['remote'] => ({
+const remote = (
+  phase: ReadinessSource['remote']['phase'],
+  changes: Partial<ReadinessSource['remote']> = {},
+): ReadinessSource['remote'] => ({
   kind: phase === 'none' ? 'none' : 'tau',
-  url: undefined,
+  url: phase === 'connected' ? 'https://api.test/v1/projects/p.git' : undefined,
   phase,
   storage: undefined,
   overQuota: [],
@@ -14,6 +17,7 @@ const remote = (phase: ReadinessSource['remote']['phase']): ReadinessSource['rem
   fetchOnly: false,
   provider: undefined,
   repositoryId: undefined,
+  ...changes,
 });
 
 const source = (changes: Partial<ReadinessSource> = {}): ReadinessSource => ({
@@ -140,11 +144,35 @@ describe('settleReadiness', () => {
   it('never reads a failed write’s new tree as materialized (D10, I7)', () => {
     const writing = readinessOf(source({ applyingRoots: ['/projects/p'] }), false, 1);
     const failed = readinessOf(source({ treeWriteFailed: true }), false, 1);
-    expect(failed).toEqual({ state: 'treeReady', tree: 'live:h1:1' });
-    expect(settleReadiness(writing, failed)).toEqual({ state: 'treeReady', tree: 'live:h1:1' });
-    /* What it already showed stays shown. */
+    expect(failed).toEqual({ state: 'treeReady', tree: 'live:h1:1:failed' });
+    expect(settleReadiness(writing, failed)).toEqual(failed);
+  });
+
+  /*
+   * A failed write's end took away the rows it never landed, so what its tree had reached no longer stands: its
+   * readiness is about another tree, the partial one, and only a write running or landed may raise it again (I7).
+   */
+  it('lets a failed write’s readiness fall back, and keeps it there through the retry until the next write begins', () => {
     const entry = readinessOf(source({ applyingRoots: ['/projects/p'], entryClosureLanded: true }), false, 1);
-    expect(settleReadiness(entry, failed)).toBe(entry);
+    const failed = settleReadiness(entry, readinessOf(source({ treeWriteFailed: true }), false, 1));
+    expect(failed.state).toBe('treeReady');
+    /* The retry fast-forwards before its own write begins: the failed tree is still the one on disk. */
+    const retrying = settleReadiness(
+      failed,
+      readinessOf(
+        source({ treeWriteFailed: true, sync: { ...source().sync, state: 'pending', pullPhase: 'applying' } }),
+        false,
+        1,
+      ),
+    );
+    expect(retrying.state).toBe('treeReady');
+    expect(reachesReadiness(retrying.state, 'entryReady')).toBe(false);
+    /* The next write announces its tree: a new tree, read on its own. */
+    const next = settleReadiness(
+      retrying,
+      readinessOf(source({ applyingRoots: ['/projects/p'], entryClosureLanded: true }), false, 2),
+    );
+    expect(next).toEqual({ state: 'entryReady', tree: 'live:h1:2' });
   });
 
   it('moves forward within one tree', () => {
@@ -159,6 +187,94 @@ describe('settleReadiness', () => {
     expect(settleReadiness(filled, pulled)).toEqual({ state: 'materialized', tree: 'live:h2:0' });
     const switched = readinessOf(source({ checkoutId: 'other' }));
     expect(settleReadiness(filled, switched).tree).toBe('other:h1:0');
+  });
+
+  /*
+   * A cold Tau Cloud open reads the checkout before its remote is attached: no remote, no head, so complete. The
+   * remote's attach makes the tree unknown again, and that completeness must not carry across it (I7).
+   */
+  it('lets a remote attached to a project with no head replace its local completeness (I7)', () => {
+    const local = readinessOf(source({ headRevisionId: undefined, remote: remote('none') }));
+    expect(local.state).toBe('filled');
+    const connecting = settleReadiness(
+      local,
+      readinessOf(source({ headRevisionId: undefined, remote: remote('connecting') }), false),
+    );
+    expect(connecting.state).toBe('connected');
+    const applying = settleReadiness(
+      connecting,
+      readinessOf(source({ headRevisionId: undefined, sync: { ...source().sync, pullPhase: 'applying' } }), false),
+    );
+    expect(applying.state).toBe('treeReady');
+    expect(reachesReadiness(applying.state, 'entryReady')).toBe(false);
+    /* The tree write announces its own tree and moves forward from there. */
+    const writing = settleReadiness(
+      applying,
+      readinessOf(source({ headRevisionId: undefined, applyingRoots: ['/projects/p'] }), false, 1),
+    );
+    expect(writing).toEqual({ state: 'treeReady', tree: 'live::1' });
+  });
+
+  it('keeps a local project with no head complete while no remote is attached', () => {
+    const local = source({ headRevisionId: undefined, remote: remote('none') });
+    const first = settleReadiness(readinessOf(source({ ...local, registrySettled: false })), readinessOf(local));
+    expect(first.state).toBe('filled');
+    expect(settleReadiness(first, readinessOf(local, false))).toEqual(first);
+    /* Its first revision is a new tree, complete on its own reading. */
+    expect(settleReadiness(first, readinessOf(source({ remote: remote('none') }))).state).toBe('filled');
+  });
+
+  /*
+   * A connect that fails after recording its remote removes it again (`abandoning`) and lands in `failed` with no
+   * remote: nothing is attached and nothing will be pulled, so the project is the local one it was (I7).
+   */
+  it('comes back to the local project’s completeness when a connect fails and leaves no remote', () => {
+    const local = readinessOf(source({ headRevisionId: undefined, remote: remote('none') }));
+    const connecting = settleReadiness(
+      local,
+      readinessOf(source({ headRevisionId: undefined, remote: remote('connecting') }), false),
+    );
+    expect(connecting.state).toBe('connected');
+    const abandoned = remote('failed', { kind: 'none', url: undefined, error: 'Not on this plan.' });
+    const failed = settleReadiness(
+      connecting,
+      readinessOf(source({ headRevisionId: undefined, remote: abandoned }), false),
+    );
+    expect(failed).toEqual(local);
+    /* A connect whose remote was never recorded fails with its kind still named, and leaves no remote either. */
+    const unrecorded = remote('failed', { kind: 'tau', url: undefined, error: 'Could not write the remote.' });
+    expect(readinessOf(source({ headRevisionId: undefined, remote: unrecorded }), false)).toEqual(local);
+  });
+
+  it('follows an attached remote that holds no tree back to filled', () => {
+    const local = readinessOf(source({ headRevisionId: undefined, remote: remote('none') }));
+    const connecting = settleReadiness(
+      local,
+      readinessOf(source({ headRevisionId: undefined, remote: remote('connecting') }), false),
+    );
+    const applied = settleReadiness(
+      connecting,
+      readinessOf(source({ headRevisionId: undefined, sync: { ...source().sync, hasAppliedRemote: true } }), false),
+    );
+    expect(applied.state).toBe('filled');
+  });
+
+  it('keeps a project with no head unknown while its remotes list is still being read (I7)', () => {
+    const reading = readinessOf(source({ headRevisionId: undefined, remote: remote('none', { reading: true }) }));
+    expect(reading).toEqual({ state: 'connected', tree: undefined });
+    const retrying = remote('failed', { kind: 'none', error: 'config unreadable', reading: true });
+    expect(readinessOf(source({ headRevisionId: undefined, remote: retrying })).state).toBe('connected');
+    /* The read settles on no remote: the local project, complete. */
+    expect(
+      settleReadiness(reading, readinessOf(source({ headRevisionId: undefined, remote: remote('none') }))).state,
+    ).toBe('filled');
+  });
+
+  it('keeps a project with a head as it is when a remote is attached', () => {
+    const local = readinessOf(source({ remote: remote('none') }));
+    const connecting = readinessOf(source({ remote: remote('connecting') }));
+    expect(connecting.tree).toBe(local.tree);
+    expect(settleReadiness(local, connecting)).toEqual({ state: 'filled', tree: 'live:h1:0' });
   });
 
   it('takes the first reading as it is', () => {

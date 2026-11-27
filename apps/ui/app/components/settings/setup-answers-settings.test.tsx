@@ -9,6 +9,7 @@ import { resetLeaf } from '@taucad/preferences';
 const flags = vi.hoisted(() => ({ onboarding: true }));
 vi.mock('#flags/use-feature.js', () => ({
   useFeature: (flag: string) => (flag === 'onboarding' ? flags.onboarding : false),
+  useFeatureState: (flag: string) => (flag === 'onboarding' && flags.onboarding ? 'on' : 'off'),
 }));
 const telemetry = vi.hoisted(() => ({ setupAnswersSwitchChanged: vi.fn(), setupAnswersCleared: vi.fn() }));
 vi.mock('#telemetry/onboarding-telemetry.js', () => ({ useOnboardingTelemetry: () => telemetry }));

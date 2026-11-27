@@ -112,7 +112,7 @@ describe('buildReportOnlyContentSecurityPolicy', () => {
           .filter((part) => !part.startsWith('img-src ') && !part.startsWith('connect-src '))
           .join('; ');
       expect(withoutHostLists(policy)).toBe(
-        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests; report-to default;",
+        "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; report-to default;",
       );
     },
   );
@@ -142,6 +142,15 @@ describe('write-content-security-policy-headers', () => {
     expect(written).toBe(`/*\n  Content-Security-Policy-Report-Only: ${productionPolicy}\n`);
   });
 
+  it('should offer the JS profiler to static documents off production only, as function documents do (OQ-P11, C6)', () => {
+    expect(contentSecurityPolicyHeaders('production')).not.toContain('Document-Policy');
+    for (const environment of ['staging', 'development'] as const) {
+      expect(contentSecurityPolicyHeaders(environment)).toBe(
+        `/*\n  Content-Security-Policy-Report-Only: ${buildReportOnlyContentSecurityPolicy(environment)}\n  Document-Policy: js-profiling\n`,
+      );
+    }
+  });
+
   it('should run in every netlify.toml build command right after the UI build', async () => {
     const toml = await readFile(join(appRoot, 'netlify.toml'), 'utf8');
     const commands = [...toml.matchAll(/^command = "(.*)"$/gmu)]
@@ -150,7 +159,8 @@ describe('write-content-security-policy-headers', () => {
     expect(commands).toHaveLength(4);
     for (const command of commands) {
       expect(command).toContain(
-        'pnpm nx build ui && node scripts/write-content-security-policy-headers.mts build/client',
+        // The deploy builds fresh and stamps its release before anything reads the build (ST-9).
+        'pnpm nx build ui --skip-nx-cache && node scripts/stamp-build-release.mts build && node scripts/write-content-security-policy-headers.mts build/client',
       );
     }
   });

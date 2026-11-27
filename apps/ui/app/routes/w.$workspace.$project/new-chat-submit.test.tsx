@@ -4,30 +4,6 @@ import { expect, it, vi } from 'vitest';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
 
-vi.mock('@ai-sdk/react', () => ({
-  // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- the store requires the SDK's newable Chat.
-  Chat: class {
-    public id: string;
-    public messages = [];
-    public status = 'ready';
-    public error = undefined;
-    public sendMessage = vi.fn(async () => undefined);
-    public regenerate = vi.fn(async () => undefined);
-    public stop = vi.fn(async () => undefined);
-
-    public constructor({ id }: { readonly id: string }) {
-      this.id = id;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the SDK's callback hook exactly.
-    public '~registerMessagesCallback' = (): (() => void) => () => undefined;
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the SDK's callback hook exactly.
-    public '~registerStatusCallback' = (): (() => void) => () => undefined;
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the SDK's callback hook exactly.
-    public '~registerErrorCallback' = (): (() => void) => () => undefined;
-  },
-}));
-
 vi.mock('ai', () => ({
   // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- no SDK transport is opened in this test.
   DefaultChatTransport: class {},
@@ -65,8 +41,8 @@ it('keeps a newly focused chat’s error write on its own chatId', async () => {
   });
   const oldSession = store.acquire('chat_old', 'project_test');
   const newSession = store.acquire('chat_new', 'project_test');
-  expect(newSession.chat).not.toBe(oldSession.chat);
-  expect(newSession.chat.id).toBe('chat_new');
+  expect(newSession).not.toBe(oldSession);
+  expect(newSession.chatId).toBe('chat_new');
   await vi.waitFor(() => {
     expect(getChat).toHaveBeenCalledWith('chat_old', 'project_test');
     expect(getChat).toHaveBeenCalledWith('chat_new', 'project_test');

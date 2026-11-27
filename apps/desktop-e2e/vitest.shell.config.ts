@@ -1,3 +1,4 @@
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { resolve } from 'node:path';
 // oxlint-disable-next-line no-restricted-imports -- Compose the adjacent production Electron harness.
@@ -10,7 +11,7 @@ export default defineConfig({
     ...desktopConfig.test,
     globalSetup: [],
     include: ['src/desktop-shell.spec.ts'],
-    reporters: ['default', 'json'],
+    reporters: [...testReporters('default'), 'json'],
     outputFile: resolve(import.meta.dirname, '../../out/test-results/desktop-shell/results.json'),
   },
 });

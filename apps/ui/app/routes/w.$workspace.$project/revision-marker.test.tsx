@@ -14,7 +14,7 @@ import { useState } from 'react';
 import { RevisionMenu, RevisionRow, nextVersionNumber } from '#routes/w.$workspace.$project/revision-marker.js';
 import { revisionTitle } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionRowProps } from '#routes/w.$workspace.$project/revision-marker.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type * as UseFeatureModule from '#flags/use-feature.js';
@@ -43,7 +43,7 @@ vi.mock('#environment.config.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   requireClientEnvironmentUrl: () => 'https://api.test',
 }));
-vi.mock('#components/code/diff-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
   DiffViewer: ({
     originalContent,
     modifiedContent,

@@ -4,7 +4,11 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 
-vi.mock('#flags/use-feature.js', () => ({ useFeature: () => true }));
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: () => true,
+  useFeatureState: () => 'on',
+  useFeatureGate: () => 'open',
+}));
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ connectWorkspace: vi.fn() }) }));
 const capture = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) }));
@@ -12,7 +16,9 @@ const webgl = vi.hoisted(() => ({ isAvailable: true }));
 vi.mock('#components/onboarding/webgl-support.js', () => ({ canCreateWebGl: () => webgl.isAvailable }));
 // The live preview is its own chunk with the real viewer; `setup-viewer-preview.test.tsx` covers its loading.
 vi.mock('#components/onboarding/setup-live-preview.js', () => ({
-  default: () => <div data-testid='setup-live-preview' />,
+  default: ({ cameraInput }: { readonly cameraInput?: { orbitStyle?: string } }) => (
+    <div data-testid='setup-live-preview' data-orbit-style={cameraInput?.orbitStyle ?? 'turntable'} />
+  ),
 }));
 /* "Take it again" reads the project listing; these suites have no project. */
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ projects: [] }) }));
@@ -74,6 +80,33 @@ describe('setup step 3', () => {
     expect(personRecordStores.viewer.read().gizmo.style).toBe('axes');
   });
 
+  it('asks for the orbit style, Turntable first, and the preview turns as the choice does', async () => {
+    const user = userEvent.setup();
+    renderViewerStep();
+    const orbit = screen.getByRole('group', { name: 'Orbit style' });
+    expect(within(orbit).getByRole('radio', { name: 'Turntable' })).toBeChecked();
+    expect(await screen.findByTestId('setup-live-preview')).toHaveAttribute('data-orbit-style', 'turntable');
+    await user.click(within(orbit).getByRole('radio', { name: 'Free orbit' }));
+    expect(personRecordStores.viewer.read().controls.orbitStyle).toBe('free');
+    expect(within(orbit).getByRole('radio', { name: 'Free orbit' })).toBeChecked();
+    expect(screen.getByTestId('setup-live-preview')).toHaveAttribute('data-orbit-style', 'free');
+  });
+
+  it('shows both orbit styles’ hints at once, each describing its own option', async () => {
+    const user = userEvent.setup();
+    renderViewerStep();
+    const orbit = screen.getByRole('group', { name: 'Orbit style' });
+    const turntable = within(orbit).getByRole('radio', { name: 'Turntable' });
+    const free = within(orbit).getByRole('radio', { name: 'Free orbit' });
+    expect(turntable).toHaveAccessibleDescription('The view stays upright and stops at the top and bottom');
+    expect(free).toHaveAccessibleDescription('The view turns freely over the top and can roll');
+    expect(within(orbit).getByText('The view stays upright and stops at the top and bottom')).toBeVisible();
+    expect(within(orbit).getByText('The view turns freely over the top and can roll')).toBeVisible();
+    await user.click(free);
+    expect(within(orbit).getByText('The view stays upright and stops at the top and bottom')).toBeVisible();
+    expect(within(orbit).getByText('The view turns freely over the top and can roll')).toBeVisible();
+  });
+
   it('offers no trackpad switch: the mouse preset is the only mapping', () => {
     renderViewerStep();
     expect(screen.getByTestId('setup-legend-zoom')).toHaveTextContent('Scroll');
@@ -110,10 +143,11 @@ describe('setup preview fallback', () => {
     expect(screen.getByTestId('setup-preview-fallback')).toHaveTextContent('Orbit');
   });
 
-  it('offers Try again when the chunk failed', async () => {
+  // A failed chunk offers none: the page keeps the failed module (FP9). A lost WebGL context can be tried again.
+  it('offers Try again when the WebGL context was lost', async () => {
     const onRetry = vi.fn();
     const user = userEvent.setup();
-    render(<SetupPreviewFallback mapping='tau' reason='chunk_failed' onRetry={onRetry} />);
+    render(<SetupPreviewFallback mapping='tau' reason='context_lost' onRetry={onRetry} />);
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(onRetry).toHaveBeenCalledOnce();
   });

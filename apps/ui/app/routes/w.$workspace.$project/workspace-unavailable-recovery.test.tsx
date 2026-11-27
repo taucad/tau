@@ -38,17 +38,25 @@ vi.mock('#components/ui/floating-panel.js', () => {
   };
 });
 
+// Mirrors the real panel: an `unsupported` status shows its copy and no connect command.
 vi.mock('@taucad/files-ui/components/filesystem/workspace-directory-panel', () => ({
-  WorkspaceDirectoryPanel: ({ onConnect }: { onConnect?: () => void }) => (
-    <button type='button' onClick={onConnect}>
-      Reconnect
-    </button>
-  ),
+  WorkspaceDirectoryPanel: ({ onConnect, status }: { onConnect?: () => void; status: string }) =>
+    status === 'unsupported' ? (
+      <p>Home only</p>
+    ) : (
+      <button type='button' onClick={onConnect}>
+        Reconnect
+      </button>
+    ),
 }));
 
-vi.mock('#filesystem/handle-store.js', () => ({
+const folderAccess = vi.hoisted(() => ({ available: true }));
+
+const { mockListWorkspaces } = vi.hoisted(() => ({ mockListWorkspaces: vi.fn(async () => [] as unknown[]) }));
+
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getWorkspace: vi.fn(),
-  listWorkspaces: vi.fn(async () => []),
+  listWorkspaces: mockListWorkspaces,
   requestHandlePermission: vi.fn(),
 }));
 
@@ -79,10 +87,10 @@ vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { error: mockToastError, success: mockToastSuccess },
 }));
 
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: true,
   directoryPicker: () => ({
-    available: true,
+    available: folderAccess.available,
     backend: 'webaccess',
     pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) => {
       const handle = await globalThis.window.showDirectoryPicker({
@@ -92,15 +100,37 @@ vi.mock('#constants/browser.constants.js', () => ({
       return { backend: 'webaccess', handle };
     },
   }),
-  webAccessDirectoryPicker: () => ({
-    pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) =>
-      globalThis.window.showDirectoryPicker({ id: options?.id, mode: options?.mode ?? 'readwrite' }),
-  }),
+  webAccessDirectoryPicker: () =>
+    folderAccess.available
+      ? {
+          pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) =>
+            globalThis.window.showDirectoryPicker({ id: options?.id, mode: options?.mode ?? 'readwrite' }),
+        }
+      : undefined,
 }));
 
 describe('WorkspaceUnavailableRecovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    folderAccess.available = true;
+    mockListWorkspaces.mockResolvedValue([]);
+  });
+
+  it('should say Home is the only location, with no dead folder commands, where folders cannot be connected', async () => {
+    folderAccess.available = false;
+    mockListWorkspaces.mockResolvedValue([
+      { workspaceId: 'wsp_existing', name: 'Existing' },
+      { workspaceId: 'wsp_other', name: 'Other' },
+    ]);
+
+    render(<WorkspaceUnavailableRecovery reason='disconnected' workspaceId='wsp_existing' workspaceName='Existing' />);
+
+    expect(await screen.findByText('Home only')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockListWorkspaces).toHaveBeenCalled();
+    });
+    expect(screen.queryByText('Or switch to another workspace')).not.toBeInTheDocument();
   });
 
   it('reconnects a disconnected workspace by exact id without rebinding the project', async () => {

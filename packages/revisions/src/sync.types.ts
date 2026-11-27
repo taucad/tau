@@ -130,4 +130,6 @@ export type SyncFailureReason =
   | 'damaged'
   | 'rejected'
   | 'offline'
+  /* Safe mode makes no Tau Cloud read (W9 R5): stated, never retried, cleared by a normal restart. */
+  | 'safeMode'
   | 'unknown';

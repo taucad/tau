@@ -185,6 +185,7 @@ describe('desktop runtime kernels', () => {
     expect(actual).toEqual({
       // WebAssembly linear memory through the observation-only hook.
       brep: ['observedHeapBytes'],
+      cadmpeg: ['observedHeapBytes'],
       gltf: ['observedHeapBytes'],
       picovoxel: ['observedHeapBytes'],
       zoo: ['observedHeapBytes'],

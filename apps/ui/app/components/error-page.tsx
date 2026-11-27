@@ -1,7 +1,7 @@
 import { Heading } from '@taucad/ui/components/heading';
 import { AlertCircle, ArrowLeft, RefreshCcw, WifiOff } from 'lucide-react';
 import { Loader } from '@taucad/ui/components/loader';
-import { lazy, Suspense, useCallback, useEffect, useSyncExternalStore } from 'react';
+import { Suspense, useCallback, useEffect, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useLocation, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { chatObservationConflict, quarantineChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
@@ -22,9 +22,10 @@ import {
   subscribeStaleBuildOutcomes,
 } from '#lib/stale-build-recovery.js';
 import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
-const CollapsibleCodeBlock = lazy(async () => {
-  const m = await import('#components/ui/collapsible-code-block.js');
+const CollapsibleCodeBlock = lazyCode(async () => {
+  const m = await import('@taucad/editor-ui/components/ui/collapsible-code-block');
   return { default: m.CollapsibleCodeBlock };
 });
 
@@ -175,6 +176,18 @@ export function ErrorPage(): React.JSX.Element {
     );
   }
 
+  // A failure on the live build reloads an untouched page into a new realm (D19): say so while it leaves.
+  if (isModuleLoadFailure && staleOutcome === 'reloading' && reloadState === 'pending' && !isExplained) {
+    return (
+      <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-3 px-4 py-8'>
+        <Loader className='size-6 text-muted-foreground' />
+        <p role='status' className='text-sm text-muted-foreground'>
+          Reloading Tau…
+        </p>
+      </div>
+    );
+  }
+
   if (isExplained) {
     return (
       <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-6 px-4 py-8'>
@@ -215,7 +228,7 @@ export function ErrorPage(): React.JSX.Element {
             Couldn’t reach Tau
           </Heading>
           <p className='max-w-xs text-sm text-pretty text-muted-foreground'>
-            Check your connection, then try again. Tau retries when your device is back online.
+            Check your connection, then try again. Tau tries again when this device is back online.
           </p>
         </div>
         <div className='flex flex-wrap items-center justify-center gap-2'>

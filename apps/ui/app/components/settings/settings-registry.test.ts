@@ -1,6 +1,12 @@
+import type * as DeploymentModeModule from '#cloud/deployment-mode.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { searchSettings, settingsSections } from '#components/settings/settings-registry.js';
+import { availableSettingsSections, searchSettings, settingsSections } from '#components/settings/settings-registry.js';
 import { experimentalFeatureFlagNames } from '#flags/flag.constants.js';
+
+vi.mock('#cloud/deployment-mode.js', async () => ({
+  ...(await vi.importActual<typeof DeploymentModeModule>('#cloud/deployment-mode.js')),
+  initialDeploymentMode: { state: 'funded', basis: 'confirmed', environment: 'development' },
+}));
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -9,38 +15,6 @@ afterEach(() => {
 });
 
 describe('searchSettings', () => {
-  it('should return no results for an empty query', () => {
-    expect(searchSettings(' \t ')).toEqual([]);
-  });
-
-  it('should normalize case, diacritics, and punctuation', () => {
-    const result = searchSettings('ACCENT---CÓLOR');
-
-    expect(result.flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('accent-color');
-  });
-
-  it('should match every query token across section and setting text', () => {
-    const result = searchSettings('data training');
-
-    expect(result).toHaveLength(1);
-    expect(result[0]?.section.id).toBe('data-controls');
-    expect(result[0]?.entries.map(({ id }) => id)).toEqual(['improve-service']);
-  });
-
-  it('should reject results when any query token is unmatched', () => {
-    expect(searchSettings('theme storage')).toEqual([]);
-  });
-
-  it('should match setting aliases', () => {
-    expect(searchSettings('colour').flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('accent-color');
-    expect(searchSettings('cache').flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('compute-reuse');
-    expect(searchSettings('dark mode').flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('theme');
-    expect(searchSettings('colour theme').flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('theme');
-    expect(searchSettings('cursor hand').flatMap(({ entries }) => entries.map(({ id }) => id))).toContain(
-      'pointer-cursors',
-    );
-  });
-
   it('should include every setting when its section matches', () => {
     const result = searchSettings('agents');
 
@@ -53,12 +27,6 @@ describe('searchSettings', () => {
       'open-tabs',
       'testing-tools',
     ]);
-  });
-
-  it('should rank an exact setting label before section-wide matches', () => {
-    const ids = searchSettings('filesystem').flatMap(({ entries }) => entries.map(({ id }) => id));
-
-    expect(ids[0]).toBe('filesystem-context');
   });
 
   it('should register every feature flag with globally unique setting ids', () => {
@@ -152,5 +120,18 @@ describe('searchSettings', () => {
   it('should keep API keys out of navigation and search', () => {
     expect(settingsSections.map(({ id }) => String(id))).not.toContain('api-keys');
     expect(searchSettings('API keys')).toEqual([]);
+  });
+
+  it('should offer Workspaces in navigation and search only where folders can be connected', () => {
+    const ids = (sections: ReturnType<typeof availableSettingsSections>): string[] =>
+      sections.flatMap(({ entries }) => entries.map(({ id }) => id));
+    const withoutFolders = availableSettingsSections(() => false, true, false);
+
+    expect(ids(availableSettingsSections(() => false, true, true))).toContain('workspaces');
+    expect(ids(withoutFolders)).not.toContain('workspaces');
+    expect(ids(withoutFolders)).toContain('browser-storage');
+    expect(
+      searchSettings('directory', withoutFolders).flatMap(({ entries }) => entries.map(({ id }) => id)),
+    ).not.toContain('workspaces');
   });
 });

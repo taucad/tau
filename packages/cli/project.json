@@ -34,7 +34,7 @@
     "dev-host": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "tsx watch --clear-screen=false --include 'packages/cli/src/**/*.ts' --include 'packages/host/src/**/*.ts' packages/cli/src/bin.ts serve --trust-projects",
+        "command": "tsx watch --clear-screen=false --include \"packages/cli/src/**/*.ts\" --include \"packages/host/src/**/*.ts\" packages/cli/src/bin.ts serve --trust-projects",
         "env": {
           "TAU_CONFIG_DIR": "out/tau-host-dev",
           "TAU_HOST_RELAY_URL": "http://localhost:4000"

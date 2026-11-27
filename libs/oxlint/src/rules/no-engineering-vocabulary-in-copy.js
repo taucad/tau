@@ -15,6 +15,9 @@
  * phrasings `Needs your decision` replaced (`Needs resolution`, `Changes need review`), raw
  * `conflicts/…` and `sync/<remote>` line names, raw actor ids (`user_…`, `anon:`, a bare
  * `agent`) and the op log's `ops`.
+ *
+ * UX policy Rule 13 names the cloud as a thing, not a product: product copy says "the cloud" and
+ * "Cloud link", never "Tau Cloud" (cloud and account naming blueprint, N2).
  */
 const BANNED_PATTERNS = [
   /\b(?:checkouts?|lease[sd]?|backends?|worktrees?|refs?)\b/iu,
@@ -32,6 +35,7 @@ const BANNED_PATTERNS = [
   /\buser_\w+/u,
   /\banon:/u,
   /\bops\b/iu,
+  /\bTau Cloud\b/u,
 ];
 
 /** Property names inside a toast options object that a person reads. */
@@ -74,7 +78,7 @@ export const noEngineeringVocabularyInCopyRule = {
     },
     messages: {
       violation:
-        '"{{word}}" is engineering vocabulary. Revisions policy Rule 1 bans checkout, lease, backend, worktree, ref, head, remote, line, linked and host in product copy, and the always-on sync charter retired detached, Return to latest, Viewing Rev N, Needs resolution, Changes need review, raw line names, actor ids and ops — say History, Branch, Current, Restore, Switch, Merge, Close, Back up, GitHub, Git host or Needs your decision instead.',
+        '"{{word}}" is engineering vocabulary. Revisions policy Rule 1 bans checkout, lease, backend, worktree, ref, head, remote, line, linked and host in product copy, and the always-on sync charter retired detached, Return to latest, Viewing Rev N, Needs resolution, Changes need review, raw line names, actor ids and ops; UX policy Rule 13 retired "Tau Cloud" in product copy — say History, Branch, Current, Restore, Switch, Merge, Close, Back up, GitHub, Git host, the cloud or Needs your decision instead.',
     },
     schema: [],
   },

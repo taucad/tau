@@ -7,7 +7,7 @@ import type { MyUIMessage } from '@taucad/chat';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
-import { initialChatProjection, materializeTranscript, reduceChatProjection } from '#machines/chat-projection.logic.js';
+import { initialChatProjection, reduceChatProjection, selectTranscript } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 
 /**
@@ -61,13 +61,13 @@ vi.doMock('#hooks/use-theme.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useTheme: () => ({ theme: 'light' }),
 }));
-vi.doMock('#components/files/file-link.js', () => ({
+vi.doMock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 // The chat lane's own seams; the composer's tray stays real (`ChatTodoList` over the chat's task-list file).
 vi.doMock('react-router', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useLocation: () => ({ state: undefined }),
+  useLocation: () => ({ key: 'default', search: '', state: undefined }),
 }));
 vi.doMock('#hooks/use-search-parameter.js', () => ({ useSearchParameter: () => [false, vi.fn()] }));
 vi.doMock('#hooks/use-chat.js', () => ({
@@ -84,7 +84,7 @@ vi.doMock('#hooks/use-chat.js', () => ({
   },
   useChatContext: () => ({ activeChatId: 'chat_tray', persistenceActorRef: undefined }),
 }));
-vi.doMock('#hooks/use-file-content.js', () => ({
+vi.doMock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: () => readChatSession().todoList,
 }));
 vi.doMock('#chat-clients/use-cad-chat-client.js', () => ({
@@ -187,7 +187,7 @@ it('should disclose recovered filenames and real highlighted diffs in a browser'
     type: 'batch',
     answer: { status: 'batch', cursor: 0, nextCursor: rows.length, endCursor: rows.length, events: rows },
   }).state;
-  const messages = await materializeTranscript(projection);
+  const messages = selectTranscript(projection);
   const tools = messages.flatMap((message) => message.parts).filter((part) => part.type === 'dynamic-tool');
   expect(tools).toHaveLength(2);
   await page.viewport(640, 500);

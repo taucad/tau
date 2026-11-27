@@ -32,12 +32,6 @@ export type FlagDefinition = {
    * flags too, so a developer can turn one on from the console. A PostHog-backed flag never reads `tau:flags`.
    */
   readonly localOverride?: false;
-  /**
-   * The flag decides first-paint geometry (a row that is there or not). Its settled value is mirrored to the
-   * `layout-flags` cookie, so the server renders, omits or holds the flagged surface (`#flags/layout-flags`); read it
-   * with `useLayoutFlag`. Keep this list short: every entry rides every document request.
-   */
-  readonly affectsLayout?: true;
 };
 
 /**
@@ -134,9 +128,8 @@ export const flagRegistry = {
     showInExperimental: false,
     schema: z.boolean().default(false),
     posthogKey: 'onboarding',
-    affectsLayout: true,
     label: 'Onboarding',
-    description: 'The setup route, the product tour and home suggestions',
+    description: 'The setup route and the product tour',
   },
   onboardingAutoOpen: {
     showInExperimental: false,
@@ -145,6 +138,13 @@ export const flagRegistry = {
     requires: 'onboarding',
     label: 'Open setup on first visit',
     description: 'Open setup automatically for a person who has not finished it. Needs Onboarding',
+  },
+  commentPins: {
+    showInExperimental: false,
+    schema: z.boolean().default(false),
+    posthogKey: 'comment-pins',
+    label: 'Comment pins',
+    description: 'Pin numbered comments on the model and mark up images for the chat',
   },
   tauDebug: {
     showInExperimental: true,
@@ -156,20 +156,58 @@ export const flagRegistry = {
 
 export type FeatureFlagName = keyof typeof flagRegistry;
 
-export const featureFlagNames = Object.keys(flagRegistry) as FeatureFlagName[];
-
-/** A flag marked `affectsLayout`. */
-export type LayoutFlagName = {
-  [K in FeatureFlagName]: (typeof flagRegistry)[K] extends { readonly affectsLayout: true } ? K : never;
+/**
+ * Flags whose value can arrive after the page's first client render: those PostHog decides (`posthogKey`) and those
+ * that follow another flag (`requires`). They have no boolean reader: `useFeatureState` and `readFeatureState` say
+ * `unknown` until the value is settled, so a consumer cannot take "not known yet" for "off".
+ */
+export type RemoteFeatureFlagName = {
+  [K in FeatureFlagName]: (typeof flagRegistry)[K] extends
+    | { readonly posthogKey: string }
+    | { readonly requires: string }
+    ? K
+    : never;
 }[FeatureFlagName];
 
-/** The flags whose settled values ride the `layout-flags` cookie, in registry order. */
-export const layoutFlagNames = featureFlagNames.filter((name): name is LayoutFlagName => {
-  const definition: FlagDefinition = flagRegistry[name];
-  return definition.affectsLayout === true;
-});
+/** Flags whose value is known synchronously on the client (a build default or a stored override). */
+export type LocalFeatureFlagName = Exclude<FeatureFlagName, RemoteFeatureFlagName>;
 
-export const experimentalFeatureFlagNames = featureFlagNames.filter((name) => flagRegistry[name].showInExperimental);
+/**
+ * Whether a flag is on, off, or not known yet. `unknown` holds during the server render and hydration for every flag,
+ * and for a {@link RemoteFeatureFlagName} until PostHog has answered or the host decided no answer will come. A failed
+ * flag load is `unknown` too: it decided nothing, so neither `on` nor `off` may follow from it.
+ */
+export type FeatureFlagState = 'on' | 'off' | 'unknown';
+
+/**
+ * Why a flag is or is not known, for a gate that must stop waiting ({@link FeatureFlagState} folds the last two into
+ * `unknown`): `pending` while an answer is still coming, `failed` when it was due and did not arrive. Neither is a
+ * value; a later answer turns `failed` into `on` or `off`.
+ */
+export type FeatureFlagAnswer = 'on' | 'off' | 'pending' | 'failed';
+
+/**
+ * What a gate on a flag does: `waiting` while the answer is still coming, `open` on `on` or a failed load (it fails
+ * open), `closed` on an answered `off` before it ever opened. Once open it stays open.
+ */
+export type FeatureGate = 'waiting' | 'open' | 'closed';
+
+/**
+ * Whether a registry name is a {@link RemoteFeatureFlagName}.
+ *
+ * @param name - The registry name.
+ * @returns Whether its value can arrive after the first client render.
+ */
+export const isRemoteFeatureFlag = (name: FeatureFlagName): name is RemoteFeatureFlagName => {
+  const definition: FlagDefinition = flagRegistry[name];
+  return definition.posthogKey !== undefined || definition.requires !== undefined;
+};
+
+export const featureFlagNames = Object.keys(flagRegistry) as FeatureFlagName[];
+
+export const experimentalFeatureFlagNames: readonly LocalFeatureFlagName[] = featureFlagNames.filter(
+  (name): name is LocalFeatureFlagName => flagRegistry[name].showInExperimental && !isRemoteFeatureFlag(name),
+);
 
 /**
  * Zod object schema built from the registry.
@@ -183,6 +221,9 @@ export const featureFlagsSchema = z.object(
 );
 
 export type FeatureFlags = z.infer<typeof featureFlagsSchema>;
+
+/** The resolved values of the {@link LocalFeatureFlagName} flags: what a boolean reader may show. */
+export type LocalFeatureFlags = Readonly<Pick<FeatureFlags, LocalFeatureFlagName>>;
 
 /**
  * Resolved defaults (all flags at their default values).

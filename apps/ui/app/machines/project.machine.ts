@@ -12,7 +12,8 @@ import { produce } from 'immer';
 import type { Project, ProjectManifestParseIssue } from '@taucad/types';
 import { assertRootedPath, normalizePath } from '@taucad/utils/path';
 import { classify } from '@taucad/filesystem/path-registry';
-import { isBrowser } from '#constants/browser.constants.js';
+import { isBrowser } from '@taucad/files-ui/constants/browser.constants';
+import type { ProjectFileActivityOperation } from '@taucad/files-ui/filesystem/file-operation-participants';
 import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { GraphicsOwnedSettings, GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
@@ -166,17 +167,6 @@ const projectActors = {
   cad: cadMachine,
   logs: logMachine,
 } as const;
-
-export type ProjectFileActivityOperation =
-  | 'written'
-  | 'batchWritten'
-  | 'directoryCreated'
-  | 'fileCopied'
-  | 'directoryCopied'
-  | 'renamed'
-  | 'directoryRenamed'
-  | 'deleted'
-  | 'directoryDeleted';
 
 /**
  * Whether a filesystem event is activity on the project's own content.

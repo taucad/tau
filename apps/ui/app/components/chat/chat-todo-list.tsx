@@ -8,7 +8,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
 import { useChatContext } from '#hooks/use-chat.js';
-import { useFileContent } from '#hooks/use-file-content.js';
+import { useFileContent } from '@taucad/files-ui/hooks/use-file-content';
 
 const collapsedStorageKey = (chatId: string): string => `tau:chat-todo-collapsed:${chatId}`;
 

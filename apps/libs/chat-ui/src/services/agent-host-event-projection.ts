@@ -1,4 +1,5 @@
 import { cadReferencesSchema } from '@taucad/chat/references';
+import { annotationsOf, hasAnnotations, serializeMessageAnnotations } from '@taucad/chat/annotations';
 import { z } from 'zod';
 import type { ProviderMetadata, UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent, KnownProjectionEvent, ProviderMessageMetadata } from '@taucad/agent-host';
@@ -23,6 +24,8 @@ import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@
 import { isRecord } from '@taucad/utils/schema';
 import { externalToolOutputText } from '#utils/external-tool-output.js';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
+import { imageUrlsOf } from '#chat-clients/turn-intent.js';
+import { isRecordedOnHost } from '#utils/chat-execution.js';
 import { normalizedErrorCategoryOf } from '#utils/chat-error-card.js';
 
 /** Presentation consumes canonical rows or distinct validated compact events. */
@@ -528,8 +531,10 @@ const toolChunkFacts = (
     ...(call?.status === 'completed' || call?.status === 'failed' ? { status: call.status } : {}),
     ...(external ? { origin: 'external' } : {}),
     ...(typeof agentId === 'string' ? { agentId } : {}),
-    // Grok omits nativeName; its qualified Tau tool name is already canonical.
-    ...(presentation === 'tau-mcp' ? { presentation, nativeName: call?.nativeName ?? message.toolName } : {}),
+    /* A Tau MCP row's own tool name is the canonical Tau name for every adapter;
+     * `call.nativeName` is the adapter's spelling (Claude's `mcp__tau__test_model`,
+     * nothing for Grok) and older durable rows still carry it. */
+    ...(presentation === 'tau-mcp' ? { presentation, nativeName: message.toolName } : {}),
   };
   const tau = durable as ToolChunkMetadata;
   return {
@@ -605,7 +610,7 @@ const messageChunks = (
   }
 };
 
-/** Read the latest ACP session record for the selected agent from durable UI messages. @public */
+/** Read the latest ACP session record for the selected agent and placement from durable UI messages. @public */
 export const latestAcpSessionData = (
   messages: readonly MyUIMessage[],
   agentId: string,
@@ -618,7 +623,7 @@ export const latestAcpSessionData = (
       if (
         part?.type === 'data-acp-session' &&
         part.data.agentId === agentId &&
-        (hostId === undefined || part.data.hostId === hostId)
+        (hostId === undefined || isRecordedOnHost(part.data.hostId, hostId))
       ) {
         return part.data;
       }
@@ -689,14 +694,22 @@ export const projectAgentHostUserMessage = (message: UserProviderMessage, record
     message.metadata?.timestamp ??
     (recordedTimestamp !== undefined && Number.isFinite(recordedTimestamp) ? recordedTimestamp : undefined);
   const references = cadReferencesSchema.safeParse(message.metadata?.['references']);
+  const annotations = annotationsOf(message.metadata);
+  /* The annotations block is the agent's reading of `metadata.annotations`, never the person's words: the transcript
+   * shows the comments themselves. It is a pure function of the record and the image order, so the part to take out
+   * is the one that equals it. */
+  const block =
+    annotations === undefined ? undefined : serializeMessageAnnotations(annotations, imageUrlsOf({ parts }));
+  const shown = block === undefined ? parts : parts.filter((part) => !(part.type === 'text' && part.text === block));
   return {
     id: message.id,
     role: 'user',
-    parts,
+    parts: shown,
     metadata: {
       status: 'success',
       ...(createdAt === undefined ? {} : { createdAt }),
       ...(references.success && references.data.length > 0 ? { references: references.data } : {}),
+      ...(hasAnnotations(annotations) ? { annotations } : {}),
     },
   };
 };
@@ -967,6 +980,23 @@ const hasOpenBlock = (runId: string, streamedBlocks: AgentHostLiveBlocks | undef
   return false;
 };
 
+/**
+ * The chunk that states when an answer's work ended, epoch milliseconds, through the AI SDK's own message metadata.
+ * A failed or cancelled run's `error` and `abort` chunks carry no metadata, so the end rides ahead of them; a steering
+ * input appends it to the answer it seals.
+ *
+ * @param endedAt - When the work ended.
+ * @returns The metadata chunk.
+ * @public
+ */
+export const endedChunk = (endedAt: number): UIMessageChunk => ({
+  type: 'message-metadata',
+  messageMetadata: { endedAt },
+});
+
+/** The metadata chunk that takes an answer's end back when its stopped run resumes: chunks only append, so it states no end. */
+export const reopenedChunk: UIMessageChunk = { type: 'message-metadata', messageMetadata: { endedAt: null } };
+
 const lifecycleChunks = (
   event: Extract<PresentationEvent, { readonly type: 'run.lifecycle' }>,
   streamedBlocks: AgentHostLiveBlocks | undefined,
@@ -993,13 +1023,22 @@ const lifecycleChunks = (
       return hasOpenBlock(event.runId, streamedBlocks) ? [] : [{ type: 'finish-step' }];
     }
     case 'completed': {
-      return [{ type: 'finish', finishReason: 'stop', messageMetadata: { status: 'success' } }];
+      return [
+        {
+          type: 'finish',
+          finishReason: 'stop',
+          messageMetadata: { status: 'success', endedAt: Date.parse(event.recordedAt) },
+        },
+      ];
     }
     case 'failed': {
-      return [{ type: 'error', errorText: runFailureText(event.detail) }];
+      return [endedChunk(Date.parse(event.recordedAt)), { type: 'error', errorText: runFailureText(event.detail) }];
     }
     case 'cancelled': {
-      return [{ type: 'abort', reason: errorText(event.detail, 'cancelled') }];
+      return [
+        endedChunk(Date.parse(event.recordedAt)),
+        { type: 'abort', reason: errorText(event.detail, 'cancelled') },
+      ];
     }
   }
 };

@@ -6,7 +6,10 @@
  * | (start)                                            | idle          | no        |
  * | gizmoPressed                                       | pressed       | yes       |
  * | gizmoPressed, after(idleStart)                     | idle          | no        |
- * | gizmoPressed, gizmoTurned                          | turning       | yes       |
+ * | gizmoPressed, gizmoTurned(drag)                    | turning       | yes       |
+ * | gizmoPressed, gizmoTurned(click)                   | pressed       | yes       |
+ * | gizmoTurned(drag)                                  | turning       | yes       |
+ * | gizmoTurned(click), gizmoTurned(key)               | idle          | no        |
  * | gizmoPressed, gizmoTurned, gizmoReleased           | idle          | no        |
  * | gizmoPressed, gizmoReleased                        | idle          | no        |
  */
@@ -35,7 +38,10 @@ const dark: ViewportGizmoEnvironment = { colorScheme: 'dark', isHighContrast: fa
 
 const samples: Record<ViewportGizmoGestureEvent['type'], readonly ViewportGizmoGestureEvent[]> = {
   gizmoPressed: [{ type: 'gizmoPressed' }],
-  gizmoTurned: [{ type: 'gizmoTurned' }],
+  gizmoTurned: [
+    { type: 'gizmoTurned', cause: 'drag' },
+    { type: 'gizmoTurned', cause: 'click' },
+  ],
   gizmoReleased: [{ type: 'gizmoReleased' }],
   applyStyle: [{ type: 'applyStyle', environment: dark }],
   upDirectionChanged: [{ type: 'upDirectionChanged', upDirection: 'y' }],
@@ -104,7 +110,7 @@ describe('view cube gesture totality', () => {
 
     expect(shortestTo('idle')).toEqual([]);
     expect(shortestTo('pressed')).toEqual(['gizmoPressed']);
-    expect(shortestTo('turning')).toEqual(['gizmoPressed', 'gizmoTurned']);
+    expect(shortestTo('turning')).toEqual(['gizmoTurned']);
     expect(unreachedStates(viewportGizmoGestureMachine, pathOptions)).toEqual([]);
   });
 
@@ -128,8 +134,8 @@ describe('view cube gesture', () => {
 
     adapter.report({ type: 'gizmoPressed' });
     expect(locked()).toBe(true);
-    adapter.report({ type: 'gizmoTurned' });
-    adapter.report({ type: 'gizmoTurned' });
+    adapter.report({ type: 'gizmoTurned', cause: 'drag' });
+    adapter.report({ type: 'gizmoTurned', cause: 'drag' });
     // A turning press outlives the idle-start window.
     clock.advance(viewportGizmoIdleStartMilliseconds + 1000);
     expect(actor.getSnapshot().value).toBe('turning');
@@ -154,17 +160,33 @@ describe('view cube gesture', () => {
     expect(adapter.record.commands).toEqual(['lockTaken', 'lockReleased']);
   });
 
-  it('should keep a turn after the idle-start release free of the lock', () => {
+  it('should keep a flight after the idle-start release free of the lock, whatever caused it', () => {
     const { adapter, clock, locked } = startGesture();
     adapter.report({ type: 'gizmoPressed' });
     clock.advance(viewportGizmoIdleStartMilliseconds);
 
-    // A face click's animation, or a drag that began after the window: the adapter reports its pose; nothing locks.
-    adapter.report({ type: 'gizmoTurned' });
+    // A face click's flight, a key, a navigation button or an API turn: the adapter reports its pose; nothing locks.
+    for (const cause of ['click', 'key', 'navigation', 'api'] as const) {
+      adapter.report({ type: 'gizmoTurned', cause });
+    }
     adapter.report({ type: 'gizmoReleased' });
 
     expect(locked()).toBe(false);
     expect(adapter.record.commands).toEqual(['lockTaken', 'lockReleased']);
+  });
+
+  it('should lock a drag that began after the idle-start window, keyed on its cause', () => {
+    const { actor, adapter, clock, locked } = startGesture();
+    adapter.report({ type: 'gizmoPressed' });
+    clock.advance(viewportGizmoIdleStartMilliseconds);
+
+    adapter.report({ type: 'gizmoTurned', cause: 'drag' });
+    expect(actor.getSnapshot().value).toBe('turning');
+    expect(locked()).toBe(true);
+    adapter.report({ type: 'gizmoReleased' });
+
+    expect(locked()).toBe(false);
+    expect(adapter.record.commands).toEqual(['lockTaken', 'lockReleased', 'lockTaken', 'lockedTurn', 'lockReleased']);
   });
 
   it('should take the lock once for a repeated press, and release it once', () => {
@@ -172,7 +194,7 @@ describe('view cube gesture', () => {
 
     adapter.report({ type: 'gizmoPressed' });
     adapter.report({ type: 'gizmoPressed' });
-    adapter.report({ type: 'gizmoTurned' });
+    adapter.report({ type: 'gizmoTurned', cause: 'drag' });
     adapter.report({ type: 'gizmoPressed' });
     adapter.report({ type: 'gizmoReleased' });
     adapter.report({ type: 'gizmoReleased' });
@@ -183,7 +205,7 @@ describe('view cube gesture', () => {
   it('should stop its adapter with it, so a held lock is given back', () => {
     const { actor, adapter } = startGesture();
     adapter.report({ type: 'gizmoPressed' });
-    adapter.report({ type: 'gizmoTurned' });
+    adapter.report({ type: 'gizmoTurned', cause: 'drag' });
 
     actor.stop();
 

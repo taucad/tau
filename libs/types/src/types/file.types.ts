@@ -63,12 +63,16 @@ export type FileTreeEntry =
       name: string;
       type: 'dir';
       size: number;
+      /** A folder only a tree write's arriving entries make (see {@link FileStat}): it is not on disk yet. */
+      pending?: true;
     }
   | ({
       path: string;
       name: string;
       type: 'file';
       size: number;
+      /** A pending entry (see {@link FileStat}): its bytes are not here yet, so it is shown arriving, never as text. */
+      pending?: true;
     } & StatContentMetadata);
 
 /**
@@ -106,13 +110,31 @@ export type FileStat =
       readonly mtimeMs: number;
       /** What a composed view says about this path; absent on a raw provider stat. */
       readonly provenance?: FileProvenance;
+      /**
+       * Present on a folder only a tree write's arriving entries make (`@taucad/filesystem` D10): a listing shows it
+       * before it is on disk, and nothing may be renamed, moved or made inside it until it is.
+       */
+      readonly pending?: true;
+      /** Not on disk yet: a tree write has still to make it. A consumer that reads what it lists leaves it out. */
+      readonly arriving?: true;
     }
   | ({
       readonly type: 'file';
+      /** The file's size; for a pending entry, the size of the large object it stands for. */
       readonly size: number;
       readonly mtimeMs: number;
       /** What a composed view says about this path; absent on a raw provider stat. */
       readonly provenance?: FileProvenance;
+      /**
+       * Present on a pending entry (`@taucad/filesystem` D9): the path holds a large object's pointer, not yet its
+       * bytes. `size` is the object's and a read of it waits for them; absent on a raw stat, which is the pointer's.
+       */
+      readonly pending?: true;
+      /**
+       * Present, beside `pending`, on a listed entry a tree write has yet to land (D10): not on disk yet, so a read of
+       * it finds nothing. A consumer that reads what it lists (an agent) leaves it out.
+       */
+      readonly arriving?: true;
     } & StatContentMetadata);
 
 /**

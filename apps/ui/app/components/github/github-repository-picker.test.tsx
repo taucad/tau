@@ -32,7 +32,7 @@ vi.mock('#lib/github-connections.js', async (importOriginal) => ({
   ...(await importOriginal<typeof GithubConnectionsModule>()),
   githubConnections: github,
 }));
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   get isDesktopTarget() {
     return desktop.current;
   },
@@ -281,8 +281,11 @@ describe('GithubRepositoryPicker', () => {
     await vi.waitFor(() => {
       expect(github.repositories).toHaveBeenCalledWith('connection-1', 10, 2);
     });
-    /* The virtualized list lays out no rows in jsdom; the search filter is what proves the match. */
-    expect(screen.queryByText('Searching remaining repositories…')).not.toBeInTheDocument();
+    /* The virtualized list lays out no rows in jsdom; the search filter is what proves the match.
+       Page 2 is requested before its response renders, so wait for the search to settle. */
+    await vi.waitFor(() => {
+      expect(screen.queryByText('Searching remaining repositories…')).not.toBeInTheDocument();
+    });
     expect(screen.queryByText('No repository found')).not.toBeInTheDocument();
 
     await userEvent.clear(screen.getByRole('combobox'));

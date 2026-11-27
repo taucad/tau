@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interface-mobile.js';
 import { mobileDrawerOpenSnapPoint } from '@taucad/ui-core/constants/editor.constants';
 import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
 import { mobilePanelByWorkbenchPanel } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
+import { readPhoneFrameHint } from '#lib/frame-hint.js';
 
 const state = vi.hoisted(() => ({
   drawerOpen: false,
@@ -15,6 +16,9 @@ const state = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   flags: { machines: true, tauDebug: true },
   row: { attention: 0, conflicted: false, settings: 0, failed: 0 },
+  isEditorReady: true,
+  /* The viewer's wait, which a sheet at full covers and speaks for. */
+  model: 'ready' as string,
   // Vaul resets its snap point 500ms after a close; a previous test's reset must not land in this one.
   generation: 0,
 }));
@@ -42,11 +46,14 @@ vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
         state.listeners.add(listener);
         return () => state.listeners.delete(listener);
       },
-      () => `${state.activeTab}|${String(state.drawerOpen)}|${String(state.activeSnapPoint)}`,
+      () =>
+        `${state.activeTab}|${String(state.drawerOpen)}|${String(state.activeSnapPoint)}|${String(state.isEditorReady)}`,
     );
-    const [activeTab, drawerOpen] = snapshot.split('|');
+    const [activeTab, drawerOpen, , isEditorReady] = snapshot.split('|');
     const { generation } = state;
     return {
+      isEditorReady: isEditorReady === 'true',
+      isLayoutRestored: isEditorReady === 'true',
       activeTab,
       handleTabChange: selectSurface,
       drawerOpen: drawerOpen === 'true',
@@ -71,6 +78,22 @@ vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => true }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-1', viewRecords: new Map() }) }));
 vi.mock('#hooks/use-sidebar-status.js', () => ({ useProjectSidebarRow: () => state.row }));
+vi.mock('#hooks/use-project-availability.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useModelAvailability: () => state.model,
+}));
+/* The covering sheet's header status reads the session's open; the shell under test has no sessions provider. */
+vi.mock('#hooks/use-sessions.js', () => ({
+  useSessions: () => ({
+    getSnapshot: () => ({ context: { status: {} } }),
+    subscribe: () => ({ unsubscribe: () => undefined }),
+  }),
+}));
+vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useRevisionStatus: () => undefined,
+  useRevisionClient: () => ({ send: vi.fn() }),
+}));
 vi.mock('#flags/use-feature.js', () => ({
   useFeature: (flag: 'machines' | 'tauDebug') => state.flags[flag],
 }));
@@ -135,7 +158,9 @@ vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => ({
   ProjectManifestIssueBanner: () => null,
 }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({ WorkspaceSkeleton: () => null }));
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', () => ({
+  WorkspaceOpening: () => <span role='status' aria-label='Opening project' />,
+}));
 /* The project top bar (W2) has its own suite; this shell suite only needs its slot. */
 vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
 
@@ -211,13 +236,23 @@ function evaluate(source: string): number {
   return sum();
 }
 
+/* Testing Library unmounts a test's tree after this file's `afterEach`, so a Terminal still mounted then reports its
+ * close after the counters were cleared: clear them before each test too, so no test sees another's unmount. */
+beforeEach(() => {
+  terminal.mounted.mockClear();
+  terminal.closed.mockClear();
+});
+
 afterEach(() => {
   state.drawerOpen = false;
   state.activeTab = 'viewer';
   state.activeSnapPoint = 0.5;
   state.flags = { machines: true, tauDebug: true };
   state.row = { attention: 0, conflicted: false, settings: 0, failed: 0 };
+  state.isEditorReady = true;
+  state.model = 'ready';
   state.listeners.clear();
+  globalThis.history.replaceState(null, '', '/');
   state.generation += 1;
   vi.unstubAllGlobals();
   terminal.mounted.mockClear();
@@ -381,6 +416,34 @@ describe('ChatInterfaceMobile', () => {
     expect(viewerBox.parentElement).toHaveClass('[--nav-offset:calc(var(--nav-height)_+_env(safe-area-inset-bottom))]');
   });
 
+  /* Progressive Loading Policy rules 17 and 21: a sheet at full covers the viewer, which is inert there, so the sheet
+   * says the viewer's failure, whatever it shows: here the open chat, while the model's files failed. */
+  it('should say the covered viewer’s failure over an open chat, and make the viewer inert', async () => {
+    state.model = 'filesFailed';
+    state.activeTab = 'chat';
+    state.drawerOpen = true;
+    state.activeSnapPoint = 1;
+    renderShell();
+
+    const notice = await screen.findByRole('alert');
+    expect(notice).toHaveTextContent('Couldn’t download model files');
+    expect(within(notice).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
+    expect(screen.getByText('Viewer controls').closest('[inert]')).not.toBeNull();
+  });
+
+  it('should leave the failure to the viewer while the sheet rests at half', async () => {
+    state.model = 'filesFailed';
+    state.activeTab = 'chat';
+    state.drawerOpen = true;
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+
+    await screen.findByRole('textbox', { name: 'Message' });
+    expect(document.querySelector('[data-slot=covering-sheet-notice]')).toBeNull();
+    expect(screen.getByText('Viewer controls').closest('[inert]')).toBeNull();
+  });
+
   it('should keep the viewer accessible while the docked panel opens and closes', async () => {
     state.drawerOpen = false;
     renderShell();
@@ -498,7 +561,8 @@ describe('ChatInterfaceMobile', () => {
     renderShell();
 
     const surface = await screen.findByRole('region', { name: 'Share' });
-    const frameTitle = within(surface).getByRole('heading', { name: 'Share project' });
+    /* The share frame is a lazy chunk: wait for it, not only for the sheet's surface, which is there at once. */
+    const frameTitle = await within(surface).findByRole('heading', { name: 'Share project' });
     // Jsdom applies no Tailwind; the wrapper's rule is what hides the frame heading on the phone.
     expect(frameTitle.closest('[class*="[&_[data-slot=share-pane-title]]:hidden"]')).not.toBeNull();
     expect(within(surface).getByRole('region', { name: 'Share project' })).toBeInTheDocument();
@@ -1200,5 +1264,36 @@ describe('ChatInterfaceMobile on load', () => {
     await screen.findByRole('textbox', { name: 'Message' });
     expect(frames.restingFrame()).toMatch(/^\d+px$/u);
     expect(frames.firstFrame()).toBe('100%');
+  });
+
+  // A15c: the phone frame's hint and its hand-over to the live sheet.
+  it('should remember the surface for the next load once the editor state has loaded, not before', () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    globalThis.localStorage.clear();
+    state.isEditorReady = false;
+    state.activeTab = 'chat';
+    state.drawerOpen = true;
+    const { container } = renderShell();
+    const workspace = (): Element => container.querySelector('[data-mobile-workspace]')!;
+
+    expect(readPhoneFrameHint('home/one')).toBeUndefined();
+    expect(workspace()).toHaveAttribute('data-mobile-workspace', 'opening');
+    /* Drawn at the default surface but not shown: the phone frame stands in until the stored layout is read. */
+    expect(workspace().className).toContain('data-[mobile-workspace=opening]:invisible');
+    /* Beside the hidden workspace, not in it, so assistive technology hears it. */
+    expect(workspace()).not.toContainElement(screen.getByRole('status', { name: 'Opening project' }));
+
+    act(() => {
+      state.isEditorReady = true;
+      notify();
+    });
+    expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'chat', snap: 0.5 });
+    expect(workspace()).toHaveAttribute('data-mobile-workspace', 'ready');
+    expect(screen.queryByRole('status', { name: 'Opening project' })).toBeNull();
+
+    act(() => {
+      selectSurface('editor');
+    });
+    expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'editor', snap: 1 });
   });
 });

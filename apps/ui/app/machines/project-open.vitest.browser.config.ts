@@ -1,12 +1,13 @@
 import { fileURLToPath } from 'node:url';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   plugins: [
     tauRuntime(),
     {
@@ -82,6 +83,8 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../..', import.meta.url))] },
   },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     include: ['app/machines/project-open.browser.test.ts'],
     fileParallelism: false,
     browser: {

@@ -22,7 +22,7 @@ import type {
 import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
 import { mutatingRpcNames } from '@taucad/chat/constants';
 import type { LargeObjectsFacet } from '@taucad/revisions';
-import { guardLargeObjectFiles, guardLargeObjectKernel } from '@taucad/ui-core/lib/large-object-guard';
+import { guardLargeObjectFiles, guardLargeObjectKernel } from '@taucad/agent-host-ui/lib/large-object-guard';
 import { applyClientTextMutation, createExactReplacementPlan, createRpcDispatcher } from '@taucad/chat/rpc';
 import type {
   RpcDependencies,
@@ -79,6 +79,7 @@ import {
   captureFilesToDataUrls,
   omittedSectionCutsNotice,
 } from '#services/headless-capture.js';
+import { planarMultiAngleNotice } from '@taucad/agent-tools/capture';
 
 /** Source of file write operations */
 type FileWriteSource = 'editor' | 'user' | 'machine';
@@ -190,9 +191,13 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
    * larger than the cap is ever read whole for its facts. */
   const factsOf = async (
     path: string,
-    known: StatContentMetadata & Readonly<{ size: number }>,
+    known: StatContentMetadata & Readonly<{ size: number; pending?: true }>,
   ): Promise<StatContentMetadata> => {
     if (known.contentKind === 'binary' || (known.contentKind === 'text' && known.lineCount !== undefined)) {
+      return fileMetadataFields(known);
+    }
+    /* A pending row's size is not its bytes' (D9): a read for its facts would fetch its object or refuse. */
+    if (known.pending === true) {
       return fileMetadataFields(known);
     }
     return known.size > lineCountByteCap
@@ -301,7 +306,10 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     async readdir(path: string, options?: RpcReaddirOptions): Promise<RpcDirectoryEntry[]> {
       const { treeService } = await fileManager.whenServicesReady();
       try {
-        const entries = await treeService.listDirectoryExact(path);
+        /* A row a tree write has yet to land is listed for the person as arriving; it is not on disk, so the agent
+           could not read it (I7). */
+        const listed = await treeService.listDirectoryExact(path);
+        const entries = listed.filter((entry) => entry.arriving !== true);
         return await mapConcurrent(entries, factsConcurrency, async (entry): Promise<RpcDirectoryEntry> => {
           const modifiedAt = entry.mtimeMs > 0 ? new Date(entry.mtimeMs).toISOString() : undefined;
           const common = {
@@ -793,23 +801,28 @@ function createBrowserImageClient(
               includeEdges,
             },
           });
-          const views =
-            resolved.cadSnapshot.context.rendering?.success &&
-            asKnownArtifact(resolved.cadSnapshot.context.rendering.artifact)?.mimeType === 'image/svg+xml'
-              ? (['drawing'] as const)
-              : input.mode === 'single'
-                ? (['isometric'] as const)
-                : canonicalCaptureViews.map((view) => view.id);
+          const planar =
+            resolved.cadSnapshot.context.rendering?.success === true &&
+            asKnownArtifact(resolved.cadSnapshot.context.rendering.artifact)?.mimeType === 'image/svg+xml';
+          const views = planar
+            ? (['drawing'] as const)
+            : input.mode === 'single'
+              ? (['isometric'] as const)
+              : canonicalCaptureViews.map((view) => view.id);
           const dataUrls = captureFilesToDataUrls(files);
           const images = views.map((view, index) => ({
             view,
             dataUrl: dataUrls[index]!,
           }));
-          // One line, so the agent never describes a cut the images do not show.
+          // One line each, so the agent never describes a cut the images do not show or expects six drawings.
+          const notes = [
+            ...(planar && input.mode === 'multi_angle' ? [planarMultiAngleNotice('drawing')] : []),
+            ...(omittedSectionCutIds.length > 0 ? [omittedSectionCutsNotice] : []),
+          ];
           return {
             success: true,
             images,
-            ...(omittedSectionCutIds.length > 0 ? { message: omittedSectionCutsNotice } : {}),
+            ...(notes.length > 0 ? { message: notes.join(' ') } : {}),
           };
         } catch (error) {
           return {

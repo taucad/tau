@@ -10,6 +10,7 @@ import { expect } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import type { TargetClickOptions } from '#support/external-target.js';
 import { filesPane, treeItem } from '#support/file-tree.js';
 
 /** The Revisions pane body that is on screen (the workbench mounts one per slot). */
@@ -233,7 +234,7 @@ export const openBackupChooser = async (): Promise<void> => {
   const strip = revisionStrip();
   const chooser = backupChooser();
   const connected = line.getByRole('status', { name: /^Backup (?:status|connection progress)$/u });
-  const backUp = line.getByRole('button', { name: 'Back up to Tau Cloud', exact: true });
+  const backUp = line.getByRole('button', { name: 'Back up to the cloud', exact: true });
   const save = strip.getByRole('button', { name: 'Save', exact: true });
   const nothingSaved = strip.getByRole('status', { name: 'History status' }).filter({ hasText: 'Nothing saved yet' });
   type Offer = 'chooser' | 'connected' | 'unsaved' | 'nothingSaved' | 'backUp';
@@ -292,7 +293,7 @@ export const branchChipOn = (name: string): Locator =>
  * the files are on it (D2, f42cb91a2b); *All branches* draws each one, with its
  * chip and ⋮. The choice is offered once there is a second branch.
  */
-export const showAllBranches = async (): Promise<void> => {
+export const showAllBranches = async (options?: TargetClickOptions): Promise<void> => {
   const allBranches = selectors
     .getByCss(visibleRevisionsPanel)
     /* A single-choice Radix toggle group is a `radiogroup` of `radio` items, as *Where to back up* is. */
@@ -300,7 +301,7 @@ export const showAllBranches = async (): Promise<void> => {
     .getByRole('radio', { name: 'All branches' });
   await target.expectVisible(allBranches, 60_000);
   if ((await target.getAttribute(allBranches, 'aria-checked')) !== 'true') {
-    await target.click(allBranches);
+    await target.click(allBranches, options);
   }
   await target.expectAttribute(allBranches, 'aria-checked', 'true');
 };
@@ -315,8 +316,9 @@ export const showAllBranches = async (): Promise<void> => {
  * only while the files are on it (D2, f42cb91a2b).
  *
  * @param name - The new branch's name.
+ * @param options - How each control is pressed: `{ touch: true }` taps it, as a phone spec does.
  */
-export const createBranchHere = async (name: string): Promise<void> => {
+export const createBranchHere = async (name: string, options?: TargetClickOptions): Promise<void> => {
   const chip = branchChip();
   const newBranch = selectors.getByRole('menuitem', { name: 'New branch…' });
   const switchBranch = selectors.getByRole('menu').getByText('Switch branch', { exact: true });
@@ -331,18 +333,18 @@ export const createBranchHere = async (name: string): Promise<void> => {
           await target.keyboardPress('Escape');
           return false;
         }
-        await target.click(chip);
+        await target.click(chip, options);
         return false;
       },
       { timeout: 60_000, interval: 1000 },
     )
     .toBe(true);
-  await target.click(newBranch);
+  await target.click(newBranch, options);
   const branchName = selectors.getByRole('textbox', { name: 'Branch name' });
   await target.expectFocused(branchName);
   await target.fill(branchName, name);
-  await target.click(selectors.getByRole('button', { name: 'Create branch' }));
-  await showAllBranches();
+  await target.click(selectors.getByRole('button', { name: 'Create branch' }), options);
+  await showAllBranches(options);
   await target.expectVisible(branchMore(name), 60_000);
 };
 
@@ -362,14 +364,19 @@ export const branchMore = (name: string): Locator =>
  *
  * @param name - The branch.
  * @param item - The menu item's accessible name.
- * @param before - Called with the menu open on the item, before it is picked (a screenshot).
+ * @param options - `before`, called with the menu open on the item before it is picked (a screenshot); `click`, how
+ *   each control is pressed (`{ touch: true }` taps it, as a phone spec does).
  */
-export const pickBranchVerb = async (name: string, item: string, before?: () => Promise<void>): Promise<void> => {
+export const pickBranchVerb = async (
+  name: string,
+  item: string,
+  { before, click }: { readonly before?: () => Promise<void>; readonly click?: TargetClickOptions } = {},
+): Promise<void> => {
   const more = branchMore(name);
   const verb = selectors.getByRole('menuitem', { name: item, exact: true });
   const branchMenu = selectors.getByRole('menu').getByText(name, { exact: true });
   /* History opens on *This branch*, which may not draw this one (D2). */
-  await showAllBranches();
+  await showAllBranches(click);
   await target.expectVisible(more, 60_000);
   await expect
     .poll(
@@ -381,14 +388,14 @@ export const pickBranchVerb = async (name: string, item: string, before?: () => 
           await target.keyboardPress('Escape');
           return false;
         }
-        await target.click(more);
+        await target.click(more, click);
         return false;
       },
       { timeout: 60_000, interval: 1000 },
     )
     .toBe(true);
   await before?.();
-  await target.click(verb);
+  await target.click(verb, click);
 };
 
 /**
@@ -396,13 +403,14 @@ export const pickBranchVerb = async (name: string, item: string, before?: () => 
  * once (C7), unless they are on it already.
  *
  * @param name - The branch.
+ * @param options - How each control is pressed: `{ touch: true }` taps it, as a phone spec does.
  */
-export const switchToBranch = async (name: string): Promise<void> => {
+export const switchToBranch = async (name: string, options?: TargetClickOptions): Promise<void> => {
   await target.expectVisible(branchChip(), 60_000);
   if (await target.isVisible(branchChipOn(name))) {
     return;
   }
-  await target.click(branchChip());
-  await target.click(selectors.getByRole('menuitemradio', { name: new RegExp(`^${name}\\b`, 'u') }));
+  await target.click(branchChip(), options);
+  await target.click(selectors.getByRole('menuitemradio', { name: new RegExp(`^${name}\\b`, 'u') }), options);
   await target.expectVisible(branchChipOn(name), 60_000);
 };

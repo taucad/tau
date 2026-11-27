@@ -1,5 +1,5 @@
 import type { Model as ApiModel } from '@taucad/chat/model-catalog';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 /** One row of the public model catalog, `/v1/models`. */
 export type Model = ApiModel;

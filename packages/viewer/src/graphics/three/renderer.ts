@@ -8,7 +8,7 @@ import { installWebGpuDepthSampling } from '#graphics/three/webgpu-depth-samplin
 import { installWebGlClearState } from '#graphics/three/webgl-clear-state.js';
 import { installWebGpuStencilState } from '#graphics/three/webgpu-stencil-state.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
-import { reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
+import { GraphicsContextUnavailableError, reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
 
 /**
  * WebGL renderer instantiated by Tau helpers.
@@ -109,6 +109,53 @@ async function initWebGpuIfNeeded(renderer: WebGpuRenderer): Promise<void> {
   installWebGpuDepthSampling(renderer);
   installWebGpuStencilState(renderer);
   installWebGlClearState(renderer);
+}
+
+/**
+ * Whether a node renderer's start failed because its WebGL 2 backend got no context. Three's WebGL 2 backend (forced,
+ * or the fallback from a WebGPU start) keeps the `null` that `getContext('webgl2')` answered and then reads extensions
+ * from it, so the start rejects with an unrelated `TypeError` (`reading 'getSupportedExtensions'`).
+ * @param renderer - The node renderer whose start failed.
+ * @returns Whether it ended on a WebGL 2 backend without a context.
+ */
+const lacksWebGlContext = (renderer: WebGpuRenderer): boolean => {
+  // Three owns these properties; the published Backend declaration omits them.
+  const backend = renderer.backend as unknown as Readonly<{ isWebGLBackend?: boolean; gl?: unknown }>;
+  return backend.isWebGLBackend === true && (backend.gl === null || backend.gl === undefined);
+};
+
+/** The start of the messages Three's classic `WebGLRenderer` throws when `getContext('webgl2')` answers `null`. */
+const webGlContextCreationFailure = 'Error creating WebGL context';
+
+/**
+ * Start a node renderer, reporting a WebGL 2 backend that got no context as {@link GraphicsContextUnavailableError}.
+ * @param renderer - The node renderer to start.
+ * @throws {GraphicsContextUnavailableError} When the browser gave its canvas no WebGL 2 context.
+ */
+async function initNodeRenderer(renderer: WebGpuRenderer): Promise<void> {
+  try {
+    await initWebGpuIfNeeded(renderer);
+  } catch (error) {
+    throw lacksWebGlContext(renderer) ? new GraphicsContextUnavailableError({ cause: error }) : error;
+  }
+}
+
+/**
+ * Construct Three's classic `WebGLRenderer`, reporting a canvas that got no WebGL 2 context as
+ * {@link GraphicsContextUnavailableError}.
+ * @param options - Canvas, antialiasing, depth and power choices for the classic pipeline.
+ * @returns A classic renderer holding the canvas's WebGL 2 context.
+ * @throws {GraphicsContextUnavailableError} When the browser gave the canvas no WebGL 2 context.
+ */
+function createClassicWebGlRenderer(options: THREE.WebGLRendererParameters): THREE.WebGLRenderer {
+  try {
+    return new THREE.WebGLRenderer(options);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(webGlContextCreationFailure)) {
+      throw new GraphicsContextUnavailableError({ cause: error });
+    }
+    throw error;
+  }
 }
 
 const destroyAllocatedDevice = (backend: WebGpuRenderer['backend']): void => {
@@ -301,7 +348,7 @@ export async function createRenderer(
       forceWebGL: backend === 'webgl',
       powerPreference: isShowcaseTarget(surface) ? surface.powerPreference : undefined,
     });
-    await initWebGpuIfNeeded(renderer);
+    await initNodeRenderer(renderer);
     // A presented showcase canvas meets the viewport's browser limit, and reports it the same way: the caller then
     // starts again on a fresh canvas, where the backend resolves to WebGL.
     if (presentsShowcaseCanvas(backend, surface)) {
@@ -342,6 +389,10 @@ export async function createRenderer(
       // Three.dispose() calls init again through setAnimationLoop when init never completed.
       // This factory supplied no external device: release any partially allocated one directly.
       destroyAllocatedDevice(requestedBackend);
+      if (lacksWebGlContext(renderer)) {
+        // Not a WebGPU failure: a WebGL retry would meet the same missing context.
+        throw new GraphicsContextUnavailableError({ cause: error });
+      }
       throw new WebGpuInitializationError(error instanceof Error ? error.message : String(error), { cause: error });
     }
     if (backend === 'webgpu' && renderer.coordinateSystem !== THREE.WebGPUCoordinateSystem) {
@@ -393,5 +444,5 @@ export async function createRenderer(
     logarithmicDepthBuffer: true,
   } satisfies THREE.WebGLRendererParameters);
 
-  return new THREE.WebGLRenderer(webGlOptions);
+  return createClassicWebGlRenderer(webGlOptions);
 }

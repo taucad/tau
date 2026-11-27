@@ -57,6 +57,33 @@ describe('useActiveChatNaming', () => {
     expect(generate).toHaveBeenCalledOnce();
   });
 
+  /* Chat performance WP-05 (server audit S-09): naming must not contend with the chat's first model step. */
+  it('waits for the first model step to answer before it names the chat', async () => {
+    const applyGeneratedChatName = vi.fn().mockResolvedValue(undefined);
+    generate.mockResolvedValue('Bracket design');
+    const activeChat = makeChat();
+    const { rerender } = renderHook(
+      ({ isAwaitingFirstStep }) =>
+        useActiveChatNaming({
+          activeChat,
+          firstMessage: activeChat.messages[0],
+          isProjectLoading: false,
+          isChatsLoading: false,
+          isAwaitingFirstStep,
+          applyGeneratedChatName,
+        }),
+      { initialProps: { isAwaitingFirstStep: true } },
+    );
+    await Promise.resolve();
+    expect(generate).not.toHaveBeenCalled();
+
+    rerender({ isAwaitingFirstStep: false });
+
+    await waitFor(() => {
+      expect(applyGeneratedChatName).toHaveBeenCalledWith('chat_new', 'Bracket design');
+    });
+  });
+
   it('does nothing for an already named or message-less chat', async () => {
     const applyGeneratedChatName = vi.fn();
     const { rerender } = renderHook(

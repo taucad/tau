@@ -72,6 +72,41 @@ decide whether to repeat, adjust, or skip the cancelled work. Do NOT assume
 the cancelled tools left the system unchanged.`;
 };
 
+/** How a turn's last reply ended when no cancelled tool output says why the turn stopped. */
+type ReplyEnding = 'stopped' | 'error';
+
+/**
+ * The reminder for a turn whose last reply was stopped or failed with no cancelled tool behind it. It names no cause
+ * the history does not show: a stopped reply is the person's Stop, a closed host or a lost connection alike, and no
+ * tool is counted, so nothing is said about tool calls.
+ *
+ * @param ending - How the last reply ended.
+ * @returns The reminder's text, without its tags.
+ */
+const replyReminderBody = (ending: ReplyEnding): string =>
+  `${
+    ending === 'stopped'
+      ? 'The previous turn was stopped before it finished.'
+      : 'The previous turn ended with an error before it finished.'
+  } Its last reply may be incomplete. Do NOT assume that work it described
+was carried out: verify the current state of any file or resource before you
+rely on it.`;
+
+const isInterruptReminder = (message: ProviderMessage | undefined): boolean =>
+  message?.role === 'user' && message.metadata?.tauInternal?.['kind'] === 'interrupt-recovery';
+
+/**
+ * Whether a message is a reply that was stopped or failed before it said anything: what a run writes when its next
+ * request is refused.
+ *
+ * @param message - A message of the history, if any.
+ * @returns `true` for an assistant message with no content whose stop reason is `aborted` or `error`.
+ */
+const isEmptyEndedReply = (message: ProviderMessage | undefined): boolean =>
+  message?.role === 'assistant' &&
+  (message.metadata?.stopReason === 'aborted' || message.metadata?.stopReason === 'error') &&
+  (Array.isArray(message.content) ? message.content.length === 0 : message.content === '');
+
 /**
  * The output a resume records for a call whose host stopped before it returned (D23, I6, I13).
  *
@@ -127,6 +162,7 @@ export const createInterruptRecoveryMessage = async (input: {
   let parent = input.messages[index];
   let calls = toolCalls(parent);
   const interrupted = outputs.filter((message) => interruptCause(message) !== undefined);
+  let ending: ReplyEnding | undefined;
   if (calls.length === 0 || interrupted.length === 0) {
     const tail = input.messages.at(-1);
     if (
@@ -135,8 +171,18 @@ export const createInterruptRecoveryMessage = async (input: {
     ) {
       return undefined;
     }
+    /* A run stopped while its tools ran writes their reminder itself, then an empty stopped reply when its next
+     * request is refused. That reminder already covers the stop: a second one, after it, would only disagree. */
+    let before = input.messages.length - 1;
+    while (before >= 0 && isEmptyEndedReply(input.messages[before])) {
+      before--;
+    }
+    if (before < input.messages.length - 1 && isInterruptReminder(input.messages[before])) {
+      return undefined;
+    }
     parent = tail;
     calls = [];
+    ending = tail.metadata.stopReason === 'aborted' ? 'stopped' : 'error';
   }
 
   const tallies = new Map<InterruptCause, number>();
@@ -170,7 +216,7 @@ export const createInterruptRecoveryMessage = async (input: {
       .map((call) => call.id)
       .toSorted((left, right) => left.localeCompare(right))
       .join(':');
-  const signature = await shortHash(`${seed}:${cause}`);
+  const signature = await shortHash(`${seed}:${ending ?? cause}`);
   const id = `tau:interrupt-recovery:${signature}`;
   if (input.messages.some((message) => message.id === id)) {
     return undefined;
@@ -178,7 +224,9 @@ export const createInterruptRecoveryMessage = async (input: {
   return {
     id,
     role: 'user',
-    content: `<system-reminder>\n${reminderBody({ completedCount, interruptedCount, cause })}\n</system-reminder>`,
+    content: `<system-reminder>\n${
+      ending === undefined ? reminderBody({ completedCount, interruptedCount, cause }) : replyReminderBody(ending)
+    }\n</system-reminder>`,
     metadata: {
       tauInternal: {
         kind: 'interrupt-recovery',

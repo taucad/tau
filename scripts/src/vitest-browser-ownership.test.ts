@@ -124,6 +124,9 @@ describe('Vitest Browser test-runner ownership', () => {
       // CDP. Browser Mode cannot own the installed app across native installer/relaunch cycles.
       'apps/desktop-e2e/scripts/qualification-renderer.mts',
       'apps/desktop-e2e/src/desktop-assimp.spec.ts',
+      // Boot recovery relaunches the built app over one profile, with switches and a missing client, and reads its
+      // recovery window; the shared launcher signs in and always loads the app page.
+      'apps/desktop-e2e/src/desktop-boot-recovery.spec.ts',
       'apps/desktop-e2e/src/desktop-build123d.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-acp.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-in-project.spec.ts',
@@ -173,6 +176,13 @@ describe('Vitest Browser test-runner ownership', () => {
       // The TAU-UI-6 deploy-skew check serves two deploys from Node and switches them under one page across a
       // document reload, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/stale-deploy-recovery.test.ts',
+      // The PL7 service worker checks install a worker, take the browser offline and switch deploys under one page
+      // across document loads, which Browser Mode's iframe cannot host.
+      'apps/ui-e2e/src/service-worker.test.ts',
+      'apps/ui-e2e/src/service-worker-deploy.test.ts',
+      // The same worker on the boot path: it also closes and reopens a persistent profile (a returning visitor) and
+      // fails the worker's own requests on the server. Its harness (support/two-deploys.ts) takes the driver from it.
+      'apps/ui-e2e/src/service-worker-boot.test.ts',
       // The hosted staging observability gate owns isolated browser contexts and cross-document failure
       // scenarios, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/observability.staging.test.ts',
@@ -230,22 +240,35 @@ describe('Vitest Browser test-runner ownership', () => {
     // runtime in, which Browser Mode cannot host.
     // The viewer parity workflow installs the Chromium its viewer-reference capture runs in (Vitest Browser Mode), and
     // its real-GPU check installs the same Chromium on the operator's Mac.
+    // The release gate's end-to-end rows install the three engines `ci.yml`'s e2e-queue rows do (C2b).
+    // The timing-budget lane installs the one engine its specs run in (D-DC17).
+    // The flake reproduction workflow installs the engines the target under stress selects (FQ-7).
+    // The apt-install action installs the browsers' system dependencies those workflows used to fetch with
+    // `--with-deps`, and its pinning test drives it (APT-1).
+    // The real-GPU viewer smoke's guest installs the Chromium its Browser Mode targets run in on the disposable GPU host.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
+        '.github/actions/apt-install/action.yml',
+        '.github/actions/apt-install/apt-install.sh',
+        'scripts/src/apt-resilience.test.ts',
         '.github/workflows/ci.yml',
         '.github/workflows/desktop-route-vm-acceptance.yml',
         '.github/workflows/e2e-nightly.yml',
+        '.github/workflows/flake-repro.yml',
         '.github/workflows/observability-staging.yml',
         '.github/workflows/picogk-browser-archive.yml',
         '.github/workflows/preview-packages.yml',
         '.github/workflows/publish.yml',
+        '.github/workflows/release-gate.yml',
         '.github/workflows/spike-publish-dry-run.yml',
         '.github/workflows/spike-s31.yml',
         '.github/workflows/spike-s32.yml',
+        '.github/workflows/timing-budgets.yml',
         '.github/workflows/ui-asset-integrity.yml',
         '.github/workflows/viewer-parity.yml',
         'scripts/spikes/native-deps/linux/s31/run.ts',
+        'apps/desktop/scripts/hosted-linux-gpu-smoke-guest.sh',
         'apps/desktop/scripts/hosted-linux-qualification-guest.sh',
         'apps/docs/project.json',
         'apps/ui/scripts/check-asset-integrity.mts',
@@ -320,6 +343,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
         'apps/ui/app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
         'apps/ui/app/components/terminal/terminal-renderer.vitest.browser.config.ts',
+        'apps/ui/app/hooks/attachment-image.vitest.browser.config.ts',
         'apps/ui/app/machines/project-open.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',

@@ -17,7 +17,7 @@ import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
 import { randomUuid } from '@taucad/utils/id';
 import { describeOutcome, describePrintError } from '#components/print/machine-facts.js';
-import { operator } from '#hooks/use-machine-control.js';
+import { operator } from '#components/print/machine-operator.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import { answerDeny, answerMachineAction } from '#components/print/machine-action-approval.js';
 import type { PendingMachineAction } from '#components/print/machine-action-approval.js';

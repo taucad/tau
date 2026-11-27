@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-/* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
+/* eslint-disable @typescript-eslint/naming-convention -- mocks keep the environment's `ENV`/`TAU_API_URL` and the AI SDK's own export names verbatim. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startEnvironmentHost } from '#runtime/environment.fixture.js';
 import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
@@ -15,30 +15,6 @@ const harness = vi.hoisted(() => ({
     touchChatRecency: vi.fn().mockResolvedValue(undefined),
     consumeChatStartupRequest: vi.fn().mockResolvedValue(undefined),
     commitCancelledDraftRestore: vi.fn().mockResolvedValue(undefined),
-  },
-}));
-
-vi.mock('@ai-sdk/react', () => ({
-  // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
-  Chat: class {
-    public id = '';
-    public messages = [];
-    public status = 'ready';
-    public error = undefined;
-    public sendMessage = vi.fn();
-    public regenerate = vi.fn();
-    public stop = vi.fn();
-    public '~registerMessagesCallback' = (): (() => void) => {
-      return () => undefined;
-    };
-
-    public '~registerStatusCallback' = (): (() => void) => {
-      return () => undefined;
-    };
-
-    public '~registerErrorCallback' = (): (() => void) => {
-      return () => undefined;
-    };
   },
 }));
 

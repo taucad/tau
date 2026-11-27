@@ -21,8 +21,16 @@ import {
 } from '#lib/agent-host-placement.js';
 import { RemoteHostApiError } from '#lib/remote-host-client.js';
 import { getComputeReuseMode, setComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
-import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
+import type { DesktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
+
+/** The build target `@taucad/*` libraries resolve; the app's own reads still follow `TAU_TARGET`. */
+const buildTarget = vi.hoisted(() => ({ desktop: false }));
+vi.mock('@taucad/ui-core/lib/build-target', () => ({
+  get isDesktopTarget() {
+    return buildTarget.desktop;
+  },
+}));
 
 const descriptor = { v: 1, agent: true, label: 'studio-mini', workspaceRoot: '/Users/x/tau-workspace/lamp' } as const;
 
@@ -102,6 +110,7 @@ describe('discoverOriginAgentHost', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllEnvs();
+      buildTarget.desktop = false;
     }
   });
 });
@@ -112,10 +121,12 @@ describe('localAgentHostId', () => {
     ['web', undefined],
   ] as const)('selects the implicit local host for the %s build', async (target, expected) => {
     vi.stubEnv('TAU_TARGET', target);
+    buildTarget.desktop = target === 'desktop';
     vi.resetModules();
     const placement = await import('#lib/agent-host-placement.js');
     expect(placement.localAgentHostId()).toBe(expected);
     vi.unstubAllEnvs();
+    buildTarget.desktop = false;
   });
 });
 
@@ -300,7 +311,7 @@ describe('listAgentHostPlacements', () => {
         listHosts: async () => [
           {
             id: 'agent_cloud',
-            label: 'Tau Cloud',
+            label: 'Cloud',
             createdAt: new Date(0),
             lastSeenAt: null,
             revokedAt: null,
@@ -324,7 +335,7 @@ describe('listAgentHostPlacements', () => {
       {
         hostId: 'agent_cloud',
         rung: 2,
-        label: 'Tau Cloud',
+        label: 'Cloud',
         workspaceRoot: '/workspace',
         online: true,
         cloudProjectId: 'project-a',

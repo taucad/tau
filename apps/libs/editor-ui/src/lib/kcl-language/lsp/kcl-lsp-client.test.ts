@@ -1,0 +1,304 @@
+/**
+ * KclLspClient protocol and lifecycle tests.
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
+import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
+import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
+import { KclLspClient } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
+import { lspWorkerEventType, kclWorkerType } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
+import type {
+  LspWorkerEvent,
+  KclLspWorkerOptions,
+  KclSymbolRequest,
+  KclSymbolResponse,
+} from '#lib/kcl-language/lsp/kcl-lsp-types.js';
+import { addHeaders } from '#lib/kcl-language/lsp/codec/headers.js';
+import { decodeMessage } from '#lib/kcl-language/lsp/codec/utils.js';
+
+type MessageListener = (event: MessageEvent) => void;
+
+function createTestFs(overrides?: { readonly readFile?: (path: string) => Promise<Uint8Array<ArrayBuffer>> }) {
+  const readFile = overrides?.readFile ?? vi.fn().mockResolvedValue(new Uint8Array(new ArrayBuffer(3)));
+  const paths = new WorkspacePathResolver('/w');
+  return {
+    fileManager: { readFile },
+    treeService: {
+      stat: vi.fn(),
+      listDirectory: vi.fn(),
+      searchFiles: vi.fn().mockResolvedValue([]),
+    } as unknown as FileTreeService,
+    paths,
+  };
+}
+
+class GenericMockWorker {
+  public postMessageCalls: unknown[] = [];
+  public terminated = false;
+  public readonly stallMethods = new Set<string>();
+
+  private messageListeners: MessageListener[] = [];
+  private readonly errorListeners: MessageListener[] = [];
+
+  public addEventListener(type: string, listener: MessageListener): void {
+    if (type === 'message') {
+      this.messageListeners.push(listener);
+    } else if (type === 'error') {
+      this.errorListeners.push(listener);
+    }
+  }
+
+  public removeEventListener(type: string, listener: MessageListener): void {
+    if (type === 'message') {
+      this.messageListeners = this.messageListeners.filter((l) => l !== listener);
+    }
+  }
+
+  public postMessage(data: unknown): void {
+    this.postMessageCalls.push(data);
+
+    const event = data as LspWorkerEvent;
+    if (event.eventType === lspWorkerEventType.init) {
+      return;
+    }
+
+    if (event.eventType === lspWorkerEventType.call) {
+      this.respondToMessage(event.eventData as Uint8Array<ArrayBuffer>);
+    }
+  }
+
+  public terminate(): void {
+    this.terminated = true;
+  }
+
+  public emitMessageToClient(data: LspWorkerEvent): void {
+    for (const listener of this.messageListeners) {
+      listener(new MessageEvent('message', { data }));
+    }
+  }
+
+  public emitError(): void {
+    for (const listener of this.errorListeners) {
+      listener(new MessageEvent('error'));
+    }
+  }
+
+  private respondToMessage(data: Uint8Array<ArrayBuffer>): void {
+    const request = decodeMessage<JSONRPCRequest>(data);
+
+    if (request.id === null || request.id === undefined) {
+      return;
+    }
+    if (this.stallMethods.has(request.method)) {
+      return;
+    }
+
+    const result =
+      request.method === 'initialize'
+        ? {
+            capabilities: { hoverProvider: true, completionProvider: {} },
+            serverInfo: { name: 'mock', version: '0.0.1' },
+          }
+        : {};
+
+    const response = JSON.stringify({ jsonrpc: '2.0', id: request.id, result });
+    const encoded = new TextEncoder().encode(addHeaders(response));
+
+    queueMicrotask(() => {
+      for (const listener of this.messageListeners) {
+        listener(new MessageEvent('message', { data: encoded }));
+      }
+    });
+  }
+}
+
+let mockWorker: GenericMockWorker;
+const createWorker = (): Worker => mockWorker as unknown as Worker;
+
+beforeEach(() => {
+  mockWorker = new GenericMockWorker();
+});
+
+describe('KclLspClient', () => {
+  it('reports a fatal worker error and rejects an in-flight LSP request', async () => {
+    const onError = vi.fn();
+    const client = new KclLspClient({ createWorker, fs: createTestFs(), onError });
+    await client.initialize();
+    mockWorker.stallMethods.add('textDocument/hover');
+    const pending = client.textDocumentHover({
+      textDocument: { uri: 'file:///main.kcl' },
+      position: { line: 0, character: 0 },
+    });
+    await vi.waitFor(() => {
+      expect(
+        mockWorker.postMessageCalls.some((call) => {
+          const event = call as LspWorkerEvent;
+          return (
+            event.eventType === lspWorkerEventType.call &&
+            decodeMessage<JSONRPCRequest>(event.eventData as Uint8Array<ArrayBuffer>).method === 'textDocument/hover'
+          );
+        }),
+      ).toBe(true);
+    });
+    mockWorker.emitError();
+    await expect(pending).rejects.toThrow('disposed');
+    expect(onError).toHaveBeenCalledOnce();
+    expect(mockWorker.terminated).toBe(true);
+  });
+  describe('initialization', () => {
+    it('should initialize and become ready', async () => {
+      const client = new KclLspClient({ createWorker, fs: createTestFs() });
+      expect(client.ready).toBe(false);
+
+      await client.initialize();
+      await client.waitForReady();
+
+      expect(client.ready).toBe(true);
+    });
+
+    it('should send init event with worker options', async () => {
+      const client = new KclLspClient({ createWorker, fs: createTestFs() });
+      await client.initialize();
+
+      const initCall = mockWorker.postMessageCalls.find(
+        (call) => (call as LspWorkerEvent).eventType === lspWorkerEventType.init,
+      ) as LspWorkerEvent | undefined;
+
+      expect(initCall).toBeDefined();
+      const options = initCall!.eventData as KclLspWorkerOptions;
+      expect(options.workspaceRootPath).toBe('/w');
+    });
+
+    it('should call onInitialized callback', async () => {
+      const onInitialized = vi.fn();
+      const client = new KclLspClient({ createWorker, fs: createTestFs(), onInitialized });
+      await client.initialize();
+
+      expect(onInitialized).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('lsp-fs bridge', () => {
+    it('should answer worker fs/content JSON-RPC via fileManager.readFile', async () => {
+      const readFile = vi.fn().mockResolvedValue(new Uint8Array([9, 9, 9]));
+      const client = new KclLspClient({ createWorker, fs: createTestFs({ readFile }) });
+      await client.initialize();
+      await client.waitForReady();
+
+      mockWorker.emitMessageToClient({
+        worker: kclWorkerType,
+        eventType: lspWorkerEventType.languageFsJsonRpc,
+        eventData: {
+          jsonrpc: '2.0',
+          id: 77,
+          method: 'fs/content',
+          params: { uri: 'file:///public/x.kcl' },
+        },
+      });
+
+      await vi.waitFor(() => {
+        const hit = mockWorker.postMessageCalls.find(
+          (c) =>
+            (c as LspWorkerEvent).eventType === lspWorkerEventType.languageFsJsonRpc &&
+            typeof (c as LspWorkerEvent).eventData === 'object' &&
+            'id' in ((c as LspWorkerEvent).eventData as JSONRPCResponse) &&
+            ((c as LspWorkerEvent).eventData as JSONRPCResponse).id === 77 &&
+            'result' in ((c as LspWorkerEvent).eventData as JSONRPCResponse),
+        );
+        expect(hit).toBeDefined();
+      });
+
+      expect(readFile).toHaveBeenCalledWith('public/x.kcl');
+
+      const responseCall = mockWorker.postMessageCalls.find(
+        (c) =>
+          (c as LspWorkerEvent).eventType === lspWorkerEventType.languageFsJsonRpc &&
+          typeof (c as LspWorkerEvent).eventData === 'object' &&
+          'result' in ((c as LspWorkerEvent).eventData as JSONRPCResponse),
+      ) as LspWorkerEvent | undefined;
+      expect(responseCall).toBeDefined();
+      const body = responseCall!.eventData as JSONRPCResponse;
+      expect(body.id).toBe(77);
+      const result = body.result as { dataBase64: string };
+      expect(typeof result.dataBase64).toBe('string');
+      expect(result.dataBase64.length).toBeGreaterThan(0);
+    });
+  });
+
+  // D-RT-14: the symbol service runs on the worker's KCL WASM instance instead of a main-thread copy.
+  describe('symbol requests', () => {
+    const symbolRequests = (): KclSymbolRequest[] =>
+      mockWorker.postMessageCalls
+        .map((call) => call as LspWorkerEvent)
+        .filter((event) => event.eventType === lspWorkerEventType.symbolRequest)
+        .map((event) => event.eventData as KclSymbolRequest);
+    const answer = (response: KclSymbolResponse): void => {
+      mockWorker.emitMessageToClient({
+        worker: kclWorkerType,
+        eventType: lspWorkerEventType.symbolResponse,
+        eventData: response,
+      });
+    };
+
+    it('should parse on the worker and resolve with its result', async () => {
+      const client = new KclLspClient({ createWorker, fs: createTestFs() });
+      await client.initialize();
+
+      const parsed = client.parseKcl('width = 10');
+      const [request] = symbolRequests();
+      expect(request).toMatchObject({ operation: 'parse', code: 'width = 10' });
+      answer({ id: request!.id, ok: true, value: [{ body: [] }, []] });
+
+      await expect(parsed).resolves.toEqual([{ body: [] }, []]);
+    });
+
+    it('should reject a mock execution with the value the worker reports it threw', async () => {
+      const client = new KclLspClient({ createWorker, fs: createTestFs() });
+      await client.initialize();
+
+      const executed = client.executeKclMock('{}', 'main.kcl');
+      const [request] = symbolRequests();
+      expect(request).toMatchObject({ operation: 'executeMock', program: '{}', path: 'main.kcl' });
+      const partial = { variables: { width: { type: 'Number', value: 10 } }, errors: ['boom'] };
+      answer({ id: request!.id, ok: false, error: partial });
+
+      await expect(executed).rejects.toEqual(partial);
+    });
+
+    it('should reject symbol requests still in flight when disposed', async () => {
+      const client = new KclLspClient({ createWorker, fs: createTestFs() });
+      await client.initialize();
+
+      const parsed = client.parseKcl('width = 10');
+      client.dispose();
+
+      await expect(parsed).rejects.toThrow('KCL LSP client disposed');
+    });
+  });
+
+  describe('dispose', () => {
+    it('should terminate the worker and clear ready state', async () => {
+      const client = new KclLspClient({ createWorker, fs: createTestFs() });
+      await client.initialize();
+      expect(client.ready).toBe(true);
+
+      client.dispose();
+      expect(mockWorker.terminated).toBe(true);
+      expect(client.ready).toBe(false);
+    });
+
+    it('should reject requests after dispose', async () => {
+      const client = new KclLspClient({ createWorker, fs: createTestFs() });
+      await client.initialize();
+      client.dispose();
+
+      await expect(
+        client.textDocumentHover({
+          textDocument: { uri: 'file:///test.kcl' },
+          position: { line: 0, character: 0 },
+        }),
+      ).rejects.toThrow();
+    });
+  });
+});

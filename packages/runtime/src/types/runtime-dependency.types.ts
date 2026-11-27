@@ -152,6 +152,24 @@ export type AssetDependency = {
 };
 
 /**
+ * The bundler's output for an entry, standing in for the content of the sources it was printed from.
+ *
+ * Present when the selected kernel's `resolve` answered from `runtime.bundler`: such a kernel reads
+ * its sources only through the bundle, so the printed code (and therefore behaviour) changes exactly
+ * when the key must. The covered files stay in the list with their content hashes for provenance and
+ * watching, but only their paths enter the build key, so comment-only and formatting-only edits that
+ * print the same bundle keep the key.
+ * @public
+ */
+export type BundleDependency = {
+  type: 'bundle';
+  /** Rooted entry path the bundle was built from. */
+  entryPath: string;
+  /** SHA-256 of the bundled output code. */
+  codeHash: string;
+};
+
+/**
  * Discriminated union of all dependency types.
  * Used for cache key computation to ensure all factors affecting
  * the output are captured.
@@ -167,7 +185,8 @@ export type Dependency =
   | ContentDependency
   | KernelDependency
   | ExportDependency
-  | AssetDependency;
+  | AssetDependency
+  | BundleDependency;
 
 /**
  * Structured result from dependency resolution. Unresolved paths remain in

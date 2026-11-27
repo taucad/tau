@@ -12,7 +12,7 @@ import { EditorSaveConflictError } from '@taucad/fs-client/file-content-service'
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
-import { EditorDocumentSession, isRecordingEditorConflict } from '#lib/editor-document-session.js';
+import { EditorDocumentSession, isRecordingEditorConflict } from '@taucad/editor-ui/lib/editor-document-session';
 import { sessionRuntimeWork } from '#runtime/project-runtime.session.js';
 import type { SessionRuntimeFlushKind } from '#services/sessions-store.js';
 
@@ -194,6 +194,7 @@ describe('sessionRuntimeWork — the close flush (A7c, S6)', () => {
     const editor = mock<ActorRefFrom<typeof editorMachine>>();
     const content = mock<FileContentService>();
     content.addEditorSaveFlusher.mockReturnValue(() => undefined);
+    content.retain.mockReturnValue(() => undefined);
     const encode = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
     content.resolve.mockResolvedValue({ kind: 'text', content: encode('one') });
     content.peekOutcome.mockReturnValue({ kind: 'text', content: encode('theirs') });

@@ -131,6 +131,30 @@ export type RevisionStatusProjection = Readonly<{
    */
   applyingRoots?: readonly string[];
   /**
+   * The paths a page asked after that the selected checkout's tree write has
+   * landed for good, sorted; absent when none has, which reads as unknown, never
+   * as landed (I7). A file pane outside the entry closure opens on it before the
+   * whole write lands (STO-25).
+   *
+   * Like `applyingRoots`, the root does not set it: the host that brackets the
+   * apply merges it.
+   */
+  landedPaths?: readonly string[];
+  /**
+   * Which `tau.json` the selected checkout's write of another revision's
+   * tree (an open, restore, switch or pull: purpose `tree`) landed with its
+   * entry closure: the SHA-256 (lowercase hex) of its bytes, once that closure
+   * has landed and until the next tree write; absent while it has not, for a
+   * failed write and its rollback, for a write into the checkout's own tree
+   * (purpose `apply`), and for a tree with no `tau.json`, which all read as
+   * unknown (I7). A page whose loaded manifest was read from these
+   * bytes renders the model from the first view (STO-25).
+   *
+   * Like `landedPaths`, the root does not set it: the host that brackets the
+   * apply merges it.
+   */
+  entryManifest?: string;
+  /**
    * How far the selected checkout's tree has arrived (D10). Absent until the
    * host has published a reading, which reads as unknown, never as empty (I7).
    *
@@ -143,8 +167,9 @@ export type RevisionStatusProjection = Readonly<{
 /**
  * The readiness vocabulary of D10: `connected → treeReady → entryReady →
  * materialized → filled`. The editor, tree and viewer open at `treeReady` and
- * `entryReady`; search, export, the LSP workspace and a revision cut wait for
- * `materialized`; a model render waits for `filled`.
+ * `entryReady`; search, export, the LSP workspace, a revision cut and a model
+ * render wait for `materialized`. A render then waits only on the large objects
+ * its own closure reads (T6); `filled` is every large object here.
  *
  * @public
  */
@@ -154,8 +179,9 @@ export type ProjectReadiness = 'connected' | 'treeReady' | 'entryReady' | 'mater
  * The large objects one checkout is still waiting for.
  *
  * The files open as soon as the checkout is written; a file whose object has
- * not arrived holds its pointer until it does, and a reader that must see real
- * bytes — a model render — waits for `paths` to empty.
+ * not arrived holds its pointer until it does. A model render waits only while
+ * `paths` holds a path its closure reads (T6); other readers, a kernel that
+ * mirrors the whole workspace among them, read pending paths through.
  *
  * @public
  */

@@ -67,7 +67,8 @@ const contentAddressConflict = (path: string): Error =>
  *
  * The bytes are written to a fresh temporary file and synced, then linked into place, so the final name never
  * names a torn file. A name already present must hold the same bytes. The directory is synced after a publish,
- * so the name survives power loss before the row naming it is appended.
+ * so the name survives power loss before the row naming it is appended; on Windows, which cannot sync a directory,
+ * a power loss just after a publish can still lose the name.
  *
  * @param absolutePath - The final, content-addressed name.
  * @param bytes - The bytes it names.
@@ -319,8 +320,16 @@ const readIfPresent = async (filePath: string): Promise<Uint8Array<ArrayBuffer>>
   }
 };
 
-/** Sync a directory so a file created in it survives power loss (L4 D-107). */
+/**
+ * Sync a directory so a file created in it survives power loss (L4 D-107). Windows refuses `fsync` on a directory
+ * handle, so there this is a no-op and a new name is only as durable as NTFS's metadata journal makes it.
+ */
 const syncDirectory = async (directory: string): Promise<void> => {
+  /* Windows refuses `fsync` on a directory handle (EPERM), which failed every chat write there. The file's own
+   * handle is synced before this, and NTFS journals the rename or create that this sync would make durable. */
+  if (process.platform === 'win32') {
+    return;
+  }
   const handle = await open(directory, 'r');
   try {
     await handle.sync();
@@ -418,6 +427,13 @@ const openWriter = async (
       await file.appendFile(bytes);
       await file.sync();
     },
+    /* A batch's rows are appended back to back and synced once (WP-10 step A). */
+    write: async (bytes) => {
+      await file.appendFile(bytes);
+    },
+    sync: async () => {
+      await file.sync();
+    },
     truncate: async (size) => {
       await file.truncate(size);
       await file.sync();
@@ -454,7 +470,7 @@ const openWriter = async (
  * Open a Node filesystem event log.
  *
  * A write open holds the chat's kernel writer lock for the log's life (a writer that finds it held is refused
- * `WRITER_LOCKED`), appends with an fsync per line, and syncs the directory once after creating the file. A torn final
+ * `WRITER_LOCKED`), appends with an fsync per line (per batch for `appendMany`), and syncs the directory once after creating the file. A torn final
  * line is repaired by the first append, never at open. Every append is fenced: it lands only if the log is still the
  * log this writer read (`LOG_FENCED`, D5). A read open creates nothing, takes no lock and keeps no handle.
  *
@@ -520,7 +536,7 @@ export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore =>
   >();
   return createChatStore({
     platform: 'node',
-    /* `appendFile` then `sync()` per append, and the directory synced once at creation (W3 §11). */
+    /* `appendFile` then `sync()` per append or batch, and the directory synced once at creation (W3 §11). */
     durability: 'exclusive-append',
     attachments: createNodeAttachmentReader(options.workspaceRoot),
     readBytes: async (chatId) => readIfPresent(filePath(chatId)),

@@ -863,7 +863,9 @@ const lokiSelectors: Readonly<Record<LokiSource['where'], readonly string[]>> = 
  * Every Prometheus rule selector carries the `service_name` of the app it binds (binding contract v2:
  * `app=~".*"` is `tau-api`, `app=~".*storage.*"` is `tau-storage`, `app=~".*mirror.*"` is `tau-mirror`), so
  * a second exporter in that app cannot match. Grafana's own `grafana_*` series and Fly's platform `fly_*`
- * series carry no `service_name`; the `app` matcher alone binds them.
+ * series carry no `service_name`; the `app` matcher alone binds them. Synthetic Monitoring's `probe_*` series
+ * carry neither: a check's own `app` label (the environment's API app) is on every series, and `app=~".*"` alone
+ * binds them.
  */
 const ruleServices: Readonly<Record<string, string>> = {
   [appPlaceholders.rule.api]: appNames.api,
@@ -899,6 +901,19 @@ const selectorSourceProblems = (root: string): string[] => [
               ? []
               : [
                   `${file}: ${groups?.['metric'] ?? ''}{${groups?.['body'] ?? ''}} needs exactly one app matcher from ${placeholders.map((value) => `app=~"${value}"`).join(', ')}`,
+                ];
+          }
+          if ((groups?.['metric'] ?? '').startsWith('probe_')) {
+            // Synthetic Monitoring's series carry no service_name; each check's `app` label names the environment's
+            // API app, which Tau Cloud's `app=~".*"` replacement binds.
+            const apps = matchers.filter(({ label }) => label === 'app' || label === 'label_app');
+            return apps.length === 1 &&
+              apps[0]!.label === 'app' &&
+              apps[0]!.op === '=~' &&
+              apps[0]!.value === appPlaceholders.rule.api
+              ? []
+              : [
+                  `${file}: ${groups?.['metric'] ?? ''}{${groups?.['body'] ?? ''}} needs exactly one app=~"${appPlaceholders.rule.api}" matcher`,
                 ];
           }
           const app = matchers.find(({ label, op }) => label === 'app' && op === '=~');
@@ -1019,7 +1034,7 @@ describe('Runtime observability dashboards and rules (T13, T32)', () => {
     expect(new Set(uids.map(([, uid]) => uid)).size).toBe(uids.length);
   });
 
-  it('should add the info rules and the heartbeat paused until Tau Cloud routes them (PR-5a)', () => {
+  it('should pause the info rules and the heartbeat locally; Tau Cloud overrides pausing', () => {
     const unpaused = rulesIn(grafanaRoot)
       .filter(({ rule }) => rule.labels?.['severity'] === 'info' && rule.labels['package'] === 'runtime-observability')
       .filter(({ rule }) => rule.isPaused !== true)

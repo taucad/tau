@@ -15,7 +15,7 @@
  * `docs/policy/filesystem-policy.md` Rule 13b.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { FolderOpen } from 'lucide-react';
 import {
   FloatingPanel,
@@ -25,8 +25,8 @@ import {
   FloatingPanelContentBody,
 } from '#components/ui/floating-panel.js';
 import { WorkspaceDirectoryPanel } from '@taucad/files-ui/components/filesystem/workspace-directory-panel';
-import { getWorkspace, listWorkspaces, requestHandlePermission } from '#filesystem/handle-store.js';
-import type { Workspace } from '#filesystem/handle-store.js';
+import { getWorkspace, listWorkspaces, requestHandlePermission } from '@taucad/files-ui/filesystem/handle-store';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { toast } from '@taucad/ui/components/sonner';
 import {
@@ -36,10 +36,12 @@ import {
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
-import { webAccessDirectoryPicker } from '#constants/browser.constants.js';
+import { directoryPicker, webAccessDirectoryPicker } from '@taucad/files-ui/constants/browser.constants';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { Label } from '@taucad/ui/components/label';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+
+const subscribeToNothing = (): (() => void) => () => undefined;
 
 type WorkspaceUnavailableRecoveryProps = {
   readonly reason: WorkspaceUnavailableReason;
@@ -60,6 +62,14 @@ export function WorkspaceUnavailableRecovery({
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [pickedWorkspaceId, setPickedWorkspaceId] = useState<string | undefined>(workspaceId);
   const [isBusy, setIsBusy] = useState(false);
+  /* Without folder access (Safari, Brave) no folder can be connected, granted or switched to here, so the panel says
+   * Home is the only location rather than offering commands that do nothing. Read inline, not through a shared hook
+   * module, which would add a chunk to the project route's critical path. The server assumes folders. */
+  const hasFolderAccess = useSyncExternalStore(
+    subscribeToNothing,
+    () => directoryPicker().available,
+    () => true,
+  );
 
   useEffect(() => {
     // async-iife: bootstrap
@@ -113,7 +123,7 @@ export function WorkspaceUnavailableRecovery({
       toast.success(`Connected workspace "${connected.workspace.name}"`);
     } catch (error) {
       telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown', error });
-      toast.error('Failed to connect workspace.');
+      toast.error('Couldn’t connect the folder. Try again.');
       throw error;
     } finally {
       setIsBusy(false);
@@ -144,7 +154,9 @@ export function WorkspaceUnavailableRecovery({
       }
       telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown', error });
       toast.error(
-        isWorkspaceIdentityConflictError(error) ? workspaceIdentityConflictCopy : 'Failed to reconnect workspace.',
+        isWorkspaceIdentityConflictError(error)
+          ? workspaceIdentityConflictCopy
+          : 'Couldn’t reconnect the folder. Try again.',
       );
       console.error('Failed to reconnect workspace:', error);
     } finally {
@@ -185,7 +197,7 @@ export function WorkspaceUnavailableRecovery({
 
               <WorkspaceDirectoryPanel
                 variant='inline'
-                status={reason}
+                status={hasFolderAccess ? (reason === 'missing' ? 'none' : reason) : 'unsupported'}
                 workspaceId={workspaceId}
                 workspaceName={workspaceName}
                 isBusy={isBusy}
@@ -193,7 +205,7 @@ export function WorkspaceUnavailableRecovery({
                 onGrantAccess={reason === 'permission' ? handleGrantAccess : undefined}
               />
 
-              {workspaces.length > 1 ? (
+              {hasFolderAccess && workspaces.length > 1 ? (
                 <div className='flex flex-col gap-1.5'>
                   <Label className='text-xs text-muted-foreground'>Or switch to another workspace</Label>
                   <div className='flex items-center gap-2'>

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { EventLogError } from '#log/event-log-error.js';
 import { modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
+import { attachmentExtensions } from '@taucad/utils/attachment-media';
 import type { AgentLogEvent, FileRefContentBlock, JsonValue } from '#log/event-types.js';
 
 const nonEmptyString = z.string().min(1);
@@ -80,11 +81,15 @@ const metadataSchema = z
  * and no reader can resolve.
  */
 /**
- * A durable `file-ref` path: `attachments/<sha256>.<ext>`.
+ * A durable `file-ref` path: `attachments/<sha256>.<ext>`, `<ext>` being a stored media type's canonical extension
+ * from `attachmentMedia` (I2).
  *
  * @internal
  */
-export const attachmentPathPattern = /^attachments\/[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/u;
+export const attachmentPathPattern = new RegExp(
+  `^attachments/[\\da-f]{64}\\.(?:${attachmentExtensions.join('|')})$`,
+  'u',
+);
 const attachmentPath = z.string().regex(attachmentPathPattern);
 /**
  * Schema for a content-addressed attachment reference in durable message content.
@@ -248,6 +253,8 @@ const lifecycleEventSchema = z.looseObject({
   placement: turnPlacementSchema.optional(),
   storageDurability: z.enum(storageDurabilityClasses).optional(),
   detail: runFailureDetailSchema.optional(),
+  /* I3: an open string, so a mode a newer build names keeps the row known; the host refuses a mode it cannot read. */
+  deployment: nonEmptyString.optional(),
 });
 const committedHistoryEventSchema = z.looseObject({
   ...eventBase,
@@ -552,13 +559,88 @@ export const historyRowTypes: ReadonlySet<string> = new Set([
   'turn.history-projection-committed',
 ]);
 
+type IssueLeaf = {
+  readonly path: readonly PropertyKey[];
+  readonly code: string;
+};
+
+/*
+ * The innermost failures behind an issue. A union failure is followed into the branch that got furthest: deepest
+ * leaf first, then fewest leaves. That is the branch the writer meant, so a bad value nested in a JSON field names
+ * its own path instead of "Invalid input" at the row.
+ */
+const issueLeaves = (issues: readonly z.core.$ZodIssue[], prefix: readonly PropertyKey[]): IssueLeaf[] =>
+  issues.flatMap((issue): IssueLeaf[] => {
+    const path = [...prefix, ...issue.path];
+    if (issue.code === 'invalid_union' && issue.errors.length > 0) {
+      const branches = issue.errors.map((branch) => issueLeaves(branch, path));
+      const depth = (leaves: readonly IssueLeaf[]): number => Math.max(...leaves.map((leaf) => leaf.path.length));
+      const [closest] = branches.toSorted((a, b) => depth(b) - depth(a) || a.length - b.length);
+      return closest ?? [{ path, code: issue.code }];
+    }
+    return [{ path, code: issue.code }];
+  });
+
+/* The JSON kind found at a path: a type name, never the value itself. */
+const kindAt = (value: unknown, path: readonly PropertyKey[]): string => {
+  let current: unknown = value;
+  for (const key of path) {
+    if (current === null || typeof current !== 'object') {
+      return 'undefined';
+    }
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- walking the rejected row by its own issue path.
+    current = (current as Record<PropertyKey, unknown>)[key];
+  }
+  if (current === null) {
+    return 'null';
+  }
+  if (Array.isArray(current)) {
+    return 'array';
+  }
+  if (typeof current === 'number' && !Number.isFinite(current)) {
+    return 'non-finite number';
+  }
+  return typeof current;
+};
+
+const maxReportedIssues = 5;
+
+/**
+ * Where a row failed, by row type and field path, never by value: a durable row carries the person's content.
+ *
+ * @param value - The rejected row.
+ * @param error - The generic reader's failure, used when the row's type names no known variant.
+ * @returns A one-line summary such as `message.appended at message.metadata.foo (invalid_type, found undefined)`.
+ */
+const describeInvalidRow = (value: unknown, error: z.ZodError): string => {
+  const envelope = rowEnvelopeSchema.safeParse(value);
+  const type = envelope.success ? envelope.data.type : undefined;
+  const typed = type === undefined ? undefined : knownJsonInputsByType.get(type)?.safeParse(value);
+  const leaves = issueLeaves(typed?.success === false ? typed.error.issues : error.issues, []);
+  const unique = [
+    ...new Set(
+      leaves.map(
+        (leaf) =>
+          `${leaf.path.length === 0 ? '(row)' : leaf.path.map(String).join('.')} (${leaf.code}, found ${kindAt(value, leaf.path)})`,
+      ),
+    ),
+  ];
+  const shown = unique.slice(0, maxReportedIssues).join('; ');
+  const more = unique.length > maxReportedIssues ? `; and ${unique.length - maxReportedIssues} more` : '';
+  return `${type ?? 'a row with no valid envelope'} at ${shown}${more}`;
+};
+
 /** Validate one untrusted durable or broadcast event envelope. @public */
 export const parseLogEvent = (value: unknown): AgentLogEvent => {
   const result = agentLogEventSchema.safeParse(value);
   if (!result.success) {
-    throw new EventLogError('EVENT_INVALID', `Invalid agent event-log record: ${z.prettifyError(result.error)}`, {
-      cause: result.error,
-    });
+    throw new EventLogError(
+      'EVENT_INVALID',
+      `Invalid agent event-log record: ${describeInvalidRow(value, result.error)}`,
+      {
+        cause: result.error,
+      },
+    );
   }
   return result.data as AgentLogEvent;
 };

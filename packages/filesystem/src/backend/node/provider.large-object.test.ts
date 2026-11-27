@@ -24,6 +24,13 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => fs.rm(root, { recursive: true, force: true })));
 });
 
+/*
+ * The permission bits a writable file reports. Windows keeps no POSIX bits,
+ * only a read-only attribute: Node reports every writable file as 0o666 and a
+ * read-only one as 0o444, whatever mode or umask it was created under.
+ */
+const writable = (posix: number): number => (process.platform === 'win32' ? 0o666 : posix);
+
 const content = new Uint8Array(64 * 1024).map((_, index) => index % 251);
 const oid = createHash('sha256').update(content).digest('hex');
 
@@ -58,7 +65,7 @@ describe('NodeFsProvider large-object writes (EQ13)', () => {
     const stats = await fs.stat(join(root, 'models', 'part.step'));
     const names = await fs.readdir(join(root, 'models'));
     expect(new Uint8Array(landed)).toStrictEqual(content);
-    expect(stats.mode % 0o1000).toBe(0o644);
+    expect(stats.mode % 0o1000).toBe(writable(0o644));
     expect(names.filter((name) => name.endsWith('.tmp'))).toStrictEqual([]);
   });
 
@@ -76,7 +83,7 @@ describe('NodeFsProvider large-object writes (EQ13)', () => {
     const landed = await fs.readFile(join(root, 'run.bin'));
     const stats = await fs.stat(join(root, 'run.bin'));
     expect(new Uint8Array(landed)).toStrictEqual(content);
-    expect(stats.mode % 0o1000).toBe(0o755);
+    expect(stats.mode % 0o1000).toBe(writable(0o755));
   });
 
   it('should refuse, writing nothing, an object the store lacks or of another size, or a root with no store', async () => {
@@ -124,12 +131,19 @@ describe('NodeFsProvider large-object writes (EQ13)', () => {
     const { root, store } = await arrange();
     const provider = new NodeFsProvider(root, { largeObjectStore: store });
     const rename = fs.rename.bind(fs);
+    let refusal: string | undefined;
     /* Another writer's entry lands at the path between this rename and its check. */
     const renamed = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
       await rename(from, to);
       if (String(to).endsWith('swapped.bin')) {
         await fs.writeFile(join(root, 'other.tmp'), content);
-        await rename(join(root, 'other.tmp'), to);
+        try {
+          await rename(join(root, 'other.tmp'), to);
+        } catch (error) {
+          /* Windows: the provider holds the published file open for its flush, and refuses a rename over a held entry. */
+          refusal = (error as NodeJS.ErrnoException).code;
+          await fs.rm(join(root, 'other.tmp'));
+        }
       }
     });
     try {
@@ -137,8 +151,18 @@ describe('NodeFsProvider large-object writes (EQ13)', () => {
         { op: 'write', path: 'swapped.bin', data: { largeObject: oid, size: content.byteLength }, create: true },
       ]);
 
-      expect(receipt).toMatchObject({ outcome: 'uncertain', error: { code: 'WRITE_VERIFICATION_FAILED' } });
-      expect(receipt?.largeObject).toBeUndefined();
+      if (process.platform === 'win32') {
+        /* The other writer never published, so the entry is the one hashed, and its id is answered. */
+        expect(refusal).toBe('EPERM');
+        expect(receipt).toMatchObject({
+          outcome: 'applied',
+          largeObject: { largeObject: oid, size: content.byteLength },
+        });
+      } else {
+        expect(refusal).toBeUndefined();
+        expect(receipt).toMatchObject({ outcome: 'uncertain', error: { code: 'WRITE_VERIFICATION_FAILED' } });
+        expect(receipt?.largeObject).toBeUndefined();
+      }
     } finally {
       renamed.mockRestore();
     }
@@ -168,9 +192,9 @@ describe('NodeFsProvider large-object writes (EQ13)', () => {
       fs.stat(join(root, 'shared.bin')),
       fs.stat(join(store, oid.slice(0, 2), oid.slice(2, 4), oid)),
     ]);
-    expect(privateStats.mode % 0o1000).toBe(0o600);
+    expect(privateStats.mode % 0o1000).toBe(writable(0o600));
     // oxlint-disable-next-line eslint/no-bitwise -- a mode is a bit set.
-    expect(sharedStats.mode % 0o1000).toBe(0o666 & ~previous);
+    expect(sharedStats.mode % 0o1000).toBe(writable(0o666 & ~previous));
     expect(new Uint8Array(await fs.readFile(join(root, 'shared.bin')))).toStrictEqual(content);
     /* Git LFS stores objects read-only; the store's copy is never made writable. */
     expect(storedStats.mode % 0o1000).toBe(0o444);

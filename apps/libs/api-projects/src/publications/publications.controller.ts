@@ -2,7 +2,6 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   Headers,
   HttpCode,
@@ -21,16 +20,7 @@ import type { FastifyReply } from 'fastify';
 import { ZodSerializerDto } from 'nestjs-zod';
 import { AuthGuard, OptionalAuth, OptionalUser, UseAuth, User } from '@taucad/api-auth';
 import { MetricsService } from '@taucad/api-observability/metrics';
-import {
-  InvitePublicationAccessDto,
-  PublicationAccessGrantDto,
-  PublicationAccessListDto,
-  PublicationViewResponseDto,
-  PublicationVisibilityUpdateDto,
-  PublishRequestDto,
-  PublishResponseDto,
-  UpdatePublicationVisibilityDto,
-} from '#publications/publications.dto.js';
+import { PublishRequestDto, PublishResponseDto } from '#publications/publications.dto.js';
 import { PublicationsService } from '#publications/publications.service.js';
 import { ViewerIdentity } from '#publications/viewer-identity.decorator.js';
 import { ViewerIdentityInterceptor } from '#publications/viewer-identity.interceptor.js';
@@ -81,24 +71,12 @@ export class PublicationsController {
     return this.publicationsService.publishFromRevision({ ownerId, request: body });
   }
 
-  @Get(':id')
-  @OptionalAuth()
-  @ZodSerializerDto(PublicationViewResponseDto)
-  public async getPublication(
-    @Param('id') publicationId: string,
-    @OptionalUser('id') viewerUserId: string | undefined,
-  ): Promise<PublicationViewResponseDto> {
-    return this.publicationsService.getPublicationForViewer({
-      publicationId,
-      viewerUserId,
-    });
-  }
-
   /**
-   * Authenticated, publication-scoped file proxy for private publication
-   * bytes. `Cache-Control: private, no-cache` + strong sha ETags let clients
-   * cache bodies while revalidating on every use, so grant revocation takes
-   * effect immediately without forfeiting client caching.
+   * Authenticated, publication-scoped file proxy for the bytes of a private
+   * cloud link, authorized through the publication's project link.
+   * `Cache-Control: private, no-cache` + strong sha ETags let clients cache
+   * bodies while revalidating on every use, so removing access or stopping the
+   * link takes effect immediately without forfeiting client caching.
    */
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind five independent request facets (route param, query, session user, conditional header, reply); an object-bundling decorator would obscure the route contract
   @Get(':id/files')
@@ -126,7 +104,7 @@ export class PublicationsController {
         return undefined;
       }
 
-      const file = await this.publicationsService.openPublicationFile(resolved.sha256Hex, resolved.path);
+      const file = await this.publicationsService.openPublicationFile(resolved.sha256Hex, resolved.path, resolved.key);
       this.metrics.publicationFileRequestsTotal.add(1, { outcome: 'served' });
 
       return new StreamableFile(file.body, {
@@ -137,59 +115,6 @@ export class PublicationsController {
       this.metrics.publicationFileRequestsTotal.add(1, { outcome: fileRequestFailureOutcome(error) });
       throw error;
     }
-  }
-
-  @Get(':id/access')
-  @UseAuth()
-  @ZodSerializerDto(PublicationAccessListDto)
-  public async listAccess(
-    @Param('id') publicationId: string,
-    @User('id') ownerId: string,
-  ): Promise<PublicationAccessListDto> {
-    return this.publicationsService.listAccessGrants({ publicationId, ownerId });
-  }
-
-  @Post(':id/access')
-  @HttpCode(HttpStatus.CREATED)
-  @UseAuth()
-  @ZodSerializerDto(PublicationAccessGrantDto)
-  public async inviteAccess(
-    @Param('id') publicationId: string,
-    @User('id') ownerId: string,
-    @Body() body: InvitePublicationAccessDto,
-  ): Promise<PublicationAccessGrantDto> {
-    return this.publicationsService.inviteAccess({
-      publicationId,
-      ownerId,
-      recipientEmail: body.email,
-      notifyRecipient: body.notifyRecipient,
-    });
-  }
-
-  @Delete(':id/access/:accessId')
-  @UseAuth()
-  @ZodSerializerDto(PublicationAccessGrantDto)
-  public async revokeAccess(
-    @Param('id') publicationId: string,
-    @Param('accessId') accessId: string,
-    @User('id') ownerId: string,
-  ): Promise<PublicationAccessGrantDto> {
-    return this.publicationsService.revokeAccess({ publicationId, ownerId, accessId });
-  }
-
-  @Patch(':id/visibility')
-  @UseAuth()
-  @ZodSerializerDto(PublicationVisibilityUpdateDto)
-  public async updateVisibility(
-    @Param('id') publicationId: string,
-    @User('id') ownerId: string,
-    @Body() body: UpdatePublicationVisibilityDto,
-  ): Promise<PublicationVisibilityUpdateDto> {
-    return this.publicationsService.updateVisibility({
-      publicationId,
-      ownerId,
-      visibility: body.visibility,
-    });
   }
 
   @Patch(':id/views')

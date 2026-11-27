@@ -18,29 +18,56 @@ import type { GitObjectKind } from '#pack-reader/pack-reader.js';
 
 const typeCodes: Readonly<Record<GitObjectKind, number>> = { commit: 1, tree: 2, blob: 3, tag: 4 };
 
-const crcTable = (() => {
-  const table = new Uint32Array(256);
+/*
+ * CRC-32 tables for eight bytes a step ("slicing by 8"): table `k` holds the
+ * CRC of a byte followed by `k` zero bytes, so eight lookups fold eight bytes
+ * at once. All eight in one array, 8 KiB, the first of them the classic table.
+ */
+const crcTables = (() => {
+  const tables = new Uint32Array(8 * 256);
   for (let index = 0; index < 256; index += 1) {
     let value = index;
     for (let bit = 0; bit < 8; bit += 1) {
       value = (value & 1) === 0 ? value >>> 1 : 0xed_b8_83_20 ^ (value >>> 1);
     }
-    table[index] = value >>> 0;
+    tables[index] = value >>> 0;
   }
-  return table;
+  for (let index = 0; index < 256; index += 1) {
+    for (let table = 1; table < 8; table += 1) {
+      const previous = tables[(table - 1) * 256 + index]!;
+      tables[table * 256 + index] = (previous >>> 8) ^ tables[previous & 0xff]!;
+    }
+  }
+  return tables;
 })();
 
 /**
- * CRC-32 of a run of byte arrays, as a pack index records it per entry.
+ * CRC-32 (the zlib and pack-index polynomial) of a run of byte arrays, as a
+ * pack index records it per entry: eight bytes a step, the tail one at a time.
  *
  * @param parts - The entry's bytes, in order.
  * @returns The checksum, unsigned.
  */
-const crc32 = (...parts: ReadonlyArray<Uint8Array<ArrayBuffer>>): number => {
+export const crc32 = (...parts: ReadonlyArray<Uint8Array<ArrayBuffer>>): number => {
+  const t = crcTables;
   let crc = 0xff_ff_ff_ff;
   for (const part of parts) {
-    for (const byte of part) {
-      crc = crcTable[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
+    const length = part.byteLength;
+    let at = 0;
+    for (const end = length - 7; at < end; at += 8) {
+      const low = crc ^ (part[at]! | (part[at + 1]! << 8) | (part[at + 2]! << 16) | (part[at + 3]! << 24));
+      crc =
+        t[7 * 256 + (low & 0xff)]! ^
+        t[6 * 256 + ((low >>> 8) & 0xff)]! ^
+        t[5 * 256 + ((low >>> 16) & 0xff)]! ^
+        t[4 * 256 + (low >>> 24)]! ^
+        t[3 * 256 + part[at + 4]!]! ^
+        t[2 * 256 + part[at + 5]!]! ^
+        t[256 + part[at + 6]!]! ^
+        t[part[at + 7]!]!;
+    }
+    for (; at < length; at += 1) {
+      crc = t[(crc ^ part[at]!) & 0xff]! ^ (crc >>> 8);
     }
   }
   return (crc ^ 0xff_ff_ff_ff) >>> 0;

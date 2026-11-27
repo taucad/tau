@@ -35,6 +35,8 @@ import { connectMachineChannel } from '@taucad/runtime/machine';
 import { detectHostIndicators, parsePluginDeployment, selectVariant } from '@taucad/runtime/preparation/node';
 import { getBoundingBoxFromInspect, getInspectReport } from '@taucad/runtime-testing';
 
+import { removeInBackground } from '#process-teardown.test-utils.js';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
 const binPath = resolvePath(
@@ -1596,12 +1598,37 @@ const until = async (condition: () => boolean | Promise<boolean>, what: string, 
   }
 };
 
-/** Every path under a folder, relative to it; empty when it does not exist. */
-const entriesOf = async (folder: string): Promise<string[]> => {
+/** Whether an error is a filesystem "no such file or directory". */
+const isMissing = (error: unknown): boolean => (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+
+/**
+ * Every path under a folder, relative to it; empty when the folder itself does not exist.
+ * A recursive listing throws ENOENT when a subfolder vanishes mid-walk, as an attempt's staging
+ * folder does while the server removes it after a cancel, so that case lists again.
+ */
+const entriesOf = async (folder: string, attempts = 20): Promise<string[]> => {
   try {
     return await readdir(folder, { recursive: true });
-  } catch {
-    return [];
+  } catch (error) {
+    if (!isMissing(error)) {
+      throw error;
+    }
+    const rootExists = await access(folder).then(
+      () => true,
+      (accessError: unknown) => {
+        if (isMissing(accessError)) {
+          return false;
+        }
+        throw accessError;
+      },
+    );
+    if (!rootExists) {
+      return [];
+    }
+    if (attempts <= 1) {
+      throw error;
+    }
+    return entriesOf(folder, attempts - 1);
   }
 };
 
@@ -2092,7 +2119,8 @@ describe.runIf(nativeDarwin)('tau mcp native kernels on darwin-arm64 (W5 tier 4b
     await writeFile(join(project, 'main.cs'), egressCheckedCsharp(canary.port));
     await writeFile(join(project, 'main.ts'), files.block['main.ts']);
     store = await mkdtemp(join(tmpdir(), 'mcp-native-darwin-store-'));
-    disposers.push(async () => rm(store, { recursive: true, force: true }));
+    /* Off the hook: Build123d and PicoGK prepared are about 1 GB, whose removal can outlast the 10 s hook timeout. */
+    disposers.push(async () => removeInBackground(store));
     served = launch(project, undefined, { env: darwinEnvironment('') });
     disposers.push(stopIfRunning(served));
     disposers.push(async () => {

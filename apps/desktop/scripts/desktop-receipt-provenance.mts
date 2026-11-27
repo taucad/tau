@@ -10,7 +10,11 @@ import type { DesktopArtifactManifest } from '#shared/desktop-release.js';
 import type { DesktopPublicationScope } from './desktop-route-publication.mjs';
 /* oxlint-disable no-restricted-imports -- Reuse authenticated candidate admission and the producer's binding contract. */
 import { admitInstallerCandidate } from './fetch-desktop-installer-candidate.mjs';
-import { usesQualificationBinding, verifyQualificationBinding } from './qualification-binding.mjs';
+import {
+  qualificationBindingScopes,
+  usesQualificationBinding,
+  verifyQualificationBinding,
+} from './qualification-binding.mjs';
 /* oxlint-enable no-restricted-imports */
 /** Fixed trusted producer workflows; each publication scope admits only its own receipt artifact names. */
 const producer = {
@@ -19,6 +23,7 @@ const producer = {
     artifact: {
       all: 'desktop-route-ci-receipts',
       macos: 'desktop-macos-ci-receipts',
+      windows: 'desktop-windows-ci-receipts',
       linux: 'desktop-linux-ci-receipts',
     },
   },
@@ -27,6 +32,7 @@ const producer = {
     artifact: {
       all: 'desktop-route-vm-receipts',
       macos: 'desktop-macos-vm-receipts',
+      windows: 'desktop-windows-vm-receipts',
       linux: 'desktop-linux-vm-receipts',
     },
   },
@@ -79,8 +85,8 @@ export const verifyDesktopReceiptProvenance = (
 
 /**
  * The fixed producer workflows are qualification gates, not assembly fixtures; absent producers fail closed. Only a
- * Mac-only publication (either channel) may omit the VM run, recording clean-host acceptance as pending; a VM run that is named
- * is authenticated exactly as before.
+ * Mac-only or Windows-only publication (either channel) may omit the VM run, recording clean-host acceptance as pending;
+ * a VM run that is named is authenticated exactly as before.
  */
 export const fetchDesktopQualifiedReceipts = async (
   manifest: DesktopArtifactManifest,
@@ -88,8 +94,8 @@ export const fetchDesktopQualifiedReceipts = async (
   runs: { ci: string; vm?: string | undefined; scope?: DesktopPublicationScope },
 ): Promise<unknown[]> => {
   const scope = runs.scope ?? 'all';
-  if (runs.vm === undefined && scope !== 'macos') {
-    throw new Error('Clean-host VM acceptance run is required outside Mac-only publication');
+  if (runs.vm === undefined && scope !== 'macos' && scope !== 'windows') {
+    throw new Error('Clean-host VM acceptance run is required outside Mac-only or Windows-only publication');
   }
   const api = (path: string): Uint8Array<ArrayBuffer> =>
     Uint8Array.from(
@@ -146,7 +152,7 @@ export const fetchDesktopQualifiedReceipts = async (
       verifyQualificationBinding(binding, {
         manifest,
         candidate,
-        scope: z.enum(['macos', 'linux']).parse(scope),
+        scope: z.enum(qualificationBindingScopes).parse(scope),
         kind: environment,
         runId: admitted.runId,
         workflowCommit: admitted.workflowCommit,

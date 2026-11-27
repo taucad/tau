@@ -9,7 +9,10 @@ import { createElement } from 'react';
 import { consumableBytes } from '@taucad/fs-bridge';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { Project, ProjectManifest } from '@taucad/types';
-import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
+import type {
+  PendingProjectOperation,
+  PendingProjectStorage,
+} from '@taucad/project-library/types/pending-project-operation.types';
 
 const sourceProject: Project = createProjectFixture({
   id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
@@ -79,7 +82,7 @@ const mockPinHomeStorageBackend = vi.fn(async (backend: 'indexeddb' | 'opfs') =>
 const mockGetProjectCreationLocation = vi.fn();
 const mockSetProjectCreationLocation = vi.fn();
 const mockRequestHomeStoragePersistence = vi.fn(async () => undefined);
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   requestHomeStoragePersistence: mockRequestHomeStoragePersistence,
   pinHomeStorageBackend: mockPinHomeStorageBackend,
   getHomeStorageBackend: vi.fn(async () => 'opfs'),
@@ -95,7 +98,7 @@ vi.mock('#filesystem/handle-store.js', () => ({
   subscribeProjectRootConfigurationChanges: vi.fn(() => vi.fn()),
 }));
 
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: true,
   directoryPicker: () => ({
     available: true,
@@ -143,7 +146,7 @@ const mockDuplicate = vi.fn<
   return pendingDuplicate;
 });
 
-vi.mock('#hooks/project-manager.machine.js', async () => {
+vi.mock('@taucad/project-library/machines/project-manager.machine', async () => {
   const xstate = await import('xstate');
   return {
     projectManagerMachine: xstate.setup({}).createMachine({

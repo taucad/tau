@@ -12,7 +12,7 @@
 (* through the external admission gap (L2a D2) until W0.6. The target must *)
 (* hold I33 even then: M3 refuses the second acquire with CHAT_RUN_LIVE.   *)
 (*                                                                         *)
-(* Six knobs each switch one mechanism off (a `witness`                    *)
+(* Seven knobs each switch one mechanism off (a `witness` or `defect`      *)
 (* configuration turns exactly one of them FALSE):                         *)
 (*   LEASE        the endpoint admits a bound turn past token expiry       *)
 (*   EVICT_ON_END eviction also runs when a turn ends, not only on open    *)
@@ -21,11 +21,15 @@
 (*   HARD_CLOSE   every close escalates to SIGKILL (no SIGTERM-only path)  *)
 (*   QUEUED_CANCEL a cancel reaches a lend queued behind a presentation   *)
 (*                write (W10.r1 finding 1: the child ignored it)           *)
+(*   DRAIN_BOUND  the child bounds its own drain: a turn whose flush or    *)
+(*                session record never answers is ended from `closed`      *)
+(*                (launch audit E-1, E-11: `finishing` had no timer, and   *)
+(*                the model assumed WF on TurnEnded in its place)          *)
 (*                                                                         *)
 (* Action names are M3's events (MC-R27): Acquire, Opened, Dequeued,       *)
 (* Bound, PromptAnswered, TurnEnded, IdleExpired, CloseChat,               *)
-(* AdapterExited, Cancel, CancelBinding, CancelQueued, CancelSettled and   *)
-(* CancelTimedOut;                                                          *)
+(* AdapterExited, Cancel, CancelBinding, CancelQueued, CancelSettled,      *)
+(* CancelTimedOut and DrainTimedOut;                                        *)
 (* Tick is the environment, and SoftCloseDone exists only for the          *)
 (* HARD_CLOSE witness.                                                      *)
 (* `act` labels the step for the graph export.                             *)
@@ -57,7 +61,7 @@
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Keys, Runs, Limit, MaxProcs, ONE_RUN,
-          LEASE, EVICT_ON_END, KEEP_KEY, BUSY_GUARD, HARD_CLOSE, QUEUED_CANCEL
+          LEASE, EVICT_ON_END, KEEP_KEY, BUSY_GUARD, HARD_CLOSE, QUEUED_CANCEL, DRAIN_BOUND
 
 Procs == 1..MaxProcs
 NoProc == 0
@@ -344,15 +348,34 @@ CancelTimedOut(r) ==
      /\ act' = "CancelTimedOut"
      /\ UNCHANGED <<timer, next>>
 
+(* The drain bound expires in `busy.flushing` or `busy.recording`: the     *)
+(* host's own flush or session record has not answered. The turn's state   *)
+(* is then unknown to the child, so it ends as a timed-out cancel does:    *)
+(* the ladder kills the process, and `closed` reports the deferred         *)
+(* `turnEnded` and `closed`, in one step of the parent. TurnEnded is the   *)
+(* drain answering in time; nothing obliges it to.                         *)
+DrainTimedOut(r) ==
+  /\ DRAIN_BOUND
+  /\ run[r].pc = "finishing"
+  /\ LET p == run[r].pid IN
+     /\ proc[p].st # "closed"
+     /\ CloseProc(p, [run EXCEPT ![r] = Free(run[r].key)])
+     /\ act' = "DrainTimedOut"
+     /\ UNCHANGED <<timer, next>>
+
 Next ==
   \/ \E r \in Runs, k \in Keys : Acquire(r, k)
   \/ \E r \in Runs : Opened(r) \/ Dequeued(r) \/ Bound(r) \/ PromptAnswered(r) \/ TurnEnded(r) \/ Cancel(r)
                      \/ CancelBinding(r) \/ CancelQueued(r) \/ CancelSettled(r) \/ CancelTimedOut(r)
+                     \/ DrainTimedOut(r)
   \/ \E p \in Procs : Tick(p) \/ AdapterExited(p) \/ SoftCloseDone(p)
   \/ \E k \in Keys : IdleExpired(k) \/ CloseChat(k)
 
+(* The timers are fair; the host's own drain is not assumed to answer, so   *)
+(* TurnEnded carries no fairness (E-11): a turn leaves `finishing` because *)
+(* the drain answered or because DrainTimedOut fired.                      *)
 Fairness ==
-  /\ \A r \in Runs : WF_vars(CancelTimedOut(r)) /\ WF_vars(TurnEnded(r)) /\ WF_vars(Dequeued(r))
+  /\ \A r \in Runs : WF_vars(CancelTimedOut(r)) /\ WF_vars(DrainTimedOut(r)) /\ WF_vars(Dequeued(r))
   /\ \A p \in Procs : WF_vars(AdapterExited(p))
 
 Spec == Init /\ [][Next]_vars /\ Fairness
@@ -392,7 +415,8 @@ CloseIsFinalStep ==
 (* Quiescence: no run in flight and no process closing (the nightly's simulated behaviours end here). *)
 Quiescent == (\A r \in Runs : run[r].pc = "free") /\ (\A p \in Procs : proc[p].st # "closing")
 
-(* Cancel settles, and every close ends. *)
+(* Cancel settles, a turn that ended drains in bounded time, and every close ends. *)
 CancelSettles == \A r \in Runs : (run[r].pc = "cancelling") ~> (run[r].pc = "free")
+DrainSettles == \A r \in Runs : (run[r].pc = "finishing") ~> (run[r].pc = "free")
 Terminates == \A p \in Procs : (proc[p].st = "closing") ~> (proc[p].st = "closed")
 =============================================================================

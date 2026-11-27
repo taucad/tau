@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/taucad/tau/blob/main/tools/vitest-ci/quarantine.schema.json",
+  "title": "Tau project quarantine",
+  "description": "A project's quarantine.json, at the project root (testing policy § 16.3). A quarantined test still runs and reports; only the task's verdict ignores its failure. The rules that need a clock or the repository (age, expiry, the never-quarantine set, that the test exists, the workspace cap) are checked by scripts:validate-quarantine and tools/vitest-ci/src/quarantine.ts, not by this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entries"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "entries": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["test", "owner", "issue", "class", "created", "expires", "evidence"],
+        "properties": {
+          "test": {
+            "type": "string",
+            "description": "<file relative to the project root> > <suite> > … > <title>: one test, never a file, a suite or a project.",
+            "pattern": "^[^/.][^>]*? > .+$"
+          },
+          "variant": {
+            "type": "object",
+            "description": "Narrows the entry to one browser, OS or target; an absent key matches any value.",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "browser": { "type": "string", "minLength": 1 },
+              "os": { "enum": ["linux", "darwin", "win32"] },
+              "target": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The Nx target without a :shard-<n> suffix."
+              }
+            }
+          },
+          "owner": {
+            "type": "string",
+            "description": "GitHub login of the human owner, without @.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+          },
+          "issue": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The owner issue on taucad/tau."
+          },
+          "class": {
+            "enum": [
+              "race",
+              "timing-budget",
+              "order-dependence",
+              "resource",
+              "product-race",
+              "flaky-regression",
+              "unreproduced"
+            ]
+          },
+          "created": {
+            "type": "string",
+            "format": "date",
+            "description": "Day the entry was made (UTC)."
+          },
+          "expires": {
+            "type": "string",
+            "format": "date",
+            "description": "Last day the entry holds (UTC): at most 14 days after created, or 28 after the one operator renewal."
+          },
+          "renewal": {
+            "type": "object",
+            "description": "The one operator renewal.",
+            "additionalProperties": false,
+            "required": ["by", "on"],
+            "properties": {
+              "by": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+              },
+              "on": { "type": "string", "format": "date" }
+            }
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The flake events that put it here: counts and run ids."
+          }
+        }
+      }
+    }
+  }
+}

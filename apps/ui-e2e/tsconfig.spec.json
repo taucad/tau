@@ -5,8 +5,21 @@
     "outDir": "./out-tsc/spec",
     "types": ["node", "vitest", "vitest/browser", "@vitest/browser-playwright"],
     "paths": {
-      "#*": ["./src/*"]
+      "#*": ["./src/*"],
+      "#components/geometry/debug/workspace-renderer-diagnostics.js": [
+        "../ui/app/components/geometry/debug/workspace-renderer-diagnostics.ts"
+      ],
+      "@taucad/app/test-bridges/section-view": ["../ui/app/components/geometry/debug/section-view-test-bridge-api.ts"]
     }
   },
-  "include": ["src/**/*.ts", "scripts/**/*.mts", "global-setup.ts", "production-server.ts", "vitest.config.ts"]
+  "include": [
+    "../ui/app/components/geometry/debug/section-view-test-bridge-api.ts",
+    "../ui/app/components/geometry/debug/workspace-renderer-diagnostics.ts",
+    "src/**/*.ts",
+    "scripts/**/*.mts",
+    "global-setup.ts",
+    "production-server.ts",
+    "vitest.config.ts",
+    "vitest.node.config.ts"
+  ]
 }

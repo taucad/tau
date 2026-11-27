@@ -24,7 +24,7 @@ import { createActor } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 
 import { createAcpExternalAgentPort } from '#acp/index.js';
-import type { AcpAdapter } from '#acp/index.js';
+import type { AcpAdapter, AgentMediaTranscoder } from '#acp/index.js';
 import { createHostToolRegistry, createHostWebResearchClient } from '#agent-tools.js';
 import type { HostRuntimeClient, HostToolFileSystem, HostToolRegistryOptions } from '#agent-tools.js';
 import { projectHostMachine } from '#project-host.machine.js';
@@ -104,10 +104,12 @@ export type ProjectHostOptions = Pick<
   | 'checkoutsDirectory'
   | 'gitExecutable'
   | 'apiBaseUrl'
+  | 'safeMode'
   | 'tauCredential'
   | 'syncTelemetryPlacement'
   | 'syncTelemetryConsent'
   | 'via'
+  | 'admissionTimed'
 > &
   Pick<AgentLauncherOptions, 'systemPrompt' | 'model' | 'modelTransport' | 'credential'> &
   Pick<
@@ -129,6 +131,11 @@ export type ProjectHostOptions = Pick<
     revisionActor?: RevisionUserActor | undefined;
     /** The adapters this machine discovered; the host builds the ACP port over its own checkouts. */
     externalAgents?: Readonly<{ agents: readonly AcpAdapter[]; mcpUrl: () => string }> | undefined;
+    /**
+     * The runtime's image transcoder for agent media (WP6): an ACP agent's AVIF, GIF or oversized image is filed as
+     * the JPEG it converts to. Absent, agent media is filed as sent.
+     */
+    mediaTranscoder?: AgentMediaTranscoder | undefined;
     /** Each revision fact; reporting only, never fatal. */
     onRevisionEvent: (event: HostRevisionEvent) => void;
     /**
@@ -469,9 +476,11 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     ...(options.checkoutsDirectory === undefined ? {} : { checkoutsDirectory: options.checkoutsDirectory }),
     ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),
     ...(options.apiBaseUrl === undefined ? {} : { apiBaseUrl: options.apiBaseUrl }),
+    ...(options.safeMode === true ? { safeMode: true } : {}),
     ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
     ...(options.syncTelemetryPlacement === undefined ? {} : { syncTelemetryPlacement: options.syncTelemetryPlacement }),
     ...(options.syncTelemetryConsent === undefined ? {} : { syncTelemetryConsent: options.syncTelemetryConsent }),
+    ...(options.admissionTimed === undefined ? {} : { admissionTimed: options.admissionTimed }),
     events: options.onRevisionEvent,
   });
 
@@ -528,7 +537,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       : createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry, workspaceRoot });
 
   /* Reads only on quiescence, by which time the launcher exists. */
-  const observer = options.observeChats?.(async (input) => launcher.host.readEvents(input), {
+  const observer = options.observeChats?.(async (input) => launcher.readEvents(input), {
     design: async ({ revision, paths }) => revisions.history.files(revision, paths),
   });
   const launcher = createAgentLauncher({
@@ -567,6 +576,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
             workspaceRoot,
             checkouts,
             ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
+            ...(options.mediaTranscoder === undefined ? {} : { mediaTranscoder: options.mediaTranscoder }),
             mcp: {
               /* Read per run: the caller's listener may bind after this host exists. */
               get url(): string {
@@ -722,11 +732,14 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
  * @example <caption>A project host over a daemon's authority</caption>
  * ```typescript
  * import { createGatewayModelTransport } from '@taucad/agent-host';
+ * import type { DeploymentModeAnswer } from '@taucad/agent-host';
  * import { createProjectHost } from '@taucad/host';
  * import type { ProjectFileSystem, ProjectHostRuntimeClient } from '@taucad/host';
  *
  * declare const fileSystem: ProjectFileSystem;
  * declare const runtimeClient: (root: string) => Promise<ProjectHostRuntimeClient>;
+ * // The API's deployment answer for the gateway's origin (`GET /v1/deployment`), fetched and cached by the host.
+ * declare const deployment: (signal: AbortSignal) => Promise<DeploymentModeAnswer>;
  *
  * const project = createProjectHost({
  *   workspaceRoot: '/work/bracket',
@@ -734,7 +747,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
  *   fileSystem,
  *   runtimeClient,
  *   systemPrompt: 'You are Tau.',
- *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/' }),
+ *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/', billing: { deployment } }),
  *   credential: () => ({ mode: 'session' }),
  *   onRevisionEvent: () => undefined,
  * });

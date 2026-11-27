@@ -38,9 +38,39 @@ export const tessellationReportSchema = z
     requested: z.enum(['low', 'medium', 'high', 'extra-high', 'explicit']).optional(),
     linearTolerance: z.number().positive().optional(),
     angularTolerance: z.number().positive().optional(),
+    meshes: z
+      .object({ reused: count, computed: count })
+      .optional()
+      .describe('Parts whose mesh the kernel kept from an earlier render at the same tolerances, and parts it meshed.'),
   })
   .describe(
     'Cost of the default view mesh: triangles, vertices and milliseconds to produce it; voxel kernels add voxelSize (mm), activeVoxels and memoryBytes, and adaptivity only when the mesh is adaptive (absent means the uniform mesh; a PicoGK view that sets no meshAdaptivity asks for 0.25 and reports the mesh its runtime delivered, while a PicoVoxel view that sets none meshes at 0.25 on the fast lane and at 0 on the exact lane or under PicoVoxel 0.1.0; exports mesh at 0 unless the export sets meshAdaptivity). Tolerance-meshed kernels add the requested preset or explicit, and the linearTolerance (mm) and angularTolerance (degrees) the mesh was produced at; there is no triangle budget, so the mesh is never coarsened.',
+  );
+
+/** @public */
+export const buildReportSchema = z
+  .object({
+    reused: z.boolean().describe('No model code ran: a build kept from an earlier evaluation answered.'),
+    elapsed: z.number().nonnegative().describe('Milliseconds the evaluation took.'),
+    operations: z
+      .object({ reused: count, computed: count })
+      .optional()
+      .describe('Library operations the model code called: reused from an earlier build, or computed in this one.'),
+    costliest: z
+      .array(
+        z.object({
+          operation: z.string().min(1).max(128),
+          elapsed: z.number().nonnegative(),
+          calls: z.number().int().positive(),
+        }),
+      )
+      .max(3)
+      .readonly()
+      .optional()
+      .describe('The operations that took longest to compute, costliest first, with their milliseconds and calls.'),
+  })
+  .describe(
+    'What the evaluation cost and reused. Editing code that feeds a costly operation recomputes it and everything after it; prefer edits downstream of it when the design allows.',
   );
 
 const millimetrePointSchema = z.object({ x: z.number(), y: z.number(), z: z.number() }).strict();
@@ -115,6 +145,7 @@ export const evaluateModelOutputSchema = z.object({
   views: z.array(z.string()).optional().describe('Offered view IDs, default first; present when ready.'),
   instances: z.record(z.string(), z.array(z.object({ id: z.string(), title: z.string() }).strict())).optional(),
   exports: z.record(z.string(), z.string()).optional().describe('Export ID to extension; present when ready.'),
+  build: buildReportSchema.optional(),
   tessellation: tessellationReportSchema.optional(),
   summary: modelSummarySchema.optional(),
   mechanism: modelMechanismSchema.optional(),
@@ -133,6 +164,9 @@ export type EvaluateModelInput = z.infer<typeof evaluateModelInputSchema>;
 
 /** @public */
 export type EvaluateModelOutput = z.infer<typeof evaluateModelOutputSchema>;
+
+/** @public */
+export type BuildReport = z.infer<typeof buildReportSchema>;
 
 /** @public */
 export type ModelSummary = z.infer<typeof modelSummarySchema>;

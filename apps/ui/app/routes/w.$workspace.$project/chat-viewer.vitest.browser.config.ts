@@ -1,13 +1,14 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 
 /** Real Dockview header and viewer bar acceptance at the ruled viewer widths. */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss(), tauRuntime()],
   optimizeDeps: {
     include: [
@@ -26,6 +27,8 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     include: [
       'app/routes/w.$workspace.$project/chat-viewer.browser.test.tsx',
       'app/routes/w.$workspace.$project/chat-viewer-controls.browser.test.tsx',

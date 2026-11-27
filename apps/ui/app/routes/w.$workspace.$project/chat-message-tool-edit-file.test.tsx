@@ -62,7 +62,7 @@ vi.mock('@taucad/chat-ui/components/chat-tool-label', () => ({
   },
 }));
 
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink({ children, path }: { readonly children: React.ReactNode; readonly path: string }): React.JSX.Element {
     return (
       <a data-testid='file-link' data-path={path} href={`#${path}`}>

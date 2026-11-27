@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-/* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
+/* eslint-disable @typescript-eslint/naming-convention -- mocks keep the environment's `ENV`/`TAU_API_URL` and the AI SDK's own export names verbatim. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -28,30 +28,6 @@ const harness = vi.hoisted(() => ({
     readdir: vi.fn(async () => []),
     unlink: vi.fn(async () => undefined),
     rmdir: vi.fn(async () => undefined),
-  },
-}));
-
-vi.mock('@ai-sdk/react', () => ({
-  // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
-  Chat: class {
-    public id = '';
-    public messages = [];
-    public status = 'ready';
-    public error = undefined;
-    public sendMessage = vi.fn();
-    public regenerate = vi.fn();
-    public stop = vi.fn();
-    public '~registerMessagesCallback' = (): (() => void) => {
-      return () => undefined;
-    };
-
-    public '~registerStatusCallback' = (): (() => void) => {
-      return () => undefined;
-    };
-
-    public '~registerErrorCallback' = (): (() => void) => {
-      return () => undefined;
-    };
   },
 }));
 
@@ -96,7 +72,7 @@ vi.mock('#runtime/file-manager-facade.js', async (importOriginal) => {
 });
 
 /* A read owner that admits every read at once: no observation runs while the file managers are idle. */
-vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
+vi.mock('@taucad/project-library/runtime/project-library-observations', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createMetadataReadOwner: (source: unknown) => ({
     connect: () => () => undefined,

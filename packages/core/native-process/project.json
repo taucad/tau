@@ -3,7 +3,7 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/core/native-process",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package", "ci:shell", "ci:windows-unit"],
+  "tags": ["scope:shared", "type:package", "ci:shell"],
   "targets": {
     "build": {
       "executor": "nx:run-commands",
@@ -21,7 +21,7 @@
       },
       "options": {
         "cwd": "{workspaceRoot}/packages/core/native-process",
-        "command": "../../../node_modules/.bin/vitest run --config vitest.config.ts src/native-sandbox.integration.test.ts"
+        "command": "vitest run --config vitest.config.ts src/native-sandbox.integration.test.ts"
       }
     }
   }

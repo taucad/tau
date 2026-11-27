@@ -5,13 +5,19 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('react-router', () => ({
-  Link: ({ children, to }: { readonly children: ReactNode; readonly to: string }) => <a href={to}>{children}</a>,
-  Outlet: () => <div data-route-content>Hydrated route content</div>,
-  useLocation: () => ({ key: 'default', pathname: '/' }),
-  NavigationType: { Pop: 'POP', Push: 'PUSH', Replace: 'REPLACE' },
-  useNavigationType: () => 'POP',
-}));
+vi.mock('react-router', async (importOriginal) => {
+  /* The real module's contexts, with no data router provided: the shell's workspace frame state reads the committed
+   * location (A15b2). */
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    Link: ({ children, to }: { readonly children: ReactNode; readonly to: string }) => <a href={to}>{children}</a>,
+    Outlet: () => <div data-route-content>Hydrated route content</div>,
+    useLocation: () => ({ key: 'default', pathname: '/' }),
+    NavigationType: { Pop: 'POP', Push: 'PUSH', Replace: 'REPLACE' },
+    useNavigationType: () => 'POP',
+  };
+});
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => 'authed' }));
 vi.mock('#flags/use-feature.js', () => ({ useFeatureFlags: () => ({}) }));
 vi.mock('#hooks/use-typed-matches.js', () => ({
@@ -23,7 +29,7 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
       commandPalette: [],
       enablePageWrapper: [],
       enablePageHeader: [{ handle: { enablePageHeader: false } }],
-      enableOverflowY: [],
+      scroll: [],
       providers: [],
     }),
 }));

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- client environment keys are an external contract. */
-import { createStaticHandler } from 'react-router';
-import type { AppLoadContext, EntryContext } from 'react-router';
+import { createStaticHandler, RouterContextProvider } from 'react-router';
+import type { EntryContext } from 'react-router';
+import { rootMiddleware } from '#lib/root-middleware.server.js';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as EnvironmentConfig from '#environment.config.js';
@@ -47,6 +48,11 @@ vi.mock('#lib/model-catalog.server.js', async (loadOriginal) => {
     prefetchModelCatalog: async (reportState?: ModelCatalogServer.ModelCatalogStateReporter) => {
       const cached = await read(reportState);
       return cached === undefined ? undefined : original.dehydrateModelCatalog(cached);
+    },
+    // `/` is the Home shell's path (PL4), whose root loader stamps the same cache's catalog.
+    prefetchShellModelCatalog: async (reportState?: ModelCatalogServer.ModelCatalogStateReporter) => {
+      const cached = await read(reportState);
+      return cached === undefined ? undefined : original.dehydrateModelCatalog({ ...cached, fetchedAt: 0 });
     },
   };
 });
@@ -98,7 +104,8 @@ const entryContextFor = async (request: Request): Promise<EntryContext> => {
 };
 
 /**
- * Serve one document as React Router does: the root loader, then the entry, with one load context between them.
+ * Serve one document as React Router does: the root middleware around the root loader and the entry, with one router
+ * context between them.
  *
  * @param pathname - The document's path and query.
  * @param options - The method and user agent.
@@ -110,9 +117,15 @@ const serve = async (pathname: string, options: { method?: string; userAgent?: s
     method: options.method ?? 'GET',
     headers: { cookie: `better-auth.session_token=${sessionValue}`, 'user-agent': options.userAgent ?? userAgent },
   });
-  const loadContext = mock<AppLoadContext>();
-  await loader({ request, params: {}, context: loadContext, url, pattern: '/*' });
-  const response = await handleRequest(request, 200, new Headers(), await entryContextFor(request), loadContext);
+  const loadContext = new RouterContextProvider();
+  // The root middleware wraps the loader and the render, and starts the request's record.
+  const response = (await rootMiddleware(
+    { request, params: {}, context: loadContext, url, pattern: '/*' },
+    async () => {
+      await loader({ request, params: {}, context: loadContext, url, pattern: '/*' });
+      return handleRequest(request, 200, new Headers(), await entryContextFor(request), loadContext);
+    },
+  )) as Response;
   // Drain the stream, as a browser would.
   await response.text();
   return response.headers.get('Server-Timing') ?? '';

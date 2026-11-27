@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { RouterContextProvider } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LoaderFunctionArgs } from 'react-router';
 import { parameterEntryPath, projectToManifest } from '@taucad/types';
@@ -9,7 +10,6 @@ const loadPublication = vi.hoisted(() =>
     publication: { id: 'pub' },
   })),
 );
-const publicationMeta = vi.hoisted(() => vi.fn(() => [{ title: 'Persisted project' }]));
 
 /* eslint-disable @typescript-eslint/naming-convention -- mocked React module exports keep their public names. */
 vi.mock('#components/share/tau-publication.js', () => ({
@@ -17,7 +17,6 @@ vi.mock('#components/share/tau-publication.js', () => ({
   PublicationInteractiveSurface: () => null,
   ErrorBoundary: () => null,
   loadPublication,
-  publicationMeta,
 }));
 /* eslint-enable @typescript-eslint/naming-convention -- end mocked exports. */
 
@@ -42,13 +41,15 @@ const portableArtifact = (parameterRecord: unknown): ShareOpenedArtifact => ({
   ],
 });
 
-const loaderArgs = (slug: string): LoaderFunctionArgs => {
-  // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- route test fixture omits unstable router internals.
+const loaderArgs = (slug: string): Parameters<typeof loader>[0] => {
+  const request = new Request(`https://tau.new/s/${slug}`);
   return {
-    context: {},
+    context: new RouterContextProvider(),
     params: { slug },
-    request: new Request(`https://tau.new/s/${slug}`),
-  } as unknown as LoaderFunctionArgs;
+    request,
+    url: new URL(request.url),
+    pattern: '/s/:slug',
+  };
 };
 
 describe('/s provider dispatch', () => {
@@ -94,14 +95,14 @@ describe('/s provider dispatch', () => {
     await expect(loader(loaderArgs('builtin~replicad.missing'))).rejects.toMatchObject({ status: 404 });
   });
 
-  it('resolves provider-qualified Tau references through the Tau loader', async () => {
-    const slug = 'tau~pub_123';
+  it('resolves provider-qualified cloud links through the cloud link loader', async () => {
+    const slug = 'tau~shr_123';
     await loader(loaderArgs(slug));
-    expect(loadPublication.mock.calls.at(-1)?.[0].params['id']).toBe('pub_123');
+    expect(loadPublication.mock.calls.at(-1)?.[0].params['id']).toBe('shr_123');
   });
 
   it('rejects bare references instead of guessing a provider', async () => {
-    await expect(loader(loaderArgs('pub_bare'))).rejects.toThrow('must identify its provider');
+    await expect(loader(loaderArgs('shr_bare'))).rejects.toThrow('must identify its provider');
     expect(loadPublication).not.toHaveBeenCalled();
   });
 

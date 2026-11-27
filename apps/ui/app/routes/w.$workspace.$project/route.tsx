@@ -9,12 +9,13 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { recoverFromCaughtError } from '#lib/stale-build-recovery.js';
-import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
+import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import { ProjectRouteNotice } from '#routes/w.$workspace.$project/project-route-notices.js';
 import type { Handle } from '#types/matches.types.js';
 import { ProjectRouteProviders, projectRouteHandle } from '#routes/w.$workspace.$project/project-route.js';
 import type { ProjectChatRoute } from '#routes/w.$workspace.$project/project-live-sessions.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 // Module-level for a stable component identity across HMR.
 function RouteProvider({ children }: { readonly children?: React.ReactNode }): React.JSX.Element {
@@ -24,6 +25,8 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
 export const handle: Handle = {
   ...projectRouteHandle,
   providers: () => RouteProvider,
+  // The workbench owns its panes' scrollers (D4.2, reviewed contained list).
+  scroll: 'contained',
 };
 
 type EditorState =
@@ -32,17 +35,16 @@ type EditorState =
   | { readonly status: 'ready'; readonly Content: typeof ProjectChatRoute };
 
 const loadProjectChatRoute = async (): Promise<{ ProjectChatRoute: typeof ProjectChatRoute }> =>
-  import('#routes/w.$workspace.$project/project-live-sessions.js');
+  loadCode(async () => import('#routes/w.$workspace.$project/project-live-sessions.js'));
 
 function DeferredProjectChatRoute(): React.JSX.Element {
   const [state, setState] = useState<EditorState>({ status: 'loading' });
-  const [loadContent, setLoadContent] = useState(() => loadProjectChatRoute);
   useEffect(() => {
     const controller = new AbortController();
-    // async-iife: bootstrap -- the mounted destination owns completion and explicit retry.
+    // async-iife: bootstrap -- the mounted destination owns completion and offers Reload on failure.
     void (async (): Promise<void> => {
       try {
-        const { ProjectChatRoute: Content } = await loadContent();
+        const { ProjectChatRoute: Content } = await loadProjectChatRoute();
         if (!controller.signal.aborted) {
           setState({ status: 'ready', Content });
         }
@@ -56,28 +58,28 @@ function DeferredProjectChatRoute(): React.JSX.Element {
     return () => {
       controller.abort();
     };
-  }, [loadContent]);
+  }, []);
 
   if (state.status === 'ready') {
     return <state.Content />;
   }
   if (state.status === 'failed') {
     return (
+      // This page keeps a module that failed to load failed, so only a reload can load it (FP9): no in-place retry.
       <div role='alert' aria-label='Workspace unavailable' className='flex flex-col items-start gap-3 p-6'>
-        <p>The workspace could not be loaded. Try again.</p>
+        <p>The workspace did not finish loading. Reload to continue.</p>
         <Button
           variant='outline'
           onClick={() => {
-            setState({ status: 'loading' });
-            setLoadContent(() => async () => loadProjectChatRoute());
+            globalThis.location.reload();
           }}
         >
-          Retry
+          Reload
         </Button>
       </div>
     );
   }
-  return <WorkspaceSkeleton />;
+  return <WorkspaceOpening />;
 }
 
 export default function WorkspaceProjectRoute(): React.JSX.Element {

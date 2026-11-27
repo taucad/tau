@@ -1,7 +1,7 @@
 import { AlertTriangle, Archive, RotateCcw } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ContextCompactionData } from '@taucad/chat';
-import { FileLink } from '#components/files/file-link.js';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
 import {
   ChatToolCard,
   ChatToolCardHeader,

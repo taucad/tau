@@ -2,8 +2,9 @@
 # Run disposable full Linux guests for infrastructure proof or protected staging/production qualification.
 # See desktop-release-signing-pipeline/linux-remote-qualification-2026-10-22.md.
 # Required env: TAU_VM_DISTRO (ubuntu, ubuntu2604 or debian), RUNNER_TEMP (disposable CI directory).
-# Optional env: TAU_VM_MODE (proof default, tooling, qualification with protected staging or production inputs, or clean-host for
-#   consumer acceptance from desktop-route-vm-acceptance.yml on a gcp host);
+# Optional env: TAU_VM_MODE (proof default, tooling, qualification with protected staging or production inputs, clean-host for
+#   consumer acceptance from desktop-route-vm-acceptance.yml on a gcp host, or gpu-smoke for e2e-gpu-smoke.yml's
+#   real-GPU viewer rows on a gcp host);
 #   TAU_VM_HOST (qemu default: a nested guest on this runner; gcp: a disposable spot T4 host in Google Cloud
 #   project TAU_GCP_PROJECT, tried in TAU_GCP_ZONES order, reached over an IAP tunnel; tau-cloud stacks/gcp). Usage: TAU_VM_DISTRO=ubuntu pnpm nx run desktop:hosted-linux-vm-proof
 # Exit codes: 0 proof passed; 1 failed assertion/external operation; 3 missing host prerequisite.
@@ -39,6 +40,17 @@ case "$mode" in
     [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ ]]
     [[ "${TAU_QUALIFICATION_ROUTE:-}" == linux-apt || "${TAU_QUALIFICATION_ROUTE:-}" == linux-appimage ]]
     : "${GH_TOKEN:?read-only job token required for existing candidate provenance checks}"
+    ;;
+  gpu-smoke)
+    # The weekly real-GPU viewer smoke (e2e-gpu-smoke.yml, tau-cloud gpu-smoke environment): main only, scheduled or
+    # dispatched, on a Google Cloud GPU host. It receives no token and no qualification input, only the commit.
+    [[ "${GITHUB_REF:-}" == refs/heads/main &&
+       ( "${GITHUB_EVENT_NAME:-}" == schedule || "${GITHUB_EVENT_NAME:-}" == workflow_dispatch ) &&
+       "${GITHUB_REPOSITORY:-}" == taucad/tau &&
+       "${GITHUB_WORKFLOW_REF:-}" == taucad/tau/.github/workflows/e2e-gpu-smoke.yml@refs/heads/main &&
+       "${TAU_VM_HOST:-}" == gcp && "$TAU_VM_DISTRO" == ubuntu ]] ||
+      { printf 'The GPU smoke requires the main e2e-gpu-smoke.yml run on an Ubuntu GPU host\n' >&2; exit 1; }
+    [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ ]]
     ;;
   *) printf 'Invalid VM mode\n' >&2; exit 1 ;;
 esac
@@ -84,6 +96,7 @@ if [[ "$host" == gcp ]]; then
       awk -F '\t' -v region="regions/${1}/subnetworks/" 'index($2, region) { print $1; exit }' || true
   }
   route_slug="${TAU_QUALIFICATION_ROUTE:-proof}"; route_slug="${route_slug#linux-}"
+  if [[ "$mode" == gpu-smoke ]]; then route_slug=gpu-smoke; fi
   instance="tau-q-${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-1}-${template_distro}-${route_slug}"
   instance="${instance:0:63}"
 fi
@@ -165,22 +178,33 @@ CONFIG
   qemu_pid=$!
 fi
 if [[ "$host" == gcp ]]; then
-  # T4 capacity varies by zone; try each configured zone once, in order (primary region first, then fallbacks). The client key is the only login path, and the
-  # host keys are read back through the guest agent before the first SSH, so StrictHostKeyChecking stays on.
+  # GPU capacity varies by zone and by minute; try every configured zone in order (primary region first, then
+  # fallbacks), and repeat the pass until TAU_GCP_CAPACITY_WAIT_SECONDS (default 40 minutes) have passed: on
+  # 2026-11-16 one pass found an L4 at 00:07Z and the next two found none across twelve zones. The client key is the
+  # only login path, and the host keys are read back through the guest agent before the first SSH, so
+  # StrictHostKeyChecking stays on.
   printf 'tau:%s\n' "$(cat "$work/client.pub")" > "$work/ssh-keys"
   template=''
-  for zone in $TAU_GCP_ZONES; do
-    zone_template="$(region_template "${zone%-*}")"
-    [[ -n "$zone_template" ]] || { printf 'No GPU host template for %s in %s\n' "$template_distro" "${zone%-*}" >&2; continue; }
-    if gcloud compute instances create "$instance" --project "$TAU_GCP_PROJECT" --zone "$zone" \
-      --source-instance-template "$zone_template" --metadata-from-file "ssh-keys=$work/ssh-keys" \
-      --metadata enable-guest-attributes=TRUE; then
-      template="$zone_template"
-      instance_zone="$zone"
-      break
-    fi
+  capacity_deadline=$((SECONDS + ${TAU_GCP_CAPACITY_WAIT_SECONDS:-2400}))
+  pass=1
+  while :; do
+    for zone in $TAU_GCP_ZONES; do
+      zone_template="$(region_template "${zone%-*}")"
+      [[ -n "$zone_template" ]] || { printf 'No GPU host template for %s in %s\n' "$template_distro" "${zone%-*}" >&2; continue; }
+      if gcloud compute instances create "$instance" --project "$TAU_GCP_PROJECT" --zone "$zone" \
+        --source-instance-template "$zone_template" --metadata-from-file "ssh-keys=$work/ssh-keys" \
+        --metadata enable-guest-attributes=TRUE; then
+        template="$zone_template"
+        instance_zone="$zone"
+        break
+      fi
+    done
+    [[ -z "$instance_zone" && SECONDS -lt capacity_deadline ]] || break
+    printf 'No zone had GPU capacity on pass %d; trying again in 120 s\n' "$pass" >&2
+    pass=$((pass + 1))
+    sleep 120
   done
-  [[ -n "$instance_zone" ]] || { printf 'No zone had GPU capacity\n' >&2; exit 1; }
+  [[ -n "$instance_zone" ]] || { printf 'No zone had GPU capacity after %d passes\n' "$pass" >&2; exit 1; }
   # The trusted host identity is what the Compute API reports for the instance this job created, never a value the
   # guest or its creator could set (the instance-template metadata attribute exists only for managed-group members).
   # Only clean-host receipts carry host facts, so only that mode depends on the description; CI qualification keeps
@@ -271,6 +295,23 @@ if [[ "$host" == gcp ]]; then
   [[ -n "$new_boot" && "$new_boot" != "$first_boot" ]] || { printf 'Guest did not come back on a new boot\n' >&2; exit 1; }
   printf 'Guest is back on a new boot\n'
 fi
+if [[ "$mode" == gpu-smoke ]]; then
+  # The smoke runs browser rows, not the desktop proof: the same verified Node, the commit, and nothing else.
+  node_root="$(dirname "$(dirname "$(command -v node)")")"
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/node'
+  tar -C "$node_root" -cf - . | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/node'
+  printf '{"GITHUB_SHA":"%s","TAU_VM_MODE":"gpu-smoke"}\n' "$GITHUB_SHA" |
+    ssh "${ssh_options[@]}" tau@127.0.0.1 'umask 077; cat > ~/qualification-env.json'
+  status=0
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'bash -s' \
+    < "$REPO_ROOT/apps/desktop/scripts/hosted-linux-gpu-smoke-guest.sh" | tee "$output/gpu-smoke.txt" || status=$?
+  # Vitest Browser diagnostics only (screenshots, benchmark JSON, failure captures).
+  mkdir -p "$REPO_ROOT/out/test-results/vitest-browser"
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -C ~/tau/out/test-results/vitest-browser -cf - . 2>/dev/null || true' |
+    tar -xf - -C "$REPO_ROOT/out/test-results/vitest-browser" || true
+  printf '%s\n' "$status" > "$output/harness-exit-code.txt"
+  exit "$status"
+fi
 # Distro is constrained to three literals above, intentionally passed to the guest.
 # shellcheck disable=SC2029
 ssh "${ssh_options[@]}" tau@127.0.0.1 "bash -s -- $TAU_VM_DISTRO $guest_graphics" \
@@ -314,6 +355,9 @@ if os.environ['TAU_VM_MODE'] == 'tooling':
 if os.environ['TAU_VM_MODE'] == 'clean-host':
     names += ['TAU_DESKTOP_ACCEPTANCE_KIND', 'TAU_GCP_HOST_TEMPLATE', 'TAU_GCP_HOST_INSTANCE', 'TAU_GCP_HOST_ZONE']
 values = {name: os.environ[name] for name in names}
+# Optional: route qualification's T-B22.4 recovery rows set it; every other caller runs the A-B-C chain.
+if os.environ['TAU_VM_MODE'] == 'qualification' and os.environ.get('TAU_QUALIFICATION_SCENARIO'):
+    values['TAU_QUALIFICATION_SCENARIO'] = os.environ['TAU_QUALIFICATION_SCENARIO']
 values['TAU_VM_MODE'] = os.environ['TAU_VM_MODE']
 with open(sys.argv[1], 'x') as output:
     json.dump(values, output)
@@ -329,7 +373,7 @@ PYENV
 import glob, os, sys, tarfile
 root = os.path.expanduser('~/tau/out/route-qualification')
 with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as output:
-    for pattern in ['qualification-*.json', 'renderer-*.json', 'renderer-*.png', 'mirror-trust.json', 'route-receipts.json', 'software-ci-evidence.json']:
+    for pattern in ['qualification-*.json', 'renderer-*.json', 'renderer-*.png', 'mirror-trust.json', 'route-receipts.json', 'recovery-receipt.json', 'software-ci-evidence.json']:
         for path in glob.glob(os.path.join(root, pattern)):
             if os.path.isfile(path) and not os.path.islink(path):
                 output.add(path, arcname=os.path.basename(path), recursive=False)

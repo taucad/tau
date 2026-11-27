@@ -79,7 +79,7 @@ export const reactE2ETargets = [
     artifactInspection: { kind: 'runtime', root: resolve(reactRouterRoot, 'build-isolated/client/assets') },
     metadata: {
       deployment: 'isolated',
-      expectedVersions: { 'react-router': '7.18.2', '@react-router/dev': '7.18.2', vite: '7.3.6' },
+      expectedVersions: { 'react-router': '7.18.5', '@react-router/dev': '7.18.5', vite: '7.3.6' },
       framework: 'react-router',
       mode: 'production',
       version: '7',
@@ -116,7 +116,7 @@ export const reactE2ETargets = [
     artifactInspection: { kind: 'runtime', root: resolve(reactRouterRoot, 'build-non-isolated/client/assets') },
     metadata: {
       deployment: 'non-isolated',
-      expectedVersions: { 'react-router': '7.18.2', '@react-router/dev': '7.18.2', vite: '7.3.6' },
+      expectedVersions: { 'react-router': '7.18.5', '@react-router/dev': '7.18.5', vite: '7.3.6' },
       framework: 'react-router',
       mode: 'production',
       version: '7',
@@ -136,7 +136,7 @@ export const reactE2ETargets = [
     artifactInspection: { kind: 'runtime', root: resolve(reactRouterExampleRoot, 'build/client/assets') },
     metadata: {
       example: true,
-      expectedVersions: { 'react-router': '8.3.0', '@react-router/dev': '8.3.0', vite: '8.0.16' },
+      expectedVersions: { 'react-router': '8.5.1', '@react-router/dev': '8.5.1', vite: '8.0.16' },
       framework: 'react-router',
       mode: 'production',
       successMessage: runtimeSuccess['react-router'],
@@ -209,7 +209,7 @@ export const reactE2ETargets = [
     },
     metadata: {
       deployment: 'isolated',
-      expectedVersions: { 'react-router': '7.18.2', '@react-router/dev': '7.18.2', vite: '7.3.6' },
+      expectedVersions: { 'react-router': '7.18.5', '@react-router/dev': '7.18.5', vite: '7.3.6' },
       framework: 'react-router',
       mode: 'development',
       version: '7',
@@ -227,7 +227,7 @@ export const reactE2ETargets = [
     },
     metadata: {
       example: true,
-      expectedVersions: { 'react-router': '8.3.0', '@react-router/dev': '8.3.0', vite: '8.0.16' },
+      expectedVersions: { 'react-router': '8.5.1', '@react-router/dev': '8.5.1', vite: '8.0.16' },
       framework: 'react-router',
       mode: 'development',
       successMessage: runtimeSuccess['react-router'],

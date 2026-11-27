@@ -6,7 +6,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { SharedProjectHydrator, SharedProjectWorkbench } from '#components/share/shared-project-workbench.js';
 import { killMemory, modelKeyOf } from '#lib/kill-memory.js';
 import { readBuildId } from '#lib/build-identity.js';
-import type { ParsedPublication } from '#components/share/parsed-publication.js';
+import type { ParsedPublication } from '@taucad/publish-ui/components/share/parsed-publication';
 
 const fileManager = vi.hoisted(() => {
   let visiblePaths: string[] = [];
@@ -70,13 +70,15 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 // Stands in for the provider that creates the kernel and its runtime worker.
 const projectProvider = vi.hoisted(() => vi.fn());
 const viewPing = vi.hoisted(() => vi.fn());
-vi.mock('#components/share/use-view-ping.js', () => ({ useViewPing: viewPing }));
+vi.mock('@taucad/publish-ui/components/share/use-view-ping', () => ({ useViewPing: viewPing }));
 
-vi.mock('#hooks/use-project.js', () => ({
+vi.mock('#hooks/project-provider.js', () => ({
   ProjectProvider: (props: { readonly children: React.JSX.Element; readonly profile: string }): React.JSX.Element => {
     projectProvider(props);
     return props.children;
   },
+}));
+vi.mock('#hooks/use-project.js', () => ({
   useProject: vi.fn(),
   useParameterSetActor: () => undefined,
 }));
@@ -98,7 +100,7 @@ vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
   RevisionProvider: ({ children }: { readonly children: React.JSX.Element }): React.JSX.Element => children,
 }));
 
-vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+vi.mock('#routes/w.$workspace.$project/project-workspace-provider.js', () => ({
   ProjectWorkspaceProvider: ({ children }: { readonly children: React.JSX.Element }): React.JSX.Element => children,
 }));
 

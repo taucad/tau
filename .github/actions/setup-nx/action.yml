@@ -3,9 +3,9 @@ description: 'Sets up Node.js, pnpm, dependencies, and Nx SHAs for CI workflows'
 
 inputs:
   node-version:
-    description: 'Node.js version used by this job. 24.21 segfaults Nx as it exits, so the default stays on 24.20.0.'
+    description: "Node.js version used by this job. The default is Node 26 LTS, whose V8 has the wasm import-wrapper fix Node 24 lacks (nodejs/node#66366); `ci.yml`'s floor lane passes the Node 24 floor. The earlier '24.21 segfaults Nx' note was one CI crash: the same intermittent Nx SIGSEGV shows on 24.10, 24.19 and 24.20 and nx-guard reruns it (Brain research/node-26-ci-migration.md, Finding 2)."
     required: false
-    default: '24.20.0'
+    default: '26.13.1'
   save-pnpm-store:
     description: "'false' restores the pnpm store and the cached Node.js without saving them after the job, for jobs whose end gates a workflow"
     required: false
@@ -43,6 +43,30 @@ runs:
         node-version: ${{ inputs.node-version }}
         registry-url: 'https://registry.npmjs.org'
 
+    # Node 25 and later ship without corepack. Install it into the selected Node itself, pinned to the 0.35.0 that
+    # Node 24.20.0 bundled, rather than lean on the runner image's own: the VM guests of `hosted-linux-vm.sh` and
+    # `shell-conformance-vm.sh` copy this Node's directory and run `corepack enable` from it. A Node that has its own
+    # (the 24.x floor jobs) keeps it.
+    - name: Provide corepack in the selected Node
+      shell: bash
+      run: |
+        bin="$(dirname "$(command -v node)")"
+        if [ -e "$bin/corepack" ] || [ -e "$bin/corepack.cmd" ]; then
+          echo "corepack: $("$bin/corepack" --version 2>/dev/null || echo bundled) in $bin"
+          exit 0
+        fi
+        # Into this Node's own prefix, never npm's configured global one: on windows-2025 that is C:\npm\prefix,
+        # which already holds the image's `yarn` shim (EEXIST) and which no guest copies. A Windows Node keeps its
+        # global bins beside node.exe; elsewhere they go to <prefix>/bin.
+        if [ "$RUNNER_OS" = Windows ]; then prefix="$bin"; else prefix="$(dirname "$bin")"; fi
+        for attempt in 1 2 3; do
+          if npm install --global --prefix "$prefix" --no-audit --no-fund corepack@0.35.0; then break; fi
+          if [ "$attempt" -eq 3 ]; then exit 1; fi
+          echo "::warning title=corepack install failed::attempt $attempt failed; retrying" >&2
+          sleep $((attempt * 5))
+        done
+        test -e "$bin/corepack" || test -e "$bin/corepack.cmd"
+
     - name: Enable corepack
       run: corepack enable
       shell: bash
@@ -66,16 +90,13 @@ runs:
     # from the npm registry, and that is the flakiest network call here: in run
     # 41670839293 it reset mid-stream (`TypeError: terminated` / `read
     # ECONNRESET`) and took the job with it. Do the download in a step of its
-    # own, with retries, so a reset costs seconds instead of a CI round.
+    # own, with retries, so a reset costs seconds instead of a CI round. Each
+    # retry is an `infra-retry` event (`apt-install/infra-retry.sh`).
     - name: Download pnpm through corepack
       shell: bash
-      run: |
-        for attempt in 1 2 3; do
-          if pnpm --version; then exit 0; fi
-          echo "::warning title=corepack download failed::pnpm download attempt $attempt failed; retrying" >&2
-          sleep $((attempt * 5))
-        done
-        pnpm --version
+      env:
+        INFRA_RETRY_BACKOFF: '5 10'
+      run: bash "$GITHUB_ACTION_PATH/../apt-install/infra-retry.sh" pnpm-download pnpm --version
 
     - name: Get pnpm store directory
       shell: bash
@@ -112,16 +133,16 @@ runs:
 
     # Postinstall scripts fetch release binaries (Electron) from GitHub, which can answer 504 for
     # minutes at a time. A frozen install is idempotent, so retry it a bounded number of times.
+    # Each attempt is also bounded in time: a cold install on `macos-26-intel` takes 5–11 minutes,
+    # and three Intel jobs that stalled in this setup on 2026-11-16 (runs 43801415465 and
+    # 43813916763) held it until the job's timeout or a lost runner. Outside Windows a watchdog ends
+    # an attempt's process group after `INFRA_RETRY_ATTEMPT_SECONDS`, so the next attempt runs
+    # instead. Each retry is an `infra-retry` event (`apt-install/infra-retry.sh`).
     - name: Install dependencies
-      run: |
-        for attempt in 1 2 3; do
-          pnpm install --frozen-lockfile && exit 0
-          if [ "$attempt" -lt 3 ]; then
-            echo "::warning title=pnpm install failed::attempt $attempt failed; retrying" >&2
-            sleep $((attempt * 30))
-          fi
-        done
-        exit 1
+      env:
+        INFRA_RETRY_ATTEMPT_SECONDS: '900'
+        INFRA_RETRY_BACKOFF: '30 60'
+      run: bash "$GITHUB_ACTION_PATH/../apt-install/infra-retry.sh" pnpm-install pnpm install --frozen-lockfile
       shell: bash
 
     # Every `pnpm nx` call goes through `nx-guard.ts`: it reruns a command once

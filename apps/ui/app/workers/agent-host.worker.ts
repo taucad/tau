@@ -16,7 +16,9 @@ import {
 } from '#workers/agent-host.contract.js';
 import type { BrowserProjectHost, ResidentWorkerContext } from '#workers/agent-host.impl.js';
 import { createProjectHosts } from '#workers/agent-host-projects.js';
+import { createImplementationLoader } from '#workers/agent-host-implementation.js';
 import { randomUuid } from '@taucad/utils/id';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 type WorkerScope = {
   addEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void;
@@ -74,9 +76,17 @@ const capabilityOf = async (
   return probe;
 };
 
-const loadImplementation = async () => {
+/**
+ * How long the implementation module may take to load (chat performance plan WP-03; launch audit PERF-9). Its chunk
+ * is about 500 KB from the app's own static host and normally arrives within a second or two; a browser gives a stalled
+ * module request no deadline, and one held a turn for 294 s on staging. Past this the load fails like any failed
+ * load: the page replaces the worker (FP10), and the turn waiting on it starts on the new one. Milliseconds.
+ */
+const implementationLoadDeadline = 30_000;
+
+const loadImplementationModule = async () => {
   try {
-    return await import('./agent-host.impl.js');
+    return await loadCode(async () => import('./agent-host.impl.js'), { deadline: implementationLoadDeadline });
   } catch (error) {
     throw Object.assign(
       new Error(`Agent host worker failed to load: ${error instanceof Error ? error.message : String(error)}`),
@@ -84,6 +94,17 @@ const loadImplementation = async () => {
     );
   }
 };
+
+/*
+ * Loaded once (STO-25 SP6-warm). The page probes this worker's capabilities when it opens a project, well before its
+ * first `provide`, which waits on the project's revision root and the session. The load starts once that probe has
+ * answered: the session's readiness waits on the probe, which must not share the thread with this module's evaluation
+ * (a stall there past the page's liveness bound would close the channel and fail the probe for the document). A warm
+ * reopen's chat history then does not wait for this module after the provide's own inputs. A load that failed is not
+ * retried here: this worker keeps the failed module, so `loadCode` tells the page, which replaces the worker (FP10),
+ * and every provide meanwhile reports the failure.
+ */
+const implementation = createImplementationLoader(loadImplementationModule);
 
 /* D-092: a fault in one chat or one project host is logged and the worker continues. */
 workerScope.addEventListener('error', (event) => {
@@ -99,6 +120,11 @@ const visibilityTopic = new Topic<boolean>();
 const visibility: ResidentWorkerContext['visibility'] = {
   visible: () => visible,
   subscribe: (listener) => visibilityTopic.subscribe(listener),
+};
+/* A composer took focus: each project host refreshes its deployment answer before a send needs it (C7). */
+const composerFocusTopic = new Topic<undefined>();
+const composerFocus: ResidentWorkerContext['composerFocus'] = {
+  subscribe: (listener) => composerFocusTopic.subscribe(listener),
 };
 
 let tabId: string | undefined;
@@ -117,10 +143,11 @@ const requireTab = (): string => {
 
 /** One project host per project; a newer `provide` replaces the incarnation, and `release` closes it (RH-R4). */
 const hosts = createProjectHosts<BrowserProjectHost>(async (args) => {
-  const loaded = await loadImplementation();
+  const loaded = await implementation.get();
   return loaded.openBrowserProjectHost(args, {
     tabId: requireTab(),
     visibility,
+    composerFocus,
     requestRebridge,
     forwardTelemetry: (entry) => forwardTelemetry?.(entry),
     viewFieldsSet: (set) => forwardViewFieldsSet?.(set),
@@ -143,7 +170,10 @@ workerScope.addEventListener('message', (event) => {
           return undefined;
         }
         case 'capabilities': {
-          return capabilityOf((args as Calls['capabilities']['args']).durability);
+          const report = await capabilityOf((args as Calls['capabilities']['args']).durability);
+          /* After the probe has answered, so its reply never waits on the implementation's evaluation. */
+          implementation.warm();
+          return report;
         }
         case 'provide': {
           return hosts.provide(args as Calls['provide']['args']);
@@ -157,8 +187,9 @@ workerScope.addEventListener('message', (event) => {
         }
         case 'connect': {
           const { projectId, hostId, port } = args as Calls['connect']['args'];
-          const host = hosts.hostOf(projectId);
-          if (host?.hostId !== hostId) {
+          /* In the project's order: a connect the page sent right behind its provide reaches the host it opened. */
+          const host = await hosts.connectable({ projectId, hostId });
+          if (host === undefined) {
             port.close();
             return { status: 'needs' };
           }
@@ -189,6 +220,10 @@ workerScope.addEventListener('message', (event) => {
         case 'visibility': {
           visible = (args as Calls['visibility']['args']).visible;
           visibilityTopic.emit(visible);
+          return undefined;
+        }
+        case 'composerFocus': {
+          composerFocusTopic.emit(undefined);
           return undefined;
         }
         default: {

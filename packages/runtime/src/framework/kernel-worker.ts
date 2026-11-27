@@ -6,6 +6,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { admitKernelOptions } from '#framework/kernel-option-admission.js';
+import { buildReportOf } from '#framework/kernel-build-report.js';
 import { tessellationSpanAttributes } from '#framework/tessellation-span-attributes.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
 import type { FileExtension, FileStat, MediaType, OnWorkerLog } from '@taucad/types';
@@ -35,6 +36,7 @@ import type {
   ExportGeometryRequest,
   KernelExportGeometryInput,
   RuntimeImplementationAsset,
+  KernelExecuteOptions,
 } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
@@ -66,6 +68,7 @@ import type {
   KernelDependency,
   ExportDependency,
   AssetDependency,
+  BundleDependency,
   GetDependenciesResult,
 } from '#types/runtime-dependency.types.js';
 import type { RuntimeSourceSnapshotArgs, RuntimeTranscodeArgs } from '#types/runtime-wire.types.js';
@@ -75,6 +78,7 @@ import type {
 } from '#types/runtime-source-snapshot.types.js';
 import { abortReason as abortReasonEnum } from '#types/runtime-wire.types.js';
 import type {
+  ImplementationAssetLoader,
   TranscodeResult,
   TranscoderDefinition,
   TranscoderEdge,
@@ -174,7 +178,7 @@ import { finalizeExportArtifactSet } from '#framework/export-artifact-finalizer.
 import { isNotFoundError } from '#filesystem/filesystem-errors.js';
 import { loadWasmBinary } from '#framework/wasm-loader.js';
 import { realmResources } from '#framework/realm-resources.js';
-import { releaseKernelModuleScope } from '#kernels/kernel-module-helpers.js';
+import { portableKernelModuleCode, releaseKernelModuleScope } from '#kernels/kernel-module-helpers.js';
 
 type FileSystemProxy = WorkerFileSystemProxy;
 
@@ -414,6 +418,57 @@ export type KernelWorkerOptions = {
   readonly transcoders?: readonly TranscoderPluginEntry[];
 };
 
+/**
+ * Check implementation asset declarations without fetching them: ids are unique and digests are SHA-256 hex.
+ *
+ * @param pluginId - Stable plugin identifier used in diagnostics.
+ * @param assets - Declared assets and their expected SHA-256 digests.
+ * @throws {Error} When an id repeats or a digest is malformed.
+ */
+const validateImplementationAssetDeclarations = (
+  pluginId: string,
+  assets: readonly RuntimeImplementationAsset[],
+): void => {
+  const ids = new Set<string>();
+  for (const asset of assets) {
+    if (ids.has(asset.id)) {
+      throw new Error(`Duplicate implementation asset id for ${pluginId}: ${asset.id}`);
+    }
+    ids.add(asset.id);
+    if (!/^[0-9a-f]{64}$/u.test(asset.sha256)) {
+      throw new Error(`Invalid SHA-256 digest for ${pluginId}:${asset.id}`);
+    }
+  }
+};
+
+/**
+ * Fetch one implementation asset and check it against its declared digest.
+ *
+ * @param pluginId - Stable plugin identifier used in diagnostics.
+ * @param asset - The declared asset.
+ * @returns The verified bytes.
+ * @throws {Error} When the fetch fails or the digest does not match.
+ */
+const fetchVerifiedImplementationAsset = async (
+  pluginId: string,
+  asset: RuntimeImplementationAsset,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = new Uint8Array(await loadWasmBinary(asset.url));
+  } catch (error) {
+    throw new Error(
+      `Failed to load implementation asset ${pluginId}:${asset.id}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  const actual = await sha256Bytes(bytes);
+  if (actual !== asset.sha256) {
+    throw new Error(`Implementation asset digest mismatch for ${pluginId}:${asset.id}`);
+  }
+  return bytes;
+};
+
 type LoadedTranscoder = {
   id: string;
   definition: TranscoderDefinition;
@@ -550,6 +605,14 @@ export type ResolvedMiddleware = {
 };
 
 /**
+ * The publication hold of one transient frame: its results publish only if a commit adopts them.
+ * @param documentId - The document the frame belongs to.
+ * @param evaluationId - The frame's evaluation.
+ * @returns The hold token.
+ */
+const transientHold = (documentId: string, evaluationId: string): string => `${documentId}:${evaluationId}`;
+
+/**
  * Base class for kernel workers providing lifecycle, middleware, bundler, and caching infrastructure.
  * @public
  */
@@ -644,9 +707,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** The evaluation currently entering its terminal kernel hook. */
   private activeEvaluationSlot: EvaluationSlot | undefined;
+  /**
+   * How the terminal evaluate of the current document evaluation was answered: `retained` (the retained build) or
+   * `built` (the kernel's `evaluate` ran). Still `undefined` after a successful evaluation: a stored build answered.
+   * One record per evaluation, so its answer is read after the evaluation's awaits.
+   */
+  private buildRun: { outcome: 'retained' | 'built' | undefined } = { outcome: undefined };
   private nextEvaluationId = 0;
   /** Latest admitted evaluation, whether or not its display projection succeeded. */
   private retainedEvaluation: EvaluationSlot | undefined;
+  /** Evaluations whose queued build publication reads their handle, per action, oldest first (R1). */
+  private readonly pendingBuildPublications = new Map<ActionDigest, EvaluationSlot[]>();
+  /** The transient frame the running operation computes for; its results never publish on their own (R4). */
+  private activeOperationHold: string | undefined;
 
   /**
    * Live native handles this worker owns, mapped to the owner that can release
@@ -746,6 +819,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   private readonly assetHashCache = new Map<string, string>();
 
+  /**
+   * Verified bytes of implementation assets loaded on use, kept for the worker's life.
+   * Maps `<url>\0<sha256>` to the pending or settled load.
+   */
+  private readonly implementationAssetBytes = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
+
   private readonly fileHashCache = new Map<string, string>();
   private readonly fileContentCache = new Map<string, Uint8Array<ArrayBuffer> | string>();
   /**
@@ -771,6 +850,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly middlewareDependencyCache = new Map<string, Promise<MiddlewareDependencySet>>();
   /** Paths each settled dependency set above was resolved from; a cached set absent here is still pending. */
   private readonly settledDependencyPaths = new WeakMap<Promise<unknown>, DependencyPaths>();
+  /** Paths a read was refused `PENDING` on (a tree write's or fill's): watched, so a render follows them (STO-25). */
+  private readonly refusedReads = new Set<string>();
 
   /**
    * Dynamically loaded middleware instances with their resolved configs.
@@ -812,6 +893,32 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** Bundle result cache keyed by entry path. Selectively invalidated when dependencies change; fully cleared on reset. */
   private readonly bundleResultCache = new Map<string, BundleResult>();
+
+  /**
+   * File dependencies whose content a bundle dependency stands in for (R24). Only their paths enter
+   * the build key; identity membership means a dependency rebuilt elsewhere keeps its content hash,
+   * so the failure mode is a miss, never a false hit.
+   */
+  private readonly bundleCoveredFiles = new WeakSet<FileDependency>();
+
+  /** The output digest of each bundle result, hashed once per bundle. */
+  private readonly bundleCodeHashes = new WeakMap<BundleResult, Promise<string>>();
+
+  /**
+   * The code of an invalidated bundle, per entry, whose executed module is kept until the entry is
+   * bundled again (N10). A comment-only or formatting-only edit prints the same code, and the next
+   * bundle then reuses that module instead of executing it again; different code releases it.
+   */
+  private readonly supersededBundleCode = new Map<string, string>();
+
+  /** Entries whose dependencies the bundler facade resolved, so a discovery can tell the kernel's resolve was the bundler's. */
+  private readonly bundlerResolvedEntries = new Set<string>();
+
+  /** The script globals each cached bundle was built with, by entry, as a canonical key. */
+  private readonly bundleGlobalsKeys = new Map<string, string>();
+
+  /** Every built-in module name registered with the bundlers, for the per-entry banner scope (`bundleModuleScope`). */
+  private readonly registeredModuleNames = new Set<string>();
 
   /** Currently watched dependency paths. Used for incremental watch-set diffing. */
   private watchedPaths = new Set<string>();
@@ -1206,15 +1313,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         record.current?.artifact?.evaluationSlot?.id ?? record.committed?.artifact?.evaluationSlot?.id;
       if (
         closedSlotId !== undefined &&
-        ![...this.documents.values()].some(
-          (live) =>
-            live.current?.artifact?.evaluationSlot?.id === closedSlotId ||
-            live.committed?.artifact?.evaluationSlot?.id === closedSlotId,
-        ) &&
-        ![...this.pinnedDocumentEvaluations.keys()].some(
-          (evaluation) => evaluation.artifact?.evaluationSlot?.id === closedSlotId,
-        ) &&
-        this.retainedEvaluation?.id === closedSlotId
+        !this.isEvaluationSlotOpen(closedSlotId) &&
+        this.retainedEvaluation?.id === closedSlotId &&
+        // The worker keeps its latest build while the compute store holds or queues it: a reopen then
+        // reuses the live handle instead of a restored snapshot, and the queued snapshot can still read it.
+        this.retainedEvaluation.buildPublication === undefined
       ) {
         this.retainedEvaluation = undefined;
       }
@@ -1227,6 +1330,93 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         },
       });
     });
+  }
+
+  /**
+   * Whether an open document or a pinned export still references an evaluation.
+   * @param slotId - The evaluation slot.
+   * @returns True while a document or pin can read it.
+   */
+  private isEvaluationSlotOpen(slotId: number): boolean {
+    return (
+      [...this.documents.values()].some(
+        (document) =>
+          document.current?.artifact?.evaluationSlot?.id === slotId ||
+          document.committed?.artifact?.evaluationSlot?.id === slotId,
+      ) ||
+      [...this.pinnedDocumentEvaluations.keys()].some(
+        (evaluation) => evaluation.artifact?.evaluationSlot?.id === slotId,
+      )
+    );
+  }
+
+  /**
+   * Follow the build publication an evaluate phase queues, so its handle outlives a document close
+   * until the snapshot is taken (R1), and so a later reuse of the live handle knows the store has it (R3).
+   * @param capability - The evaluate phase's compute facet.
+   * @param computedSlot - The evaluation that computed the value, once the kernel handler ran.
+   * @returns The facet, its evaluate observed.
+   */
+  private trackBuildPublication(
+    capability: KernelComputeCapability,
+    computedSlot: () => EvaluationSlot | undefined,
+  ): KernelComputeCapability {
+    if (capability.status === 'off') {
+      return capability;
+    }
+    const { evaluate } = capability;
+    return {
+      ...capability,
+      evaluate: async (evaluation) => {
+        const result = await evaluate(evaluation);
+        const slot = computedSlot();
+        if (result.source !== 'computed' || slot?.hasHandle !== true) {
+          return result;
+        }
+        if (result.publication.status === 'stored') {
+          slot.buildPublication = 'stored';
+        } else if (result.publication.status === 'deferred') {
+          slot.buildPublication ??= 'pending';
+          slot.pendingPublications = (slot.pendingPublications ?? 0) + 1;
+          const queued = this.pendingBuildPublications.get(result.actionDigest);
+          if (queued) {
+            queued.push(slot);
+          } else {
+            this.pendingBuildPublications.set(result.actionDigest, [slot]);
+          }
+        }
+        return result;
+      },
+    };
+  }
+
+  /**
+   * A queued publication settled: release a build publication's hold on its handle.
+   * @param actionDigest - The published action.
+   * @param stored - Whether the store now holds the action.
+   */
+  private settleBuildPublication(actionDigest: ActionDigest, stored: boolean): void {
+    const queued = this.pendingBuildPublications.get(actionDigest);
+    const slot = queued?.shift();
+    if (!slot) {
+      return;
+    }
+    if (queued?.length === 0) {
+      this.pendingBuildPublications.delete(actionDigest);
+    }
+    slot.pendingPublications = Math.max(0, (slot.pendingPublications ?? 1) - 1);
+    if (stored) {
+      slot.buildPublication = 'stored';
+    } else if (slot.buildPublication === 'pending' && slot.pendingPublications === 0) {
+      slot.buildPublication = undefined;
+      if (this.retainedEvaluation === slot && !this.isEvaluationSlotOpen(slot.id)) {
+        // Kept past its close only for the store; nothing will hold it there now.
+        this.retainedEvaluation = undefined;
+      }
+    }
+    if (this.admittedOperations === 0) {
+      this.disposeUnreachableNativeHandles();
+    }
   }
 
   /** Subscribe one view to the document's current and future evaluations. */
@@ -1624,9 +1814,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     let initialWatchRefusal: { error: unknown } | undefined;
     const pending = this.enqueueOperation(
       async () => {
+        // Build elapsed: queue wait excluded, the parameter description included.
+        const buildStarted = performance.now();
         const previousProgress = this.onProgress;
         this.activeDocumentEvaluationController = controller;
         this.activeDocumentEvaluationSequence = Number(evaluationId) >>> 0;
+        this.activeOperationHold = transient ? transientHold(document.id, evaluationId) : undefined;
         this.onProgress = (phase, detail) => {
           this.onDocumentProgressUpdate?.({
             documentId: document.id,
@@ -1714,6 +1907,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           } else {
             const manifest = described.data;
             const parametersWithDefaults = mergeParameterDefaults({}, parameters, legacyProjection.schema);
+            const buildRun: { outcome: 'retained' | 'built' | undefined } = { outcome: undefined };
+            this.buildRun = buildRun;
             const { artifact } = await this.materializeRender(
               {
                 file,
@@ -1726,6 +1921,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               { dependencyContext, owner },
             );
             const { result } = artifact;
+            const build = buildReportOf(
+              buildRun.outcome === 'built',
+              artifact.evaluationSlot?.kernelBuild,
+              performance.now() - buildStarted,
+            );
             evaluation = result.success
               ? {
                   id: evaluationId,
@@ -1741,6 +1941,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                     ...this.getDocumentEvaluateOptionsOffer(owner),
                     issues: result.issues,
                     sourceRevision: sourceRevisionForArtifact(artifact, described.sourceRevision),
+                    build,
                   },
                 }
               : {
@@ -1765,6 +1966,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           if (evaluationSlot !== undefined && priorEvaluation?.artifact?.evaluationSlot === evaluationSlot) {
             priorEvaluation.projections ??= new Map();
             evaluation.projections = priorEvaluation.projections;
+            if (priorEvaluation.transient && !transient) {
+              // A committed state adopts the last frame's build and meshes: publish them once now (R4).
+              this.computeHost?.releaseHeld(transientHold(document.id, priorEvaluation.id));
+            }
           }
           if (initialWatchRefusal && evaluation.result.success) {
             throw initialWatchRefusal.error;
@@ -1823,6 +2028,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         } finally {
           this.activeDocumentEvaluationController = undefined;
           this.activeDocumentEvaluationSequence = 0;
+          this.activeOperationHold = undefined;
           this.onProgress = previousProgress;
         }
       },
@@ -2015,13 +2221,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           );
           if (selected.success) {
             const { selection } = selected;
-            const key = canonicalJson([selection, view.options, view.content]);
             const meshMiddleware = this.getMeshExecutionList(artifact.owner, view.content ?? {});
+            /* Key the content the mesh phase will run with (s15b): an omitted property and its
+             * operation default render the same bytes. An unsupported request keeps its raw form;
+             * the mesh phase refuses it. */
+            const effectiveContent = this.selectRenderContent(artifact.owner, selection, {
+              resolvedMiddleware: meshMiddleware,
+              requested: view.content,
+            });
+            const keyedContent = effectiveContent.success ? effectiveContent.content : (view.content ?? {});
+            const key = canonicalJson([selection, view.options, keyedContent]);
             const dependencies = await this.computeDependencies({
               operations: ['evaluate', 'render'],
               parameters: artifact.identity.parameters,
               renderOptions: view.options,
-              content: view.content ?? {},
+              content: keyedContent,
               resolvedMiddleware: this.mergeExecutionLists(
                 this.getCreateExecutionList(artifact.owner, artifact.identity.content, false),
                 meshMiddleware,
@@ -2081,6 +2295,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               };
               computeOperationId = randomUuid();
               this.trackProjectionRelease(computeOperationId);
+              this.activeOperationHold = evaluation.transient ? transientHold(document.id, evaluation.id) : undefined;
               try {
                 projected = await this.runMeshPhase({
                   computeOperationId,
@@ -2099,6 +2314,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 });
               } finally {
                 this.activeDocumentNativeOperation = undefined;
+                this.activeOperationHold = undefined;
               }
               // Never cache what an aborted render made of its abort: the same options must render again.
               controller.signal.throwIfAborted();
@@ -2664,6 +2880,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.watchUnsubscribe?.();
     this.watchUnsubscribe = undefined;
     this.assetHashCache.clear();
+    this.implementationAssetBytes.clear();
     this.parameterResultCache = undefined;
     this.commonDependencyCache.clear();
     this.middlewareDependencyCache.clear();
@@ -2671,6 +2888,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.watchedPaths.clear();
     this.pendingNativeHandle = undefined;
     this.retainedEvaluation = undefined;
+    this.pendingBuildPublications.clear();
     // Nothing references the handles now — release them before onCleanup tears
     // down the kernel that owns their memory.
     this.disposeUnreachableNativeHandles();
@@ -2781,7 +2999,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       dependencyContext,
       owner: operationOwner,
     });
-    const dependencyHash = await this.computeDependencyHash(dependencies);
+    /* A description records each source file's digest (`identity.sourceFiles`, `sourceRevision`), so
+     * both its in-process and its durable key stay on the bytes, never on the bundle (R24). */
+    const dependencyHash = await this.computeDependencyHash(dependencies, 'source');
     depsSpan.end();
     const parameterMiddlewareKey = canonicalJson(
       resolvedArray.map(({ id, middleware, options }) => ({
@@ -3747,6 +3967,24 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       nativeHandleKey,
     });
     let evaluationSlot = this.createEvaluationSlot(owner, evaluationIdentityKey);
+    /* The worker still holds this build live: a store lookup could only return a restored copy, which
+     * meshes every occurrence instead of its shared prototypes and costs a snapshot on the request path. */
+    const live =
+      this.retainedEvaluation?.identityKey === evaluationIdentityKey && this.retainedEvaluation.hasHandle
+        ? this.retainedEvaluation
+        : undefined;
+    // Set by the terminal handler; middleware decides whether it runs.
+    const terminal = { ran: false };
+    /* No build action when it cannot store anything (the kernel has no snapshot serializer) or need not
+     * (the live build is already stored or queued): middleware then sees reuse off for this phase (R3). */
+    const buildCompute = (): KernelComputeCapability => {
+      if (!this.kernelStoresNativeHandleForOwner(owner) || live?.buildPublication !== undefined) {
+        return { status: 'off' };
+      }
+      return this.trackBuildPublication(this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal), () =>
+        terminal.ran ? evaluationSlot : undefined,
+      );
+    };
 
     const runtimes = new Map<string, KernelMiddlewareRuntime>();
     for (const { middleware, options: middlewareOptions, enabled, id } of createMiddleware) {
@@ -3759,7 +3997,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             onLog: this.onLog,
             middlewareName: middleware.name,
             filesystem: this.filesystem,
-            compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal),
+            compute: buildCompute(),
             dependencies: nativeHandleDependencies,
             dependencyHash: nativeHandleKey,
             stateSchema: middleware.stateSchema,
@@ -3774,6 +4012,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     let chain: (input: EvaluateRequest) => Promise<EvaluateResult> = named(
       'kernelHandler',
       async (handlerInput: EvaluateRequest) => {
+        terminal.ran = true;
         const computeSpan = tracer.startSpan('kernel.compute');
         const createSchema = owner.binding?.kernelId
           ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
@@ -3856,6 +4095,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
         }
         if (sameBuild && (retained.hasHandle || retained.serializedNativeHandleSlot)) {
+          this.buildRun.outcome = 'retained';
           evaluationSlot = retained;
           this.activeEvaluationSlot = retained;
           computeSpan.end();
@@ -3863,6 +4103,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             success: true,
             data: retained.terminalOffers ?? {},
             issues: retained.terminalIssues ?? [],
+            // A reused live build can still be published, for example once a slider frame is committed.
+            ...(retained.hasHandle && retained.serializeHandleSnapshot
+              ? { serializeHandleSnapshot: retained.serializeHandleSnapshot }
+              : {}),
             [nativeBuildInputSymbol]: retained.nativeBuildInput,
           };
         }
@@ -3887,11 +4131,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           );
         }
         let result: EvaluateResult;
+        this.buildRun.outcome = 'built';
         try {
           result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime(), evaluationSlot);
           if (result.success) {
             evaluationSlot.terminalOffers = result.data;
             evaluationSlot.terminalIssues = [...result.issues];
+            evaluationSlot.serializeHandleSnapshot = result.serializeHandleSnapshot;
           }
         } finally {
           if (documentController) {
@@ -3953,6 +4199,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       evaluated = await chain(input);
     } finally {
       this.activeEvaluationSlot = undefined;
+    }
+    if (
+      !terminal.ran &&
+      evaluated.success &&
+      live?.hasHandle === true &&
+      live.nativeBuildInput !== undefined &&
+      canonicalJson(live.nativeBuildInput) === canonicalJson(evaluated[nativeBuildInputSymbol])
+    ) {
+      // A store hit for the build this worker still holds: keep the live handle, not the restored copy (R3).
+      evaluationSlot = live;
+      live.buildPublication = 'stored';
+      const { serializedHandle: _restored, ...hit } = evaluated;
+      evaluated = hit;
     }
     evaluationSlot.offers = evaluated.success ? evaluated.data : undefined;
     if (evaluated.success) {
@@ -4127,6 +4386,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         ]),
         ...[...this.committedAdmissions].map((admission) => admission.evaluation?.artifact?.evaluationSlot?.id),
         ...[...this.pinnedDocumentEvaluations.keys()].map((evaluation) => evaluation.artifact?.evaluationSlot?.id),
+        // A queued publication reads its snapshot from the live handle when it runs (R1).
+        ...[...this.pendingBuildPublications.values()].flat().map((slot) => slot.id),
       ].filter((id): id is number => id !== undefined),
     );
 
@@ -4565,6 +4826,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
+   * Whether the owner's kernel can snapshot its native handle, so a build entry can be stored.
+   * The base worker has no kernel registry and keeps the build action.
+   */
+  protected kernelStoresNativeHandleForOwner(_owner: OperationOwner): boolean {
+    return true;
+  }
+
+  /**
    * Whether the owner's kernel implements the optional `meshGeometry` display phase.
    * Base workers have no kernel registry, so the display path must come from
    * inline `createGeometry` geometry.
@@ -4678,39 +4947,56 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     pluginId: string,
     assets: readonly RuntimeImplementationAsset[],
   ): Promise<void> {
-    const ids = new Set<string>();
-    for (const asset of assets) {
-      if (ids.has(asset.id)) {
-        throw new Error(`Duplicate implementation asset id for ${pluginId}: ${asset.id}`);
-      }
-      ids.add(asset.id);
-      if (!/^[0-9a-f]{64}$/u.test(asset.sha256)) {
-        throw new Error(`Invalid SHA-256 digest for ${pluginId}:${asset.id}`);
-      }
-    }
+    validateImplementationAssetDeclarations(pluginId, assets);
 
     for (const asset of assets) {
       const cached = this.assetHashCache.get(asset.url);
       if (cached === asset.sha256) {
         continue;
       }
-      let bytes: ArrayBuffer;
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- verification errors must identify the exact declared asset
-        bytes = await loadWasmBinary(asset.url);
-      } catch (error) {
-        throw new Error(
-          `Failed to load implementation asset ${pluginId}:${asset.id}: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error },
-        );
-      }
       // oxlint-disable-next-line no-await-in-loop -- verification errors must identify the exact declared asset
-      const actual = await sha256Bytes(new Uint8Array(bytes));
-      if (actual !== asset.sha256) {
-        throw new Error(`Implementation asset digest mismatch for ${pluginId}:${asset.id}`);
-      }
-      this.assetHashCache.set(asset.url, actual);
+      await fetchVerifiedImplementationAsset(pluginId, asset);
+      this.assetHashCache.set(asset.url, asset.sha256);
     }
+  }
+
+  /**
+   * Create the loader a transcoder uses to fetch its declared assets on first use.
+   *
+   * @param pluginId - Stable plugin identifier used in diagnostics.
+   * @param assets - Declared assets and their expected SHA-256 digests.
+   * @returns A loader that fetches, verifies and keeps each asset's bytes for the worker's life.
+   */
+  private createImplementationAssetLoader(
+    pluginId: string,
+    assets: readonly RuntimeImplementationAsset[],
+  ): ImplementationAssetLoader {
+    const byId = new Map(assets.map((asset) => [asset.id, asset]));
+    return {
+      load: async (id) => {
+        const asset = byId.get(id);
+        if (asset === undefined) {
+          throw new Error(`Unknown implementation asset ${pluginId}:${id}`);
+        }
+        const key = `${asset.url}\0${asset.sha256}`;
+        const pending = this.implementationAssetBytes.get(key);
+        if (pending !== undefined) {
+          return pending;
+        }
+        const load = fetchVerifiedImplementationAsset(pluginId, asset);
+        this.implementationAssetBytes.set(key, load);
+        try {
+          const bytes = await load;
+          this.assetHashCache.set(asset.url, asset.sha256);
+          return bytes;
+        } catch (error) {
+          if (this.implementationAssetBytes.get(key) === load) {
+            this.implementationAssetBytes.delete(key);
+          }
+          throw error;
+        }
+      },
+    };
   }
 
   /**
@@ -4819,15 +5105,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       ]);
     }
 
-    const selectedKeys = new Set(this.getNativeRenderContentKeys(owner, selection.view));
-    for (const { enabled, middleware } of resolvedMiddleware) {
-      if (enabled) {
-        for (const key of middleware.content?.views?.[selection.mimeType] ?? []) {
-          selectedKeys.add(key);
-        }
-      }
-    }
-    const selectedContentResult = this.validateRuntimeContent('render', [...selectedKeys], requestedContent);
+    const selectedContentResult = this.selectRenderContent(owner, selection, {
+      resolvedMiddleware,
+      requested: requestedContent,
+    });
     if (!selectedContentResult.success) {
       return createKernelError(selectedContentResult.issues);
     }
@@ -6079,10 +6360,26 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         result.dependencies.some((dep) => changedPaths.includes(dep)) ||
         result.unresolvedPaths.some((dep) => changedPaths.includes(dep))
       ) {
-        this.clearBundlerExecutionCaches(result.code);
-        this.bundleResultCache.delete(entryPath);
+        this.supersedeBundle(entryPath, result);
       }
     }
+  }
+
+  /**
+   * Retire an entry's cached bundle, keeping its executed module until the next bundle shows
+   * whether the code changed (N10).
+   *
+   * @param entryPath - The entry.
+   * @param result - Its cached bundle.
+   */
+  private supersedeBundle(entryPath: string, result: BundleResult): void {
+    const superseded = this.supersededBundleCode.get(entryPath);
+    if (superseded !== undefined && superseded !== result.code) {
+      this.clearBundlerExecutionCaches(superseded);
+    }
+    this.supersededBundleCode.set(entryPath, result.code);
+    this.bundleResultCache.delete(entryPath);
+    this.bundleGlobalsKeys.delete(entryPath);
   }
 
   private clearBundlerExecutionCaches(code?: string): void {
@@ -6256,8 +6553,25 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   private async reconcileObservedPaths(): Promise<void> {
     const allDeps = new Map<string, number>();
+    const refused = [...this.refusedReads].flatMap((path) => {
+      try {
+        return [assertRootedPath(path)];
+      } catch {
+        return [];
+      }
+    });
+    this.refusedReads.clear();
+    /* The render observed each as not there yet: its landing is a change from that, never a first baseline. */
+    for (const path of refused) {
+      if (!this.fileHashCache.has(path)) {
+        this.fileHashCache.set(path, 'missing');
+      }
+    }
     for (const document of this.documents.values()) {
       if (document.watch && !document.closed) {
+        for (const path of refused) {
+          document.watchPaths.add(path);
+        }
         for (const path of document.watchPaths) {
           allDeps.set(path, fileChangeDebounce);
         }
@@ -6425,10 +6739,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return transcoder.context;
     }
     transcoder.initialization ??= (async () => {
-      await this.verifyImplementationAssets(transcoder.id, transcoder.implementationAssets);
+      if (transcoder.definition.implementationAssetLoading === 'on-use') {
+        validateImplementationAssetDeclarations(transcoder.id, transcoder.implementationAssets);
+      } else {
+        await this.verifyImplementationAssets(transcoder.id, transcoder.implementationAssets);
+      }
       const context = await transcoder.definition.initialize(transcoder.options, {
         logger: this.logger,
         tracer: this.tracer,
+        implementationAssets: this.createImplementationAssetLoader(transcoder.id, transcoder.implementationAssets),
       });
       transcoder.context = context;
       transcoder.initialized = true;
@@ -6939,9 +7258,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   private createFileSystem(): KernelFileSystem {
     const fileSystem = this.fileSystem!;
-    const { tracer } = this;
+    const { tracer, refusedReads } = this;
     const checkOperationAbort = (): void => {
       (this.operationSignal ?? neverAbortedSignal).throwIfAborted();
+    };
+    /* A read refused while its file is still arriving names a file the render must run again for once it lands. */
+    const follow = async <Value>(path: string, read: Promise<Value>): Promise<Value> => {
+      try {
+        return await read;
+      } catch (error) {
+        if ((error as { code?: unknown } | undefined)?.code === 'PENDING') {
+          refusedReads.add(path);
+        }
+        throw error;
+      }
     };
 
     function readFile(path: string, encoding: 'utf8'): Promise<string>;
@@ -6950,7 +7280,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       checkOperationAbort();
       const span = tracer.startSpan('fs.read', { path });
       try {
-        const data = encoding ? await fileSystem.readFile(path, encoding) : await fileSystem.readFile(path);
+        const data = await follow<string | Uint8Array<ArrayBuffer>>(
+          path,
+          encoding ? fileSystem.readFile(path, encoding) : fileSystem.readFile(path),
+        );
         checkOperationAbort();
         return data;
       } finally {
@@ -6985,7 +7318,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         checkOperationAbort();
         const span = tracer.startSpan('fs.exists', { path });
         try {
-          const fileExists = await fileSystem.exists(path);
+          const fileExists = await follow(path, fileSystem.exists(path));
           checkOperationAbort();
           return fileExists;
         } finally {
@@ -6997,7 +7330,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         checkOperationAbort();
         const span = tracer.startSpan('fs.readdir', { path });
         try {
-          const entries = await fileSystem.readdir(path);
+          const entries = await follow(path, fileSystem.readdir(path));
           checkOperationAbort();
           return entries;
         } finally {
@@ -7032,13 +7365,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       },
       async stat(path: string) {
         checkOperationAbort();
-        const result = await fileSystem.stat(path);
+        const result = await follow(path, fileSystem.stat(path));
         checkOperationAbort();
         return result;
       },
       async lstat(path: string) {
         checkOperationAbort();
-        const result = await fileSystem.lstat(path);
+        const result = await follow(path, fileSystem.lstat(path));
         checkOperationAbort();
         return result;
       },
@@ -7256,9 +7589,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const discoverInput: GetDependenciesInput = {
       entryPath: ownerFilePath,
     };
-    const depsResult = await this.onGetDependenciesForOwner(owner, discoverInput, this.createRuntime());
+    const discoveryRuntime = this.createRuntime();
+    this.bundlerResolvedEntries.delete(ownerFilePath);
+    const depsResult = await this.onGetDependenciesForOwner(owner, discoverInput, discoveryRuntime);
+    const resolvedByBundler = this.bundlerResolvedEntries.delete(ownerFilePath);
     const unresolvedPaths = [...new Set(depsResult.unresolved.map((path) => assertRootedPath(path)))];
     const rootedPaths = [...new Set(depsResult.resolved.map((path) => assertRootedPath(path)))];
+    const bundleDependency = await this.bundleDependencyFor({
+      resolvedByBundler,
+      owner,
+      entryPath: ownerFilePath,
+      rootedPaths,
+      runtime: discoveryRuntime,
+    });
     /* Absence is an observation: a request-scoped operation that retained "this import does
      * not resolve" has to notice the file appearing. */
     for (const path of unresolvedPaths) {
@@ -7308,6 +7651,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       path: rootedPath,
       contentHash: this.fileHashCache.get(rootedPath)!,
     }));
+    if (bundleDependency) {
+      for (const dependency of fileDeps) {
+        this.bundleCoveredFiles.add(dependency);
+      }
+    }
 
     // 4. Framework dependency
     const frameworkDep: FrameworkDependency = {
@@ -7340,10 +7688,82 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }));
 
     return {
-      fileDependencies: fileDeps,
+      fileDependencies: bundleDependency ? [...fileDeps, bundleDependency] : fileDeps,
       trailingDependencies: [...kernelDeps, frameworkDep, ...optionDeps, ...assetDeps],
       paths: new Set([...rootedPaths, ...unresolvedPaths]),
     };
+  }
+
+  /**
+   * The bundle that stands in for the resolved sources' content in the build key (R24), when there is one.
+   *
+   * Only a kernel that declares `sourceIdentity: 'bundle'`, and whose resolve just answered through
+   * `runtime.bundler.resolveDependencies`, qualifies: it reads its sources only
+   * through the bundle's output, so the output's digest decides behaviour, and a comment or a
+   * reformat that prints the same bundle keeps the key. The bundle must also name exactly the
+   * resolved paths; anything else (a failed bundle, a resolve that is not the bundler's) keeps
+   * hashing raw content.
+   *
+   * @param input - The discovery to key.
+   * @param input.resolvedByBundler - Whether the kernel's resolve answered through `runtime.bundler.resolveDependencies`.
+   * @param input.owner - The operation owner whose kernel resolved the paths.
+   * @param input.entryPath - The rooted entry path.
+   * @param input.rootedPaths - The resolved dependency paths, in discovery order.
+   * @param input.runtime - The runtime discovery ran with; its bundler is the one the kernel uses.
+   * @returns The bundle dependency, or `undefined` to key on raw content.
+   */
+  private async bundleDependencyFor(input: {
+    resolvedByBundler: boolean;
+    owner: OperationOwner;
+    entryPath: string;
+    rootedPaths: readonly string[];
+    runtime: KernelRuntime;
+  }): Promise<BundleDependency | undefined> {
+    const { resolvedByBundler, owner, entryPath, rootedPaths, runtime } = input;
+    if (!resolvedByBundler || this.kernelSourceIdentity(owner) !== 'bundle') {
+      return undefined;
+    }
+    // The bundle its describe and evaluate are about to read; built here when resolve did not.
+    const bundle =
+      this.cachedBundleFor(entryPath, this.bundleGlobalsFor(entryPath)) ?? (await runtime.bundler.bundle(entryPath));
+    if (!bundle.success) {
+      return undefined;
+    }
+    const bundled = new Set(bundle.dependencies.map((path) => assertRootedPath(path)));
+    if (bundled.size !== rootedPaths.length || !rootedPaths.every((path) => bundled.has(path))) {
+      return undefined;
+    }
+    let codeHash = this.bundleCodeHashes.get(bundle);
+    if (codeHash === undefined) {
+      /* Built-in shims name this worker's random module-registry scope; it routes the same exports
+       * in every worker, so the key reads the portable form and two workers share their keys. */
+      codeHash = sha256String(portableKernelModuleCode(bundle.code, { registryScope: this.registryScope }));
+      this.bundleCodeHashes.set(bundle, codeHash);
+    }
+    return { type: 'bundle', entryPath, codeHash: await codeHash };
+  }
+
+  /**
+   * What the build key reads for an owner's sources: the selected kernel's declared
+   * `sourceIdentity`. A worker without kernel definitions keys raw files.
+   *
+   * @param _owner - The operation owner.
+   * @returns `'bundle'` only for a kernel that opted in.
+   */
+  protected kernelSourceIdentity(_owner: OperationOwner): 'files' | 'bundle' {
+    return 'files';
+  }
+
+  /**
+   * Which registered built-in modules an entry's bundle binds as script globals, or `undefined`
+   * for all of them. A worker that knows which kernel registered each module narrows it to the
+   * entry's kernel, so the bundle (and the key over it) does not depend on what else loaded.
+   *
+   * @param _entryPath - The entry being bundled.
+   * @returns A predicate over module names, or `undefined` for every registered module.
+   */
+  protected bundleModuleScope(_entryPath: string): ((name: string) => boolean) | undefined {
+    return undefined;
   }
 
   /** Resolve only the dependencies declared by one middleware execution list. */
@@ -7506,11 +7926,42 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @returns a bundler interface that delegates to extension-specific bundler implementations
    */
+  /**
+   * The script globals an entry's bundle binds now: the selected kernel's modules, sorted, or
+   * `undefined` (every registered module) before the entry has a kernel.
+   *
+   * @param entryPath - The entry to bundle.
+   * @returns The module names, or `undefined`.
+   */
+  private bundleGlobalsFor(entryPath: string): readonly string[] | undefined {
+    const scope = this.bundleModuleScope(entryPath);
+    return scope ? [...this.registeredModuleNames].filter((name) => scope(name)).toSorted() : undefined;
+  }
+
+  /**
+   * The cached bundle for an entry, only when it was built with the same script globals. A bundle
+   * built for another kernel selection is retired, so its banner never runs without this kernel's
+   * globals.
+   *
+   * @param entryPath - The entry.
+   * @param globals - The globals the bundle must bind.
+   * @returns The cached bundle, or `undefined` to bundle again.
+   */
+  private cachedBundleFor(entryPath: string, globals: readonly string[] | undefined): BundleResult | undefined {
+    const cached = this.bundleResultCache.get(entryPath);
+    if (cached === undefined || this.bundleGlobalsKeys.get(entryPath) === canonicalJson(globals ?? null)) {
+      return cached;
+    }
+    this.supersedeBundle(entryPath, cached);
+    return undefined;
+  }
+
   private createBundlerFacade(signal: AbortSignal): KernelBundler {
     const facade: KernelBundler = {
       bundle: async (entryPath: string): Promise<BundleResult> => {
         signal.throwIfAborted();
-        const cached = this.bundleResultCache.get(entryPath);
+        const globals = this.bundleGlobalsFor(entryPath);
+        const cached = this.cachedBundleFor(entryPath, globals);
         if (cached) {
           return cached;
         }
@@ -7523,14 +7974,27 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         const extension = KernelWorker.getFileExtension(entryPath);
         const bundler = await this.ensureBundlerForExtension(extension);
 
-        const bundleResult = await bundler.definition.bundle({ entryPath }, { signal }, bundler.ctx);
+        const bundleResult = await bundler.definition.bundle(
+          { entryPath, ...(globals === undefined ? {} : { globals }) },
+          { signal },
+          bundler.ctx,
+        );
         signal.throwIfAborted();
         bundleSpan.end(bundler.id === undefined ? undefined : { 'bundler.id': bundler.id });
         this.bundleResultCache.set(entryPath, bundleResult);
+        this.bundleGlobalsKeys.set(entryPath, canonicalJson(globals ?? null));
+        const superseded = this.supersededBundleCode.get(entryPath);
+        if (superseded !== undefined) {
+          this.supersededBundleCode.delete(entryPath);
+          if (superseded !== bundleResult.code) {
+            this.clearBundlerExecutionCaches(superseded);
+          }
+        }
         return bundleResult;
       },
       resolveDependencies: async (entryPath: string): Promise<GetDependenciesResult> => {
-        const cached = this.bundleResultCache.get(entryPath);
+        this.bundlerResolvedEntries.add(entryPath);
+        const cached = this.cachedBundleFor(entryPath, this.bundleGlobalsFor(entryPath));
         if (cached) {
           return {
             resolved: cached.dependencies,
@@ -7546,6 +8010,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       },
       registryScope: this.registryScope,
       registerModule: (name: string, entry: BuiltinModule): void => {
+        this.registeredModuleNames.add(name);
         if (this.loadedBundlers.size > 0) {
           for (const bundler of new Set(this.loadedBundlers.values())) {
             bundler.definition.registerModule({ name, module: entry }, bundler.ctx);
@@ -7580,6 +8045,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           this.telemetryCollector?.flush();
         }
         this.settleProjectionRelease(operationId, actionDigest, status === 'stored' || reason === 'duplicate');
+        this.settleBuildPublication(actionDigest, status === 'stored' || reason === 'duplicate');
       },
       onScopeSettled: ({ operationId, generation, settlement }) => {
         this.tracer.startSpan('kernel.compute.reuse', { operationId }).end({
@@ -7592,7 +8058,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         });
       },
     });
-    const capability = this.observeComputeReuse(this.computeHost.capability(signal, operationId));
+    const capability = this.observeComputeReuse(
+      this.computeHost.capability(
+        signal,
+        operationId,
+        this.activeOperationHold === undefined ? undefined : { hold: this.activeOperationHold },
+      ),
+    );
     const release = this.projectionReleases.get(operationId);
     if (capability.status === 'off' || !release) {
       return capability;
@@ -7744,9 +8216,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       logger: this.logger,
       fileContentCache: this.fileContentCache,
       bundler: this.createBundlerFacade(signal),
-      execute: async (code: string): Promise<ExecuteResult> => {
+      execute: async (code: string, options?: KernelExecuteOptions): Promise<ExecuteResult> => {
         signal.throwIfAborted();
         await this.ensureBundlerContext();
+        if (options?.fresh === true) {
+          // The new instance is cached under the same code, so the clear on a file edit still frees it.
+          this.clearBundlerExecutionCaches(code);
+        }
 
         const executeSpan = this.tracer.startSpan('kernel.execute', {
           phase: 'computingGeometry',
@@ -8055,6 +8531,34 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
   }
 
+  /**
+   * The content one view's mesh phase runs with: the request projected onto the properties the
+   * kernel and its enabled mesh middleware declare for the view, with operation defaults applied.
+   *
+   * @param owner - The operation owner.
+   * @param selection - The selected view and its media type.
+   * @param request - The mesh execution list and the caller's content request.
+   * @param request.resolvedMiddleware - The mesh execution list.
+   * @param request.requested - The caller's content request.
+   * @returns The normalized content, or the unsupported-content issues.
+   */
+  private selectRenderContent(
+    owner: OperationOwner,
+    selection: { view: string; mimeType: MediaType },
+    request: { resolvedMiddleware: readonly ResolvedMiddleware[]; requested: RuntimeContentInput | undefined },
+  ): { success: true; content: RuntimeContentInput } | { success: false; issues: KernelIssue[] } {
+    const { resolvedMiddleware, requested } = request;
+    const selectedKeys = new Set(this.getNativeRenderContentKeys(owner, selection.view));
+    for (const { enabled, middleware } of resolvedMiddleware) {
+      if (enabled) {
+        for (const key of middleware.content?.views?.[selection.mimeType] ?? []) {
+          selectedKeys.add(key);
+        }
+      }
+    }
+    return this.validateRuntimeContent('render', [...selectedKeys], requested);
+  }
+
   private projectRuntimeContent(
     content: RuntimeContentInput | undefined,
     keys: readonly RuntimeContentKey[],
@@ -8190,9 +8694,23 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }));
   }
 
-  private async computeDependencyHash(dependencies: readonly Dependency[]): Promise<string> {
+  private async computeDependencyHash(
+    dependencies: readonly Dependency[],
+    scope: 'build' | 'source' = 'build',
+  ): Promise<string> {
     const contentHashSpan = this.tracer.startSpan('deps.content-hash');
-    const hex = await sha256String(canonicalJson(dependencies));
+    /* A build key keys covered files by path; their bundle dependency carries the content (R24).
+     * A source key (a description's revision, which may be persisted) is exactly the file identity:
+     * file bytes, no bundle dependency. */
+    const keyed =
+      scope === 'source'
+        ? dependencies.filter((dependency) => dependency.type !== 'bundle')
+        : dependencies.map((dependency) =>
+            dependency.type === 'file' && this.bundleCoveredFiles.has(dependency)
+              ? { type: dependency.type, path: dependency.path }
+              : dependency,
+          );
+    const hex = await sha256String(canonicalJson(keyed));
     contentHashSpan.end();
     return hex;
   }

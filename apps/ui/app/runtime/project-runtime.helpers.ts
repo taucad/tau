@@ -20,7 +20,9 @@ import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils'
 import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import type { QueryClient } from '@tanstack/react-query';
 import type { Chat } from '@taucad/chat';
-import type { ChatStorage } from '#types/storage.types.js';
+import type { ChatStorage } from '@taucad/project-library/types/chat-storage.types';
+import type { RevisionStatusProjection } from '@taucad/revisions';
+import { chatsLanded, chatsOpen } from '#hooks/use-project-availability.js';
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : 'Parameter operation failed.';
@@ -75,6 +77,24 @@ export const parameterStageForSettlement = ({
     : undefined;
 
 type FocusedChatWorker = Pick<ChatStorage, 'getChatRecordsForResource' | 'createNavigationRepairChat'>;
+
+/**
+ * Whether the focused chat's ensure may make a new chat (SP2h): during a Tau Cloud open once the chats may open
+ * ({@link chatsOpen}: their records landed, the entry closure readable, the open neither failed nor another
+ * account's), never on an empty list read before the remote's chats arrived; otherwise once a Tau remote's chats have
+ * landed ({@link chatsLanded}: projected, or chat sync is off).
+ *
+ * @param status - The revision client's projection, `undefined` before its first.
+ * @param isCloudOpenPending - Whether a Tau Cloud open is still owed for the project.
+ * @param canOpen - Whether this account may open the project.
+ * @returns `true` when a chat may be made.
+ */
+export const mayCreateChat = (
+  status: Pick<RevisionStatusProjection, 'sync' | 'remote' | 'readiness'> | undefined,
+  isCloudOpenPending: boolean,
+  canOpen: boolean,
+): boolean =>
+  isCloudOpenPending ? chatsOpen(status, true, canOpen) : status?.remote.kind !== 'tau' || chatsLanded(status);
 
 export async function ensureFocusedChatForProject({
   projectId,
@@ -150,12 +170,18 @@ export const createProjectManifestChangeObserver = ({
   reload,
   report,
   onSettled,
+  onReconciled,
 }: {
   readonly projectId: string;
   readonly getCurrent: () => ObservedManifestState;
   readonly reload: () => void;
   readonly report: (issue: ProjectManifestParseIssue) => void;
   readonly onSettled?: () => void;
+  /**
+   * The bytes the workspace's manifest was just found equal to; `undefined` once it is not known to be any bytes'
+   * (a reload begins, or the bytes read are reported instead).
+   */
+  readonly onReconciled?: (bytes: Uint8Array<ArrayBuffer> | undefined) => void;
 }): {
   readonly check: (input: { readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>> }) => Promise<void>;
   readonly invalidate: () => void;
@@ -168,6 +194,7 @@ export const createProjectManifestChangeObserver = ({
   const reportIssue = (issue: ProjectManifestParseIssue): void => {
     // A later return to the same bytes must reload to clear the report.
     lastObserved = undefined;
+    onReconciled?.(undefined);
     report(issue);
     onSettled?.();
   };
@@ -206,9 +233,12 @@ export const createProjectManifestChangeObserver = ({
       }
       const observed = manifestStateKey({ project: { ...read.data, id: projectId }, issue: read.issue });
       if (current.project !== undefined && manifestStateKey(current) === observed) {
+        onReconciled?.(bytes);
         onSettled?.();
         return;
       }
+      /* The workspace holds another manifest than these bytes, whether or not a reload for them is already owed. */
+      onReconciled?.(undefined);
       if (observed === lastObserved) {
         return;
       }
@@ -226,6 +256,7 @@ export const createProjectManifestChangeObserver = ({
 /**
  * Read the open route's manifest: strict, or degraded with its issue. The
  * established route binding supplies identity independently of the declaration.
+ * The bytes read come back too, so what the project was parsed from can be named.
  */
 export async function resolveScopedProjectManifest({
   contentService,
@@ -233,7 +264,11 @@ export async function resolveScopedProjectManifest({
 }: {
   readonly contentService: FileContentService;
   readonly projectId: string;
-}): Promise<{ readonly project: Project; readonly issue?: ProjectManifestParseIssue }> {
+}): Promise<{
+  readonly project: Project;
+  readonly issue?: ProjectManifestParseIssue;
+  readonly bytes: Uint8Array<ArrayBuffer>;
+}> {
   const outcome = await contentService.resolve('tau.json', { forceText: true });
   if (outcome.kind !== 'text') {
     throw new Error(`Cannot read tau.json for ${projectId}: ${outcome.kind}`);
@@ -243,5 +278,9 @@ export async function resolveScopedProjectManifest({
   if (!read.success) {
     throw new Error(`Invalid tau.json for ${projectId}: ${describeProjectManifestIssue(read.issue).join(' ')}`);
   }
-  return { project: { ...read.data, id: projectId }, ...(read.issue === undefined ? {} : { issue: read.issue }) };
+  return {
+    project: { ...read.data, id: projectId },
+    ...(read.issue === undefined ? {} : { issue: read.issue }),
+    bytes: outcome.content,
+  };
 }

@@ -44,8 +44,8 @@ import { PasswordInput } from '@taucad/ui/components/password-input';
 import { Switch } from '@taucad/ui/components/switch';
 import { failureCodeOf } from '#components/print/machine-facts.js';
 import { ConfigurationFields, MachineDetails, fieldNames } from '#components/settings/machine-details.js';
-import { SettingsSectionCard } from '#components/settings/settings-item.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { SettingsSectionCard } from '@taucad/settings-ui/components/settings/settings-item';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { printersInUseElsewhere, useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 

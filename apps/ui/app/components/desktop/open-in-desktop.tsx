@@ -25,29 +25,9 @@ import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { osClass } from '#telemetry/platform-class.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { isTauDesktopReleased, tauDesktopDownloadUrl } from '#lib/desktop-release.js';
 import { desktopDeepLink } from '@taucad/ui-core/lib/desktop-deep-link';
 import { browserDesktopScheme, useDesktopScheme } from '#hooks/use-desktop-scheme.js';
-
-/**
- * Where "Get Tau Desktop" goes.
- *
- * The same destination the in-app `Get Tau Desktop` action already opens
- * (`routes/w.$workspace.$project/project-route-notices.tsx`). The release
- * workflow marks only a desktop release "latest", and only once its archives
- * are attached, so this page always offers a complete download.
- */
-export const tauDesktopDownloadUrl = 'https://github.com/taucad/tau/releases/latest';
-
-/**
- * Whether a non-prerelease desktop release exists to download (charter Q56, go-live DSK-7).
- *
- * `releases/latest` answers 404 until the first one is published, so every "Get Tau Desktop" offer stays hidden
- * until the build says otherwise: `TAU_DESKTOP_RELEASED=true` at build time, substituted by `define` in
- * `vite.config.ts`. A function, not a constant, so tests can `vi.stubEnv` both branches.
- *
- * @returns Whether to offer the desktop download.
- */
-export const isTauDesktopReleased = (): boolean => import.meta.env.TAU_DESKTOP_RELEASED === 'true';
 
 /**
  * The browser's own preference, per the Figma pattern the canvas copies.
@@ -98,6 +78,13 @@ export type OpenInDesktopProps = {
    * button only puts the offer away.
    */
   readonly continueLabel: string;
+  /**
+   * The web path this offer stands for, when the address bar no longer holds
+   * it: `/invitations` takes its token out of the address (#2290) and hands
+   * the link here instead. Defaults to the current location. It is only ever
+   * passed to the scheme handler, never rendered.
+   */
+  readonly path?: string;
 };
 
 /**
@@ -107,8 +94,9 @@ export type OpenInDesktopProps = {
  * @returns The offer, or nothing when this build is the desktop app or the
  *   shell could not open this link anyway.
  */
-export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.Element | undefined {
+export function OpenInDesktop({ continueLabel, path }: OpenInDesktopProps): React.JSX.Element | undefined {
   const location = useLocation();
+  const linkPath = path ?? `${location.pathname}${location.search}${location.hash}`;
   const scheme = useDesktopScheme();
   const isDesktopSupported = useSyncExternalStore(subscribePlatform, canOpenDesktop, serverCanOpenDesktop);
   const checkboxId = useId();
@@ -118,10 +106,7 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
      would otherwise navigate to the scheme twice. */
   const attempted = useRef(false);
 
-  const deepLink =
-    isDesktopTarget() || !isDesktopSupported
-      ? undefined
-      : desktopDeepLink(`${location.pathname}${location.search}${location.hash}`, scheme);
+  const deepLink = isDesktopTarget() || !isDesktopSupported ? undefined : desktopDeepLink(linkPath, scheme);
 
   const handOff = useCallback((): void => {
     if (deepLink === undefined) {
@@ -130,14 +115,11 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
     setStage('opening');
     /* A top-level navigation, which is how a browser is asked to consult its
        scheme handlers; the page itself stays where it is. */
-    const currentLink = desktopDeepLink(
-      `${location.pathname}${location.search}${location.hash}`,
-      browserDesktopScheme(),
-    );
+    const currentLink = desktopDeepLink(linkPath, browserDesktopScheme());
     if (currentLink !== undefined) {
       globalThis.location.assign(currentLink);
     }
-  }, [deepLink, location.pathname, location.search, location.hash]);
+  }, [deepLink, linkPath]);
 
   useEffect(() => {
     if (deepLink === undefined || attempted.current || !readAlwaysOpen()) {

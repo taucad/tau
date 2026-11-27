@@ -1,0 +1,7 @@
+--- a/docs/policy/testing-policy.md
++++ b/docs/policy/testing-policy.md
+@@
+ # Testing policy
+
+-A flaky test is never landed.
++A flaky test may be landed when it is hard to fix.

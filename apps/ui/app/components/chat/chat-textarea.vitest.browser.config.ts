@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import type { CDPSession, Page } from 'playwright';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Browser acceptance shares the application's native-module aliases.
@@ -12,7 +13,7 @@ const emulationSessions = new WeakMap<Page, CDPSession>();
 /** Real-browser composer spacing acceptance with the shipped styles. */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss(), tauRuntime()],
   resolve: { alias: uiResolveAlias },
   optimizeDeps: {
@@ -36,6 +37,8 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     include: ['app/components/chat/chat-textarea.browser.test.tsx'],
     fileParallelism: false,
     browser: {
@@ -52,6 +55,10 @@ export default defineConfig({
             emulationSessions.set(page, session);
           }
           await session.send('Emulation.setTouchEmulationEnabled', { enabled: coarse, maxTouchPoints: 1 });
+        },
+        /** `prefers-reduced-motion: reduce`, so motion-reduce styles apply. */
+        async composerReducedMotion({ page }, reduce: boolean) {
+          await page.emulateMedia({ reducedMotion: reduce ? 'reduce' : 'no-preference' });
         },
       },
       instances: [{ browser: 'chromium' }],

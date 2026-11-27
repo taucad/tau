@@ -1,12 +1,15 @@
 /* oxlint-disable no-bitwise -- permission bits are a bit field. */
-import { createHash } from 'node:crypto';
-import { chmod, mkdir, symlink, writeFile } from 'node:fs/promises';
-import { join, toNamespacedPath } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmod, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { dirname, join, toNamespacedPath } from 'node:path';
 
 import { resolveLinkTarget } from '#archive-entry.js';
 import type { ArchiveEntry } from '#archive-entry.js';
 import { ArchiveError } from '#archive-error.js';
 import { mapConcurrent } from '#bounded-stream.js';
+import { fetchVerified } from '#fetch-verified.js';
+import type { FetchVerifiedInput } from '#fetch-verified.js';
+import { integrityMatches } from '#integrity.js';
 
 /**
  * One written file as a receipt records it.
@@ -152,4 +155,53 @@ export const writeArchiveEntries = async (input: WriteArchiveEntriesInput): Prom
     }
   });
   return rows.map(({ row }) => row);
+};
+
+/**
+ * Input of {@link fetchVerifiedFile}: a {@link fetchVerified} input and the file that keeps its bytes.
+ * @public
+ */
+export type FetchVerifiedFileInput = FetchVerifiedInput & {
+  /** File the verified bytes are kept in; its directory is created when missing. */
+  readonly path: string;
+};
+
+/**
+ * The verified bytes of a pinned download, kept in a file. A file already at `path` whose bytes match `integrity`
+ * (and `byteLength`, when declared) is used as it is; otherwise the bytes are downloaded with {@link fetchVerified},
+ * on its retry policy, and only bytes that matched the pin are written: to a unique temporary file beside `path`,
+ * then renamed over it. A failed or aborted run therefore never leaves a partial or unverified file at `path`, and a
+ * retry or a later run starts clean.
+ * @param input - The `fetchVerified` input and the file path.
+ * @returns The verified bytes, and whether they were downloaded (`false` when the kept file matched).
+ * @throws {ArchiveError} As `fetchVerified`.
+ * @public
+ */
+export const fetchVerifiedFile = async (
+  input: FetchVerifiedFileInput,
+): Promise<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly fetched: boolean }> => {
+  const { path, ...request } = input;
+  let kept: Uint8Array<ArrayBuffer> | undefined;
+  try {
+    kept = new Uint8Array(await readFile(path));
+  } catch {
+    // Nothing kept yet, or unreadable: download below.
+  }
+  if (
+    kept !== undefined &&
+    (input.byteLength === undefined || kept.byteLength === input.byteLength) &&
+    (await integrityMatches(kept, input.integrity))
+  ) {
+    return { bytes: kept, fetched: false };
+  }
+  const bytes = await fetchVerified(request);
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${randomUUID()}.partial`;
+  try {
+    await writeFile(temporary, bytes);
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+  return { bytes, fetched: true };
 };

@@ -26,12 +26,18 @@ export type CodeCardCategory =
   | 'externalRestart'
   | 'fundedLimit'
   | 'billingRecovery'
+  | 'deploymentUnknown'
   | 'accountRestricted';
 
 type CodeCard = Readonly<{
   category: CodeCardCategory;
   /** A gateway code's normalized category, independent of the card a live run shows. */
   normalized?: ErrorCategory;
+  /**
+   * The card's own title, for a refusal whose sentence the page never renders (IS3). Every surface that names the
+   * failure (the card, the sidebar's row) says these words, so the gateway's sentence stays in Tau Debug.
+   */
+  headline?: string;
 }>;
 
 /** The page's one typed code-to-card map; retry classes remain the host registry's (§5.8, SC-G3). */
@@ -54,8 +60,8 @@ const codeCards = {
   WIRE_VERSION_UNSUPPORTED: { category: 'updateHost' },
   INVALID_REQUEST: { category: 'switchModel' },
   EXTERNAL_AGENT_MODEL_UNAVAILABLE: { category: 'switchModel' },
-  MODEL_ROUTE_PAUSED: { category: 'switchModel' },
-  REASONING_REPLAY_REJECTED: { category: 'switchModel' },
+  MODEL_ROUTE_PAUSED: { category: 'switchModel', headline: 'This model is paused' },
+  REASONING_REPLAY_REJECTED: { category: 'switchModel', headline: 'This model cannot continue this chat' },
   BILLING_ACCOUNT_RESTRICTED: { category: 'accountRestricted' },
   RESUME_UNAVAILABLE: { category: 'nothingToResume' },
   LEADERSHIP_LOST: { category: 'otherTab' },
@@ -65,6 +71,7 @@ const codeCards = {
   LEADER_VERSION_MISMATCH: { category: 'otherBuild' },
   MODEL_ATTEMPT_PENDING: { category: 'modelPending' },
   BILLING_RECOVERY_UNAVAILABLE: { category: 'billingRecovery' },
+  DEPLOYMENT_UNKNOWN: { category: 'deploymentUnknown' },
   FUNDED_OPERATION_LIMIT: { category: 'fundedLimit' },
   RUN_UNREADABLE: { category: 'update' },
   HISTORY_INVALID: { category: 'historyInvalid' },
@@ -89,3 +96,12 @@ export const cardOf = (
 
 /** A gateway's code outranks its HTTP status, including after a 200 stream began. @public */
 export const normalizedErrorCategoryOf = (code: string): ErrorCategory | undefined => knownCodeCard(code)?.normalized;
+
+/**
+ * The page's own title for a coded refusal whose sentence it never renders (IS3), or `undefined` for a code without one.
+ *
+ * @param code - The refusal's wire code.
+ * @returns The card's title.
+ * @public
+ */
+export const pageHeadlineOf = (code: string | undefined): string | undefined => knownCodeCard(code)?.headline;

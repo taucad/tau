@@ -84,6 +84,15 @@ const groupOrder: readonly KernelRepresentation[] = ['brep', 'mesh', 'implicit',
 const bindingSentence =
   'The entry file binds the kernel: its extension, and for `.ts`, `.js` and `.py` the library the entry imports.';
 
+/**
+ * How an entry-less project gets its entry (D3): the host adopts the first model a tool renders, so the agent renders
+ * the entry first and need not write `tau.json`.
+ *
+ * @public
+ */
+export const entryAdoptionSentence =
+  'While `tau.json` names no main model, the first model `evaluate_model` renders or `test_model` loads becomes it (`assets.main.entryPath`): render the entry file before any library file, and write that field yourself only to name another file.';
+
 const nameOf = (id: KernelId): string => resolveKernel(id).name;
 
 const skillOf = (id: KernelId, profile: KernelRoutingProfile): string | undefined =>
@@ -206,7 +215,7 @@ export const renderKernelGuidance = ({ preference, owner, profile }: KernelGuida
     return [
       kernelChoiceCondition,
       renderKernelRoutingCard(profile),
-      "After choosing, activate that kernel's `cad-` skill before writing.",
+      `After choosing, activate that kernel's \`cad-\` skill before writing. ${entryAdoptionSentence}`,
     ].join('\n\n');
   }
   const picked = resolveKernel(preference);

@@ -1,9 +1,6 @@
-import { useCallback } from 'react';
-import { useCredits } from '@taucad/billing/hooks/use-credits';
-import { useModelEstimates } from '@taucad/billing/hooks/use-model-estimates';
-import { errorCategory } from '@taucad/types/constants';
-import { errorCategoryTitles } from '@taucad/chat/utils';
-import { useAutoReloadEnabled } from '#hooks/use-auto-reload-enabled.js';
+import { cloudPort } from '#cloud/cloud-port.js';
+import type { CloudPlanFacts } from '#cloud/plan-facts.types.js';
+import { refuseUnfundedTurn } from '#hooks/credit-preflight-refusal.js';
 
 /**
  * Refuse a turn the account cannot fund, before it is dispatched.
@@ -18,59 +15,27 @@ import { useAutoReloadEnabled } from '#hooks/use-auto-reload-enabled.js';
 export type CreditPreflight = (routeId: string, modelName: string) => void;
 
 /**
- * Compares the account's spendable credit against the *floor* admission would hold
- * on the selected route (`minimumHoldAtoms` from `GET /v1/billing/model-estimates`).
+ * The credit preflight (adaptive app deployment mode charter C7, I4): a stable function that reads the
+ * credit facts of the identity bound when it is called, never a value captured before an `await`. With none
+ * (unfunded, unknown, signed out, the balance not yet read) it is a no-op and the server's admission decides.
  *
- * The floor prices the smallest turn the route's wire admits, so a balance below it
- * cannot fund any turn on the route and the refusal is a fact, not a guess. The
- * representative hold is a much larger number — on Astra, ~2.7x the floor — and
- * refusing against it denied turns the ledger went on to admit; the picker and the
- * balance chip keep using it for "≈ credits per turn" and their advisory
- * below-one-turn warning.
- *
- * @returns A refusal to call once per dispatch, with the route the turn will use.
+ * @param routeId - The route the turn will use.
+ * @param modelName - The model's name, for the refusal.
+ * @public
  */
-export const useCreditPreflight = (): CreditPreflight => {
-  const explanation = useCredits();
-  const estimates = useModelEstimates();
-  const autoReloadEnabled = useAutoReloadEnabled();
-
-  return useCallback(
-    (routeId: string, modelName: string): void => {
-      // `eligibleAvailableCreditAtoms` is the server's own spendable figure
-      // (assets − holds, zero while in debt). An explanation whose authority is
-      // unavailable carries no balance at all, and must not read as zero.
-      const balance = explanation?.balance;
-      const available = balance ? balance.eligibleAvailableCreditAtoms : undefined;
-      const required = estimates?.routes.find((route) => route.routeId === routeId)?.minimumHoldAtoms;
-      if (available === undefined || required === undefined || autoReloadEnabled) {
-        return;
-      }
-      const availableAtoms = BigInt(available);
-      const requiredAtoms = BigInt(required);
-      if (availableAtoms >= requiredAtoms) {
-        return;
-      }
-      throw new Error(
-        JSON.stringify({
-          category: errorCategory.credits,
-          title: errorCategoryTitles[errorCategory.credits],
-          // The exact shortfall rides on `details`, which the credits card
-          // renders; `@taucad/billing`'s formatter is lazy-loaded in this app
-          // and may not be imported statically here.
-          message: `Add credits to use ${modelName}.`,
-          code: 'INSUFFICIENT_CREDIT',
-          httpStatus: 402,
-          details: {
-            // The real shortfall: what the balance must reach before any turn on
-            // this route can be admitted, not what a representative turn reserves.
-            requiredCreditAtoms: required,
-            availableCreditAtoms: available,
-            routeId,
-          },
-        }),
-      );
-    },
-    [autoReloadEnabled, estimates, explanation],
-  );
+export const preflightCredit: CreditPreflight = (routeId, modelName) => {
+  const credit = (cloudPort.read(cloudPort.current()) as CloudPlanFacts | undefined)?.credit;
+  if (credit === undefined) {
+    return;
+  }
+  refuseUnfundedTurn({
+    available: credit.availableAtoms,
+    required: credit.minimumHoldAtoms[routeId],
+    autoReloadEnabled: credit.autoReloadEnabled,
+    routeId,
+    modelName,
+  });
 };
+
+/** One function for the page's life: it reads the bound identity when called. */
+export const useCreditPreflight = (): CreditPreflight => preflightCredit;

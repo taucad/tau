@@ -32,7 +32,8 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '@taucad/ui/components/loader';
-import { ProjectProvider, useProject } from '#hooks/use-project.js';
+import { ProjectProvider } from '#hooks/project-provider.js';
+import { useProject } from '#hooks/use-project.js';
 import { GraphicsProvider, useGraphics, useGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
@@ -139,6 +140,31 @@ export const ConverterViewer = memo(function ({
  * The export panel. From md up it is always open beside the viewer. Below md it folds away behind an Export toggle, so
  * the viewer and its bar stay in reach, and opens under the toggle over the viewer.
  */
+/**
+ * What the converter could not carry over from the opened file, such as the losses a native CAD import records.
+ * Collapsed by default; every warning stays readable.
+ */
+export function ConversionWarnings({
+  messages,
+}: Readonly<{ messages: readonly string[] }>): React.JSX.Element | undefined {
+  if (messages.length === 0) {
+    return undefined;
+  }
+  return (
+    <details className='text-xs text-muted-foreground'>
+      <summary className='w-fit rounded-xs select-none focus-visible:focus-outline-outside'>
+        {`${messages.length} ${messages.length === 1 ? 'warning' : 'warnings'}: some of the file's data didn't carry over`}
+      </summary>
+      <ul className='mt-2 max-h-40 list-disc space-y-1 overflow-y-auto pl-4 break-words'>
+        {messages.map((message, index) => (
+          // oxlint-disable-next-line react/no-array-index-key -- the list is replaced whole, and messages can repeat
+          <li key={index}>{message}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export function ConverterExportPanel({ children }: Readonly<{ children: React.ReactNode }>): React.JSX.Element {
   const [isOpenOnPhone, setIsOpenOnPhone] = useState(false);
   const panelId = useId();
@@ -197,6 +223,7 @@ function ConverterContentInner(): React.JSX.Element {
   const [isConverting, setIsConverting] = useState(false);
   const [openingFileName, setOpeningFileName] = useState<string>();
   const [conversionError, setConversionError] = useState<string>();
+  const [conversionWarnings, setConversionWarnings] = useState<readonly string[]>([]);
   const conversionGeneration = useRef(0);
 
   useEffect(() => {
@@ -324,6 +351,9 @@ function ConverterContentInner(): React.JSX.Element {
           throw new Error(`Converter returned unsupported preview media: ${preview.rendering.artifact.mimeType}`);
         }
         setUploadedFile({ name: entryFile.name, format, size: entryFile.size });
+        setConversionWarnings(
+          outcome.evaluation.issues.filter((issue) => issue.severity === 'warning').map((issue) => issue.message),
+        );
         documentRef.current?.close();
         documentRef.current = opened;
         pendingDocumentRef.current = undefined;
@@ -373,6 +403,7 @@ function ConverterContentInner(): React.JSX.Element {
     setIsConverting(false);
     setConversionError(undefined);
     setUploadedFile(undefined);
+    setConversionWarnings([]);
     documentRef.current?.close();
     documentRef.current = undefined;
     setRuntimeDocument(undefined);
@@ -418,175 +449,174 @@ function ConverterContentInner(): React.JSX.Element {
   const hasModel = glbData !== undefined;
 
   return (
-    <div className='h-full overflow-y-auto'>
-      <PageContent className='flex min-h-full flex-col gap-6'>
-        <div className='shrink-0'>
-          <PageHeader
-            title='Convert'
-            action={
-              hasModel ? (
-                <Button variant='outline' onClick={handleReset}>
-                  <RotateCcw />
-                  Start over
-                </Button>
-              ) : undefined
-            }
-          />
-        </div>
-
-        {conversionError ? (
-          <PageNotice
-            title={client ? 'Model unavailable' : 'Converter unavailable'}
-            message={
-              client
-                ? `${openingFileName ?? 'The selected model'} could not be read. Choose another model to try again.`
-                : 'The converter could not start. Reload the page to try again.'
-            }
-            detail={conversionError}
-          >
-            {client ? undefined : (
-              <Button
-                variant='outline'
-                onClick={() => {
-                  globalThis.location.reload();
-                }}
-              >
-                Reload converter
+    <PageContent className='flex min-h-full flex-col gap-6'>
+      <div className='shrink-0'>
+        <PageHeader
+          title='Convert'
+          action={
+            hasModel ? (
+              <Button variant='outline' onClick={handleReset}>
+                <RotateCcw />
+                Start over
               </Button>
-            )}
-          </PageNotice>
-        ) : undefined}
+            ) : undefined
+          }
+        />
+      </div>
 
-        <div
-          className={cn(
-            'relative',
-            (isConverting || hasModel) && 'min-h-144 flex-1 overflow-hidden rounded-lg border bg-muted',
-          )}
+      {conversionError ? (
+        <PageNotice
+          title={client ? 'Model unavailable' : 'Converter unavailable'}
+          message={
+            client
+              ? `${openingFileName ?? 'The selected model'} could not be read. Choose another model to try again.`
+              : 'The converter could not start. Reload the page to try again.'
+          }
+          detail={conversionError}
         >
-          {isConverting || hasModel ? (
-            <>
-              {glbData && glbHash ? (
-                <ConverterViewer glbData={glbData} hash={glbHash} fileName={uploadedFile?.name ?? 'Model'} />
-              ) : undefined}
-              {isConverting ? (
-                <div
-                  role='status'
-                  aria-label='Opening model'
-                  aria-busy='true'
-                  className={cn(
-                    'absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 p-4 text-center',
-                    hasModel ? 'bg-background/90' : 'bg-muted',
-                  )}
-                >
-                  <Loader className='size-5 text-muted-foreground' />
-                  <span className='max-w-full font-mono text-sm break-all'>{openingFileName}</span>
-                  <span className='text-sm text-muted-foreground'>Opening model…</span>
-                  <Button
-                    variant='outline'
-                    size='sm'
-                    onClick={() => {
-                      conversionGeneration.current += 1;
-                      setIsConverting(false);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <ConverterExportPanel>
-                  <FloatingPanelContentBody className='flex min-h-0 flex-col justify-between gap-4 bg-sidebar p-3'>
-                    <div className='space-y-5'>
-                      {uploadedFile ? (
-                        <div className='space-y-1'>
-                          <div className='flex items-center gap-1'>
-                            <span className='truncate text-sm font-medium'>{uploadedFile.name}</span>
-                            <InfoTooltip>{formatConfigurations[uploadedFile.format].description}</InfoTooltip>
-                          </div>
-                          <p className='text-xs text-muted-foreground'>
-                            {formatDisplayName(uploadedFile.format)} · {formatFileSize(uploadedFile.size)}
-                          </p>
-                        </div>
-                      ) : undefined}
-                      <Converter
-                        availableFormats={converterExportFormats}
-                        exportFormat={exportFormat}
-                        selectedFormats={selectedFormats}
-                        shouldUseZipForMultiple={useZipForMultiple}
-                        uploadedFile={uploadedFile}
-                        onFormatToggle={handleFormatToggle}
-                        onClearSelection={handleClearFormats}
-                        onZipToggle={handleZipToggle}
-                      />
-                    </div>
-                    <Dropzone
-                      className='w-full max-md:hidden'
-                      maxFiles={100}
-                      onDrop={handleFileDrop}
-                      onError={(error) => {
-                        setConversionError(error.message);
-                      }}
-                    >
-                      <DropzoneEmptyState>
-                        <div className='flex flex-col items-center gap-1 py-1 text-wrap'>
-                          <Upload className='size-4 text-muted-foreground' />
-                          <span className='text-sm font-medium'>Open another model</span>
-                          <span className='text-xs font-normal text-muted-foreground'>
-                            Drop files here or click to browse
-                          </span>
-                        </div>
-                      </DropzoneEmptyState>
-                    </Dropzone>
-                  </FloatingPanelContentBody>
-                </ConverterExportPanel>
-              )}
-            </>
-          ) : (
-            <div className='grid items-start gap-8 border-t pt-6 lg:grid-cols-[minmax(0,1fr)_20rem]'>
-              <div className='min-w-0 space-y-4'>
-                <Heading level={2} variant='label'>
-                  Source model
-                </Heading>
-                <Dropzone
-                  className='min-h-72 rounded-lg border-dashed p-6 text-wrap'
-                  maxFiles={100}
-                  disabled={!client}
-                  onDrop={handleFileDrop}
-                  onError={(error) => {
-                    setConversionError(error.message);
+          {client ? undefined : (
+            <Button
+              variant='outline'
+              onClick={() => {
+                globalThis.location.reload();
+              }}
+            >
+              Reload converter
+            </Button>
+          )}
+        </PageNotice>
+      ) : undefined}
+
+      <div
+        className={cn(
+          'relative',
+          (isConverting || hasModel) && 'min-h-144 flex-1 overflow-hidden rounded-lg border bg-muted',
+        )}
+      >
+        {isConverting || hasModel ? (
+          <>
+            {glbData && glbHash ? (
+              <ConverterViewer glbData={glbData} hash={glbHash} fileName={uploadedFile?.name ?? 'Model'} />
+            ) : undefined}
+            {isConverting ? (
+              <div
+                role='status'
+                aria-label='Opening model'
+                aria-busy='true'
+                className={cn(
+                  'absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 p-4 text-center',
+                  hasModel ? 'bg-background/90' : 'bg-muted',
+                )}
+              >
+                <Loader className='size-5 text-muted-foreground' />
+                <span className='max-w-full font-mono text-sm break-all'>{openingFileName}</span>
+                <span className='text-sm text-muted-foreground'>Opening model…</span>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => {
+                    conversionGeneration.current += 1;
+                    setIsConverting(false);
                   }}
                 >
-                  <DropzoneEmptyState>
-                    <div className='flex flex-col items-center gap-1 text-center'>
-                      <span className='mb-2 rounded-xl border bg-card p-2'>
-                        <Upload aria-hidden className='size-5 text-muted-foreground' />
-                      </span>
-                      <span className='text-base font-medium'>Open model</span>
-                      <span className='text-sm font-normal text-muted-foreground'>
-                        Drop files here or click to browse
-                      </span>
-                      <span className='mt-3 text-xs font-normal text-muted-foreground'>
-                        Include supporting files, such as textures.
-                      </span>
-                    </div>
-                  </DropzoneEmptyState>
-                </Dropzone>
-                <p className='flex items-center gap-2 text-xs text-muted-foreground'>
-                  <Cpu aria-hidden className='size-3.5' /> Processed on this device.
-                </p>
+                  Cancel
+                </Button>
               </div>
-              <div className='min-w-0 space-y-3'>
-                {!client && conversionError ? undefined : (
-                  <FormatsList formats={converterImportFormats} isLoading={!client} />
-                )}
-                <p className='border-t pt-4 text-xs leading-relaxed text-muted-foreground'>
-                  Output formats depend on the model. Open a file to see available conversions.
-                </p>
-              </div>
+            ) : (
+              <ConverterExportPanel>
+                <FloatingPanelContentBody className='flex min-h-0 flex-col justify-between gap-4 bg-sidebar p-3'>
+                  <div className='space-y-5'>
+                    {uploadedFile ? (
+                      <div className='space-y-1'>
+                        <div className='flex items-center gap-1'>
+                          <span className='truncate text-sm font-medium'>{uploadedFile.name}</span>
+                          <InfoTooltip>{formatConfigurations[uploadedFile.format].description}</InfoTooltip>
+                        </div>
+                        <p className='text-xs text-muted-foreground'>
+                          {formatDisplayName(uploadedFile.format)} · {formatFileSize(uploadedFile.size)}
+                        </p>
+                        <ConversionWarnings messages={conversionWarnings} />
+                      </div>
+                    ) : undefined}
+                    <Converter
+                      availableFormats={converterExportFormats}
+                      exportFormat={exportFormat}
+                      selectedFormats={selectedFormats}
+                      shouldUseZipForMultiple={useZipForMultiple}
+                      uploadedFile={uploadedFile}
+                      onFormatToggle={handleFormatToggle}
+                      onClearSelection={handleClearFormats}
+                      onZipToggle={handleZipToggle}
+                    />
+                  </div>
+                  <Dropzone
+                    className='w-full max-md:hidden'
+                    maxFiles={100}
+                    onDrop={handleFileDrop}
+                    onError={(error) => {
+                      setConversionError(error.message);
+                    }}
+                  >
+                    <DropzoneEmptyState>
+                      <div className='flex flex-col items-center gap-1 py-1 text-wrap'>
+                        <Upload className='size-4 text-muted-foreground' />
+                        <span className='text-sm font-medium'>Open another model</span>
+                        <span className='text-xs font-normal text-muted-foreground'>
+                          Drop files here or click to browse
+                        </span>
+                      </div>
+                    </DropzoneEmptyState>
+                  </Dropzone>
+                </FloatingPanelContentBody>
+              </ConverterExportPanel>
+            )}
+          </>
+        ) : (
+          <div className='grid items-start gap-8 border-t pt-6 lg:grid-cols-[minmax(0,1fr)_20rem]'>
+            <div className='min-w-0 space-y-4'>
+              <Heading level={2} variant='label'>
+                Source model
+              </Heading>
+              <Dropzone
+                className='min-h-72 rounded-lg border-dashed p-6 text-wrap'
+                maxFiles={100}
+                disabled={!client}
+                onDrop={handleFileDrop}
+                onError={(error) => {
+                  setConversionError(error.message);
+                }}
+              >
+                <DropzoneEmptyState>
+                  <div className='flex flex-col items-center gap-1 text-center'>
+                    <span className='mb-2 rounded-xl border bg-card p-2'>
+                      <Upload aria-hidden className='size-5 text-muted-foreground' />
+                    </span>
+                    <span className='text-base font-medium'>Open model</span>
+                    <span className='text-sm font-normal text-muted-foreground'>
+                      Drop files here or click to browse
+                    </span>
+                    <span className='mt-3 text-xs font-normal text-muted-foreground'>
+                      Include supporting files, such as textures.
+                    </span>
+                  </div>
+                </DropzoneEmptyState>
+              </Dropzone>
+              <p className='flex items-center gap-2 text-xs text-muted-foreground'>
+                <Cpu aria-hidden className='size-3.5' /> Processed on this device.
+              </p>
             </div>
-          )}
-        </div>
-      </PageContent>
-    </div>
+            <div className='min-w-0 space-y-3'>
+              {!client && conversionError ? undefined : (
+                <FormatsList formats={converterImportFormats} isLoading={!client} />
+              )}
+              <p className='border-t pt-4 text-xs leading-relaxed text-muted-foreground'>
+                Output formats depend on the model. Open a file to see available conversions.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </PageContent>
   );
 }
 

@@ -12,8 +12,12 @@ import type { CarouselApi } from '@taucad/ui/components/carousel';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
 import { cn } from '@taucad/ui/utils/cn';
 import { ViewerLayer, ViewerLayerPortal } from '@taucad/ui-kit/components/viewer-layer';
-import { attachmentAbsentLabel, attachmentDownloadName, useAttachmentSource } from '#hooks/use-attachment-source.js';
-import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import {
+  attachmentAbsentLabel,
+  attachmentDownloadName,
+  useAttachmentSource,
+} from '@taucad/chat-ui/hooks/use-attachment-source';
+import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 
 type ImageCarouselDialogItem = {
   readonly id: string;
@@ -254,6 +258,7 @@ function ImageCarouselDialog({
           ) : null}
           <DialogContent
             {...dialogProps}
+            scroll='contained'
             onInteractOutside={(event) => {
               if (isImageCarouselOverlayControlEvent(event)) {
                 event.preventDefault();

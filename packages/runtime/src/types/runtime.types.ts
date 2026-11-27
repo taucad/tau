@@ -95,26 +95,26 @@ export type IssueSeverity = 'error' | 'warning' | 'info';
  *
  * @public
  *
- * @example <caption>Report the limit an export refused</caption>
+ * @example <caption>Report the limit a build refused</caption>
  * ```typescript
  * import type { KernelIssue, ResourceLimitDetails } from '@taucad/runtime/types';
  *
  * const issue: KernelIssue = {
- *   message: 'The mesh has more triangles than this export allows.',
+ *   message: 'The SDF expression compiles to more instructions than PicoVoxel allows.',
  *   code: 'RESOURCE_LIMIT',
  *   severity: 'error',
  *   details: {
- *     limit: 'occt.export.triangles',
- *     unit: '{triangle}',
- *     maximum: 5_000_000,
- *     demand: { kind: 'estimated', value: 7_200_000 },
+ *     limit: 'picovoxel.tape.instructions',
+ *     unit: '{instruction}',
+ *     maximum: 65_536,
+ *     demand: { kind: 'unknown' },
  *     origin: 'default',
  *   } satisfies ResourceLimitDetails,
  * };
  * ```
  */
 export type ResourceLimitDetails = Readonly<{
-  /** Stable id `{owner}.{limit}`, such as `occt.export.triangles` or `host.utility.resident`. */
+  /** Stable id `{owner}.{limit}`, such as `picovoxel.tape.instructions` or `host.utility.resident`. */
   limit: string;
   /** UCUM unit of `maximum` and `demand`: `By`, `{triangle}`, `{instance}`, `ms`. */
   unit: string;

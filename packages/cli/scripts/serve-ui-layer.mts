@@ -13,6 +13,7 @@
  *   node --import @oxc-node/core/register packages/cli/scripts/serve-ui-layer.mts pin \
  *     --layer out/serve-ui-layer/tau-layer.json --archive out/serve-ui-layer/tau-serve-ui.tar.gz \
  *     (--write <pin> | --check <pin>) [--outputs]
+ * Either way `build` prints the layer's gzipped size beside the line, on stderr; `--max-bytes` takes a positive integer.
  * Exit codes: 0 built, pinned or matching; 1 refused (size, a source map, a link, a digest or a stale pin); 2 usage.
  */
 
@@ -46,6 +47,30 @@ export type LayerRecord = {
   readonly fileCount: number;
   /** Source maps left out of the layer (X2): never served, never shipped. */
   readonly excludedSourceMaps: { readonly fileCount: number; readonly byteLength: number };
+  /**
+   * The `cadmpeg-ts` whose engines the layer loads from the daemon (cadmpeg engine delivery charter EQ1 option A), from
+   * the build's `cadmpeg-engines.json`; absent for a build that names none. `tau serve` refuses to mount another
+   * version's engines.
+   */
+  readonly engines?: { readonly package: 'cadmpeg-ts'; readonly version: string };
+};
+
+/**
+ * The `cadmpeg-ts` version a serve build's `cadmpeg-engines.json` names, if it has one.
+ * @param client - The client directory.
+ * @returns The package and version, or `undefined`.
+ * @throws {Error} When the file exists and names no `cadmpeg-ts` version.
+ */
+const layerEngines = async (client: string): Promise<LayerRecord['engines']> => {
+  const text = await readFile(join(client, 'cadmpeg-engines.json'), 'utf8').catch(() => undefined);
+  if (text === undefined) {
+    return undefined;
+  }
+  const manifest = JSON.parse(text) as { readonly package?: unknown; readonly version?: unknown };
+  if (manifest.package !== 'cadmpeg-ts' || typeof manifest.version !== 'string' || manifest.version === '') {
+    throw new Error(`${client}/cadmpeg-engines.json names no cadmpeg-ts version.`);
+  }
+  return { package: 'cadmpeg-ts', version: manifest.version };
 };
 
 /**
@@ -208,6 +233,7 @@ export const buildLayer = async (options: {
       `The layer is ${String(byteLength)} bytes gzipped, over the ${String(maximumBytes)}-byte line (X2). Trim the serve build before publishing it.`,
     );
   }
+  const engines = await layerEngines(client);
   const record: LayerRecord = {
     schemaVersion: 1,
     asset: layerAsset,
@@ -217,6 +243,7 @@ export const buildLayer = async (options: {
     unpackedByteLength: files.reduce((sum, file) => sum + file.size, 0),
     fileCount: files.length,
     excludedSourceMaps: maps,
+    ...(engines === undefined ? {} : { engines }),
   };
   await writeFile(join(options.out, 'tau-layer.json'), `${JSON.stringify(record, undefined, 2)}\n`);
   return record;
@@ -320,13 +347,20 @@ const main = async (argv: readonly string[]): Promise<number> => {
     },
     strict: true,
   });
-  if (command === 'build' && values.client !== undefined && values.out !== undefined) {
-    const record = await buildLayer({
-      client: values.client,
-      out: values.out,
-      ...(values['max-bytes'] === undefined ? {} : { maximumBytes: Number(values['max-bytes']) }),
-    });
+  const maximumBytes = values['max-bytes'] === undefined ? defaultMaximumBytes : Number(values['max-bytes']);
+  if (
+    command === 'build' &&
+    values.client !== undefined &&
+    values.out !== undefined &&
+    Number.isSafeInteger(maximumBytes) &&
+    maximumBytes > 0
+  ) {
+    const record = await buildLayer({ client: values.client, out: values.out, maximumBytes });
     process.stdout.write(`${JSON.stringify(record, undefined, 2)}\n`);
+    // The size on a pass too, beside the refusal's, so every build log states it (X2).
+    process.stderr.write(
+      `The layer is ${String(record.byteLength)} bytes gzipped, within the ${String(maximumBytes)}-byte line (X2).\n`,
+    );
     return 0;
   }
   if (

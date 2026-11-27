@@ -1,11 +1,13 @@
-import { observeHomeProjectSaves } from '#filesystem/observe-home-project-saves.js';
+import { observeHomeProjectSaves } from '@taucad/files-ui/filesystem/observe-home-project-saves';
+import { FileServicesProvider } from '@taucad/files-ui/hooks/use-file-services';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileServices } from '@taucad/files-ui/hooks/use-file-services';
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 import { machineSettingsPath } from '@taucad/runtime/machine/settings';
 import type { FileSystemBridgeRootedProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ReactNode } from 'react';
 import {
-  createContext,
   useContext,
   useMemo,
   useCallback,
@@ -14,6 +16,7 @@ import {
   useLayoutEffect,
   useReducer,
   useRef,
+  useState,
   useSyncExternalStore,
 } from 'react';
 import { useSelector } from '@xstate/react';
@@ -21,6 +24,8 @@ import type { ActorOptions, AnyActorLogic } from 'xstate';
 import { OctagonAlert, RefreshCw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
+import { recoveryActions } from '#lib/recovery-actions.js';
+import type { RecoveryAction, RecoveryActionId } from '#lib/recovery-actions.js';
 import type { FileSystemBackend, FileStatEntry, FileStat } from '@taucad/types';
 import type { FileWriteSource } from '@taucad/fs-client/file-write-source';
 import type {
@@ -42,6 +47,7 @@ import {
   selectActiveWorkspaceId,
   selectBridgeOpener,
   selectProxy,
+  selectSafeMode,
   servicesBound,
   servicesOf,
 } from '#runtime/file-manager-facade.js';
@@ -49,8 +55,9 @@ import type { RootFileFacade } from '#runtime/file-manager-facade.js';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { MountConfig, WorkspaceMutationError, WatchEvent } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
-import { getProjectRootConfigs, setProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import type { HomeStorageBackend, WorkspaceEntry } from '#filesystem/handle-store.js';
+import { setProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
+import { readRootConfigurationOnly } from '#runtime/root-configuration.js';
+import type { HomeStorageBackend, WorkspaceEntry } from '@taucad/files-ui/filesystem/handle-store';
 import {
   selectRuntimeFileManagerHost,
   selectRuntimeFiles,
@@ -73,6 +80,7 @@ import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-e
 import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * Wait for a file manager's content and tree services, up to the ready bound.
@@ -176,6 +184,7 @@ export type FileSystemClientFacade = Pick<
   FileSystemClient,
   | 'listProjectManifests'
   | 'verifyProjectRoute'
+  | 'verifyAbsent'
   | 'commitPendingProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
   | 'adoptProjectDirectory'
@@ -204,6 +213,7 @@ export type WorkspaceFacade = {
   restoreWorkspaceHandle: (workspaceId: string, handle: FileSystemDirectoryHandle) => Promise<boolean>;
 };
 
+/** What a file-manager provider gives its subtree; the shared `FileManagerContext` types only what library components use. */
 type FileManagerContextType = {
   fileManagerRef: FileManagerRef;
   backendType: FileSystemBackend | undefined;
@@ -402,8 +412,6 @@ type FileManagerContextType = {
   runtimeFileSystem: RuntimeFileSystem;
 };
 
-const FileManagerContext = createContext<FileManagerContextType | undefined>(undefined);
-
 /** The file-manager host's ref, outside a runtime `undefined` (a component test that renders a gate alone). */
 function useOptionalFileManagerHost() {
   const runtime = useOptionalAppRuntime();
@@ -437,6 +445,81 @@ function useHomeBackendFailure(): string | undefined {
   return useSelector(host, (snapshot) => (snapshot === undefined ? undefined : selectHomeBackendFailure(snapshot)));
 }
 
+/** What a classified start failure says and offers (desktop resilient startup blueprint D3). */
+type StartFailureCopy = Readonly<{
+  title: string;
+  description: string;
+  actions: readonly RecoveryActionId[];
+  /** A retry replays the same start; offered beside an action that changes the input, never alone for a deterministic failure. */
+  offersRetry: boolean;
+}>;
+
+const transientFailureCopy: StartFailureCopy = {
+  title: "Couldn't start the file service",
+  description: "Tau's file service did not start, so your files aren't available yet. Try again to restart it.",
+  actions: [],
+  offersRetry: true,
+};
+
+/**
+ * The panel for a start failure, by its class and code (D3): a transient failure offers Try again; a deterministic one
+ * offers the action that changes what failed, with the logs and the recovery entry beside it.
+ *
+ * @param errorClass - The machine's class for the failure.
+ * @param errorCode - The machine's code for the failure.
+ * @returns The panel's copy and actions.
+ */
+function startFailureCopy(errorClass: string | undefined, errorCode: string | undefined): StartFailureCopy {
+  if (errorClass !== 'deterministic') {
+    return transientFailureCopy;
+  }
+  switch (errorCode) {
+    case 'VersionError': {
+      return {
+        title: 'A newer Tau opened your local database',
+        description: 'This copy of Tau is older than the one that last opened its database. Update Tau to open it.',
+        actions: ['updateTau', 'showLogs', 'troubleshooting'],
+        offersRetry: false,
+      };
+    }
+    case 'StorageUpgradeBlockedError': {
+      return {
+        title: 'Another Tau window is holding the database',
+        description: 'Close the other Tau window or tab, then try again.',
+        actions: ['showLogs', 'troubleshooting'],
+        offersRetry: true,
+      };
+    }
+    case 'DatabaseOpenTimeoutError': {
+      return {
+        title: "Tau's local database did not open",
+        description:
+          'Tau’s storage on this device didn’t answer. Restart in safe mode, or open Troubleshooting to reset it.',
+        actions: ['restartInSafeMode', 'troubleshooting', 'showLogs'],
+        offersRetry: true,
+      };
+    }
+    case 'SERVICES_UNAVAILABLE': {
+      return {
+        title: "Tau's file services did not start",
+        description:
+          'The part of Tau that reads your folders keeps stopping. Restart in safe mode or check for an update.',
+        actions: ['restartInSafeMode', 'checkForUpdates', 'showLogs'],
+        offersRetry: false,
+      };
+    }
+    default: {
+      return {
+        title: "Couldn't start the file service",
+        description:
+          "Tau's file service failed the same way twice. Restart in safe mode, or open Troubleshooting for the logs and an update.",
+        actions: ['restartInSafeMode', 'troubleshooting', 'showLogs', 'checkForUpdates'],
+        offersRetry: true,
+      };
+    }
+  }
+}
+
 /**
  * What the gate shows when the root mount has no worker (blueprint R7).
  *
@@ -465,6 +548,8 @@ function SharedWorkerFallback({
   readonly placeholder: ReactNode;
 }): React.ReactNode {
   const hasFailed = useSelector(fileManagerRef, (state) => state.matches('error'));
+  const errorClass = useSelector(fileManagerRef, (state) => state.context.errorClass);
+  const errorCode = useSelector(fileManagerRef, (state) => state.context.errorCode);
   const isBackendPending = useSelector(fileManagerRef, (state) => state.context.backendType === undefined);
   const host = useOptionalFileManagerHost();
   const homeFailure = useHomeBackendFailure();
@@ -474,11 +559,17 @@ function SharedWorkerFallback({
     return placeholder;
   }
 
-  const title = homeFailed ? "Couldn't open Home" : "Couldn't start the file service";
-  const description = homeFailed
-    ? "Tau couldn't read your Home storage selection. Try again to open your existing files."
-    : "Tau's file service did not start, so your files aren't available yet. Try again to restart it.";
-  const retry = (
+  const copy: StartFailureCopy = homeFailed
+    ? {
+        title: "Couldn't open Home",
+        description: "Tau couldn't read your Home storage selection. Try again to open your existing files.",
+        actions: [],
+        offersRetry: true,
+      }
+    : startFailureCopy(errorClass, errorCode);
+  const { title, description } = copy;
+  const actions = recoveryActions(copy.actions);
+  const retryButton = (
     <Button
       type='button'
       onClick={() => {
@@ -492,6 +583,30 @@ function SharedWorkerFallback({
       <RefreshCw />
       Try again
     </Button>
+  );
+  /* Never a lone retry of a deterministic failure (D3): where none of its actions is available here, retry stays. */
+  const retry = (
+    <>
+      {actions.map((action) =>
+        action.kind === 'link' ? (
+          <Button key={action.id} asChild variant='outline'>
+            <a href={action.href}>{action.label}</a>
+          </Button>
+        ) : (
+          <Button
+            key={action.id}
+            type='button'
+            variant='outline'
+            onClick={() => {
+              void action.run();
+            }}
+          >
+            {action.label}
+          </Button>
+        ),
+      )}
+      {copy.offersRetry || actions.length === 0 ? retryButton : undefined}
+    </>
   );
   if (isInline) {
     return (
@@ -554,11 +669,135 @@ export function SharedWorkerGate({
   );
 }
 
+/** What the database panel says and offers for the failure that left the start without its records (D3, R7). */
+function databaseNoticeCopy(errorName: string): Readonly<{
+  description: string;
+  actions: readonly RecoveryActionId[];
+  offersRetry: boolean;
+}> {
+  switch (errorName) {
+    case 'VersionError': {
+      return {
+        /* D3: the database is not damaged, only newer. Updating brings the folders back; a reset would only lose them. */
+        description:
+          'A newer Tau opened the database this device keeps. Home is open and your files are safe. Update Tau to bring back your folders.',
+        actions: ['updateTau', 'showLogs', 'troubleshooting'],
+        offersRetry: false,
+      };
+    }
+    case 'StorageUpgradeBlockedError': {
+      return {
+        description:
+          'Another Tau window or tab is holding the database this device keeps. Home is open. Close the other Tau window, then try again.',
+        actions: ['showLogs'],
+        offersRetry: true,
+      };
+    }
+    default: {
+      return {
+        description:
+          "Tau couldn't open the database this device keeps. Home is open and your files are safe. Reset the database to bring back your folders; their projects return from disk.",
+        actions: ['resetLocalDatabase', 'resetFolderList', 'showLogs', 'troubleshooting'],
+        offersRetry: true,
+      };
+    }
+  }
+}
+
+/**
+ * The database panel (desktop resilient startup blueprint D1, D3, R7): the start went on with Home alone because its
+ * records could not be read, so Home is open and the folders are missing. It says so beside Home and offers the action
+ * for the cause: Update Tau for a newer database, closing the other window when one holds it, and the reset, which is
+ * the shell's quarantine on the desktop and, on the web, offered only when Home's engine mirror exists. Try again
+ * reloads the page, which opens the database afresh.
+ */
+function DatabaseNotice({ fileManagerRef }: { readonly fileManagerRef: FileManagerRef }): React.ReactNode {
+  const degraded = useSelector(fileManagerRef, (state) => state.context.degraded);
+  /* An action that cannot be undone, waiting for its confirmation. */
+  const [confirming, setConfirming] = useState<RecoveryAction>();
+  if (degraded?.input !== 'records') {
+    return undefined;
+  }
+  const title = "Tau's local database is unavailable";
+  const copy = databaseNoticeCopy(degraded.errorName);
+  const actions = recoveryActions(copy.actions);
+  if (confirming?.kind === 'run' && confirming.confirm !== undefined) {
+    const { run } = confirming;
+    return (
+      <div role='alert' aria-label={title} className='flex flex-wrap items-center gap-3 border-b p-4'>
+        <OctagonAlert aria-hidden className='size-4 shrink-0 text-feature' />
+        <p className='min-w-0 flex-1 text-sm'>{confirming.confirm.question}</p>
+        <Button
+          type='button'
+          variant='outline'
+          onClick={() => {
+            setConfirming(undefined);
+          }}
+        >
+          Cancel
+        </Button>
+        <Button
+          type='button'
+          variant='destructive'
+          onClick={() => {
+            setConfirming(undefined);
+            void run();
+          }}
+        >
+          {confirming.confirm.label}
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div role='alert' aria-label={title} className='flex flex-wrap items-center gap-3 border-b p-4'>
+      <OctagonAlert aria-hidden className='size-4 shrink-0 text-feature' />
+      <p className='min-w-0 flex-1 text-sm'>{copy.description}</p>
+      {actions.map((action) =>
+        action.kind === 'link' ? (
+          <Button key={action.id} asChild variant='outline'>
+            <a href={action.href}>{action.label}</a>
+          </Button>
+        ) : (
+          <Button
+            key={action.id}
+            type='button'
+            variant='outline'
+            onClick={() => {
+              if (action.confirm === undefined) {
+                void action.run();
+              } else {
+                setConfirming(action);
+              }
+            }}
+          >
+            {action.label}
+          </Button>
+        ),
+      )}
+      {copy.offersRetry || actions.length === 0 ? (
+        <Button
+          type='button'
+          onClick={() => {
+            globalThis.location.reload();
+          }}
+        >
+          <RefreshCw />
+          Try again
+        </Button>
+      ) : undefined}
+    </div>
+  );
+}
+
 /** Keep storage recovery inside the available page instead of displacing its shell. */
 export function HomeFileManagerNotice(): React.ReactNode {
   const fileManager = useOptionalFileManager();
   return fileManager ? (
-    <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={undefined} isInline />
+    <>
+      <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={undefined} isInline />
+      <DatabaseNotice fileManagerRef={fileManager.fileManagerRef} />
+    </>
   ) : undefined;
 }
 
@@ -831,7 +1070,7 @@ function FileManagerScope({
         proxy.disposeStorageRoot(`webaccess:${previousWorkspaceId}`);
       }
       proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
-      await proxy.configureProjectRoots(await getProjectRootConfigs());
+      await proxy.configureProjectRoots(await readRootConfigurationOnly(selectSafeMode(fileManagerRef)));
       const discovery = await proxy.listProjectManifests();
       const matches = discovery.entries.filter(
         (entry) =>
@@ -850,7 +1089,7 @@ function FileManagerScope({
         workspaceId,
         providerBasePath: match.locator.relativeDirectory,
       });
-      await proxy.configureProjectRoots(await getProjectRootConfigs());
+      await proxy.configureProjectRoots(await readRootConfigurationOnly(selectSafeMode(fileManagerRef)));
 
       workspaceTelemetry.workspaceSwap({
         previousWorkspaceId,
@@ -963,7 +1202,10 @@ function FileManagerScope({
     const connection: { proxy?: FileSystemBridgeRootedProxy } = {};
     const service = async (): Promise<FileSystemBridgeRootedProxy> => {
       await whenServicesReady();
-      const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+      const { createFileSystemBridgeProxy } = await loadCode(async () => {
+        const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+        return { createFileSystemBridgeProxy };
+      });
       // A known opener belongs to this store incarnation; the first undefined opener waits for the current one.
       const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(rootDirectory, 'user'));
       connection.proxy = proxy;
@@ -1387,11 +1629,18 @@ function FileManagerScope({
     ],
   );
 
-  return <FileManagerContext.Provider value={value}>{children}</FileManagerContext.Provider>;
+  /* The files feature's hooks (`@taucad/files-ui/hooks/*`) read the two services from their own context. */
+  const fileServices = useMemo<FileServices>(() => ({ contentService, treeService }), [contentService, treeService]);
+
+  return (
+    <FileManagerContext.Provider value={value}>
+      <FileServicesProvider value={fileServices}>{children}</FileServicesProvider>
+    </FileManagerContext.Provider>
+  );
 }
 
 export function useFileManager(): FileManagerContextType {
-  const context = useContext(FileManagerContext);
+  const context = useContext(FileManagerContext) as FileManagerContextType | undefined;
   if (context === undefined) {
     throw new Error('useFileManager must be used within a FileManagerProvider');
   }
@@ -1402,10 +1651,10 @@ export function useFileManager(): FileManagerContextType {
 /**
  * Non-throwing variant of `useFileManager`. Returns `undefined` when called
  * outside a `FileManagerProvider` instead of throwing. Used by components
- * that optionally read from the file manager context (e.g. `FileSelector`).
+ * that optionally read from the file manager context.
  */
 export function useOptionalFileManager(): FileManagerContextType | undefined {
-  return useContext(FileManagerContext);
+  return useContext(FileManagerContext) as FileManagerContextType | undefined;
 }
 
 /**

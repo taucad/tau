@@ -31,7 +31,6 @@ export const seededIdsStorageKey = 'tau:e2e:chat-attachments';
 export const pdfModelName = 'Haiku 5.5';
 /**
  * An enabled catalog row that reads images but not PDFs (D20), with Low among its reasoning levels.
- * Gemini 3.1 Pro reads PDFs since 267ac20ae1 (#1163).
  */
 export const imageOnlyModelName = 'Grok 4.7';
 

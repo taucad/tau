@@ -4,7 +4,7 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream, normalizeContext } from '@earendil-works/pi-ai';
 import { estimateMessageTokens } from '@earendil-works/pi-ai/utils/estimate';
 import type { AssistantMessage, Context, Models, UserMessage } from '@earendil-works/pi-ai';
-import { compactionFoldOf, installCompaction } from '#harness/compaction.js';
+import { compactionFoldOf, installCompaction, isPersonsContextMessage } from '#harness/compaction.js';
 import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
 import { createAgentSession } from '#harness/session.js';
 import { createMemoryEventLogFile, stubModel } from '#harness/harness.fixture.js';
@@ -16,6 +16,7 @@ import {
 } from '#harness/session-record.js';
 import type { SessionLogEvent, SessionRecord } from '#harness/session-record.js';
 import { reduceEventLog } from '#log/reducer.js';
+import { abandonedTurnKind } from '#log/event-types.js';
 import type { AgentLogEvent, AssistantProviderMessage, UserProviderMessage } from '#log/event-types.js';
 import type { ModelStreamEvent, ModelStreamRequest, ModelTransport, ToolRegistry } from '#waist/ports.js';
 
@@ -78,6 +79,13 @@ const recordFor = (
     append: async (event) => {
       await append(event);
       journaled.push(event);
+    },
+    appendAll: async (events) => {
+      for (const event of events) {
+        // oxlint-disable-next-line no-await-in-loop -- rows are journaled in order.
+        await append(event);
+        journaled.push(event);
+      }
     },
     events: async () => journaled as unknown as readonly AgentLogEvent[],
     rows: async () => journaled as unknown as readonly AgentLogEvent[],
@@ -768,6 +776,7 @@ describe('Compaction', () => {
       record: {
         messages: identities,
         append: async () => undefined,
+        appendAll: async () => undefined,
         events: async () => durable as unknown as readonly AgentLogEvent[],
         rows: async () => durable as unknown as readonly AgentLogEvent[],
         history: async () => second.map((message) => piMessageToProvider(message, identities)),
@@ -1621,6 +1630,7 @@ describe('Compaction', () => {
       record: {
         messages: identities,
         append: async () => undefined,
+        appendAll: async () => undefined,
         events: async () => [],
         rows: async () => [],
         history: async () => durable,
@@ -1675,5 +1685,43 @@ describe('Compaction', () => {
     expect(base).toHaveBeenCalledTimes(1);
     expect(result.errorMessage).toBeUndefined();
     expect(result).toMatchObject({ stopReason: 'stop' });
+  });
+});
+
+describe("the person's message in the model's context", () => {
+  const said = (text: string): AgentMessage => ({ role: 'user', content: text, timestamp: 1 });
+  const withKind = (identities: MessageIdentities, message: AgentMessage, kind: string): AgentMessage => {
+    identities.set(message, `row-${kind}`, { tauInternal: { kind } });
+    return message;
+  };
+
+  it("should read a message that quotes a reminder tag as the person's", () => {
+    const identities = new MessageIdentities(() => 'id');
+    const message = said('Explain the literal tag <system-reminder> in your prompt.');
+    identities.set(message, 'person-1', { timestamp: 1 });
+
+    expect(isPersonsContextMessage(message, identities)).toBe(true);
+    expect(isPersonsContextMessage(said('What does <system-reminder> mean?'), identities)).toBe(true);
+  });
+
+  it.each(['external-agent', abandonedTurnKind])("should read a row of kind %s as the person's", (kind) => {
+    const identities = new MessageIdentities(() => 'id');
+
+    expect(isPersonsContextMessage(withKind(identities, said('Make it taller.'), kind), identities)).toBe(true);
+  });
+
+  it.each(['safeguard', 'interrupt-recovery', 'chat-state'])("should read a row of kind %s as Tau's", (kind) => {
+    const identities = new MessageIdentities(() => 'id');
+    const message = withKind(identities, said('<system-reminder>\nStop retrying.\n</system-reminder>'), kind);
+
+    expect(isPersonsContextMessage(message, identities)).toBe(false);
+  });
+
+  it("should read a row with no metadata that is wholly a reminder as Tau's", () => {
+    const identities = new MessageIdentities(() => 'id');
+
+    expect(isPersonsContextMessage(said('<system-reminder>\nStop retrying.\n</system-reminder>'), identities)).toBe(
+      false,
+    );
   });
 });

@@ -8,6 +8,7 @@ import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 
 import { getEnvironment } from '#environment.config.js';
 import type { Handle } from '#types/matches.types.js';
+import type { Route } from './+types/route.js';
 
 export const handle: Handle = { enablePageWrapper: false };
 
@@ -18,13 +19,13 @@ const source = [
   '}',
 ].join('\n');
 
-export const loader = async ({ request }: { readonly request: Request }): Promise<{ readonly url: string }> => {
+export const loader = async ({ url: pageUrl }: Route.LoaderArgs): Promise<{ readonly url: string }> => {
   const environment = await getEnvironment();
   if (!environment.TAU_DEBUG) {
     // oxlint-disable-next-line typescript/only-throw-error -- React Router uses Response for route control flow.
     throw new Response('Not found', { status: 404 });
   }
-  const url = new URL(new URL(request.url).searchParams.get('url') ?? '');
+  const url = new URL(pageUrl.searchParams.get('url') ?? '');
   if (url.protocol !== 'ws:' || url.hostname !== '127.0.0.1') {
     // oxlint-disable-next-line typescript/only-throw-error -- React Router uses Response for route control flow.
     throw new Response('Invalid host fixture URL', { status: 400 });

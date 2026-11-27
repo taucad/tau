@@ -2,16 +2,25 @@ import { describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { CloudLoadRecord, CloudRequestCounts, CloudStandInDelays } from '#support/cloud-stand-ins.js';
-import { waitForOfflineShell } from '#support/billing-usage-fixture.js';
+import { setTargetOffline, waitForOfflineShell } from '#support/billing-usage-fixture.js';
 import {
   cloudDefectRow,
   cloudLoadProbe,
   cloudStandInCommands,
+  cloudStandInPaths,
   cloudStandInOwner,
   cloudStandInProject,
   readCloudLoadRecord,
   recordCloudLoad,
 } from '#support/cloud-stand-ins.js';
+
+/** F14: what an offline reload of a project draws. */
+type OfflineRead = {
+  readonly url: string;
+  readonly frame: boolean;
+  readonly workspace: boolean;
+  readonly alerts: readonly string[];
+};
 
 /**
  * The cloud-build load tier (lane A0.11, `ui-e2e:test:e2e:cloud-load`): the loading defects a self-host build cannot
@@ -153,6 +162,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
+      // Expected-failure: @rifont until 2026-12-15
       expectedFailure: true,
       title: 'N2: requests get-session and /v1/agents once per load of a project route',
     },
@@ -258,7 +268,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await target.navigate('/');
       await waitForSettledHome();
       const record = await keep('k-b-listing-late');
-      const waits = record.cloudStates.filter((state) => state.text.includes('Loading Tau Cloud projects'));
+      const waits = record.cloudStates.filter((state) => state.text.includes('Loading cloud projects'));
       precondition(waits.length > 0, 'K-b: the Tau Cloud wait was never shown');
       const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
       await defect(() => {
@@ -299,7 +309,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       );
       await target.delay(settleWindow);
       await cloud.uiReadCloudRequestCounts(true);
-      await target.click(selectors.getByRole('button', { name: 'Retry Tau Cloud' }));
+      await target.click(selectors.getByRole('button', { name: 'Try loading cloud projects again' }));
       /* Long enough for react-query's own retries of a failed listing (1, 2 and 4 s) to be counted. */
       await target.delay(retryWatch);
       const counts = await cloud.uiReadCloudRequestCounts();
@@ -309,7 +319,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await defect(() => {
         expect(
           {
-            words: alerts.every((state) => state.text.includes('Tau Cloud projects not loaded')),
+            words: alerts.every((state) => state.text.includes('Couldn’t load cloud projects')),
             inHeader: alerts.every((state) => state.inHeader),
             gridMoved: tops.length > 1,
             retryRequests: counts.projects,
@@ -335,10 +345,10 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await target.navigate('/');
       await waitForSettledHome();
       const record = await keep('k-d-listing-long');
-      const slow = record.cloudStates.filter((state) => state.text.includes('Still loading Tau Cloud projects'));
+      const slow = record.cloudStates.filter((state) => state.text.includes('Still loading cloud projects'));
       await defect(() => {
         expect(
-          slow.some((state) => state.inHeader && state.t >= slowWait && state.text.includes('Retry')),
+          slow.some((state) => state.inHeader && state.t >= slowWait && state.text.includes('Try again')),
           `K-d: the Tau Cloud states shown ${JSON.stringify(record.cloudStates)}`,
         ).toBe(true);
       });
@@ -352,9 +362,10 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       title: `U24: paints the usage shell within ${String(shellPaintBound)} ms while its document is stalled ${String(documentStall)} ms, the service worker installed`,
     },
     async (defect) => {
+      await target.commands.uiOpenTarget({ serviceWorker: true });
       await openSignedIn();
       await target.navigate('/usage');
-      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-offline-shell-/u);
+      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-precache-/u);
       const load = await stalledDocument(target.commands).uiOpenWithStalledDocument('/usage', documentStall);
       await target.writeArtifact('cloud-load-gate/u24-document-stalled.json', `${JSON.stringify(load, null, 2)}\n`);
       expect(load.stalledRequests, 'the usage document was never held, so nothing forced the stall').toBeGreaterThan(0);
@@ -366,4 +377,91 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       });
     },
   );
+
+  /*
+   * F14 (A15b2, programme control 2026-11-16T12:12Z): with the service worker installed and the browser offline, a
+   * reload of a project on this device draws the workspace frame and the workspace, with no error state.
+   */
+  cloudDefectRow(
+    {
+      api: test,
+      // Expected-failure: @rifont until 2026-12-15
+      expectedFailure: true,
+      title:
+        'F14: an offline reload of a project on this device renders the workspace frame and the workspace, the service worker installed',
+    },
+    async (defect) => {
+      await target.commands.uiOpenTarget({ serviceWorker: true });
+      await openSignedIn();
+      const route = await seedLocalProject();
+      await waitForSettledProject();
+      /* The page registers the service worker outside a project workspace (B-27); the project then opens under it,
+         which caches its deferred files on first use. */
+      await target.navigate('/projects');
+      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-precache-/u);
+      await target.navigate(route);
+      await waitForSettledProject();
+      await setTargetOffline(true);
+      let reloadError = '';
+      let offline: OfflineRead;
+      /* Back online whatever happens, so a later row never runs offline. */
+      try {
+        try {
+          await target.reload();
+        } catch (error) {
+          reloadError = error instanceof Error ? error.message.split('\n')[0]! : String(error);
+        }
+        const readOffline = async (): Promise<OfflineRead> =>
+          target.evaluate(() => ({
+            url: location.href,
+            frame: document.querySelector('[data-slot="workspace-frame"]') !== null,
+            workspace: document.querySelector('[data-project-workspace]') !== null,
+            alerts: [...document.querySelectorAll('[role="alert"]')].map((node) =>
+              node.textContent.trim().slice(0, 120),
+            ),
+          }));
+        /* Up to 30 s for the workspace; a page that never draws it is the defect, read as it stands. */
+        await target
+          .waitFor(() => document.querySelector('[data-project-workspace]') !== null, undefined, { timeout: 30_000 })
+          .catch(() => undefined);
+        /* Not caught: a failed read is a harness fault, which must fail the row, not stand as the defect. */
+        offline = await readOffline();
+        await target.writeArtifact(
+          'cloud-load-gate/f14-offline-reload.json',
+          `${JSON.stringify({ route, reloadError, offline }, null, 2)}\n`,
+        );
+      } finally {
+        await setTargetOffline(false);
+      }
+      await defect(() => {
+        expect(
+          { frame: offline.frame, workspace: offline.workspace, alerts: offline.alerts },
+          `F14: after an offline reload of ${route} (${reloadError || 'the reload resolved'}), the page at ${offline.url || 'unknown'}`,
+        ).toEqual({ frame: true, workspace: true, alerts: [] });
+      });
+    },
+  );
+
+  /* K-e (A15e), report-only, ruled by programme control on 2026-11-15: the first open of a Tau Cloud project with its
+     download held. The viewer stage should stay mounted and show the status pill with the download's percent, never be
+     replaced. This tier cannot force it: its stand-ins answer only the session, the listing and the paired hosts. The
+     listing names `cloudStandInProject` as on the Tau remote, but nothing here serves its repository (see N2's
+     project-route note), so no clone or large-object download ever starts. The forced row needs a stand-in for the API's git proxy that serves a clone of `cloudStandInProject` with
+     at least one large object, and holds either the clone (`git-upload-pack`) or the large-object answer
+     (`info/lfs/objects/batch` or the object itself). That need joins the git-proxy stand-in item carried to A10's
+     handback. The stage's own half is pinned by `chat-viewer.test.tsx` (the download pill with its percent, the
+     failure overlay) and the frame row F8. This row records the gap and fails once a stand-in answers anything else,
+     so the lane that adds one turns it into the forced row. */
+  test('K-e report-only: the first open of a Tau Cloud project with its download held cannot be forced in this tier', async ({
+    annotate,
+  }) => {
+    await annotate(
+      'K-e report-only: needs a git-proxy stand-in serving the Tau-remote project with a large object, holding its clone or its large-object answer',
+      'notice',
+    );
+    expect(
+      Object.keys(cloudStandInPaths),
+      'K-e: a stand-in now answers more than the session, the listing and the paired hosts; turn this row into the forced K-e row',
+    ).toEqual(['session', 'projects', 'agents']);
+  });
 });

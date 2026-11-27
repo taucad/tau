@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Chat } from '@taucad/chat';
-import type { ChatStorage } from '#types/storage.types.js';
+import type { ChatStorage } from '@taucad/project-library/types/chat-storage.types';
 import { QueryClient } from '@tanstack/react-query';
-import { ensureFocusedChatForProject, isKnownChatId } from '#runtime/project-runtime.helpers.js';
+import type { ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
+import { ensureFocusedChatForProject, isKnownChatId, mayCreateChat } from '#runtime/project-runtime.helpers.js';
 
 const makeChat = (overrides: Partial<Chat> & { id: string }): Chat => ({
   resourceId: 'project_test',
@@ -11,6 +12,42 @@ const makeChat = (overrides: Partial<Chat> & { id: string }): Chat => ({
   createdAt: 1000,
   updatedAt: 1000,
   ...overrides,
+});
+
+const cloudStatus = (
+  sync: Partial<RevisionStatusProjection['sync']>,
+  readiness: ProjectReadiness,
+): Pick<RevisionStatusProjection, 'sync' | 'remote' | 'readiness'> =>
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- only the read fields matter here.
+  ({
+    remote: { kind: 'tau', phase: 'connected' },
+    readiness,
+    sync: { state: 'pending', online: true, pendingCount: 0, hasAppliedRemote: false, chats: 'loading', ...sync },
+  }) as Pick<RevisionStatusProjection, 'sync' | 'remote' | 'readiness'>;
+
+/* SP2h: a chat may be made once the chats may open, not once the whole apply lands. */
+describe('mayCreateChat', () => {
+  it('lets a cloud open make a chat once its chats land and its entry closure is readable', () => {
+    expect(mayCreateChat(cloudStatus({ pullPhase: 'applying', chats: 'ready' }, 'entryReady'), true, true)).toBe(true);
+    expect(mayCreateChat(cloudStatus({ pullPhase: 'applying', chats: 'loading' }, 'entryReady'), true, true)).toBe(
+      false,
+    );
+    expect(mayCreateChat(cloudStatus({ pullPhase: 'applying', chats: 'ready' }, 'treeReady'), true, true)).toBe(false);
+    expect(mayCreateChat(cloudStatus({ pullPhase: 'applying', chats: 'ready' }, 'entryReady'), true, false)).toBe(
+      false,
+    );
+    expect(mayCreateChat(cloudStatus({ state: 'queued', chats: 'ready' }, 'entryReady'), true, true)).toBe(false);
+  });
+  it('asks only for the chats outside a cloud open, and nothing of a project with no Tau remote', () => {
+    expect(mayCreateChat(cloudStatus({ chats: 'ready' }, 'connected'), false, true)).toBe(true);
+    expect(mayCreateChat(cloudStatus({ chats: 'loading' }, 'filled'), false, true)).toBe(false);
+    /* Chat sync off: no history is coming, so a chat may be made at once, during an open or after it. */
+    expect(mayCreateChat(cloudStatus({ chats: 'disabled' }, 'connected'), false, true)).toBe(true);
+    expect(mayCreateChat(cloudStatus({ pullPhase: 'applying', chats: 'disabled' }, 'entryReady'), true, true)).toBe(
+      true,
+    );
+    expect(mayCreateChat(undefined, false, true)).toBe(true);
+  });
 });
 
 describe('ensureFocusedChatForProject', () => {

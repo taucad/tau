@@ -30,8 +30,8 @@ import {
 
 const models = {
   anthropic: { id: 'anthropic-claude-haiku-5.5', providerId: 'anthropic' },
-  openai: { id: 'openai-gpt-5.6-sol', providerId: 'openai' },
-  vertex: { id: 'google-gemini-3.8-flash', providerId: 'vertexai' },
+  openai: { id: 'openai-gpt-6-sol', providerId: 'openai' },
+  vertex: { id: 'google-gemini-4-hydrogen', providerId: 'vertexai' },
 } as const satisfies Record<string, LiveModel>;
 
 const pairs: ReadonlyArray<readonly [string, LiveModel, LiveModel]> = [

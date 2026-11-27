@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import type { Editor } from '@tiptap/core';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { captureDictation } from '#components/dictation/dictation-capture.js';
 import type { transcribeDictation } from '#components/dictation/dictation-client.js';
 import type { AcpSessionData } from '@taucad/chat';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import type { PaintedSendVerdict } from '#components/chat/chat-textarea-desktop.js';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
@@ -33,6 +34,8 @@ const execution: { current: ChatComposerContextValue['execution']['execution'] }
   current: { kind: 'tau', model: 'm' },
 };
 const setActiveExecution = vi.fn();
+/* The chat whose draft the composer edits; the composer stays mounted when the person moves to another chat. */
+const draftOwner: { current: unknown } = { current: undefined };
 const placements: { current: readonly AgentHostPlacementTarget[] } = { current: [] };
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
@@ -45,6 +48,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
       setActivePreference: vi.fn(),
     },
     execution: { execution: execution.current, setActiveExecution },
+    draftActorRef: draftOwner.current,
     contextUsage: undefined,
   }),
 }));
@@ -385,13 +389,22 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       isFocused?: boolean;
       earlyInput?: EarlyChatInput;
       setDraftText?: (text: string) => void;
+      isSubmitDisabled?: boolean;
+      /** Read at each render, so a row can change the verdict between renders. */
+      paintedSendVerdict?: { current: PaintedSendVerdict | undefined };
     } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
-    const element = (session: AcpSessionData, text = inputText): React.JSX.Element => (
+    const element = (
+      session: AcpSessionData,
+      text = inputText,
+      isSubmitDisabled = options.isSubmitDisabled,
+    ): React.JSX.Element => (
       <TooltipProvider>
         <ChatTextareaDesktop
           earlyInput={options.earlyInput}
+          paintedSendVerdict={options.paintedSendVerdict?.current}
+          isSubmitDisabled={isSubmitDisabled}
           enableAutoFocus={options.enableAutoFocus ?? false}
           mode={options.mode}
           enableMobileCollapse={options.enableMobileCollapse}
@@ -436,8 +449,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     const view = render(element(acpSessionData));
     return {
       ...view,
-      rerenderWith: (session: AcpSessionData, text?: string): void => {
-        view.rerender(element(session, text));
+      rerenderWith: (session: AcpSessionData, text?: string, isSubmitDisabled?: boolean): void => {
+        view.rerender(element(session, text, isSubmitDisabled));
       },
     };
   };
@@ -465,6 +478,35 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     },
   );
 
+  /* Review round 2: a painted draft's selection is carried, as an edit's is (P-a). */
+  it("should carry a painted draft's selection into the editor", async () => {
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() =>
+      Object.assign(createRange(), {
+        getClientRects: () => [],
+        getBoundingClientRect: () => new DOMRect(),
+      }),
+    );
+    renderComposer('Make a gear', codexSession, {
+      earlyInput: {
+        text: 'Make a gear',
+        edited: false,
+        focused: true,
+        focusUnclaimed: false,
+        start: 0,
+        end: 11,
+        direction: 'none',
+        scrollTop: 0,
+        submitQueued: false,
+        prefilled: true,
+      },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toHaveFocus();
+      expect(globalThis.getSelection()?.toString()).toBe('Make a gear');
+    });
+  });
+
   /* R11: Home's native input held focus, with the composer's outline, until this replaced it. The editor
    * takes focus in the same commit, so no frame paints the box unfocused and no key typed during the
    * handover lands on the page. */
@@ -486,6 +528,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         start: 0,
         end: 0,
         direction: 'none',
+        scrollTop: 0,
+        submitQueued: false,
       },
     });
     // No waiting: a frame's delay is where typed keys were lost.
@@ -510,6 +554,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           start: 0,
           end: 0,
           direction: 'none',
+          scrollTop: 0,
+          submitQueued: false,
         },
       });
       const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
@@ -518,6 +564,362 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     } finally {
       other.remove();
     }
+  });
+
+  /* P4: Enter in the native input before the editor existed is one send, made once it holds the adopted text. */
+  describe('a submit queued in the native input', () => {
+    const queued = (text: string): EarlyChatInput => ({
+      text,
+      edited: true,
+      focused: true,
+      focusUnclaimed: false,
+      start: text.length,
+      end: text.length,
+      direction: 'none',
+      scrollTop: 0,
+      submitQueued: true,
+    });
+    beforeEach(() => {
+      const createRange = document.createRange.bind(document);
+      vi.spyOn(document, 'createRange').mockImplementation(() =>
+        Object.assign(createRange(), {
+          getClientRects: () => [],
+          getBoundingClientRect: () => new DOMRect(),
+        }),
+      );
+    });
+
+    it('should send once, after adoption', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await vi.waitFor(() => {
+        expect(submit).toHaveBeenCalledOnce();
+      });
+      view.rerenderWith(codexSession);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(submit).toHaveBeenCalledOnce();
+    });
+
+    /* The draft the composer last knew can still be the previous one when the queued send runs: the adopted text
+     * travels with the send instead of being read back from the parent. */
+    it('should send the adopted text, not the previous draft', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      renderComposer('An older draft.', codexSession, {
+        handleSubmit: submit,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await vi.waitFor(() => {
+        expect(submit).toHaveBeenCalledOnce();
+      });
+      expect(submit.mock.calls[0]?.[0]).toBe('Make a bracket.');
+    });
+
+    /* A first visit has no model until the catalog answers, and a send then is refused: the queued one waits for it. */
+    it('should keep the send queued until the chat has a model to send with', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      execution.current = { kind: 'tau', model: '' };
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(submit).not.toHaveBeenCalled();
+
+      execution.current = { kind: 'tau', model: 'm' };
+      view.rerenderWith(codexSession);
+
+      await vi.waitFor(() => {
+        expect(submit).toHaveBeenCalledOnce();
+      });
+      expect(submit.mock.calls[0]?.[0]).toBe('Make a bracket.');
+    });
+
+    /* STO-25 SP5: the composer mounts and takes the native input before the catalog names a model; only the send
+     * waits for it. */
+    it('should mount the editor with the queued text before the catalog names a model, and send only once it has', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      execution.current = { kind: 'tau', model: '' };
+      try {
+        const view = renderComposer('Make a bracket.', codexSession, {
+          handleSubmit: submit,
+          earlyInput: queued('Make a bracket.'),
+        });
+        expect(await screen.findByRole('textbox')).toHaveTextContent('Make a bracket.');
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(submit).not.toHaveBeenCalled();
+
+        execution.current = { kind: 'tau', model: 'm' };
+        view.rerenderWith(codexSession);
+
+        await vi.waitFor(() => {
+          expect(submit).toHaveBeenCalledOnce();
+        });
+      } finally {
+        execution.current = { kind: 'tau', model: 'm' };
+      }
+    });
+
+    /* Any edit after the Enter cancels it, as in the native input: an edit undone back to the same text included. */
+    it('should drop the queued send after an edit, even one undone back to the queued text', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        isSubmitDisabled: true,
+        earlyInput: queued('Make a bracket.'),
+      });
+      const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+      expect(editor).toBeDefined();
+      act(() => {
+        editor!.commands.insertContent('!');
+      });
+      act(() => {
+        editor!.commands.undo();
+      });
+      expect(editor!.getText()).toBe('Make a bracket.');
+
+      view.rerenderWith(codexSession, undefined, false);
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    /* The composer stays mounted when the person moves to another chat: the Enter was for the chat it was pressed in. */
+    it('should drop the queued send when the composer moves to another chat', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      draftOwner.current = { chat: 'one' };
+      onTestFinished(() => {
+        draftOwner.current = undefined;
+      });
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        isSubmitDisabled: true,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, 'The other chat draft.', true);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      view.rerenderWith(codexSession, 'The other chat draft.', false);
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    /* Send while dictating stops the recording first and sends its words; the queued send cannot, so it waits. */
+    it('should keep the send queued while dictation is running', async () => {
+      dictationDependencies.available = true;
+      dictationDependencies.capture.mockResolvedValue({
+        finish: async () => new Blob([], { type: 'audio/wav' }),
+        cancel: noop,
+      });
+      const submit = vi.fn(async (_text?: string) => undefined);
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        isSubmitDisabled: true,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await userEvent.click(await screen.findByRole('button', { name: 'Dictate' }));
+      await screen.findByRole('button', { name: 'Stop dictation' });
+
+      view.rerenderWith(codexSession, undefined, false);
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    /* A send that is not permitted yet stays queued; the gesture is spent only when it is sent. */
+    it('should keep the send queued while sending is not permitted, then send once', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        isSubmitDisabled: true,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(submit).not.toHaveBeenCalled();
+      view.rerenderWith(codexSession, undefined, false);
+      await vi.waitFor(() => {
+        expect(submit).toHaveBeenCalledOnce();
+      });
+      expect(submit.mock.calls[0]?.[0]).toBe('Make a bracket.');
+      view.rerenderWith(codexSession, undefined, false);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(submit).toHaveBeenCalledOnce();
+    });
+  });
+
+  /* One editor serves every chat, so its undo history has to end where the draft it edits ends. */
+  describe('undo after the composer moves to another chat', () => {
+    const editorOf = (container: HTMLElement): Editor => {
+      const editor = container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+      expect(editor).toBeDefined();
+      return editor!;
+    };
+    const settle = async (): Promise<void> => {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    };
+    /* The history plugin groups steps made within 500 ms; a chat switch comes long after the last keystroke. */
+    const later = (): void => {
+      vi.setSystemTime(Date.now() + 2000);
+    };
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      draftOwner.current = { chat: 'one' };
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      draftOwner.current = undefined;
+    });
+
+    it("should not bring the previous chat's draft back over this chat's", async () => {
+      const setDraftText = vi.fn<(text: string) => void>();
+      const view = renderComposer('', codexSession, { setDraftText });
+      const editor = editorOf(view.container);
+      act(() => {
+        editor.commands.insertContent('A plan for chat one');
+      });
+      view.rerenderWith(codexSession, 'A plan for chat one');
+      await settle();
+      setDraftText.mockClear();
+      later();
+
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, 'The other chat draft.');
+      await settle();
+      later();
+      act(() => {
+        editor.commands.undo();
+      });
+
+      expect(editor.getText()).toBe('The other chat draft.');
+      expect(setDraftText).not.toHaveBeenCalled();
+    });
+
+    it("should not bring the previous chat's draft into an empty chat", async () => {
+      const setDraftText = vi.fn<(text: string) => void>();
+      const view = renderComposer('', codexSession, { setDraftText });
+      const editor = editorOf(view.container);
+      act(() => {
+        editor.commands.insertContent('A plan for chat one');
+      });
+      view.rerenderWith(codexSession, 'A plan for chat one');
+      await settle();
+      setDraftText.mockClear();
+      later();
+
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, '');
+      await settle();
+      later();
+      act(() => {
+        editor.commands.undo();
+      });
+
+      expect(editor.getText()).toBe('');
+      expect(setDraftText).not.toHaveBeenCalled();
+    });
+
+    it('should not bring back text the person deleted in the previous chat when both drafts are empty', async () => {
+      const setDraftText = vi.fn<(text: string) => void>();
+      const view = renderComposer('', codexSession, { setDraftText });
+      const editor = editorOf(view.container);
+      act(() => {
+        editor.commands.insertContent('A plan for chat one');
+      });
+      later();
+      act(() => {
+        editor.commands.clearContent(true);
+      });
+      view.rerenderWith(codexSession, '');
+      await settle();
+      setDraftText.mockClear();
+      later();
+
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, '');
+      await settle();
+      later();
+      act(() => {
+        editor.commands.undo();
+      });
+
+      expect(editor.getText()).toBe('');
+      expect(setDraftText).not.toHaveBeenCalled();
+    });
+
+    /* The chat moved to can report its draft after the switch: empty first, then the text its draft restores. */
+    it('should not undo a draft that arrives after the switch back to empty', async () => {
+      const setDraftText = vi.fn<(text: string) => void>();
+      const view = renderComposer('', codexSession, { setDraftText });
+      const editor = editorOf(view.container);
+      act(() => {
+        editor.commands.insertContent('A plan for chat one');
+      });
+      view.rerenderWith(codexSession, 'A plan for chat one');
+      await settle();
+      later();
+
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, '');
+      await settle();
+      later();
+      view.rerenderWith(codexSession, 'The restored draft.');
+      await settle();
+      setDraftText.mockClear();
+      later();
+      act(() => {
+        editor.commands.undo();
+      });
+
+      expect(editor.getText()).toBe('The restored draft.');
+      expect(setDraftText).not.toHaveBeenCalled();
+    });
+
+    it('should still undo an edit made in the chat the composer moved to', async () => {
+      const view = renderComposer('', codexSession);
+      const editor = editorOf(view.container);
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, 'The other chat draft.');
+      await settle();
+      later();
+      act(() => {
+        editor.commands.focus('end');
+        editor.commands.insertContent(' More.');
+      });
+      expect(editor.getText()).toBe('The other chat draft. More.');
+
+      act(() => {
+        editor.commands.undo();
+      });
+
+      expect(editor.getText()).toBe('The other chat draft.');
+    });
   });
 
   it('should not draw a focus outline when the native input was not focused', () => {
@@ -530,10 +932,505 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         start: 0,
         end: 0,
         direction: 'none',
+        scrollTop: 0,
+        submitQueued: false,
       },
     });
     const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
     expect(box).not.toHaveClass('focus-outline');
+  });
+
+  /* A15d (C10, H-f, F7): Enter pressed before this composer was here is replayed once, through the submit Enter calls. */
+  it('should replay a queued send once, through the submit Enter calls', async () => {
+    const handleSubmit = vi.fn(asyncNoop);
+    const earlyInput: EarlyChatInput = {
+      text: 'Make a bracket.',
+      edited: true,
+      focused: true,
+      focusUnclaimed: false,
+      start: 15,
+      end: 15,
+      direction: 'none',
+      scrollTop: 0,
+      submitQueued: true,
+    };
+    const view = renderComposer('Make a bracket.', codexSession, { earlyInput, handleSubmit });
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalledOnce();
+    });
+    view.rerenderWith(codexSession);
+    await Promise.resolve();
+    expect(handleSubmit).toHaveBeenCalledOnce();
+  });
+
+  const queuedEarlyInput: EarlyChatInput = {
+    text: 'Make a bracket.',
+    edited: true,
+    focused: true,
+    focusUnclaimed: false,
+    start: 15,
+    end: 15,
+    direction: 'none',
+    scrollTop: 0,
+    submitQueued: true,
+  };
+
+  /* Ruling 2026-11-17T03:28Z: an Enter on a painted draft nobody edited queued visibly; it is replayed only when the chat's
+   * record holds that text, and otherwise cancelled with the record's text shown and a status saying why. */
+  describe('an Enter queued on a painted draft', () => {
+    const paintedQueued: EarlyChatInput = {
+      text: 'Fillet it',
+      edited: false,
+      focused: true,
+      focusUnclaimed: false,
+      start: 9,
+      end: 9,
+      direction: 'none',
+      scrollTop: 0,
+      submitQueued: true,
+      prefilled: true,
+    };
+
+    it('should hold it, shown as queued, while the record is unread, and send it once the record holds the same text', async () => {
+      const handleSubmit = vi.fn(async (_text?: string) => undefined);
+      const verdict: { current: PaintedSendVerdict | undefined } = { current: { kind: 'wait' } };
+      const view = renderComposer('Fillet it', codexSession, {
+        earlyInput: paintedQueued,
+        handleSubmit,
+        paintedSendVerdict: verdict,
+      });
+      await waitFor(() => {
+        expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+      });
+      expect(screen.getByRole('status')).toHaveTextContent('Send queued. Press Escape to cancel.');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(handleSubmit).not.toHaveBeenCalled();
+
+      verdict.current = { kind: 'send' };
+      view.rerenderWith(codexSession, 'Fillet it');
+      await waitFor(() => {
+        expect(handleSubmit).toHaveBeenCalledOnce();
+      });
+      expect(handleSubmit.mock.calls[0]?.[0]).toBe('Fillet it');
+    });
+
+    it('should cancel it when the record holds another text, show that text, and say why', async () => {
+      const handleSubmit = vi.fn(asyncNoop);
+      const setDraftText = vi.fn();
+      const verdict: { current: PaintedSendVerdict | undefined } = { current: { kind: 'wait' } };
+      const view = renderComposer('Fillet it', codexSession, {
+        earlyInput: paintedQueued,
+        handleSubmit,
+        setDraftText,
+        paintedSendVerdict: verdict,
+      });
+      await waitFor(() => {
+        expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+      });
+
+      /* A record with no draft at all: the painted text is not the record's, so it goes too. */
+      verdict.current = { kind: 'cancel', recordText: '' };
+      view.rerenderWith(codexSession, 'Fillet it');
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Queued send cancelled: the saved draft differs.');
+      });
+      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+      const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+      expect(editor!.getText()).toBe('');
+      expect(setDraftText).toHaveBeenLastCalledWith('');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(handleSubmit).not.toHaveBeenCalled();
+    });
+
+    /* Review round 21: Home's record can still be unread at adoption; one that loads another text before the send is
+     * permitted replaces the painted draft, and the queued Enter must not send that text. */
+    it('should cancel it with the notice when the draft changes to another text before the send is permitted', async () => {
+      const handleSubmit = vi.fn(asyncNoop);
+      const view = renderComposer('Fillet it', codexSession, {
+        earlyInput: paintedQueued,
+        handleSubmit,
+        isSubmitDisabled: true,
+      });
+      await waitFor(() => {
+        expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+      });
+      view.rerenderWith(codexSession, 'A hinge for the door', true);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      view.rerenderWith(codexSession, 'A hinge for the door', false);
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Queued send cancelled: the saved draft differs.');
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(handleSubmit).not.toHaveBeenCalled();
+      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+    });
+
+    /* Home decides at adoption (ruling 2026-11-17T03:43Z): its early input carries the cancellation and the record's text. */
+    it('should cancel it with the same notice when the early input says the record holds another text', async () => {
+      const handleSubmit = vi.fn(asyncNoop);
+      const view = renderComposer('A hinge for the door', codexSession, {
+        earlyInput: { ...paintedQueued, paintedSendCancelled: { recordText: 'A hinge for the door' } },
+        handleSubmit,
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Queued send cancelled: the saved draft differs.');
+      });
+      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(handleSubmit).not.toHaveBeenCalled();
+    });
+  });
+
+  /* Home's creation location can still be loading at adoption (H-f): the queued send waits, shown on Send. */
+  it('should hold a queued send, shown as queued, until nothing refuses it', async () => {
+    const handleSubmit = vi.fn(asyncNoop);
+    const view = renderComposer('Make a bracket.', codexSession, {
+      earlyInput: queuedEarlyInput,
+      handleSubmit,
+      isSubmitDisabled: true,
+    });
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+    });
+    expect(handleSubmit).not.toHaveBeenCalled();
+    view.rerenderWith(codexSession, 'Make a bracket.', false);
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalledOnce();
+    });
+    expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+  });
+
+  it.each([
+    {
+      name: 'an edit in the editor',
+      cancel: (view: ReturnType<typeof renderComposer>): void => {
+        const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+        act(() => {
+          editor!.commands.insertContent(' Twice');
+        });
+      },
+    },
+    {
+      name: 'Escape',
+      cancel: (_view: ReturnType<typeof renderComposer>, box: Element): void => {
+        fireEvent.keyDown(box, { key: 'Escape' });
+      },
+    },
+  ])('should cancel a held queued send on $name', async ({ cancel }) => {
+    const handleSubmit = vi.fn(asyncNoop);
+    const view = renderComposer('Make a bracket.', codexSession, {
+      earlyInput: queuedEarlyInput,
+      handleSubmit,
+      isSubmitDisabled: true,
+    });
+    const box = await waitFor(() => {
+      const queued = view.container.querySelector('[data-queued-send]');
+      expect(queued).not.toBeNull();
+      return queued!;
+    });
+    cancel(view, box);
+    expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+    view.rerenderWith(codexSession, 'Make a bracket.', false);
+    await Promise.resolve();
+    expect(handleSubmit).not.toHaveBeenCalled();
+  });
+
+  it('should not send for an early input that queued none', async () => {
+    const handleSubmit = vi.fn(asyncNoop);
+    renderComposer('Make a bracket.', codexSession, {
+      handleSubmit,
+      earlyInput: {
+        text: 'Make a bracket.',
+        edited: true,
+        focused: false,
+        focusUnclaimed: true,
+        start: 0,
+        end: 0,
+        direction: 'none',
+        scrollTop: 0,
+        submitQueued: false,
+      },
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(handleSubmit).not.toHaveBeenCalled();
+  });
+
+  /* The project route's served input is handed over once its lane is revealed, after this editor exists (F7). */
+  it('should take an edit handed over after the editor exists, as an edit, with its caret and focus', async () => {
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() =>
+      Object.assign(createRange(), {
+        getClientRects: () => [],
+        getBoundingClientRect: () => new DOMRect(),
+      }),
+    );
+    const setDraftText = vi.fn();
+    const adopted = vi.fn();
+    /* Stable across renders, as the route's are: the draft rehydration effect re-runs on a new list. */
+    const chats: never[] = [];
+    const attachments: never[] = [];
+    const props = (earlyInput?: EarlyChatInput): React.ComponentProps<typeof ChatTextareaDesktop> => ({
+      earlyInput,
+      onEarlyInputAdopted: earlyInput === undefined ? undefined : adopted,
+      enableAutoFocus: false,
+      dragKind: undefined,
+      isSubmitting: false,
+      isAttaching: false,
+      canResume: false,
+      inputText: '',
+      attachments,
+      attachmentDirectory: undefined,
+      sendBlockReason: undefined,
+      attachmentAccept: 'image/png',
+      attachmentInputSupported: true,
+      status: 'ready',
+      formattedCancelKeyCombination: '⇧⌘⌫',
+      treeService: undefined,
+      chats,
+      setDraftText,
+      acpAgentId: 'codex',
+      acpSessionData: codexSession,
+      fileInputReference: { current: null },
+      containerReference: { current: null },
+      focusEditorRef: { current: undefined },
+      addContextChipsRef: { current: undefined },
+      addContextReferencesRef: { current: undefined },
+      handleSubmit: asyncNoop,
+      handleCancelClick: noop,
+      handleDragOver: noop,
+      handleDragLeave: noop,
+      handleDrop: asyncNoop,
+      handlePaste: () => false,
+      handleFileSelect: noop,
+      handleFileChange: noop,
+      handleAddImage: noop,
+      onScreenshotAction: noop,
+      handleTextareaBlur: noop,
+      removeAttachment: noop,
+    });
+    const view = render(
+      <TooltipProvider>
+        <ChatTextareaDesktop {...props()} />
+      </TooltipProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
+    });
+    view.rerender(
+      <TooltipProvider>
+        <ChatTextareaDesktop
+          {...props({
+            text: 'abc',
+            edited: true,
+            focused: true,
+            focusUnclaimed: false,
+            start: 3,
+            end: 3,
+            direction: 'none',
+            scrollTop: 0,
+            submitQueued: false,
+          })}
+        />
+      </TooltipProvider>,
+    );
+    expect(screen.getByRole('textbox')).toHaveTextContent('abc');
+    expect(screen.getByRole('textbox')).toHaveFocus();
+    expect(globalThis.getSelection()?.anchorOffset).toBe(3);
+    expect(setDraftText).toHaveBeenLastCalledWith('abc');
+    expect(adopted).toHaveBeenCalledOnce();
+  });
+
+  /* Review round 6: a painted draft handed over to an editor that holds nothing stays in the box, not as an edit (P-a). */
+  it('should keep a painted draft handed over after the editor exists, not as an edit', async () => {
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() =>
+      Object.assign(createRange(), {
+        getClientRects: () => [],
+        getBoundingClientRect: () => new DOMRect(),
+      }),
+    );
+    const setDraftText = vi.fn();
+    const adopted = vi.fn(() => true);
+    /* Stable across renders, as the route's are: the draft rehydration effect re-runs on a new list. */
+    const chats: never[] = [];
+    const attachments: never[] = [];
+    const props = (earlyInput?: EarlyChatInput): React.ComponentProps<typeof ChatTextareaDesktop> => ({
+      earlyInput,
+      onEarlyInputAdopted: earlyInput === undefined ? undefined : adopted,
+      enableAutoFocus: false,
+      dragKind: undefined,
+      isSubmitting: false,
+      isAttaching: false,
+      canResume: false,
+      inputText: '',
+      attachments,
+      attachmentDirectory: undefined,
+      sendBlockReason: undefined,
+      attachmentAccept: 'image/png',
+      attachmentInputSupported: true,
+      status: 'ready',
+      formattedCancelKeyCombination: '⇧⌘⌫',
+      treeService: undefined,
+      chats,
+      setDraftText,
+      acpAgentId: 'codex',
+      acpSessionData: codexSession,
+      fileInputReference: { current: null },
+      containerReference: { current: null },
+      focusEditorRef: { current: undefined },
+      addContextChipsRef: { current: undefined },
+      addContextReferencesRef: { current: undefined },
+      handleSubmit: asyncNoop,
+      handleCancelClick: noop,
+      handleDragOver: noop,
+      handleDragLeave: noop,
+      handleDrop: asyncNoop,
+      handlePaste: () => false,
+      handleFileSelect: noop,
+      handleFileChange: noop,
+      handleAddImage: noop,
+      onScreenshotAction: noop,
+      handleTextareaBlur: noop,
+      removeAttachment: noop,
+    });
+    const view = render(
+      <TooltipProvider>
+        <ChatTextareaDesktop {...props()} />
+      </TooltipProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
+    });
+    view.rerender(
+      <TooltipProvider>
+        <ChatTextareaDesktop
+          {...props({
+            text: 'Fillet it',
+            edited: false,
+            focused: true,
+            focusUnclaimed: false,
+            start: 3,
+            end: 3,
+            direction: 'none',
+            scrollTop: 0,
+            submitQueued: false,
+            prefilled: true,
+          })}
+        />
+      </TooltipProvider>,
+    );
+    expect(screen.getByRole('textbox')).toHaveTextContent('Fillet it');
+    expect(screen.getByRole('textbox')).toHaveFocus();
+    expect(globalThis.getSelection()?.anchorOffset).toBe(3);
+    /* The draft takes it from the handover (`onEarlyInputAdopted`), open to the record: no edit is written. */
+    expect(setDraftText).not.toHaveBeenCalled();
+    expect(adopted).toHaveBeenCalledOnce();
+  });
+
+  /* Review round 10: the record was read with the painted text before the handover; the caret is still carried. */
+  it('should carry a painted caret when the record already holds the painted text at the handover', async () => {
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() =>
+      Object.assign(createRange(), {
+        getClientRects: () => [],
+        getBoundingClientRect: () => new DOMRect(),
+      }),
+    );
+    const setDraftText = vi.fn();
+    const adopted = vi.fn(() => false);
+    /* Stable across renders, as the route's are: the draft rehydration effect re-runs on a new list. */
+    const chats: never[] = [];
+    const attachments: never[] = [];
+    const props = (earlyInput?: EarlyChatInput, inputText = ''): React.ComponentProps<typeof ChatTextareaDesktop> => ({
+      earlyInput,
+      onEarlyInputAdopted: earlyInput === undefined ? undefined : adopted,
+      enableAutoFocus: false,
+      dragKind: undefined,
+      isSubmitting: false,
+      isAttaching: false,
+      canResume: false,
+      inputText,
+      attachments,
+      attachmentDirectory: undefined,
+      sendBlockReason: undefined,
+      attachmentAccept: 'image/png',
+      attachmentInputSupported: true,
+      status: 'ready',
+      formattedCancelKeyCombination: '⇧⌘⌫',
+      treeService: undefined,
+      chats,
+      setDraftText,
+      acpAgentId: 'codex',
+      acpSessionData: codexSession,
+      fileInputReference: { current: null },
+      containerReference: { current: null },
+      focusEditorRef: { current: undefined },
+      addContextChipsRef: { current: undefined },
+      addContextReferencesRef: { current: undefined },
+      handleSubmit: asyncNoop,
+      handleCancelClick: noop,
+      handleDragOver: noop,
+      handleDragLeave: noop,
+      handleDrop: asyncNoop,
+      handlePaste: () => false,
+      handleFileSelect: noop,
+      handleFileChange: noop,
+      handleAddImage: noop,
+      onScreenshotAction: noop,
+      handleTextareaBlur: noop,
+      removeAttachment: noop,
+    });
+    const view = render(
+      <TooltipProvider>
+        <ChatTextareaDesktop {...props()} />
+      </TooltipProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
+    });
+    view.rerender(
+      <TooltipProvider>
+        <ChatTextareaDesktop
+          {...props(
+            {
+              text: 'Fillet it',
+              edited: false,
+              focused: true,
+              focusUnclaimed: false,
+              start: 3,
+              end: 3,
+              direction: 'none',
+              scrollTop: 0,
+              submitQueued: false,
+              prefilled: true,
+            },
+            'Fillet it',
+          )}
+        />
+      </TooltipProvider>,
+    );
+    expect(screen.getByRole('textbox')).toHaveTextContent('Fillet it');
+    expect(screen.getByRole('textbox')).toHaveFocus();
+    expect(globalThis.getSelection()?.anchorOffset).toBe(3);
+    /* The record holds it already: no edit is written, and the caret is not moved to the end after the commit. */
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(globalThis.getSelection()?.anchorOffset).toBe(3);
+    expect(setDraftText).not.toHaveBeenCalled();
+    expect(adopted).toHaveBeenCalledOnce();
   });
 
   describe('enableMobileCollapse', () => {
@@ -748,6 +1645,35 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     expect(editorContent).not.toHaveClass('overflow-y-auto');
     expect(bar?.parentElement).toBe(editorScroller?.parentElement);
     expect(bar).not.toHaveClass('absolute');
+  });
+
+  /* Review round 9: a painted draft enters the editor as plain text; its tokens are chipped once the draft holds it. */
+  it("chips a painted draft's $skill the agent already advertises, without changing the draft text", async () => {
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    const text = 'Make a render of this using $imagegen';
+    const view = renderComposer(
+      text,
+      { ...codexSession, commands: [{ name: '$imagegen', description: 'Generate images' }] },
+      {
+        earlyInput: {
+          text,
+          edited: false,
+          focused: false,
+          focusUnclaimed: false,
+          start: 0,
+          end: 0,
+          direction: 'none',
+          scrollTop: 0,
+          submitQueued: false,
+          prefilled: true,
+        },
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(view.container.querySelector('.ProseMirror svg')).not.toBeNull();
+    });
+    expect(view.container.querySelector('.ProseMirror')).toHaveTextContent(text);
   });
 
   it('chips a restored $skill once the agent advertises it, without changing the draft text', async () => {

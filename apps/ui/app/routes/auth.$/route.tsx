@@ -152,7 +152,7 @@ export default function AuthPage(): React.JSX.Element {
         <div className='w-full max-w-md text-center'>
           {!isSignedIn && (isError || hasWaitExpired) ? (
             <>
-              <p role='alert'>We couldn&apos;t check your session.</p>
+              <p role='alert'>Couldn&apos;t check that you&apos;re signed in.</p>
               <div className='mt-4 flex justify-center gap-2'>
                 <Button
                   variant='outline'

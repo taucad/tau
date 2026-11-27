@@ -24,19 +24,24 @@
 # hardware GL renderer and no prior Tau package, tree, repository, AppImage, desktop entry or profile. There is one GPU:
 # the Linux scope shares route qualification's Linux GPU concurrency group, so the two can never overlap. The
 # first row is a canary that runs alone; the other five wait until it passes (D-H8).
+#
+# Windows scope: the one NSIS row runs on an operator-named self-hosted Windows 11 x64 consumer host (an interactive,
+# standard-user session with UAC, Defender and SmartScreen on). As for Mac and Linux, on either channel (D-H5), the
+# collector re-admits candidate C itself and writes qualification-binding.json, and the receipts are uploaded as
+# `desktop-windows-vm-receipts`.
 name: Desktop clean-host route acceptance
 
 on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Consumer-host evidence for one platform; Windows remains staging qualification-only
+        description: Consumer-host evidence for one platform, on either channel (D-H5)
         required: true
         default: macos
         type: choice
         options: [macos, windows, linux]
       channel:
-        description: Exact candidate channel; all three candidates must agree. Production is Mac or Linux only (D-H5)
+        description: Exact candidate channel; all three candidates must agree (D-H5)
         required: true
         default: staging
         type: choice
@@ -50,7 +55,7 @@ on:
         required: true
         type: string
       candidate_c:
-        description: Successful trusted installer-candidate run C; Windows needs this dispatch's main commit, Mac and Linux a trusted ancestor
+        description: Successful trusted installer-candidate run C, built from a trusted ancestor of this dispatch's main commit
         required: true
         type: string
       runner_group:
@@ -119,9 +124,9 @@ jobs:
             echo '::error::Clean-host acceptance not run: requires a platform-scoped main dispatch and explicit operator enablement.'
             exit 1
           fi
-          # D-H5: production clean-host evidence exists only for the Mac and Linux platform scopes.
-          if [ "$CHANNEL" != staging ] && { [ "$CHANNEL" != production ] || [ "$SCOPE" = windows ]; }; then
-            echo '::error::Clean-host acceptance not run: production evidence is Mac or Linux only.'
+          # D-H5: each platform scope produces its own clean-host evidence on staging or production.
+          if [ "$CHANNEL" != staging ] && [ "$CHANNEL" != production ]; then
+            echo '::error::Clean-host acceptance not run: the channel must be staging or production.'
             exit 1
           fi
       - name: Select the clean-host rows for the available hosts
@@ -247,7 +252,7 @@ jobs:
         with:
           save-pnpm-store: 'false'
       - name: Install the download browser
-        run: pnpm exec playwright install chromium
+        run: ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
       - name: Run clean-host install, shipping renderer, explicit update and latest-feed update
         env:
           # Authorizes only the run's own loopback TLS trust entry, granted after the preflight above passed.
@@ -344,6 +349,9 @@ jobs:
       TAU_WINDOWS_PUBLISHER: ${{ vars.TAU_WINDOWS_PUBLISHER }}
       TAU_APPIMAGE_PUBLIC_KEYS: '{}'
     steps:
+      # Windows checkouts default to CRLF, which breaks the lockfile parse; keep the committed bytes.
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
@@ -352,7 +360,8 @@ jobs:
         with:
           save-pnpm-store: 'false'
       - name: Install the download browser
-        run: pnpm exec playwright install chromium
+        shell: bash
+        run: bash ./.github/actions/apt-install/infra-retry.sh playwright-install pnpm exec playwright install chromium
       - name: Observe consumer host and run visible installation with operator evidence
         env:
           TAU_QUALIFICATION_DISPOSABLE_HOST: '1'
@@ -383,13 +392,13 @@ jobs:
 
   windows-receipts:
     needs: windows
+    if: inputs.scope == 'windows'
     environment: desktop-qualification-${{ inputs.channel }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
-      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
       TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
       TAU_WINDOWS_PUBLISHER: ${{ vars.TAU_WINDOWS_PUBLISHER }}
     steps:
@@ -398,17 +407,25 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
-      - run: pnpm nx run desktop:fetch-installer-candidate
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: desktop-route-row-windows-nsis-x64
           path: out/qualification-rows
-      - name: Bind the consumer row to the exact final source
+      # As for Mac and Linux, the collector re-admits candidate C itself and writes qualification-binding.json, binding
+      # C's ancestor source to this run by authenticated S≤K≤H ancestry (the publisher adds ≤P).
+      - name: Require the Windows clean-host row and bind its receipt to the final candidate and this run
         run: pnpm nx run desktop:collect-qualification-rows
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
+          name: desktop-windows-vm-host-matrix
+          path: out/qualification-receipts/host-matrix.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
           name: desktop-windows-vm-receipts
-          path: out/qualification-receipts/*.json
+          path: |
+            out/qualification-receipts/route-receipts.json
+            out/qualification-receipts/qualification-binding.json
           if-no-files-found: error
 
   # The canary row runs alone first; every other Linux row waits for it (D-H8). It shares the row steps below.
@@ -458,7 +475,7 @@ jobs:
           TAU_VM_MODE: clean-host
           TAU_VM_HOST: gcp
           TAU_GCP_PROJECT: tau-ci
-          TAU_GCP_ZONES: us-central1-a us-central1-b us-central1-c us-central1-f us-east1-c us-east1-d us-west1-a us-west1-b europe-west4-b europe-west4-c europe-west1-b europe-west1-d
+          TAU_GCP_ZONES: us-central1-a us-central1-b us-central1-c us-central1-f us-east1-b us-east1-c us-east1-d us-west1-a us-west1-b us-west1-c europe-west4-a europe-west4-b europe-west4-c europe-west1-b europe-west1-c europe-west1-d
           TAU_VM_DISTRO: ${{ matrix.distro }}
         run: bash apps/desktop/scripts/hosted-linux-vm.sh
       - name: Preserve diagnostic observations without private TLS keys or app profile contents

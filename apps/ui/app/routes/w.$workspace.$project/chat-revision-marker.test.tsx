@@ -12,7 +12,7 @@ import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.j
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
 import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
-import type { RevisionCard, RevisionsView } from '#hooks/use-revisions.js';
+import type { RevisionCard, RevisionsView } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
@@ -99,7 +99,7 @@ vi.mock('@taucad/project-workspace/utils/revision-reveal', () => ({
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
 }));
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 
@@ -466,7 +466,7 @@ describe('ChatRevisionMarker', () => {
     setLog(saved());
     setRevisions({ revisions: [revision()], byTurnId: new Map([['u1', revision()]]), headRevisionId: 'rev-5' });
     const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    expect(container.textContent).not.toMatch(/Tau Cloud|backed up|Backing up/u);
+    expect(container.textContent).not.toMatch(/Tau Cloud|the cloud|backed up|Backing up/u);
   });
 
   it('should link an earlier saved request to its entry in History', () => {

@@ -1,9 +1,11 @@
+import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
+import type * as FileSystem from 'node:fs';
 import type { StreamingMachine, MachineQuitDecision } from '@taucad/types/desktop';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
@@ -32,7 +34,7 @@ import {
   windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
 
-type UpdateMenuItem = { label: string; click?: () => void };
+type UpdateMenuItem = { label?: string; type?: string; role?: string; click?: () => void; submenu?: unknown };
 const originalTitle = process.title;
 const originalResourcesPath = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
 const originalUncaught = new Set(process.listeners('uncaughtException'));
@@ -119,10 +121,19 @@ const state = vi.hoisted(() => ({
   prepareToInstall: undefined as DesktopUpdaterOptions['prepareToInstall'],
   /* Lets a case hold ACP discovery open while the window boots (D17). */
   acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
+  acpDiscoveryCalls: 0,
   bambuStudioStatus: vi.fn(async () => ({ available: false, reason: 'not installed' })),
   log: vi.fn(),
   updateMenuItems: [{ label: 'About Tau' }] as UpdateMenuItem[],
   installedUpdateMenuItems: [] as UpdateMenuItem[],
+  helpMenuItems: [{ label: 'Learn More' }] as UpdateMenuItem[],
+  installedHelpMenuItems: [] as UpdateMenuItem[],
+  reportSignal: vi.fn(),
+  flushReports: vi.fn(async () => true),
+  authSignIn: vi.fn(async () => undefined),
+  /* Per-case faults in synchronous filesystem calls main makes during bootstrap (B18). */
+  mkdirSync: undefined as undefined | ((path: string) => void),
+  realpathNative: undefined as undefined | ((path: string) => void),
   updaterCheck: vi.fn(async () => undefined),
   updaterInstall: vi.fn(async () => undefined),
   nativeStoreOptions: undefined as unknown,
@@ -133,10 +144,31 @@ const state = vi.hoisted(() => ({
   servicesPost: vi.fn(),
 }));
 
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof FileSystem>();
+  const mkdirSync = ((path: FileSystem.PathLike, options?: FileSystem.MakeDirectoryOptions) => {
+    state.mkdirSync?.(String(path));
+    return actual.mkdirSync(path, options);
+  }) as typeof actual.mkdirSync;
+  const native = ((path: FileSystem.PathLike) => {
+    state.realpathNative?.(String(path));
+    return actual.realpathSync.native(path);
+  }) as typeof actual.realpathSync.native;
+  const realpathSync = Object.assign(
+    ((path: FileSystem.PathLike, options?: FileSystem.EncodingOption) =>
+      actual.realpathSync(path, options)) as typeof actual.realpathSync,
+    { native },
+  );
+  const overridden = { ...actual, mkdirSync, realpathSync };
+  return { ...overridden, default: overridden };
+});
+
 vi.mock('#main/error-reporting.js', () => ({
   initializeDesktopErrorReporting: state.initializeErrorReporting,
-  reportDesktopSignal: vi.fn(),
+  reportDesktopSignal: state.reportSignal,
+  flushDesktopErrorReporting: state.flushReports,
   rendererErrorReportingEnvironment: vi.fn(() => ({})),
+  noteRendererGone: vi.fn(),
 }));
 
 vi.mock('@taucad/desktop-services-host/native-preparation', () => ({
@@ -207,6 +239,8 @@ const app = {
   once: vi.fn(),
   quit: vi.fn(),
   exit: vi.fn(),
+  relaunch: vi.fn(),
+  disableHardwareAcceleration: vi.fn(),
   setName: vi.fn(),
   setAppUserModelId: vi.fn(),
 };
@@ -238,9 +272,14 @@ const fakeWindow = {
   isDestroyed: vi.fn(() => false),
   isMinimized: vi.fn(() => false),
   isFullScreen: vi.fn(() => false),
+  getSize: vi.fn((): [number, number] => [1216, 859]),
+  getContentSize: vi.fn((): [number, number] => [1200, 800]),
+  setMinimumSize: vi.fn(),
   restore: vi.fn(),
   loadURL: vi.fn(async () => undefined),
+  loadFile: vi.fn(async () => undefined),
   reload: vi.fn(),
+  close: vi.fn(),
   show: vi.fn(),
   focus: vi.fn(),
   once: vi.fn(),
@@ -264,13 +303,24 @@ vi.mock('electron', () => ({
     getApplicationMenu: vi.fn(() => ({
       items: [
         { submenu: { insert: (index: number, item: UpdateMenuItem) => state.updateMenuItems.splice(index, 0, item) } },
+        {
+          role: 'help',
+          label: 'Help',
+          submenu: {
+            items: state.helpMenuItems,
+            append: (item: UpdateMenuItem) => state.helpMenuItems.push(item),
+          },
+        },
       ],
+      append: vi.fn(),
     })),
     setApplicationMenu: vi.fn(() => {
       // Electron's native menu does not reflect additions until it is installed again.
       state.installedUpdateMenuItems = [...state.updateMenuItems];
+      state.installedHelpMenuItems = [...state.helpMenuItems];
     }),
   },
+  clipboard: { writeText: vi.fn() },
   MenuItem: vi.fn(function MenuItem(options: UpdateMenuItem) {
     return options;
   }),
@@ -340,12 +390,16 @@ vi.mock('@taucad/runtime/electron/main', () => ({
 }));
 vi.mock('@taucad/host', async (importOriginal) => {
   /* The host's real bounds, so the quit waits main derives from them are the shipped ones (rule 9). */
-  const { keepAwakeWhileStreaming, projectCloseMilliseconds, projectReleaseMilliseconds } =
+  const { computeStoreWorkspace, keepAwakeWhileStreaming, projectCloseMilliseconds, projectReleaseMilliseconds } =
     await importOriginal<typeof Host>();
   return {
+    computeStoreWorkspace,
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
     defaultDependencyStore: vi.fn(() => join(state.userData, 'store')),
-    discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
+    discoverAcpAgents: vi.fn(async () => {
+      state.acpDiscoveryCalls += 1;
+      return state.acpDiscovery ?? { agents: [], refused: [] };
+    }),
     externalAgentDescriptors: vi.fn(() => []),
     keepAwakeWhileStreaming,
     projectCloseMilliseconds,
@@ -367,15 +421,21 @@ vi.mock('#main/auth-service.js', () => ({
     onChange: vi.fn(),
     dispose: vi.fn(),
     handleCallback: state.authHandleCallback,
-    signIn: vi.fn(),
+    signIn: state.authSignIn,
     signOut: vi.fn(),
   })),
 }));
 vi.mock('#main/diagnostics.js', () => ({
-  createDiagnosticsLog: vi.fn(() => ({ log: state.log, dispose: vi.fn() })),
+  createDiagnosticsLog: vi.fn(() => ({
+    filePath: join(state.userData, 'logs', 'desktop.log'),
+    log: state.log,
+    flush: vi.fn(async () => undefined),
+    dispose: vi.fn(),
+  })),
   forwardRendererDiagnostics: vi.fn(),
   forwardUtilityDiagnostics: vi.fn(),
   kernelUtilityDiagnostics: vi.fn(() => ({})),
+  pagesThatCanSave: vi.fn((windows: readonly unknown[]) => [...windows]),
   watchRendererHangs: vi.fn(),
 }));
 vi.mock('#main/environment.js', async (importOriginal) => ({
@@ -445,6 +505,9 @@ vi.mock('#main/utility-environment.js', () => ({
   packagedEsbuildEnvironment: vi.fn(() => ({ ESBUILD_BINARY_PATH: '/staged/esbuild' })),
   bundledGitEnvironment: vi.fn(() => ({})),
   bundledStoreGuardEnvironment: vi.fn(() => ({})),
+  windowsShellSandboxEnvironment: vi.fn(() => ({
+    TAU_WINDOWS_SANDBOX_HELPER: String.raw`C:\Tau\resources\windows-sandbox\win32-x64\tau-windows-sandbox.exe`,
+  })),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
     TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
   })),
@@ -492,8 +555,14 @@ afterEach(async () => {
   state.prepareToInstall = undefined;
   state.updateMenuItems = [{ label: 'About Tau' }];
   state.installedUpdateMenuItems = [];
+  state.helpMenuItems = [{ label: 'Learn More' }];
+  state.installedHelpMenuItems = [];
+  state.mkdirSync = undefined;
+  state.realpathNative = undefined;
+  state.flushReports.mockImplementation(async () => true);
   getWindows.mockReturnValue([fakeWindow]);
   state.acpDiscovery = undefined;
+  state.acpDiscoveryCalls = 0;
   state.ready = undefined;
   state.shellApplied = undefined;
   state.authRestored = undefined;
@@ -545,7 +614,6 @@ describe('desktop main compute owner', () => {
   const bootMilliseconds = 30_000;
 
   const bootstrap = async (): Promise<string> => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-owner-'));
     await import('#main/main.js');
     await vi.waitFor(() => {
@@ -652,6 +720,52 @@ describe('desktop main compute owner', () => {
   );
 
   it(
+    'logs a quit that reached before-quit with no reason of its own as external',
+    async () => {
+      await bootstrap();
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', { purpose: 'quit', reason: 'external' });
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'logs the session ending as the reason for the quit that follows it',
+    async () => {
+      await bootstrap();
+      const { powerMonitor } = await import('electron');
+      // `on` is overloaded per event, so its recorded calls are read untyped.
+      const calls: ReadonlyArray<readonly unknown[]> = vi.mocked(powerMonitor.on).mock.calls;
+      const shutdown = calls.findLast(([event]) => event === 'shutdown')?.[1];
+      expect(shutdown).toBeTypeOf('function');
+      (shutdown as () => void)();
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', {
+          purpose: 'quit',
+          reason: 'system-shutdown',
+        });
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'logs an update restart as its own quit reason',
+    async () => {
+      await bootstrap();
+      await expect(state.prepareToRestart!()).resolves.toBe(true);
+      expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', {
+        purpose: 'restart',
+        reason: 'update-install',
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'installer failure restores services before permitting another install',
     async () => {
       await bootstrap();
@@ -728,6 +842,51 @@ describe('desktop main compute owner', () => {
   );
 
   it(
+    'should open the folder picker at the nearest existing ancestor of a default path that is gone (T-R4.5)',
+    async () => {
+      await bootstrap();
+      const parent = join(state.userData, 'Projects');
+      await mkdir(parent, { recursive: true });
+      dialog.showOpenDialog.mockClear();
+      dialog.showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] });
+
+      await state.handlers.get('tau:select-directory')!(
+        { senderFrame: {} },
+        { id: 'tau-locate-wsp_tau', defaultPath: join(parent, 'Moved Away', 'Workshop') },
+      );
+
+      expect(dialog.showOpenDialog).toHaveBeenCalledOnce();
+      const request = dialog.showOpenDialog.mock.calls[0]!.at(-1) as { defaultPath?: string };
+      expect(request.defaultPath).toBe(parent);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should refuse a picked folder that holds Tau's own data and leave the grants unchanged",
+    async () => {
+      await bootstrap();
+      const list = state.handlers.get(directoryGrantChannels.list)!;
+      const before = list({ senderFrame: {} });
+      dialog.showMessageBox.mockClear();
+      const pickRefused = async (picked: string): Promise<void> => {
+        await mkdir(picked, { recursive: true });
+        dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [picked] });
+
+        await expect(state.handlers.get('tau:select-directory')!({ senderFrame: {} })).resolves.toBeUndefined();
+
+        expect(list({ senderFrame: {} })).toEqual(before);
+      };
+      await pickRefused(state.userData);
+      await pickRefused(join(state.userData, 'filesystem-authority', 'nested'));
+      expect(dialog.showMessageBox).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(dialog.showMessageBox.mock.calls[0])).toContain("Tau's own data");
+      expect(fakeWindow.webContents.send).not.toHaveBeenCalledWith(directoryGrantChannels.changed);
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'refuses Home, relative paths, and untrusted grant requests',
     async () => {
       await bootstrap();
@@ -741,6 +900,32 @@ describe('desktop main compute owner', () => {
       expect(() => state.handlers.get(directoryGrantChannels.list)!({ senderFrame: {} })).toThrow(
         'untrusted directory',
       );
+    },
+    bootMilliseconds,
+  );
+
+  /* WP9 (R7, T-B5.8): a reset database adopts each granted folder under the id its marker names. */
+  it(
+    'should read the marker of a granted folder only, and answer nothing for a folder without one',
+    async () => {
+      await bootstrap();
+      const granted = join(state.userData, 'Granted');
+      const bare = join(state.userData, 'Bare');
+      await mkdir(join(granted, '.tau'), { recursive: true });
+      await mkdir(bare, { recursive: true });
+      await writeFile(join(granted, '.tau', 'workspace.json'), '{"workspaceId":"wsp_marked"}');
+      for (const directory of [granted, bare]) {
+        dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [directory] });
+        // oxlint-disable-next-line no-await-in-loop -- grants are admitted one pick at a time.
+        await state.handlers.get('tau:select-directory')!({ senderFrame: {} });
+      }
+      const marker = state.handlers.get(directoryGrantChannels.marker)!;
+      await expect(marker({ senderFrame: {} }, granted)).resolves.toBe('{"workspaceId":"wsp_marked"}');
+      await expect(marker({ senderFrame: {} }, bare)).resolves.toBeUndefined();
+      /* Not granted, relative, or not a string: refused before any read. */
+      await expect(marker({ senderFrame: {} }, join(state.userData, 'Elsewhere'))).resolves.toBeUndefined();
+      await expect(async () => marker({ senderFrame: {} }, 'Granted')).rejects.toThrow('invalid directory');
+      await expect(async () => marker({ senderFrame: {} }, 42)).rejects.toThrow('invalid directory');
     },
     bootMilliseconds,
   );
@@ -799,6 +984,34 @@ describe('desktop main compute owner', () => {
       fakeWindow.isFullScreen.mockReturnValue(false);
       leave?.();
       expect(fakeWindow.webContents.send).toHaveBeenLastCalledWith(windowFullscreenChannel, false);
+    },
+    bootMilliseconds,
+  );
+
+  /* T-A2.1 (D4.6): the floor is a 400 × 300 content area, so the minimum set on the frame adds the frame's own size,
+   * measured after creation and again whenever full screen changes the chrome. */
+  it(
+    'should hold the window to a 400 x 300 content floor through its frame, and measure again after full screen',
+    async () => {
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1216, 859]);
+      fakeWindow.getContentSize.mockReturnValue([1200, 800]);
+      await bootstrap();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(416, 359);
+
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1440, 900]);
+      fakeWindow.getContentSize.mockReturnValue([1440, 900]);
+      const enter = fakeWindow.on.mock.calls.findLast(([name]) => name === 'enter-full-screen')?.[1];
+      enter?.();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(400, 300);
+
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1216, 859]);
+      fakeWindow.getContentSize.mockReturnValue([1200, 800]);
+      const leave = fakeWindow.on.mock.calls.findLast(([name]) => name === 'leave-full-screen')?.[1];
+      leave?.();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(416, 359);
     },
     bootMilliseconds,
   );
@@ -906,6 +1119,68 @@ describe('desktop main compute owner', () => {
       const reopened = state.resolveFork!({ projectRoot, computeMode: 'durable' });
       expect(storeOf(reopened)).not.toBe(storeOf(first));
       reopened.release!();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should give a copy of a project the project's compute connection and keep other projects apart",
+    async () => {
+      const projectRoot = await bootstrap();
+      const copyRoot = resolve(join(state.userData, 'home', 'project-copy'));
+      const otherRoot = resolve(join(state.userData, 'home', 'other'));
+      const identify = async (root: string, projectId: string): Promise<void> => {
+        await mkdir(join(root, '.tau'), { recursive: true });
+        await writeFile(join(root, '.tau', 'project.json'), `${JSON.stringify({ version: 1, projectId })}\n`);
+      };
+      await identify(projectRoot, 'proj_AAAAAAAAAAAAAAAAAAAAA');
+      await identify(copyRoot, 'proj_AAAAAAAAAAAAAAAAAAAAA');
+      await identify(otherRoot, 'proj_BBBBBBBBBBBBBBBBBBBBB');
+      const project = state.resolveFork!({ projectRoot, computeMode: 'durable' });
+      const copy = state.resolveFork!({ projectRoot: copyRoot, computeMode: 'durable' });
+      const other = state.resolveFork!({ projectRoot: otherRoot, computeMode: 'durable' });
+      const storeOf = (resolved: typeof project): unknown => (resolved.compute as { store: unknown }).store;
+
+      expect(storeOf(copy)).toBe(storeOf(project));
+      expect(storeOf(other)).not.toBe(storeOf(project));
+      for (const resolved of [project, copy, other]) {
+        resolved.release!();
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should give a Git worktree of a project the project's compute connection",
+    async () => {
+      const projectRoot = await bootstrap();
+      const worktreeRoot = resolve(join(state.userData, 'home', 'project-feature'));
+      await mkdir(join(projectRoot, '.tau'), { recursive: true });
+      await writeFile(
+        join(projectRoot, '.tau', 'project.json'),
+        `${JSON.stringify({ version: 1, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' })}\n`,
+      );
+      await writeFile(join(projectRoot, '.gitignore'), '/.tau/*\n');
+      await writeFile(join(projectRoot, 'tau.json'), '{}\n');
+      const git = (...args: string[]): void => {
+        execFileSync(
+          'git',
+          ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args],
+          { cwd: projectRoot, stdio: 'ignore' },
+        );
+      };
+      git('init', '-q');
+      git('add', '.');
+      git('commit', '-qm', 'init');
+      git('worktree', 'add', '-q', worktreeRoot);
+      const project = state.resolveFork!({ projectRoot, computeMode: 'durable' });
+      const worktree = state.resolveFork!({ projectRoot: worktreeRoot, computeMode: 'durable' });
+      const storeOf = (resolved: typeof project): unknown => (resolved.compute as { store: unknown }).store;
+
+      expect(existsSync(join(worktreeRoot, '.tau', 'project.json'))).toBe(false);
+      expect(storeOf(worktree)).toBe(storeOf(project));
+      project.release!();
+      worktree.release!();
     },
     bootMilliseconds,
   );
@@ -1033,6 +1308,22 @@ describe('desktop main compute owner', () => {
       expect(carrying).toHaveLength(1);
       expect(carrying[0]?.['TAU_DESKTOP_USER_DATA_DIR']).toBe(state.userData);
       expect(carrying[0]?.['TAU_DESKTOP_AUTHORITY_DIR']).toBe(join(state.userData, 'filesystem-authority'));
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'gives the Windows shell sandbox helper to the services utility alone',
+    async () => {
+      await bootstrap();
+      const carrying = state.utilityEnvironmentAdditions.filter(
+        (additions) => 'TAU_WINDOWS_SANDBOX_HELPER' in additions,
+      );
+      expect(carrying).toHaveLength(1);
+      expect(carrying[0]).toHaveProperty('TAU_DESKTOP_USER_DATA_DIR', state.userData);
+      expect(carrying[0]?.['TAU_WINDOWS_SANDBOX_HELPER']).toBe(
+        String.raw`C:\Tau\resources\windows-sandbox\win32-x64\tau-windows-sandbox.exe`,
+      );
     },
     bootMilliseconds,
   );
@@ -1525,11 +1816,14 @@ describe('desktop main compute owner', () => {
 describe('desktop main admission gates', () => {
   const bootMilliseconds = 30_000;
 
+  /* T-R11.2 (D7): only a locked release owns `Tau Staging`. A staging build that honours overrides and is started
+   * without `--user-data-dir` uses `Tau Staging Dev`, so a development or test run can never default into the
+   * installed app's profile. */
   it.each([
-    { overrides: true, explicitProfile: true, usesChannelProfile: false },
-    { overrides: true, explicitProfile: false, usesChannelProfile: true },
-    { overrides: false, explicitProfile: true, usesChannelProfile: true },
-    { overrides: false, explicitProfile: false, usesChannelProfile: true },
+    { overrides: true, explicitProfile: true, profile: undefined },
+    { overrides: true, explicitProfile: false, profile: 'Tau Staging Dev' },
+    { overrides: false, explicitProfile: true, profile: 'Tau Staging' },
+    { overrides: false, explicitProfile: false, profile: 'Tau Staging' },
   ])(
     'should isolate a staging profile according to $overrides/$explicitProfile',
     async (options) => {
@@ -1544,10 +1838,10 @@ describe('desktop main admission gates', () => {
       );
       await import('#main/main.js');
       const profileCall = app.setPath.mock.calls.find(([name]) => name === 'userData');
-      if (options.usesChannelProfile) {
-        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', 'Tau Staging')]);
-      } else {
+      if (options.profile === undefined) {
         expect(profileCall).toBeUndefined();
+      } else {
+        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', options.profile)]);
       }
       expect(app.setPath).toHaveBeenCalledWith('sessionData', state.userData);
     },
@@ -1555,7 +1849,6 @@ describe('desktop main admission gates', () => {
   );
 
   const boot = async (): Promise<void> => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-admission-'));
     if (app.isPackaged) {
       Object.defineProperty(process, 'resourcesPath', { configurable: true, value: state.userData });
@@ -1621,35 +1914,53 @@ describe('desktop main admission gates', () => {
   );
 
   it(
-    'restores the credential before the first page can request an authenticated origin',
+    'holds the first authenticated request, not the first page, until the credential is restored (B32)',
     async () => {
       const restore = Promise.withResolvers<void>();
       state.authRestored = restore.promise;
-      const { injectTauHeaders } = await vi.importActual<{
-        injectTauHeaders: (
-          url: string,
-          headers: Record<string, string>,
+      const { installTauHeaderInjection } = await vi.importActual<{
+        installTauHeaderInjection: (
+          webRequest: {
+            onBeforeSendHeaders: (
+              filter: unknown,
+              listener: (
+                details: { url: string; requestHeaders: Record<string, string> },
+                callback: (response: { requestHeaders: Record<string, string> }) => void,
+              ) => void,
+            ) => void;
+          },
           options: TauHeaderInjectionOptions,
-        ) => Record<string, string>;
+        ) => void;
       }>('#main/header-injection.js');
       let firstRequestHeaders: Record<string, string> | undefined;
       fakeWindow.loadURL.mockImplementationOnce(async () => {
-        firstRequestHeaders = injectTauHeaders('http://127.0.0.1:1/v1/projects', {}, state.headerOptions!);
+        installTauHeaderInjection(
+          {
+            onBeforeSendHeaders: (_filter, listener) => {
+              listener({ url: 'http://127.0.0.1:1/v1/projects', requestHeaders: {} }, ({ requestHeaders }) => {
+                firstRequestHeaders = requestHeaders;
+              });
+            },
+          },
+          state.headerOptions!,
+        );
       });
 
       await boot();
       await vi.waitFor(() => {
-        expect(state.headerOptions).toBeDefined();
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
       });
-      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
       expect(state.headerOptions?.token()).toBeUndefined();
+      expect(firstRequestHeaders).toBeUndefined();
 
       state.authToken = 'restored-token';
       restore.resolve();
       await vi.waitFor(() => {
-        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+        expect(firstRequestHeaders).toEqual({
+          authorization: 'Bearer restored-token',
+          'tau-client': 'tau-desktop/test',
+        });
       });
-      expect(firstRequestHeaders).toEqual({ authorization: 'Bearer restored-token', 'tau-client': 'tau-desktop/test' });
     },
     bootMilliseconds,
   );
@@ -1663,7 +1974,10 @@ describe('desktop main admission gates', () => {
       const openUrl = state.appListeners.get('open-url')?.at(-1);
       expect(openUrl).toBeDefined();
       openUrl?.({ preventDefault: vi.fn() }, 'tau://invitations/queued-token');
-      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/');
+      });
+      expect(fakeWindow.loadURL).not.toHaveBeenCalledWith('app://tau/invitations/queued-token');
 
       restore.resolve();
       await vi.waitFor(() => {
@@ -1674,20 +1988,21 @@ describe('desktop main admission gates', () => {
   );
 
   it(
-    'reports a failed credential restore without loading an unauthenticated page',
+    'logs a failed credential restore and starts signed out instead of ending the launch',
     async () => {
       const restore = Promise.withResolvers<void>();
       state.authRestored = restore.promise;
       await boot();
       await vi.waitFor(() => {
-        expect(state.headerOptions).toBeDefined();
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
       });
       restore.reject(new Error('credential store failed'));
 
       await vi.waitFor(() => {
-        expect(app.exit).toHaveBeenCalledWith(1);
+        expect(state.log).toHaveBeenCalledWith('warn', 'auth.restore-failed', expect.any(Error));
       });
-      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+      expect(app.exit).not.toHaveBeenCalled();
+      expect(state.headerOptions?.token()).toBeUndefined();
     },
     bootMilliseconds,
   );
@@ -1696,7 +2011,6 @@ describe('desktop main admission gates', () => {
 describe('desktop quit bounds', () => {
   it('nests each quit wait strictly outside the host close it awaits (rule 9, RV-W2b #1)', async () => {
     const host = await vi.importActual<typeof Host>('@taucad/host');
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-quit-'));
     const { quitQuiesceMilliseconds, quitRendererMilliseconds } = await import('#main/main.js');
 
@@ -1721,7 +2035,6 @@ describe('desktop main deep links', () => {
   const bootMilliseconds = 30_000;
 
   const boot = async (): Promise<void> => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-links-'));
     await import('#main/main.js');
   };
@@ -1939,7 +2252,6 @@ describe('desktop main Bambu Studio channels', () => {
   it(
     'should answer Bambu Studio calls only for the trusted renderer',
     async () => {
-      vi.stubGlobal('tauCloudBuildEnabled', false);
       state.userData = await mkdtemp(join(tmpdir(), 'tau-main-bambu-'));
       await import('#main/main.js');
       await vi.waitFor(() => {
@@ -1964,7 +2276,6 @@ describe('desktop main Bambu Studio channels', () => {
 
 describe('desktop main machine binding channel', () => {
   it('refuses machine and slicer IPC without creating the machine store when disabled', async () => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     const { desktopEnvironment } = await import('#main/environment.js');
     vi.mocked(desktopEnvironment).mockReturnValueOnce({
       TAU_API_URL: 'http://127.0.0.1:1',
@@ -2004,7 +2315,6 @@ describe('desktop main machine binding channel', () => {
   it(
     'should forward an access code only when one was typed, and refuse one over 256 characters',
     async () => {
-      vi.stubGlobal('tauCloudBuildEnabled', false);
       state.userData = await mkdtemp(join(tmpdir(), 'tau-main-machines-'));
       await import('#main/main.js');
       await vi.waitFor(() => {
@@ -2059,7 +2369,6 @@ describe('desktop main machine store', () => {
    * @returns The environment main adds for the services utility.
    */
   const boot = async (before?: (userData: string) => Promise<void>): Promise<NodeJS.ProcessEnv> => {
-    vi.stubGlobal('tauCloudBuildEnabled', false);
     state.userData = await mkdtemp(join(tmpdir(), 'tau-main-store-'));
     await before?.(state.userData);
     await import('#main/main.js');
@@ -2222,3 +2531,916 @@ describe('desktop main machine store', () => {
 });
 
 /* eslint-enable @typescript-eslint/naming-convention -- End environment fixtures. */
+
+/* eslint-disable @typescript-eslint/naming-convention -- Electron exports keep their names; Sentry tags are snake_case. */
+describe('desktop main boot hardening (WP5)', () => {
+  const bootMilliseconds = 30_000;
+
+  /** Boot main over fresh user data, after `before` lays out what an earlier launch left there. */
+  const boot = async (before?: (userData: string) => Promise<void>): Promise<void> => {
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-hardening-'));
+    await before?.(state.userData);
+    await import('#main/main.js');
+  };
+  const booted = async (before?: (userData: string) => Promise<void>): Promise<void> => {
+    await boot(before);
+    await vi.waitFor(() => {
+      expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+    });
+  };
+  const signals = (name: string): Array<{ tags: Record<string, string> }> =>
+    state.reportSignal.mock.calls
+      .map(([signal]) => signal as { fingerprint?: readonly string[]; tags: Record<string, string> } | undefined)
+      .filter((signal) => signal?.fingerprint?.[0] === name) as Array<{ tags: Record<string, string> }>;
+  const troubleshooting = (): UpdateMenuItem[] => {
+    const entry = state.installedHelpMenuItems.find((item) => item.label === 'Troubleshooting');
+    return (entry?.submenu ?? []) as UpdateMenuItem[];
+  };
+
+  it(
+    'should start the updater and install the menu before the first page loads, and show the window at 15 s (T-B17.1)',
+    async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        fakeWindow.loadURL.mockReturnValueOnce(Promise.withResolvers<undefined>().promise);
+        await boot();
+        /* `vi.waitFor` advances fake timers while it polls, which would spend the deadline under test. */
+        const giveUpAt = Date.now() + 20_000;
+        while (Date.now() < giveUpAt && fakeWindow.loadURL.mock.calls.length === 0) {
+          // oxlint-disable-next-line no-await-in-loop -- yield to bootstrap without touching the faked clock
+          await new Promise((resolve) => {
+            setImmediate(resolve);
+          });
+        }
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+        const { Menu } = await import('electron');
+        expect(state.prepareToRestart).toBeDefined();
+        expect(state.installedUpdateMenuItems.map((item) => item.label)).toContain('Check for Updates…');
+        expect(troubleshooting().map((item) => item.label)).toContain('Check for Updates…');
+        expect(vi.mocked(Menu.setApplicationMenu).mock.invocationCallOrder[0]).toBeLessThan(
+          fakeWindow.loadURL.mock.invocationCallOrder[0] ?? 0,
+        );
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(14_999);
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(fakeWindow.show).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should show the window as soon as it is ready to show (T-B17.2)',
+    async () => {
+      fakeWindow.loadURL.mockReturnValueOnce(Promise.withResolvers<undefined>().promise);
+      await boot();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      });
+      const readyToShow = [...fakeWindow.once.mock.calls, ...fakeWindow.on.mock.calls].find(
+        ([event]) => event === 'ready-to-show',
+      )?.[1] as (() => void) | undefined;
+      expect(readyToShow).toBeTypeOf('function');
+      expect(fakeWindow.show).not.toHaveBeenCalled();
+      readyToShow!();
+      expect(fakeWindow.show).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should explain a bootstrap failure in a native dialog before it exits (T-B18.1)',
+    async () => {
+      state.mkdirSync = (path) => {
+        if (path === join(state.userData, 'home')) {
+          throw Object.assign(new Error(`EACCES: permission denied, mkdir '${path}'`), { code: 'EACCES' });
+        }
+      };
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 3 });
+      await boot();
+      await vi.waitFor(() => {
+        expect(app.exit).toHaveBeenCalled();
+      });
+      expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+      const options = dialog.showMessageBox.mock.calls[0]![0];
+      expect(options.buttons).toEqual(['Restart in Safe Mode', 'Show Logs', 'Download Tau', 'Quit']);
+      expect(dialog.showMessageBox.mock.invocationCallOrder[0]).toBeLessThan(app.exit.mock.invocationCallOrder[0]!);
+      expect(state.flushReports.mock.invocationCallOrder[0]).toBeLessThan(
+        dialog.showMessageBox.mock.invocationCallOrder[0]!,
+      );
+      expect(signals('desktop-bootstrap-failed')).toEqual([
+        expect.objectContaining({ tags: { step: 'home-directory', errno: 'EACCES' } }),
+      ]);
+      expect(state.log).toHaveBeenCalledWith(
+        'error',
+        'main.bootstrap-failed',
+        expect.objectContaining({ step: 'home-directory' }),
+      );
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should log and report an uncaught exception and an unhandled rejection after bootstrap (T-B18.3)',
+    async () => {
+      await booted();
+      const added = (event: 'uncaughtException' | 'unhandledRejection', original: ReadonlySet<unknown>) =>
+        (process.listeners(event as 'uncaughtException') as unknown[]).filter(
+          (listener) => !original.has(listener),
+        ) as Array<(...args: unknown[]) => void>;
+      const exception = new TypeError('late fault');
+      const rejection = new RangeError('late rejection');
+      for (const listener of added('uncaughtException', originalUncaught)) {
+        listener(exception, 'uncaughtException');
+      }
+      for (const listener of added('unhandledRejection', originalUnhandled)) {
+        listener(rejection, Promise.resolve());
+      }
+      expect(state.log).toHaveBeenCalledWith('error', 'main.uncaught-exception', exception);
+      expect(state.log).toHaveBeenCalledWith('error', 'main.unhandled-rejection', rejection);
+      expect(signals('desktop-main-uncaught')).toEqual([
+        expect.objectContaining({ tags: { kind: 'exception', error_name: 'TypeError' } }),
+        expect.objectContaining({ tags: { kind: 'rejection', error_name: 'RangeError' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should skip a failing optional step and still load the first page (T-B18.4)',
+    async () => {
+      const { removeStaleQuickLookSessions } = await import('#main/quick-look.js');
+      vi.mocked(removeStaleQuickLookSessions).mockImplementationOnce(() => {
+        throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+      });
+      await booted(async (userData) => {
+        await mkdir(join(userData, 'machines'));
+        state.realpathNative = (path) => {
+          if (path === join(userData, 'machines')) {
+            throw Object.assign(new Error('EIO'), { code: 'EIO' });
+          }
+        };
+      });
+      expect(signals('desktop-optional-step-failed').map(({ tags }) => tags)).toEqual(
+        expect.arrayContaining([
+          { step: 'quick-look-cleanup', errno: 'EBUSY' },
+          { step: 'legacy-machines', errno: 'EIO' },
+        ]),
+      );
+      expect(signals('desktop-optional-step-failed')).toHaveLength(2);
+      expect(app.exit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should create a window for a second launch when none exists, and show a hidden one (T-B19.1)',
+    async () => {
+      await booted();
+      const { BrowserWindow } = await import('electron');
+      const created = vi.mocked(BrowserWindow).mock.calls.length;
+      const secondInstance = state.appListeners.get('second-instance')!.at(-1)!;
+      getWindows.mockReturnValue([]);
+      secondInstance({}, ['tau']);
+      await vi.waitFor(() => {
+        expect(vi.mocked(BrowserWindow).mock.calls.length).toBe(created + 1);
+      });
+      getWindows.mockReturnValue([fakeWindow]);
+      fakeWindow.show.mockClear();
+      secondInstance({}, ['tau']);
+      expect(fakeWindow.show).toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should boot normally past a leftover route qualification state file and report it once (T-B23.1)',
+    async () => {
+      await booted(async (userData) => {
+        await writeFile(join(userData, 'route-qualification.state.json'), '{}');
+      });
+      expect(signals('desktop-probe-leftover-ignored')).toEqual([
+        expect.objectContaining({ tags: { probe: 'route-qualification', error_name: 'Error' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should boot normally past a leftover OTA receipt and report it once (T-B29.1)',
+    async () => {
+      await booted(async (userData) => {
+        await writeFile(join(userData, 'ota-probe.pending.json'), 'not json');
+      });
+      expect(signals('desktop-probe-leftover-ignored')).toEqual([
+        expect.objectContaining({ tags: { probe: 'ota', error_name: 'Error' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should load the first page while the credential is unread, and hold sign-in until it is (T-B32.1)',
+    async () => {
+      const restore = Promise.withResolvers<void>();
+      state.authRestored = restore.promise;
+      await booted();
+      const signIn = state.handlers.get('tau:auth:sign-in')!;
+      const pending = signIn({ senderFrame: {} });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(state.authSignIn).not.toHaveBeenCalled();
+      restore.resolve();
+      await pending;
+      expect(state.authSignIn).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should offer Help → Troubleshooting with logs and scrubbed diagnostics (T-U5.1)',
+    async () => {
+      await booted();
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toEqual([
+          'Restart in Safe Mode',
+          'Show Logs',
+          'Copy Diagnostics',
+          'Check for Updates…',
+        ]);
+      });
+      const { clipboard, shell } = await import('electron');
+      troubleshooting().find((item) => item.label === 'Show Logs')!.click!();
+      expect(shell.showItemInFolder).toHaveBeenCalledWith(join(state.userData, 'logs', 'desktop.log'));
+      troubleshooting().find((item) => item.label === 'Copy Diagnostics')!.click!();
+      await vi.waitFor(() => {
+        expect(clipboard.writeText).toHaveBeenCalledOnce();
+      });
+      const text = vi.mocked(clipboard.writeText).mock.calls[0]![0];
+      expect(text).toContain('Version: test');
+      expect(text).not.toContain(homedir());
+    },
+    bootMilliseconds,
+  );
+});
+/* eslint-enable @typescript-eslint/naming-convention -- End WP5 boot hardening rows. */
+
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are snake_case. */
+describe('desktop main boot health and safe mode (WP6)', () => {
+  const bootMilliseconds = 30_000;
+  /** This test build's identity, as main computes it: version `test`, no stamped commit, unpackaged. */
+  const testBuild = 'test+unknown+unpackaged';
+
+  const boot = async (before?: (userData: string) => Promise<void>, argv: readonly string[] = []): Promise<void> => {
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-boot-health-'));
+    await before?.(state.userData);
+    const original = process.argv;
+    process.argv = [...original, ...argv];
+    try {
+      await import('#main/main.js');
+    } finally {
+      process.argv = original;
+    }
+  };
+  const booted = async (before?: (userData: string) => Promise<void>, argv: readonly string[] = []): Promise<void> => {
+    await boot(before, argv);
+    await vi.waitFor(() => {
+      expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+    });
+  };
+  const ledgerPath = (): string => join(state.userData, 'boot-health.json');
+  type LedgerOnDisk = { readonly unhealthyCount?: number; readonly last?: Record<string, unknown> };
+  const readLedger = async (): Promise<LedgerOnDisk> => {
+    const text = await readFile(ledgerPath(), 'utf8');
+    return JSON.parse(text) as LedgerOnDisk;
+  };
+  const seedLedger = (unhealthyCount: number) => async (userData: string) => {
+    await writeFile(
+      join(userData, 'boot-health.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        build: testBuild,
+        unhealthyCount,
+        last: { launchId: 'previous', mode: 'normal', stage: 'shell-mounted', deadlinePassed: true },
+      }),
+    );
+  };
+  const signals = (name: string): Array<{ tags: Record<string, string> }> =>
+    state.reportSignal.mock.calls
+      .map(([signal]) => signal as { fingerprint?: readonly string[]; tags: Record<string, string> } | undefined)
+      .filter((signal) => signal?.fingerprint?.[0] === name) as Array<{ tags: Record<string, string> }>;
+  const bootstrapArgument = async (): Promise<Record<string, unknown>> => {
+    const { BrowserWindow } = await import('electron');
+    const options = vi.mocked(BrowserWindow).mock.calls[0]?.[0] as
+      | { webPreferences?: { additionalArguments?: string[] } }
+      | undefined;
+    const argument = options?.webPreferences?.additionalArguments?.find((value) =>
+      value.startsWith('--tau-bootstrap='),
+    );
+    return JSON.parse(argument!.slice('--tau-bootstrap='.length)) as Record<string, unknown>;
+  };
+  const reportStage = (stage: string): void => {
+    for (const listener of state.ipcListeners.get('tau:boot:stage') ?? []) {
+      listener({ sender: fakeWindow.webContents, senderFrame: fakeWindow.webContents.mainFrame }, stage);
+    }
+  };
+  const troubleshooting = (): UpdateMenuItem[] => {
+    const entry = state.installedHelpMenuItems.find((item) => item.label === 'Troubleshooting');
+    return (entry?.submenu ?? []) as UpdateMenuItem[];
+  };
+
+  it(
+    'should neither read nor write the ledger in a launch that does not hold the single-instance lock (T-R12.4)',
+    async () => {
+      app.requestSingleInstanceLock.mockReturnValueOnce(false);
+      await boot(seedLedger(2));
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalled();
+      });
+      expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
+      const ledger = await readLedger();
+      expect(ledger.last).toEqual(expect.objectContaining({ launchId: 'previous' }));
+      expect(ledger.unhealthyCount).toBe(2);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should neither read nor write the ledger in a probe launch (T-R12.4)',
+    async () => {
+      vi.doMock('#main/ota-probe.js', () => ({
+        admitOtaProbe: vi.fn(() => ({ candidateTag: 'v0.0.0', complete: vi.fn() })),
+      }));
+      try {
+        await booted(seedLedger(2));
+      } finally {
+        vi.doUnmock('#main/ota-probe.js');
+      }
+      expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
+      const ledger = await readLedger();
+      expect(ledger.last).toEqual(expect.objectContaining({ launchId: 'previous' }));
+      expect(existsSync(join(state.userData, 'boot-health.json.tmp'))).toBe(false);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should record this launch at main-started and advance it through the renderer stages',
+    async () => {
+      await booted();
+      const first = await readLedger();
+      expect(first).toEqual(expect.objectContaining({ schemaVersion: 1, build: testBuild, unhealthyCount: 0 }));
+      expect(first.last).toEqual(expect.objectContaining({ mode: 'normal', deadlinePassed: false }));
+      reportStage('shell-mounted');
+      const mounted = await readLedger();
+      expect(mounted.last?.['stage']).toBe('shell-mounted');
+      reportStage('main-started');
+      reportStage('home-ready');
+      const ready = await readLedger();
+      expect(ready.last?.['stage']).toBe('home-ready');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should start in safe mode with --safe-mode: no hardware acceleration before ready, the bootstrap names it, and the optional subsystems stay off (T-R12.8)',
+    async () => {
+      await booted(undefined, ['--safe-mode']);
+      expect(app.disableHardwareAcceleration).toHaveBeenCalledOnce();
+      expect(app.disableHardwareAcceleration.mock.invocationCallOrder[0]).toBeLessThan(
+        app.whenReady.mock.invocationCallOrder[0]!,
+      );
+      expect(await bootstrapArgument()).toEqual(expect.objectContaining({ safeMode: { reason: 'requested' } }));
+      const { removeStaleQuickLookSessions } = await import('#main/quick-look.js');
+      const { installBrowserHost } = await import('#main/browser-host.js');
+      const { createBambuStudioService } = await import('#main/bambu-studio-service.js');
+      expect(removeStaleQuickLookSessions).not.toHaveBeenCalled();
+      expect(installBrowserHost).not.toHaveBeenCalled();
+      expect(state.acpDiscoveryCalls).toBe(0);
+      expect(createBambuStudioService).not.toHaveBeenCalled();
+      expect(state.utilityEnvironmentAdditions.some((additions) => 'TAU_DESKTOP_MACHINES_DIR' in additions)).toBe(
+        false,
+      );
+      const ledger = await readLedger();
+      expect(ledger.last).toEqual(expect.objectContaining({ mode: 'safe-requested' }));
+      expect(signals('desktop-safe-mode')).toEqual([
+        expect.objectContaining({ tags: { trigger: 'requested', count: '0' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should start in safe mode by itself after two unhealthy launches of this build (T-R12.8)',
+    async () => {
+      await booted(seedLedger(1));
+      expect(app.disableHardwareAcceleration).toHaveBeenCalledOnce();
+      expect(await bootstrapArgument()).toEqual(
+        expect.objectContaining({ safeMode: { reason: 'unhealthy-launches' } }),
+      );
+      const ledger = await readLedger();
+      expect(ledger.unhealthyCount).toBe(2);
+      expect(signals('desktop-boot-unhealthy')).toEqual([
+        expect.objectContaining({ tags: { stage: 'shell-mounted', ended: 'none', count: '2', mode: 'normal' } }),
+      ]);
+      expect(signals('desktop-safe-mode')).toEqual([
+        expect.objectContaining({ tags: { trigger: 'unhealthy-launches', count: '2' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should start normally with no safe mode in the bootstrap',
+    async () => {
+      await booted();
+      expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
+      expect(await bootstrapArgument()).not.toHaveProperty('safeMode');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should not wait for the page to save when a restart is asked for before shell-mounted (T-R12.8)',
+    async () => {
+      state.autoQuiesce = false;
+      await booted();
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toContain('Restart in Safe Mode');
+      });
+      troubleshooting().find((item) => item.label === 'Restart in Safe Mode')!.click!();
+      await vi.waitFor(() => {
+        expect(app.relaunch).toHaveBeenCalledOnce();
+      });
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      expect(app.relaunch.mock.calls[0]![0]).toEqual({ args: expect.arrayContaining(['--safe-mode']) as unknown });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should still wait for the page to save once the shell has mounted',
+    async () => {
+      await booted();
+      reportStage('shell-mounted');
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toContain('Restart in Safe Mode');
+      });
+      troubleshooting().find((item) => item.label === 'Restart in Safe Mode')!.click!();
+      await vi.waitFor(() => {
+        expect(app.relaunch).toHaveBeenCalledOnce();
+      });
+      expect(state.sentToRenderer).toContain(quitChannels.ask);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should not wait for the page to save when an update installs before shell-mounted (N1, T-B22.4)',
+    async () => {
+      /* A page that never mounted cannot answer: waiting on it ends in the saving review, which no one is there to
+       * answer, so the automatic install never restarts into the update. */
+      state.autoQuiesce = false;
+      await booted();
+      await vi.waitFor(() => {
+        expect(state.prepareToInstall).toBeDefined();
+      });
+      const commit = vi.fn();
+      const installing = state.prepareToInstall!(commit);
+      await vi.waitFor(() => {
+        expect(commit).toHaveBeenCalledOnce();
+      });
+      await expect(installing).resolves.toBe(true);
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should still wait for the page to save when an update installs once the shell has mounted',
+    async () => {
+      /* No `home-ready` either: a project session opens once `rootFiles` holds the shared worker, before it is
+       * `ready`, so a mounted page may hold edits even in a launch whose Home never became ready (N1). */
+      await booted();
+      reportStage('shell-mounted');
+      await vi.waitFor(() => {
+        expect(state.prepareToInstall).toBeDefined();
+      });
+      const commit = vi.fn();
+      await expect(state.prepareToInstall!(commit)).resolves.toBe(true);
+      expect(commit).toHaveBeenCalledOnce();
+      expect(state.sentToRenderer).toContain(quitChannels.ask);
+      expect(state.log).not.toHaveBeenCalledWith('info', 'main.restart-without-page', expect.anything());
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should not wait for the page to save when a Squirrel update restarts before shell-mounted, and log why (N1)',
+    async () => {
+      /* On macOS and Windows, Squirrel's `quitAndInstall` runs after the updater's `prepareToRestart`. */
+      state.autoQuiesce = false;
+      await booted();
+      await vi.waitFor(() => {
+        expect(state.prepareToRestart).toBeDefined();
+      });
+      await expect(state.prepareToRestart!()).resolves.toBe(true);
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
+      expect(state.log).toHaveBeenCalledWith('info', 'main.restart-without-page', { reason: 'update-install' });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should ask the page to save again on a later quit after an install before shell-mounted fails',
+    async () => {
+      await booted();
+      await vi.waitFor(() => {
+        expect(state.prepareToInstall).toBeDefined();
+      });
+      const commit = vi.fn(async () => {
+        throw new Error('spawn refused');
+      });
+      await expect(state.prepareToInstall!(commit)).resolves.toBe(false);
+      expect(state.log).toHaveBeenCalledWith('info', 'main.restart-without-page', { reason: 'update-install' });
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.sentToRenderer).toContain(quitChannels.ask);
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should ask once, in a native prompt, when a second launch carries --safe-mode (T-R12.8)',
+    async () => {
+      await booted();
+      dialog.showMessageBox.mockClear();
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
+      const secondInstance = state.appListeners.get('second-instance')!.at(-1)!;
+      secondInstance({}, ['tau', '--safe-mode']);
+      secondInstance({}, ['tau', '--safe-mode']);
+      await vi.waitFor(() => {
+        expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]![0].buttons).toEqual(['Restart in Safe Mode', 'Not Now']);
+      expect(app.relaunch).not.toHaveBeenCalled();
+      secondInstance({}, ['tau']);
+      expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should report a GPU process that exited and not count the launch healthy for it (T-B26.1)',
+    async () => {
+      await booted();
+      const gone = state.appListeners.get('child-process-gone')!.at(-1)!;
+      gone({}, { type: 'GPU', reason: 'crashed', exitCode: 133 });
+      expect(signals('desktop-gpu-process-gone')).toEqual([
+        expect.objectContaining({ tags: { reason: 'crashed', exit_code: '133', safe_mode: 'false' } }),
+      ]);
+      const { last } = await readLedger();
+      expect(last?.['stage']).not.toBe('home-ready');
+      expect(last?.['gpuProcessGone']).toBe(true);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should open the recovery window in its own partition when the first load fails',
+    async () => {
+      fakeWindow.loadURL.mockRejectedValueOnce(Object.assign(new Error('ERR_FILE_NOT_FOUND'), { errno: -6 }));
+      await booted();
+      const { BrowserWindow } = await import('electron');
+      const partitions = (): unknown[] =>
+        vi.mocked(BrowserWindow).mock.calls.map(([options]) => options?.webPreferences?.partition);
+      /* Counted by partition, not by position: a slow host may create the app's windows at other times. */
+      await vi.waitFor(() => {
+        expect(partitions().filter((partition) => partition === 'tau-recovery')).toHaveLength(1);
+      });
+      expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
+      expect(signals('desktop-recovery-shown')).toEqual([
+        expect.objectContaining({ tags: { surface: 'window', trigger: 'load-failed' } }),
+      ]);
+      expect(app.exit).not.toHaveBeenCalled();
+      expect(fakeWindow.reload).not.toHaveBeenCalled();
+      expect(fakeWindow.close).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  /*
+   * A renderer death as Electron delivers it: the diagnostics forwarder's recovery first, then every other listener
+   * main put on the app window's web contents, as they stood before the death.
+   */
+  type RendererWatch = {
+    readonly recover: (reason: string) => void;
+    readonly hangRule: { readonly endHungPage: () => void; readonly restartInSafeMode: () => void };
+  };
+  const rendererWatch = async (): Promise<RendererWatch> => {
+    const { forwardRendererDiagnostics, watchRendererHangs } = await import('#main/diagnostics.js');
+    const forwarded = vi.mocked(forwardRendererDiagnostics).mock.calls[0]![2] as { recover: (reason: string) => void };
+    const watched = vi.mocked(watchRendererHangs).mock.calls[0]![2] as { hangRule: RendererWatch['hangRule'] };
+    return { recover: forwarded.recover, hangRule: watched.hangRule };
+  };
+  const rendererDies = (watch: RendererWatch, reason: string): void => {
+    const listeners = fakeWindow.webContents.on.mock.calls
+      .filter(([name]) => name === 'render-process-gone')
+      .map(([, listener]) => listener);
+    watch.recover(reason);
+    for (const listener of listeners) {
+      listener({}, { reason, exitCode: 1 });
+    }
+  };
+  const contents = fakeWindow.webContents as typeof fakeWindow.webContents & {
+    reload?: () => void;
+    forcefullyCrashRenderer?: () => void;
+  };
+
+  it(
+    'should leave a renderer death before the first load to the watchdog alone: recovery opens and nothing reloads',
+    async () => {
+      const reload = vi.fn();
+      contents.reload = reload;
+      try {
+        await booted();
+        rendererDies(await rendererWatch(), 'crashed');
+        await vi.waitFor(() => {
+          expect(signals('desktop-recovery-shown')).toEqual([
+            expect.objectContaining({ tags: { surface: 'window', trigger: 'load-failed' } }),
+          ]);
+        });
+        expect(reload).not.toHaveBeenCalled();
+        expect(signals('desktop-renderer-reload-policy')).toEqual([]);
+      } finally {
+        delete contents.reload;
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should not open recovery when the hang rule's Restart in Safe Mode ends a page stuck in its first load (N1)",
+    async () => {
+      contents.reload = vi.fn();
+      try {
+        await booted();
+        const watch = await rendererWatch();
+        contents.forcefullyCrashRenderer = () => {
+          rendererDies(watch, 'killed');
+        };
+        watch.hangRule.endHungPage();
+        watch.hangRule.restartInSafeMode();
+        await vi.waitFor(() => {
+          expect(app.quit).toHaveBeenCalled();
+        });
+        expect(signals('desktop-recovery-shown')).toEqual([]);
+        expect(fakeWindow.loadFile).not.toHaveBeenCalled();
+      } finally {
+        delete contents.reload;
+        delete contents.forcefullyCrashRenderer;
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should apply a pending reset at the next start before the window, and never delete it',
+    async () => {
+      await booted(async (userData) => {
+        await writeFile(join(userData, 'granted-roots.json'), JSON.stringify([join(userData, 'gone')]));
+        await mkdir(join(userData, 'recovery'), { recursive: true });
+        await writeFile(
+          join(userData, 'recovery', 'pending-resets.json'),
+          JSON.stringify({ schemaVersion: 1, stores: ['folder-list'] }),
+        );
+      });
+      expect(existsSync(join(state.userData, 'recovery', 'pending-resets.json'))).toBe(false);
+      const { readdir } = await import('node:fs/promises');
+      const entries = await readdir(join(state.userData, 'recovery'));
+      const quarantines = entries.filter((name) => name !== 'pending-resets.json');
+      expect(quarantines).toHaveLength(1);
+      expect(
+        JSON.parse(await readFile(join(state.userData, 'recovery', quarantines[0]!, 'granted-roots.json'), 'utf8')),
+      ).toEqual([join(state.userData, 'gone')]);
+      expect(signals('desktop-store-reset')).toEqual([
+        expect.objectContaining({ tags: { store: 'folder-list', outcome: 'moved' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should accept a boot stage only from a trusted main frame',
+    async () => {
+      await booted();
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      vi.mocked(isTrustedSender).mockReturnValue(false);
+      try {
+        reportStage('shell-mounted');
+      } finally {
+        vi.mocked(isTrustedSender).mockReturnValue(true);
+      }
+      const refused = await readLedger();
+      expect(refused.last?.['stage']).not.toBe('shell-mounted');
+      for (const listener of state.ipcListeners.get('tau:boot:stage') ?? []) {
+        listener({ sender: fakeWindow.webContents, senderFrame: { url: 'app://tau/frame' } }, 'shell-mounted');
+      }
+      const wrongFrame = await readLedger();
+      expect(wrongFrame.last?.['stage']).not.toBe('shell-mounted');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should put the boot-health ledger in Copy Diagnostics',
+    async () => {
+      await booted(seedLedger(1));
+      const { clipboard } = await import('electron');
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toContain('Copy Diagnostics');
+      });
+      troubleshooting().find((item) => item.label === 'Copy Diagnostics')!.click!();
+      await vi.waitFor(() => {
+        expect(clipboard.writeText).toHaveBeenCalledOnce();
+      });
+      const text = vi.mocked(clipboard.writeText).mock.calls[0]![0];
+      expect(text).toContain('Boot health:');
+      expect(text).toContain('Mode: safe-auto');
+      expect(text).toContain('Unhealthy launches: 2');
+      expect(text).toContain('Previous launch: unhealthy (stage shell-mounted');
+    },
+    bootMilliseconds,
+  );
+});
+/* eslint-enable @typescript-eslint/naming-convention -- End WP6 boot health rows. */
+
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are snake_case. */
+describe('desktop main update path without a renderer (WP7)', () => {
+  const bootMilliseconds = 30_000;
+
+  const boot = async (): Promise<void> => {
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-update-path-'));
+    if (app.isPackaged) {
+      Object.defineProperty(process, 'resourcesPath', { configurable: true, value: state.userData });
+    }
+    await import('#main/main.js');
+  };
+  const booted = async (): Promise<void> => {
+    await boot();
+    await vi.waitFor(() => {
+      expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+    });
+  };
+  const signals = (name: string): Array<{ tags: Record<string, string> }> =>
+    state.reportSignal.mock.calls
+      .map(([signal]) => signal as { fingerprint?: readonly string[]; tags: Record<string, string> } | undefined)
+      .filter((signal) => signal?.fingerprint?.[0] === name) as Array<{ tags: Record<string, string> }>;
+  const reportStage = (stage: string): void => {
+    for (const listener of state.ipcListeners.get('tau:boot:stage') ?? []) {
+      listener({ sender: fakeWindow.webContents, senderFrame: fakeWindow.webContents.mainFrame }, stage);
+    }
+  };
+  const recoveryAction = async (action: unknown): Promise<unknown> =>
+    state.handlers.get('tau:recovery:action')!(
+      { sender: fakeWindow.webContents, senderFrame: fakeWindow.webContents.mainFrame },
+      action,
+    );
+  const windowsCreated = async (): Promise<Array<{ webPreferences?: { partition?: string } } | undefined>> => {
+    const { BrowserWindow } = await import('electron');
+    return vi
+      .mocked(BrowserWindow)
+      .mock.calls.map(([options]) => options as { webPreferences?: { partition?: string } } | undefined);
+  };
+  const checkForUpdatesItem = (): UpdateMenuItem =>
+    state.installedUpdateMenuItems.find((item) => item.label === 'Check for Updates…')!;
+
+  /* The windows this launch created after `from`, as recovery windows or not. */
+  const createdSince = async (from: number): Promise<Array<string | undefined>> => {
+    const created = await windowsCreated();
+    return created.slice(from).map((options) => options?.webPreferences?.partition);
+  };
+
+  it(
+    'should open the recovery window, not a renderer window, for Check for Updates… before any window has mounted (T-B22.3)',
+    async () => {
+      await booted();
+      state.updaterCheck.mockClear();
+      fakeWindow.focus.mockClear();
+      const { length: before } = await windowsCreated();
+      checkForUpdatesItem().click!();
+      await vi.waitFor(async () => {
+        expect(await createdSince(before)).toEqual(['tau-recovery']);
+      });
+      expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
+      await vi.waitFor(() => {
+        expect(state.updaterCheck).toHaveBeenCalledWith(true);
+      });
+      expect(signals('desktop-recovery-shown')).toEqual([
+        expect.objectContaining({ tags: { surface: 'window', trigger: 'check-for-updates' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should still bring up the app window for Check for Updates… once the shell has mounted',
+    async () => {
+      await booted();
+      reportStage('shell-mounted');
+      fakeWindow.focus.mockClear();
+      const { length: before } = await windowsCreated();
+      checkForUpdatesItem().click!();
+      await vi.waitFor(() => {
+        expect(state.updaterCheck).toHaveBeenCalledWith(true);
+      });
+      expect(fakeWindow.focus).toHaveBeenCalled();
+      expect(await createdSince(before)).toEqual([]);
+      expect(fakeWindow.loadFile).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should install from the recovery window's Install update and restart (T-B22.3)",
+    async () => {
+      await booted();
+      await recoveryAction({ type: 'open-recovery-window' });
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
+      });
+      await recoveryAction({ type: 'install-update' });
+      expect(state.updaterInstall).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should run exactly one update check when home-ready arrives (T-B22.3)',
+    async () => {
+      await booted();
+      state.updaterCheck.mockClear();
+      reportStage('shell-mounted');
+      reportStage('home-ready');
+      reportStage('home-ready');
+      await vi.waitFor(() => {
+        expect(state.updaterCheck).toHaveBeenCalledOnce();
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(state.updaterCheck).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should say this copy can't update itself, with a download page and one report, when the installation marker is damaged (T-B27.1)",
+    async () => {
+      app.isPackaged = true;
+      vi.doMock('#main/update-platform.js', () => ({
+        startPlatformUpdater: vi.fn(async () => {
+          throw new TypeError('Installed update route disagrees with the running app');
+        }),
+        relaunchSelf: vi.fn(async () => undefined),
+      }));
+      try {
+        await booted();
+        const snapshot = state.handlers.get('tau:updates:snapshot')!;
+        await vi.waitFor(async () => {
+          expect(await snapshot({ senderFrame: {} })).toEqual(
+            expect.objectContaining({
+              blockedReason: 'installation-marker',
+              downloadPage: 'https://github.com/taucad/tau/releases/latest',
+            }),
+          );
+        });
+        const blocked = (await snapshot({ senderFrame: {} })) as { phase: string; detail?: string };
+        /* The renderer and the recovery window word "can't update itself" from `blockedReason`; main's raw error stays
+           in its log, never in the snapshot (#2557). */
+        expect(blocked.phase).toBe('disabled');
+        expect(blocked).not.toHaveProperty('detail');
+        const check = state.handlers.get('tau:updates:check')!;
+        await check({ senderFrame: {} });
+        await check({ senderFrame: {} });
+        expect(signals('desktop-update-blocked')).toEqual([
+          expect.objectContaining({ tags: { reason: 'installation-marker', route: process.platform } }),
+        ]);
+      } finally {
+        vi.doUnmock('#main/update-platform.js');
+      }
+    },
+    bootMilliseconds,
+  );
+});
+/* eslint-enable @typescript-eslint/naming-convention -- End WP7 update path rows. */

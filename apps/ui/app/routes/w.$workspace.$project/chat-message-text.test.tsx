@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { TextUIPart } from 'ai';
 
-vi.mock('#components/markdown/markdown-viewer-chat.js', () => ({
+vi.mock('@taucad/chat-surfaces/components/markdown/markdown-viewer-chat', () => ({
   MarkdownViewerChat: ({
     children,
     isStreaming,

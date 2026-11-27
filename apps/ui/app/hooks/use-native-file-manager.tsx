@@ -3,11 +3,11 @@ import { FolderOpen, PanelsTopLeft } from 'lucide-react';
 import { resolveRootedPath } from '@taucad/utils/path';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { toast } from '@taucad/ui/components/sonner';
-import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
-import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { desktopBridge, nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
+import type { DesktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { desktopWorkspaceRoot } from '#lib/agent-host-placement.js';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 
 type NativeDirectories = NonNullable<DesktopBridge['directories']>;
 

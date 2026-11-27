@@ -26,6 +26,7 @@ const builtInKernelIds = [
   'smlib',
   'gltf',
   'brep',
+  'cadmpeg',
   'tscircuit',
   'zoo',
   'smlibpy',
@@ -131,7 +132,15 @@ describe('createCliRuntime', () => {
     expect(runtime.kernels.map(({ id }) => id)).toEqual(builtInKernelIds);
     expect(runtime.bundlers.map(({ id }) => id)).toEqual(['esbuild']);
     expect(runtime.middleware.length).toBeGreaterThan(0);
-    expect(runtime.transcoders.map(({ id }) => id)).toEqual(['gltf', 'slicer', 'assimp', 'image', 'svg-image']);
+    expect(runtime.transcoders.map(({ id }) => id)).toEqual([
+      'gltf',
+      'slicer',
+      'assimp',
+      'render',
+      'svg',
+      'raster',
+      'heif',
+    ]);
   });
 
   it('composes the bundler under the locked acquisition profile only when asked', async () => {

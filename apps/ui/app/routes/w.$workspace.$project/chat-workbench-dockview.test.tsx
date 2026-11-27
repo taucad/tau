@@ -6,6 +6,10 @@ import { isValidElement, useEffect, useRef, useState, StrictMode, Fragment } fro
 import { MemoryRouter } from 'react-router';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { createPortal } from 'react-dom';
+import type {
+  filePaneAvailability as FilePaneAvailabilityOf,
+  ProjectAvailability,
+} from '#hooks/use-project-availability.js';
 import { Printer } from 'lucide-react';
 import type {
   DockviewApi,
@@ -24,8 +28,8 @@ import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
-import { EditorDocument } from '#lib/editor-document.js';
-import type { DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
+import type { DocumentChange, DocumentTransaction } from '@taucad/editor-ui/lib/editor-document';
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { createActor } from 'xstate';
@@ -51,29 +55,57 @@ const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastErro
 const mockEditorRuntimeImported = vi.hoisted(() => vi.fn());
 const mockEditorViewMounted = vi.hoisted(() => vi.fn());
 const mockLoadEditorSyntax = vi.hoisted(() => vi.fn(async () => []));
-vi.mock('#components/code/code-editor-view.client.js', () => {
-  mockEditorRuntimeImported();
+/* Counts each time a pane takes the editor runtime from its module, not the module's one evaluation: the module cache
+ * outlives a test, so a factory call would only count for whichever test imports it first. */
+vi.mock('@taucad/editor-ui/components/code/code-editor-view.client', () => {
+  function CodeEditorView(): React.JSX.Element {
+    mockEditorViewMounted();
+    return <div role='textbox' aria-label='Code editor' />;
+  }
   return {
-    CodeEditorView: () => {
-      mockEditorViewMounted();
-      return <div role='textbox' aria-label='Code editor' />;
+    get CodeEditorView() {
+      mockEditorRuntimeImported();
+      return CodeEditorView;
     },
   };
 });
-vi.mock('#lib/editor-syntax.js', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
+vi.mock('@taucad/editor-ui/lib/editor-syntax', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
 
 const largeObjectState = vi.hoisted(() => ({ pending: new Set<string>(), opened: [] as string[] }));
-vi.mock('#hooks/use-project-availability.js', () => ({
-  useProjectAvailability: () => 'ready',
-  useModelAvailability: () => 'ready',
-  useLargeObjectPending: (path: string | undefined) => path !== undefined && largeObjectState.pending.has(path),
-  useOpenedLargeObjectPending(path: string | undefined) {
-    if (path !== undefined) {
-      largeObjectState.opened.push(path);
-    }
-    return path !== undefined && largeObjectState.pending.has(path);
-  },
+vi.mock('#routes/w.$workspace.$project/project-wait-skeleton.js', () => ({
+  ProjectWaitSkeleton: ({ state }: { readonly state: string }) => <div data-testid={`project-wait-${state}`} />,
+  PaneWaitSkeleton: ({ label }: { readonly label: string }) => <div data-testid={`pane-wait-${label}`} />,
 }));
+/* What each surface shows; a surface not named here is ready. */
+const surfaceAvailability = vi.hoisted(() => ({ current: new Map<string | undefined, string>() }));
+/* The paths this tab's open has landed, as the revision host names them (STO-25). */
+const landedState = vi.hoisted(() => ({ paths: new Set<string>() }));
+vi.mock('#hooks/use-project-availability.js', async (importOriginal) => {
+  const { filePaneAvailability } = await importOriginal<{
+    filePaneAvailability: typeof FilePaneAvailabilityOf;
+  }>();
+  const availabilityOf = (surface?: string): ProjectAvailability =>
+    (surfaceAvailability.current.get(surface) ?? 'ready') as ProjectAvailability;
+  return {
+    useProjectAvailability: availabilityOf,
+    useFilePaneAvailability: (path: string, inClosure: boolean) =>
+      filePaneAvailability({
+        inClosure,
+        firstView: availabilityOf('editor'),
+        absence: availabilityOf('absence'),
+        landed: landedState.paths.has(path),
+      }),
+    useCloudOpenPending: () => false,
+    useModelAvailability: () => 'ready',
+    useLargeObjectPending: (path: string | undefined) => path !== undefined && largeObjectState.pending.has(path),
+    useOpenedLargeObjectPending(path: string | undefined) {
+      if (path !== undefined) {
+        largeObjectState.opened.push(path);
+      }
+      return path !== undefined && largeObjectState.pending.has(path);
+    },
+  };
+});
 
 vi.mock('#routes/w.$workspace.$project/chat-print.js', () => ({
   PrintPanelBody: ({ isShown }: { readonly isShown?: boolean }) => {
@@ -201,8 +233,35 @@ const mockUseFileContent =
     ) => FileContentResult & { observation?: { status: string; error?: string }; retry?: () => void }
   >();
 
-vi.mock('#hooks/use-file-content.js', () => ({
-  useFileContent: (path: string | undefined) => {
+/* Paths whose fresh read after opening has not settled yet (STO-25, I7). */
+const freshState = vi.hoisted(() => ({
+  held: new Set<string>(),
+  failed: new Map<string, unknown>(),
+  readAfresh: new Set<string>(),
+  retainValue: undefined as boolean | undefined,
+  retry: (() => undefined) as () => void,
+  settled: (() => undefined) as (path: string | undefined) => void,
+}));
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
+  useFreshContent: (path: string | undefined, open: boolean) => ({
+    state: open
+      ? path !== undefined && freshState.failed.has(path)
+        ? 'failed'
+        : path !== undefined && freshState.held.has(path)
+          ? 'waiting'
+          : 'open'
+      : 'waiting',
+    cause: path === undefined ? undefined : freshState.failed.get(path),
+    readAfresh: path !== undefined && freshState.readAfresh.has(path),
+    retry: () => {
+      freshState.retry();
+    },
+    settled: () => {
+      freshState.settled(path);
+    },
+  }),
+  useFileContent: (path: string | undefined, options?: Readonly<{ retainValue?: boolean }>) => {
+    freshState.retainValue = options?.retainValue;
     const result = mockUseFileContent(path);
     return {
       ...result,
@@ -411,7 +470,7 @@ vi.mock('#routes/w.$workspace.$project/file-viewers/built-in-viewers.js', () => 
   },
 }));
 
-vi.mock('#components/files/file-selector.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-selector', () => ({
   FileSelector: ({
     onSelect,
     placeholder,
@@ -458,12 +517,39 @@ const {
 const actualWorkspace = await vi.importActual<typeof ProjectWorkspaceContext>(
   '#routes/w.$workspace.$project/project-workspace-context.js',
 );
+const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-provider.js');
+
+/* Every case starts from the same fixtures: a wide screen, no workspace layout, the default flags, no open files and
+ * no file, read or large-object state. A case that set one must not decide what a later one sees, whatever order the
+ * cases run in: a phone left set, for one, sends a Files request to the phone's tabs instead of the connected
+ * workbench. Cases that restore their own fixtures in `finally` keep doing so; this covers the ones that did not. */
+beforeEach(() => {
+  mobileState.value = false;
+  workspaceLayout.value = undefined;
+  featureState.value = false;
+  featureState.machines = true;
+  largeObjectState.pending.clear();
+  largeObjectState.opened.length = 0;
+  surfaceAvailability.current = new Map();
+  landedState.paths.clear();
+  freshState.held.clear();
+  freshState.failed.clear();
+  freshState.readAfresh.clear();
+  freshState.retainValue = undefined;
+  freshState.retry = () => undefined;
+  freshState.settled = () => undefined;
+  editorMachineSnapshot.context.openFiles = [];
+  editorMachineSnapshot.context.pendingOpenFile = undefined;
+  currentEditorSnapshot = editorMachineSnapshot;
+  readyDockviewApi = undefined;
+  mockDocuments.clear();
+});
 
 describe('hidden workbench operation panels', () => {
   it.each([
     ['Print', PrintWorkbenchPanel, mockPrintBody],
     ['Export', ExportWorkbenchPanel, mockExportBody],
-  ] as const)('passes hidden visibility to mounted %s body and wakes it on reveal', (_name, Panel, body) => {
+  ] as const)('passes hidden visibility to mounted %s body and wakes it on reveal', async (_name, Panel, body) => {
     let onVisibilityChange: (() => void) | undefined;
     const api = {
       isVisible: false,
@@ -475,7 +561,10 @@ describe('hidden workbench operation panels', () => {
     const properties = { api } as IDockviewPanelProps;
 
     render(<Panel {...properties} />);
-    expect(body).toHaveBeenLastCalledWith(false);
+    // The body is its own chunk (PL5): it mounts once the lazy import settles.
+    await waitFor(() => {
+      expect(body).toHaveBeenLastCalledWith(false);
+    });
 
     act(() => {
       Object.assign(api, { isVisible: true });
@@ -503,6 +592,7 @@ const createTabProperties = ({
     setActive: vi.fn(),
     updateParameters: vi.fn(),
     onDidTitleChange: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidGroupChange: vi.fn(() => ({ dispose: vi.fn() })),
   } as unknown as DockviewPanelApi;
   group.panels.push({ id, api } as unknown as IDockviewPanel);
 
@@ -710,7 +800,7 @@ describe('FileEditor routing', () => {
 
     now.mockReturnValue(20_000);
     // The slow words and Retry are laid out from the wait's start; CSS shows them at 10,000 ms.
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(retry).toHaveBeenCalledOnce();
     expect(document.activeElement).not.toBe(document.body);
@@ -760,7 +850,7 @@ describe('FileEditor routing', () => {
     expect(slot).not.toHaveAttribute('role');
 
     now.mockReturnValue(10_100);
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(retry).toHaveBeenCalledOnce();
     expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
@@ -917,6 +1007,171 @@ describe('FileEditor routing', () => {
     expect(screen.getByText(/file not found/i)).toBeInTheDocument();
     expect(screen.getAllByTestId('file-selector')).toHaveLength(2);
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
+  });
+
+  /* STO-25, I7: a pane opened before the open's apply has landed every file never calls an arriving file missing. */
+  it('should show a file still to land as waiting, not as not found, while the apply writes the rest', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'orphaned' });
+    try {
+      render(<FileEditor paneId='test-pane' filePath='lib/gear.scad' panelApi={mockPanelApi} />);
+
+      expect(screen.queryByText(/file not found/i)).not.toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Waiting for gear.scad' })).toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+    }
+  });
+
+  /*
+   * A file outside the entry closure may still hold the previous revision's bytes while the open's apply writes it
+   * (D9: an unlanded path is what is on disk). Its pane waits for every authored file; the closure opens at once.
+   */
+  it('should keep a pane outside the entry closure waiting while the open applies, never showing its old bytes', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('old') });
+    try {
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByRole('group', { name: 'Waiting for gear.ts' })).toBeInTheDocument();
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+    }
+  });
+
+  /* STO-25 gap 3: a file outside the closure opens on its own landing, and waits on it alone until then (I7). */
+  it('should wait on a file outside the entry closure alone until the open lands it, then open it', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('new') });
+    try {
+      const { unmount } = render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByRole('group', { name: 'Waiting for gear.ts' })).toBeInTheDocument();
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+      unmount();
+
+      /* The host names it landed: the same pane opens on its new bytes. */
+      landedState.paths.add('lib/gear.ts');
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('viewer')).toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+      landedState.paths.clear();
+    }
+  });
+
+  /* STO-25, I7: a landed file's pane shows only a read begun after it opened, never what was cached before. */
+  it('should never render bytes read before the pane opened, nor read anything while it waits', () => {
+    mockUseFileContent.mockClear();
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('old') });
+    try {
+      const waiting = render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByRole('group', { name: 'Waiting for gear.ts' })).toBeInTheDocument();
+      expect(mockUseFileContent).not.toHaveBeenCalledWith('lib/gear.ts');
+      waiting.unmount();
+
+      /* Landed, but the fresh read has not settled: still waiting, still nothing read for the pane. */
+      landedState.paths.add('lib/gear.ts');
+      freshState.held.add('lib/gear.ts');
+      const landed = render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByRole('group', { name: 'Waiting for gear.ts' })).toBeInTheDocument();
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+      expect(mockUseFileContent).not.toHaveBeenCalledWith('lib/gear.ts');
+      landed.unmount();
+
+      freshState.held.clear();
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('viewer')).toBeInTheDocument();
+      expect(mockUseFileContent).toHaveBeenCalledWith('lib/gear.ts');
+    } finally {
+      surfaceAvailability.current = new Map();
+      landedState.paths.clear();
+      freshState.held.clear();
+    }
+  });
+
+  /* A fresh read that failed is shown failed with a way to try again, never as the bytes held before (I7). */
+  it('should show a failed fresh read with Try again, not the content held before', async () => {
+    const user = userEvent.setup();
+    const retry = vi.fn();
+    freshState.retry = retry;
+    freshState.failed.set('lib/gear.ts', new Error('disk on fire'));
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('old') });
+    try {
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByText(/disk on fire/)).toBeInTheDocument();
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(retry).toHaveBeenCalledOnce();
+    } finally {
+      freshState.failed.clear();
+      freshState.retry = () => undefined;
+    }
+  });
+
+  /* A pane that read afresh retains nothing from before it opened, until its own observation is ready. */
+  it('should settle a fresh pane once its own observation is ready, not before', () => {
+    const settled = vi.fn();
+    freshState.settled = settled;
+    freshState.readAfresh.add('lib/gear.ts');
+    const content = new TextEncoder().encode('landed');
+    mockUseFileContent.mockReturnValue({ kind: 'text', content, observation: { status: 'pending' } });
+    try {
+      const pending = render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(mockUseFileContent).toHaveBeenLastCalledWith('lib/gear.ts');
+      expect(freshState.retainValue).toBe(false);
+      expect(settled).not.toHaveBeenCalled();
+      pending.unmount();
+
+      mockUseFileContent.mockReturnValue({ kind: 'text', content, observation: { status: 'ready' } });
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(settled).toHaveBeenCalledExactlyOnceWith('lib/gear.ts');
+    } finally {
+      freshState.readAfresh.clear();
+      freshState.settled = () => undefined;
+    }
+  });
+
+  it('should never call a landed path missing before every authored file has landed', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    landedState.paths.add('lib/gone.ts');
+    mockUseFileContent.mockReturnValue({ kind: 'orphaned' });
+    try {
+      render(<FileEditor paneId='other-pane' filePath='lib/gone.ts' panelApi={mockPanelApi} />);
+      expect(screen.queryByText(/file not found/i)).not.toBeInTheDocument();
+      expect(screen.getByTestId('project-wait-preparing')).toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+      landedState.paths.clear();
+    }
+  });
+
+  it('should let a failed open win over a file the open had landed', () => {
+    surfaceAvailability.current = new Map([
+      ['absence', 'failed'],
+      ['editor', 'failed'],
+    ]);
+    landedState.paths.add('lib/gear.ts');
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('partial') });
+    try {
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('project-wait-failed')).toBeInTheDocument();
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+      landedState.paths.clear();
+    }
+  });
+
+  it('should open the entry closure’s own pane while the open applies the rest', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('x') });
+    try {
+      render(<FileEditor paneId='main-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('viewer')).toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+    }
   });
 
   it.each(['Select peer file', 'Select file to edit…'])(
@@ -2050,6 +2305,7 @@ describe('workbench adapter record apply (A0.3)', () => {
 
   // A0.3 row 3, Y7/I10: a record apply waits in `pendingRecordNodeRef` for its file to open. The person rearranges
   // the panes before it lands; when the file opens, the late apply must not revert the person's arrangement.
+  // Expected-failure: @rifont until 2026-12-15
   it.fails("I10: should not land a record apply computed before the person's edit over that edit", () => {
     const dockview = createTestDockview([panel('utility')]);
     const subscribe = () => ({ dispose: vi.fn() });
@@ -2387,9 +2643,9 @@ describe('Workbench file reconciliation', () => {
         <Lifecycle>
           <MemoryRouter>
             <KeyboardProvider>
-              <actualWorkspace.ProjectWorkspaceProvider>
+              <ProjectWorkspaceProvider>
                 <MountedWorkbench />
-              </actualWorkspace.ProjectWorkspaceProvider>
+              </ProjectWorkspaceProvider>
             </KeyboardProvider>
           </MemoryRouter>
         </Lifecycle>,

@@ -15,9 +15,11 @@ const DEFAULT_ALLOWLIST = [
   // Object-store provider — browser-local, non-project state (storage-policy Rule 0).
   'apps/ui/app/db/indexeddb-storage.ts',
   // Per-device workspace handle/config schema (tau-fs-handles).
-  'apps/ui/app/filesystem/handle-store.ts',
+  'apps/libs/files-ui/src/filesystem/handle-store.ts',
   // Filesystem backend providers.
   'packages/filesystem/src/backend/**',
+  // The billing cache's own database (saved usage and its purge; adaptive app deployment mode W2 split it out).
+  'apps/libs/billing-ui/src/db/billing-snapshot-database.ts',
   // Tests set up and tear down fake-indexeddb.
   '**/*.test.ts',
   '**/*.test.tsx',

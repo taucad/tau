@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router';
 import { Switch } from '@taucad/ui/components/switch';
 import { useSession } from '@better-auth-ui/react';
-import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { CookiePreferencesDialog } from '#components/cookie-preferences.js';
 import { CloudAccountClosure } from '#cloud/settings-billing.js';
 import { desktopAnalyticsCopy, useDesktopAnalytics } from '#hooks/use-desktop-analytics.js';
@@ -13,7 +13,7 @@ import { telemetryCopy, useTelemetrySwitch } from '#hooks/use-telemetry-switch.j
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { legalUrl } from '#lib/legal-url.js';
-import { setAnonymousRevisions, useAnonymousRevisions } from '#lib/revision-actor.js';
+import { setAnonymousRevisions, useAnonymousRevisions } from '@taucad/revisions-ui/lib/revision-actor';
 import { Button } from '@taucad/ui/components/button';
 
 function LearnMore(): React.JSX.Element {

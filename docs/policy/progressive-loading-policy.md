@@ -3,7 +3,7 @@ title: 'Progressive Loading Policy'
 description: 'How Tau web documents are delivered and loaded, and what a region shows while it waits: route classes, static shells, client facts, load tiers, budgets, the hand-off contract, the service worker, and loading states.'
 status: active
 created: '2026-11-16'
-updated: '2026-11-25'
+updated: '2026-11-27'
 related:
   - docs/research/progressive-loading-architecture.md
   - docs/research/loading-states-ux-blueprint.md
@@ -249,7 +249,7 @@ When the region that carries the status is covered (a phone sheet at full over t
 | Is measurable and passes 3,000 ms  | A detail line with the numbers: "189 of 295 files, 44.8 MB of 70.0 MB"                                          |
 | Has made no progress for 10,000 ms | The slow label ("Still opening project…"), "Try again" beside it, and one line of what to do in the detail line |
 
-The label does not change to name an internal step while the wait runs. A wait with no known total has no detail line; do not fill the line with a sentence. A wait whose numbers are still moving is never called slow and never offers "Try again". Announce the label and a failure, never a percentage or a detail line (rule 22).
+The label does not change to name an internal step while the wait runs. One second label is allowed after it: once the model's files are open and its first build runs, the viewer's status says "Rendering…" (the request is now a render, so the label still names what the person asked for). A wait with no known total has no detail line; do not fill the line with a sentence. A wait whose numbers are still moving is never called slow and never offers "Try again". Announce the label and a failure, never a percentage or a detail line (rule 22).
 
 **Why**: words are read; a wait that ends in a second should cost none, and a download that takes a minute owes the person its real numbers. A "Try again" offered at ten seconds on a large download that is working invites the person to restart it.
 
@@ -278,7 +278,7 @@ A control that does not need the awaited data stays usable. The composer accepts
 
 **Why**: the wait is the system's, not the person's; the one useful thing they can do meanwhile is start writing.
 
-**Enforced by**: `describeHandOffContract` (rule 8) for the composer. Default, unenforced on a phone, where the chat sheet has no hand-off box yet.
+**Enforced by**: `describeHandOffContract` (rule 8) for the composer, on wide screens and on a phone, where the frame's chat sheet carries the same hand-off box (`workspace-frame.test.tsx`).
 
 ### 21. Fail once, on the surface in front
 
@@ -290,7 +290,7 @@ When a group's wait fails, or stalls past the slow mark, every skeleton and indi
 
 ### 22. Announce a group once
 
-A group has one live region: for a project open, the route's `ProjectSyncAnnouncement`. It says the label when the wait starts and the failure if there is one. It does not say a step, a percentage, a detail line or a success; content arriving is the success. Inside the group every indicator passes `live={false}`, a skeleton's wrapper carries `aria-busy='true'` and its region's name with `aria-hidden` bars and no status text, and the failure notice is a labelled `group`, not a second `alert`. Focus does not move. Under reduced motion nothing pulses or spins, so an indicator always carries words.
+A group has one live region: for a project open, the route's `ProjectSyncAnnouncement`. It says the label when the wait starts and the failure if there is one. It does not say a step, a percentage, a detail line or a success; content arriving is the success. A send queued during the open is not said either: Send's pending state shows it. Only its cancellation is said ("Send cancelled.", in the composer's status slot), because it ends something the person asked for. Inside the group every indicator passes `live={false}`, a skeleton's wrapper carries `aria-busy='true'` and its region's name with `aria-hidden` bars and no status text, and the failure notice is a labelled `group`, not a second `alert`. Focus does not move. Under reduced motion nothing pulses or spins, so an indicator always carries words.
 
 CORRECT:
 
@@ -314,7 +314,7 @@ INCORRECT:
 
 **Why**: a screen reader hears every live region; one open that speaks from three panes, or changes its words at each step, is noise ([WCAG 4.1.3](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html)).
 
-**Enforced by**: `project-sync-announcement.test.tsx` (one region; one label at every step; the failure); `chat-viewer.test.tsx` and `viewer-stage.test.tsx` (the open's failure card is a labelled group, not an `alert`); `project-wait-skeleton.test.tsx` (no pane adds a live region).
+**Enforced by**: `project-sync-announcement.test.tsx` (one region; one label at every step; the failure); `chat-viewer.test.tsx` and `viewer-stage.test.tsx` (the open's failure card is a labelled group, not an `alert`); `project-wait-skeleton.test.tsx` (no pane adds a live region); `hand-off.test.ts` (a queued send writes nothing to the status slot, its cancellation writes "Send cancelled." once).
 
 ## Anti-Patterns
 

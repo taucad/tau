@@ -28,6 +28,7 @@ import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
+import { isChangingQuietly } from '#components/panes/dockview-announcements.js';
 import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import type { DocumentChange, DocumentTransaction } from '@taucad/editor-ui/lib/editor-document';
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -2499,6 +2500,19 @@ describe('Workbench file reconciliation', () => {
     expect(dockview.addPanel).toHaveBeenCalledWith(
       expect.objectContaining({ component: 'newTab', title: 'New tab', params: { mode: 'launcher' } }),
     );
+  });
+
+  it('seeds the launcher without Dockview announcing it', () => {
+    const dockview = createTestDockview();
+    const quiet: boolean[] = [];
+    dockview.addPanel.mockImplementationOnce((options: TestAddPanelOptions) => {
+      quiet.push(isChangingQuietly(dockview.api));
+      return panel(options.id, options.params);
+    });
+
+    seedFreshWorkbench({ api: dockview.api });
+
+    expect(quiet).toEqual([true]);
   });
 
   it('seeds the shared profile directly into Parameters', () => {

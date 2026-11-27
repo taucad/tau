@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T22:19:29.940Z",
+  "updatedAt": "2026-11-27T22:25:01.427Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -7632,6 +7632,19 @@
       "counted": 1,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 46075949499,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "c464e7274b4dcdcacbca415ce0e5f033353982e7",
+      "at": "2026-11-27T22:24:47Z",
+      "conclusion": "success",
+      "artifacts": 1,
+      "counted": 1,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -7977,14 +7990,14 @@
       }
     },
     "apps-runtime-e2e:vitest": {
-      "executions": 127,
-      "tests": 127,
+      "executions": 128,
+      "tests": 128,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:40:19Z",
-      "lastSeen": "2026-11-27T22:19:23Z",
+      "lastSeen": "2026-11-27T22:24:47Z",
       "targets": {
-        "vitest linux-x64 project=suites": 94
+        "vitest linux-x64 project=suites": 95
       }
     },
     "archive-core:test": {

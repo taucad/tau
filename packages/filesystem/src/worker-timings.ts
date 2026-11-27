@@ -32,6 +32,11 @@
  * - `capture.tree`: one checkout comparison capture.
  * - `apply.hold`: one tree apply, from its first write to its release.
  * - `records.project`: the opening pull's chat and evidence fetch and projection.
+ * - `io.wait.background`: one background provider call, from when it was issued to when its lane admitted it
+ *   (project-library fast path FW4).
+ * - `io.wait.interactive`: one interactive provider call issued while background or sweep calls were in flight, from
+ *   when it was issued until those calls settled or it did, whichever came first: the most it could have waited behind
+ *   ranked work (FW4, S10). A call issued with none in flight waits for none and records nothing.
  *
  * @public
  */
@@ -45,6 +50,8 @@ export const workerTimingSpans = [
   'capture.tree',
   'apply.hold',
   'records.project',
+  'io.wait.background',
+  'io.wait.interactive',
 ] as const;
 
 /** One timed span's name. @public */
@@ -88,6 +95,9 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  * - `discovery.rootCold`: discovery roots whose index went cold, every directory unknown; each also moves its reason's
  *   counter, `discovery.rootCold.<reason>` (see {@link discoveryRootColdReasons}).
  *
+ * - `io.background.stalled`: background provider calls still in flight after the stall deadline, whose slots the I/O
+ *   lanes released (FW4): a hung mount shows here.
+ *
  * The discovery index (fast-path blueprint FW2) moves the sweep, audit, cold and unretained counters.
  *
  * @public
@@ -129,6 +139,7 @@ export const workerTimingCounters = [
   'discovery.rootCold.observer',
   'discovery.rootCold.notice',
   'discovery.rootCold.bound',
+  'io.background.stalled',
 ] as const;
 
 /** One counter's name. @public */

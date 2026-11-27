@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '../..');
 const read = (path: string): string => readFileSync(resolve(root, path), 'utf8');
-const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' })
+const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
   .split('\0')
   .filter((file) => file !== '' && !file.startsWith('examples/') && !file.includes('/node_modules/'));
 

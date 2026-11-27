@@ -974,6 +974,12 @@ export type FileSystemBridgeOptions = {
       root: string;
       /** Which surface this rooted connection reads; required beside a root (CI2). */
       consumer: RootedBridgeConsumer;
+      /**
+       * The I/O lane the connection's reads run in (project-library fast path FW4): `'background'` for a reader nobody
+       * waits on call by call, whose reads then yield to every interactive call in the authority. Interactive when
+       * absent. Additive on the envelope: an authority that predates it serves the connection interactively.
+       */
+      lane?: 'interactive' | 'background';
     }
 );
 
@@ -1028,6 +1034,7 @@ type FileSystemBridgeConnectEnvelope = {
   readonly type: string;
   readonly port: MessagePort;
   readonly root?: unknown;
+  readonly lane?: unknown;
 };
 
 const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<FileSystemBridgeConnectEnvelope> =>
@@ -1036,6 +1043,7 @@ const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<F
     type: z.literal(messageType),
     port: z.instanceof(MessagePort),
     root: z.unknown().optional(),
+    /* `lane` passes through the loose object unvalidated; only `'background'` changes anything (FW4). */
   });
 
 /**
@@ -1324,6 +1332,7 @@ function exposeFileSystemHandlers(
     /* Held here rather than read back from `serverHandles`, which a refused
      * connection is deliberately absent from. */
     let serverHandle: BridgeServerHandle | undefined = undefined;
+    const closed = new AbortController();
     const disconnectPort = (): void => {
       if (disconnected) {
         return;
@@ -1334,6 +1343,7 @@ function exposeFileSystemHandlers(
       portIds.delete(port);
       scopedPorts.delete(port);
       serverHandles.delete(port);
+      closed.abort();
       safeDispose(() => serverHandle?.dispose());
       safeDispose(() => {
         port.close();
@@ -1343,7 +1353,12 @@ function exposeFileSystemHandlers(
 
     const wrappedPort = wrapFileSystemBridgePort(port, 'expose-fs-bridge');
     const requestedRoot = typeof parsedEnvelope.data.root === 'string' ? parsedEnvelope.data.root : undefined;
-    const mutationContext = { originClientId: portId };
+    /* Only a rooted connection declares a lane (FW4); any value but `'background'` is the interactive lane. A
+     * background connection's queued reads are cancelled when it closes (`closed`, aborted by `disconnectPort`). */
+    const mutationContext: WorkspaceMutationContext =
+      requestedRoot !== undefined && parsedEnvelope.data.lane === 'background'
+        ? { originClientId: portId, lane: 'background', signal: closed.signal }
+        : { originClientId: portId };
     const { portHandlers, unavailableError } =
       requestedRoot === undefined
         ? {
@@ -1616,6 +1631,7 @@ export function openFileSystemBridge(
     type: messageType,
     port: channel.port1,
     ...(options?.root === undefined ? {} : { root: options.root, consumer: options.consumer }),
+    ...(options?.root !== undefined && options.lane === 'background' ? { lane: 'background' } : {}),
   };
   worker.postMessage(envelope, [channel.port1]);
   const rawPort = asFileSystemBridgePort(channel.port2);

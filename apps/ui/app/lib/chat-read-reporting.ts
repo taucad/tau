@@ -101,3 +101,28 @@ export const createChatReadReporter = (
 
 /** The page's sink. */
 export const chatReadReporter = createChatReadReporter();
+
+/** HA4: a claim refusal the agent host worker forwards on its `telemetry` notify (`onClaimRefused`). */
+export type ForwardedClaimRefusal = Readonly<{ kind: 'claim.refused'; chatId: string; code: string }>;
+
+/**
+ * Report a forwarded entry that is a claim refusal as `claim.refused`; anything else is left to the caller.
+ *
+ * @param entry - What the worker forwarded.
+ * @param reporter - The sink; the page's by default.
+ * @returns Whether the entry was a claim refusal.
+ */
+export const reportForwardedClaimRefusal = (
+  entry: unknown,
+  reporter: Pick<ReturnType<typeof createChatReadReporter>, 'report'> = chatReadReporter,
+): boolean => {
+  if (typeof entry !== 'object' || entry === null || !('kind' in entry) || entry.kind !== 'claim.refused') {
+    return false;
+  }
+  const { chatId, code } = entry as Partial<Record<keyof ForwardedClaimRefusal, unknown>>;
+  if (typeof chatId === 'string' && typeof code === 'string') {
+    /* Each forward is one refusal: the entry object is the occurrence, and the per-code cap bounds a page load. */
+    reporter.report('claim.refused', { chatId, occurrence: entry, tags: { code } });
+  }
+  return true;
+};

@@ -52,10 +52,12 @@ export const resolveDefaultChoice = (
   }
   const concrete = choices.filter((choice) => !isDefaultChoice(choice));
   const hint = `${alias.description ?? ''} ${alias.name}`.toLowerCase();
+  /* Matched without a "(recommended)" the agent may append to a concrete name. */
+  const plain = (choice: LineupChoice): string => (withoutRecommended(choice.name).text || choice.name).toLowerCase();
   // Longest name first, so "Opus 5.5" wins over "Opus 5" in "Opus 5.5".
   const named = concrete
-    .toSorted((left, right) => right.name.length - left.name.length)
-    .find((choice) => hint.includes(choice.name.toLowerCase()));
+    .toSorted((left, right) => plain(right).length - plain(left).length)
+    .find((choice) => hint.includes(plain(choice)));
   return (named ?? concrete[0])?.id ?? current;
 };
 
@@ -186,5 +188,8 @@ export const recommendedChoice = (
   }
   // ponytail: an agent whose "Default" names no level (Claude Code) runs medium, as Claude Code's own picker
   // recommends; read the level from the agent once ACP or the adapter publishes it.
-  return concrete.some((level) => level.id === 'medium') ? 'medium' : undefined;
+  // Only when the agent offers its own "Default": without one, nothing recommends a level.
+  return levels.some((level) => isDefaultChoice(level)) && concrete.some((level) => level.id === 'medium')
+    ? 'medium'
+    : undefined;
 };

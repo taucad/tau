@@ -230,6 +230,55 @@ describe('createExternalAgentDiscovery', () => {
     expect(kept[0]?.models).toEqual(full);
   });
 
+  it('should take the default model from the refresh while it keeps the longer list', async () => {
+    const harness = createHarness();
+    const full = [
+      { id: 'opus', name: 'Opus 5.5' },
+      { id: 'claude-opus-5', name: 'Opus 5' },
+    ];
+    const initial = harness.discovery.list();
+    await harness.settle({
+      agents: [{ ...adapterFor('claude'), models: full, defaultModel: 'claude-opus-5' }],
+      refused: [],
+    });
+    await initial;
+
+    harness.advance(externalAgentRefreshMilliseconds);
+    await harness.discovery.list();
+    await harness.settle({
+      agents: [{ ...adapterFor('claude'), models: [{ id: 'opus', name: 'Opus' }], defaultModel: 'opus' }],
+      refused: [],
+    });
+
+    const [adapter] = harness.configure.mock.lastCall?.[0] ?? [];
+    expect(adapter?.models).toEqual(full);
+    expect(adapter?.defaultModel).toBe('opus');
+  });
+
+  it('should still refresh every agent while a refused one is retried between refreshes', async () => {
+    const harness = createHarness();
+    const initial = harness.discovery.list();
+    await harness.settle({ agents: [adapterFor('claude')], refused: [refusalOf('codex')] });
+    await initial;
+
+    /* Refused-only retries until the refresh interval has passed since the full discovery. */
+    let elapsed = 0;
+    while (elapsed + externalAgentRediscoveryMilliseconds < externalAgentRefreshMilliseconds) {
+      harness.advance(externalAgentRediscoveryMilliseconds);
+      elapsed += externalAgentRediscoveryMilliseconds;
+      const retry = harness.discovery.list();
+      await harness.settle({ agents: [], refused: [refusalOf('codex')] });
+      await retry;
+    }
+    const retries = harness.discover.mock.calls.length;
+    expect(harness.discover.mock.calls.slice(1).every(([options]) => options.pins !== undefined)).toBe(true);
+
+    harness.advance(externalAgentRefreshMilliseconds - elapsed);
+    await harness.discovery.list();
+    expect(harness.discover).toHaveBeenCalledTimes(retries + 1);
+    expect(harness.discover.mock.lastCall?.[0].pins).toBeUndefined();
+  });
+
   it('should not probe a refused agent again within the rediscovery interval', async () => {
     const harness = createHarness();
     const initial = harness.discovery.list();

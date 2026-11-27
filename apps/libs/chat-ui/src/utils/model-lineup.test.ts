@@ -70,6 +70,15 @@ describe('resolveDefaultChoice', () => {
   it('should fall back to the first concrete model when the alias names none', () => {
     expect(resolveDefaultChoice([{ id: 'default', name: 'Default' }, ...claude.slice(3)], 'default')).toBe('sonnet');
   });
+
+  it('should match a concrete name the agent marks "(recommended)"', () => {
+    const choices = [
+      { id: 'default', name: 'Default', description: 'Opus 5.5' },
+      { id: 'sonnet', name: 'Sonnet 5.5' },
+      { id: 'opus', name: 'Opus 5.5 (recommended)' },
+    ];
+    expect(resolveDefaultChoice(choices, 'default')).toBe('opus');
+  });
 });
 
 describe('latestInFamily', () => {
@@ -139,6 +148,10 @@ describe('recommendedChoice', () => {
   it('should read an agent-decides default as medium when offered', () => {
     expect(recommendedChoice([{ id: 'default', name: 'Default' }, ...levels], 'default')).toBe('medium');
     expect(recommendedChoice([{ id: 'default', name: 'Default' }, levels[2]!], 'default')).toBeUndefined();
+  });
+
+  it('should recommend nothing when no level is marked, none is in force and there is no Default', () => {
+    expect(recommendedChoice(levels, undefined)).toBeUndefined();
   });
 
   it('should treat only default ids and names as the sentinel', () => {

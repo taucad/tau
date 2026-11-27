@@ -172,6 +172,10 @@ describe('ChatAddMenu', () => {
     expect(options()[1]).toMatch(/^Auto/u);
     await user.click(screen.getByRole('option', { name: /^Replicad/u }));
     expect(composer.setActivePreference).toHaveBeenCalledWith('replicad');
+    /* The pick closes the menu and hands focus back to the composer, not to +. */
+    await waitFor(() => {
+      expect(handlers.focusEditor).toHaveBeenCalled();
+    });
   });
 
   it('explains a kernel that cannot run here, keeps the menu open and chooses nothing', async () => {
@@ -205,5 +209,9 @@ describe('ChatAddMenu', () => {
     ]);
     await user.click(screen.getByRole('option', { name: /^Workshop/u }));
     expect(state.phase === 'ready' && state.shouldShowPicker ? state.select : undefined).toHaveBeenCalledWith(workshop);
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    expect(handlers.focusEditor).toHaveBeenCalled();
   });
 });

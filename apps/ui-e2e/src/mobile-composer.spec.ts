@@ -173,8 +173,9 @@ test('shows no keyboard hints on a touch screen (I7)', async () => {
   expect(tooltipHints.shown).toEqual([]);
 
   await target.click(composer().getByRole('button', { name: 'Add', exact: true }), { touch: true });
-  await target.expectVisible(selectors.getByRole('menuitem', { name: 'Add context' }));
-  const menuHints = await hintsMatching('[data-slot="dropdown-menu-shortcut"]');
+  await target.expectVisible(selectors.getByRole('option', { name: /^Add context/u }));
+  // The + menu's "@" hint is a key shortcut chip, like the tooltip's.
+  const menuHints = await hintsMatching('[role="listbox"] span[class*="tracking-"]');
   expect(menuHints.count).toBeGreaterThan(0);
   expect(menuHints.shown).toEqual([]);
 });

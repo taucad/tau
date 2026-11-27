@@ -1311,7 +1311,8 @@ function Sheet({
               <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
             </button>
             {/* E1: Effort is a row like Model — label left, the level right — and drills into its page. */}
-            {sheetModel.levels.length > 1 ? (
+            {/* One level still shows when "Default" names none: it is then the only way to choose it. */}
+            {sheetModel.levels.length > 1 || (sheetModel.levels.length === 1 && sheetModel.level === undefined) ? (
               <button
                 ref={effortRowRef}
                 type='button'

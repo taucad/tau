@@ -538,6 +538,33 @@ describe('ChatAgentSheet', () => {
     expect(screen.getByRole('button', { name: 'Agent and model: Codex, GPT-5.6-Sol, Fast mode' })).toBeInTheDocument();
   });
 
+  it('keeps a sole level choosable while the agent’s “Default” names none', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    const select = vi.fn();
+    renderSheet(vi.fn(), {
+      options: [
+        {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          category: 'thought_level',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+      valueOf: (option) => option.currentValue,
+      select,
+    });
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model: Codex/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Effort for Codex.*not set/u }));
+    await userEvent.click(screen.getByRole('option', { name: 'High' }));
+    expect(select).toHaveBeenCalledWith('thought_level', 'high');
+  });
+
   it('shows and changes a discovered ACP reasoning option before the first session', async () => {
     state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
     state.placements = [codex()];

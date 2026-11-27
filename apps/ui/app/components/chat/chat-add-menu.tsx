@@ -100,6 +100,15 @@ export function ChatAddMenu({
 }): React.JSX.Element {
   /* A chosen action moves focus itself: to the file picker, or to the editor at a typed @. */
   const isFocusMoved = useRef(false);
+  /* A kernel or location pick closes the menu by selection, which skips `onClose`: the surface would hand focus to +. */
+  const isEditorRefocused = useRef(false);
+  const refocusEditor = (event: Event): void => {
+    if (isEditorRefocused.current) {
+      isEditorRefocused.current = false;
+      event.preventDefault();
+      focusEditor();
+    }
+  };
   const {
     kernel: { preference, owner },
   } = useChatComposer();
@@ -187,10 +196,11 @@ export function ChatAddMenu({
         break;
       }
       case 'kernel': {
-        kernels.choose(row.row.id);
+        isEditorRefocused.current = kernels.choose(row.row.id);
         break;
       }
       case 'location': {
+        isEditorRefocused.current = isReadyOption(row.option);
         location.select(optionValue(row.option));
         break;
       }
@@ -210,7 +220,8 @@ export function ChatAddMenu({
       <ComboBoxResponsive<AddMenuRow>
         data-chat-textarea-focustrap
         className="data-[slot='popover-content']:w-72"
-        popoverProperties={{ align: 'start' }}
+        popoverProperties={{ align: 'start', onCloseAutoFocus: refocusEditor }}
+        drawerProperties={{ onCloseAutoFocus: refocusEditor }}
         title='Add'
         description='Attach files or context, or choose the kernel and where the project is saved.'
         isSearchEnabled={false}

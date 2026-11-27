@@ -143,7 +143,10 @@ const refreshed = (previous: AcpAgentDiscovery, next: AcpAgentDiscovery): AcpAge
   ...next,
   agents: next.agents.map((adapter) => {
     const before = previous.agents.find(({ id }) => id === adapter.id);
-    return before && (before.models ?? []).length > (adapter.models ?? []).length ? before : adapter;
+    /* Only the list is kept: the default model and the effort options are the new answer's. */
+    return before && (before.models ?? []).length > (adapter.models ?? []).length
+      ? { ...adapter, models: before.models }
+      : adapter;
   }),
 });
 
@@ -178,6 +181,8 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
   let descriptors: readonly ExternalAgentDescriptor[] = [];
   /** When the last discovery settled; `undefined` before the first. */
   let settledAt: number | undefined;
+  /** When the last full discovery settled: the refused-only retries between them do not reset it. */
+  let fullySettledAt: number | undefined;
   let failed = false;
   let inFlight: Promise<readonly ExternalAgentDescriptor[]> | undefined;
   /** The discovery in flight is a background refresh, which no listing waits for. */
@@ -210,6 +215,9 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
       }
     } finally {
       settledAt = now();
+      if (pins === undefined) {
+        fullySettledAt = settledAt;
+      }
       inFlight = undefined;
       isRefreshing = false;
     }
@@ -221,18 +229,20 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
       if (inFlight) {
         return isRefreshing ? descriptors : inFlight;
       }
-      const age = settledAt === undefined ? Infinity : now() - settledAt;
-      if (
-        settledAt === undefined ||
-        ((failed || (current?.refused.length ?? 0) > 0) && age >= externalAgentRediscoveryMilliseconds)
-      ) {
+      if (settledAt === undefined) {
         inFlight = run();
         return inFlight;
       }
-      if (age >= externalAgentRefreshMilliseconds) {
+      const fullAge = fullySettledAt === undefined ? Infinity : now() - fullySettledAt;
+      if (!failed && fullAge >= externalAgentRefreshMilliseconds) {
         /* The listing answers what it has; the next one gets the refreshed lists. */
         isRefreshing = true;
         inFlight = run(true);
+        return descriptors;
+      }
+      if ((failed || (current?.refused.length ?? 0) > 0) && now() - settledAt >= externalAgentRediscoveryMilliseconds) {
+        inFlight = run();
+        return inFlight;
       }
       return descriptors;
     },

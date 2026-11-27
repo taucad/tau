@@ -15,7 +15,8 @@ afterEach(() => {
 
 describe('createOpenFileQueue', () => {
   it('captures supported absolute paths once and returns a grant for each, never its bytes', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'tau-open-file-'));
+    /* The queue grants the native real path, which spells out a Windows 8.3 temp directory (`RUNNER~1`). */
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'tau-open-file-')));
     temporary.push(root);
     const path = join(root, 'part.mesh.xml');
     writeFileSync(path, new Uint8Array([1, 2, 3]));

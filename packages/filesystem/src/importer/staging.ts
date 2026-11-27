@@ -1,5 +1,5 @@
 /**
- * Staging an import: entries stream into `<root>/.tau-staging/import-<operation>/`
+ * Staging an import: entries stream into `<root>/.tau/staging/import-<operation>/`
  * as bounded changesets, each followed by a ledger record of what it landed
  * (charter D12, EQ8).
  *
@@ -55,7 +55,7 @@ import { isStagedImportEntry } from '#importer/facts.js';
 import type { StagedImportEntry } from '#importer/facts.js';
 
 /** The storage root's reserved staging folder (I9). @public */
-export const importStagingFolder = '.tau-staging';
+export const importStagingFolder = '.tau/staging';
 
 /** Every import's staging directory starts with this, so the OPFS sweep of dead writers' staging leaves it. @public */
 export const importStagingPrefix = 'import-';
@@ -66,7 +66,7 @@ const operationIdPattern = /^[\w-]{1,128}$/u;
  * The staging directory of one import operation, relative to its storage root.
  *
  * @param operationId - The import operation's id.
- * @returns `.tau-staging/import-<operationId>`.
+ * @returns `.tau/staging/import-<operationId>`.
  * @throws TypeError for an id that is not a plain token.
  * @public
  */
@@ -468,7 +468,7 @@ const removeOwnedEntries = async (port: ImportStagingPort, target: string, opera
  * discovery or index ever sees it (I6). The commit moves it into the project.
  *
  * @param operationId - The import operation.
- * @returns `.tau-staging/import-<operationId>/control/.git`.
+ * @returns `.tau/staging/import-<operationId>/control/.git`.
  * @public
  */
 export const importControlDirectory = (operationId: string): string =>

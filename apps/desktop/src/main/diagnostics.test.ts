@@ -159,8 +159,12 @@ describe('createDiagnosticsLog', () => {
     const folder = dirname(first.filePath);
     expect(folder).not.toBe(dirname(second.filePath));
     expect(lstatSync(folder).isSymbolicLink()).toBe(false);
-    expect(lstatSync(folder).mode % 0o1000).toBe(0o700);
-    expect(statSync(first.filePath).mode % 0o1000).toBe(0o600);
+    /* Windows keeps no POSIX mode bits: Node reports 0o666 whatever was asked (windows-2025, run 45923570791). The
+       folder is private there through the person's own temporary folder, whose ACL admits only them. */
+    if (process.platform !== 'win32') {
+      expect(lstatSync(folder).mode % 0o1000).toBe(0o700);
+      expect(statSync(first.filePath).mode % 0o1000).toBe(0o600);
+    }
   });
 
   it('never throws when the log cannot be written', () => {

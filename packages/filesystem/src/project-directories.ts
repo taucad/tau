@@ -1255,7 +1255,7 @@ export class ProjectDirectories {
   /**
    * Where an import stages on one durable storage root (charter D12): the
    * root's provider and the unlocked batch apply over it. Staging is private
-   * to its operation, under the reserved `.tau-staging/` folder no discovery
+   * to its operation, under the reserved `.tau/staging/` folder no discovery
    * or index reads, so it takes no lock; the commit takes the project's. An
    * import written straight into its project directory claims, writes and
    * removes that directory under the lock its commit takes (`exclusive`), so

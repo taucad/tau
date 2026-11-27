@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useCallback, useSyncExternalStore } from 'react';
 import type React from 'react';
 import { Bot, CircleAlert, MonitorSmartphone, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
@@ -9,7 +9,7 @@ import type { CombinedChatState } from '#hooks/use-chat.js';
 import { CodeViewer } from '@taucad/editor-ui/components/code/code-viewer';
 import { cn } from '@taucad/ui/utils/cn';
 import { isCodeLoadFailure } from '@taucad/ui-core/lib/code-loading';
-import { chatHistoryTidyFailureMessage } from '@taucad/chat-ui/utils/error.utils';
+import { admissionCauseKey, chatHistoryTidyFailureMessage } from '@taucad/chat-ui/utils/error.utils';
 import { cardOf, pageHeadlineOf, waitLineOf } from '@taucad/chat-ui/utils/chat-error-card';
 import {
   autoResumableProviderUnavailableCode,
@@ -171,6 +171,60 @@ function ChatErrorChooseThisComputer({ className }: { readonly className: string
  * R6 for a refused command: the computer is no longer paired. A chat this device reads from its own files says that
  * reading still works.
  */
+const noSubscription = (): void => undefined;
+
+/** Whether the chat's R1 line shows: a remote computer it cannot read, or a message pinned to one. */
+function useR1Shows(): boolean {
+  const { activeChatId: chatId } = useChatContext();
+  const store = useOptionalChatSessionStore();
+  const subscribe = useCallback(
+    (listener: () => void) => store?.subscribeProjection(chatId, listener) ?? noSubscription,
+    [chatId, store],
+  );
+  const read = useCallback(
+    () =>
+      store !== undefined &&
+      store.getRemoteResidual(chatId) === undefined &&
+      (store.getUnreachableComputer(chatId) !== undefined || store.pinnedElsewhereOf(chatId) !== undefined),
+    [chatId, store],
+  );
+  return useSyncExternalStore(subscribe, read, read);
+}
+
+/**
+ * The one restart that loses nothing: admission refused before a run existed. A turn refused because its computer
+ * is out of reach steps aside while R1 says so, with Remove and Send here instead, so one card shows.
+ */
+function ChatErrorTurnNotStarted({
+  className,
+  error,
+  onTryAgain,
+}: {
+  readonly className: string | undefined;
+  readonly error: NormalizedChatError;
+  readonly onTryAgain: () => void;
+}): React.JSX.Element | undefined {
+  const r1Shows = useR1Shows();
+  if (r1Shows && error.details?.[admissionCauseKey] === 'CHAT_PLACEMENT_UNAVAILABLE') {
+    return undefined;
+  }
+  return (
+    <ChatErrorCard
+      className={className}
+      tone='warning'
+      icon={CircleAlert}
+      title='Tau could not start this turn'
+      description={error.message}
+      actions={
+        <Button variant='outline' size='xs' onClick={onTryAgain}>
+          <RefreshCcw className='size-3.5' />
+          Try again
+        </Button>
+      }
+    />
+  );
+}
+
 function ChatErrorPair({
   className,
   computer,
@@ -542,21 +596,7 @@ function codedErrorCard({
 
   // The one restart that loses nothing: admission refused before a run existed.
   if (category === 'turnNotStarted') {
-    return (
-      <ChatErrorCard
-        className={className}
-        tone='warning'
-        icon={CircleAlert}
-        title='Tau could not start this turn'
-        description={error.message}
-        actions={
-          <Button variant='outline' size='xs' onClick={onTryAgain}>
-            <RefreshCcw className='size-3.5' />
-            Try again
-          </Button>
-        }
-      />
-    );
+    return <ChatErrorTurnNotStarted className={className} error={error} onTryAgain={onTryAgain} />;
   }
 
   if (category === 'modelPending') {

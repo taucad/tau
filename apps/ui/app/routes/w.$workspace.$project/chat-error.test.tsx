@@ -9,14 +9,14 @@ import type { ChatError as ChatErrorPayload } from '@taucad/types';
 import type * as AgentHostModule from '@taucad/agent-host';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
-import { chatTurnNotStartedCode, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
+import { admissionCauseKey, chatTurnNotStartedCode, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { ChatError as ChatErrorBanner, selectVisibleChatErrorId } from '#routes/w.$workspace.$project/chat-error.js';
 import { chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
 import { recordProviderUnavailableAutoResume, resetAutoResumes } from '@taucad/chat-ui/utils/run-auto-resume';
-import { autoResumePlanOf, refusalOfGesture } from '#utils/run-auto-resume-plan.js';
+import { autoResumePlanOf, commandRefusalOf, refusalOfGesture } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 
 /* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
@@ -57,7 +57,8 @@ vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: vi.fn(),
 }));
 /* The residual cards name a computer from the placement list and pair it in Settings; this suite lists none. */
-vi.mock('#hooks/chat-session-store-provider.js', () => ({ useOptionalChatSessionStore: () => undefined }));
+const sessionStore = vi.hoisted((): { current: unknown } => ({ current: undefined }));
+vi.mock('#hooks/chat-session-store-provider.js', () => ({ useOptionalChatSessionStore: () => sessionStore.current }));
 vi.mock('#hooks/use-settings-dialog.js', () => ({ useSettingsDialog: () => ({ open: vi.fn() }) }));
 vi.mock('#hooks/use-cad-agent-config.js', () => ({
   useAgentHostPlacements: () => ({ targets: [], loading: false, refresh: vi.fn() }),
@@ -365,6 +366,44 @@ describe('ChatError', () => {
       expect(selectVisibleChatErrorId({ ...state, persistedError })).toBe('run:req_quiet:1');
     },
   );
+
+  /* NEW-1: a refused Start in a chat that already holds a run shows; only a run that begins after it retires it. */
+  it('should show a refused Start over the completed run before it, in the shape the store saves', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 3,
+        endCursor: 3,
+        events: [
+          lifecycleRow(0, 'admitted', 'run_1'),
+          lifecycleRow(1, 'running', 'run_1'),
+          lifecycleRow(2, 'completed', 'run_1'),
+        ],
+      },
+    });
+    const { context } = projection.getSnapshot();
+    projection.stop();
+    const persistedError = commandRefusalOf(
+      {
+        category: errorCategory.generic,
+        title: 'Something went wrong',
+        message: 'Old wire.',
+        code: 'WIRE_VERSION_UNSUPPORTED',
+      },
+      { requestId: 'cmd_new', runId: 'run_2', commandType: 'start', kind: 'send', projection: context },
+    );
+
+    expect(
+      selectVisibleChatErrorId({
+        persistedError,
+        projection: context,
+        attachmentStatus: 'attached',
+      } as unknown as CombinedChatState),
+    ).toBe('refusal:cmd_new');
+  });
 
   it('should identify a refused command by its request (I5)', () => {
     const projection = createActor(chatProjectionLogic).start();
@@ -891,6 +930,34 @@ describe('ChatError', () => {
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(regenerate).toHaveBeenCalledTimes(1);
     expect(continueChat).not.toHaveBeenCalled();
+  });
+
+  /* HA5 review: a turn refused because its computer is out of reach leaves the chat to R1, so one card shows. */
+  it.each([
+    { r1: true, shown: false },
+    { r1: false, shown: true },
+  ])('should step the turn-not-started card aside for R1 only while R1 shows ($r1)', ({ r1, shown }) => {
+    sessionStore.current = {
+      subscribeProjection: () => () => undefined,
+      getRemoteResidual: () => undefined,
+      getUnreachableComputer: () => (r1 ? { hostId: 'device-a' } : undefined),
+      pinnedElsewhereOf: () => undefined,
+    };
+    try {
+      persisted({
+        category: errorCategory.generic,
+        title: 'Error',
+        message: 'Tau can’t reach that computer yet.',
+        code: chatTurnNotStartedCode,
+        details: { [admissionCauseKey]: 'CHAT_PLACEMENT_UNAVAILABLE' },
+      });
+
+      render(<ChatErrorBanner />);
+
+      expect(screen.queryByText('Tau could not start this turn') !== null).toBe(shown);
+    } finally {
+      sessionStore.current = undefined;
+    }
   });
 
   /* T2-D11. A resume the host cannot honour is not a failure: the turn is

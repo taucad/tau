@@ -64,6 +64,13 @@ describe('parseErrorForPersistence', () => {
     expect(parsed).toMatchObject({ category: errorCategory.generic, code: 'WIRE_VERSION_UNSUPPORTED' });
   });
 
+  /* HA5 review: a coded refusal whose message reads like a transport failure is still its code's card. */
+  it('should keep the code of a thrown refusal whose message says "Load failed"', () => {
+    const parsed = parseErrorForPersistence(Object.assign(new Error('Load failed'), { code: 'HOST_NOT_PAIRED' }));
+
+    expect(parsed).toMatchObject({ code: 'HOST_NOT_PAIRED' });
+  });
+
   it('decodes Google byte-list provider errors before persistence', () => {
     const parsed = parseErrorForPersistence(
       new Error(`Google request failed with status code 400: ${googleInvalidArgumentByteList}`),

@@ -8,6 +8,8 @@ import type { OpenWait } from '#hooks/use-wait-start.js';
 import { WaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { ProjectComposerHandOff, useProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
 import { useHandOffAdopted } from '#components/hand-off/hand-off-store.js';
+import { DepartingFirstMessage } from '#components/chat/departing-first-message.js';
+import { useDepartingFirstMessage } from '#lib/departing-first-message.js';
 import {
   defaultPhoneFrameHint,
   defaultWideFrameHint,
@@ -252,7 +254,7 @@ function WorkspaceFrameLanes({
           data-lane='chat'
           className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 border-r border-border @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'
         >
-          <ChatLaneFrame>
+          <ChatLaneFrame pathname={pathname}>
             <FrameWaitSkeleton shape='transcript' label='Chat' />
           </ChatLaneFrame>
         </div>
@@ -285,7 +287,7 @@ function WorkspaceFrameLanes({
           ) : null}
         </div>
       </div>
-      <PhoneFrame />
+      <PhoneFrame pathname={pathname} />
       {/* Hoisted to the head by React. Until the parser reaches the marker after the lanes, Chromium holds rendering,
        * so a project load's first paint is never a document cut above the frame: no lanes, or the shell alone (the
        * blank first paint A11 reported, and F15's lane-less first frame). The held region ends at the lanes, not the
@@ -309,9 +311,11 @@ function WorkspaceFrameLanes({
  * It is inert and hidden from assistive technology: the route's busy state is the gates' `WorkspaceOpening`. A
  * failure or a notice that stands in the workspace's place shows alone, as on a wide screen.
  *
+ * @param props - The destination's pathname when the frame is drawn ahead of the route.
  * @returns The phone frame.
  */
-function PhoneFrame(): React.JSX.Element {
+function PhoneFrame({ pathname }: { readonly pathname?: string }): React.JSX.Element {
+  const departing = useDepartingFirstMessage(useProjectComposerHandOff(pathname).scope);
   return (
     <div
       aria-hidden='true'
@@ -358,7 +362,15 @@ function PhoneFrame(): React.JSX.Element {
           <div className='absolute inset-x-0 bottom-0 mx-auto h-1 w-15 rounded-full bg-sidebar-primary/15' />
         </div>
         {/* The remembered surface's shape, chosen by the tab the pre-paint script selected on `<html>`. */}
-        <FrameWaitSkeleton shape='transcript' label='Chat' className='hidden flex-1 [[data-frame-tab=chat]_&]:block' />
+        {departing === undefined ? (
+          <FrameWaitSkeleton
+            shape='transcript'
+            label='Chat'
+            className='hidden flex-1 [[data-frame-tab=chat]_&]:block'
+          />
+        ) : (
+          <DepartingFirstMessage text={departing} className='hidden flex-1 [[data-frame-tab=chat]_&]:block' />
+        )}
         <FrameWaitSkeleton
           shape='fields'
           label='Parameters'
@@ -432,18 +444,26 @@ function FrameViewerStatus(): React.JSX.Element {
  * (its feed then draws the transcript's shape) and while the focused chat is re-established, so the lane keeps one
  * frame through every wait (Progressive Loading Policy rule 15). In a phone sheet its header is the sheet's bar height.
  *
- * @param props - What its feed draws while the lane waits, and a status for its header's trailing slot.
+ * A new project's first message on its way from Home takes the feed's place (WP-12 with WP-07 step 5): the person's
+ * words stay in view, at the transcript's first row, through every wait of the open.
+ *
+ * @param props - What its feed draws while the lane waits, a status for its header's trailing slot, and the
+ *   destination's pathname when the frame is drawn ahead of the route.
  * @returns The chat lane frame.
  */
 export function ChatLaneFrame({
   children,
   headerStatus,
+  pathname,
 }: {
   /** The feed's content while the lane waits, such as the transcript's shape. Empty by default. */
   readonly children?: React.ReactNode;
   /** The header's trailing slot, such as the open's status where the lane covers the viewer. */
   readonly headerStatus?: React.ReactNode;
+  /** The project's pathname when the frame is drawn ahead of the route; the route's params otherwise. */
+  readonly pathname?: string;
 }): React.JSX.Element {
+  const departing = useDepartingFirstMessage(useProjectComposerHandOff(pathname).scope);
   return (
     <div
       className='flex size-full flex-col bg-sidebar/50'
@@ -454,7 +474,9 @@ export function ChatLaneFrame({
       <div className='flex h-9 shrink-0 items-center justify-end border-b bg-sidebar px-2 [[data-slot=drawer-content]_&]:h-(--drawer-bar-height) [[data-slot=drawer-content]_&]:px-4'>
         {headerStatus}
       </div>
-      <div className='relative min-h-0 flex-1'>{children}</div>
+      <div className='relative min-h-0 flex-1'>
+        {departing === undefined ? children : <DepartingFirstMessage text={departing} />}
+      </div>
       <div className='mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
         <div
           data-testid='chat-lane-frame-composer'

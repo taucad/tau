@@ -1364,9 +1364,21 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   let stopped = false;
   const release = async (): Promise<void> => {
     if (!stopped) {
-      /* A refused close keeps everything: the caller's next close re-attempts
+      /* A refused close keeps the tree: the caller's next close re-attempts
        * the cut, so nothing below runs until one succeeds. */
-      await flushClose();
+      try {
+        await flushClose();
+      } catch (error) {
+        /* But not the watchers. An open recursive watch holds its root on
+         * Windows, so a project whose close cannot record would stay locked
+         * against deletion or a rename until Tau quits. Each root is kept
+         * unwatched instead, which the next cut reads in full (`settleWatch`). */
+        for (const [key, watcher] of watchers) {
+          watcher?.close();
+          watchers.set(key, undefined);
+        }
+        throw error;
+      }
       stopWatchingCheckouts();
       for (const watcher of watchers.values()) {
         watcher?.close();

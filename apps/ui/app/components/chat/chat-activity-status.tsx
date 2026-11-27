@@ -14,8 +14,8 @@ type ChatActivityStatusProperties = {
 };
 
 // One shimmer sweep per two rest+morph cycles; preserve the shared loader pace.
-const activityShimmerStyle = {
-  animationDuration: `${(2 * (defaultMorphTiming.restDuration + defaultMorphTiming.morphDuration)) / metalMorphSpinnerSpeed}ms`,
+const activityShimmerStyle: React.CSSProperties & Record<'--shimmer-duration', string> = {
+  '--shimmer-duration': `${(2 * (defaultMorphTiming.restDuration + defaultMorphTiming.morphDuration)) / metalMorphSpinnerSpeed}ms`,
 };
 
 /**
@@ -71,6 +71,9 @@ export const ChatActivityStatus = ({ cue, startedAt, className }: ChatActivitySt
         style={activityShimmerStyle}
       >
         {cue.sentence}
+        {cue.kind === 'waiting' ? null : (
+          <span aria-hidden='true' className='activity-shimmer-band' data-shimmer={cue.sentence} />
+        )}
       </span>
     </div>
     {startedAt !== undefined && Number.isFinite(startedAt) ? (

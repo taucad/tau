@@ -1064,40 +1064,81 @@ const keyboardHintClassName = 'pointer-coarse:hidden';
 /** The labels that leave, in order, before the model's name is cut (D6). */
 const collapseSteps = ['data-hide-kernel', 'data-hide-mode', 'data-hide-level'] as const;
 
+/** The model's name, or its pending placeholder, which is cut like the name. */
+const barNameSelector = '[data-slot=trigger-model], [data-slot=trigger-model-placeholder]';
+/** Everything whose text decides the collapse: the name and the labels that leave (`group-data-[hide-*]/bar`). */
+const barFitSelector = `${barNameSelector}, [class*="group-data-[hide-"]`;
+
+/** Whether a change under the bar can move the collapse: it touched the name or a label that leaves. */
+const touchesFit = (record: MutationRecord): boolean => {
+  const target = record.target instanceof Element ? record.target : record.target.parentElement;
+  if (target?.closest(barFitSelector)) {
+    return true;
+  }
+  for (const node of [...record.addedNodes, ...record.removedNodes]) {
+    if (node instanceof Element && (node.matches(barFitSelector) || node.querySelector(barFitSelector))) {
+      return true;
+    }
+  }
+  return false;
+};
+
 /**
  * The measured collapse. Before paint, and on every resize or label change,
  * labels leave in a fixed order — the kernel's (or the location's), the mode's,
  * then the level — until the model's name is whole; only then is it cut.
+ *
+ * Measuring forces a layout per step, so it runs only when something that decides it changes: the bar's size, the
+ * name's box (a sibling such as the context meter grew), or the text of the name or a label. Other changes under
+ * the bar (the context meter's figures, the send button turning into stop while a turn streams) do not measure.
+ *
+ * @param barRef - The composer bar.
+ * @internal
  */
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
-function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
+export function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
   useLayoutEffect(() => {
     const bar = barRef.current;
     if (!bar) {
       return undefined;
     }
     let disposed = false;
-    const fit = (): void => {
+    let observedName: HTMLElement | undefined;
+    const resize = new ResizeObserver(() => {
+      fit();
+    });
+    function fit(): void {
       if (disposed) {
         return;
       }
-      /* The pending name's placeholder is cut like the name, so it too makes the labels leave first. */
-      const name = bar.querySelector<HTMLElement>('[data-slot=trigger-model], [data-slot=trigger-model-placeholder]');
+      const name = bar!.querySelector<HTMLElement>(barNameSelector) ?? undefined;
+      if (name !== observedName) {
+        if (observedName) {
+          resize.unobserve(observedName);
+        }
+        if (name) {
+          resize.observe(name);
+        }
+        observedName = name;
+      }
       for (let hidden = 0; hidden <= collapseSteps.length; hidden += 1) {
         for (const [index, flag] of collapseSteps.entries()) {
-          bar.toggleAttribute(flag, index < hidden);
+          bar!.toggleAttribute(flag, index < hidden);
         }
         if (!name || name.scrollWidth <= name.clientWidth) {
           return;
         }
       }
-    };
+    }
     fit();
-    const resize = new ResizeObserver(fit);
     resize.observe(bar);
     /* Labels change without a resize (another model, a level). Attributes are
      * not observed, so the flags this sets cannot loop. */
-    const mutation = new MutationObserver(fit);
+    const mutation = new MutationObserver((records) => {
+      if (records.some((record) => touchesFit(record))) {
+        fit();
+      }
+    });
     mutation.observe(bar, {
       childList: true,
       subtree: true,

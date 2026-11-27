@@ -252,6 +252,7 @@ describe('ChatTextarea screenshots', () => {
 describe('ChatTextarea while another device runs the chat', () => {
   beforeEach(() => {
     mocks.runElsewhere = undefined;
+    mocks.cloudIntent = undefined;
   });
 
   it('should hold the send while another device runs the chat', () => {
@@ -280,6 +281,9 @@ describe('ChatTextarea draft hint', () => {
   it('writes the main draft under the URL key with its chat, removes it when the draft empties', () => {
     mocks.inputText = 'Fillet the edges';
     const view = render(<ChatTextarea onSubmit={vi.fn()} />);
+    act(() => {
+      globalThis.dispatchEvent(new Event('pagehide'));
+    });
     expect(readDraftHint({ kind: 'project', key: 'acme/bracket' })).toMatchObject({
       text: 'Fillet the edges',
       chatId: 'chat-1',
@@ -287,7 +291,28 @@ describe('ChatTextarea draft hint', () => {
 
     mocks.inputText = '';
     view.rerender(<ChatTextarea onSubmit={vi.fn()} />);
+    view.unmount();
     expect(readDraftHint({ kind: 'project', key: 'acme/bracket' })).toBeUndefined();
+    globalThis.history.replaceState(null, '', '/');
+    mocks.inputText = '';
+    mocks.activeChatId = undefined;
+  });
+
+  it('holds the draft while typing and writes the last one when the page is hidden', () => {
+    mocks.inputText = 'F';
+    const view = render(<ChatTextarea onSubmit={vi.fn()} />);
+    for (const text of ['Fi', 'Fil', 'Fill']) {
+      mocks.inputText = text;
+      view.rerender(<ChatTextarea onSubmit={vi.fn()} />);
+    }
+    expect(readDraftHint({ kind: 'project', key: 'acme/bracket' })).toBeUndefined();
+
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    visibility.mockRestore();
+    expect(readDraftHint({ kind: 'project', key: 'acme/bracket' })).toMatchObject({ text: 'Fill' });
     view.unmount();
     globalThis.history.replaceState(null, '', '/');
     mocks.inputText = '';

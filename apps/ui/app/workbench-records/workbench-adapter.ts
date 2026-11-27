@@ -26,6 +26,7 @@ import type { CallbackActorLogic } from 'xstate';
 import type { DockviewApi, DockviewDidDropEvent, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import type { OpenFile } from '@taucad/ui-core/types/editor.types';
+import { changeQuietly } from '#components/panes/dockview-announcements.js';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { WorkbenchIntentTarget } from '#routes/w.$workspace.$project/workbench-layout-controller.shim.js';
 import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
@@ -337,7 +338,10 @@ function runWorkbenchAdapter(
     try {
       // Pruned in the operation, not in the record: a web session's next edit writes the pruned layout back, dropping a
       // desktop Browser tab. That is intended, since Browser tabs are window-local.
-      dock.showNode(api, node, { files, launcherId: dock.launcherId(api) });
+      // The app's own arrangement: Dockview says nothing about the panels it lands (progressive-loading rule 22).
+      changeQuietly(api, () => {
+        dock.showNode(api, node, { files, launcherId: dock.launcherId(api) });
+      });
       shown = dock.shownNode(api);
       adoptedProjection = JSON.stringify(shown);
       held = undefined;

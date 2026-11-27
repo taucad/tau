@@ -14,6 +14,8 @@
 \* step 5) reads the frame only; delivery, admission and persistence are unchanged.
 \* A command that borrows the chat's attached client goes through the same answer
 \* wrapper as a dialled one, so a cursor wake is the only effect; delivery is unchanged.
+\* Composer focus asking the chat's host to prewarm an ACP adapter (WP-18) opens no
+\* turn and sends no queued item; admission, delivery and persistence are unchanged.
 \* The executable queue event alphabet comes from its schemas; removing an unused
 \* duplicate TypeScript event union does not change these transitions or guards.
 \* Grok config discovery and host-owned session selection affect composer controls;

@@ -414,6 +414,15 @@ const recordLinesOf = (message: string): Readonly<{ records: string[]; actors: s
   };
 };
 
+/*
+ * A git name as the module may return it: empty when it holds `@`, `<` or `>`
+ * or the role's own address, so no address leaves the module through a name
+ * (I11, M2 review M1). `author a@b.c <a@b.c>`, which git writes when
+ * `user.name` is unset, and a malformed line with two `<…>` both read empty.
+ */
+const neutralName = (name: string, email: string): string =>
+  /[@<>]/u.test(name) || (email !== '' && name.toLowerCase().includes(email.toLowerCase())) ? '' : name;
+
 /* What the commit's author and committer lines say, addresses classified. */
 const identityFields = (parts: CommitParts) => {
   const authorEmail = parts.author?.email ?? '';
@@ -421,7 +430,7 @@ const identityFields = (parts: CommitParts) => {
   const authorLocal = tauNoreplyLocalPart(authorEmail);
   const committerLocal = tauNoreplyLocalPart(committerEmail);
   return {
-    authorName: parts.author?.name ?? '',
+    authorName: neutralName(parts.author?.name ?? '', authorEmail),
     authorLocal,
     committerLocal,
     authorAccountId: authorLocal !== undefined && isAccountShaped(authorLocal) ? authorLocal : undefined,

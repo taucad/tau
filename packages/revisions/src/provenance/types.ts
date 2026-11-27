@@ -152,7 +152,16 @@ export type Viewer = Readonly<{
 }>;
 
 /**
- * Who an entry is shown as by. The page owns the words.
+ * The attested pusher named beside a non-account answer ("for", "backed up by"), with the marker that it is a
+ * deleted account, which reads "Former member" (R2-20).
+ *
+ * @public
+ */
+export type PusherRef = Readonly<{ accountId: string; former?: true }>;
+
+/**
+ * Who an entry is shown as by. The page owns the words. `viaDevice` marks an answer that names the pusher of a push a
+ * host device made on the account's behalf ("by a cloud agent", D4).
  *
  * @public
  */
@@ -165,18 +174,21 @@ export type Attribution =
       viaDevice?: true;
     }>
   /** `for` is the attested pusher only, never the record's `onBehalfOf`. */
-  | Readonly<{ kind: 'tauAgent'; for?: string }>
+  | Readonly<{ kind: 'tauAgent'; for?: PusherRef; viaDevice?: true }>
   /** `for` and `backedUpBy` never both appear. */
   | Readonly<{
       kind: 'agent';
       agent: RecognisedAgentId;
-      for?: string;
-      backedUpBy?: string;
+      for?: PusherRef;
+      backedUpBy?: PusherRef;
       onThisDevice?: true;
+      viaDevice?: true;
     }>
-  | Readonly<{ kind: 'anonymous'; backedUpBy?: string }>
-  | Readonly<{ kind: 'beforeSignIn'; backedUpBy?: string }>
-  | Readonly<{ kind: 'external'; name: string; backedUpBy?: string }>
+  /** A hidden push's `backedUpBy` is the owner's read only, and carries no device marker. */
+  | Readonly<{ kind: 'anonymous'; backedUpBy?: PusherRef }>
+  | Readonly<{ kind: 'beforeSignIn'; backedUpBy?: PusherRef; viaDevice?: true }>
+  /** `name` is the git author name, empty when it would show an address (I11). */
+  | Readonly<{ kind: 'external'; name: string; backedUpBy?: PusherRef; viaDevice?: true }>
   | Readonly<{ kind: 'local' }>
   /** `showLine` is false in a one-person project. */
   | Readonly<{ kind: 'pending'; showLine: boolean }>;

@@ -20,7 +20,15 @@ import { commitRefusalMarker, hookCodeLinePrefix, preReceiveHookScript } from '#
 
 type PinnedObject = Readonly<{ scenario: string; leg?: string; type: 'commit' | 'tag'; ref: string; body: string }>;
 type PinnedWriter = Readonly<{ release: string; tree: string; parent: string; objects: readonly PinnedObject[] }>;
-type CorpusEntry = Readonly<{ id: string; title: string; type: 'commit' | 'tag'; ref: string; body: string }>;
+type CorpusEntry = Readonly<{
+  id: string;
+  title: string;
+  type: 'commit' | 'tag';
+  ref: string;
+  body: string;
+  /** Malformed past git's own object checks: it can reach only local history, never a push. */
+  localOnly?: true;
+}>;
 type Corpus = Readonly<{ tree: string; parent: string; entries: readonly CorpusEntry[] }>;
 
 const corpusDirectory = path.resolve(import.meta.dirname, '../../../../../packages/revisions/src/provenance/corpus');
@@ -50,13 +58,15 @@ const cases: readonly Case[] = [
       admitted: true,
     })),
   ),
-  ...corpus.entries.map((entry) => ({
-    label: `corpus ${entry.id}: ${entry.title}`,
-    object: { scenario: entry.title, type: entry.type, ref: entry.ref, body: entry.body },
-    tree: corpus.tree,
-    parent: corpus.parent,
-    admitted: entry.type === 'commit' || expected[entry.id]?.reading.shape === 'tau/2',
-  })),
+  ...corpus.entries
+    .filter((entry) => entry.localOnly !== true)
+    .map((entry) => ({
+      label: `corpus ${entry.id}: ${entry.title}`,
+      object: { scenario: entry.title, type: entry.type, ref: entry.ref, body: entry.body },
+      tree: corpus.tree,
+      parent: corpus.parent,
+      admitted: entry.type === 'commit' || expected[entry.id]?.reading.shape === 'tau/2',
+    })),
 ];
 
 const none = '0'.repeat(40);

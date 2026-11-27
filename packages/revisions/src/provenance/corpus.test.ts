@@ -169,7 +169,7 @@ describe('the provenance golden corpus', () => {
             result.kind === 'account'
               ? result.accountId
               : result.kind === 'tauAgent' || result.kind === 'agent'
-                ? result.for
+                ? result.for?.accountId
                 : undefined;
           if (named !== undefined) {
             expect(named, `${item.key} ${joinName}`).toBe(pusher);
@@ -189,6 +189,17 @@ describe('the provenance golden corpus', () => {
     const forged = corpus.entries.find(({ id }) => id === 'row01-signed-in')!;
     const owner: Viewer = { accountId: corpus.pusher, owner: true, sharedProject: true, deviceIdentities: [] };
     expect(attributionOf(readCommit(forged.body), 'local', owner)).toEqual({ kind: 'local' });
+  });
+
+  it('P3: no answer for any case holds an address its object carries', () => {
+    const addressPattern = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/gu;
+    for (const item of cases) {
+      const addresses = new Set([...item.body.matchAll(addressPattern)].map(([address]) => address.toLowerCase()));
+      const output = JSON.stringify(actual[item.key]).toLowerCase();
+      for (const address of addresses) {
+        expect(output.includes(address), `${item.key} returns ${address}`).toBe(false);
+      }
+    }
   });
 
   it('P5: every corpus object is the object its id names', () => {

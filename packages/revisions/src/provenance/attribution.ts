@@ -8,7 +8,7 @@
  * the first that matches answers; the step numbers are D4's.
  */
 
-import type { Attribution, CommitReading, Join, PushView, ServerBits, Viewer } from '#provenance/types.js';
+import type { Attribution, CommitReading, Join, PushView, PusherRef, ServerBits, Viewer } from '#provenance/types.js';
 
 type Joined = Readonly<{ push: PushView; bits: ServerBits }>;
 type AccountPusher = Readonly<{
@@ -74,10 +74,18 @@ const account = (pusher: AccountPusher, push: PushView, basis: Basis): Attributi
   ...(push.viaDevice ? { viaDevice: true } : {}),
 });
 
-const external = (reading: CommitReading, pusher: string): Attribution => ({
+/* The pusher as a non-account answer names it, with its "Former member" marker (M2 review M2). */
+const pusherRef = (pusher: AccountPusher): PusherRef =>
+  pusher.former === true ? { accountId: pusher.accountId, former: true } : { accountId: pusher.accountId };
+
+/* "By a cloud agent" on every answer that names the pusher of a host-device push (D4). */
+const device = (push: PushView): Readonly<{ viaDevice?: true }> => (push.viaDevice ? { viaDevice: true } : {});
+
+const external = (reading: CommitReading, pusher: AccountPusher, push: PushView): Attribution => ({
   kind: 'external',
   name: reading.authorName,
-  backedUpBy: pusher,
+  backedUpBy: pusherRef(pusher),
+  ...device(push),
 });
 
 /* Steps 6 to 9, once hiding, claims, pseudonyms and Tau agents are settled. */
@@ -90,13 +98,13 @@ const verifiedAttribution = (reading: CommitReading, join: Joined, pusher: Accou
     const agent = reading.agent.id;
     if (reading.agent.by === 'author') {
       return committerVerifies(reading, bits, id)
-        ? { kind: 'agent', agent, for: id }
-        : { kind: 'agent', agent, backedUpBy: id };
+        ? { kind: 'agent', agent, for: pusherRef(pusher), ...device(push) }
+        : { kind: 'agent', agent, backedUpBy: pusherRef(pusher), ...device(push) };
     }
     /* A trailer or committer matcher applies only to a commit that verifies as
      * the pusher on record, own git or forge (6a); otherwise steps 7 to 9 decide. */
     if (basis === 'record' || basis === 'ownGit' || basis === 'forge') {
-      return { kind: 'agent', agent, for: id };
+      return { kind: 'agent', agent, for: pusherRef(pusher), ...device(push) };
     }
   }
   /* Step 7: verified as the pusher on one basis. */
@@ -105,17 +113,19 @@ const verifiedAttribution = (reading: CommitReading, join: Joined, pusher: Accou
   }
   /* Step 8: Tau wrote it and it names no account. */
   if (reading.tauWritten && !reading.namesAccount) {
-    return { kind: 'beforeSignIn', backedUpBy: id };
+    return { kind: 'beforeSignIn', backedUpBy: pusherRef(pusher), ...device(push) };
   }
   /* Step 9: external. */
-  return external(reading, id);
+  return external(reading, pusher, push);
 };
 
 const joinedAttribution = (reading: CommitReading, join: Joined, viewer: Viewer): Attribution => {
   const { push, bits } = join;
   /* Step 2: a hidden push. Every entry reads Anonymous. */
   if (push.pusher.kind === 'hidden') {
-    return push.backedUpBy === undefined ? { kind: 'anonymous' } : { kind: 'anonymous', backedUpBy: push.backedUpBy };
+    return push.backedUpBy === undefined
+      ? { kind: 'anonymous' }
+      : { kind: 'anonymous', backedUpBy: { accountId: push.backedUpBy } };
   }
   const { pusher } = push;
   const id = pusher.accountId;
@@ -126,14 +136,14 @@ const joinedAttribution = (reading: CommitReading, join: Joined, viewer: Viewer)
   }
   /* Step 4: pseudonymous and not covered. */
   if (reading.pseudonymous) {
-    return viewer.owner ? { kind: 'anonymous', backedUpBy: id } : { kind: 'anonymous' };
+    return viewer.owner ? { kind: 'anonymous', backedUpBy: pusherRef(pusher) } : { kind: 'anonymous' };
   }
   /* Step 5: a Tau agent result for the pusher; any other falls to step 9 (R2-6). */
   if (reading.tauAgent !== undefined) {
-    const forPusher =
-      (reading.shape === 'tau/2' && (reading.person?.id === id || reading.onBehalfOf === id)) ||
-      reading.authorAccountId === id;
-    return forPusher ? { kind: 'tauAgent', for: id } : external(reading, id);
+    /* The parsed record decides (a Tau agent result always has one): an own-git author under a record that names
+     * another account is that account's work, not the pusher's (M2 review m1). */
+    const forPusher = reading.person?.id === id || reading.onBehalfOf === id;
+    return forPusher ? { kind: 'tauAgent', for: pusherRef(pusher), ...device(push) } : external(reading, pusher, push);
   }
   return verifiedAttribution(reading, join, pusher);
 };

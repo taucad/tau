@@ -228,6 +228,57 @@ describe('readCommit', () => {
   });
 });
 
+describe('no address and every pusher marker (M2 review M1, M2)', () => {
+  const joined = (viaDevice: boolean): Join => ({
+    push: { generation: 3, pusher: { kind: 'account', accountId: pusher, former: true }, viaDevice },
+    bits: {},
+  });
+  const member: Viewer = { accountId: other, owner: false, sharedProject: true, deviceIdentities: [] };
+
+  it('returns no name that holds an address, and none becomes claimable', () => {
+    for (const author of [
+      'alice@example.com <alice@example.com>',
+      `X <${noreply(pusher)}> <evil@x.example>`,
+      'a<b <c@d.example>',
+    ]) {
+      const reading = readCommit(commit({ author, message: 'Imported' }));
+      expect(reading.authorName, author).toBe('');
+      expect(reading.claimable, author).toBeUndefined();
+    }
+    expect(readCommit(commit({ author: 'Alice Smith <alice@example.com>', message: 'Imported' })).authorName).toBe(
+      'Alice Smith',
+    );
+  });
+
+  it('carries "Former member" and "by a cloud agent" on every answer that names the pusher', () => {
+    const imported = readCommit(
+      commit({ author: 'Alice <alice@example.com>', committer: 'Alice <alice@example.com>', message: 'Imported' }),
+    );
+    expect(attributionOf(imported, joined(true), member)).toEqual({
+      kind: 'external',
+      name: 'Alice',
+      backedUpBy: { accountId: pusher, former: true },
+      viaDevice: true,
+    });
+    expect(attributionOf(imported, joined(false), member)).toEqual({
+      kind: 'external',
+      name: 'Alice',
+      backedUpBy: { accountId: pusher, former: true },
+    });
+    const agentResult = readCommit(
+      commit({
+        author: `Pusher <${noreply(pusher)}>`,
+        message: v2({ kind: 'agent', id: 'claude', runId: 'run_1', onBehalfOf: { kind: 'user', id: pusher } }, 'agent'),
+      }),
+    );
+    expect(attributionOf(agentResult, joined(true), member)).toEqual({
+      kind: 'tauAgent',
+      for: { accountId: pusher, former: true },
+      viaDevice: true,
+    });
+  });
+});
+
 describe('readTag', () => {
   const tag = (message: string): string =>
     `object ${'b'.repeat(40)}\ntype commit\ntag v2\ntagger ${tau} 1 +0000\n\n${message}`;
@@ -282,7 +333,7 @@ describe('attributionOf against the device-state rows', () => {
     });
     expect(row(body, pushed())).toEqual({
       kind: 'beforeSignIn',
-      backedUpBy: pusher,
+      backedUpBy: { accountId: pusher },
     });
     expect(row(body)).toEqual({
       kind: 'account',
@@ -304,7 +355,7 @@ describe('attributionOf against the device-state rows', () => {
     expect(readCommit(elsewhere).claimable).toBe(handle);
     expect(row(elsewhere, pushed())).toEqual({
       kind: 'beforeSignIn',
-      backedUpBy: pusher,
+      backedUpBy: { accountId: pusher },
     });
   });
 
@@ -317,7 +368,7 @@ describe('attributionOf against the device-state rows', () => {
     expect(row(body, pushed({ claim: true }))).toEqual({
       kind: 'external',
       name: 'Other Person',
-      backedUpBy: pusher,
+      backedUpBy: { accountId: pusher },
     });
   });
 
@@ -344,7 +395,7 @@ describe('attributionOf against the device-state rows', () => {
     expect(row(body, pushed())).toEqual({ kind: 'anonymous' });
     expect(row(body, pushed(), owner)).toEqual({
       kind: 'anonymous',
-      backedUpBy: pusher,
+      backedUpBy: { accountId: pusher },
     });
   });
 
@@ -370,7 +421,7 @@ describe('attributionOf against the device-state rows', () => {
           message: v2(agent(pusher), 'agent'),
         }),
       ),
-    ).toEqual({ kind: 'tauAgent', for: pusher });
+    ).toEqual({ kind: 'tauAgent', for: { accountId: pusher } });
     expect(
       row(
         commit({
@@ -378,8 +429,8 @@ describe('attributionOf against the device-state rows', () => {
           message: v2(agent(other), 'agent'),
         }),
       ),
-    ).toEqual({ kind: 'external', name: 'O', backedUpBy: pusher });
-    /* Forged for another but authored as the pusher: still the record decides, not own git. */
+    ).toEqual({ kind: 'external', name: 'O', backedUpBy: { accountId: pusher } });
+    /* Recorded for another account but authored as the pusher: the record decides, not own git (M2 review m1). */
     expect(
       row(
         commit({
@@ -387,7 +438,7 @@ describe('attributionOf against the device-state rows', () => {
           message: v2(agent(other), 'agent'),
         }),
       ),
-    ).toEqual({ kind: 'tauAgent', for: pusher });
+    ).toEqual({ kind: 'external', name: 'P', backedUpBy: { accountId: pusher } });
   });
 
   it('row 9: git under the pusher’s Tau no-reply address reads as the account, made with git', () => {
@@ -420,7 +471,7 @@ describe('attributionOf against the device-state rows', () => {
           message: 'Edit\n',
         }),
       ),
-    ).toEqual({ kind: 'external', name: 'P', backedUpBy: pusher });
+    ).toEqual({ kind: 'external', name: 'P', backedUpBy: { accountId: pusher } });
   });
 
   it('row 11: the pusher’s own forge commits are the account on the numeric id; other people’s are external', () => {
@@ -441,7 +492,7 @@ describe('attributionOf against the device-state rows', () => {
           message: 'Edit\n',
         }),
       ),
-    ).toEqual({ kind: 'external', name: 'pg', backedUpBy: pusher });
+    ).toEqual({ kind: 'external', name: 'pg', backedUpBy: { accountId: pusher } });
   });
 
   it('row 12: history imported from another host reads external', () => {
@@ -453,7 +504,7 @@ describe('attributionOf against the device-state rows', () => {
           message: 'Import\n',
         }),
       ),
-    ).toEqual({ kind: 'external', name: 'Ada', backedUpBy: pusher });
+    ).toEqual({ kind: 'external', name: 'Ada', backedUpBy: { accountId: pusher } });
   });
 
   it('rows 13a to 13c: recognised agents read "for" only when the person half verifies', () => {
@@ -466,7 +517,7 @@ describe('attributionOf against the device-state rows', () => {
           message: 'Fix\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n',
         }),
       ),
-    ).toEqual({ kind: 'agent', agent: 'claude-code', for: pusher });
+    ).toEqual({ kind: 'agent', agent: 'claude-code', for: { accountId: pusher } });
     expect(
       row(
         commit({
@@ -475,7 +526,7 @@ describe('attributionOf against the device-state rows', () => {
           message: 'Fix\n',
         }),
       ),
-    ).toEqual({ kind: 'agent', agent: 'claude-code', for: pusher });
+    ).toEqual({ kind: 'agent', agent: 'claude-code', for: { accountId: pusher } });
     expect(
       row(
         commit({
@@ -484,11 +535,11 @@ describe('attributionOf against the device-state rows', () => {
           message: 'Fix\n',
         }),
       ),
-    ).toEqual({ kind: 'agent', agent: 'claude-code', for: pusher });
+    ).toEqual({ kind: 'agent', agent: 'claude-code', for: { accountId: pusher } });
     expect(row(commit({ author: claude, committer: claude, message: 'Fix\n' }))).toEqual({
       kind: 'agent',
       agent: 'claude-code',
-      backedUpBy: pusher,
+      backedUpBy: { accountId: pusher },
     });
     /* A trailer on a commit that does not verify re-owns nobody's work. */
     expect(
@@ -499,7 +550,7 @@ describe('attributionOf against the device-state rows', () => {
           message: 'Fix\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n',
         }),
       ),
-    ).toEqual({ kind: 'external', name: 'O', backedUpBy: pusher });
+    ).toEqual({ kind: 'external', name: 'O', backedUpBy: { accountId: pusher } });
   });
 
   it('rows 15 and 16: a newer or corrupt record reads by own git when the author is the pusher, else external', () => {
@@ -519,7 +570,7 @@ describe('attributionOf against the device-state rows', () => {
         }),
         pushed(),
       ),
-    ).toEqual({ kind: 'beforeSignIn', backedUpBy: pusher });
+    ).toEqual({ kind: 'beforeSignIn', backedUpBy: { accountId: pusher } });
   });
 
   it('a version 1 record naming an account with an OS-login author is unclaimable', () => {
@@ -531,7 +582,7 @@ describe('attributionOf against the device-state rows', () => {
     expect(row(body, pushed({ claim: true }))).toEqual({
       kind: 'external',
       name: handle,
-      backedUpBy: pusher,
+      backedUpBy: { accountId: pusher },
     });
   });
 

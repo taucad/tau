@@ -29,6 +29,7 @@ import type { ChatContextReference } from '@taucad/chat-ui/components/chat-conte
 import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
 import { ChatPlacementNotice } from '#components/chat/chat-placement-notice.js';
 import { ChatRunElsewhereNotice } from '#components/chat/chat-run-elsewhere-notice.js';
+import { prewarmExternalAgent } from '#chat-clients/_internal/external-agent-prewarm.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { buildDraftMessage } from '@taucad/chat-ui/hooks/draft.machine';
 import type { ComposerRecord } from '@taucad/chat-ui/db/composer-record-store';
@@ -160,9 +161,6 @@ export const ChatTextarea = memo(function ({
 
   /* Focus inside the composer or its portalled menus; a collapsible composer unfolds while it holds. */
   const [isFocused, setIsFocused] = useState(false);
-  const handleFocus = useCallback((): void => {
-    setIsFocused(true);
-  }, []);
   const handleBlur = useCallback((): void => {
     setIsFocused(false);
     onBlur?.();
@@ -186,6 +184,18 @@ export const ChatTextarea = memo(function ({
   const { session: composerSession, homeRecordRef } = useChatComposer();
   /* The record this composer's draft persists to: the chat's, or Home's own. */
   const composerRecordRef = composerSession?.composerRecordRef ?? homeRecordRef;
+  const handleFocus = useCallback((): void => {
+    setIsFocused(true);
+    /* WP-18: a focused composer naming an ACP agent may send next, so its host opens the chat's session now. */
+    const projectId = projectContext?.projectId;
+    if (composerSession !== undefined && projectId !== undefined) {
+      void prewarmExternalAgent({
+        projectId,
+        chatId: composerSession.activeChatId,
+        execution: composerExecution,
+      });
+    }
+  }, [composerExecution, composerSession, projectContext]);
   /* Set in the adoption's own commit, so the editor reads it at its handover. */
   const [isPaintedDraftTaken, setIsPaintedDraftTaken] = useState(false);
   const isRecordLoading = useSelector(composerRecordRef, (state) =>

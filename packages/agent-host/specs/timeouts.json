@@ -1439,14 +1439,6 @@
       "owner": "filesystem speed phase SP2c"
     },
     {
-      "id": "ACP-PREWARM-DWELL",
-      "bound": "Dwell on a selected ACP agent before its chat's session is prewarmed, 250 ms; a selection changed within it asks nothing",
-      "site": "apps/ui/app/chat-clients/_internal/external-agent-prewarm.tsx",
-      "token": "externalAgentPrewarmDwell",
-      "class": "Debounce",
-      "owner": "chat performance WP-18"
-    },
-    {
       "id": "LSP-INDEX-MIRROR-RETRY",
       "bound": "Language-worker index mirror feed retry after a failed index ask: 250 ms, doubling to at most 8 s (indexMirrorRetryBackoff, indexMirrorRetryCeiling); reset on a successful ask, replaced by an immediate ask on the next change set, cleared on dispose",
       "site": "apps/libs/lsp-fs/src/sync/sync-fs-server.ts",

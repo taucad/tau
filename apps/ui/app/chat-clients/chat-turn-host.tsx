@@ -4,7 +4,10 @@ import type { ReactNode } from 'react';
 import { isResumableRun } from '@taucad/agent-host';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { awaitContextPayload } from '#hooks/use-context-payload.js';
-import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
+import { projectSnapshotKernel } from '#hooks/use-chat-snapshot.js';
+import { routingKernelProfile } from '#constants/available-kernel-configurations.js';
+import { useKernelRoutingPlan } from '#cloud/kernel-commerce.js';
+import { getAllFlags } from '#flags/feature-flags.js';
 import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useModels } from '#hooks/use-models.js';
@@ -31,7 +34,6 @@ const eitherStop = (...stops: ReadonlyArray<AbortSignal | undefined>): AbortSign
 export function ChatTurnHost(): ReactNode {
   const agent = useCadAgentConfig();
   const { activeChatId } = useActiveChatSession();
-  const chat = useActiveChatInstance();
   const store = useChatSessionStore();
   const { resolveModel } = useModels();
   const {
@@ -41,6 +43,9 @@ export function ChatTurnHost(): ReactNode {
   /* Auto turns report how they resolved (blueprint D10); the owner is read again when the turn settles. */
   const kernelOwnerRef = useRef(kernelOwner);
   const isAutoRef = useRef(kernelPreference === 'auto');
+  /* Stable in an adaptive build, where it reads the plan when called (I4); a pinned build's follows its render. */
+  const isPlanAllowed = useKernelRoutingPlan();
+  const isPlanAllowedRef = useRef(isPlanAllowed);
   const { admitExecution, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   /* Agent usage follows the one switch's resolved consent (AR-W6-02); only `granted` reports, `unknown` does not. */
   const { consent } = useTelemetryConsent();
@@ -64,7 +69,8 @@ export function ChatTurnHost(): ReactNode {
     setActiveExecutionRef.current = setActiveExecution;
     kernelOwnerRef.current = kernelOwner;
     isAutoRef.current = kernelPreference === 'auto';
-  }, [agent, consent, resolveModel, setActiveExecution, kernelOwner, kernelPreference]);
+    isPlanAllowedRef.current = isPlanAllowed;
+  }, [agent, consent, resolveModel, setActiveExecution, kernelOwner, kernelPreference, isPlanAllowed]);
 
   /* Aborted when this turn host unmounts (the chat closes, the project switches): a turn held for a cloud open's files
    * then stops waiting (SP2h review); one already admitted runs on, as a turn outlives its view. */
@@ -95,7 +101,7 @@ export function ChatTurnHost(): ReactNode {
       const projection = store.getProjection(activeChatId);
       const projectedRun =
         projection !== undefined && selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
-      const messages = Array.isArray(chat.messages) ? chat.messages : [];
+      const messages = store.getCurrentTranscript(activeChatId);
       const turnTelemetry = telemetry.begin(execution, {
         kernelId: turnAgent.kernel,
         consent: consentRef.current,
@@ -131,8 +137,29 @@ export function ChatTurnHost(): ReactNode {
             : turnAgent.contextPayload;
         /* A host that unmounted during the catalog wait admits nothing for a closed chat. */
         mountedRef.current?.signal.throwIfAborted();
+        /* The waits above can be long (a cloud open): the command is built from the fold as it is now. */
+        const admittedMessages = store.getCurrentTranscript(activeChatId);
+        const withPayload = contextPayload === turnAgent.contextPayload ? turnAgent : { ...turnAgent, contextPayload };
+        /* C6 (adaptive app deployment mode I4): the routing set is read now, at admission, not from the snapshot a
+         * passive effect last handed the ref; an unresolved plan leaves Zoo out of automatic routing. */
+        const routed = withPayload.snapshot?.kernel;
         const admittedAgent =
-          contextPayload === turnAgent.contextPayload ? turnAgent : { ...turnAgent, contextPayload };
+          routed === undefined
+            ? withPayload
+            : {
+                ...withPayload,
+                snapshot: {
+                  ...withPayload.snapshot,
+                  kernel: projectSnapshotKernel({
+                    preference: routed.preference,
+                    owner: routed.owner,
+                    profile: routingKernelProfile({
+                      isPlanAllowed: isPlanAllowedRef.current,
+                      isSupplierOpen: getAllFlags().zooCloudDispatch,
+                    }),
+                  }),
+                },
+              };
         /* The chat owns what it ran on from its first turn, so a later default
          * cannot move it — and that choice becomes the next new chat's. */
         if (execution === liveAgent.execution) {
@@ -145,7 +172,7 @@ export function ChatTurnHost(): ReactNode {
             leaseTurnId: intent.leaseTurnId,
             request: {
               kind: 'continue',
-              command: commandOf({ kind: 'continue' }, messages, {
+              command: commandOf({ kind: 'continue' }, admittedMessages, {
                 chatId: activeChatId,
                 commandId: generatePrefixedId(idPrefix.request),
                 runId,
@@ -159,23 +186,23 @@ export function ChatTurnHost(): ReactNode {
             : generatePrefixedId(idPrefix.request);
         const transcript =
           gesture.kind === 'send'
-            ? [...messages, gesture.message]
+            ? [...admittedMessages, gesture.message]
             : gesture.kind === 'edit'
               ? (() => {
-                  const index = messages.findIndex((message) => message.id === gesture.messageId);
+                  const index = admittedMessages.findIndex((message) => message.id === gesture.messageId);
                   if (index === -1) {
                     throw new Error('That message is no longer in this chat, so it cannot be edited.');
                   }
                   return [
-                    ...messages.slice(0, index),
-                    buildEditedUserMessage(messages[index]!, {
+                    ...admittedMessages.slice(0, index),
+                    buildEditedUserMessage(admittedMessages[index]!, {
                       text: gesture.text,
                       ...(gesture.attachments === undefined ? {} : { attachments: gesture.attachments }),
                       ...(gesture.references === undefined ? {} : { references: gesture.references }),
                     }),
                   ];
                 })()
-              : messages;
+              : admittedMessages;
         const browserHost = hostAdmission({
           agent: admittedAgent,
           chatId: activeChatId,
@@ -210,17 +237,18 @@ export function ChatTurnHost(): ReactNode {
                   content: gesture.text,
                   ...(gesture.attachments === undefined ? {} : { attachments: gesture.attachments }),
                   ...(gesture.references === undefined ? {} : { references: gesture.references }),
+                  ...(gesture.annotations === undefined ? {} : { annotations: gesture.annotations }),
                   command,
                 }
               : { kind: 'regenerate', command };
         return track({ runId, leaseTurnId: intent.leaseTurnId, request });
       } catch (error) {
         turnTelemetry.refused(error);
-        surfaceDispatchFailure(error);
+        surfaceDispatchFailure(error, gesture.kind);
         throw error;
       }
     },
-    [activeChatId, admitExecution, chat, store, surfaceDispatchFailure, telemetry],
+    [activeChatId, admitExecution, store, surfaceDispatchFailure, telemetry],
   );
 
   /* The admitted turn retains its callback; future seeds need a live focused publisher. */

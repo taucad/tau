@@ -125,6 +125,11 @@
     "reason": "test fixture read from another project"
   },
   {
+    "file": "apps/libs/project-library/src/discovery-budget.test.ts",
+    "target": "packages/filesystem/src/testing/discovery-unit-cost.json",
+    "reason": "holds the library budget's per-call rows to the unit costs the filesystem cost test measures"
+  },
+  {
     "file": "apps/ui/app/runtime/attachment-transcode-sources.test.ts",
     "target": "packages/plugins/heif/src/fixtures/small.heic",
     "reason": "test fixture read from another project: the heif package owns the HEIC fixtures its parity tests share"
@@ -460,7 +465,17 @@
     "reason": "imports tau-examples source by relative path instead of its package"
   },
   {
+    "file": "apps/ui-e2e/src/service-worker.test.ts",
+    "target": "apps/ui/build/**",
+    "reason": "reads another project's build output"
+  },
+  {
     "file": "apps/ui-e2e/src/stale-deploy-recovery.test.ts",
+    "target": "apps/libs/api-llm-gateway/src/models/model.constants.js",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/two-deploys.ts",
     "target": "apps/ui/build/**",
     "reason": "reads another project's build output"
   },
@@ -540,9 +555,9 @@
     "reason": "test fixture read from another project"
   },
   {
-    "file": "apps/ui/app/runtime/plugin-source-surface.test.ts",
-    "target": "packages/plugins",
-    "reason": "enumerates or probes sibling project directories"
+    "file": "apps/ui/app/machines/chat-projection.transcript.test.ts",
+    "target": "packages/agent-host/specs/ChatLog/recorded/kinetic-regenerate-resume.jsonl",
+    "reason": "conformance or recorded corpus read from another project's specs"
   },
   {
     "file": "apps/ui/app/services/chat-session-store.test.ts",
@@ -553,6 +568,11 @@
     "file": "apps/ui/app/styles/global.test.ts",
     "target": "packages/ui/src/styles/**",
     "reason": "reads the design-system stylesheets from packages/ui"
+  },
+  {
+    "file": "apps/ui/app/styles/global.test.ts",
+    "target": "apps/libs/editor-ui/src/components/code/code-editor.css",
+    "reason": "checks the code editor stylesheet, which moved to editor-ui, against the app's theme tokens"
   },
   {
     "file": "apps/ui/app/workbench-records/view-record-session.conformance.test.ts",
@@ -573,11 +593,6 @@
     "file": "apps/ui/app/workers/agent-host.vitest.browser.config.ts",
     "target": "packages/agent-host/src/transport/gateway-wire.fixture.js",
     "reason": "test fixture read from another project"
-  },
-  {
-    "file": "apps/ui/csharp-language-assets-cache-key.ts",
-    "target": "out/**",
-    "reason": "reads build or test output under out/, not a source file"
   },
   {
     "file": "apps/ui/depth-ownership.vitest.browser.config.ts",
@@ -622,12 +637,14 @@
   {
     "file": "apps/www/scripts/export-story-assets.ts",
     "target": "libs/tau-examples/**",
-    "reason": "reads a Tau example from tau-examples as a fixture or source"
+    "reason": "reads a Tau example from tau-examples as a fixture or source",
+    "unscheduled": "Run by hand with WWW_RENDER_TOOLS to regenerate the frozen gearbox assets; no Nx target runs it. planetary-gearbox:test (manifest.test.ts) checks the assets against this example and declares it as an input."
   },
   {
     "file": "apps/www/scripts/export-variant-assets.ts",
     "target": "libs/tau-examples/**",
-    "reason": "reads a Tau example from tau-examples as a fixture or source"
+    "reason": "reads a Tau example from tau-examples as a fixture or source",
+    "unscheduled": "Run by hand with WWW_RENDER_TOOLS to regenerate the frozen gearbox assets; no Nx target runs it. planetary-gearbox:test (manifest.test.ts) checks the assets against this example and declares it as an input."
   },
   {
     "file": "apps/www/scripts/metal-hero-entry.ts",
@@ -727,12 +744,14 @@
   {
     "file": "libs/telemetry/scripts/runtime-registry.mts",
     "target": "packages/jobs-solvers/src",
-    "reason": "enumerates or probes sibling project directories"
+    "reason": "enumerates or probes sibling project directories",
+    "unscheduled": "Imported by the operator generator telemetry:generate-runtime-vocabulary, which CI does not run, and by scripts:test (telemetry-runtime-vocabulary.test.ts, telemetry-usage-coverage.test.ts), whose inputs must keep matching these files."
   },
   {
     "file": "libs/telemetry/scripts/runtime-registry.mts",
     "target": "packages/plugins",
-    "reason": "enumerates or probes sibling project directories"
+    "reason": "enumerates or probes sibling project directories",
+    "unscheduled": "Imported by the operator generator telemetry:generate-runtime-vocabulary, which CI does not run, and by scripts:test (telemetry-runtime-vocabulary.test.ts, telemetry-usage-coverage.test.ts), whose inputs must keep matching these files."
   },
   {
     "file": "libs/types/src/schemas/project-manifest.schema.test.ts",
@@ -830,11 +849,6 @@
     "reason": "enumerates or probes sibling project directories"
   },
   {
-    "file": "packages/runtime/src/plugins/plugin-default-export-surface.test.ts",
-    "target": "packages/plugins",
-    "reason": "enumerates or probes sibling project directories"
-  },
-  {
     "file": "packages/skills/src/skill-bundles.test.ts",
     "target": "packages/plugins",
     "reason": "enumerates or probes sibling project directories"
@@ -847,7 +861,8 @@
   {
     "file": "scripts/spikes/native-deps/fetch-payloads.mts",
     "target": "apps/desktop/resources/python/manifest.json",
-    "reason": "reads another project's configuration it checks"
+    "reason": "reads another project's configuration it checks",
+    "unscheduled": "Run by the spike-wave0-macos workflow's `spike fetch-payloads` step, not by an Nx target."
   },
   {
     "file": "scripts/spikes/native-deps/linux/s11/fixtures-check.ts",
@@ -865,8 +880,18 @@
     "reason": "reads the GitHub workflow it checks; .github is not an Nx project"
   },
   {
+    "file": "scripts/src/apt-resilience.test.ts",
+    "target": ".github/actions",
+    "reason": "lists the composite actions whose apt installs it checks; .github is not an Nx project"
+  },
+  {
     "file": "scripts/src/canvas-vite.config.ts",
     "target": ".",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/check-cadmpeg-engine-mirror.ts",
+    "target": "pnpm-lock.yaml",
     "reason": "reads workspace-root configuration or inventory"
   },
   {
@@ -940,9 +965,34 @@
     "reason": "reads workspace-root configuration or inventory"
   },
   {
+    "file": "scripts/src/formal-nightly-workflow.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
     "file": "scripts/src/formal-plugin-target.test.ts",
     "target": "tools/formal.plugin.js",
     "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "scripts/src/formal-nightly-mutants-workflow.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/formal-toolchain-cache-workflow.test.ts",
+    "target": ".github/actions/setup-formal/action.yml",
+    "reason": "reads the composite action whose cache steps it checks; .github is not an Nx project"
+  },
+  {
+    "file": "scripts/src/pinned-download.test.ts",
+    "target": ".github/actions",
+    "reason": "lists the composite actions whose file downloads it checks; .github is not an Nx project"
+  },
+  {
+    "file": "scripts/src/pinned-download.test.ts",
+    "target": ".github/actions/apt-install/download.sh",
+    "reason": "reads the download helper's default retry schedule; .github is not an Nx project"
   },
   {
     "file": "scripts/src/prepare-geospec-test-consumer.ts",
@@ -1010,6 +1060,16 @@
     "reason": "enumerates or probes sibling project directories"
   },
   {
+    "file": "scripts/src/test-outcome-outputs.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/test-shard-dealer.test.ts",
+    "target": "apps/ui/project.json",
+    "reason": "reads another project's configuration it checks"
+  },
+  {
     "file": "scripts/src/test-shard-dealer.test.ts",
     "target": "libs/tau-examples/**",
     "reason": "reads a Tau example from tau-examples as a fixture or source"
@@ -1045,6 +1105,11 @@
     "reason": "reads the optional external checkout under repos/, outside the Nx graph"
   },
   {
+    "file": "scripts/src/validate-cross-root-reads{,.test}.ts",
+    "target": "nx.json",
+    "reason": "reads nx.json's named inputs to resolve the filesets each target declares"
+  },
+  {
     "file": "scripts/src/validate-quickstart-budget.ts",
     "target": "apps/docs/content/docs/runtime/getting-started/quick-start.mdx",
     "reason": "reads the documented quick start it checks"
@@ -1078,5 +1143,25 @@
     "file": "tools/workspace-plugin/src/generators/plugin/generator.test.ts",
     "target": "packages/plugins/image",
     "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "scripts/src/desktop-platform-scope-workflow.test.ts",
+    "target": "apps/desktop/scripts/fetch-desktop-installer-candidate.mts",
+    "reason": "binds the workflow's artifact names to the names the desktop script admits; the replay test owns that cross-file contract"
+  },
+  {
+    "file": "scripts/src/desktop-platform-scope-workflow.test.ts",
+    "target": "apps/desktop/scripts/desktop-receipt-provenance.mts",
+    "reason": "binds the workflow's artifact names to the names the desktop script admits; the replay test owns that cross-file contract"
+  },
+  {
+    "file": "packages/agent-host/src/log/chat-ledger.differential.test.ts",
+    "target": "out/test-results/formal/packages/agent-host/lean",
+    "reason": "lists the fresh-differential corpus directory this test writes, to clear the files no other part writes"
+  },
+  {
+    "file": "apps/ui/one-build.test.ts",
+    "target": "apps/libs/desktop-services-host/src/zoo-close-errors.ts",
+    "reason": "holds main's Zoo close-code sentences equal to the web app's neutral ones; the desktop cannot import UI source (adaptive app deployment mode D3, D11)"
   }
 ]

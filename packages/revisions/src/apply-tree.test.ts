@@ -15,12 +15,14 @@
  * batches built from the primitives counted here.
  */
 
+import { createHash } from 'node:crypto';
 import fs, { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
+import { writeBlob, writeCommit, writeTree } from 'isomorphic-git';
 
 import { AbstractFileSystemProvider } from '@taucad/filesystem/backend';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
@@ -33,10 +35,13 @@ import type {
   FileMode,
   FileStatEntry,
 } from '@taucad/filesystem';
+import { maximumChangesetEntries } from '@taucad/filesystem';
 import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/project-core';
 
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import { createApplyTreeEffects } from '#apply-tree.js';
+import { createApplyTreeEffects, readDeferredRevisionTree } from '#apply-tree.js';
+import type { DeferredRevisionTree } from '#apply-tree.js';
+import { blobOid, createBlobHashing, hashingTurns } from '#tree-id-memo.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
@@ -47,7 +52,7 @@ import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { generatedGitattributesContent, generatedGitattributesPath, tauRevisionPolicy } from '#workspace-config.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
-import { testIdentity } from '#test/identity.js';
+import { recordedBy, testIdentity } from '#test/identity.js';
 
 /** A clock stopped at `time`: these rows read only its `now()`. */
 const clockAt = (time: number): StepClock => {
@@ -186,8 +191,13 @@ const countingCheckout = (
       mutate('rename', async () => real.rename(pathOf(from), pathOf(to))),
     unlink: async (path: string): Promise<void> => mutate('unlink', async () => real.unlink(pathOf(path))),
     exists: async (path: string): Promise<boolean> => real.exists(pathOf(path)),
-    setFileMode: async (path: string, mode: FileMode): Promise<void> =>
-      mutate('setFileMode', async () => real.setFileMode(pathOf(path), mode)),
+    /* A disk without an executable bit (Windows) exposes no mode seam, so neither does this surface. */
+    ...(real.setFileMode === undefined
+      ? {}
+      : {
+          setFileMode: async (path: string, mode: FileMode): Promise<void> =>
+            mutate('setFileMode', async () => real.setFileMode?.(pathOf(path), mode)),
+        }),
     ...(options.statAge === undefined ? {} : { statTree }),
   };
   const checkout: RevisionFileSystem = Object.assign(Object.create(real) as RevisionFileSystem, counted, {
@@ -275,8 +285,8 @@ const liveCheckout: Checkout = {
   baseRevisionId: undefined,
 };
 
-/** The extracted apply primitive over the counting checkout used by the crash rows. */
-const materializer = (
+/** The extracted apply primitives over the counting checkout used by the crash rows. */
+const applyEffects = (
   checkout: RevisionFileSystem,
   prepareTarget?: Parameters<typeof createApplyTreeEffects>[0]['prepareTarget'],
   onApplyingTree?: Parameters<typeof createApplyTreeEffects>[0]['onApplyingTree'],
@@ -305,8 +315,12 @@ const materializer = (
         }
       });
     },
-  }).materializeTree;
+  });
 };
+
+/** The extracted apply primitive over the counting checkout used by the crash rows. */
+const materializer = (...dependencies: Parameters<typeof applyEffects>) =>
+  applyEffects(...dependencies).materializeTree;
 
 /** Cut the live checkout and answer the tree id the store would record. */
 const cut = async (actors: RevisionActors): Promise<string> => {
@@ -695,8 +709,8 @@ describe('a large apply', () => {
     await materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
 
     expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
-    await expect(context.tree.getFileMode('bin/run.sh')).resolves.toBe('100755');
-    await expect(context.tree.getFileMode('bin/readme.txt')).resolves.toBe('100644');
+    await expect(context.tree.getFileMode?.('bin/run.sh')).resolves.toBe('100755');
+    await expect(context.tree.getFileMode?.('bin/readme.txt')).resolves.toBe('100644');
   });
 });
 
@@ -933,7 +947,9 @@ describe('the entry closure of a tree write (D10)', () => {
         return checkout.applyBatch!(entries, batchOptions);
       },
     });
-    const brackets: Array<Readonly<{ purpose: string; closure?: readonly string[] }> | undefined> = [];
+    const brackets: Array<
+      Readonly<{ purpose: string; closure?: readonly string[]; manifest?: Uint8Array<ArrayBuffer> }> | undefined
+    > = [];
 
     const outcomes: unknown[] = [];
     await materializer(watched, undefined, (_place, _paths, bracket) => {
@@ -962,10 +978,33 @@ describe('the entry closure of a tree write (D10)', () => {
       arriving: true,
     });
     expect(expected.find((entry) => entry.path === 'old.scad')?.arriving).toBe(false);
-    expect(brackets).toEqual([{ purpose: 'tree', closure: ['tau.json', 'zz/main.scad'] }]);
+    /* With the closure, the `tau.json` bytes it lands: the host names which manifest the first view is (STO-25). */
+    expect(brackets).toStrictEqual([{ purpose: 'tree', closure: ['tau.json', 'zz/main.scad'], manifest }]);
     /* The closure lands in the first changeset, before the tree's other files. */
     expect(events.slice(2, 4).toSorted()).toEqual(['tau.json', 'zz/main.scad']);
     expect(events.slice(-2)).toEqual(['end', 'release']);
+  });
+
+  it('should name the files a tree write removes, so a read of one waits until it is gone (I7)', async () => {
+    const context = await project({ 'gone.scad': 'old\n', 'tau.json': '{}\n' });
+    const before = new ImmutableRevisionTree([
+      ['gone.scad', 'old\n'],
+      ['tau.json', '{}\n'],
+    ]);
+    const target = new ImmutableRevisionTree([
+      ['main.scad', 'cube(1);\n'],
+      ['tau.json', '{}\n'],
+    ]);
+    let removing: readonly string[] | undefined;
+    const { checkout } = context;
+    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+      expectEntries: (_entries: readonly ExpectedEntry[], options?: Readonly<{ removing?: readonly string[] }>) => {
+        removing = options?.removing;
+      },
+      endExpectation: () => undefined,
+    });
+    await materializer(watched, undefined, () => () => undefined)(liveCheckout, target, { before, purpose: 'tree' });
+    expect(removing).toEqual(['gone.scad']);
   });
 
   it('should land the closure first across created and replaced files', async () => {
@@ -1074,9 +1113,11 @@ describe('the entry closure of a tree write (D10)', () => {
         throw new Error('host bracket failed');
       })(liveCheckout, target, { before: new ImmutableRevisionTree([]), purpose: 'tree' }),
     ).rejects.toThrow('host bracket failed');
-    expect(endExpectation).toHaveBeenCalledTimes(1);
-    /* A failed write's entries no longer answer: what it did not land is what is on disk (I7). */
-    expect(endExpectation).toHaveBeenLastCalledWith({ failed: true });
+    /*
+     * A failed write's entries no longer answer, and what it still owed refuses (I7) until the checkout is whole
+     * again: here it changed nothing, so the expectation ends at once after.
+     */
+    expect(endExpectation.mock.calls).toStrictEqual([[{ failed: true }], []]);
 
     /* An aborted write releases its bracket as failed, so its tree is never read as written. */
     const outcomes: unknown[] = [];
@@ -1095,7 +1136,8 @@ describe('the entry closure of a tree write (D10)', () => {
     ).rejects.toThrow();
     /* It tore the checkout and the recovery put the prior files back, so it left the checkout whole: neither is told failed (L5). */
     expect(outcomes).toEqual([{ failed: false }, { failed: false }]);
-    expect(endExpectation).toHaveBeenCalledTimes(3);
+    /* The failed write's end, the rollback's own, and the end that lets the whole checkout answer again. */
+    expect(endExpectation.mock.calls.slice(2)).toStrictEqual([[{ failed: true }], [{ failed: false }], []]);
 
     /* One that fails before any byte lands leaves the checkout whole: it is not told failed, and nothing recovers. */
     outcomes.length = 0;
@@ -1414,5 +1456,503 @@ describe('conversion inside recoverable materialization', () => {
     ).rejects.toThrow('publish refused');
     expect(await context.tree.readFile('tau.json', 'utf8')).toBe('before');
     expect(new TextDecoder().decode(target.get('tau.json'))).toBe('imported');
+  });
+});
+
+describe('a cold open written from its listing (STO-25)', () => {
+  const manifest = serializeProjectManifest({
+    $schema: projectManifestSchemaUrl,
+    name: 'Aircraft',
+    description: '',
+    tags: [],
+    assets: { main: { entryPath: 'main.ts' } },
+  });
+  const sized = (seed: string, bytes: number): string => seed.repeat(Math.ceil(bytes / seed.length)).slice(0, bytes);
+  const { bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
+  /* More deferred files than one changeset takes, so their bytes arrive in more than one read. */
+  const sources = Array.from({ length: maximumChangesetEntries + 44 }, (_, index): [string, string] => [
+    `src/file-${String(index).padStart(4, '0')}.ts`,
+    sized(`export const value${String(index)} = ${String(index)};\n`, 1100),
+  ]);
+  const remoteFiles: ReadonlyArray<readonly [string, string | Uint8Array<ArrayBuffer>]> = [
+    ['tau.json', manifest],
+    ['main.ts', sized('export const main = 1;\n', 2048)],
+    ['.gitattributes', '*.step filter=lfs diff=lfs merge=lfs -text\n'],
+    ['models/part.step', pointerBytes],
+    ['model/aircraft.usda', sized('def Xform "Part" {}\n', 8192)],
+    ...sources,
+  ];
+
+  /**
+   * An unborn `main` whose remote head holds {@link remoteFiles}, over a port
+   * that lists each file's size as a cold open's head listing does.
+   *
+   * @param files - What the checkout holds before the open.
+   * @param failRead - Paths a store read refuses.
+   * @returns The project, its actors, and the ordered log of reads, the bracket and writes.
+   */
+  const opening = async (
+    files: Readonly<Record<string, string>> = {},
+    failRead?: (paths: readonly string[]) => boolean,
+    afterBatch?: (written: readonly string[]) => Promise<void>,
+  ) => {
+    const context = await project(files);
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await context.port.setHead('main');
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree(remoteFiles.map(([path, content]) => [path, content] as const)),
+      provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 10, 18) },
+      summary: { generated: 'Remote' },
+    });
+    const remote = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+    const remoteTree = (await context.port.readTree(remote, { largeObjects: 'local' }))!;
+    const sizes = new Map(remoteTree.entries().map(({ path, content }) => [path, content.byteLength]));
+    const events: string[] = [];
+    /* Once a read fails, the store stays unreadable: a rollback cannot ask it either. */
+    let unreadable = false;
+    /* A slow object source: the model's bytes arrive only once the closure has landed, or after a bound. */
+    const { promise: closureLanded, resolve: landClosure } = Promise.withResolvers<void>();
+    const port: RevisionPort = {
+      ...context.port,
+      listTree: async (id) => {
+        const listing = await context.port.listTree!(id);
+        return listing?.map((file) => ({ ...file, size: sizes.get(file.path)! }));
+      },
+      readTree: async (id, readOptions) => {
+        const paths = readOptions?.paths;
+        events.push(`read ${paths === undefined ? '*' : paths.join(',')}`);
+        if (paths !== undefined && (unreadable || failRead?.(paths) === true)) {
+          unreadable = true;
+          throw new Error('the store could not read that pack');
+        }
+        if (paths?.includes('model/aircraft.usda') === true && events.includes('bracket')) {
+          await Promise.race([
+            closureLanded,
+            new Promise<void>((resolve) => {
+              setTimeout(() => {
+                events.push('model read unblocked by its bound');
+                resolve();
+              }, 2000);
+            }),
+          ]);
+        }
+        const tree = await context.port.readTree(id, readOptions);
+        events.push(`read-done ${paths === undefined ? '*' : paths.join(',')}`);
+        return tree;
+      },
+    };
+    const { checkout } = context;
+    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        const receipts = await checkout.applyBatch!(entries, batchOptions);
+        events.push(...entries.flatMap((entry) => (entry.op === 'write' ? [`write ${entry.path}`] : [])));
+        if (entries.some((entry) => entry.op === 'write' && entry.path === 'tau.json')) {
+          landClosure();
+        }
+        await afterBatch?.(entries.flatMap((entry) => (entry.op === 'write' ? [entry.path] : [])));
+        return receipts;
+      },
+    });
+    const brackets: Array<Parameters<NonNullable<Parameters<typeof createRevisionActors>[0]['onApplyingTree']>>[2]> =
+      [];
+    const outcomes: unknown[] = [];
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port,
+      projectId: 'project-1',
+      clock: clockAt(clockReading),
+      filesystem: async () => watched,
+      onApplyingTree: (_place, _paths, bracket) => {
+        brackets.push(bracket);
+        events.push('bracket');
+        return (outcome) => {
+          outcomes.push(outcome);
+          events.push('release');
+        };
+      },
+    });
+    /* Where in the log a path's bytes were first read. */
+    const readOf = (path: string, kind = 'read'): number =>
+      events.findIndex(
+        (event) =>
+          event.startsWith(`${kind} `) &&
+          event
+            .slice(kind.length + 1)
+            .split(',')
+            .includes(path),
+      );
+    return { ...context, actors, remote, remoteTree, events, brackets, outcomes, readOf };
+  };
+
+  it('should open the bracket and land the entry closure before the tree’s other bytes are read', async () => {
+    const opened = await opening();
+    await expect(run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+      checkoutId: 'live',
+      revisionId: opened.remote,
+    });
+    const { events, readOf } = opened;
+    /* No whole-tree read in the write: it begins from the listing. */
+    expect(events.slice(0, events.indexOf('release'))).not.toContain('read *');
+    const bracket = events.indexOf('bracket');
+    expect(bracket).toBeGreaterThan(-1);
+    expect(readOf('model/aircraft.usda')).toBeGreaterThan(bracket);
+    /* The closure lands without waiting on the model's bytes, the manifest it lands named to the bracket. */
+    expect(events).not.toContain('model read unblocked by its bound');
+    const usda = readOf('model/aircraft.usda', 'read-done');
+    expect(events.indexOf('write tau.json')).toBeLessThan(usda);
+    expect(events.indexOf('write main.ts')).toBeLessThan(usda);
+    expect(readOf('main.ts')).toBeLessThan(bracket);
+    /* The manifest named is the one that landed, as the host prepared it. */
+    expect(opened.brackets).toStrictEqual([
+      {
+        purpose: 'tree',
+        closure: ['tau.json', 'main.ts'],
+        manifest: new Uint8Array(await opened.tree.readFile('tau.json')),
+      },
+    ]);
+    expect(opened.outcomes).toEqual([{ failed: false }]);
+    /* A changeset's bytes at a time: the deferred files come in more than one bounded read. */
+    const deferredReads = events.slice(bracket, events.indexOf('release')).filter((event) => event.startsWith('read '));
+    expect(deferredReads.length).toBeGreaterThan(1);
+    for (const read of deferredReads) {
+      expect(read.slice(5).split(',').length).toBeLessThanOrEqual(maximumChangesetEntries);
+    }
+    /* Every other file landed as the revision holds it, the pointer as its placeholder. */
+    const others = opened.remoteTree.entries().filter((entry) => entry.path !== 'tau.json');
+    const landed = await Promise.all(others.map(async ({ path }) => new Uint8Array(await opened.tree.readFile(path))));
+    expect(landed).toEqual(others.map(({ content }) => content));
+    expect(await opened.port.readRef('main')).toBe(opened.remote);
+  }, 30_000);
+
+  it('should keep a file the checkout already holds as the revision does, by its blob id and unread', async () => {
+    const usda = remoteFiles.find(([path]) => path === 'model/aircraft.usda')![1] as string;
+    const opened = await opening({ 'model/aircraft.usda': usda });
+    await run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' });
+    const written = opened.events.slice(0, opened.events.indexOf('release'));
+    /* No whole-tree read: the checkout's own bytes are the blob the listing names. */
+    expect(written).not.toContain('read *');
+    const bracket = written.indexOf('bracket');
+    /* One read of the model, the work check's; the write never asks the store for it again. */
+    expect(
+      written.filter((event) => event.startsWith('read ') && event.slice(5).split(',').includes('model/aircraft.usda')),
+    ).toHaveLength(1);
+    /* The work check reads the checkout's own paths before the write; the write itself never reads the model. */
+    expect(
+      written.slice(bracket).some((event) => event.startsWith('read ') && event.includes('model/aircraft.usda')),
+    ).toBe(false);
+    expect(opened.events).not.toContain('write model/aircraft.usda');
+    expect(await opened.tree.readFile('model/aircraft.usda', 'utf8')).toBe(usda);
+    expect(await opened.port.readRef('main')).toBe(opened.remote);
+  }, 30_000);
+
+  it('should fail the write and take back what it landed when a deferred read fails', async () => {
+    const failing = sources.at(-1)![0];
+    const opened = await opening({}, (paths) => paths.includes(failing));
+    await expect(run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toThrow(
+      'the store could not read that pack',
+    );
+    /* The closure and the first deferred batch had landed: the rollback took them back, leaving the checkout whole. */
+    expect(opened.events).toContain('write tau.json');
+    expect(opened.events).toContain(`write ${sources[0]![0]}`);
+    /* The write and its rollback each released whole: the checkout was never left torn. */
+    expect(opened.outcomes.length).toBeGreaterThan(0);
+    expect(opened.outcomes).not.toContainEqual({ failed: true });
+    const left = await Promise.all(remoteFiles.map(async ([path]) => opened.tree.exists(path)));
+    expect(left.filter(Boolean)).toEqual([]);
+    expect(await opened.port.readRef('main')).toBeUndefined();
+  }, 30_000);
+
+  it('should keep a same-size edit someone made to a landed file when the store cannot be read to roll back (I5)', async () => {
+    const [edited, original] = sources[0]!;
+    const foreign = original.replace('export', 'EXPORT');
+    const failing = sources.at(-1)![0];
+    const checkoutOf: { tree?: NodeFsProvider } = {};
+    const opened = await opening(
+      {},
+      (paths) => paths.includes(failing),
+      async (written) => {
+        /* An editor's save between two changesets, which no fence holds back. */
+        if (written.includes(edited)) {
+          await checkoutOf.tree!.writeFile(edited, foreign);
+        }
+      },
+    );
+    checkoutOf.tree = opened.tree;
+    await expect(run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toThrow(
+      'the store could not read that pack',
+    );
+    expect(foreign).toHaveLength(original.length);
+    expect(await opened.tree.readFile(edited, 'utf8')).toBe(foreign);
+    /* Everything the write itself landed went back. */
+    expect(await opened.tree.exists(sources[1]![0])).toBe(false);
+    expect(await opened.tree.exists('tau.json')).toBe(false);
+  }, 30_000);
+
+  it('should read a tree that holds a symbolic link or a submodule whole, as before', async () => {
+    const reads: string[] = [];
+    const port: Pick<RevisionPort, 'diff' | 'listTree' | 'readTree'> = {
+      listTree: async () => [{ path: 'main.ts', oid: 'a'.repeat(40), mode: '100644', size: 2048 }],
+      diff: async () => [
+        { path: 'link', kind: 'added' },
+        { path: 'main.ts', kind: 'added' },
+        { path: 'vendor/lib', kind: 'added' },
+      ],
+      readTree: async (_id, readOptions) => {
+        reads.push(readOptions?.paths?.join(',') ?? '*');
+        return new ImmutableRevisionTree([]);
+      },
+    };
+    await expect(readDeferredRevisionTree(port, revisionId('b'.repeat(40)))).resolves.toBeUndefined();
+    expect(reads).toEqual([]);
+  });
+});
+
+describe('a deferred tree write (STO-25)', () => {
+  const encoder = new TextEncoder();
+  const manifest = serializeProjectManifest({
+    $schema: projectManifestSchemaUrl,
+    name: 'Deferred',
+    description: '',
+    tags: [],
+    assets: { main: { entryPath: 'main.ts' } },
+  });
+  /* More files than one changeset takes. */
+  const files = new Map(
+    Array.from({ length: maximumChangesetEntries + 44 }, (_, index): [string, Uint8Array<ArrayBuffer>] => [
+      `src/file-${String(index).padStart(4, '0')}.ts`,
+      encoder.encode(`export const value = ${String(index).padStart(1100, '0')};\n`),
+    ]),
+  );
+
+  /**
+   * A deferred tree over {@link files}, its manifest held.
+   *
+   * @param options - What a read does, given its paths and its call's number.
+   * @returns The tree and the reads it answered.
+   */
+  const deferredOf = (
+    options: Readonly<{
+      onRead?: (paths: readonly string[], call: number) => void;
+      answer?: (path: string, content: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+    }> = {},
+  ): Readonly<{ tree: DeferredRevisionTree; reads: string[][] }> => {
+    const reads: string[][] = [];
+    return {
+      reads,
+      tree: {
+        held: new ImmutableRevisionTree([
+          ['tau.json', manifest],
+          ['main.ts', 'export const main = 1;\n'],
+        ]),
+        deferred: new Map(
+          [...files].map(([path, content]) => [
+            path,
+            { mode: '100644', size: content.byteLength, oid: blobOid(new Uint8Array(content), 'sha1') },
+          ]),
+        ),
+        read: async (paths) => {
+          reads.push([...paths]);
+          options.onRead?.(paths, reads.length);
+          return new Map(
+            paths.map((path) => [path, options.answer?.(path, files.get(path)!) ?? new Uint8Array(files.get(path)!)]),
+          );
+        },
+      },
+    };
+  };
+
+  const present = async (tree: NodeFsProvider, paths: Iterable<string>): Promise<string[]> => {
+    const held = await Promise.all([...paths].map(async (path) => ((await tree.exists(path)) ? path : undefined)));
+    return held.filter((path) => path !== undefined);
+  };
+
+  it('should stop between changesets on abort and take back what landed', async () => {
+    const context = await project({});
+    const controller = new AbortController();
+    const { tree, reads } = deferredOf({
+      onRead: (_paths, call) => {
+        if (call === 2) {
+          controller.abort(new Error('closed'));
+        }
+      },
+    });
+    await expect(
+      materializer(context.checkout)(liveCheckout, async () => tree, { signal: controller.signal }),
+    ).rejects.toThrow('closed');
+    expect(reads.length).toBeGreaterThan(1);
+    expect(await present(context.tree, ['tau.json', 'main.ts', ...files.keys()])).toEqual([]);
+  });
+
+  it('should fail and take back what landed when the store answers a file at another size', async () => {
+    const context = await project({});
+    const short = [...files.keys()].at(-1)!;
+    const { tree } = deferredOf({
+      answer: (path, content) => (path === short ? content.slice(1) : new Uint8Array(content)),
+    });
+    await expect(materializer(context.checkout)(liveCheckout, async () => tree)).rejects.toThrow(
+      `The store could not read ${short} as its tree lists it.`,
+    );
+    expect(await present(context.tree, ['tau.json', 'main.ts', ...files.keys()])).toEqual([]);
+  });
+
+  it('should replace a deferred file the checkout holds at another size, or at the same size with other bytes', async () => {
+    const [longer, shorter] = [...files.keys()];
+    const sameSize = [...files.keys()][2]!;
+    const sameSizeOther = new TextDecoder().decode(files.get(sameSize)).replace('export', 'EXPORT');
+    const context = await project({
+      [longer!]: 'old\n',
+      [shorter!]: `${'x'.repeat(4000)}\n`,
+      [sameSize]: sameSizeOther,
+    });
+    const { tree, reads } = deferredOf();
+    await materializer(context.checkout)(liveCheckout, async () => tree);
+    const landed = await Promise.all(
+      [longer!, shorter!, sameSize].map(async (path) => new Uint8Array(await context.tree.readFile(path))),
+    );
+    expect(landed).toEqual([longer!, shorter!, sameSize].map((path) => files.get(path)));
+    expect(reads.flat()).toEqual(expect.arrayContaining([longer, shorter, sameSize]));
+  });
+
+  it('should repair a torn deferred write by blob id, keeping a same-size edit made since', async () => {
+    let refusing = false;
+    let unreadable = false;
+    const context = await project({}, { ...trustedStats, failMutation: () => refusing });
+    const failing = [...files.keys()].at(-1)!;
+    const { tree } = deferredOf({
+      onRead: (paths) => {
+        if (unreadable || paths.includes(failing)) {
+          /* The store fails the write and stays unreadable, and the checkout refuses its rollback. */
+          refusing = true;
+          unreadable = true;
+          throw new Error('the store could not read that pack');
+        }
+      },
+    });
+    const effects = applyEffects(context.checkout);
+    await expect(effects.materializeTree(liveCheckout, async () => tree)).rejects.toThrow(
+      'could not be restored completely',
+    );
+    refusing = false;
+    const [edited] = [...files.keys()];
+    const foreign = new TextDecoder().decode(files.get(edited!)).replace('export', 'EXPORT');
+    await context.tree.writeFile(edited!, foreign);
+    await expect(effects.repairTornCheckout(liveCheckout)).resolves.toBe(true);
+    expect(await context.tree.readFile(edited!, 'utf8')).toBe(foreign);
+    expect(await present(context.tree, ['tau.json', 'main.ts', ...[...files.keys()].slice(1)])).toEqual([]);
+  });
+});
+
+describe('hashing a deferred file without holding the thread (STO-25)', () => {
+  const sample = (length: number): Uint8Array<ArrayBuffer> =>
+    new Uint8Array(new ArrayBuffer(length)).map((_, index) => index % 251);
+  const gitBlobId = (algorithm: 'sha1' | 'sha256', content: Uint8Array<ArrayBuffer>): string =>
+    createHash(algorithm)
+      .update(`blob ${String(content.length)}\0`)
+      .update(content)
+      .digest('hex');
+
+  it('should hash a large file with the JS hasher in runs, letting a queued read in, to git’s own id', async () => {
+    const content = sample(24 * 1024 * 1024 + 7);
+    let served = false;
+    /* A read queued behind the hash: it runs at one of the hash's turns, not after the whole file. */
+    setTimeout(() => {
+      served = true;
+    }, 0);
+    const turns = hashingTurns.count;
+    const hashing = createBlobHashing(false).blobOid(content, 'sha1');
+    expect(served).toBe(false);
+    const oid = await hashing;
+    expect(served).toBe(true);
+    expect(hashingTurns.count).toBeGreaterThan(turns);
+    expect(oid).toBe(gitBlobId('sha1', content));
+    const other = sample(70_001);
+    await expect(createBlobHashing(false).blobOid(other, 'sha256')).resolves.toBe(gitBlobId('sha256', other));
+  });
+
+  it('should hash many small files on one budget, not a turn each', async () => {
+    const hashing = createBlobHashing(false);
+    const small = Array.from({ length: 6000 }, (_, index) => {
+      const content = sample(2048);
+      content[0] = index % 256;
+      content[1] = Math.floor(index / 256);
+      return content;
+    });
+    const turns = hashingTurns.count;
+    const oids = [];
+    for (const content of small) {
+      // oxlint-disable-next-line no-await-in-loop -- the batch is paced as the write paces it.
+      oids.push(await hashing.blobOid(content, 'sha1'));
+    }
+    expect(hashingTurns.count - turns).toBeLessThan(small.length / 20);
+    expect(oids[5999]).toBe(gitBlobId('sha1', small[5999]!));
+    /* A memoised id costs no turn at all. */
+    const again = hashingTurns.count;
+    await Promise.all(small.map(async (content) => hashing.blobOid(content, 'sha1')));
+    expect(hashingTurns.count).toBe(again);
+  });
+
+  it('should take WebCrypto’s digest for a large file, memoised for the next cut, and the JS hasher if it refuses', async () => {
+    const content = sample(2 * 1024 * 1024);
+    const digest = vi.fn(async (algorithm: AlgorithmIdentifier, data: BufferSource) =>
+      crypto.subtle.digest(algorithm, data),
+    );
+    const oid = await createBlobHashing({ digest }).blobOid(content, 'sha1');
+    expect(oid).toBe(gitBlobId('sha1', content));
+    expect(digest).toHaveBeenCalledTimes(1);
+    /* The same bytes again, or a cut asking synchronously, hash nothing. */
+    await expect(createBlobHashing({ digest }).blobOid(content, 'sha1')).resolves.toBe(oid);
+    expect(blobOid(content, 'sha1')).toBe(oid);
+    expect(digest).toHaveBeenCalledTimes(1);
+    /* A digest WebCrypto refuses is answered all the same: a rollback never waits on it. */
+    const refused = sample(1024 * 1024 + 3);
+    const refusing = vi.fn(async (): Promise<ArrayBuffer> => {
+      throw new DOMException('refused', 'OperationError');
+    });
+    await expect(createBlobHashing({ digest: refusing }).blobOid(refused, 'sha256')).resolves.toBe(
+      gitBlobId('sha256', refused),
+    );
+    expect(refusing).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a store tree with a symbolic link or a submodule (STO-25)', () => {
+  it('should be read whole, the listing’s files counted against every entry the store holds', async () => {
+    const context = await project({});
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const gitdir = join(roots.at(-1)!, '.git');
+    const git = { fs: { promises: fs }, gitdir };
+    const encoder = new TextEncoder();
+    const main = encoder.encode('export const main = 1;\n'.repeat(100));
+    const mainOid = await writeBlob({ ...git, blob: main });
+    const linkOid = await writeBlob({ ...git, blob: encoder.encode('main.ts') });
+    const file = { mode: '100644', path: 'main.ts', oid: mainOid, type: 'blob' } as const;
+    const signature = { name: 'Tau', email: 'noreply@tau.new', timestamp: 1_790_000_000, timezoneOffset: 0 };
+    const commitOf = async (tree: string): Promise<string> =>
+      writeCommit({ ...git, commit: { message: 'tree\n', tree, parent: [], author: signature, committer: signature } });
+    const plain = await commitOf(await writeTree({ ...git, tree: [file] }));
+    const mixed = await commitOf(
+      await writeTree({
+        ...git,
+        tree: [
+          file,
+          { mode: '120000', path: 'link', oid: linkOid, type: 'blob' },
+          { mode: '160000', path: 'vendor', oid: 'c'.repeat(40), type: 'commit' },
+        ],
+      }),
+    );
+    /* Sizes as a cold open's head listing gives them; the store's own diff names every entry. */
+    const port: RevisionPort = {
+      ...context.port,
+      listTree: async (id) => {
+        const listing = await context.port.listTree!(id);
+        return listing?.map((entry) => ({ ...entry, size: main.byteLength }));
+      },
+    };
+    const listed = await port.listTree!(revisionId(mixed));
+    expect(listed?.map(({ path }) => path)).toEqual(['main.ts']);
+    await expect(readDeferredRevisionTree(port, revisionId(plain))).resolves.toBeDefined();
+    await expect(readDeferredRevisionTree(port, revisionId(mixed))).resolves.toBeUndefined();
   });
 });

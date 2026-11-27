@@ -12,7 +12,14 @@
  */
 
 import { describe, expectTypeOf, it } from 'vitest';
-import type { PathPolicy, WorkspaceFileService, WorkspaceMutationContext, WorkspaceScope } from '@taucad/filesystem';
+import type {
+  PathPolicy,
+  ProjectRootConfigurationResult,
+  RootStatus,
+  WorkspaceFileService,
+  WorkspaceMutationContext,
+  WorkspaceScope,
+} from '@taucad/filesystem';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { bindMutationContextForPort, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
 import type {
@@ -178,6 +185,16 @@ describe('bridge proxy surfaces — rooted / workspace split', () => {
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('pollExternalChanges');
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('dispose');
     expectTypeOf<FileSystemBridgeWorkspaceProxy>().toHaveProperty('listen');
+  });
+
+  it('should return the per-root configuration result from configureProjectRoots (T-R1.1)', () => {
+    expectTypeOf<ReturnType<FileSystemBridgeWorkspaceProxy['configureProjectRoots']>>().toEqualTypeOf<
+      Promise<ProjectRootConfigurationResult>
+    >();
+    expectTypeOf<ReturnType<FileSystemBridgeWorkspaceProxy['getRootStatuses']>>().toEqualTypeOf<
+      Promise<RootStatus[]>
+    >();
+    expectTypeOf<ReturnType<FileSystemBridgeWorkspaceProxy['recheckRoots']>>().toEqualTypeOf<Promise<RootStatus[]>>();
   });
 
   it('serves both halves on a rooted proxy', () => {

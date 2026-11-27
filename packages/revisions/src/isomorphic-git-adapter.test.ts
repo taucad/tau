@@ -3,7 +3,9 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 
+import { createInlineCompute } from '#compute-worker/compute-worker.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import { digestHex } from '#object-hash.js';
 import type { LfsFetchReport } from '#isomorphic-git-adapter.js';
 import { lfsObjectPath, lfsPointerFor } from '#lfs.js';
 import {
@@ -256,9 +258,9 @@ describe('isomorphic-git remote refusals (N1)', () => {
     {
       label: 'a free-tier push',
       status: 403,
-      body: '{"code":"GIT_SYNC_NOT_ENTITLED","message":"Syncing files to Tau Cloud is a paid plan feature."}',
+      body: '{"code":"GIT_SYNC_NOT_ENTITLED","message":"Syncing files to the cloud is a paid plan feature."}',
       code: 'REMOTE_NOT_ENTITLED',
-      message: 'Syncing files to Tau Cloud is a paid plan feature.',
+      message: 'Syncing files to the cloud is a paid plan feature.',
     },
     {
       label: 'an expired session',
@@ -277,16 +279,16 @@ describe('isomorphic-git remote refusals (N1)', () => {
     {
       label: 'a full store',
       status: 413,
-      body: '{"code":"GIT_QUOTA_EXCEEDED","message":"This project is over its storage plan."}',
+      body: '{"code":"GIT_QUOTA_EXCEEDED","message":"This project doesn’t fit in its backup."}',
       code: 'REMOTE_QUOTA_EXCEEDED',
-      message: 'This project is over its storage plan.',
+      message: 'This project doesn’t fit in its backup.',
     },
     {
       label: 'a busy server',
       status: 503,
       body: '',
       code: 'REMOTE_UNAVAILABLE',
-      message: 'This remote is busy; this project will try again.',
+      message: 'Your backup is busy. Tau will try again.',
     },
   ])('names $label as itself rather than an unreachable remote', async ({ status, body, code, message }) => {
     const { http } = refusingClient(status, body);
@@ -918,5 +920,84 @@ describe('reading a tree with large objects', () => {
     const read = port.readTree(head, { signal: controller.signal });
     controller.abort(new Error('Closing stopped the large-object fill.'));
     await expect(read).rejects.toThrow();
+  });
+});
+
+describe('reading a whole tree (SP5)', () => {
+  /* A tree wider than the read pool, in nested folders, with one blob shared by two paths. */
+  const wideTree = (): ImmutableRevisionTree =>
+    new ImmutableRevisionTree([
+      ...Array.from(
+        { length: 120 },
+        (_, at) =>
+          [
+            `level-${String(at % 5)}/sub-${String(at % 3)}/part-${String(at)}.scad`,
+            encoder.encode(`cube(${String(at)});\n`),
+          ] as const,
+      ),
+      ['copy-a.scad', encoder.encode('shared();\n')],
+      ['copy-b.scad', encoder.encode('shared();\n')],
+    ]);
+
+  const wideStore = async (onInflate?: (inFlight: number) => void) => {
+    const filesystem = new MemoryProvider();
+    providers.push(filesystem);
+    const inline = createInlineCompute();
+    let inFlight = 0;
+    const port = createIsomorphicGitRevisionPort({
+      filesystem,
+      compute: {
+        ...inline,
+        inflate: async (compressed) => {
+          inFlight += 1;
+          onInflate?.(inFlight);
+          try {
+            await new Promise((resolve) => {
+              setTimeout(resolve, 1);
+            });
+            return await inline.inflate(compressed);
+          } finally {
+            inFlight -= 1;
+          }
+        },
+      },
+    });
+    await port.init({ author });
+    const receipt = await port.writeRevision({
+      parents: [],
+      tree: wideTree(),
+      provenance,
+      summary: { generated: 'Wide' },
+    });
+    return { port, filesystem, head: revisionId(receipt.commitId) };
+  };
+
+  it('reads its blobs side by side, a bounded number at once, in tree order and byte for byte', async () => {
+    let most = 0;
+    const { port, head } = await wideStore((inFlight) => {
+      most = Math.max(most, inFlight);
+    });
+
+    const read = await port.readTree(head, { largeObjects: 'local' });
+
+    const wanted = wideTree();
+    expect(read?.entries().map(({ path }) => path)).toStrictEqual(wanted.entries().map(({ path }) => path));
+    for (const entry of wanted.entries()) {
+      expect(read?.get(entry.path)).toStrictEqual(entry.content);
+    }
+    expect(most).toBeGreaterThan(1);
+    expect(most).toBeLessThanOrEqual(32);
+  });
+
+  it('fails the whole read when a blob is missing, and never answers part of the tree', async () => {
+    const { port, filesystem, head } = await wideStore();
+    const data = encoder.encode('cube(7);\n');
+    const missing = digestHex(
+      'sha1',
+      new Uint8Array([...encoder.encode(`blob ${String(data.byteLength)}\0`), ...data]),
+    );
+    await filesystem.unlink(`.git/objects/${missing.slice(0, 2)}/${missing.slice(2)}`);
+
+    await expect(port.readTree(head, { largeObjects: 'local' })).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
   });
 });

@@ -13,8 +13,8 @@ import {
 import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
-import { CodeBlockContent, Pre } from '#components/code/code-block.js';
-import { FileLink } from '#components/files/file-link.js';
+import { CodeBlockContent, Pre } from '@taucad/editor-ui/components/code/code-block';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
 
 type ShellInvocation = ToolInvocation<typeof toolName.shell>;
 type ShellInputValue = NonNullable<ShellInvocation['input']>;
@@ -34,6 +34,14 @@ const notStartedTitles: Readonly<Record<ShellNotStartedCode, string>> = {
   'access-unsupported': 'Access refused',
   'approval-unavailable': 'Approval unavailable',
   'launch-failed': 'Did not start',
+};
+
+/** The closed row's verb: it never opens itself, so the verb is where a command that did not succeed says so. */
+const closedVerbOf = (output: ShellOutput, succeeded: boolean): string => {
+  if (output.status === 'not-started') {
+    return notStartedTitles[output.code];
+  }
+  return succeeded ? 'Ran' : 'Attempted';
 };
 
 /** "exit 0", "timed out after 30 s": how the command ended, in the person's words. */
@@ -160,7 +168,7 @@ function ShellBody({
 
 /**
  * The transcript's record of one `shell` call: the command as written, where it ran, how it ended, any extra access
- * with the agent's reason labelled as its words, and the bounded output. Folded when it exited 0.
+ * with the agent's reason labelled as its words, and the bounded output. Always folded until the reader opens it.
  *
  * @param props - The tool part this message carries.
  * @param props.part - The `shell` invocation, in whatever state it is in.
@@ -198,11 +206,11 @@ export function ChatMessageToolShell({ part }: { readonly part: ShellInvocation 
       }
       const succeeded = output.status === 'completed' && output.exitCode === 0;
       return (
-        <ChatToolCard variant='minimal' status={succeeded ? 'ready' : 'error'} isDefaultOpen={!succeeded}>
+        <ChatToolCard variant='minimal' status={succeeded ? 'ready' : 'error'}>
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={SquareTerminal} />
             <ChatToolCardTitle>
-              <ChatToolLabel verb={output.status === 'not-started' ? notStartedTitles[output.code] : 'Ran'}>
+              <ChatToolLabel verb={closedVerbOf(output, succeeded)}>
                 <ChatToolDescription className='font-mono'>{commandLine(part.input?.command)}</ChatToolDescription>
               </ChatToolLabel>
             </ChatToolCardTitle>

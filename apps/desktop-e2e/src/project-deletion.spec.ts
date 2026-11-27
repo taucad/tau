@@ -155,14 +155,14 @@ const openDeletion = async (
   if (input === 'keyboard') {
     await actions.focus();
     await page.keyboard.press('Enter');
-    await page.getByRole('menuitem', { name: 'Delete from Tau Cloud…', exact: true }).focus();
+    await page.getByRole('menuitem', { name: 'Delete cloud copy…', exact: true }).focus();
     await page.keyboard.press('Enter');
   } else if (input === 'touch') {
     await actions.tap();
-    await page.getByRole('menuitem', { name: 'Delete from Tau Cloud…', exact: true }).tap();
+    await page.getByRole('menuitem', { name: 'Delete cloud copy…', exact: true }).tap();
   } else {
     await actions.click();
-    await page.getByRole('menuitem', { name: 'Delete from Tau Cloud…', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Delete cloud copy…', exact: true }).click();
   }
   await page.getByRole('alertdialog').waitFor();
   expect(await page.getByRole('alertdialog').textContent()).toContain('30 days');
@@ -396,7 +396,7 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
             response.url() === `${desktopE2EApiUrl}/v1/projects/${id}/deletion` &&
             response.request().method() === 'GET',
         );
-        const confirm = page.getByRole('button', { name: 'Delete from Tau Cloud', exact: true });
+        const confirm = page.getByRole('button', { name: 'Delete cloud copy', exact: true });
         await (view === 'Table' ? confirm.tap() : confirm.click());
         const recoveredResponse = await recovered;
         expect(recoveredResponse.status()).toBe(200);
@@ -544,12 +544,12 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
       expect(browserHeadBefore.trim()).toBe(await git(source, ['rev-parse', 'HEAD']));
       expect(JSON.parse(browserBefore.identity)).toMatchObject({ projectId: id });
       await page.getByRole('button', { name: `Actions for ${name}`, exact: true }).click();
-      expect(await page.getByRole('menuitem', { name: 'Delete from Tau Cloud…', exact: true }).count()).toBe(0);
+      expect(await page.getByRole('menuitem', { name: 'Delete cloud copy…', exact: true }).count()).toBe(0);
       await page.keyboard.press('Escape');
       // The collaborator misses the deletion and must retain its bytes on reconnect.
       await context.setOffline(true);
       await openDeletion(session.page, name);
-      await session.page.getByRole('button', { name: 'Delete from Tau Cloud', exact: true }).click();
+      await session.page.getByRole('button', { name: 'Delete cloud copy', exact: true }).click();
       await expect.poll(async () => state(id), { timeout: 30_000 }).toBe('deleted');
       await session.page.getByRole('alertdialog').waitFor({ state: 'detached' });
       expect(await nativeSnapshot(root)).toEqual(nativeBefore);
@@ -713,7 +713,7 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
         (response) =>
           response.url() === `${desktopE2EApiUrl}/v1/projects/${id}` && response.request().method() === 'DELETE',
       );
-      await session.page.getByRole('button', { name: 'Delete from Tau Cloud', exact: true }).click();
+      await session.page.getByRole('button', { name: 'Delete cloud copy', exact: true }).click();
       const response = await deletionResponse;
       expect([200, 202], await response.text()).toContain(response.status());
       await expect.poll(async () => state(id), { timeout: 30_000 }).toBe('deleted');

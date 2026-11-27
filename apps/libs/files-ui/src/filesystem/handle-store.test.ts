@@ -1,10 +1,18 @@
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for tests
 import 'fake-indexeddb/auto';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBDatabase as FakeIDBDatabase, IDBFactory, IDBObjectStore as FakeIDBObjectStore } from 'fake-indexeddb';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { workspaceMarkerPath, workspaceMarkerSchemaUrl } from '@taucad/types';
 import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 import type * as HandleStore from '#filesystem/handle-store.js';
+
+/** The build target the store resolves at module scope; a case sets it before {@link loadStore}. */
+const buildTarget = vi.hoisted(() => ({ desktop: false }));
+vi.mock('@taucad/ui-core/lib/build-target', () => ({
+  get isDesktopTarget() {
+    return buildTarget.desktop;
+  },
+}));
 
 // ===========================================================================
 // In-memory File System Access handles
@@ -357,9 +365,15 @@ beforeEach(() => {
   // natively, so identity pass-through is the faithful stand-in.
   vi.stubGlobal('structuredClone', (value: unknown) => value);
   stubStorage(undefined);
+  /* `loadStore` replaces the factory, but a case that imports the store itself would read the last case's database. */
+  globalThis.indexedDB = new IDBFactory();
 });
 
 afterEach(() => {
+  /* Home's engine mirror (WP9) lives in `localStorage`, which outlives each case's fresh database. */
+  globalThis.localStorage.clear();
+  buildTarget.desktop = false;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   Reflect.deleteProperty(globalThis.navigator, 'locks');
@@ -741,6 +755,38 @@ describe('Home storage backend', () => {
     await expect(getHomeStorageBackend()).rejects.toThrow('blocked by another Tau tab');
     older.close();
   });
+
+  /* T-B5.7 (B5): an open queued behind the blocked upgrade must not wait out its deadline and read as a timeout, or
+   * the panel shows "couldn't open" instead of asking for the other window to close (D3). */
+  it('fails every later open as blocked while another tab blocks the upgrade', async () => {
+    globalThis.indexedDB = new IDBFactory();
+    const older = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(`${appMetaConfig.databasePrefix}fs-handles`, 3);
+      request.addEventListener('upgradeneeded', () => {
+        request.result.createObjectStore('meta', { keyPath: 'key' });
+      });
+      request.addEventListener('success', () => {
+        resolve(request.result);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('older open failed'));
+      });
+    });
+    globalThis.localStorage.setItem('tau:home-backend', 'opfs');
+    stubHomeProbe(false);
+    vi.resetModules();
+    const { getHomeStorageBackend, readProjectRootConfigs } = await import('#filesystem/handle-store.js');
+
+    try {
+      await expect(getHomeStorageBackend()).resolves.toBe('opfs');
+      const read = await readProjectRootConfigs();
+
+      expect(read.degraded).toEqual({ input: 'records', errorName: 'StorageUpgradeBlockedError' });
+    } finally {
+      older.close();
+      globalThis.localStorage.clear();
+    }
+  }, 30_000);
 
   it('closes its connection so a newer version in another tab can upgrade', async () => {
     stubHomeProbe(false);
@@ -1522,5 +1568,949 @@ describe('project-root configuration broadcasts', () => {
 
     expect(listener).toHaveBeenCalledTimes(3);
     channel.close();
+  });
+});
+
+// ===========================================================================
+// Desktop resilient startup (WP2): open deadline and a degraded Home-only configuration
+// ===========================================================================
+
+/** An `indexedDB` whose open requests never fire an event, as a wedged profile can leave them (B31). */
+const stubSilentIndexedDb = (): ReturnType<typeof vi.fn> => {
+  const open = vi.fn(() => new EventTarget());
+  vi.stubGlobal('indexedDB', { open });
+  return open;
+};
+
+/** An `indexedDB` whose open fails with a named DOM error, as an older build opening a newer profile does (B5). */
+const stubFailingIndexedDb = (name: string): void => {
+  vi.stubGlobal('indexedDB', {
+    open: () => {
+      const request = new EventTarget() as EventTarget & { error: DOMException };
+      request.error = new DOMException('The requested version is less than the existing version.', name);
+      queueMicrotask(() => {
+        request.dispatchEvent(new Event('error'));
+      });
+      return request;
+    },
+  });
+};
+
+const desktopHomeRoot = '/Users/tester/Library/Application Support/Tau/home';
+
+const installDesktop = (list: () => Promise<string[]>): void => {
+  buildTarget.desktop = true;
+  vi.stubGlobal('tau', {
+    nodeFs: { homeRoot: desktopHomeRoot, connect: async () => new MessageChannel().port1 },
+    dialog: { selectDirectory: vi.fn() },
+    directories: { list, onChange: () => () => undefined },
+  });
+};
+
+describe('database open deadline', () => {
+  it('should reject a handle database open that fires no event at 5 000 ms, and open again on the next read', async () => {
+    vi.resetModules();
+    const store = await import('#filesystem/handle-store.js');
+    vi.useFakeTimers();
+    const open = stubSilentIndexedDb();
+
+    const first = store.getAllProjectFileSystemConfigs();
+    const settled = expect(first).rejects.toMatchObject({ name: 'DatabaseOpenTimeoutError' });
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(open).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await settled;
+
+    const second = store.getAllProjectFileSystemConfigs();
+    const secondSettled = expect(second).rejects.toMatchObject({ name: 'DatabaseOpenTimeoutError' });
+    expect(open).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(5000);
+    await secondSettled;
+  });
+});
+
+describe('readProjectRootConfigs', () => {
+  it('should start Home alone, marked degraded, when the records cannot be read on the desktop', async () => {
+    installDesktop(async () => ['/Users/tester/Projects/Workshop']);
+    vi.resetModules();
+    const { readProjectRootConfigs } = await import('#filesystem/handle-store.js');
+    stubFailingIndexedDb('VersionError');
+
+    const read = await readProjectRootConfigs();
+
+    expect(read.configuration).toEqual({ projects: [], roots: [{ backend: 'node', path: desktopHomeRoot }] });
+    expect(read.degraded).toEqual({ input: 'records', errorName: 'VersionError' });
+  });
+
+  it('should start Home alone, marked degraded, when the grant list cannot be read', async () => {
+    installDesktop(async () => {
+      throw new Error('The services utility is not answering');
+    });
+    vi.resetModules();
+    const { readProjectRootConfigs } = await import('#filesystem/handle-store.js');
+
+    const read = await readProjectRootConfigs();
+
+    expect(read.configuration.roots).toEqual([{ backend: 'node', path: desktopHomeRoot }]);
+    expect(read.degraded).toEqual({ input: 'grants', errorName: 'Error' });
+  });
+
+  it('should return the full configuration, not degraded, when every input reads', async () => {
+    stubStorage({});
+    const { readProjectRootConfigs, getProjectRootConfigs } = await loadStore();
+
+    const read = await readProjectRootConfigs();
+
+    expect(read.degraded).toBeUndefined();
+    expect(read.configuration).toEqual(await getProjectRootConfigs());
+  });
+});
+
+// ===========================================================================
+// Desktop resilient startup WP3 — Remove from Tau, creation location, overlap
+// ===========================================================================
+
+const projectId = (index: number): string => `proj_${String(index).padStart(21, '0')}`;
+
+describe('removeWorkspace', () => {
+  it('should delete the row, its handle and its bindings in one transaction without touching files', async () => {
+    const { applyProjectFileSystemConfigChanges, createWorkspace, getAllProjectFileSystemConfigs, removeWorkspace } =
+      await loadStore();
+    const handle = makeHandle('Workshop');
+    const removeEntry = vi.fn();
+    const getFileHandle = vi.spyOn(handle, 'getFileHandle');
+    const getDirectoryHandle = vi.spyOn(handle, 'getDirectoryHandle');
+    Object.defineProperty(handle, 'removeEntry', { value: removeEntry });
+    const removed = await createWorkspace(handle);
+    const kept = await createWorkspace(makeHandle('Studio'));
+    const keptBinding = {
+      projectId: projectId(3),
+      backend: 'webaccess',
+      workspaceId: kept.workspaceId,
+      providerBasePath: 'kept',
+    } as const;
+    await applyProjectFileSystemConfigChanges({
+      upserts: [
+        { projectId: projectId(1), backend: 'webaccess', workspaceId: removed.workspaceId, providerBasePath: 'one' },
+        { projectId: projectId(2), backend: 'webaccess', workspaceId: removed.workspaceId, providerBasePath: 'two' },
+        keptBinding,
+      ],
+      deletes: [],
+    });
+    const keptRow = await rawReadWorkspace(kept.workspaceId);
+    getFileHandle.mockClear();
+    getDirectoryHandle.mockClear();
+    const transaction = vi.spyOn(FakeIDBDatabase.prototype, 'transaction');
+
+    await expect(removeWorkspace(removed.workspaceId)).resolves.toBe(true);
+
+    const writes = transaction.mock.calls.filter(([, mode]) => mode === 'readwrite');
+    expect(writes).toHaveLength(1);
+    const scope = writes[0]![0];
+    const stores = typeof scope === 'string' ? [scope] : [...scope];
+    expect(stores.toSorted((left, right) => left.localeCompare(right))).toEqual(['configs', 'handles', 'workspaces']);
+    transaction.mockRestore();
+    expect(await rawReadWorkspace(removed.workspaceId)).toBeUndefined();
+    expect(await rawReadHandle(removed.workspaceId)).toBeUndefined();
+    expect(await getAllProjectFileSystemConfigs()).toEqual([keptBinding]);
+    expect(await rawReadWorkspace(kept.workspaceId)).toEqual(keptRow);
+    expect(await rawReadHandle(kept.workspaceId)).toBeDefined();
+    expect(removeEntry).not.toHaveBeenCalled();
+    expect(getFileHandle).not.toHaveBeenCalled();
+    expect(getDirectoryHandle).not.toHaveBeenCalled();
+  });
+
+  it('should delete the node bindings that name the removed folder and keep the others', async () => {
+    const { createNodeWorkspace, getAllProjectFileSystemConfigs, removeWorkspace, setProjectFileSystemConfig } =
+      await loadStore();
+    const removed = await createNodeWorkspace('/Users/tester/Scratch');
+    await createNodeWorkspace('/Users/tester/Studio');
+    const kept = {
+      projectId: projectId(3),
+      backend: 'node',
+      path: '/Users/tester/Studio',
+      providerBasePath: 'kept',
+    } as const;
+    const home = { projectId: projectId(4), backend: 'node', providerBasePath: 'home-project' } as const;
+    await setProjectFileSystemConfig({
+      projectId: projectId(1),
+      backend: 'node',
+      path: '/Users/tester/Scratch',
+      providerBasePath: 'one',
+    });
+    await setProjectFileSystemConfig({
+      projectId: projectId(2),
+      backend: 'node',
+      path: '/Users/tester/Scratch',
+      providerBasePath: 'two',
+    });
+    await setProjectFileSystemConfig(kept);
+    await setProjectFileSystemConfig(home);
+
+    await expect(removeWorkspace(removed.workspaceId)).resolves.toBe(true);
+
+    expect(await rawReadWorkspace(removed.workspaceId)).toBeUndefined();
+    const remaining = await getAllProjectFileSystemConfigs();
+    expect(remaining.toSorted((left, right) => left.projectId.localeCompare(right.projectId))).toEqual([kept, home]);
+  });
+
+  it('should report an unknown workspace without writing', async () => {
+    const { removeWorkspace } = await loadStore();
+
+    await expect(removeWorkspace('wsp_unknown')).resolves.toBe(false);
+  });
+});
+
+describe('project creation location while its folder is unavailable', () => {
+  const preferenceKey = 'project-creation-location';
+
+  it('should create in Home and keep the stored folder while that folder is not found', async () => {
+    const { createNodeWorkspace, getProjectCreationLocation, setProjectCreationLocation } = await loadStore();
+    const workspace = await createNodeWorkspace('/Users/tester/Workshop');
+    await setProjectCreationLocation({ kind: 'workspace', workspaceId: workspace.workspaceId });
+
+    await expect(
+      getProjectCreationLocation({
+        webAccessSupported: true,
+        rootStatuses: [
+          { storageRootKey: 'node:/Users/tester/Workshop', backend: 'node', state: 'notFound', code: 'ENOENT' },
+        ],
+      }),
+    ).resolves.toEqual({ location: { kind: 'home' }, repaired: 'workspace-unavailable' });
+    expect(await rawReadMeta(preferenceKey)).toEqual({
+      key: preferenceKey,
+      location: { kind: 'workspace', workspaceId: workspace.workspaceId },
+    });
+
+    await expect(
+      getProjectCreationLocation({
+        webAccessSupported: true,
+        rootStatuses: [{ storageRootKey: 'node:/Users/tester/Workshop', backend: 'node', state: 'available' }],
+      }),
+    ).resolves.toEqual({ location: { kind: 'workspace', workspaceId: workspace.workspaceId }, repaired: undefined });
+  });
+});
+
+describe('node workspace overlap', () => {
+  const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
+
+  beforeEach(() => {
+    vi.stubGlobal('tau', {
+      nodeFs: { homeRoot, connect: async () => new MessageChannel().port1 },
+      directories: { list: async () => [], onChange: () => () => undefined },
+    });
+  });
+
+  it.each([
+    ['equal to Home', homeRoot],
+    ['containing Home', '/Users/tester/Library/Application Support/Tau'],
+    ['inside Home', `${homeRoot}/Nested`],
+    ['containing another workspace', '/Users/tester'],
+    ['inside another workspace', '/Users/tester/Workshop/Parts'],
+    ['inside another workspace on Windows', String.raw`C:\Users\tester\Studio\Parts`],
+  ])('should refuse a folder %s', async (_case, path) => {
+    buildTarget.desktop = true;
+    const store = await loadStore();
+    await store.createNodeWorkspace('/Users/tester/Workshop');
+    await store.createNodeWorkspace(String.raw`C:\Users\tester\Studio`);
+    const before = await store.listWorkspaces();
+
+    await expect(store.createNodeWorkspace(path)).rejects.toMatchObject({ name: 'WorkspaceOverlapError' });
+    expect(await store.listWorkspaces()).toEqual(before);
+  });
+
+  it('should still re-adopt the same folder and admit a sibling', async () => {
+    buildTarget.desktop = true;
+    const store = await loadStore();
+    const first = await store.createNodeWorkspace('/Users/tester/Workshop');
+
+    await expect(store.createNodeWorkspace('/Users/tester/Workshop/')).resolves.toMatchObject({
+      workspaceId: first.workspaceId,
+      minted: false,
+    });
+    await expect(store.createNodeWorkspace('/Users/tester/Workshop Two')).resolves.toMatchObject({ minted: true });
+  });
+});
+
+describe('relinkWorkspace (Locate)', () => {
+  const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
+  const oldPath = '/Users/tester/Workshop';
+  const newPath = '/Volumes/Archive/Workshop Moved';
+
+  type Store = typeof HandleStore;
+  type Evidence = Awaited<ReturnType<HandleStore.RelinkPorts['readEvidence']>>;
+
+  const evidence = (overrides: Partial<Evidence> = {}): Evidence => ({
+    marker: undefined,
+    projects: [],
+    subfolders: [],
+    ...overrides,
+  });
+
+  const ports = (found: Evidence) => ({
+    readEvidence: vi.fn<HandleStore.RelinkPorts['readEvidence']>(async () => found),
+    revokeGrant: vi.fn<(path: string) => Promise<void>>(async () => undefined),
+  });
+
+  /** A node workspace at {@link oldPath} with the given projects bound to it, plus Studio as another workspace. */
+  const seed = async (
+    store: Store,
+    bound: ReadonlyArray<{ readonly id: string; readonly directory: string }>,
+  ): Promise<HandleStore.Workspace> => {
+    const workspace = await store.createNodeWorkspace(oldPath);
+    await store.createNodeWorkspace('/Users/tester/Studio');
+    for (const project of bound) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Seeding rows in order.
+      await store.setProjectFileSystemConfig({
+        projectId: project.id,
+        backend: 'node',
+        path: oldPath,
+        providerBasePath: project.directory,
+      });
+    }
+    return workspace;
+  };
+
+  const nodeConfigs = async (store: Store): Promise<Array<Record<string, unknown>>> =>
+    ((await store.getAllProjectFileSystemConfigs()) as Array<Record<string, unknown>>).toSorted((left, right) =>
+      String(left['projectId']).localeCompare(String(right['projectId'])),
+    );
+
+  beforeEach(() => {
+    buildTarget.desktop = true;
+    vi.stubGlobal('tau', {
+      nodeFs: { homeRoot, connect: async () => new MessageChannel().port1 },
+      directories: { list: async () => [], onChange: () => () => undefined },
+    });
+  });
+
+  afterEach(() => {
+    buildTarget.desktop = false;
+  });
+
+  describe('evidence rules (T-R4.1)', () => {
+    it('should relink with no prompt when the folder carries a marker naming this workspace', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+      ]);
+      const found = evidence({
+        marker: {
+          $schema: workspaceMarkerSchemaUrl,
+          workspaceId: workspace.workspaceId,
+          slug: 'workshop',
+          createdAt: '2026-07-24T00:11:47.808Z',
+        },
+      });
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(found),
+      );
+
+      expect(result).toMatchObject({ status: 'relinked' });
+      expect(await rawReadWorkspace(workspace.workspaceId)).toMatchObject({ path: newPath });
+    });
+
+    it('should relink with no prompt when every bound project is found', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+      ]);
+      const found = evidence({
+        projects: [
+          { projectId: projectId(1), directory: 'gearbox' },
+          { projectId: projectId(2), directory: 'bracket' },
+        ],
+      });
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(found),
+      );
+
+      expect(result).toMatchObject({ status: 'relinked', matched: 2, unmatched: [] });
+      expect(await nodeConfigs(store)).toEqual([
+        { projectId: projectId(1), backend: 'node', path: newPath, providerBasePath: 'gearbox' },
+        { projectId: projectId(2), backend: 'node', path: newPath, providerBasePath: 'bracket' },
+      ]);
+    });
+
+    it('should ask for confirmation with the counts and write nothing when only some projects are found', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+        { id: projectId(3), directory: 'hinge' },
+      ]);
+      const before = await rawReadWorkspace(workspace.workspaceId);
+      const configsBefore = await nodeConfigs(store);
+      const found = evidence({ projects: [{ projectId: projectId(1), directory: 'gearbox' }] });
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(found),
+      );
+
+      expect(result).toEqual({ status: 'confirm', matched: 1, total: 3 });
+      expect(await rawReadWorkspace(workspace.workspaceId)).toEqual(before);
+      expect(await nodeConfigs(store)).toEqual(configsBefore);
+
+      const confirmed = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        { ...ports(found), confirmed: true },
+      );
+      expect(confirmed).toMatchObject({ status: 'relinked', matched: 1, unmatched: [projectId(2), projectId(3)] });
+      /* An unmatched project keeps its binding; it is never dropped silently. */
+      expect(await nodeConfigs(store)).toEqual([
+        { projectId: projectId(1), backend: 'node', path: newPath, providerBasePath: 'gearbox' },
+        { projectId: projectId(2), backend: 'node', path: oldPath, providerBasePath: 'bracket' },
+        { projectId: projectId(3), backend: 'node', path: oldPath, providerBasePath: 'hinge' },
+      ]);
+    });
+
+    it('should say the folder looks different when none of its projects match', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+      const before = await rawReadWorkspace(workspace.workspaceId);
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(evidence({ projects: [{ projectId: projectId(9), directory: 'someone-else' }] })),
+      );
+
+      expect(result).toEqual({ status: 'confirm-different' });
+      expect(await rawReadWorkspace(workspace.workspaceId)).toEqual(before);
+    });
+
+    it('should suggest the subfolder that holds every project when the parent was picked', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+      ]);
+      const before = await rawReadWorkspace(workspace.workspaceId);
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: '/Volumes/Archive', wasGranted: false },
+        ports(
+          evidence({
+            subfolders: [
+              { name: 'Other', projects: [{ projectId: projectId(9), directory: 'other' }] },
+              {
+                name: 'Workshop Moved',
+                projects: [
+                  { projectId: projectId(1), directory: 'gearbox' },
+                  { projectId: projectId(2), directory: 'bracket' },
+                ],
+              },
+            ],
+          }),
+        ),
+      );
+
+      expect(result).toEqual({ status: 'suggest-subfolder', name: 'Workshop Moved' });
+      expect(await rawReadWorkspace(workspace.workspaceId)).toEqual(before);
+    });
+
+    it('should match a renamed project folder by its manifest id and move its provider path', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(evidence({ projects: [{ projectId: projectId(1), directory: 'gearbox-v2' }] })),
+      );
+
+      expect(result).toMatchObject({ status: 'relinked', matched: 1 });
+      expect(await nodeConfigs(store)).toEqual([
+        { projectId: projectId(1), backend: 'node', path: newPath, providerBasePath: 'gearbox-v2' },
+      ]);
+    });
+
+    it('should resolve two folders with one id by the old directory name, or leave the project unmatched', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+      ]);
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        {
+          ...ports(
+            evidence({
+              projects: [
+                { projectId: projectId(1), directory: 'gearbox' },
+                { projectId: projectId(1), directory: 'gearbox copy' },
+                { projectId: projectId(2), directory: 'bracket-a' },
+                { projectId: projectId(2), directory: 'bracket-b' },
+              ],
+            }),
+          ),
+          confirmed: true,
+        },
+      );
+
+      expect(result).toMatchObject({ status: 'relinked', matched: 1, unmatched: [projectId(2)] });
+      expect(await nodeConfigs(store)).toEqual([
+        { projectId: projectId(1), backend: 'node', path: newPath, providerBasePath: 'gearbox' },
+        { projectId: projectId(2), backend: 'node', path: oldPath, providerBasePath: 'bracket' },
+      ]);
+    });
+  });
+
+  describe('refusals (T-R4.2)', () => {
+    it.each([
+      ['Home', homeRoot, 'home'],
+      ['another workspace', '/Users/tester/Studio/Parts', 'workspace-overlap'],
+      ['the data directory', '/Users/tester/Library/Application Support/Tau/filesystem-authority', 'data-directory'],
+    ] as const)('should refuse a target that overlaps %s', async (_case, path, reason) => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+      const rowsBefore = await store.listWorkspaces();
+      const configsBefore = await nodeConfigs(store);
+      const relinkPorts = ports(evidence({ projects: [{ projectId: projectId(1), directory: 'gearbox' }] }));
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path, wasGranted: false },
+        relinkPorts,
+      );
+
+      expect(result).toEqual({ status: 'refused', reason });
+      expect(await store.listWorkspaces()).toEqual(rowsBefore);
+      expect(await nodeConfigs(store)).toEqual(configsBefore);
+      expect(relinkPorts.revokeGrant).toHaveBeenCalledWith(path);
+    });
+
+    it('should refuse a folder marked for another workspace', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+      const rowsBefore = await store.listWorkspaces();
+      const relinkPorts = ports(
+        evidence({
+          marker: {
+            $schema: workspaceMarkerSchemaUrl,
+            workspaceId: 'wsp_someoneElse000000000',
+            slug: 'elsewhere',
+            createdAt: '2026-07-24T00:11:47.808Z',
+          },
+          projects: [{ projectId: projectId(1), directory: 'gearbox' }],
+        }),
+      );
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        relinkPorts,
+      );
+
+      expect(result).toEqual({ status: 'refused', reason: 'marker-owned-by-another-workspace' });
+      expect(await store.listWorkspaces()).toEqual(rowsBefore);
+      expect(relinkPorts.revokeGrant).toHaveBeenCalledWith(newPath);
+    });
+
+    it('should keep a grant the folder held before the pick', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+      const relinkPorts = ports(evidence());
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: '/Users/tester/Studio', wasGranted: true },
+        relinkPorts,
+      );
+
+      expect(result).toEqual({ status: 'refused', reason: 'workspace-overlap' });
+      expect(relinkPorts.revokeGrant).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('atomicity and order (T-R4.3)', () => {
+    it('should change no row when the commit aborts halfway', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+      ]);
+      const before = await rawReadWorkspace(workspace.workspaceId);
+      const configsBefore = await nodeConfigs(store);
+      const relinkPorts = ports(
+        evidence({
+          projects: [
+            { projectId: projectId(1), directory: 'gearbox' },
+            { projectId: projectId(2), directory: 'bracket' },
+          ],
+        }),
+      );
+      const { put } = FakeIDBObjectStore.prototype;
+      let puts = 0;
+      const failing = vi.spyOn(FakeIDBObjectStore.prototype, 'put').mockImplementation(function (
+        this: IDBObjectStore,
+        ...args: Parameters<IDBObjectStore['put']>
+      ) {
+        puts += 1;
+        if (this.name === 'configs' && puts === 3) {
+          throw new DOMException('The disk is full', 'QuotaExceededError');
+        }
+        return put.apply(this, args);
+      });
+
+      await expect(
+        store.relinkWorkspace(
+          workspace.workspaceId,
+          { backend: 'node', path: newPath, wasGranted: false },
+          relinkPorts,
+        ),
+      ).rejects.toThrow();
+      failing.mockRestore();
+
+      expect(await rawReadWorkspace(workspace.workspaceId)).toEqual(before);
+      expect(await nodeConfigs(store)).toEqual(configsBefore);
+      expect(relinkPorts.revokeGrant).not.toHaveBeenCalledWith(oldPath);
+    });
+
+    it('should keep the workspace id, re-allocate the slug and revoke the old grant only after the commit', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+      const seen: Array<Record<string, unknown> | undefined> = [];
+      const relinkPorts = ports(evidence({ projects: [{ projectId: projectId(1), directory: 'gearbox' }] }));
+      relinkPorts.revokeGrant.mockImplementation(async () => {
+        seen.push(await rawReadWorkspace(workspace.workspaceId));
+      });
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        relinkPorts,
+      );
+
+      expect(result).toMatchObject({ status: 'relinked', workspace: { workspaceId: workspace.workspaceId } });
+      const row = await rawReadWorkspace(workspace.workspaceId);
+      expect(row).toMatchObject({ workspaceId: workspace.workspaceId, path: newPath, slug: 'workshop-moved' });
+      expect(relinkPorts.revokeGrant).toHaveBeenCalledOnce();
+      expect(relinkPorts.revokeGrant).toHaveBeenCalledWith(oldPath);
+      expect(seen).toEqual([expect.objectContaining({ path: newPath })]);
+    });
+  });
+});
+
+describe('node workspace marker (T-R4.4)', () => {
+  it("should write .tau/workspace.json through the file service with the workspace's id", async () => {
+    const store = await loadStore();
+    const workspace = await store.createNodeWorkspace('/Users/tester/Workshop');
+    const written: string[] = [];
+
+    const outcome = await store.syncNodeWorkspaceMarker(workspace, {
+      read: async () => undefined,
+      write: async (content) => {
+        written.push(content);
+      },
+    });
+
+    expect(outcome).toBe('written');
+    expect(written).toHaveLength(1);
+    expect(JSON.parse(written[0]!)).toMatchObject({
+      $schema: workspaceMarkerSchemaUrl,
+      workspaceId: workspace.workspaceId,
+      slug: workspace.slug,
+    });
+  });
+
+  it('should skip a read-only folder without an error', async () => {
+    const store = await loadStore();
+    const workspace = await store.createNodeWorkspace('/Users/tester/Workshop');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(
+      store.syncNodeWorkspaceMarker(workspace, {
+        read: async () => undefined,
+        write: async () => {
+          throw new DOMException('The request is not allowed', 'NotAllowedError');
+        },
+      }),
+    ).resolves.toBe('skipped');
+    warn.mockRestore();
+  });
+
+  it('should leave a marker that already names the workspace untouched', async () => {
+    const store = await loadStore();
+    const workspace = await store.createNodeWorkspace('/Users/tester/Workshop');
+    const write = vi.fn(async () => undefined);
+
+    await expect(
+      store.syncNodeWorkspaceMarker(workspace, {
+        read: async () => markerJson(workspace.workspaceId, workspace.slug),
+        write,
+      }),
+    ).resolves.toBe('unchanged');
+    expect(write).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// Desktop resilient startup (WP9): Home's engine mirror and the folder list from the grants
+// ===========================================================================
+
+const homeBackendMirrorKey = 'tau:home-backend';
+
+/*
+ * T-B5.4 (B5, R7): Home's pin is mirrored to `localStorage` at pin time and on every read of it, and the mirror is
+ * read only when the database cannot be opened. On the desktop with no mirror Home is node, its engine by build; on
+ * the web with no mirror nothing is guessed (row S37).
+ */
+describe('Home engine mirror', () => {
+  afterEach(() => {
+    globalThis.localStorage.clear();
+  });
+
+  it('should write the mirror when Home is pinned', async () => {
+    const { pinHomeStorageBackend } = await loadStore();
+
+    await pinHomeStorageBackend('opfs');
+
+    expect(globalThis.localStorage.getItem(homeBackendMirrorKey)).toBe('opfs');
+  });
+
+  it('should refresh the mirror on a read of the pin', async () => {
+    const { getHomeStorageBackend, pinHomeStorageBackend } = await loadStore();
+    await pinHomeStorageBackend('opfs');
+    globalThis.localStorage.removeItem(homeBackendMirrorKey);
+
+    await expect(getHomeStorageBackend()).resolves.toBe('opfs');
+
+    expect(globalThis.localStorage.getItem(homeBackendMirrorKey)).toBe('opfs');
+  });
+
+  it('should take Home from the mirror when the database cannot be opened', async () => {
+    globalThis.localStorage.setItem(homeBackendMirrorKey, 'opfs');
+    vi.resetModules();
+    const { getHomeStorageBackend } = await import('#filesystem/handle-store.js');
+    stubFailingIndexedDb('VersionError');
+
+    await expect(getHomeStorageBackend()).resolves.toBe('opfs');
+  });
+
+  it('should start desktop Home on node when the database cannot be opened and no mirror exists', async () => {
+    installDesktop(async () => []);
+    vi.resetModules();
+    const { getHomeStorageBackend } = await import('#filesystem/handle-store.js');
+    stubFailingIndexedDb('UnknownError');
+
+    await expect(getHomeStorageBackend()).resolves.toBe('node');
+  });
+
+  it('should guess no engine on the web when the database cannot be opened and no mirror exists', async () => {
+    vi.resetModules();
+    const { getHomeStorageBackend } = await import('#filesystem/handle-store.js');
+    stubFailingIndexedDb('VersionError');
+
+    await expect(getHomeStorageBackend()).rejects.toMatchObject({ name: 'VersionError' });
+  });
+
+  /* Risk S37: a reset another tab blocks is rejected, but the deletion stays queued and completes when that tab
+   * closes. The next start then opens an empty database; Home must stay on the engine its mirror names. */
+  it('should keep Home on its mirrored engine when a blocked reset completes after it was refused', async () => {
+    stubHomeProbe(true);
+    const store = await loadStore();
+    await store.pinHomeStorageBackend('opfs');
+    const holder = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(`${appMetaConfig.databasePrefix}fs-handles`);
+      request.addEventListener('success', () => {
+        resolve(request.result);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('holder open failed'));
+      });
+    });
+
+    await expect(store.resetHomeRecords()).rejects.toMatchObject({ name: 'StorageUpgradeBlockedError' });
+    holder.close();
+    /* Queued behind the refused deletion, so it settles once that deletion has run. */
+    await new Promise<void>((resolve) => {
+      const request = indexedDB.deleteDatabase(`${appMetaConfig.databasePrefix}fs-handles`);
+      request.addEventListener('success', () => {
+        resolve();
+      });
+    });
+    stubHomeProbe(false);
+    vi.resetModules();
+    const next = await import('#filesystem/handle-store.js');
+
+    await expect(next.getHomeStorageBackend()).resolves.toBe('opfs');
+  });
+
+  it('should ignore a mirror that names no engine', async () => {
+    globalThis.localStorage.setItem(homeBackendMirrorKey, 'floppy');
+    vi.resetModules();
+    const { getHomeStorageBackend } = await import('#filesystem/handle-store.js');
+    stubFailingIndexedDb('VersionError');
+
+    await expect(getHomeStorageBackend()).rejects.toMatchObject({ name: 'VersionError' });
+  });
+});
+
+/*
+ * T-B5.8 (R7): after a desktop reset the handle database starts empty, and each folder the grant file still holds gets
+ * its workspace row back, with the id its `.tau/workspace.json` names when no other row holds it. A database that was
+ * not just created adopts nothing: a grant without a row there is not this function's to restore.
+ */
+describe('folder list from the grants after a database reset', () => {
+  const grantedPath = '/Users/tester/Projects/Workshop';
+  const markedWorkspaceId = 'wsp_K3d9Qm2Lx7Vb4Np8Rt1Zs';
+
+  const installGrants = (
+    paths: string[],
+    readMarker: (path: string) => Promise<string | undefined> = async () => undefined,
+  ): ReturnType<typeof vi.fn> => {
+    const read = vi.fn(readMarker);
+    buildTarget.desktop = true;
+    vi.stubGlobal('tau', {
+      nodeFs: { homeRoot: desktopHomeRoot, connect: async () => new MessageChannel().port1 },
+      dialog: { selectDirectory: vi.fn() },
+      directories: { list: async () => paths, onChange: () => () => undefined, readMarker: read },
+    });
+    return read;
+  };
+
+  it('should adopt a granted folder under the id its marker names', async () => {
+    const readMarker = installGrants([grantedPath], async (path) =>
+      path === grantedPath ? markerJson(markedWorkspaceId, 'workshop') : undefined,
+    );
+    const { getProjectRootConfigs, listWorkspaces } = await loadStore();
+
+    const configuration = await getProjectRootConfigs();
+
+    const workspaces = await listWorkspaces();
+    expect(workspaces).toHaveLength(1);
+    expect(workspaces[0]).toMatchObject({ workspaceId: markedWorkspaceId, path: grantedPath, name: 'Workshop' });
+    expect(readMarker).toHaveBeenCalledWith(grantedPath);
+    expect(configuration.roots).toContainEqual({ backend: 'node', path: grantedPath });
+  });
+
+  it('should adopt a granted folder with no marker under a new id', async () => {
+    installGrants([grantedPath]);
+    const { getProjectRootConfigs, listWorkspaces } = await loadStore();
+
+    await getProjectRootConfigs();
+
+    const workspaces = await listWorkspaces();
+    expect(workspaces).toHaveLength(1);
+    expect(workspaces[0]?.path).toBe(grantedPath);
+    expect(workspaces[0]?.workspaceId).toMatch(/^wsp_/u);
+    expect(workspaces[0]?.workspaceId).not.toBe(markedWorkspaceId);
+  });
+
+  it('should give a second folder that names the same marker a new id', async () => {
+    const copy = '/Users/tester/Projects/Workshop copy';
+    installGrants([grantedPath, copy], async () => markerJson(markedWorkspaceId, 'workshop'));
+    const { getProjectRootConfigs, listWorkspaces } = await loadStore();
+
+    await getProjectRootConfigs();
+
+    const workspaces = await listWorkspaces();
+    expect(workspaces).toHaveLength(2);
+    expect(workspaces.filter((workspace) => workspace.workspaceId === markedWorkspaceId)).toHaveLength(1);
+  });
+
+  /* A folder whose marker answers after the deadline is adopted under a new id so the start is not held; once its
+   * marker can be read, the row takes the id the marker names (D2's marker rule), rather than staying a conflict. */
+  it('should give a folder adopted before its marker could be read the id its marker names', async () => {
+    let answer: ((text: string) => void) | undefined;
+    installGrants(
+      [grantedPath],
+      async () =>
+        new Promise<string>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const store = await loadStore();
+    await store.getProjectRootConfigs();
+    answer?.(markerJson(markedWorkspaceId, 'workshop'));
+    const [adopted] = await store.listWorkspaces();
+    expect(adopted?.workspaceId).not.toBe(markedWorkspaceId);
+    await store.setProjectCreationLocation({ kind: 'workspace', workspaceId: adopted!.workspaceId });
+    const write = vi.fn(async () => undefined);
+
+    const outcome = await store.syncNodeWorkspaceMarker(adopted!, {
+      read: async () => markerJson(markedWorkspaceId, 'workshop'),
+      write,
+    });
+
+    expect(outcome).not.toBe('conflict');
+    const workspaces = await store.listWorkspaces();
+    expect(workspaces).toHaveLength(1);
+    expect(workspaces[0]).toMatchObject({ workspaceId: markedWorkspaceId, path: grantedPath });
+    await expect(store.getProjectCreationLocation({ webAccessSupported: true })).resolves.toMatchObject({
+      location: { kind: 'workspace', workspaceId: markedWorkspaceId },
+    });
+  }, 15_000);
+
+  it('should keep a conflict for a folder whose marker names another workspace it was not adopted from', async () => {
+    installGrants([]);
+    const store = await loadStore();
+    const workspace = await store.createNodeWorkspace(grantedPath);
+
+    const outcome = await store.syncNodeWorkspaceMarker(workspace, {
+      read: async () => markerJson(markedWorkspaceId, 'workshop'),
+      write: async () => undefined,
+    });
+
+    expect(outcome).toBe('conflict');
+    await expect(store.listWorkspaces()).resolves.toEqual([
+      expect.objectContaining({ workspaceId: workspace.workspaceId }),
+    ]);
+  });
+
+  it('should adopt nothing into a database that was not just created', async () => {
+    const grants: string[] = [];
+    installGrants(grants);
+    const { getProjectRootConfigs } = await loadStore();
+    await getProjectRootConfigs();
+    /* A later launch over the same database: a grant with no row appears. */
+    grants.push(grantedPath);
+    vi.resetModules();
+    const reloaded = await import('#filesystem/handle-store.js');
+
+    await reloaded.getProjectRootConfigs();
+
+    await expect(reloaded.listWorkspaces()).resolves.toEqual([]);
+  });
+
+  it('should adopt the folder list on a later read when the first one could not read the grants', async () => {
+    let failing = true;
+    buildTarget.desktop = true;
+    vi.stubGlobal('tau', {
+      nodeFs: { homeRoot: desktopHomeRoot, connect: async () => new MessageChannel().port1 },
+      dialog: { selectDirectory: vi.fn() },
+      directories: {
+        list: async () => {
+          if (failing) {
+            throw new Error('The services utility is not answering');
+          }
+          return [grantedPath];
+        },
+        onChange: () => () => undefined,
+        readMarker: async () => undefined,
+      },
+    });
+    const { getProjectRootConfigs, listWorkspaces } = await loadStore();
+    await expect(getProjectRootConfigs()).rejects.toThrow();
+    failing = false;
+
+    await getProjectRootConfigs();
+
+    await expect(listWorkspaces()).resolves.toHaveLength(1);
   });
 });

@@ -2,7 +2,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { ArrowRight } from 'lucide-react';
 import { NavLink, useNavigation } from 'react-router';
 import type { ReactNode } from 'react';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import { DataTableColumnHeader } from '@taucad/ui-kit/components/data-table';
 import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
@@ -14,7 +14,7 @@ import { Loader } from '@taucad/ui/components/loader';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 
-import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
+import { projectSlugOf, projectUrlOr } from '@taucad/files-ui/utils/project-url.utils';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import {
   CloudProjectNameCell,
@@ -73,7 +73,7 @@ function ProjectNameCell({
           <div className='flex min-w-0 items-center gap-1.5 pl-2 text-xs text-muted-foreground'>
             <span className='truncate font-mono'>{projectSlugOf(project.locator)}</span>
             {project.cloud?.cloudState === 'deleting' ? (
-              <span role='status'>Deleting from Tau Cloud…</span>
+              <span role='status'>Deleting cloud copy…</span>
             ) : project.onCloud === true ? (
               <OnTauCloudMark />
             ) : undefined}

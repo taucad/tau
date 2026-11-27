@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog and environment APIs use snake/constant case. */
+import { MemoryRouter } from 'react-router';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { store } from '#hooks/use-cookie.js';
@@ -35,7 +36,7 @@ Object.defineProperty(navigator, 'sendBeacon', { configurable: true, value: vi.f
 
 const { DesktopAnalyticsProvider } = await import('#providers/desktop-analytics-provider.js');
 const { desktopAnalyticsStorageName, useDesktopAnalytics } = await import('#hooks/use-desktop-analytics.js');
-const { useFeature } = await import('#flags/use-feature.js');
+const { useFeatureState } = await import('#flags/use-feature.js');
 
 function Workspace(): React.JSX.Element {
   const [isEnabled, setEnabled] = useDesktopAnalytics();
@@ -46,7 +47,7 @@ function Workspace(): React.JSX.Element {
         setEnabled(!isEnabled);
       }}
     >
-      {`viewerControls=${String(useFeature('viewerControls'))}`}
+      {`viewerControls=${String(useFeatureState('viewerControls') === 'on')}`}
     </button>
   );
 }
@@ -67,6 +68,7 @@ describe('PostHog-backed flags through the desktop analytics boundary', () => {
       <DesktopAnalyticsProvider>
         <Workspace />
       </DesktopAnalyticsProvider>,
+      { wrapper: MemoryRouter },
     );
     expect(screen.getByRole('button')).toHaveTextContent('viewerControls=false');
     await vi.waitFor(() => {

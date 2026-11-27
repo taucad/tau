@@ -8,6 +8,7 @@
  * Exit codes: n/a (library module).
  */
 
+import { execFileSync } from 'node:child_process';
 import { chmod, cp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
@@ -18,6 +19,7 @@ import { preparationPluginsOf } from '@taucad/native-process-core/store';
 import { createPreparationHost, readManagedPreparation } from '@taucad/runtime/preparation/node';
 import type { Integrity } from '@taucad/runtime/preparation/node';
 
+import { desktopHostBuildOf, writeDesktopHostBuild } from '#shared/desktop-host-build.js';
 import { desktopReleaseIdentity } from '#shared/desktop-release.js';
 import {
   desktopNativeDeployments,
@@ -49,6 +51,7 @@ export type RuntimePlatformPackages = Readonly<{
   esbuild: string;
   libassimp: string | undefined;
   nanoraster: string;
+  cadmpeg: string;
   /**
    * Native payloads the bundled imports load through `optionalDependencies`: sharp's libvips (where it
    * is a separate package) before sharp's addon, so the addon finds it as a sibling, then
@@ -79,6 +82,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     esbuild: '@esbuild/darwin-arm64',
     libassimp: 'libassimp-darwin-arm64',
     nanoraster: 'nanoraster-darwin-arm64',
+    cadmpeg: 'cadmpeg-ts-darwin-arm64',
     bundledOptionalDependencies: [
       '@img/sharp-libvips-darwin-arm64',
       '@img/sharp-darwin-arm64',
@@ -93,6 +97,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     // The pinned Assimp release has no Intel Mac addon; this host uses its WASM backend.
     libassimp: undefined,
     nanoraster: 'nanoraster-darwin-x64',
+    cadmpeg: 'cadmpeg-ts-darwin-x64',
     bundledOptionalDependencies: [
       '@img/sharp-libvips-darwin-x64',
       '@img/sharp-darwin-x64',
@@ -106,6 +111,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     esbuild: '@esbuild/linux-x64',
     libassimp: 'libassimp-linux-x64-gnu',
     nanoraster: 'nanoraster-linux-x64-gnu',
+    cadmpeg: 'cadmpeg-ts-linux-x64-gnu',
     bundledOptionalDependencies: [
       '@img/sharp-libvips-linux-x64',
       '@img/sharp-linux-x64',
@@ -119,6 +125,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     esbuild: '@esbuild/win32-x64',
     libassimp: 'libassimp-win32-x64-msvc',
     nanoraster: 'nanoraster-win32-x64-msvc',
+    cadmpeg: 'cadmpeg-ts-win32-x64-msvc',
     /* `@img/sharp-win32-x64` carries libvips itself; there is no separate libvips package. */
     bundledOptionalDependencies: ['@img/sharp-win32-x64', '@parcel/watcher-win32-x64'],
     unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win/arm64'],
@@ -139,6 +146,8 @@ export type ResolvedRuntimePackages = Readonly<{
   libassimpPlatform: string | undefined;
   nanoraster: InstalledPackage;
   nanorasterPlatform: string;
+  cadmpeg: InstalledPackage;
+  cadmpegPlatform: string;
   sandboxRuntime: InstalledPackage;
   nodePty: InstalledPackage;
   bundledImports: readonly InstalledPackage[];
@@ -152,6 +161,17 @@ const readJson = async <Value extends NonNullable<unknown>>(path: string): Promi
  * replicad's kernel loads its `replicad.js-<hash>.map` asset at run time to map library frames. */
 export const excludesBuildDiagnostics = (path: string): boolean =>
   !/\.(?:[cm]?[jt]s|css)\.map$|^tau-module-graph.*\.json$/u.test(basename(path));
+
+/** The bundled main/utility imports staged with their runtime dependency closure from the desktop's own install. */
+export const desktopBundledImports = [
+  '@gltf-transform/core',
+  '@gltf-transform/functions',
+  'electron-updater',
+  'fflate',
+  'uint8array-extras',
+  'xstate',
+  '@parcel/watcher',
+] as const;
 
 /**
  * Resolve every runtime package one target stages, failing before the output is touched.
@@ -185,6 +205,7 @@ export const resolveRuntimePackages = async (
   const esbuild = await installed(await realpath(resolve(pluginModules('esbuild'), 'esbuild')));
   const libassimp = await installed(await realpath(resolve(pluginModules('assimp'), 'libassimp')));
   const nanoraster = await installed(await realpath(resolve(pluginModules('image'), 'nanoraster')));
+  const cadmpeg = await installed(await realpath(resolve(pluginModules('cadmpeg'), 'cadmpeg-ts')));
   /* The ACP adapters are spawned as `node <modulePath>` from inside the packaged
    * app, so they are staged with their runtime dependency closure and unpacked
    * out of the ASAR — a module path inside `app.asar` is not a real file. A native
@@ -212,15 +233,7 @@ export const resolveRuntimePackages = async (
     });
   }
   const bundledImports = await Promise.all(
-    [
-      '@gltf-transform/core',
-      '@gltf-transform/functions',
-      'electron-updater',
-      'fflate',
-      'uint8array-extras',
-      'xstate',
-      '@parcel/watcher',
-    ].map(async (name) => ({
+    desktopBundledImports.map(async (name) => ({
       ...(await installed(await realpath(resolve(desktopRoot, 'node_modules', name)))),
       name,
     })),
@@ -235,6 +248,8 @@ export const resolveRuntimePackages = async (
     libassimpPlatform: platform.libassimp ? platformPackage(libassimp.source, platform.libassimp) : undefined,
     nanoraster,
     nanorasterPlatform: platformPackage(nanoraster.source, platform.nanoraster),
+    cadmpeg,
+    cadmpegPlatform: platformPackage(cadmpeg.source, platform.cadmpeg),
     sandboxRuntime,
     nodePty,
     bundledImports,
@@ -387,6 +402,21 @@ export const stageRuntimePackages = async (
     readonly main: string;
     readonly type: string;
   }>(resolve(desktopRoot, 'package.json'));
+  /*
+   * LW8: the commit this app is packaged from, beside the bundles, where main reads it (`#shared/desktop-host-build`).
+   * The release workflow checks out the release tag, so it is the tag's commit. `desktop:build` compiles no commit in,
+   * so its cache key holds sources and configuration only (ST-9).
+   */
+  writeDesktopHostBuild(
+    resolve(stageRoot, 'dist'),
+    desktopHostBuildOf(() =>
+      execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: desktopRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    ),
+  );
   await Promise.all([
     copyTree(resolve(desktopRoot, 'dist/main'), resolve(stageRoot, 'dist/main'), excludesBuildDiagnostics),
     copyTree(resolve(desktopRoot, 'dist/preload'), resolve(stageRoot, 'dist/preload'), excludesBuildDiagnostics),
@@ -409,6 +439,10 @@ export const stageRuntimePackages = async (
       markNodePtySpawnHelperExecutable(resolve(stageRoot, 'node_modules/node-pty'), platform.nodePtyNative),
     ),
     copyRuntimePackage(platform.nanoraster, packages.nanorasterPlatform),
+    /* The `node` entry's `auto` backend loads the addon from the platform package and reads
+     * `dist/wasm` only when that addon fails, so the WebAssembly modules stay out of the app. */
+    copyRuntimePackage('cadmpeg-ts', packages.cadmpeg.source, ['dist/wasm']),
+    copyRuntimePackage(platform.cadmpeg, packages.cadmpegPlatform),
     writeFile(
       resolve(stageRoot, 'package.json'),
       `${JSON.stringify(
@@ -429,6 +463,8 @@ export const stageRuntimePackages = async (
             ...(platform.libassimp ? { [platform.libassimp]: packages.libassimp.version } : {}),
             nanoraster: packages.nanoraster.version,
             [platform.nanoraster]: packages.nanoraster.version,
+            'cadmpeg-ts': packages.cadmpeg.version,
+            [platform.cadmpeg]: packages.cadmpeg.version,
             '@anthropic-ai/sandbox-runtime': packages.sandboxRuntime.version,
             'node-pty': packages.nodePty.version,
             ...Object.fromEntries(packages.bundledImports.map(({ name, version }) => [name, version])),

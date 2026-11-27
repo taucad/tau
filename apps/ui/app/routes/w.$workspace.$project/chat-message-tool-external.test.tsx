@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render as renderBare, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { mock } from 'vitest-mock-extended';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
 import { userEvent } from '@testing-library/user-event';
 import { readUIMessageStream } from 'ai';
 import type { DynamicToolUIPart, UIMessageChunk } from 'ai';
@@ -12,6 +16,7 @@ import {
   ChatMessageToolExternal,
   externalToolKinds,
   externalToolPresentation,
+  sanitizeAgentFailure,
   sanitizeAgentText,
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 import type { AgentHostLiveBlocks } from '@taucad/chat-ui/services/agent-host-event-projection';
@@ -21,30 +26,33 @@ import { classifyActivityPart } from '@taucad/chat-ui/utils/assistant-message-ac
 import chatMessageSource from '#routes/w.$workspace.$project/chat-message.tsx?raw';
 
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: () => [false, vi.fn(), vi.fn()] }));
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
-vi.mock('#components/code/diff-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
   DiffViewer: ({ modifiedContent }: { readonly modifiedContent: string }) => <pre>{modifiedContent}</pre>,
   getFirstChangedLine: () => 1,
 }));
 const imageHash = 'c'.repeat(64);
 const attachmentDirectory = '/projects/p1/.tau/chats/c1/attachments';
-vi.mock('#hooks/use-file-manager.js', () => {
-  // The provider memoizes its record client; attachment sources are keyed by that identity.
-  const fileManager = {
-    recordFiles: {
-      readFile: async (path: string) => {
-        if (path === `${attachmentDirectory}/${imageHash}.png`) {
-          return new Uint8Array([137, 80, 78, 71]);
-        }
-        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
-      },
+// The provider memoizes its record client; attachment sources are keyed by that identity.
+const fileManager = mock<FileManagerContextValue>({
+  recordFiles: mock<FileManagerContextValue['recordFiles']>({
+    readFile: async (path: string) => {
+      if (path === `${attachmentDirectory}/${imageHash}.png`) {
+        return new Uint8Array([137, 80, 78, 71]);
+      }
+      throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
     },
-  };
-  return { useOptionalFileManager: () => fileManager };
+  }),
 });
-vi.mock('#components/code/code-viewer.js', () => ({
+
+function FileManagerWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <FileManagerContext.Provider value={fileManager}>{children}</FileManagerContext.Provider>;
+}
+
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
+vi.mock('@taucad/editor-ui/components/code/code-viewer', () => ({
   CodeViewer: ({ text }: { readonly text: string }) => <pre>{text}</pre>,
 }));
 
@@ -592,10 +600,58 @@ describe('the external tool-call renderer', () => {
 
     renderExternal(part);
     const header = screen.getByRole('button', { name: /Attempted/u });
-    expect(header).toHaveTextContent(/^Attempted reading geospec-authoring\/api-types\.md, checking for dotnet$/u);
+    expect(header).toHaveTextContent(
+      /^Attempted reading geospec-authoring\/api-types\.md, checking for dotnet · GeoSpecMeshIntegrityExpectation: \{ Exit code 1$/u,
+    );
     await user.click(header);
-    expect(screen.getByText(/GeoSpecMeshIntegrityExpectation: \{\s+Exit code 1/u)).toBeVisible();
+    expect(screen.getByText(/^GeoSpecMeshIntegrityExpectation: \{\s+Exit code 1$/u).tagName).toBe('PRE');
     expect(document.body.textContent).not.toContain('formatted_output');
+  });
+
+  it('reads a stopped call as stopped when its name is a 500-character command', async () => {
+    const user = userEvent.setup();
+    const command = `pnpm geospec run ${'x'.repeat(483)}`;
+    expect(command).toHaveLength(500);
+    const errorText = JSON.stringify({
+      errorCode: 'USER_INTERRUPTED',
+      message: 'Interrupted by user.',
+      toolCallId: 'call-stop',
+      toolName: command,
+    });
+    const part: DynamicToolUIPart = {
+      type: 'dynamic-tool',
+      toolName: command,
+      toolCallId: 'call-stop',
+      state: 'output-error',
+      input: { command },
+      errorText,
+    };
+
+    renderExternal(part);
+    const header = screen.getByRole('button', { name: /^Stopped pnpm geospec run x+…$/u });
+    await user.click(header);
+    expect(screen.getByText('Interrupted by user.')).toBeVisible();
+    expect(document.body.textContent).not.toContain('errorCode');
+  });
+
+  it('bounds a failure envelope field by field, and drops the fields the card does not read', () => {
+    const bounded: unknown = JSON.parse(
+      sanitizeAgentFailure(
+        JSON.stringify({
+          errorCode: 'IO_ERROR',
+          message: `HTTP 502 ‮${'m'.repeat(600)}`,
+          toolName: 'n'.repeat(600),
+          rawOutput: { bulk: 'r'.repeat(600) },
+        }),
+      ),
+    );
+
+    expect(bounded).toEqual({
+      errorCode: 'IO_ERROR',
+      message: `HTTP 502 ${'m'.repeat(391)}…`,
+      toolName: `${'n'.repeat(200)}…`,
+    });
+    expect(sanitizeAgentFailure('x'.repeat(600))).toHaveLength(401);
   });
 
   it('strips control and bidirectional-override characters from an agent-authored title', async () => {

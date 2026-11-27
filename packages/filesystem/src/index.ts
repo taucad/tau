@@ -69,6 +69,7 @@ export type {
   ProjectDiscoveryIssue,
   ResolvedProjectManifest,
   ProjectRouteVerification,
+  ProjectAbsence,
   ProjectDiscoveryResult,
   ProjectRootDiscoveryStatus,
   ResolvedDiscoveryRoot,
@@ -96,7 +97,12 @@ export type { CapacityDecision, CapacityDomain, CapacityMeasurement, CapacityReq
 
 export { BoundedFileCache } from '#bounded-file-cache.js';
 export { indexRemovalLimit, ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
-export { PendingContentError, pendingObjectOf, pendingStallMilliseconds } from '#pending-content.js';
+export {
+  ArrivingContentError,
+  PendingContentError,
+  pendingObjectOf,
+  pendingStallMilliseconds,
+} from '#pending-content.js';
 export type { PendingObject, PendingObjectRequest, PendingObjectSource } from '#pending-content.js';
 export type {
   DeclaredPlaceholder,
@@ -185,7 +191,7 @@ export {
 } from '#content-metadata.js';
 export type { ContentFactsSource, MeasuredContentFacts } from '#content-metadata.js';
 
-export { MountTable } from '#mount-table.js';
+export { MountTable, homeRootUnavailableCode, rootDeadlineCode, rootStateForError } from '#mount-table.js';
 export type {
   MountConfig,
   MountConfigCommon,
@@ -195,6 +201,10 @@ export type {
   CheckoutRootConfig,
   ProjectRootConfig,
   ProjectRootConfiguration,
+  ProjectRootConfigurationResult,
+  RootState,
+  RootStatus,
+  SkippedConfigurationEntry,
   CommitPendingProjectDirectoryInput,
   CommitPendingProjectDirectoryResult,
   PermanentDeleteProjectDirectoryInput,

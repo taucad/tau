@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -20,6 +21,8 @@ export default defineConfig({
     ],
   },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     environment: 'node',
     include: [
       'src/support/desktop-app.test.ts',

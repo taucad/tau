@@ -1,4 +1,7 @@
+import { rm } from 'node:fs/promises';
 import type { Config } from '@react-router/dev/config';
+// oxlint-disable-next-line eslint/no-restricted-imports -- the build config runs outside the app alias root.
+import { resolveUiBuildDirectory, uiBuildDirectoryVariable } from '../build-environment.js';
 
 /**
  * Desktop (Electron) build of `apps/ui` — see
@@ -9,7 +12,8 @@ import type { Config } from '@react-router/dev/config';
  * would re-admit the server-export validator's strict branch. The single
  * `index.html` React Router emits is what the shell serves over `app://tau`.
  *
- * `appDirectory` and `buildDirectory` keep their defaults (`./app`, `./build`)
+ * `appDirectory` keeps its default (`./app`) and `buildDirectory` is `./build`, or the
+ * directory `TAU_UI_BUILD_DIRECTORY` names,
  * relative to this directory: the React Router CLI derives its root from the
  * `--config` file's directory (belt-and-braces `REACT_ROUTER_ROOT` in
  * `apps/ui/project.json`), and `routes.ts`/`root.tsx` are hardcoded lookups
@@ -18,4 +22,12 @@ import type { Config } from '@react-router/dev/config';
  */
 export default {
   ssr: false,
+  buildDirectory: resolveUiBuildDirectory(process.env[uiBuildDirectoryVariable]),
+  /**
+   * React Router 8 leaves `build/server` after an `ssr: false` build (7 deleted it). Nothing serves it, so it is removed
+   * here, before the desktop package copies `build/client`.
+   */
+  async buildEnd({ reactRouterConfig }) {
+    await rm(`${reactRouterConfig.buildDirectory}/server`, { recursive: true, force: true });
+  },
 } satisfies Config;

@@ -7,6 +7,9 @@ import {
   agentIdentityOf,
   createAgentSessionTracker,
   createAgentUsageTelemetry,
+  recordToolResultFolded,
+  recordToolResultShown,
+  recordTurnAdmission,
   reportRefusedAgentTurn,
   trackAgentTurn,
 } from '#chat-clients/_internal/agent-usage-telemetry.js';
@@ -603,6 +606,68 @@ describe('trackAgentTurn', () => {
     const { publish, report } = harness('run_stop');
     publish([lifecycleRow(0, 'admitted', 'run_stop'), lifecycleRow(0, 'cancelled', 'run_stop')], 1100);
     expect(report.mock.calls[0]![0]).toMatchObject({ detail: { outcome: 'cancelled' } });
+  });
+
+  /* B4, C3: the store records delivery and admission facts by run; the turn's entry carries them, content-free. */
+  it('should report the recorded admission phases and tool-result delivery, counting an unshown result as unsettled', () => {
+    const { publish, report } = harness('run_delivered');
+    recordTurnAdmission('run_delivered', { admissionDelay: { create: 1.2, page: 0.05 }, hostStart: 'cold' });
+    recordTurnAdmission('run_delivered', {
+      admissionDelay: { dispatch: 0.03, host: 0.08, delivery: 0.02 },
+      chatState: 'reopened',
+      deploymentRefetched: true,
+    });
+    recordToolResultFolded('run_delivered', 'call_a', true);
+    recordToolResultFolded('run_delivered', 'call_b', true);
+    recordToolResultFolded('run_delivered', 'call_c', true);
+    recordToolResultFolded('run_delivered', 'call_d', false);
+    recordToolResultShown('run_delivered', 'call_a', 0.2);
+    recordToolResultShown('run_delivered', 'call_b', 0.9);
+    recordToolResultShown('run_delivered', 'call_d', 5);
+
+    publish([lifecycleRow(0, 'admitted', 'run_delivered'), lifecycleRow(0, 'completed', 'run_delivered')], 1100);
+
+    expect(report.mock.calls[0]![0]).toMatchObject({
+      detail: {
+        toolResults: 3,
+        toolResultsExcluded: 1,
+        toolResultsUnsettled: 1,
+        toolResultDelayMax: 0.9,
+        admissionDelay: { create: 1.2, page: 0.05, dispatch: 0.03, host: 0.08, delivery: 0.02 },
+        hostStart: 'cold',
+        chatState: 'reopened',
+        deploymentRefetched: true,
+      },
+    });
+  });
+
+  /* The ingest rejects a negative count or NaN for the whole batch, so a replay or a bad clock must not produce one. */
+  it('should keep the counts nonnegative when a shown result is folded again untimed, and drop a delay that is not finite', () => {
+    const { publish, report } = harness('run_replayed');
+    recordToolResultFolded('run_replayed', 'call_a', true);
+    recordToolResultShown('run_replayed', 'call_a', 0.4);
+    recordToolResultFolded('run_replayed', 'call_a', false);
+    recordToolResultFolded('run_replayed', 'call_b', true);
+    recordToolResultShown('run_replayed', 'call_b', Number.NaN);
+
+    publish([lifecycleRow(0, 'admitted', 'run_replayed'), lifecycleRow(0, 'completed', 'run_replayed')], 1100);
+
+    const { detail } = report.mock.calls[0]![0] as Extract<ClientMetricEntry, { name: 'agent.turn' }>;
+    expect(detail).toMatchObject({ toolResults: 1, toolResultsExcluded: 1, toolResultsUnsettled: 1 });
+    expect(detail).not.toHaveProperty('toolResultDelayMax');
+  });
+
+  it('should report no delivery field for a run with nothing recorded, nor reuse one already reported', () => {
+    recordToolResultFolded('run_once', 'call_a', true);
+    const first = harness('run_once');
+    first.publish([lifecycleRow(0, 'admitted', 'run_once'), lifecycleRow(0, 'completed', 'run_once')], 1100);
+    expect(first.report.mock.calls[0]![0]).toMatchObject({ detail: { toolResults: 1, toolResultsUnsettled: 1 } });
+
+    const second = harness('run_once');
+    second.publish([lifecycleRow(0, 'admitted', 'run_once'), lifecycleRow(0, 'completed', 'run_once')], 1100);
+    const { detail } = second.report.mock.calls[0]![0] as Extract<ClientMetricEntry, { name: 'agent.turn' }>;
+    expect(detail).not.toHaveProperty('toolResults');
+    expect(detail).not.toHaveProperty('admissionDelay');
   });
 });
 

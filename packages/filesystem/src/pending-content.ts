@@ -72,13 +72,42 @@ export class PendingContentError extends Error {
   public readonly object: PendingObject;
 
   public constructor(path: string, object: PendingObject, options?: { cause?: unknown }) {
-    super(`The large object of ${path} is not on this device yet.`, options);
+    super(`${path} is still downloading.`, options);
     this.name = 'PendingContentError';
     this.path = path;
     this.object = object;
   }
 
   /** The code an error frame carries. */
+  public get code(): 'PENDING' {
+    return 'PENDING';
+  }
+}
+
+/**
+ * A read of a path a tree write had yet to land that the write never landed for it (D10, I7): the write failed, so
+ * what the path holds is not the tree's, or nothing landed under its root for the stall bound. Never empty or old
+ * bytes in its place; a reader may ask again.
+ *
+ * @public
+ */
+export class ArrivingContentError extends Error {
+  public readonly path: string;
+  /** `failed` when the write ended without landing it; `stalled` when it landed nothing for the bound. */
+  public readonly reason: 'failed' | 'stalled';
+
+  public constructor(path: string, reason: 'failed' | 'stalled') {
+    super(
+      reason === 'failed'
+        ? `${path} was not written: the download of this project's files stopped before it arrived.`
+        : `${path} is still arriving with this project's files.`,
+    );
+    this.name = 'ArrivingContentError';
+    this.path = path;
+    this.reason = reason;
+  }
+
+  /** The code an error frame carries: the same retryable refusal as a pending large object's. */
   public get code(): 'PENDING' {
     return 'PENDING';
   }

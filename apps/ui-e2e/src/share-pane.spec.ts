@@ -46,7 +46,7 @@ test('keeps one movable Share pane, restores it, and resolves an unencrypted Dir
   /* The methods are one "Share with" picker (#765), not tabs: it shows the chosen method and lists all three. */
   await target.click(shareMethodPicker('Direct link'));
   await target.expectVisible(selectors.getByRole('option', { name: 'Direct link' }));
-  await target.expectVisible(selectors.getByRole('option', { name: 'Hosted link' }));
+  await target.expectVisible(selectors.getByRole('option', { name: 'Cloud link' }));
   await target.expectVisible(selectors.getByRole('option', { name: 'GitHub Gist' }));
   await target.keyboardPress('Escape');
   await target.expectCount(selectors.getByRole('option', { name: 'GitHub Gist' }), 0);
@@ -70,11 +70,11 @@ test('keeps one movable Share pane, restores it, and resolves an unencrypted Dir
   expect(restoredBounds?.x).toBeCloseTo(splitBounds.x, 0);
 
   await target.expectAttribute(
-    shareRegion().getByRole('checkbox', { name: 'Encrypt with a password' }),
+    shareRegion().getByRole('checkbox', { name: 'Protect with a password' }),
     'data-state',
     'unchecked',
   );
-  await target.click(shareRegion().getByRole('button', { name: 'Copy direct link' }));
+  await target.click(shareRegion().getByRole('button', { name: 'Copy link' }));
   const shareLink = shareRegion().getByRole('textbox', { name: 'Share link' });
   await target.expectVisible(shareLink, 60_000);
   const shareLinkState = await target.read(shareLink);
@@ -159,7 +159,26 @@ test('uses the same Share body in the mobile drawer without clipping its navigat
   await target.expectVisible(allButton);
   await target.expectAttribute(allButton, 'aria-current', 'page');
   await target.expectVisible(selectors.getByRole('region', { name: 'Share', exact: true }));
-  await target.expectVisible(shareRegion().getByRole('button', { name: 'Copy direct link' }));
+  await target.expectVisible(shareRegion().getByRole('button', { name: 'Copy link' }));
+  /* The pane scrolls as one: only its frame scrolls, nothing in it is pinned, and nothing scrolls sideways. */
+  await target.waitFor(() => {
+    const pane = document.querySelector('[data-slot=share-pane]');
+    if (!pane) {
+      return false;
+    }
+    const elements = [pane, ...pane.querySelectorAll('*')];
+    const scrollers = elements.filter(
+      (element) =>
+        !element.matches('input, textarea, select') && ['auto', 'scroll'].includes(getComputedStyle(element).overflowY),
+    );
+    const scroller = scrollers[0] as HTMLElement | undefined;
+    return (
+      scrollers.length === 1 &&
+      scroller?.dataset['slot'] === 'share-pane-scroll' &&
+      scroller.scrollWidth <= scroller.clientWidth &&
+      elements.every((element) => !['sticky', 'fixed'].includes(getComputedStyle(element).position))
+    );
+  });
   const navigationBounds = await target.boundingBox(allButton);
   if (!navigationBounds) {
     throw new Error('Mobile All navigation action did not have layout bounds.');
@@ -170,7 +189,9 @@ test('uses the same Share body in the mobile drawer without clipping its navigat
   await target.click(shareMethodPicker('Direct link'));
   await target.click(selectors.getByRole('option', { name: 'GitHub Gist' }));
   await target.expectVisible(shareMethodPicker('GitHub Gist'));
-  await target.expectVisible(shareRegion().getByText(/Tau sends the compressed project to GitHub/u));
+  await target.expectVisible(
+    shareRegion().getByText('Tau stores the project in a Gist on your GitHub account.', { exact: true }),
+  );
   await target.click(mobileNavigation.getByRole('button', { name: 'Model', exact: true }));
   await target.expectHidden(shareRegion());
   await target.screenshot(selectors.getByCss('body'), 'share-pane-mobile.png');

@@ -56,6 +56,19 @@ export const modelRoutePausedError = (routeId: string): LlmGatewayError =>
     { routeId },
   );
 
+/**
+ * The route's published price has passed its end date and its successor is not published. It is the paused-route
+ * refusal because the person's way out is the same, another model, and every released client already draws that code
+ * with the switch and no Resume; the sentence and the denial metric say which of the two it was.
+ */
+export const modelRouteRatesExpiredError = (routeId: string): LlmGatewayError =>
+  new LlmGatewayError(
+    HttpStatus.SERVICE_UNAVAILABLE,
+    'MODEL_ROUTE_PAUSED',
+    'This model route is paused: its published price has expired.',
+    { routeId },
+  );
+
 /** Admission refused spending on an account whose own balance is in question; no route or retry changes it. */
 export const billingAccountRestrictedError = (): LlmGatewayError =>
   new LlmGatewayError(HttpStatus.FORBIDDEN, 'BILLING_ACCOUNT_RESTRICTED', 'This Tau billing account is restricted.');

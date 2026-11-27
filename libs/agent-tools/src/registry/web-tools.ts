@@ -132,7 +132,20 @@ export type GatewayWebResearchClientOptions = Readonly<{
    */
   auth?: (() => string | undefined | Promise<string | undefined>) | undefined;
   fetch?: typeof globalThis.fetch | undefined;
+  /** How long one request may take to answer in full; {@link webResearchAnswerMilliseconds} when absent. */
+  answerMilliseconds?: number | undefined;
 }>;
+
+/**
+ * How long one web research request may take, answer and body together.
+ *
+ * The gateway bounds each request it makes upstream at 30 s and makes a call's requests side by side, so it answers
+ * well inside a minute or not at all. A request left open past that is stalled, not slow, and nothing else in the
+ * loop bounds a tool call (launch audit C-6): without this the turn stays running until the person presses Stop.
+ *
+ * @public
+ */
+export const webResearchAnswerMilliseconds = 60_000;
 
 const searchResponseSchema = z.discriminatedUnion('success', [
   z.object({
@@ -183,20 +196,34 @@ export const createGatewayWebResearchClient = (options: GatewayWebResearchClient
       headers.set('authorization', `Bearer ${token}`);
     }
     const fetch = options.fetch ?? globalThis.fetch;
-    const response = await fetch(`${root}v1/llm/tools/${path}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      credentials: 'include',
-      signal,
-    });
-    if (!response.ok) {
-      throw codedError(
-        `WEB_RESEARCH_HTTP_${String(response.status)}`,
-        `Tau's web research service answered HTTP ${String(response.status)}.`,
-      );
+    const answerMilliseconds = options.answerMilliseconds ?? webResearchAnswerMilliseconds;
+    const deadline = AbortSignal.timeout(answerMilliseconds);
+    try {
+      const response = await fetch(`${root}v1/llm/tools/${path}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        credentials: 'include',
+        signal: AbortSignal.any([signal, deadline]),
+      });
+      if (!response.ok) {
+        throw codedError(
+          `WEB_RESEARCH_HTTP_${String(response.status)}`,
+          `Tau's web research service answered HTTP ${String(response.status)}.`,
+        );
+      }
+      /* Awaited here so a body that stalls is the deadline's too. */
+      return (await response.json()) as unknown;
+    } catch (error) {
+      /* The caller's own abort is a Stop and stays one; only the deadline is a timeout. */
+      if (deadline.aborted && !signal.aborted) {
+        throw codedError(
+          'WEB_RESEARCH_TIMEOUT',
+          `Tau's web research service did not answer within ${String(answerMilliseconds / 1000)} s.`,
+        );
+      }
+      throw error;
     }
-    return response.json();
   };
   return {
     search: async ({ query, signal }) => {

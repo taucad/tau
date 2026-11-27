@@ -79,7 +79,7 @@ vi.mock('#components/chat/chat-tool-error.js', () => ({
   },
 }));
 
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink({
     children,
     path,

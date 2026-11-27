@@ -1,7 +1,5 @@
 import { flatRoutes } from '@react-router/fs-routes';
 import type { RouteConfigEntry } from '@react-router/dev/routes';
-// oxlint-disable-next-line eslint/no-restricted-imports -- route generation runs outside the app alias root.
-import { resolveTauCloudBuildEnabled } from '../../build-environment.js';
 
 /**
  * Serve route manifest: the web route tree minus every module SPA mode cannot
@@ -25,7 +23,7 @@ import { resolveTauCloudBuildEnabled } from '../../build-environment.js';
  * "single RR config" reconsider item), which is a change to
  * `apps/ui/desktop/**` and therefore not this lane's to make.
  */
-export default flatRoutes({
+const routes: RouteConfigEntry[] = await flatRoutes({
   rootDirectory: '../../app/routes',
   ignoredRouteFiles: [
     // Co-located route tests would otherwise become live routes (and generate
@@ -33,7 +31,8 @@ export default flatRoutes({
     '../../app/routes/**/*.test.{ts,tsx}',
     '../../app/routes/**/*.spec.{ts,tsx}',
     // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
-    ...(resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']) ? [] : ['../../app/routes/usage/**']),
+    /* The `tau serve` bundle pins `self-host` (adaptive app deployment mode D12): never a Tau Cloud host. */
+    '../../app/routes/usage/**',
 
     // Web-only: the desktop sign-in callback lands in the system browser.
     // A daemon-served page signs in through the ordinary web flow.
@@ -69,5 +68,19 @@ export default flatRoutes({
     '../../app/routes/[[]__e2e[]].*/**',
     '../../app/routes/[[]__debug[]].observability/**',
   ],
-  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- explicit module boundary required here.
-}) as Promise<RouteConfigEntry[]>;
+});
+
+/**
+ * Paths served from a different module. `/invitations/:token` is a server
+ * redirect on the web that moves the token out of the address (#2290); a
+ * daemon-served page has no server, so it takes the renderer module the
+ * desktop shell uses, which does the same before the router commits.
+ */
+const spaRouteFiles = new Map<string, string>([
+  ['../../app/routes/invitations.$token', '../../app/routes/invitations.$token/desktop-route.tsx'],
+]);
+
+export default routes.map((entry) => {
+  const file = spaRouteFiles.get(entry.id ?? '');
+  return file === undefined ? entry : { ...entry, file };
+});

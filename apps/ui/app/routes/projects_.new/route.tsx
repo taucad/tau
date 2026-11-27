@@ -33,17 +33,10 @@ import {
   projectLocationDescriptor,
   projectLocationFullLabel,
 } from '@taucad/files-ui/utils/project-creation-location.utils';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { focusProjectNameScript } from '#routes/projects_.new/focus-project-name-script.js';
 import { reportProjectCreationFailure } from '#lib/project-creation-failure-reporting.js';
-
-/*
- * `autoFocus` is applied by the browser at its next rendering update, about 90 ms after navigation on an
- * M2 Pro; a key typed before then lands on the body and is lost (20 of 40 loads lost the first key). This
- * runs as soon as the parser reaches the field, before first paint, and leaves focus alone if the person
- * already put it somewhere.
- */
-const focusProjectNameScript = `(()=>{const input=document.getElementById('project-name');if(input&&(document.activeElement===null||document.activeElement===document.body))input.focus()})()`;
 
 const homeLocationLabel = projectLocationFullLabel(projectLocationDescriptor({ kind: 'home' }));
 
@@ -52,8 +45,6 @@ export const meta: MetaFunction = () => [{ title: 'New project · Tau' }];
 export const handle: Handle = {
   // Nested under `/projects`, so the phone bar shows "‹ Projects".
   title: 'New project',
-  // Mobile: section scrolls as one page. Desktop: route uses h-full flex + inner list scroll (see layout).
-  enableOverflowY: true,
 };
 
 // Reusable component for kernel details content
@@ -224,11 +215,11 @@ export default function ProjectsNew(): React.JSX.Element {
   );
 
   return (
-    <PageContent layout='fill'>
+    <PageContent className='flex flex-col gap-4'>
       <PageHeader title='New project' />
 
-      <div className='md:flex md:min-h-0 md:flex-1 md:flex-col md:overflow-hidden'>
-        <Card className='flex flex-col bg-sidebar/70 md:min-h-0 md:flex-1 md:overflow-hidden'>
+      <div>
+        <Card className='flex flex-col bg-sidebar/70'>
           <CardContent className='shrink-0 space-y-4 border-b pb-6'>
             <div className='flex flex-col gap-4'>
               <div className='flex-1 space-y-2'>
@@ -283,7 +274,7 @@ export default function ProjectsNew(): React.JSX.Element {
             <CardTitle variant='label'>Choose CAD Kernel *</CardTitle>
             <CardDescription>Select the technology that best fits your project needs</CardDescription>
           </CardHeader>
-          <CardContent className='md:flex md:min-h-0 md:flex-1 md:flex-col md:overflow-hidden'>
+          <CardContent>
             {/* Mobile Accordion Layout */}
             <div className='block rounded-lg border border-border bg-card md:hidden'>
               <RadioGroup
@@ -358,8 +349,8 @@ export default function ProjectsNew(): React.JSX.Element {
               </RadioGroup>
             </div>
 
-            {/* Desktop: only the kernel list column scrolls */}
-            <div className='hidden min-h-0 md:flex md:flex-1 md:gap-6'>
+            {/* Desktop: a document page (D4.2); the two columns keep a bounded height and scroll on their own */}
+            <div className='hidden md:flex md:h-[min(36rem,70dvh)] md:gap-6'>
               <div className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card md:basis-1/2'>
                 <div className='min-h-0 flex-1 scroll-shadows-y overflow-y-auto'>
                   <RadioGroup

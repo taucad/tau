@@ -53,7 +53,9 @@
 (* The model is untimed: the 5 s poll, the observation debounce and the    *)
 (* worker round trips are steps. What an operation writes is the root it   *)
 (* adds or removes; thumbnails, metadata, cloud projects and the workspace *)
-(* connection handshake are abstracted away.                               *)
+(* connection handshake are abstracted away. A project's root stands for   *)
+(* every directory that carries its id: a delete removes one directory,    *)
+(* and the root goes only when no other copy remains (`Applied`).          *)
 (***************************************************************************)
 \* A2 (app state orchestration): the project-manager and workspace-connection actors moved into the
 \* `ProjectLibrary` service, which the runtime starts. Discovery, recovery and route access still run in
@@ -96,6 +98,109 @@
 \* to `@taucad/files-ui`; the four sources only re-point their imports. No action or correspondence changes.
 \* Project name fit (2026-11-16): `ProjectCommands` keeps a generated name's first line and fits it, and a duplicate's
 \* name, to the manifest's 200 code units before the create is journaled. No action or correspondence changes.
+\* W30 project lifecycle (2026-11-17): a listing takes a scope (`live`, `trash`, `all`) in place of
+\* `includeDeleted`, and a delete of a project no tab has open checks quiescence by leasing each chat's log
+\* lock and reading its log, instead of refusing until the project is opened. Both stay outside the model,
+\* as the registry and chat store reads did; the journal, apply and gate order is unchanged. No action or
+\* correspondence changes.
+\* Database recovery (WP9, 2026-11-17): when the journal store cannot open (`VersionError`, a blocked upgrade, an open
+\* timeout or `UnknownError`), `ProjectLibrary` lists discovery alone, answers route access from disk, and refuses a
+\* mutation before it is journaled. That state is outside the model; no action or correspondence changes.
+\* Folder states and Locate (WP3, WP4, 2026-11-17): the workspace commands read a picked folder's evidence for
+\* Locate, which re-binds a moved workspace's project bindings in one transaction, and Remove from Tau drops a lost
+\* folder's workspace row. Both act on the workspace store, outside the model; no action or correspondence changes.
+\* DC-10 files-ui slice 5 (2026-11-17): the three library machines, `project-library.types`,
+\* `pending-project-operation.types`, `project-url.utils` and `project-name.utils` moved to `@taucad/files-ui`; the
+\* four library sources only re-point (and rewrap) their imports. No action or correspondence changes.
+\* DC-10 files-ui slice 6 (2026-11-18): `project-library-storage` and `project-library-observations` moved to
+\* `@taucad/files-ui` behind structural facade, object-store and chat-store types; `use-project-manager.tsx` and the
+\* three runtime sources re-point their imports, and the app's facade type is now `ProjectLibraryFacade`. No action or
+\* correspondence changes.
+\* DC-10 files-ui slice 7 (2026-11-18): `project-library-workspace`, the workspace connection machine and
+\* `project-library-chat-logs` moved to `@taucad/files-ui`. The machine reports its first fault through an injected
+\* `reportFault` service, which `ProjectLibrary` binds to the app's runtime fault reporter; the workspace commands read
+\* the facade and journal through structural types. The other sources re-point their imports. No action or
+\* correspondence changes.
+\* DC-10 files-ui slice 8 (2026-11-18): the project-manager machine moved to `@taucad/files-ui`. It starts the
+\* object-store worker through an injected `startObjectStore` and reports through injected `reportFault` and
+\* `reportWorkerFailed` services, which `ProjectLibrary` binds to the app's worker factory and reporters; the library
+\* reads the started store back as its worker (`runtime/project-library.ts` re-reviewed in its final form, with the
+\* typed read-back). `use-project-manager.tsx` re-points a type import. No action or correspondence changes.
+\* Tau Cloud naming audit (2026-11-18): `project-library-commands.ts` rewords a refusal sentence; copy only.
+\* No action or correspondence changes.
+\* DC-10 files-ui slice 9 (2026-11-19): `ProjectLibrary` and `ProjectCommands` moved to `@taucad/files-ui`
+\* (`runtime/project-library.ts`, `runtime/project-library-commands.ts`), generic over the worker, facade and
+\* projection types. What only the app supplies arrives as injected services: the worker start, the reporters, the
+\* build-skew write stop, the chat store, the legacy listing clear, the project templates and kernel lock files, the
+\* initial user message, the Tau Cloud backup intent and the projection's catch-up. The app keeps a binding at
+\* `apps/ui/app/runtime/project-library.ts` that passes them. Every port, journal, apply and gate call keeps its order;
+\* `use-project-manager.tsx` re-points imports. No action or correspondence changes.
+\* DC-10 files-ui slice 10 (2026-11-19): the project manager's provider moved to `@taucad/files-ui`
+\* (`hooks/project-manager-provider.tsx`, its context in `hooks/use-project-manager.ts`), with the chat permission
+\* modes, the project-name client and the first-project tour as injected services; `use-project-manager.tsx` is now
+\* the app's binding. Every library command and read keeps its order. No action or correspondence changes.
+\* PL7 staging defects FP9 (2026-11-20): `project-library-commands.ts` loads the settled chat-log lease through the
+\* code-loading owner (`loadCode`), which hands a failed load to the page's recovery; the import and every command keep
+\* their order. No action or correspondence changes.
+\* Auto-bring on sign-in removed (2026-11-20): `project-library-commands.ts` stops naming that setting in two
+\* comments; comments only. No action or correspondence changes.
+\* Layering W5 (2026-11-21): the project library (the three library machines, the project-manager machine, the
+\* service, its commands, storage, observations and workspace commands, the provider and listing hooks, and their
+\* types) moved unchanged from `@taucad/files-ui` to `@taucad/project-library`; the sources re-point their imports
+\* of the files-ui modules that stayed. No action or correspondence changes.
+\* W0 copy delete (2026-11-24): a permanent delete removes one exact directory, the copy the person chose or the one
+\* the route binds. When it settles while another directory still carries the project id (`settleCopyDelete` in
+\* `project-library-storage.ts`), the project lives on there, so the settled "delete" row leaves the project's root;
+\* only the last copy's delete removes it. Whether a copy remains is decided when the row settles, not by the row's
+\* `copy` flag: a row journaled with `copy: true` removes the root if the other copy went meanwhile, and one journaled
+\* without it keeps the root if another copy appeared. The flag only turns a directory found already gone into a
+\* conflict or not, a failure the model already allows. The model keeps no directories, so a settled "delete" row,
+\* this tab's or another tab's, now removes the root or leaves it (`Applied`), and `Ops` needs no third operation. The
+\* gate (`MutationJournaled`, `HeldActive`), the journal-then-apply order and recovery are unchanged; every invariant
+\* and property is unchanged and is checked over the larger set of behaviours.
+\* Fast-path FW1 (2026-11-25): mutations that change no disk fact stop scanning. Trash, Restore and every chat
+\* create, delete, purge and recency touch re-enrich the current pass's listing and write it only while that pass's
+\* epoch is current, as a workspace catalog's publish already does, instead of refetching or bumping the epoch; a
+\* removed bump is one `EpochBumped` the environment no longer takes, and the listing's projects come only from a
+\* pass. A permanent delete's precheck reads its target and root statuses from the current pass (`discover` with
+\* `reuse`) and proves another copy with `verifyProjectRoute`, scanning only for a copy no route binds; it runs
+\* before `MutationJournaled`, which is unchanged. The refetches after a delete's and a duplicate's settle go: the
+\* settled row's `Bump` already owes the pass (`project-library-commands.ts` re-reviewed in its final form). No action
+\* or correspondence changes.
+\* Name ahead C1 (2026-11-26): a kernel create starts its name request before the worker, storage and template
+\* awaits and awaits it at directory allocation, before anything is journaled; `namingImageUrls` is exported. The
+\* journal, apply and gate order is unchanged. A caller's `projectName` may be a promise, awaited at the same point.
+\* No action or correspondence changes.
+\* FW1 over C1 (2026-11-26): `project-library-commands.ts` re-reviewed with both changes in it, C1's name request
+\* started ahead of a kernel create and FW1's scan-free commands and permanent-delete precheck; they touch different
+\* commands and merged without overlap. No action or correspondence changes.
+\* FW1 review (2026-11-26): the permanent-delete precheck counts a route verification as proof of another copy only
+\* when the directory it read, which the verification now names (an older authority names none: no proof), is the
+\* copy the precheck chose and not the target; a "Use this folder" that moves the route in between leaves `copy`
+\* unset, the stricter Trash check. Overlapping `refreshListingRows` calls of one pass publish only the latest call's
+\* listing. Both sit before `MutationJournaled` or outside the gate, which are unchanged. No action or correspondence
+\* changes.
+\* Fast-path FW2 (2026-11-26, the discovery index; index-contract review A1 and A6): a pass reads the authority's
+\* index, which may lag storage. `stale` holds the projects whose presence the index has wrong, flipped by a change no
+\* evidence reported (`EnvChangedUnheard`) and cleared by evidence (`EvidenceArrived`, the environment's, with no
+\* fairness), by this tab's audit (`Audited`, weakly fair under `IndexLiveSpec`), by a settled row, a heard change, a
+\* reload or the workspace's return. A pass sees `Seen`, storage with `stale` flipped. `kept` is the ids this device
+\* holds state for: a pass at the current epoch adds what it saw, and a settled delete and the pass's orphan sweep
+\* remove an id only on `AbsenceProof`'s answer, `verifyAbsent`'s read of storage or (the witness) the index. An access
+\* read that finds storage and the index disagreeing feeds the index (`VerifyFeedsIndex`). `CatalogReflectsStorage`
+\* becomes `CatalogWithinStale`, which is it when `stale` is empty; `NoReclaimWhileCopy`, `ContradictionIsEvidence` and
+\* `CatalogEventuallyCurrent` are new; `AccessMatchedById` lets the epoch move another question's reads in the step a
+\* reply feeds the index. With `MaxUnheard = 0` no new action is enabled and every earlier verdict stands. The code:
+\* `remainingCopiesAfterDelete`, the orphan sweep, adopt and the orphaned-route release ask `verifyAbsent`
+\* (`project-library-storage.ts`, `project-library-commands.ts` re-reviewed in their final form).
+\* FW2 code (2026-11-26): `project-library.ts` hands the orphan sweep `verifyAbsent`, and `project-library-commands.ts`
+\* passes adopt's remembered id to the authority, which decides under `project:<id>`, and asks `verifyAbsent` before
+\* the orphaned-route release; `remainingCopiesAfterDelete` proves the route's copy by the directory it names or asks
+\* `verifyAbsent`. That is `AbsenceProof = "storage"`; no action or correspondence changes.
+\* FW2 review (2026-11-26): the permanent-delete precheck proves a copy no route binds with `verifyAbsent` (a `present`
+\* answer naming another directory) instead of a pass, which reads the index (B1); `project-library.ts` remembers an
+\* orphan nominee's undecided proof until the listing changes (M4). Both read storage, `AbsenceProof = "storage"`; the
+\* precheck runs before `MutationJournaled`. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids
@@ -120,7 +225,11 @@ CONSTANTS Projects,        \* project ids
                            \* query cache a step later, as getProjectListing does today; "none": no check
           AccessLoop,      \* "target": every answer fenced; "today": getProjectRouteAccess as written
           AccessMatch,     \* "gen": a reply counts only for its question's current generation; "id": by id alone
-          Labelled         \* TRUE: `act` names each step, for the graph export
+          Labelled,        \* TRUE: `act` names each step, for the graph export
+          MaxUnheard,      \* storage changes no evidence reports to the index (FW2): a lost fact, an offline edit
+          AbsenceProof,    \* "storage": a reclaim asks `verifyAbsent`, a read of storage; "index": it trusts the index
+          VerifyFeedsIndex,\* TRUE: an access read that contradicts the index corrects it and owes a pass
+          AuditOn          \* TRUE: this tab's audit re-reads what the index holds (`Audited`)
 
 ASSUME /\ InitRows \subseteq Rows
        /\ Ops \subseteq {"create", "delete"} /\ Ops # {}
@@ -133,6 +242,9 @@ ASSUME /\ InitRows \subseteq Rows
        /\ AccessLoop \in {"target", "today"}
        /\ AccessMatch \in {"gen", "id"}
        /\ AccessLoop = "today" => Reads = 2
+       /\ MaxUnheard \in Nat
+       /\ AbsenceProof \in {"storage", "index"}
+       /\ VerifyFeedsIndex \in BOOLEAN /\ AuditOn \in BOOLEAN
 
 None == "none"
 MaxAttempts == 3
@@ -155,10 +267,12 @@ VARIABLES
   replies,     \* access reads in flight, each a reply tagged {id, gen}
   deliveries,  \* ghost: answers delivered to each question, per generation
   n,           \* bounds: mutations, crashes, stops, bumps, env changes, env rows, env settles, losses
-  act          \* the step's label, for the graph export; constant unless Labelled
+  act,         \* the step's label, for the graph export; constant unless Labelled
+  stale,       \* the projects whose presence the authority's discovery index has wrong (FW2)
+  kept         \* durable: the ids this device holds state for (library rows, chats index, editor layout)
 
 vars == <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, held, stopped, skipped, redo, rec, acc, replies,
-          deliveries, n, act>>
+          deliveries, n, act, stale, kept>>
 
 Label(l) == IF Labelled THEN l ELSE "-"
 
@@ -181,11 +295,19 @@ NotHeld == [st |-> "none", cur |-> FALSE, seen |-> NoListing]
 NoQuestion == [st |-> "unasked", p |-> None, gen |-> 0, k |-> 0, cur |-> FALSE, rs |-> FALSE, val |-> None,
                ans |-> None]
 Bounds == [mut |-> 0, crash |-> 0, stop |-> 0, bump |-> 0, poll |-> 0, change |-> 0, add |-> 0, settle |-> 0, loss |-> 0,
-           ask |-> 0]
+           ask |-> 0, unheard |-> 0]
 
 \* What a read of storage sees: nothing of the workspace's roots while it is away.
 Visible == IF ws = "available" THEN [ok |-> TRUE, roots |-> storage] ELSE NoListing
-Apply(o, p, s) == IF o = "create" THEN s \cup {p} ELSE s \ {p}
+SymDiff(a, b) == (a \ b) \cup (b \ a)
+\* What a pass sees (FW2): the authority's index, storage with the presence of every stale project flipped.
+Seen == IF ws = "available" THEN [ok |-> TRUE, roots |-> SymDiff(storage, stale)] ELSE NoListing
+\* Whether a reclaim may treat p as gone, by `AbsenceProof`: `verifyAbsent` reads every directory under p's lock, so
+\* it answers from storage s, and only while every root is available; the index answers from what a pass saw.
+Absent(p, seen, s) == IF AbsenceProof = "storage" THEN ws = "available" /\ p \notin s ELSE p \notin seen.roots
+\* The roots a settled row of operation o on p may leave: a create adds p; a delete removes one directory of p, so p's
+\* root goes when that was its last copy and stays while another directory carries the id (W0).
+Applied(o, p, s) == IF o = "create" THEN {s \cup {p}} ELSE {s \ {p}, s}
 FreeRow == CHOOSE r \in Rows : rowProj[r] = None
 HasFreeRow == \E r \in Rows : rowProj[r] = None
 HeldActive(p) == \E r \in Rows : rowProj[r] = p /\ rec[r].st \in Active
@@ -225,6 +347,8 @@ Init ==
   /\ deliveries = [q \in Questions |-> [g \in 0..MaxAsks |-> 0]]
   /\ n = Bounds
   /\ act = Label("Init")
+  /\ stale = {}
+  /\ kept = {}
 
 -----------------------------------------------------------------------------
 (* Discovery *)
@@ -236,18 +360,22 @@ PassStarted ==
   /\ pass.st = "idle"
   /\ owed \/ n.poll < MaxPolls
   /\ n' = IF owed THEN n ELSE [n EXCEPT !.poll = @ + 1]
-  /\ pass' = [st |-> "reading", cur |-> TRUE, seen |-> Visible]
+  /\ pass' = [st |-> "reading", cur |-> TRUE, seen |-> Seen]
   /\ held' = [held EXCEPT !.cur = FALSE]
   /\ acc' = [q \in Questions |-> [acc[q] EXCEPT !.cur = FALSE]]
   /\ owed' = FALSE
   /\ redo' = FALSE
   /\ act' = Label("PassStarted")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, stopped, skipped, rec, replies, deliveries>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, stopped, skipped, rec, replies, deliveries, stale, kept>>
 
 \* The pass settles and publishes what it read. During a write stop it skips its writes (DF20) and says
-\* so.
+\* so. At the current epoch over a complete listing it keeps state for what it saw, and its orphan sweep drops the
+\* state of a kept id it did not see once `AbsenceProof` says no directory carries it (FW2).
 PassSettled ==
   /\ pass.st = "reading"
+  /\ kept' = IF pass.cur /\ pass.seen.ok
+               THEN {p \in kept \cup pass.seen.roots : p \in pass.seen.roots \/ ~Absent(p, pass.seen, storage)}
+               ELSE kept
   /\ skipped' = (skipped \/ stopped)
   /\ pass' = Idle
   /\ CASE CatalogFence = "pass" ->
@@ -260,7 +388,7 @@ PassSettled ==
             /\ catalog' = pass.seen
             /\ held' = held
   /\ act' = Label("PassSettled")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, stopped, redo, rec, acc, replies, deliveries, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, stopped, redo, rec, acc, replies, deliveries, n, stale>>
 
 \* CatalogFence = "ref" only: the listing the epoch check let through reaches the query cache.
 CatalogApplied ==
@@ -268,7 +396,8 @@ CatalogApplied ==
   /\ catalog' = held.seen
   /\ held' = NotHeld
   /\ act' = Label("CatalogApplied")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, stopped, skipped, redo, rec, acc, replies, deliveries, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, stopped, skipped, redo, rec, acc, replies, deliveries, n,
+                 stale, kept>>
 
 \* An invalidation with no change behind it: a manifest event, a root-configuration broadcast.
 EpochBumped ==
@@ -276,7 +405,8 @@ EpochBumped ==
   /\ n' = [n EXCEPT !.bump = @ + 1]
   /\ Bump
   /\ act' = Label("EpochBumped")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, deliveries>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, deliveries, stale,
+                 kept>>
 
 WriteStopBegan ==
   /\ ~stopped
@@ -285,7 +415,8 @@ WriteStopBegan ==
   /\ n' = [n EXCEPT !.stop = @ + 1]
   /\ act' = Label("WriteStopBegan")
   /\ UNCHANGED held
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, skipped, redo, rec, acc, replies, deliveries>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, skipped, redo, rec, acc, replies, deliveries,
+                 stale, kept>>
 
 \* DF20: when the stop lifts after a skipped pass, invalidate and owe a fresh pass.
 WriteStopEnded ==
@@ -297,7 +428,7 @@ WriteStopEnded ==
             /\ Bump
        ELSE UNCHANGED <<skipped, redo, owed, pass, held, acc>>
   /\ act' = Label("WriteStopEnded")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, rec, replies, deliveries, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, rec, replies, deliveries, n, stale, kept>>
 
 -----------------------------------------------------------------------------
 (* Mutations and recovery *)
@@ -318,7 +449,7 @@ MutationJournaled(p, o) ==
   /\ RecoveryStarts(p)
   /\ act' = Label("MutationJournaled")
   /\ UNCHANGED held
-  /\ UNCHANGED <<storage, ws, owed, pass, catalog, stopped, skipped, redo, replies, deliveries>>
+  /\ UNCHANGED <<storage, ws, owed, pass, catalog, stopped, skipped, redo, replies, deliveries, stale, kept>>
 
 \* The recovery loop replays one journal row at a time.
 ReplayStarted(r) ==
@@ -328,25 +459,34 @@ ReplayStarted(r) ==
   /\ RecoveryStarts(rowProj[r])
   /\ act' = Label("ReplayStarted")
   /\ UNCHANGED held
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, replies, deliveries, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, replies, deliveries, n,
+                 stale, kept>>
 
 Outcomes == IF ws = "unavailable" THEN {"workspace"} ELSE {"ok", "terminal"}
 
 \* A replay, or a mutation applying its own row (MutationApplied), settles. `settleRecovery` and
-\* `resumePendingProjectOperation`: success removes the row; any failure marks it failed with its reason
-\* and invalidates. A terminal row is never replayed in this tab, so the model keeps no attempts for it
+\* `resumePendingProjectOperation`: success removes the row and applies it (`Applied`); any failure marks
+\* it failed with its reason and invalidates. A terminal row is never replayed in this tab, so the model keeps no attempts for it
 \* (today `recoveryAttemptsRef` keeps them, and nothing reads them again); a row that failed with
 \* `workspace-unavailable` keeps its attempts and waits for WorkspaceReturned. Only the recovery loop's
 \* replays count an attempt (ReplayStarted, `settleRecovery`); a mutation's own settle counts none.
+\* A settled row read its project's directory, so the index holds it as it is (FW2). A settled delete reclaims the
+\* id's device state when `AbsenceProof` says no directory still carries it, read after the delete: `verifyAbsent`
+\* holds `project:<id>`, which every Tau writer of the id takes, so the step is atomic for them.
 ReplaySettled(r) ==
   /\ rec[r].st = "replaying"
   /\ \E out \in Outcomes :
+     \E s \in IF out = "ok" THEN Applied(rowOp[r], rowProj[r], storage) ELSE {storage} :
        /\ rec' = [rec EXCEPT ![r] =
                     CASE out = "ok" -> [Unseen EXCEPT !.st = "recovered"]
                       [] out = "terminal" -> [Unseen EXCEPT !.st = "failed", !.why = "terminal"]
                       [] out = "workspace" -> [@ EXCEPT !.st = "failed", !.why = "workspace", !.via = "journal"]]
        /\ journal' = IF out = "ok" THEN journal \ {r} ELSE journal
-       /\ storage' = IF out = "ok" THEN Apply(rowOp[r], rowProj[r], storage) ELSE storage
+       /\ storage' = s
+       /\ stale' = IF out = "ok" THEN stale \ {rowProj[r]} ELSE stale
+       /\ kept' = IF out = "ok" /\ rowOp[r] = "delete"
+                      /\ Absent(rowProj[r], [ok |-> TRUE, roots |-> SymDiff(s, stale')], s)
+                   THEN kept \ {rowProj[r]} ELSE kept
   /\ Bump
   /\ act' = Label(IF rec[r].via = "mutation" THEN "MutationApplied" ELSE "ReplaySettled")
   /\ UNCHANGED <<rowProj, rowOp, ws, catalog, stopped, skipped, redo, replies, deliveries, n>>
@@ -357,7 +497,7 @@ PersonDiscarded(r) ==
   /\ journal' = journal \ {r}
   /\ Bump
   /\ act' = Label("PersonDiscarded")
-  /\ UNCHANGED <<storage, rowProj, rowOp, ws, catalog, stopped, skipped, redo, replies, deliveries, n>>
+  /\ UNCHANGED <<storage, rowProj, rowOp, ws, catalog, stopped, skipped, redo, replies, deliveries, n, stale, kept>>
 
 \* The workspace's roots become unreadable; the watch reports it as an invalidation.
 WorkspaceLost ==
@@ -367,21 +507,24 @@ WorkspaceLost ==
   /\ n' = [n EXCEPT !.loss = @ + 1]
   /\ Bump
   /\ act' = Label("WorkspaceLost")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, catalog, stopped, skipped, redo, rec, replies, deliveries>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, catalog, stopped, skipped, redo, rec, replies, deliveries, stale, kept>>
 
 \* A re-pick republishes the route configuration: an invalidation, and `retryFailedRecoveries` settles
-\* every row that failed with `workspace-unavailable` again, unless it has made its third attempt.
+\* every row that failed with `workspace-unavailable` again, unless it has made its third attempt. A re-admitted
+\* root is read from storage, so the index is current again (FW2).
 WorkspaceReturned ==
   /\ ws = "unavailable"
   /\ ws' = "available"
   /\ rec' = [r \in Rows |-> IF rec[r].st = "failed" /\ rec[r].why = "workspace" /\ rec[r].att < MaxAttempts
                              THEN [rec[r] EXCEPT !.st = "waiting", !.why = "none"] ELSE rec[r]]
   /\ Bump
+  /\ stale' = {}
   /\ act' = Label("WorkspaceReturned")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, catalog, stopped, skipped, redo, replies, deliveries, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, catalog, stopped, skipped, redo, replies, deliveries, n, kept>>
 
 \* This tab reloads: it keeps storage and the journal, reads every journal row again as waiting with no
-\* attempts, and loses its pass, catalog, write-stop flags and open questions.
+\* attempts, and loses its pass, catalog, write-stop flags and open questions. Its index is volatile: the next pass
+\* reads every directory from storage (FW2). Device state is durable.
 Crash ==
   /\ n.crash < MaxCrashes
   /\ n' = [n EXCEPT !.crash = @ + 1]
@@ -396,19 +539,22 @@ Crash ==
   /\ acc' = [q \in Questions |-> IF acc[q].st \in Open
                                  THEN [NoQuestion EXCEPT !.st = "lost", !.p = acc[q].p, !.gen = acc[q].gen]
                                  ELSE acc[q]]
+  /\ stale' = {}
   /\ act' = Label("Crash")
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, replies, deliveries>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, replies, deliveries, kept>>
 
 -----------------------------------------------------------------------------
 (* The environment: other tabs *)
 
+\* Another tab changes a root and this tab hears it: its index takes the named directory (FW2).
 EnvChangedStorage(p) ==
   /\ n.change < MaxEnvChange
   /\ n' = [n EXCEPT !.change = @ + 1]
   /\ storage' = IF p \in storage THEN storage \ {p} ELSE storage \cup {p}
+  /\ stale' = stale \ {p}
   /\ Bump
   /\ act' = Label("EnvChangedStorage")
-  /\ UNCHANGED <<journal, rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, deliveries>>
+  /\ UNCHANGED <<journal, rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, deliveries, kept>>
 
 EnvAddedRow(p, o) ==
   /\ n.add < MaxEnvAdd
@@ -420,7 +566,7 @@ EnvAddedRow(p, o) ==
        /\ journal' = journal \cup {r}
   /\ act' = Label("EnvAddedRow")
   /\ UNCHANGED held
-  /\ UNCHANGED <<storage, ws, owed, pass, catalog, stopped, skipped, redo, rec, acc, replies, deliveries>>
+  /\ UNCHANGED <<storage, ws, owed, pass, catalog, stopped, skipped, redo, rec, acc, replies, deliveries, stale, kept>>
 
 EnvSettledRow(r) ==
   /\ n.settle < MaxEnvSettle
@@ -428,10 +574,32 @@ EnvSettledRow(r) ==
   /\ EnvSettlesReplaying \/ rec[r].st # "replaying"
   /\ n' = [n EXCEPT !.settle = @ + 1]
   /\ journal' = journal \ {r}
-  /\ storage' = Apply(rowOp[r], rowProj[r], storage)
+  /\ storage' \in Applied(rowOp[r], rowProj[r], storage)
+  /\ stale' = stale \ {rowProj[r]}
   /\ Bump
   /\ act' = Label("EnvSettledRow")
-  /\ UNCHANGED <<rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, deliveries>>
+  /\ UNCHANGED <<rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, deliveries, kept>>
+
+\* A root changes and no evidence reaches this tab's index: a lost notice, an observer that stopped, an edit while
+\* the folder was away (FW2). The index now has p's presence wrong, and no epoch moves.
+EnvChangedUnheard(p) ==
+  /\ n.unheard < MaxUnheard
+  /\ n' = [n EXCEPT !.unheard = @ + 1]
+  /\ storage' = IF p \in storage THEN storage \ {p} ELSE storage \cup {p}
+  /\ stale' = IF p \in stale THEN stale \ {p} ELSE stale \cup {p}
+  /\ act' = Label("EnvChangedUnheard")
+  /\ UNCHANGED <<journal, rowProj, rowOp, ws, owed, pass, catalog, held, stopped, skipped, redo, rec, acc, replies,
+                 deliveries, kept>>
+
+\* Late evidence reaches the index (a poll, a late observer record) and moves the epoch. The environment's: no
+\* fairness.
+EvidenceArrived(p) ==
+  /\ ws = "available"
+  /\ p \in stale
+  /\ stale' = stale \ {p}
+  /\ Bump
+  /\ act' = Label("EvidenceArrived")
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, deliveries, n, kept>>
 
 -----------------------------------------------------------------------------
 (* Route access *)
@@ -448,7 +616,7 @@ AccessAsked(q, p) ==
   /\ act' = Label("AccessAsked")
   /\ UNCHANGED held
   /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec,
-                 replies, deliveries>>
+                 replies, deliveries, stale, kept>>
 
 AccessCancelled(q) ==
   /\ acc[q].st \in Open
@@ -458,7 +626,7 @@ AccessCancelled(q) ==
   /\ act' = Label("AccessCancelled")
   /\ UNCHANGED held
   /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec,
-                 replies, deliveries>>
+                 replies, deliveries, stale, kept>>
 
 \* Answer question q. The caller says what becomes of the replies.
 Deliver(q, a) ==
@@ -487,7 +655,7 @@ AccessTop(q) ==
             /\ Send(q)
             /\ act' = Label("AccessRead")
   /\ UNCHANGED held
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec, n, stale, kept>>
 
 \* A later read starts (`ensureProjectLibraryState`, `getProjectFileSystemConfig`).
 AccessNextRead(q) ==
@@ -496,7 +664,7 @@ AccessNextRead(q) ==
   /\ Send(q)
   /\ act' = Label("AccessRead")
   /\ UNCHANGED held
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec, n>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec, n, stale, kept>>
 
 \* Target: an answer is delivered only after its last read, and only when every read was taken at the
 \* current epoch and no recovery row for the project started since the first; otherwise read again.
@@ -533,15 +701,49 @@ TodayReadDone(m) ==
 \* A reply counts for the question it answers: "gen" by id and generation, "id" by id alone.
 Matches(m) == acc[m.id].st = "reading" /\ (AccessMatch = "id" \/ m.gen = acc[m.id].gen)
 
+\* The first read of a question reads the project's directory (`verifyProjectRoute`); its discovery branch is a pass,
+\* which reads the index. They contradict each other while the index has the project wrong (FW2).
+Contradicts(m) == Matches(m) /\ acc[m.id].k = 1 /\ ws = "available" /\ m.p \in stale
+
+\* A read that contradicts the index. With `VerifyFeedsIndex` the authority writes what it read into the index and the
+\* discovery change moves the epoch, so the question reads again behind a pass; without it the question reads again
+\* against the same index.
+ContradictionRead(m) ==
+  LET q == m.id
+      again == [NoQuestion EXCEPT !.st = "asking", !.p = acc[q].p, !.gen = acc[q].gen]
+  IN /\ IF VerifyFeedsIndex
+          THEN /\ stale' = stale \ {m.p}
+               /\ owed' = TRUE
+               /\ pass' = [pass EXCEPT !.cur = FALSE]
+               /\ held' = NotHeld
+               /\ acc' = [x \in Questions |-> IF x = q THEN again ELSE [acc[x] EXCEPT !.cur = FALSE]]
+          ELSE /\ acc' = [acc EXCEPT ![q] = again]
+               /\ UNCHANGED <<stale, owed, pass, held>>
+     /\ deliveries' = deliveries
+     /\ act' = Label("AccessContradiction")
+
 \* A read completes. A reply that matches no reading question is dropped.
 AccessReadDone(m) ==
   /\ replies' = replies \ {m}
-  /\ IF Matches(m)
-       THEN IF AccessLoop = "target" THEN TargetReadDone(m) ELSE TodayReadDone(m)
-       ELSE /\ UNCHANGED <<acc, deliveries>>
-            /\ act' = Label("AccessStaleReply")
-  /\ UNCHANGED held
-  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, rec, n>>
+  /\ IF Contradicts(m)
+       THEN ContradictionRead(m)
+       ELSE /\ IF Matches(m)
+                 THEN IF AccessLoop = "target" THEN TargetReadDone(m) ELSE TodayReadDone(m)
+                 ELSE /\ UNCHANGED <<acc, deliveries>>
+                      /\ act' = Label("AccessStaleReply")
+            /\ UNCHANGED <<held, owed, pass, stale>>
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, n, kept>>
+
+\* This tab's audit re-reads a directory the index has wrong, with no evidence asking it to, and moves the epoch (FW2,
+\* index-contract review A4). It reads storage, so not while the workspace is away.
+Audited(p) ==
+  /\ AuditOn
+  /\ ws = "available"
+  /\ p \in stale
+  /\ stale' = stale \ {p}
+  /\ Bump
+  /\ act' = Label("Audited")
+  /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, catalog, stopped, skipped, redo, rec, replies, deliveries, n, kept>>
 
 -----------------------------------------------------------------------------
 
@@ -554,9 +756,10 @@ TabNext ==
   \/ \E q \in Questions : AccessTop(q) \/ AccessNextRead(q) \/ AccessCancelled(q)
   \/ \E m \in replies : AccessReadDone(m)
   \/ \E q \in Questions, p \in Projects : AccessAsked(q, p)
+  \/ \E p \in Projects : Audited(p)
 
 EnvNext ==
-  \/ \E p \in Projects : EnvChangedStorage(p)
+  \/ \E p \in Projects : EnvChangedStorage(p) \/ EnvChangedUnheard(p) \/ EvidenceArrived(p)
   \/ \E p \in Projects, o \in Ops : EnvAddedRow(p, o)
   \/ \E r \in Rows : EnvSettledRow(r)
 
@@ -571,6 +774,9 @@ Fairness ==
   /\ WF_vars(PassStarted) /\ WF_vars(PassSettled) /\ WF_vars(CatalogApplied)
 
 LiveSpec == Spec /\ Fairness
+
+\* FW2: the audit is this tab's own action and carries the fairness that evidence, the environment's, cannot.
+IndexLiveSpec == LiveSpec /\ \A p \in Projects : WF_vars(Audited(p))
 
 \* Projects are interchangeable; safety configurations may declare SYMMETRY ProjectSymmetry.
 ProjectSymmetry == Permutations(Projects)
@@ -597,6 +803,8 @@ TypeOK ==
                           /\ acc[q].gen \in 0..MaxAsks
   /\ replies \subseteq [id : Questions, gen : 0..MaxAsks, p : Projects]
   /\ deliveries \in [Questions -> [0..MaxAsks -> Nat]]
+  /\ stale \subseteq Projects
+  /\ kept \subseteq Projects
 
 \* I7. The catalog is replaced only by a pass whose epoch equals the current epoch. A reload, which
 \* forgets the catalog, replaces nothing.
@@ -648,7 +856,10 @@ Settled == /\ pass.st = "idle"
            /\ held.st = "none"
            /\ \A r \in Rows : rec[r].st # "replaying"
            /\ ~owed
-CatalogReflectsStorage == Settled => catalog = Visible
+\* FW2: the catalog differs from storage at most in the projects the index has wrong. With `stale` empty this is the
+\* former `CatalogReflectsStorage`, `Settled => catalog = Visible`.
+CatalogWithinStale ==
+  Settled => IF ws = "available" THEN catalog.ok /\ SymDiff(catalog.roots, storage) \subseteq stale ELSE catalog = Visible
 
 \* I4, D10. An answer is delivered only for the current epoch, from reads all taken at it, with no
 \* recovery row for the project started since the first of them; it is recovering or recovery-failed
@@ -665,9 +876,12 @@ AccessAnswerFenced ==
 \* I18. A reply changes only its own question, and only while that question is reading under the reply's
 \* generation and about the reply's project; an answer is delivered at most once per question {id,
 \* generation}, to the question open under that id and generation.
+\* FW2: a reply that feeds the index moves the epoch, which may also make another question's reads stale; that is the
+\* epoch's change, not the reply's.
 AccessMatchedById ==
   [][/\ \A m \in replies \ replies', x \in Questions :
-          acc'[x] # acc[x] => (x = m.id /\ acc[x].st = "reading" /\ m.gen = acc[x].gen /\ m.p = acc[x].p)
+          acc'[x] # acc[x] => \/ (x = m.id /\ acc[x].st = "reading" /\ m.gen = acc[x].gen /\ m.p = acc[x].p)
+                              \/ acc'[x] = [acc[x] EXCEPT !.cur = FALSE]
      /\ \A q \in Questions, g \in 0..MaxAsks :
           deliveries'[q][g] # deliveries[q][g] =>
             /\ deliveries'[q][g] = 1
@@ -684,5 +898,18 @@ RowSettled(r) == rec[r].st \in {"unseen", "recovered", "failed", "discarded"}
 RowsQuiescent == \A r \in Rows : RowSettled(r)
 Calm == ws = "available"
 RowEventuallySettled == <>[]Calm => <>[]RowsQuiescent
+
+\* S2, S11 (FW2). An id's device state is dropped only in a step after which no directory carries it.
+NoReclaimWhileCopy == [][\A p \in Projects : (p \in kept /\ p \notin kept') => p \notin storage']_vars
+
+\* Index-contract review F7. A read that finds storage and the index disagreeing leaves the project out of `stale` and
+\* a pass owed, so the pass the question then waits for reads the directory instead of answering from the same entry.
+ContradictionIsEvidence == [][\A m \in replies \ replies' : Contradicts(m) => (m.p \notin stale' /\ owed')]_vars
+
+\* Liveness (FW2). Under weak fairness of the audit, the replay and discovery (`IndexLiveSpec`), with the workspace
+\* available and the bounded environment quiet, the index comes to hold storage and the catalog to show it.
+\* Quiescence: `CatalogQuiescent`.
+CatalogQuiescent == stale = {} /\ Settled
+CatalogEventuallyCurrent == <>[]Calm => <>[](CatalogQuiescent /\ catalog = Visible)
 
 =============================================================================

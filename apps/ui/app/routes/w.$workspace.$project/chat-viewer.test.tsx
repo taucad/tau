@@ -7,6 +7,7 @@ import type { RefObject } from 'react';
 import { getLiveViewOptions, setLiveViewOptions } from '#workbench-records/live-view-options.js';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { WaitClockProvider } from '@taucad/ui/hooks/use-wait-clock';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { DockviewPanelApi } from 'dockview-react';
@@ -91,7 +92,14 @@ let mockFileTree: Map<string, { type: 'file' | 'dir'; name: string }>;
 let mockFileContent: { kind: string; text?: string };
 let mockMainEntryPath = 'main.scad';
 let mockSyncStatus: {
-  readonly sync: { readonly state: 'checking' | 'backedUp' };
+  readonly sync: {
+    readonly state: 'checking' | 'backedUp' | 'failed';
+    /** A cloud open's pull: fetching is its download, applying its preparing (option C). */
+    readonly pullPhase?: 'fetching' | 'applying';
+    readonly online?: boolean;
+  };
+  /** The remote, over the default connected one: a failed remote fails a cloud open. */
+  readonly remote?: Readonly<{ phase: 'connected' | 'failed' }>;
   /** The checkout's published readiness: before `materialized` the model's files are still being checked (D10, T6). */
   readonly readiness?: 'treeReady' | 'entryReady' | 'filled';
   /** A running or failed download of the model's large files. */
@@ -396,9 +404,11 @@ vi.mock('#services/part-thumbnail-visual.js', () => ({
 vi.mock('#hooks/use-cloud-projects.js', () => ({
   useTauCloudIntent: () => (mockSyncStatus.sync.state === 'checking' ? 'open' : undefined),
 }));
+/** Whether this account may open the cloud project; `false` is the sign-in failure. */
+let mockCanOpenCloudProject = true;
 vi.mock('#lib/tau-cloud-intent.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  canOpenCloudProject: () => true,
+  canOpenCloudProject: () => mockCanOpenCloudProject,
 }));
 
 vi.mock('#hooks/use-sessions.js', () => ({
@@ -412,8 +422,10 @@ vi.mock('#hooks/use-sessions.js', () => ({
   }),
 }));
 
+const mockSyncNow = vi.fn();
+const mockConnectRemote = vi.fn();
 vi.mock('#hooks/use-revision-status.js', () => ({
-  useRevisionCommands: () => ({ connectRemote: vi.fn(), syncNow: vi.fn() }),
+  useRevisionCommands: () => ({ connectRemote: mockConnectRemote, syncNow: mockSyncNow }),
   useRevisionClient: () => ({ send: mockRevisionClientSend }),
   useRevisionStatus: () => ({
     remote: { phase: 'connected' },
@@ -432,11 +444,11 @@ vi.mock('#hooks/use-revision-status.js', () => ({
 // directory placeholder branches
 // =============================================================================
 
-vi.mock('#hooks/use-file-tree.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({
   useFileTreeSelector: <T,>(select: (tree: typeof mockFileTree) => T): T => select(mockFileTree),
 }));
 
-vi.mock('#hooks/use-file-content.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: () => mockFileContent,
 }));
 
@@ -486,7 +498,7 @@ vi.mock('@taucad/viewer/cad/cad-viewer', () => ({
   },
 }));
 
-vi.mock('#components/files/file-selector.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-selector', () => ({
   FileSelector: ({ onSelect }: { readonly onSelect: (path: string) => void }) => (
     <button
       type='button'
@@ -558,40 +570,70 @@ vi.mock('#components/cad/ar-button.js', () => ({
 
 // `use-graphics` drags in three.js via screenshot/camera capability machines, so
 // stub the provider/hooks to avoid loading three under jsdom.
-vi.mock('@taucad/viewer/hooks/use-graphics', () => ({
-  GraphicsProvider: ({ children, seed }: { children: React.ReactNode; seed?: unknown }) => {
-    mockCameraSeed = seed;
-    mockGraphicsProviderMounts += 1;
-    return <div>{children}</div>;
-  },
-  useGraphics: () => mockGraphicsActor,
-  useGraphicsSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) => {
+vi.mock('@taucad/viewer/hooks/use-graphics', async () => {
+  const { createContext, useContext } = await import('react');
+  /* The provider's graphics actor, `undefined` while the view has none yet, as the real provider presents it. */
+  const ProvidedGraphics = createContext<unknown>(undefined);
+  const useMockGraphicsSelector = (
+    selector: (state: { context: Record<string, unknown> }) => unknown,
+    isPresent = true,
+    fallback?: unknown,
+  ): unknown => {
     const selectSnapshot = () =>
-      selector({
-        context: {
-          enableSurfaces: true,
-          enableLines: true,
-          enableGizmo: true,
-          enableGrid: true,
-          enableAxes: true,
-          enableMatcap: false,
-          upDirection: 'z',
-          isSectionViewActive: mockAreToolsRunning,
-          isMeasureActive: mockAreToolsRunning,
-          measurements: [],
-          artifact: mockGraphicsProjection.artifact,
-          artifactKey: mockGraphicsProjection.artifactKey,
-          gltfPresentation: mockGltfPresentation,
-        },
-      });
+      isPresent
+        ? selector({
+            context: {
+              enableSurfaces: true,
+              enableLines: true,
+              enableGizmo: true,
+              enableGrid: true,
+              enableAxes: true,
+              enableMatcap: false,
+              upDirection: 'z',
+              isSectionViewActive: mockAreToolsRunning,
+              isMeasureActive: mockAreToolsRunning,
+              measurements: [],
+              artifact: mockGraphicsProjection.artifact,
+              artifactKey: mockGraphicsProjection.artifactKey,
+              gltfPresentation: mockGltfPresentation,
+            },
+          })
+        : fallback;
     return useSyncExternalStore(subscribeGraphics, selectSnapshot, selectSnapshot);
-  },
-  useModelInteractionSelector: (selector: (state: { context: ModelInteractionContext }) => unknown) =>
-    selector({ context: createModelInteractionContext() }),
-  useKinematicsSelector: (
-    selector: (state: { context: { unitsById: Record<string, never>; revision: number } }) => unknown,
-  ) => selector({ context: { unitsById: {}, revision: 0 } }),
-}));
+  };
+  return {
+    GraphicsProvider: ({
+      children,
+      seed,
+      graphicsRef,
+    }: {
+      children: React.ReactNode;
+      seed?: unknown;
+      graphicsRef: unknown;
+    }) => {
+      mockCameraSeed = seed;
+      mockGraphicsProviderMounts += 1;
+      return (
+        <div>
+          <ProvidedGraphics.Provider value={graphicsRef}>{children}</ProvidedGraphics.Provider>
+        </div>
+      );
+    },
+    useGraphics: () => mockGraphicsActor,
+    useOptionalGraphics: () => useContext(ProvidedGraphics),
+    useGraphicsSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
+      useMockGraphicsSelector(selector),
+    useOptionalGraphicsSelector: (
+      selector: (state: { context: Record<string, unknown> }) => unknown,
+      fallback: unknown,
+    ) => useMockGraphicsSelector(selector, useContext(ProvidedGraphics) !== undefined, fallback),
+    useModelInteractionSelector: (selector: (state: { context: ModelInteractionContext }) => unknown) =>
+      selector({ context: createModelInteractionContext() }),
+    useKinematicsSelector: (
+      selector: (state: { context: { unitsById: Record<string, never>; revision: number } }) => unknown,
+    ) => selector({ context: { unitsById: {}, revision: 0 } }),
+  };
+});
 
 const { ChatViewer } = await import('./chat-viewer.js');
 
@@ -1226,7 +1268,10 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockSyncStatus = { sync: { state: 'checking' } };
     const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} />);
 
-    expect(screen.getByRole('region', { name: 'Connecting to Tau Cloud' })).toBeInTheDocument();
+    /* Option C: the stage is mounted from the first frame and the open's wait is its pill's words. */
+    expect(screen.getByTestId('chat-viewer-layout')).toHaveAttribute('data-slot', 'viewer-stage');
+    expect(document.querySelector('[data-slot="wait-indicator-body"]')).toHaveTextContent('Opening project…');
+    expect(screen.queryByRole('region', { name: 'Opening project…' })).not.toBeInTheDocument();
     expect(screen.queryByText('File not found')).not.toBeInTheDocument();
 
     act(() => {
@@ -1898,8 +1943,11 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     expect(screen.queryByRole('region', { name: 'Preparing model' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /reopen renderer/i })).not.toBeInTheDocument();
     expect(screen.getByTestId('cad-viewer-canvas-region')).toHaveAttribute('aria-busy', 'true');
-    /* The pill's words are laid out from the wait's start and revealed by CSS from 1,000 ms (UI Policy § 6). */
-    expect(document.querySelector('[data-slot="wait-indicator-body"]')).toHaveTextContent('Checking model files…');
+    /* The pill's words are laid out from the wait's start and revealed by CSS from 1,000 ms (UI Policy § 6). The open
+       waits for this first check, so the pill says the open's one label (Progressive Loading Policy rule 18). */
+    expect(document.querySelector('[data-slot="wait-indicator-body"]')).toHaveTextContent('Opening project…');
+    /* The open waits for it, so the route's announcement speaks for it: the pill is seen, not announced. */
+    expect(document.querySelector('[data-slot="wait-indicator"]')).not.toHaveAttribute('role');
     /* The geometry unit, and so the kernel, waits for the files: the stage creates none during the check. */
     expect(mockProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
   });
@@ -1929,14 +1977,12 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     expect(document.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('data-state', 'waiting');
   });
 
-  it('should read "Still checking model files" with "Try again" once the session reports the check slow', () => {
+  it('should read "Still opening project" with "Try again" once the session reports the open\'s check slow', () => {
     mockSyncStatus = checking;
     mockSessionAvailability = 'slow';
     renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    expect(document.querySelector('[data-slot="wait-indicator-body"]')).toHaveTextContent(
-      'Still checking model files…',
-    );
+    expect(document.querySelector('[data-slot="wait-indicator-body"]')).toHaveTextContent('Still opening project…');
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(mockRevisionClientSend).toHaveBeenCalledWith({
       command: 'retryLargeObjects',
@@ -1961,6 +2007,8 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     const pill = document.querySelector('[data-slot="wait-indicator-body"]');
     expect(pill).toHaveTextContent('Downloading model files…');
     expect(pill).toHaveTextContent('25%');
+    /* A wait after the open is its own group: the route's announcement is quiet, so the pill says it (rule 22). */
+    expect(document.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('role', 'status');
     expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Downloading model files' })).not.toBeInTheDocument();
   });
@@ -2134,5 +2182,437 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     expect(screen.queryByText('No model yet')).not.toBeInTheDocument();
     expect(screen.queryByText('No file selected')).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-viewer-layout')).toHaveAttribute('data-slot', 'viewer-stage');
+  });
+});
+
+describe('ChatViewer stage through a cloud open (cloud open loading states, option C)', () => {
+  const opening = { sync: { state: 'checking' } } as const;
+  const downloading = { sync: { state: 'checking', pullPhase: 'fetching' } } as const;
+  const preparing = { sync: { state: 'checking', pullPhase: 'applying' } } as const;
+  const downloadingWithNumbers = {
+    sync: { state: 'checking', pullPhase: 'fetching' },
+    largeObjects: {
+      phase: 'fetching',
+      objects: 189,
+      totalObjects: 295,
+      bytes: 44.8 * 1024 * 1024,
+      totalBytes: 70 * 1024 * 1024,
+      paths: [helperEntryPath],
+    },
+  } as const;
+  const landed = { sync: { state: 'backedUp' } } as const;
+  /* The wait clock reads the faked `Date`, so the pill's start and the caption's and slow marks share one timeline. */
+  const fakeClock = { now: (): number => Date.now() };
+
+  const renderOpen = (): ReturnType<typeof render> =>
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />, {
+      wrapper: ({ children }) => (
+        <WaitClockProvider clock={fakeClock}>
+          <MemoryRouter>
+            <KeyboardProvider>
+              <TooltipProvider>{children}</TooltipProvider>
+            </KeyboardProvider>
+          </MemoryRouter>
+        </WaitClockProvider>
+      ),
+    });
+  const pill = (): Element | undefined => document.querySelector('[data-slot="wait-indicator-body"]') ?? undefined;
+  const caption = (): Element | undefined => document.querySelector('[data-slot="viewer-wait-caption"]') ?? undefined;
+  const captionText = (): HTMLElement | undefined =>
+    document.querySelector<HTMLElement>('[data-slot="viewer-wait-caption-text"]') ?? undefined;
+  const slowCaption = (): HTMLElement | undefined =>
+    document.querySelector<HTMLElement>('[data-slot="viewer-wait-caption-slow"]') ?? undefined;
+  const slowDelay = (element: Element | undefined): string | undefined =>
+    element instanceof HTMLElement ? element.style.getPropertyValue('--wait-slow-delay') : undefined;
+  const detailDelay = (element: Element | undefined): string | undefined =>
+    element instanceof HTMLElement ? element.style.getPropertyValue('--wait-detail-delay') : undefined;
+  const advance = (milliseconds: number): void => {
+    act(() => {
+      vi.advanceTimersByTime(milliseconds);
+    });
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    mockGeometryUnits = new Map();
+    mockFileTree = new Map();
+    mockFileContent = { kind: 'orphaned' };
+    mockSyncListeners.clear();
+    mockSessionAvailability = 'settled';
+    mockCanOpenCloudProject = true;
+    mockSyncNow.mockClear();
+    mockConnectRemote.mockClear();
+    mockRevisionClientSend.mockClear();
+    mockProjectSend.mockClear();
+    mockViewGraphics.set('view-1', mockGraphicsActor);
+    mockMainEntryPath = 'main.scad';
+    mockGraphicsProjection = { artifact: undefined, artifactKey: undefined };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    mockSyncStatus = { sync: { state: 'backedUp' } };
+    mockViewSettings = {};
+  });
+
+  it('should keep one stage from the first frame through opening, downloading and preparing, the pill saying one label', () => {
+    mockSyncStatus = opening;
+    renderOpen();
+    const stage = screen.getByTestId('chat-viewer-layout');
+    expect(stage).toHaveAttribute('data-slot', 'viewer-stage');
+    expect(pill()).toHaveTextContent('Opening project…');
+    /* The pill is timed by the ladder: a fresh open reveals it 1,000 ms in (UI Policy § 6). */
+    expect(pill()).toHaveStyle({ '--wait-reveal-delay': '1000ms' });
+    expect(screen.getByTestId('cad-viewer-canvas-region')).toHaveAttribute('aria-busy', 'true');
+
+    /* One label for the whole open (Progressive Loading Policy rules 18 and 19): no step, device or transport words. */
+    const body = pill();
+    publishSyncStatus(downloading);
+    expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+    expect(pill()).toBe(body);
+    expect(document.querySelector('[data-slot="wait-indicator-label"]')).toHaveTextContent(/^Opening project…$/u);
+
+    publishSyncStatus(preparing);
+    expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+    expect(document.querySelector('[data-slot="wait-indicator-label"]')).toHaveTextContent(/^Opening project…$/u);
+    expect(stage).not.toHaveTextContent(/Downloading|Preparing|device/u);
+
+    /* No full-pane placeholder at any step, and no empty state before the files are known. */
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
+    expect(screen.queryByText('File not found')).not.toBeInTheDocument();
+  });
+
+  it('should keep the same stage when the open lands and draw the canvas only then', () => {
+    mockSyncStatus = downloading;
+    renderOpen();
+    const stage = screen.getByTestId('chat-viewer-layout');
+    /* Nothing takes a camera move into a checkout the open has yet to land. */
+    expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+
+    mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+    mockFileContent = { kind: 'text', text: 'cube();' };
+    publishSyncStatus(landed);
+    expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+    expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
+  });
+
+  it('should write no view record from the controls while the project is still opening', () => {
+    mockSyncStatus = downloading;
+    renderOpen();
+    expect(mockViewFields).toBeUndefined();
+  });
+
+  it('should lay out one caption row of one height in every step, with words only for a download’s numbers', () => {
+    mockSyncStatus = opening;
+    renderOpen();
+    expect(caption()).toHaveClass('absolute', 'top-full', 'h-4', 'text-xs', 'text-muted-foreground');
+    /* A step with no numbers has no detail line: no sentence fills it. */
+    expect(caption()?.textContent).toBe('');
+
+    advance(3000);
+    expect(caption()?.textContent).toBe('');
+
+    /* A download with no known size has no numbers either; only what to do is laid out, hidden until a stall. */
+    publishSyncStatus(downloading);
+    expect(captionText()?.textContent).toBe('');
+
+    publishSyncStatus(downloadingWithNumbers);
+    expect(caption()).toHaveClass('h-4');
+    expect(captionText()).toHaveTextContent(/^189 of 295 files, 44\.8 MB of 70\.0 MB$/u);
+
+    publishSyncStatus(preparing);
+    expect(caption()).toHaveClass('h-4');
+    expect(caption()?.textContent).toBe('');
+  });
+
+  it('should show the download numbers by CSS once the open passes 3 s, with no timer', () => {
+    mockSyncStatus = downloadingWithNumbers;
+    renderOpen();
+    expect(pill()).toHaveTextContent('Opening project…');
+    expect(pill()).toHaveTextContent('64%');
+    /* The words are laid out from the start and revealed by `wait-detail` at the ladder's detail mark. */
+    expect(captionText()).toHaveTextContent('189 of 295 files, 44.8 MB of 70.0 MB');
+    expect(captionText()).toHaveClass('wait-detail');
+    expect(detailDelay(captionText())).toBe('3000ms');
+    expect(vi.getTimerCount()).toBe(0);
+
+    /* Time passing re-renders nothing: the same element keeps its delay, which CSS counts down. */
+    const text = captionText();
+    advance(5000);
+    expect(captionText()).toBe(text);
+    expect(detailDelay(captionText())).toBe('3000ms');
+  });
+
+  it('should keep the caption on the wait’s clock when the stage mounts part way through it', () => {
+    /* A download of the model files the open already bore starts the stage's clock 1,000 ms back: the pill is
+       showing, and the caption's delay is the 2 s it still has to go. */
+    mockSessionAvailability = 'pending';
+    mockViewSettings = { 'view-1': { entryPath: helperEntryPath, graphicsSettings: defaultGraphicsSettings } };
+    mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+    mockFileContent = { kind: 'text', text: 'cube();' };
+    mockSyncStatus = {
+      sync: { state: 'backedUp' },
+      readiness: 'filled',
+      largeObjects: downloadingWithNumbers.largeObjects,
+    };
+    renderOpen();
+    /* A wait the open bore is the open's: it says the open's one label. */
+    expect(pill()).toHaveTextContent('Opening project…');
+    expect(captionText()).toHaveTextContent('189 of 295 files, 44.8 MB of 70.0 MB');
+    expect(pill()).toHaveStyle({ '--wait-reveal-delay': '0ms' });
+    expect(detailDelay(captionText())).toBe('2000ms');
+  });
+
+  it('should offer the slow words and "Try again" only after 10 s in which the download made no progress', () => {
+    mockSyncStatus = opening;
+    renderOpen();
+    const body = pill();
+    advance(2000);
+    publishSyncStatus(downloadingWithNumbers);
+    /* The pill keeps its element and its own clock through the step: it does not restart. */
+    expect(pill()).toBe(body);
+    expect(pill()).toHaveStyle({ '--wait-reveal-delay': '1000ms' });
+    /* The download's start is progress: the slow mark is 10 s from it, not from the open's start. */
+    expect(slowDelay(pill())).toBe('10000ms');
+    const label = document.querySelector('[data-slot="wait-indicator-label"]');
+    const slowWords = document.querySelector('[data-slot="wait-indicator-slow"]');
+    expect(label).toHaveTextContent(/^Opening project…$/u);
+    expect(label).toHaveClass('wait-until-slow');
+    expect(slowWords).toHaveTextContent('Still opening project…');
+    expect(slowWords).toHaveClass('wait-after-slow');
+
+    /* The caption's numbers give way, and what to do appears, at the same mark. */
+    expect(captionText()?.firstElementChild).toHaveClass('wait-until-slow');
+    expect(slowDelay(captionText()?.firstElementChild ?? undefined)).toBe('10000ms');
+    expect(slowCaption()).toHaveTextContent('Check your connection, then try again.');
+    expect(slowCaption()).toHaveClass('wait-after-slow');
+    expect(slowDelay(slowCaption())).toBe('10000ms');
+
+    /* One "Try again", hidden (so neither focusable nor in the accessibility tree) until the mark. */
+    const retries = within(document.body).getAllByRole('button', { name: 'Try again', hidden: true });
+    expect(retries).toHaveLength(1);
+    expect(slowWords).toContainElement(retries[0]!);
+    expect(vi.getTimerCount()).toBe(0);
+
+    /* Bytes arrive 8 s later: the slow mark moves to 10 s after them, on new elements, so a moving download never
+       reads as slow. */
+    advance(8000);
+    publishSyncStatus({
+      ...downloadingWithNumbers,
+      largeObjects: { ...downloadingWithNumbers.largeObjects, objects: 190, bytes: 45 * 1024 * 1024 },
+    });
+    expect(pill()).toBe(body);
+    expect(document.querySelector('[data-slot="wait-indicator-label"]')).not.toBe(label);
+    expect(slowDelay(pill())).toBe('10000ms');
+    expect(slowDelay(slowCaption())).toBe('10000ms');
+    expect(captionText()).toHaveTextContent('190 of 295 files, 45.0 MB of 70.0 MB');
+
+    fireEvent.click(within(document.body).getByRole('button', { name: 'Try again', hidden: true }));
+    expect(mockSyncNow).toHaveBeenCalledOnce();
+
+    /* The download is done: the slow words and Try again go with it. */
+    publishSyncStatus(preparing);
+    expect(pill()).toBe(body);
+    expect(pill()).toHaveTextContent('Opening project…');
+    expect(document.querySelector('[data-slot="wait-indicator-slow"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again', hidden: true })).not.toBeInTheDocument();
+    expect(slowCaption()).toBeUndefined();
+  });
+
+  it('should never show a percentage lower than one it showed under the same label', () => {
+    mockSyncStatus = downloadingWithNumbers;
+    renderOpen();
+    expect(pill()).toHaveTextContent('64%');
+
+    /* Bytes arrive for the same transfer: the percentage moves on. */
+    publishSyncStatus({
+      ...downloadingWithNumbers,
+      largeObjects: { ...downloadingWithNumbers.largeObjects, bytes: 52.5 * 1024 * 1024 },
+    });
+    expect(pill()).toHaveTextContent('75%');
+
+    /* A new transfer starts its own count (a fill begun again over the remaining files): the percentage would go back,
+       so the pill drops it for the rest of the wait and keeps its one label. The numbers stay true to the transfer. */
+    publishSyncStatus({
+      ...downloadingWithNumbers,
+      largeObjects: {
+        ...downloadingWithNumbers.largeObjects,
+        objects: 2,
+        totalObjects: 106,
+        bytes: 1024 * 1024,
+        totalBytes: 17.5 * 1024 * 1024,
+      },
+    });
+    expect(document.querySelector('[data-slot="wait-indicator-label"]')).toHaveTextContent(/^Opening project…$/u);
+    expect(pill()).not.toHaveTextContent('%');
+    expect(captionText()).toHaveTextContent('2 of 106 files, 1.0 MB of 17.5 MB');
+  });
+
+  it('should not announce the pill or the caption itself: the open has one route announcement', () => {
+    mockSyncStatus = downloadingWithNumbers;
+    renderOpen();
+    advance(3000);
+    expect(document.querySelector('[data-slot="wait-indicator"]')).not.toHaveAttribute('role');
+    expect(caption()).not.toHaveAttribute('role');
+    expect(caption()).not.toHaveAttribute('aria-live');
+  });
+
+  it('should show no pill for a cached open that never waits', () => {
+    mockSyncStatus = landed;
+    mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+    mockFileContent = { kind: 'text', text: 'cube();' };
+    renderOpen();
+    expect(document.querySelector('[data-slot="wait-indicator"]')).not.toBeInTheDocument();
+    expect(caption()).toBeUndefined();
+  });
+
+  it('should show no pill for an open that lands before 1 s', () => {
+    mockSyncStatus = opening;
+    renderOpen();
+    advance(400);
+    mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+    mockFileContent = { kind: 'text', text: 'cube();' };
+    publishSyncStatus(landed);
+    expect(document.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('data-state', 'idle');
+    expect(pill()).toBeUndefined();
+    expect(caption()).toBeEmptyDOMElement();
+  });
+
+  it.each([
+    {
+      name: 'offline',
+      status: { sync: { state: 'checking', online: false } },
+      summary: 'You’re offline',
+      message: 'This project isn’t on this device yet. Go online, then try again.',
+      retried: mockSyncNow,
+    },
+    {
+      name: 'failed',
+      status: { sync: { state: 'checking' }, remote: { phase: 'failed' } },
+      summary: 'Couldn’t open this project',
+      message: 'The download didn’t finish. Try again.',
+      retried: mockConnectRemote,
+    },
+  ] as const)(
+    'should say a $name open in the stage failure card with "Try again", keeping the stage',
+    ({ status, summary, message, retried }) => {
+      mockSyncStatus = opening;
+      renderOpen();
+      const stage = screen.getByTestId('chat-viewer-layout');
+      publishSyncStatus(status);
+
+      /* The route's announcement says the failure: the card is a labelled group, not a second alert (rule 22). */
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      const notice = screen.getByRole('group', { name: summary });
+      expect(notice).toHaveAttribute('data-slot', 'viewer-failure');
+      expect(notice).toHaveTextContent(message);
+      expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+      expect(pill()).toBeUndefined();
+      expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1);
+      fireEvent.click(within(notice).getByRole('button', { name: 'Try again' }));
+      expect(retried).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('should ask an account that may not open the project to sign in, with the placeholder’s "Open History"', () => {
+    mockSyncStatus = opening;
+    mockCanOpenCloudProject = false;
+    renderOpen();
+
+    const notice = screen.getByRole('group', { name: 'Sign in to continue' });
+    expect(notice).toHaveTextContent('Sign in with the account you used to open this project.');
+    expect(within(notice).getByRole('link', { name: 'Open History' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('workbench=revisions') as string,
+    );
+    expect(screen.getByTestId('chat-viewer-layout')).toHaveAttribute('data-slot', 'viewer-stage');
+  });
+
+  /* The view's graphics come only once the project is loaded here, which a cold open reaches after its waits start: the
+     stage says each wait without them, rather than "Initializing viewer…" (cloud open loading states, option C). */
+  describe('before the project is loaded and the view has its graphics', () => {
+    beforeEach(() => {
+      mockViewGraphics.delete('view-1');
+      mockGraphicsSend.mockClear();
+      mockConnectRemote.mockClear();
+    });
+
+    it.each([
+      { name: 'opening', status: opening, label: 'Opening project…' },
+      { name: 'downloading', status: downloading, label: 'Opening project…' },
+      { name: 'preparing', status: preparing, label: 'Opening project…' },
+    ] as const)('should lay out the stage with the $name pill from the first frame', ({ status, label }) => {
+      mockSyncStatus = status;
+      renderOpen();
+      expect(screen.queryByText('Initializing viewer…')).not.toBeInTheDocument();
+      expect(screen.getByTestId('chat-viewer-layout')).toHaveAttribute('data-slot', 'viewer-stage');
+      expect(pill()).toHaveTextContent(label);
+      expect(caption()).toBeInTheDocument();
+      expect(screen.getByTestId('cad-viewer-canvas-region')).toHaveAttribute('aria-busy', 'true');
+      /* No canvas and no controls without graphics, and nothing sent to graphics that are not there. */
+      expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Viewer controls' })).not.toBeInTheDocument();
+      expect(mockGraphicsSend).not.toHaveBeenCalled();
+    });
+
+    it('should say a failed open in the stage failure card with "Try again"', () => {
+      mockSyncStatus = { sync: { state: 'checking' }, remote: { phase: 'failed' } };
+      renderOpen();
+      expect(screen.queryByText('Initializing viewer…')).not.toBeInTheDocument();
+      const notice = screen.getByRole('group', { name: 'Couldn’t open this project' });
+      expect(notice).toHaveAttribute('data-slot', 'viewer-failure');
+      fireEvent.click(within(notice).getByRole('button', { name: 'Try again' }));
+      expect(mockConnectRemote).toHaveBeenCalledOnce();
+    });
+
+    it('should keep the same stage when the graphics arrive part way through the open, and draw the canvas once it lands', () => {
+      mockSyncStatus = downloading;
+      renderOpen();
+      const stage = screen.getByTestId('chat-viewer-layout');
+
+      mockViewGraphics.set('view-1', mockGraphicsActor);
+      publishSyncStatus(preparing);
+      expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+      expect(pill()).toHaveTextContent('Opening project…');
+      expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+
+      mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+      mockFileContent = { kind: 'text', text: 'cube();' };
+      publishSyncStatus(landed);
+      expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+      expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
+    });
+
+    it('should keep the same stage, with no empty state or "Reopen renderer", when the open lands before the graphics', () => {
+      mockSyncStatus = downloading;
+      const view = renderOpen();
+      const stage = screen.getByTestId('chat-viewer-layout');
+
+      mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+      mockFileContent = { kind: 'text', text: 'cube();' };
+      publishSyncStatus(landed);
+      expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+      expect(screen.queryByText('Initializing viewer…')).not.toBeInTheDocument();
+      expect(screen.queryByText('File not found')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Reopen renderer' })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+
+      /* The project is loaded here: its view gets its graphics, and the stage draws the canvas. */
+      mockViewGraphics.set('view-1', mockGraphicsActor);
+      view.rerender(
+        <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={{ ...mockPanelApi } as DockviewPanelApi} />,
+      );
+      expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+      expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
+    });
+
+    it('should still show "Initializing viewer…" for a project that never waited while its graphics start', () => {
+      mockSyncStatus = landed;
+      mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+      mockFileContent = { kind: 'text', text: 'cube();' };
+      renderOpen();
+      expect(screen.getByText('Initializing viewer…')).toBeInTheDocument();
+      expect(screen.queryByTestId('chat-viewer-layout')).not.toBeInTheDocument();
+    });
   });
 });

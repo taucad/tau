@@ -42,6 +42,8 @@
 (*   SettlesBy     the gateway states `settlesBy` on a pending answer and  *)
 (*                 the host keeps waiting until it (W2)                    *)
 (***************************************************************************)
+\* Cloud and account naming (2026-11-18): `session.ts` and `tau-agent-host.ts` reword the funding refusals'
+\* sentences ("Another account funded …"); copy only. No action or correspondence changes.
 EXTENDS Integers
 
 CONSTANTS Notice, Budget, Due, ImmediateCut, StartWaits, ResumeWaits, SettlesBy

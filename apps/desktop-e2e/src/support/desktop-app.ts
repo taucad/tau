@@ -1,9 +1,9 @@
 /* oxlint-disable no-await-in-loop -- Teardown steps are intentionally sequential. */
 /* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, readFile, realpath, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { setTimeout as wait } from 'node:timers/promises';
 import { promisify } from 'node:util';
@@ -48,8 +48,8 @@ const workspaceRoot = resolve(import.meta.dirname, '../../../..');
  * and this suite would otherwise fight over one directory. Point the suite at
  * a snapshot of a built bundle instead. */
 const clientRoot = process.env['TAU_DESKTOP_CLIENT_ROOT'] ?? join(workspaceRoot, 'apps/ui/desktop/build/client');
-const desktopRoot = join(workspaceRoot, 'apps/desktop');
-const defaultPackagedExecutable = join(desktopRoot, 'package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau');
+const workspaceDesktopRoot = join(workspaceRoot, 'apps/desktop');
+const defaultPackagedExecutable = join(workspaceDesktopRoot, 'package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau');
 const diagnosticsRoot = join(workspaceRoot, 'out/test-results/desktop-e2e');
 const execFileAsync = promisify(execFile);
 
@@ -311,8 +311,12 @@ export type DesktopSession = {
    * that carries the resolved engine version lands here (N6).
    */
   readonly logPath: string;
-  /** The absolute path `window.tau.dialog.selectDirectory()` resolves to. */
+  /** The launch's `--user-data-dir`, checked against the app's effective `userData` before any interaction (D7). */
+  readonly profileRoot: string;
+  /** The absolute path `window.tau.dialog.selectDirectory()` resolves to first. */
   readonly pickedDirectory: string;
+  /** Every folder the dialog stub answers, in order; the last is repeated once the others are used. */
+  readonly pickedDirectories: readonly string[];
   /** Every PostHog-shaped request any renderer made since launch (D13: zero on desktop). */
   readonly analyticsRequests: readonly string[];
   /** Chromium net log begun before the first renderer navigation. */
@@ -386,6 +390,80 @@ export const captureNextDesktopDownload = async (
  *   like, all read at launch.
  * @returns The live session.
  */
+/**
+ * Make `count` folders the dialog stub can answer, each named as the incident log names them:
+ * `tau-desktop-workspace` inside a `tau-desktop-e2e-pick-` temporary parent. The caller owns them across launches and removes them with `remove`.
+ *
+ * @param count - How many folders to make.
+ * @returns The folders in pick order, and their removal.
+ */
+export const createPickedDirectories = async (
+  count: number,
+): Promise<{ readonly directories: readonly string[]; readonly remove: () => Promise<void> }> => {
+  if (!Number.isSafeInteger(count) || count < 1) {
+    throw new TypeError('createPickedDirectories needs a positive whole count.');
+  }
+  const directories: string[] = [];
+  for (let index = 0; index < count; index++) {
+    /* A fixed, already-lowercase leaf inside the random parent, as the default pick uses. */
+    const directory = join(await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-pick-')), 'tau-desktop-workspace');
+    await mkdir(directory, { recursive: true });
+    directories.push(directory);
+  }
+  return {
+    directories,
+    remove: async () => {
+      for (const directory of directories) {
+        await removeDesktopRoot(dirname(directory));
+      }
+    },
+  };
+};
+
+/**
+ * Whether the app's effective `userData` is the profile this run created, compared after resolving links (macOS
+ * reaches `/var/folders` through `/private`).
+ */
+const isSameProfile = async (effective: unknown, expected: string): Promise<boolean> => {
+  if (typeof effective !== 'string' || effective === '') {
+    return false;
+  }
+  if (resolve(effective) === resolve(expected)) {
+    return true;
+  }
+  const [left, right] = await Promise.all([realpath(effective).catch(() => effective), realpath(expected)]);
+  return left === right;
+};
+
+/**
+ * Playwright's rejection when the main-process handle behind an `evaluate` is collected before it settles. It can hit
+ * the first evaluate straight after launch, while the main process is still starting, and says nothing about the
+ * profile, so only this rejection is retried (shell-conformance runs 44017533915 on LNX-D, LNX-U and LNX-U26).
+ */
+const collectedEvaluation = /Resulting promise was garbage collected/u;
+
+/** Attempts and pause for {@link collectedEvaluation}: a bounded wait of about two seconds, never an open loop. */
+const profileReadAttempts = 10;
+const profileReadPauseMilliseconds = 200;
+
+/**
+ * The app's effective `userData`, or the error that kept it from being read. Only a collected evaluation is retried;
+ * any other failure is returned at once, so the profile check still fails closed.
+ */
+const readEffectiveProfile = async (application: ElectronApplication): Promise<string | Error> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await application.evaluate(({ app }) => app.getPath('userData'));
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      if (attempt >= profileReadAttempts || !collectedEvaluation.test(failure.message)) {
+        return failure;
+      }
+      await wait(profileReadPauseMilliseconds);
+    }
+  }
+};
+
 /** PostHog through Tau's web proxy or directly. */
 export const analyticsRequestPattern = /\/api\/ph(?:\/|$)|posthog\.com/iu;
 
@@ -420,7 +498,26 @@ export const launchDesktopApp = async (options: {
    * before, so only a spec that names the state meets the first run.
    */
   readonly flagState?: FlagStateName | undefined;
+  /**
+   * Folders the native directory dialog answers, one per pick, in order; once used up the last is answered again.
+   * The caller owns them (see {@link createPickedDirectories}) and they outlive the session. Without it the run makes
+   * one folder of its own and answers it every time.
+   */
+  readonly pickedDirectories?: readonly string[] | undefined;
+  /**
+   * Launch the unpackaged app in this directory instead of the workspace's `apps/desktop`, with the UI bundle built
+   * beside it, e.g. a second worktree built at a release's base commit (blueprint T-REH.2).
+   */
+  readonly desktopRoot?: string | undefined;
+  /** Extra command-line switches for the app, after the harness's own (for example `--safe-mode`). */
+  readonly args?: readonly string[] | undefined;
 }): Promise<DesktopSession> => {
+  if (options.desktopRoot !== undefined && (desktopE2ECompletedArtifact || options.packaged === true)) {
+    throw new Error('desktopRoot launches an unpackaged build; it cannot be combined with a packaged launch.');
+  }
+  if (options.pickedDirectories?.length === 0) {
+    throw new Error('pickedDirectories needs at least one folder.');
+  }
   if (desktopE2ECompletedArtifact && options.packaged === false) {
     throw new Error('A completed-artifact run cannot launch the workspace desktop app.');
   }
@@ -444,13 +541,15 @@ export const launchDesktopApp = async (options: {
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
   const runFlagState = process.env[flagStateVariable] ? resolveFlagState(process.env[flagStateVariable]) : undefined;
   const flagState = options.flagState ?? runFlagState;
-  /* A spec that names no flag state of its own, run with auto-open on, is not about onboarding: it starts as an install
-   * that has run before and a device whose setup was already offered. */
+  /* A spec that names no flag state of its own, run with onboarding on, is not about onboarding: it starts as an install
+   * that has run before and a device whose setup was already offered and whose tour was declined. Auto-open alone is
+   * not the test: with onboarding on, a newcomer's first project asks for the tour whether or not setup opens by itself
+   * (`first-project-tour.ts`), and its popover covers the composer. */
   const settledOnboarding =
     options.flagState === undefined &&
     options.profileRoot === undefined &&
     flagState !== undefined &&
-    flagStateFlags[flagState].onboardingAutoOpen;
+    flagStateFlags[flagState].onboarding;
   if (settledOnboarding) {
     /* Main counts a launch as the first run only while no window-state file exists, whatever the file holds
      * (`apps/desktop/src/main/first-run.ts`); an empty object restores no frame, so the window opens at its default
@@ -468,9 +567,18 @@ export const launchDesktopApp = async (options: {
    * slug the UI mints is the folder name slugified, so a `mkdtemp` name with
    * capitals would make the routed URL differ from the directory on disk for
    * no reason. */
-  const pickedParent = await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-pick-'));
-  const pickedDirectory = join(pickedParent, 'tau-desktop-workspace');
-  await mkdir(pickedDirectory, { recursive: true });
+  const ownedPickedParent =
+    options.pickedDirectories === undefined ? await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-pick-')) : undefined;
+  const pickedDirectories = options.pickedDirectories ?? [join(ownedPickedParent ?? '', 'tau-desktop-workspace')];
+  const pickedDirectory = pickedDirectories[0] ?? '';
+  if (ownedPickedParent !== undefined) {
+    await mkdir(pickedDirectory, { recursive: true });
+  }
+  /* Where the run's picked folders live, for chat-log capture: one parent of its own, or each caller-owned one. */
+  const pickedParents = [...new Set(pickedDirectories.map((directory) => dirname(directory)))];
+  const desktopRoot = options.desktopRoot ?? workspaceDesktopRoot;
+  const unpackagedClientRoot =
+    options.desktopRoot === undefined ? clientRoot : join(options.desktopRoot, '../ui/desktop/build/client');
   const output: string[] = [];
   const startupStarted = performance.now();
   const startupPhases: Array<{ phase: string; elapsedMilliseconds: number }> = [];
@@ -554,6 +662,7 @@ export const launchDesktopApp = async (options: {
               `--use-file-for-fake-audio-capture=${options.fakeMicrophonePath}`,
             ]
           : []),
+        ...(options.args ?? []),
       ],
       cwd: packaged ? userData : desktopRoot,
       env: {
@@ -572,9 +681,11 @@ export const launchDesktopApp = async (options: {
               TAU_WEBSOCKET_URL: desktopE2EApiUrl.replace(/^http/u, 'ws'),
               TAU_FRONTEND_URL: desktopE2EFrontendUrl,
             }),
-        ...(packaged ? {} : { TAU_DESKTOP_CLIENT_ROOT: clientRoot }),
+        ...(packaged ? {} : { TAU_DESKTOP_CLIENT_ROOT: unpackagedClientRoot }),
         TAU_DESKTOP_TOKEN: options.token,
-        TAU_E2E_PICK_DIRECTORY: pickedDirectory,
+        /* A development build answers every pick with this seed before the dialog stub is reached, so a run with
+         * several folders leaves it unset and lets the stub answer them in turn. */
+        ...(pickedDirectories.length === 1 ? { TAU_E2E_PICK_DIRECTORY: pickedDirectory } : {}),
         /* Printer access codes go to the throwaway profile's file vault, never the
          * person's login keychain, whatever the shell running the suite sets. */
         TAU_SECRET_VAULT: 'file',
@@ -603,6 +714,23 @@ export const launchDesktopApp = async (options: {
 
   child.stdout?.on('data', (chunk: unknown) => output.push(String(chunk)));
   child.stderr?.on('data', (chunk: unknown) => output.push(String(chunk)));
+
+  /* R11 (D7): whatever the build does with `--user-data-dir`, a run that landed in another profile, such as a
+   * person's installed app, stops here: before the page is touched, a folder is picked or a grant is written. */
+  recordStartupPhase('profile-check.before');
+  const effectiveProfile = await readEffectiveProfile(application);
+  if (!(await isSameProfile(effectiveProfile, userData))) {
+    child.kill('SIGKILL');
+    if (ownedPickedParent !== undefined) {
+      await removeDesktopRoot(ownedPickedParent).catch(() => undefined);
+    }
+    const reported =
+      effectiveProfile instanceof Error ? `unreadable (${effectiveProfile.message})` : String(effectiveProfile);
+    throw new Error(
+      `The desktop app's userData is ${reported}, which is not the temporary profile this run created (${userData}). The app was closed before any interaction.`,
+    );
+  }
+  recordStartupPhase('profile-check.after');
 
   /* Anything that throws between `launch` and the returned session would
    * otherwise strand a live Electron — and a stranded shell keeps polling the
@@ -712,14 +840,19 @@ export const launchDesktopApp = async (options: {
       });
     }
     recordStartupPhase('main-overrides.before');
-    await application.evaluate(({ dialog, shell }, selectedDirectory) => {
+    await application.evaluate(({ dialog, shell }, selectedDirectories) => {
       const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
       shell.openExternal = async (url): Promise<void> => {
         testState.__TAU_E2E_EXTERNAL_URL__ = url;
       };
-      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedDirectory] });
+      let picks = 0;
+      dialog.showOpenDialog = async () => {
+        const selected = selectedDirectories[Math.min(picks, selectedDirectories.length - 1)] ?? '';
+        picks += 1;
+        return { canceled: false, filePaths: [selected] };
+      };
       dialog.showMessageBox = async () => ({ checkboxChecked: false, response: 1 });
-    }, pickedDirectory);
+    }, pickedDirectories);
     recordStartupPhase('main-overrides.after');
     page.setDefaultTimeout(60_000);
     page.on('console', (message) => {
@@ -764,7 +897,8 @@ export const launchDesktopApp = async (options: {
     const location = new URL(page.url());
     const url = { protocol: location.protocol, host: location.host, pathname: location.pathname };
     const desktopLog = await readFile(join(userData, 'logs/desktop.log'), 'utf8').catch(() => '(no desktop.log)');
-    const pickedTree = await tree(pickedDirectory);
+    const pickedTrees = await Promise.all(pickedDirectories.map(async (directory) => tree(directory)));
+    const pickedTree = pickedTrees.flat();
     const homeTree = await tree(join(userData, 'home'));
     const grants = await readFile(join(userData, 'granted-roots.json'), 'utf8').catch(() => '(none)');
     // Persist available evidence before any renderer or trace operation can stall.
@@ -794,7 +928,9 @@ export const launchDesktopApp = async (options: {
      * the only account of a turn the renderer did not show. */
     const failureChatLogs = join(directory, 'chat-logs');
     await captureChatLogs(userData, failureChatLogs).catch(() => []);
-    await captureChatLogs(pickedParent, failureChatLogs).catch(() => []);
+    for (const parent of pickedParents) {
+      await captureChatLogs(parent, failureChatLogs).catch(() => []);
+    }
     // Main observation is best-effort and never delays the original renderer failure or trace collection.
     const navigationPath = join(directory, 'main-navigation.json');
     await writeFile(
@@ -930,7 +1066,9 @@ export const launchDesktopApp = async (options: {
      * app wrote under Home or the picked project before the roots go. */
     const chatLogs = chatLogDestination('desktop-e2e', expect.getState().testPath);
     await captureChatLogs(userData, chatLogs);
-    await captureChatLogs(pickedParent, chatLogs);
+    for (const parent of pickedParents) {
+      await captureChatLogs(parent, chatLogs);
+    }
     if (captured) {
       /* Keep the evidence a failing run just produced. */
       return;
@@ -938,7 +1076,9 @@ export const launchDesktopApp = async (options: {
     if (!options.preserveProfile) {
       await removeDesktopRoot(userData);
     }
-    await removeDesktopRoot(pickedParent);
+    if (ownedPickedParent !== undefined) {
+      await removeDesktopRoot(ownedPickedParent);
+    }
   };
 
   return {
@@ -952,6 +1092,8 @@ export const launchDesktopApp = async (options: {
     logPath: join(userData, 'logs/desktop.log'),
     page,
     pickedDirectory,
+    pickedDirectories,
+    profileRoot: userData,
   };
 };
 

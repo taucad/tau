@@ -15,9 +15,11 @@ import type {
   ProjectDiscoveryEntry,
   ProjectLocator,
   ProjectRootConfig,
+  ProjectRootConfigurationResult,
   ProjectRootDiscoveryStatus,
   RootedFileSystem,
   RootedPorcelain,
+  RootStatus,
   MountConfig,
   StorageRootConfig,
   WatchEvent,
@@ -421,8 +423,11 @@ type WorkspaceBridgeMethodName =
   | 'mount'
   | 'unmount'
   | 'configureProjectRoots'
+  | 'getRootStatuses'
+  | 'recheckRoots'
   | 'listProjectManifests'
   | 'verifyProjectRoute'
+  | 'verifyAbsent'
   | 'commitPendingProjectDirectory'
   | 'adoptProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
@@ -839,35 +844,38 @@ const storageRootConfigSchema: z.ZodType<StorageRootConfig> = z.discriminatedUni
   z.looseObject({ backend: z.literal('opfs') }),
   z.looseObject({ backend: z.literal('node'), path: z.string() }),
 ]);
+/* A configuration entry's id and directory are validated by the authority,
+ * which skips and reports an invalid entry instead of failing the whole
+ * configuration (blueprint B3); the wire checks only the shape. */
 const projectRootConfigSchema: z.ZodType<ProjectRootConfig> = z.discriminatedUnion('backend', [
   z.looseObject({
-    projectId: projectIdSchema,
+    projectId: z.string(),
     backend: z.literal('webaccess'),
     workspaceId: z.string(),
-    providerBasePath: projectDirectoryPathSchema,
+    providerBasePath: z.string(),
     directoryHandle: z.undefined().optional(),
   }),
   z.looseObject({
-    projectId: projectIdSchema,
+    projectId: z.string(),
     backend: z.literal('indexeddb'),
-    providerBasePath: projectDirectoryPathSchema,
+    providerBasePath: z.string(),
   }),
   z.looseObject({
-    projectId: projectIdSchema,
+    projectId: z.string(),
     backend: z.literal('opfs'),
-    providerBasePath: projectDirectoryPathSchema,
+    providerBasePath: z.string(),
   }),
   z.looseObject({
-    projectId: projectIdSchema,
+    projectId: z.string(),
     backend: z.literal('memory'),
     storageRootKey: z.string(),
-    providerBasePath: projectDirectoryPathSchema,
+    providerBasePath: z.string(),
   }),
   z.looseObject({
-    projectId: projectIdSchema,
+    projectId: z.string(),
     backend: z.literal('node'),
     path: z.string(),
-    providerBasePath: projectDirectoryPathSchema,
+    providerBasePath: z.string(),
   }),
 ]);
 const projectLocatorSchema: z.ZodType<ProjectLocator> = z.discriminatedUnion('backend', [
@@ -1127,7 +1135,10 @@ const fileTreeNodeSchema: z.ZodType<FileTreeNode> = z.custom<FileTreeNode>((valu
       Array.isArray(node['children']) && node['children'].every((child) => fileTreeNodeSchema.safeParse(child).success)
     );
   }
+  /* Facts arrive only when already known (`StatContentMetadata`): an unmeasured file, as every raw provider
+   * listing gives, carries neither, and refusing it rejected a whole directory for one plain file. */
   return (
+    (node['contentKind'] === undefined && node['lineCount'] === undefined) ||
     (node['contentKind'] === 'binary' && node['lineCount'] === undefined) ||
     (node['contentKind'] === 'text' &&
       (node['lineCount'] === undefined || finiteNumberSchema.safeParse(node['lineCount']).success))
@@ -1243,6 +1254,33 @@ const bulkMoveResultSchema = z.looseObject({
 const projectRootConfigurationSchema = z.looseObject({
   projects: z.array(projectRootConfigSchema),
   roots: z.array(storageRootConfigSchema),
+});
+const rootStatusSchema: z.ZodType<RootStatus> = z.looseObject({
+  storageRootKey: z.string(),
+  backend: z.enum(['webaccess', 'indexeddb', 'opfs', 'node']),
+  state: z.enum(['available', 'notFound', 'permission', 'unreachable', 'conflict', 'error']),
+  code: z.string().optional(),
+});
+const rootStatusesSchema = z.array(rootStatusSchema);
+const projectRootConfigurationResultSchema: z.ZodType<ProjectRootConfigurationResult> = z.looseObject({
+  roots: rootStatusesSchema,
+  skipped: z.array(
+    z.looseObject({
+      kind: z.enum(['root', 'project', 'checkout']),
+      reason: z.enum([
+        'duplicate-root',
+        'invalid-project-id',
+        'duplicate-route',
+        'non-canonical-path',
+        'checkout-rule',
+        'duplicate-physical-route',
+        'root-unavailable',
+        'provider-unavailable',
+      ]),
+      projectId: z.string().optional(),
+      storageRootKey: z.string().optional(),
+    }),
+  ),
 });
 const projectDiscoveryResultSchema = z.looseObject({
   entries: z.array(projectDiscoveryEntrySchema),
@@ -1541,7 +1579,12 @@ const callSchemas = {
   exists: { args: oneStringArgument, result: booleanResult },
   mount: { args: z.tuple([z.string(), mountConfigSchema]), result: voidResult },
   unmount: { args: oneStringArgument, result: voidResult },
-  configureProjectRoots: { args: z.tuple([projectRootConfigurationSchema]), result: voidResult },
+  configureProjectRoots: {
+    args: z.tuple([projectRootConfigurationSchema]),
+    result: projectRootConfigurationResultSchema,
+  },
+  getRootStatuses: { args: noArgs, result: rootStatusesSchema },
+  recheckRoots: { args: z.tuple([z.array(z.string()).optional()]), result: rootStatusesSchema },
   listProjectManifests: { args: noArgs, result: projectDiscoveryResultSchema },
   verifyProjectRoute: {
     args: z.tuple([z.object({ projectId: projectIdSchema })]),
@@ -1549,10 +1592,21 @@ const callSchemas = {
       z.object({
         status: z.literal('verified'),
         project: z.object({ projectId: projectIdSchema, manifest: projectManifestSchema }),
+        /* Optional on the wire: an authority from before they were sent still answers, and its proof names no copy. */
+        storageRootKey: z.string().optional(),
+        providerBasePath: projectDirectoryPathSchema.optional(),
       }),
       z.object({ status: z.literal('discovery-required') }),
       z.object({ status: z.literal('unavailable') }),
       z.object({ status: z.literal('superseded') }),
+    ]),
+  },
+  verifyAbsent: {
+    args: z.tuple([projectIdSchema]),
+    result: discriminatedResultUnion('status', [
+      z.looseObject({ status: z.literal('absent') }),
+      z.looseObject({ status: z.literal('present'), locators: z.array(projectLocatorSchema) }),
+      z.looseObject({ status: z.literal('unknown'), reason: z.string() }),
     ]),
   },
   commitPendingProjectDirectory: {
@@ -1639,7 +1693,11 @@ const callSchemas = {
   pendingPaths: { args: z.tuple([z.array(rootedPathSchema)]), result: z.array(z.string()) },
 } satisfies FileSystemBridgeCallSchemas;
 
-const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });
+/* Every named event the authority broadcasts: a frame this rejects ends the shared broadcast subscription. */
+const broadcastValidator = z.union([
+  z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema }),
+  z.looseObject({ event: z.literal('rootStatus'), data: rootStatusesSchema }),
+]);
 
 /** Exact runtime-validator inventory for the filesystem bridge domain. @public */
 export const fileSystemBridgeSchemas = {
@@ -1720,6 +1778,13 @@ export const fileSystemLongCalls: Readonly<Record<string, number | undefined>> =
   /* A read of a pending entry waits for its large object (D9) under the
    * authority's own no-progress bound; its signature has no options slot. */
   readFile: undefined,
+  /* A read of a path a tree write still owes waits for it to land (D10, STO-25) under the same bound, so do these. */
+  readFileWithDigest: undefined,
+  readRange: undefined,
+  stat: undefined,
+  lstat: undefined,
+  exists: undefined,
+  readdir: undefined,
   /* Its controls ride `ApplyOptions` and the changeset's own signal;
    * `prepareApplyCall` takes them out. */
   apply: undefined,

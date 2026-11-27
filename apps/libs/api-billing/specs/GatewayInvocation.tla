@@ -40,6 +40,23 @@
 (*                  the admitting generation, as a stop is (taucad/tau#851;*)
 (*                  FALSE left it pending for recovery, and the chat's     *)
 (*                  next step waited on it: agent-host StopSettlement)     *)
+(*   SupplierCutSettles  a step the supplier ended without complete usage  *)
+(*                  (a dropped stream, a request that failed before any    *)
+(*                  response, a deadline cut) is terminalized at once as   *)
+(*                  absorbed under the admitting generation, as a client   *)
+(*                  cut is (launch audit D-2; FALSE left it pending until  *)
+(*                  due_at plus the grace, and the host's retry, a Resume  *)
+(*                  and the chat's next step waited on it)                 *)
+(*   AtomicAdmit    admission inserts the row with its dispatch intent in  *)
+(*                  the same transaction (chat performance WP-14, F-5);   *)
+(*                  the in-process abort check after it absorbs the row   *)
+(*                  at zero at once, as a cut before any response does.   *)
+(*                  FALSE is admitOperation then markDispatchIntent        *)
+(*   LateAccept     markDispatchAccepted is not awaited before the first  *)
+(*                  relayed byte: ApiAccepted is its own action, enabled  *)
+(*                  from the supplier call on, including after the finish; *)
+(*                  its CAS makes a late one a no-op. FALSE is the awaited *)
+(*                  mark inside ApiDispatch                                *)
 (***************************************************************************)
 EXTENDS Integers, FiniteSets
 
@@ -76,6 +93,12 @@ CONSTANTS
     ServiceStops,
     \* @type: Bool;
     CutSettles,
+    \* @type: Bool;
+    SupplierCutSettles,
+    \* @type: Bool;
+    AtomicAdmit,
+    \* @type: Bool;
+    LateAccept,
     \* mutation knobs: TRUE is the code as written
     \* @type: Bool;
     FenceGen,
@@ -380,15 +403,19 @@ ApiAdmit(k) ==
        ELSE IF k \in voided
        THEN /\ req' = [req EXCEPT ![k] = "refused"]
             /\ UNCHANGED <<row, acctHeld, fin>>
-       ELSE /\ row' = [row EXCEPT ![k] = [NoRow EXCEPT !.ex = TRUE, !.cust = "pending", !.disp = "admitted",
-                                                !.gen = 1, !.due = now + Due]]
+       ELSE /\ row' = [row EXCEPT ![k] =
+                    IF AtomicAdmit
+                    THEN [NoRow EXCEPT !.ex = TRUE, !.cust = "pending", !.disp = "intent_recorded", !.gen = 1,
+                                       !.due = now + Due, !.intent = now, !.igen = 1]
+                    ELSE [NoRow EXCEPT !.ex = TRUE, !.cust = "pending", !.disp = "admitted", !.gen = 1,
+                                       !.due = now + Due]]
             /\ acctHeld' = acctHeld + 1
             /\ req' = [req EXCEPT ![k] = "admitted"]
             /\ UNCHANGED fin
     /\ UNCHANGED <<now, refundHeld, voided, conn, sup, dispatches, claims, host, logVars>>
 
 \* The abort check after admission (recordCancellation), then markDispatchIntent (CAS, clock).
-ApiMarkIntent(k) ==
+ApiMarkIntentSequential(k) ==
     /\ req[k] = "admitted"
     /\ IF conn[k] = "noticed"
        THEN /\ row' = [row EXCEPT ![k].cancel = IF row[k].cust = "pending" /\ @ < 0 THEN now ELSE @]
@@ -401,6 +428,24 @@ ApiMarkIntent(k) ==
             /\ UNCHANGED row
     /\ UNCHANGED <<now, acctHeld, refundHeld, voided, fin, conn, sup, dispatches, claims, host, logVars>>
 
+\* AtomicAdmit: the intent was written with the row, so only the in-process abort check is left. An abort
+\* found there finishes the row as a cut before any response (finishUnanswered with client_abort):
+\* absorbed at zero under the admitting generation, so the chat's next step does not wait for recovery.
+ApiAbortCheck(k) ==
+    /\ req[k] = "admitted"
+    /\ IF conn[k] = "noticed"
+       THEN /\ IF (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"
+               THEN /\ row' = [row EXCEPT ![k] = [@ EXCEPT !.cancel = IF @ < 0 THEN now ELSE @,
+                                    !.cust = "absorbed", !.ev = @ \cup {"abort"}, !.rat = now, !.tgen = 1]]
+                    /\ acctHeld' = acctHeld - 1
+               ELSE UNCHANGED <<row, acctHeld>>
+            /\ req' = [req EXCEPT ![k] = "gone"]
+       ELSE /\ req' = [req EXCEPT ![k] = "intent"]
+            /\ UNCHANGED <<row, acctHeld>>
+    /\ UNCHANGED <<now, refundHeld, voided, fin, conn, sup, dispatches, claims, host, logVars>>
+
+ApiMarkIntent(k) == IF AtomicAdmit THEN ApiAbortCheck(k) ELSE ApiMarkIntentSequential(k)
+
 \* getDispatchTimeRemaining (CAS, clock), executeOnce, markDispatchAccepted.
 ApiDispatch(k) ==
     /\ req[k] = "intent"
@@ -408,11 +453,21 @@ ApiDispatch(k) ==
           /\ row[k].cancel < 0 /\ row[k].due > now
        THEN /\ sup' = [sup EXCEPT ![k] = "generating"]
             /\ dispatches' = [dispatches EXCEPT ![k] = @ + 1]
-            /\ row' = [row EXCEPT ![k].disp = "accepted"]
+            /\ row' = IF LateAccept THEN row ELSE [row EXCEPT ![k].disp = "accepted"]
             /\ req' = [req EXCEPT ![k] = "streaming"]
        ELSE /\ req' = [req EXCEPT ![k] = "gone"]
             /\ UNCHANGED <<sup, dispatches, row>>
     /\ UNCHANGED <<now, acctHeld, refundHeld, voided, fin, conn, claims, host, logVars>>
+
+\* markDispatchAccepted, not awaited (LateAccept): its CAS on the admitting generation, a pending
+\* customer state, intent_recorded and the deadline. It may land at any point after the supplier call,
+\* after the finish too, where its guard no longer holds and it writes nothing.
+ApiAccepted(k) ==
+    /\ LateAccept
+    /\ dispatches[k] >= 1
+    /\ row[k].gen = 1 /\ row[k].cust = "pending" /\ row[k].disp = "intent_recorded" /\ row[k].due > now
+    /\ row' = [row EXCEPT ![k].disp = "accepted"]
+    /\ UNCHANGED <<now, acctHeld, refundHeld, voided, apiVars, claims, host, logVars>>
 
 SupplierEnd(k) ==
     /\ sup[k] = "generating"
@@ -472,18 +527,26 @@ ApiServiceStop(k) ==
     /\ req' = [req EXCEPT ![k] = "done"]
     /\ UNCHANGED <<now, refundHeld, voided, conn, dispatches, claims, host, logVars>>
 
-\* finish(): terminalize under the admitting generation; absorbed_unknown returns without it, unless
-\* the process is stopping (ApiServiceStop). After a settled receipt it hands the settlement to the
+\* finish(): terminalize under the admitting generation. Every end it is handed has no supplier stream
+\* left to observe (ApiObserve recorded it), so absorbed_unknown is terminalized here too
+\* (SupplierCutSettles): recovery would reach the same absorbed receipt from the same stored evidence,
+\* only after due_at plus the grace. After a settled receipt it hands the settlement to the
 \* evidence recorder in the background (T07); that write never touches the row, so it is not modelled.
 \* Its usage and turn-step cache metrics (recordSettledGenAiUsage, recordTurnStepCache) are counters
 \* read from the same evidence; they write nothing the spec observes, so they are not modelled either.
 ApiFinish(k) ==
     /\ req[k] = "finishing"
-    /\ IF fin[k] = "final" /\ (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"
+    /\ IF (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending" /\ fin[k] = "final"
        THEN Terminal(k, "settled", 1, {}, FALSE, 1)
+       ELSE IF /\ SupplierCutSettles /\ (~FenceGen \/ row[k].gen = 1) /\ row[k].cust = "pending"
+               /\ fin[k] = "unknown"
+       THEN Terminal(k, "absorbed", 0, {"unknown"}, FALSE, 1)   \* finish() records its evidence first
        ELSE UNCHANGED <<row, acctHeld>>   \* a stale generation throws; a terminal row returns its receipt
     /\ req' = [req EXCEPT ![k] = "done"]
     /\ UNCHANGED <<now, refundHeld, voided, fin, conn, sup, dispatches, claims, host, logVars>>
+\* Launch audit review (2026-11-25): finish() now catches the stale generation's throw by its type
+\* (StaleCreditOperationGenerationError) and returns, logging the sweep's settlement as expected
+\* rather than as a failed one. The row is untouched either way, so this action is unchanged.
 
 -----------------------------------------------------------------------------
 (* Recovery sweep (credit-ledger.service.ts claimDueOperations, recover, defer, absorb). *)
@@ -548,7 +611,7 @@ Host == \/ HostPrepare \/ HostSend \/ HostBind \/ HostComplete \/ HostSeesFailur
         \/ HostNetworkDrop \/ HostCrash \/ HostDiscard \/ HostResume \/ HostReprepare \/ HostEndRun
         \/ HostUserResume
 Api == \E k \in Keys : \/ ApiNotice(k) \/ ApiAbortBeforeAdmission(k) \/ ApiAdmit(k)
-                       \/ ApiMarkIntent(k) \/ ApiDispatch(k) \/ SupplierEnd(k)
+                       \/ ApiMarkIntent(k) \/ ApiDispatch(k) \/ ApiAccepted(k) \/ SupplierEnd(k)
                        \/ ApiObserve(k) \/ ApiClientCancel(k) \/ ApiServiceStop(k) \/ ApiFinish(k)
 Sweep == SweepClaim \/ SweepResolve \/ SweepFail \/ SweepCrash
 
@@ -650,13 +713,21 @@ ChargedReplyRecorded ==
 \* D-086: today's uncoded dead end is reachable; the target never reaches it
 NoUncodedDeadEnd == host.ph # "stuck"
 
-\* Vacuity for ApiServiceStop and ApiClientCancel: only a stopping API or a client cut absorbs under
-\* the admitting generation; every recovery absorb runs under a claimed one. Its witness must keep failing.
+\* Vacuity for ApiServiceStop, ApiClientCancel and ApiFinish's absorb: only a stopping API, a client cut
+\* or a supplier cut absorbs under the admitting generation; every recovery absorb runs under a claimed
+\* one. Its witnesses must keep failing.
 NoLiveAbsorb == \A k \in Keys : row[k].cust = "absorbed" => row[k].tgen > 1
 
 \* taucad/tau#851: a client cut under the live generation never waits for recovery, so the chat's next
 \* step finds it settled (agent-host StopSettlement). A claimed row is recovery's, as before.
 ClientCutSettled == \A k \in Keys : "abort" \in row[k].ev /\ row[k].gen = 1 => row[k].cust # "pending"
+
+\* Launch audit D-2: once finish() has run on a step the supplier ended without complete usage, the row
+\* is not pending under the live generation, so the host's retry of a lost reply, a Resume and the
+\* chat's next step find the attempt settled instead of waiting for due_at plus the grace. A claimed row
+\* is recovery's, as before.
+SupplierCutSettled ==
+    \A k \in Keys : req[k] = "done" /\ fin[k] = "unknown" /\ row[k].gen = 1 => row[k].cust # "pending"
 
 -----------------------------------------------------------------------------
 (* GI-S7: the row's inductive invariant for Apalache (MC_GatewayInvocation). *)
@@ -701,6 +772,8 @@ RowFacts(k) ==
     /\ fin[k] = "final" => "final" \in r.ev /\ sup[k] = "completed"
     /\ req[k] \in {"admitted", "intent", "streaming", "finishing"} => r.ex
     /\ req[k] = "intent" => r.intent >= 0
+    \* AtomicAdmit writes the intent with the row, and nothing clears it, so an admitted request's row has one.
+    /\ AtomicAdmit /\ req[k] = "admitted" => r.intent >= 0
 
 IndInv ==
     /\ TypeInv

@@ -271,6 +271,49 @@ describe('file-manager host composition', () => {
     return { host, ref, rootFiles };
   };
 
+  /* T-B31.1: a Home read that never settles (a database open with no event) must not hold the start forever. */
+  it.each([
+    { target: 'web', deadlineBackend: undefined, state: 'failed', backend: undefined },
+    { target: 'desktop', deadlineBackend: 'node', state: 'resolved', backend: 'node' },
+  ] as const)(
+    'should settle a Home read that never answers at 20 000 ms on the $target target',
+    async ({ deadlineBackend, state, backend }) => {
+      const host = createFileManagerHost({
+        analytics: noAnalytics,
+        loadHomeBackend: async () => Promise.withResolvers<HomeStorageBackend>().promise,
+        deadlineBackend,
+      });
+      vi.useFakeTimers();
+      const rootFiles = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/', backendResolution: 'pending', shouldInitializeOnStart: false },
+      }).start();
+      const ref = createActor(host.logic, { input: { rootFiles } }).start();
+      stops.push(() => {
+        ref.stop();
+        rootFiles.stop();
+        vi.useRealTimers();
+      });
+
+      await vi.advanceTimersByTimeAsync(19_999);
+      expect(ref.getSnapshot().value).toBe('resolving');
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(ref.getSnapshot().value).toBe(state);
+      expect(selectHomeBackend(ref.getSnapshot())).toBe(backend);
+      if (state === 'failed') {
+        expect(selectHomeBackendFailure(ref.getSnapshot())).toMatch(/did not answer/u);
+      } else {
+        expect(rootFiles.getSnapshot().context.backendType).toBe('node');
+      }
+    },
+  );
+
+  it('should give every file manager it builds the page load\u2019s safe mode', () => {
+    const host = createFileManagerHost({ analytics: noAnalytics, safeMode: true });
+    expect(host.rootFilesInput()).toMatchObject({ safeMode: true });
+    expect(createFileManagerHost({ analytics: noAnalytics }).rootFilesInput()).toMatchObject({ safeMode: false });
+  });
+
   it('should build an actor for Home with the resolved backend as input', async () => {
     const { host, ref } = composeHost(Promise.resolve('opfs'));
     await flush();

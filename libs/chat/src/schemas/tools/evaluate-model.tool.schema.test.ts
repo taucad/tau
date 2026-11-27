@@ -52,6 +52,40 @@ describe('evaluateModelOutputSchema', () => {
     });
   });
 
+  it('should keep the build report and the meshes the kernel kept (R18)', () => {
+    const output = {
+      status: 'ready',
+      build: {
+        reused: false,
+        elapsed: 7735,
+        operations: { reused: 412, computed: 108 },
+        costliest: [{ operation: 'Shape.fillet', elapsed: 2100.5, calls: 12 }],
+      },
+      tessellation: { triangles: 12, vertices: 8, elapsed: 3, meshes: { reused: 30, computed: 4 } },
+    };
+
+    expect(evaluateModelOutputSchema.parse(output)).toEqual(output);
+    expect(evaluateModelOutputSchema.parse({ status: 'ready', build: { reused: true, elapsed: 6 } })).toEqual({
+      status: 'ready',
+      build: { reused: true, elapsed: 6 },
+    });
+  });
+
+  it('should reject a build report the runtime cannot produce', () => {
+    for (const build of [
+      { elapsed: 1 },
+      { reused: false, elapsed: -1 },
+      { reused: false, elapsed: 1, operations: { reused: 1.5, computed: 0 } },
+      {
+        reused: false,
+        elapsed: 1,
+        costliest: Array.from({ length: 4 }, () => ({ operation: 'a', elapsed: 1, calls: 1 })),
+      },
+    ]) {
+      expect(evaluateModelOutputSchema.safeParse({ status: 'ready', build }).success).toBe(false);
+    }
+  });
+
   it('should reject a tessellation resolution the runtime cannot report', () => {
     const counts = { triangles: 12, vertices: 8, elapsed: 3 };
     for (const resolution of [{ requested: 'coarse' }, { linearTolerance: 0 }, { angularTolerance: -1 }]) {

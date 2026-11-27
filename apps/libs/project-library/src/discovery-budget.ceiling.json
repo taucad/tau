@@ -1,0 +1,161 @@
+{
+  "$comment": "What each library mutation may ask of the filesystem authority on the 386-directory profile (project-library fast-path blueprint FW0; lowered by FW2, the discovery index), held by discovery-budget.test.ts. A ceiling only goes down: a count above it fails, and a count below it fails until the ceiling is lowered to match. FW2 traded one row's scan for a verification (delete-copy's post-delete proof of the route's copy), so its `verifications` rose while its discovery reads fell from 1,550 to 4. The unit rows (`scan`, a full read of every directory; `warmPass`; `directoryRead`, one directory a warm pass re-reads; `sweep`, one `verifyAbsent`; `verification`) are measured by packages/filesystem/src/project-directories.discovery-cost.test.ts into packages/filesystem/src/testing/discovery-unit-cost.json, which discovery-budget.test.ts holds these rows to; a change there changes them here. A discovery read is a file read or listing made to learn what a project directory holds. A record read is one `tau.json` read through the record client, outside a pass, a sweep or a verification.",
+  "profile": {
+    "home": 84,
+    "workspace": 302,
+    "duplicates": 3
+  },
+  "scan": {
+    "fileReads": 772,
+    "listings": 2,
+    "browserCalls": 2324
+  },
+  "warmPass": {
+    "fileReads": 0,
+    "listings": 0,
+    "browserCalls": 0
+  },
+  "directoryRead": {
+    "fileReads": 2,
+    "listings": 0,
+    "browserCalls": 6
+  },
+  "sweep": {
+    "fileReads": 386,
+    "listings": 2,
+    "browserCalls": 1932
+  },
+  "verification": {
+    "fileReads": 2,
+    "listings": 0,
+    "browserCalls": 8
+  },
+  "mutations": {
+    "delete-copy": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 2,
+      "recordReads": 0,
+      "discoveryReads": 4,
+      "browserCalls": 16
+    },
+    "permanent-delete": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 1,
+      "verifications": 0,
+      "recordReads": 0,
+      "discoveryReads": 388,
+      "browserCalls": 1932
+    },
+    "use-this-folder": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 0,
+      "discoveryReads": 0,
+      "browserCalls": 0
+    },
+    "create": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 0,
+      "discoveryReads": 0,
+      "browserCalls": 0
+    },
+    "duplicate": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 1,
+      "discoveryReads": 0,
+      "browserCalls": 0
+    },
+    "rename": {
+      "scans": 0,
+      "directoryReads": 1,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 1,
+      "discoveryReads": 2,
+      "browserCalls": 6
+    },
+    "trash": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 0,
+      "discoveryReads": 0,
+      "browserCalls": 0
+    },
+    "restore": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 0,
+      "discoveryReads": 0,
+      "browserCalls": 0
+    },
+    "chat-create": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 0,
+      "discoveryReads": 0,
+      "browserCalls": 0
+    },
+    "chat-soft-delete": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 0,
+      "discoveryReads": 0,
+      "browserCalls": 0
+    },
+    "chat-delete": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 0,
+      "discoveryReads": 0,
+      "browserCalls": 0
+    },
+    "chat-purge": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 0,
+      "discoveryReads": 0,
+      "browserCalls": 0
+    },
+    "chat-recency": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 0,
+      "discoveryReads": 0,
+      "browserCalls": 0
+    },
+    "window-focus": {
+      "scans": 0,
+      "directoryReads": 0,
+      "sweeps": 0,
+      "verifications": 0,
+      "recordReads": 0,
+      "discoveryReads": 0,
+      "browserCalls": 0
+    }
+  }
+}

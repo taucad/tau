@@ -57,7 +57,7 @@ HEIC images are HEVC-coded. This notice concerns copyright only; it grants no pa
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 913 packages, with the license each declares.
+The web and desktop apps include the following 997 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -176,7 +176,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@lhncbc/ucum-lhc](https://github.com/lhncbc/ucum-lhc) | 7.1.10 | SEE LICENSE IN LICENSE.md |
 | [@marijn/find-cluster-break](https://code.haverbeke.berlin/marijn/find-cluster-break) | 1.0.4 | MIT |
 | @mediapipe/tasks-vision | 0.10.17 | Apache-2.0 |
-| [@mjackson/node-fetch-server](https://github.com/mjackson/remix-the-web) | 0.2.0 | MIT |
 | [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk) | 1.32.1 | MIT |
 | [@monogrid/gainmap-js](https://github.com/MONOGRID/gainmap-js) | 3.4.0 | MIT |
 | [@msgpack/msgpack](https://github.com/msgpack/msgpack-javascript) | 3.1.3 | ISC |
@@ -268,10 +267,12 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@radix-ui/react-use-size](https://github.com/radix-ui/primitives) | 1.1.5 | MIT |
 | [@radix-ui/react-visually-hidden](https://github.com/radix-ui/primitives) | 1.2.13 | MIT |
 | [@radix-ui/rect](https://github.com/radix-ui/primitives) | 1.1.3 | MIT |
-| [@react-router/express](https://github.com/remix-run/react-router) | 7.18.5 | MIT |
-| [@react-router/node](https://github.com/remix-run/react-router) | 7.18.5 | MIT |
+| [@react-router/express](https://github.com/remix-run/react-router) | 8.5.1 | MIT |
+| [@react-router/node](https://github.com/remix-run/react-router) | 8.5.1 | MIT |
 | [@react-three/drei](https://github.com/pmndrs/drei) | 10.7.9 | MIT |
 | [@reduxjs/toolkit](https://github.com/reduxjs/redux-toolkit) | 2.13.0 | MIT |
+| [@remix-run/node-fetch-server](https://github.com/remix-run/remix) | 0.14.2 | MIT |
+| [@remix-run/route-pattern](https://github.com/remix-run/remix) | 0.22.1 | MIT |
 | [@resvg/resvg-wasm](https://github.com/yisibl/resvg-js) | 2.6.2 | MPL-2.0 |
 | [@rjsf/core](https://github.com/rjsf-team/react-jsonschema-form) | 6.11.0 | Apache-2.0 |
 | [@rjsf/utils](https://github.com/rjsf-team/react-jsonschema-form) | 6.11.0 | Apache-2.0 |
@@ -298,6 +299,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@stablelib/base64](https://github.com/StableLib/stablelib) | 1.0.1 | MIT |
 | [@standard-schema/spec](https://github.com/standard-schema/standard-schema) | 1.1.0 | MIT |
 | [@standard-schema/utils](https://github.com/standard-schema/standard-schema) | 0.3.0 | MIT |
+| [@streamdown/cjk](https://github.com/vercel/streamdown) | 1.0.4 | Apache-2.0 |
+| [@streamdown/math](https://github.com/vercel/streamdown) | 1.0.3 | Apache-2.0 |
 | [@tanstack/devtools-event-client](https://github.com/TanStack/devtools) | 0.4.4 | MIT |
 | [@tanstack/pacer](https://github.com/TanStack/pacer) | 0.21.1 | MIT |
 | [@tanstack/query-core](https://github.com/TanStack/query) | 5.104.2 | MIT |
@@ -312,9 +315,9 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.192 | MIT |
 | [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
 | [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
-| [@taulabs/replicad](https://github.com/taucad/replicad) | 1.1.0-taulabs.1 | MIT |
-| [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.1 | MIT |
-| [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 3.0.0-beta.0 | MIT |
+| [@taulabs/replicad](https://github.com/taucad/replicad) | 1.2.1-beta.1 | MIT |
+| [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 1.2.1-beta.0 | MIT |
+| [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 3.0.0-beta.6 | MIT |
 | [@tiptap/core](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
 | [@tiptap/extension-bubble-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
 | [@tiptap/extension-floating-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
@@ -339,8 +342,11 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@types/debug](https://github.com/DefinitelyTyped/DefinitelyTyped) | 4.1.13 | MIT |
 | [@types/draco3d](https://github.com/DefinitelyTyped/DefinitelyTyped) | 1.4.10 | MIT |
 | [@types/emscripten](https://github.com/DefinitelyTyped/DefinitelyTyped) | 1.41.6 | MIT |
+| [@types/estree](https://github.com/DefinitelyTyped/DefinitelyTyped) | 1.0.9 | MIT |
+| [@types/estree-jsx](https://github.com/DefinitelyTyped/DefinitelyTyped) | 1.0.5 | MIT |
 | [@types/hast](https://github.com/DefinitelyTyped/DefinitelyTyped) | 3.0.5 | MIT |
 | [@types/json-schema](https://github.com/DefinitelyTyped/DefinitelyTyped) | 7.0.15 | MIT |
+| [@types/katex](https://github.com/DefinitelyTyped/DefinitelyTyped) | 0.16.8 | MIT |
 | [@types/mdast](https://github.com/DefinitelyTyped/DefinitelyTyped) | 4.0.4 | MIT |
 | [@types/ms](https://github.com/DefinitelyTyped/DefinitelyTyped) | 2.1.0 | MIT |
 | [@types/ndarray](https://github.com/DefinitelyTyped/DefinitelyTyped) | 1.1.0 | MIT |
@@ -353,6 +359,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@types/stats.js](https://github.com/DefinitelyTyped/DefinitelyTyped) | 0.17.4 | MIT |
 | [@types/three](https://github.com/DefinitelyTyped/DefinitelyTyped) | 0.184.1 | MIT |
 | [@types/trusted-types](https://github.com/DefinitelyTyped/DefinitelyTyped) | 2.0.7 | MIT |
+| [@types/unist](https://github.com/DefinitelyTyped/DefinitelyTyped) | 2.0.11 | MIT |
 | [@types/unist](https://github.com/DefinitelyTyped/DefinitelyTyped) | 3.0.3 | MIT |
 | [@types/use-sync-external-store](https://github.com/DefinitelyTyped/DefinitelyTyped) | 0.0.6 | MIT |
 | [@types/webxr](https://github.com/DefinitelyTyped/DefinitelyTyped) | 0.5.24 | MIT |
@@ -364,6 +371,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@vscode/codicons](https://github.com/microsoft/vscode-codicons) | 0.0.46-24 | CC-BY-4.0 |
 | [@vscode/l10n](https://github.com/Microsoft/vscode-l10n) | 0.0.18 | MIT |
 | [@x0k/json-schema-merge](https://github.com/x0k/json-schema-merge) | 1.1.0 | MIT |
+| [@xstate/react](https://github.com/statelyai/xstate) | 7.0.0-alpha.3 | MIT |
 | [@zkochan/js-yaml](https://github.com/nodeca/js-yaml) | 0.0.7 | MIT |
 | [abort-controller](https://github.com/mysticatea/abort-controller) | 3.0.0 | MIT |
 | [accepts](https://github.com/jshttp/accepts) | 2.0.0 | MIT |
@@ -408,6 +416,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [builder-util-runtime](https://github.com/electron-userland/electron-builder) | 9.7.0 | MIT |
 | [bundle-name](https://github.com/sindresorhus/bundle-name) | 4.1.1 | MIT |
 | [bytes](https://github.com/visionmedia/bytes.js) | 3.1.2 | MIT |
+| [cadmpeg-ts](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.5 | Apache-2.0 |
+| [cadmpeg-ts-{platform}](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.5 | Apache-2.0 |
 | [call-bind](https://github.com/ljharb/call-bind) | 1.0.9 | MIT |
 | [call-bind-apply-helpers](https://github.com/ljharb/call-bind-apply-helpers) | 1.0.2 | MIT |
 | [call-bound](https://github.com/ljharb/call-bound) | 1.0.4 | MIT |
@@ -418,6 +428,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [character-entities](https://github.com/wooorm/character-entities) | 2.0.2 | MIT |
 | [character-entities-html4](https://github.com/wooorm/character-entities-html4) | 2.1.0 | MIT |
 | [character-entities-legacy](https://github.com/wooorm/character-entities-legacy) | 3.0.0 | MIT |
+| [character-reference-invalid](https://github.com/wooorm/character-reference-invalid) | 2.0.1 | MIT |
 | [citty](https://github.com/unjs/citty) | 0.2.2 | MIT |
 | [cjs-module-lexer](https://github.com/nodejs/cjs-module-lexer) | 2.3.0 | MIT |
 | [class-variance-authority](https://github.com/joe-bell/cva) | 0.7.1 | Apache-2.0 |
@@ -435,6 +446,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [comma-separated-tokens](https://github.com/wooorm/comma-separated-tokens) | 2.0.3 | MIT |
 | [commander](https://github.com/tj/commander.js) | 12.1.0 | MIT |
 | [commander](https://github.com/tj/commander.js) | 13.1.0 | MIT |
+| [commander](https://github.com/tj/commander.js) | 8.3.0 | MIT |
 | [commist](https://github.com/mcollina/commist) | 3.2.0 | MIT |
 | [compressible](https://github.com/jshttp/compressible) | 2.0.18 | MIT |
 | [compression](https://github.com/expressjs/compression) | 1.8.2 | MIT |
@@ -446,7 +458,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [convert-source-map](https://github.com/thlorenz/convert-source-map) | 2.0.0 | MIT |
 | [convert-to-spaces](https://github.com/vadimdemedes/convert-to-spaces) | 2.0.1 | MIT |
 | [cookie](https://github.com/jshttp/cookie) | 0.7.2 | MIT |
-| [cookie](https://github.com/jshttp/cookie) | 1.1.1 | MIT |
+| [cookie-es](https://github.com/unjs/cookie-es) | 3.1.1 | MIT |
 | [cookie-signature](https://github.com/visionmedia/node-cookie-signature) | 1.2.2 | MIT |
 | [core-util-is](https://github.com/isaacs/core-util-is) | 1.0.3 | MIT |
 | [cors](https://github.com/expressjs/cors) | 2.8.6 | MIT |
@@ -513,6 +525,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [encodeurl](https://github.com/pillarjs/encodeurl) | 2.0.0 | MIT |
 | [end-of-stream](https://github.com/mafintosh/end-of-stream) | 1.4.5 | MIT |
 | [enquirer](https://github.com/enquirer/enquirer) | 2.3.6 | MIT |
+| [entities](https://github.com/fb55/entities) | 6.0.1 | BSD-2-Clause |
 | [environment](https://github.com/sindresorhus/environment) | 1.1.0 | MIT |
 | [es-cookie](https://github.com/theodorejb/es-cookie) | 1.5.0 | MIT |
 | [es-define-property](https://github.com/ljharb/es-define-property) | 1.0.1 | MIT |
@@ -525,6 +538,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [esbuild-wasm](https://github.com/evanw/esbuild) | 0.28.2 | MIT |
 | [escape-html](https://github.com/component/escape-html) | 1.0.3 | MIT |
 | [escape-string-regexp](https://github.com/sindresorhus/escape-string-regexp) | 2.0.0 | MIT |
+| [escape-string-regexp](https://github.com/sindresorhus/escape-string-regexp) | 5.0.0 | MIT |
+| [estree-util-is-identifier-name](https://github.com/syntax-tree/estree-util-is-identifier-name) | 3.0.0 | MIT |
 | [etag](https://github.com/jshttp/etag) | 1.8.1 | MIT |
 | [event-target-shim](https://github.com/mysticatea/event-target-shim) | 5.0.1 | MIT |
 | [eventemitter3](https://github.com/primus/eventemitter3) | 5.0.4 | MIT |
@@ -579,18 +594,31 @@ Their copyright notices and full license texts ship inside each package and are 
 | [has-symbols](https://github.com/inspect-js/has-symbols) | 1.1.0 | MIT |
 | [has-tostringtag](https://github.com/inspect-js/has-tostringtag) | 1.0.2 | MIT |
 | [hasown](https://github.com/inspect-js/hasOwn) | 2.0.4 | MIT |
+| [hast-util-from-dom](https://github.com/syntax-tree/hast-util-from-dom) | 5.0.1 | ISC |
+| [hast-util-from-html](https://github.com/syntax-tree/hast-util-from-html) | 2.0.3 | MIT |
+| [hast-util-from-html-isomorphic](https://github.com/syntax-tree/hast-util-from-html-isomorphic) | 2.0.0 | MIT |
+| [hast-util-from-parse5](https://github.com/syntax-tree/hast-util-from-parse5) | 8.0.3 | MIT |
+| [hast-util-is-element](https://github.com/syntax-tree/hast-util-is-element) | 3.0.0 | MIT |
+| [hast-util-parse-selector](https://github.com/syntax-tree/hast-util-parse-selector) | 4.0.0 | MIT |
+| [hast-util-raw](https://github.com/syntax-tree/hast-util-raw) | 9.1.0 | MIT |
 | [hast-util-sanitize](https://github.com/syntax-tree/hast-util-sanitize) | 5.0.2 | MIT |
 | [hast-util-to-html](https://github.com/syntax-tree/hast-util-to-html) | 9.0.5 | MIT |
+| [hast-util-to-jsx-runtime](https://github.com/syntax-tree/hast-util-to-jsx-runtime) | 2.3.6 | MIT |
+| [hast-util-to-parse5](https://github.com/syntax-tree/hast-util-to-parse5) | 8.0.1 | MIT |
+| [hast-util-to-text](https://github.com/syntax-tree/hast-util-to-text) | 4.0.2 | MIT |
 | [hast-util-whitespace](https://github.com/syntax-tree/hast-util-whitespace) | 3.0.0 | MIT |
+| [hastscript](https://github.com/syntax-tree/hastscript) | 9.0.1 | MIT |
 | [help-me](https://github.com/mcollina/help-me) | 5.0.0 | MIT |
 | [hls.js](https://github.com/video-dev/hls.js) | 1.7.3 | Apache-2.0 |
 | [hono](https://github.com/honojs/hono) | 4.13.13 | MIT |
+| [html-url-attributes](https://github.com/rehypejs/rehype-minify/tree/main/packages/html-url-attributes) | 3.0.1 | MIT |
 | [html-void-elements](https://github.com/wooorm/html-void-elements) | 3.0.0 | MIT |
 | [http-errors](https://github.com/jshttp/http-errors) | 2.0.1 | MIT |
 | [http-proxy-agent](https://github.com/TooTallNate/proxy-agents) | 9.1.0 | MIT |
 | [https-proxy-agent](https://github.com/TooTallNate/proxy-agents) | 7.0.6 | MIT |
 | [https-proxy-agent](https://github.com/TooTallNate/proxy-agents) | 9.1.0 | MIT |
 | [iconv-lite](https://github.com/pillarjs/iconv-lite) | 0.7.3 | MIT |
+| [idb](https://github.com/jakearchibald/idb) | 7.1.1 | ISC |
 | [ieee754](https://github.com/feross/ieee754) | 1.2.1 | BSD-3-Clause |
 | [ignore](https://github.com/kaelzhang/node-ignore) | 5.3.2 | MIT |
 | [immediate](https://github.com/calvinmetcalf/immediate) | 3.0.6 | MIT |
@@ -599,17 +627,22 @@ Their copyright notices and full license texts ship inside each package and are 
 | [indent-string](https://github.com/sindresorhus/indent-string) | 5.0.0 | MIT |
 | [inherits](https://github.com/isaacs/inherits) | 2.0.4 | ISC |
 | [ink](https://github.com/vadimdemedes/ink) | 6.8.0 | MIT |
+| [inline-style-parser](https://github.com/remarkablemark/inline-style-parser) | 0.2.7 | MIT |
 | [internmap](https://github.com/mbostock/internmap) | 2.0.3 | ISC |
 | [iota-array](https://github.com/mikolalysenko/iota-array) | 1.0.0 | MIT |
 | [ip-address](https://github.com/beaugunderson/ip-address) | 10.7.4 | MIT |
 | [ipaddr.js](https://github.com/whitequark/ipaddr.js) | 1.9.1 | MIT |
+| [is-alphabetical](https://github.com/wooorm/is-alphabetical) | 2.0.1 | MIT |
+| [is-alphanumerical](https://github.com/wooorm/is-alphanumerical) | 2.0.1 | MIT |
 | [is-buffer](https://github.com/feross/is-buffer) | 1.1.6 | MIT |
 | [is-callable](https://github.com/inspect-js/is-callable) | 1.2.7 | MIT |
+| [is-decimal](https://github.com/wooorm/is-decimal) | 2.0.1 | MIT |
 | [is-docker](https://github.com/sindresorhus/is-docker) | 3.0.0 | MIT |
 | [is-extglob](https://github.com/jonschlinkert/is-extglob) | 2.1.1 | MIT |
 | [is-finite](https://github.com/sindresorhus/is-finite) | 1.1.0 | MIT |
 | [is-fullwidth-code-point](https://github.com/sindresorhus/is-fullwidth-code-point) | 5.1.0 | MIT |
 | [is-glob](https://github.com/micromatch/is-glob) | 4.0.3 | MIT |
+| [is-hexadecimal](https://github.com/wooorm/is-hexadecimal) | 2.0.1 | MIT |
 | [is-in-ci](https://github.com/sindresorhus/is-in-ci) | 2.0.0 | MIT |
 | [is-in-ssh](https://github.com/sindresorhus/is-in-ssh) | 1.0.0 | MIT |
 | [is-inside-container](https://github.com/sindresorhus/is-inside-container) | 1.0.0 | MIT |
@@ -645,6 +678,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [jszip](https://github.com/Stuk/jszip) | 3.10.2 | (MIT OR GPL-3.0-or-later) |
 | [jwa](https://github.com/brianloveswords/node-jwa) | 2.0.1 | MIT |
 | [jws](https://github.com/brianloveswords/node-jws) | 4.0.1 | MIT |
+| [katex](https://github.com/KaTeX/KaTeX) | 0.18.2 | MIT |
 | [ktx-parse](https://github.com/donmccurdy/ktx-parse) | 1.1.0 | MIT |
 | [kysely](https://github.com/kysely-org/kysely) | 0.29.6 | MIT |
 | [lazy-val](https://github.com/develar/lazy-val) | 1.0.5 | MIT |
@@ -658,6 +692,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [lodash.get](https://github.com/lodash/lodash) | 4.4.2 | MIT |
 | [lodash.isequal](https://github.com/lodash/lodash) | 4.5.0 | MIT |
 | [long](https://github.com/dcodeIO/long.js) | 5.3.2 | Apache-2.0 |
+| [longest-streak](https://github.com/wooorm/longest-streak) | 3.1.0 | MIT |
 | [loose-envify](https://github.com/zertosh/loose-envify) | 1.4.0 | MIT |
 | [lru-cache](https://github.com/isaacs/node-lru-cache) | 10.4.3 | ISC |
 | [lucide-react](https://github.com/lucide-icons/lucide) | 0.552.0 | ISC |
@@ -665,10 +700,27 @@ Their copyright notices and full license texts ship inside each package and are 
 | [magic-string](https://github.com/Rich-Harris/magic-string) | 0.30.21 | MIT |
 | [make-error](https://github.com/JsCommunity/make-error) | 1.3.6 | ISC |
 | [manifold-3d](https://github.com/elalish/manifold) | 3.4.1 | Apache-2.0 |
+| [markdown-table](https://github.com/wooorm/markdown-table) | 3.0.4 | MIT |
 | [markdown-to-jsx](https://github.com/quantizor/markdown-to-jsx) | 9.10.3 | MIT |
+| [marked](https://github.com/markedjs/marked) | 18.1.1 | MIT |
 | [math-intrinsics](https://github.com/es-shims/math-intrinsics) | 1.1.0 | MIT |
+| [mdast-util-find-and-replace](https://github.com/syntax-tree/mdast-util-find-and-replace) | 3.0.3 | MIT |
 | [mdast-util-from-markdown](https://github.com/syntax-tree/mdast-util-from-markdown) | 2.1.0 | MIT |
+| [mdast-util-gfm](https://github.com/syntax-tree/mdast-util-gfm) | 3.1.0 | MIT |
+| [mdast-util-gfm-autolink-literal](https://github.com/syntax-tree/mdast-util-gfm-autolink-literal) | 2.0.1 | MIT |
+| [mdast-util-gfm-footnote](https://github.com/syntax-tree/mdast-util-gfm-footnote) | 2.1.0 | MIT |
+| [mdast-util-gfm-strikethrough](https://github.com/syntax-tree/mdast-util-gfm-strikethrough) | 2.0.1 | MIT |
+| [mdast-util-gfm-table](https://github.com/syntax-tree/mdast-util-gfm-table) | 2.0.0 | MIT |
+| [mdast-util-gfm-task-list-item](https://github.com/syntax-tree/mdast-util-gfm-task-list-item) | 2.0.0 | MIT |
+| [mdast-util-math](https://github.com/syntax-tree/mdast-util-math) | 3.0.0 | MIT |
+| [mdast-util-mdx-expression](https://github.com/syntax-tree/mdast-util-mdx-expression) | 2.0.1 | MIT |
+| [mdast-util-mdx-jsx](https://github.com/syntax-tree/mdast-util-mdx-jsx) | 3.2.0 | MIT |
+| [mdast-util-mdxjs-esm](https://github.com/syntax-tree/mdast-util-mdxjs-esm) | 2.0.1 | MIT |
+| [mdast-util-phrasing](https://github.com/syntax-tree/mdast-util-phrasing) | 4.1.0 | MIT |
 | [mdast-util-to-hast](https://github.com/syntax-tree/mdast-util-to-hast) | 13.2.1 | MIT |
+| [mdast-util-to-markdown](https://github.com/syntax-tree/mdast-util-to-markdown) | 2.2.0 | MIT |
+| [mdast-util-to-markdown-cjk-friendly](https://github.com/tats-u/markdown-cjk-friendly) | 1.0.0 | MIT |
+| [mdast-util-to-markdown-cjk-friendly-gfm-strikethrough](https://github.com/tats-u/markdown-cjk-friendly) | 1.0.0 | MIT |
 | [mdast-util-to-string](https://github.com/syntax-tree/mdast-util-to-string) | 4.0.0 | MIT |
 | [media-typer](https://github.com/jshttp/media-typer) | 1.1.1 | MIT |
 | [merge-descriptors](https://github.com/sindresorhus/merge-descriptors) | 2.0.0 | MIT |
@@ -676,6 +728,17 @@ Their copyright notices and full license texts ship inside each package and are 
 | [meshoptimizer](https://github.com/zeux/meshoptimizer) | 1.1.1 | MIT |
 | [micromark](https://github.com/micromark/micromark/tree/main/packages/micromark) | 4.0.3 | MIT |
 | [micromark-core-commonmark](https://github.com/micromark/micromark/tree/main/packages/micromark-core-commonmark) | 2.0.4 | MIT |
+| [micromark-extension-cjk-friendly](https://github.com/tats-u/markdown-cjk-friendly) | 2.0.2 | MIT |
+| [micromark-extension-cjk-friendly-gfm-strikethrough](https://github.com/tats-u/markdown-cjk-friendly) | 2.0.1 | MIT |
+| [micromark-extension-cjk-friendly-util](https://github.com/tats-u/markdown-cjk-friendly) | 3.0.1 | MIT |
+| [micromark-extension-gfm](https://github.com/micromark/micromark-extension-gfm) | 3.0.0 | MIT |
+| [micromark-extension-gfm-autolink-literal](https://github.com/micromark/micromark-extension-gfm-autolink-literal) | 2.1.0 | MIT |
+| [micromark-extension-gfm-footnote](https://github.com/micromark/micromark-extension-gfm-footnote) | 2.1.0 | MIT |
+| [micromark-extension-gfm-strikethrough](https://github.com/micromark/micromark-extension-gfm-strikethrough) | 2.1.0 | MIT |
+| [micromark-extension-gfm-table](https://github.com/micromark/micromark-extension-gfm-table) | 2.1.2 | MIT |
+| [micromark-extension-gfm-tagfilter](https://github.com/micromark/micromark-extension-gfm-tagfilter) | 2.0.0 | MIT |
+| [micromark-extension-gfm-task-list-item](https://github.com/micromark/micromark-extension-gfm-task-list-item) | 2.1.0 | MIT |
+| [micromark-extension-math](https://github.com/micromark/micromark-extension-math) | 3.1.0 | MIT |
 | [micromark-factory-destination](https://github.com/micromark/micromark/tree/main/packages/micromark-factory-destination) | 2.0.1 | MIT |
 | [micromark-factory-label](https://github.com/micromark/micromark/tree/main/packages/micromark-factory-label) | 2.0.1 | MIT |
 | [micromark-factory-space](https://github.com/micromark/micromark/tree/main/packages/micromark-factory-space) | 2.1.0 | MIT |
@@ -711,8 +774,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
 | [n8ao](https://github.com/N8python/n8ao) | 1.10.2 | ISC |
 | [nanoid](https://github.com/ai/nanoid) | 5.1.16 | MIT |
-| [nanoraster](https://github.com/taucad/nanoraster) | 0.9.0 | Apache-2.0 |
-| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.9.0 | Apache-2.0 |
+| [nanoraster](https://github.com/taucad/nanoraster) | 0.10.0 | Apache-2.0 |
+| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.10.0 | Apache-2.0 |
 | [nanostores](https://github.com/nanostores/nanostores) | 1.5.5 | MIT |
 | [ndarray](https://github.com/mikolalysenko/ndarray) | 1.1.1 | MIT |
 | [ndarray-lanczos](https://github.com/donmccurdy/ndarray-lanczos) | 0.3.0 | MIT |
@@ -739,10 +802,12 @@ Their copyright notices and full license texts ship inside each package and are 
 | [open](https://github.com/sindresorhus/open) | 11.0.4 | MIT |
 | [openai](https://github.com/openai/openai-node) | 7.19.0 | Apache-2.0 |
 | [openapi-types](https://github.com/kogosoftwarellc/open-api/tree/master/packages/openapi-types) | 12.1.3 | MIT |
-| [opentype.js](https://github.com/opentypejs/opentype.js) | 1.3.4 | MIT |
+| [opentype.js](https://github.com/opentypejs/opentype.js) | 2.0.0 | MIT |
 | [orderedmap](https://github.com/marijnh/orderedmap) | 2.1.1 | MIT |
 | [p-retry](https://github.com/sindresorhus/p-retry) | 4.6.2 | MIT |
 | [pako](https://github.com/nodeca/pako) | 1.0.11 | (MIT AND Zlib) |
+| [parse-entities](https://github.com/wooorm/parse-entities) | 4.0.2 | MIT |
+| [parse5](https://github.com/inikulin/parse5) | 7.3.0 | MIT |
 | [parseurl](https://github.com/pillarjs/parseurl) | 1.3.3 | MIT |
 | [partial-json](https://github.com/promplate/partial-json-parser-js) | 0.1.7 | MIT |
 | [patch-console](https://github.com/vadimdemedes/patch-console) | 2.0.0 | MIT |
@@ -750,7 +815,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [path-key](https://github.com/sindresorhus/path-key) | 3.1.1 | MIT |
 | [path-to-regexp](https://github.com/pillarjs/path-to-regexp) | 8.4.2 | MIT |
 | [picomatch](https://github.com/micromatch/picomatch) | 4.0.7 | MIT |
-| [picovoxel](https://github.com/taucad/picovoxel) | 0.2.1 | Apache-2.0 |
+| [picovoxel](https://github.com/taucad/picovoxel) | 0.3.0 | Apache-2.0 |
 | [pify](https://github.com/sindresorhus/pify) | 4.0.1 | MIT |
 | [pino-abstract-transport](https://github.com/pinojs/pino-abstract-transport) | 3.0.0 | MIT |
 | [pino-pretty](https://github.com/pinojs/pino-pretty) | 13.2.0 | MIT |
@@ -800,7 +865,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [react-remove-scroll](https://github.com/theKashey/react-remove-scroll) | 2.7.2 | MIT |
 | [react-remove-scroll-bar](https://github.com/theKashey/react-remove-scroll-bar) | 2.3.8 | MIT |
 | [react-resizable-panels](https://github.com/bvaughn/react-resizable-panels) | 3.0.6 | MIT |
-| [react-router](https://github.com/remix-run/react-router) | 7.18.5 | MIT |
+| [react-router](https://github.com/remix-run/react-router) | 8.5.1 | MIT |
 | [react-style-singleton](https://github.com/theKashey/react-style-singleton) | 2.2.3 | MIT |
 | [react-virtuoso](https://github.com/petyosi/react-virtuoso) | 4.18.16 | MIT |
 | [readable-stream](https://github.com/nodejs/readable-stream) | 2.3.8 | MIT |
@@ -810,10 +875,19 @@ Their copyright notices and full license texts ship inside each package and are 
 | [redux](https://github.com/reduxjs/redux) | 5.0.1 | MIT |
 | [redux-thunk](https://github.com/reduxjs/redux-thunk) | 3.1.0 | MIT |
 | [regexp-tree](https://github.com/DmitrySoshnikov/regexp-tree) | 0.1.27 | MIT |
+| [rehype-harden](https://github.com/vercel-labs/markdown-sanitizers) | 1.1.8 | MIT |
+| [rehype-katex](https://github.com/remarkjs/remark-math/tree/main/packages/rehype-katex) | 7.0.1 | MIT |
+| [rehype-raw](https://github.com/rehypejs/rehype-raw) | 7.0.0 | MIT |
 | [rehype-sanitize](https://github.com/rehypejs/rehype-sanitize) | 6.0.0 | MIT |
 | [rehype-stringify](https://github.com/rehypejs/rehype/tree/main/packages/rehype-stringify) | 10.0.1 | MIT |
+| [remark-cjk-friendly](https://github.com/tats-u/markdown-cjk-friendly) | 2.3.2 | MIT |
+| [remark-cjk-friendly-gfm-strikethrough](https://github.com/tats-u/markdown-cjk-friendly) | 2.3.1 | MIT |
+| [remark-gfm](https://github.com/remarkjs/remark-gfm) | 4.0.1 | MIT |
+| [remark-math](https://github.com/remarkjs/remark-math/tree/main/packages/remark-math) | 6.0.0 | MIT |
 | [remark-parse](https://github.com/remarkjs/remark/tree/main/packages/remark-parse) | 11.0.0 | MIT |
 | [remark-rehype](https://github.com/remarkjs/remark-rehype) | 11.1.2 | MIT |
+| [remark-stringify](https://github.com/remarkjs/remark/tree/main/packages/remark-stringify) | 11.0.0 | MIT |
+| [remend](https://github.com/vercel/streamdown) | 1.4.0 | Apache-2.0 |
 | [require-from-string](https://github.com/floatdrop/require-from-string) | 2.0.2 | MIT |
 | [require-in-the-middle](https://github.com/nodejs/require-in-the-middle) | 8.0.1 | MIT |
 | [reselect](https://github.com/reduxjs/reselect) | 5.2.0 | MIT |
@@ -839,7 +913,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [semver](https://github.com/npm/node-semver) | 7.8.5 | ISC |
 | [send](https://github.com/pillarjs/send) | 1.2.1 | MIT |
 | [serve-static](https://github.com/expressjs/serve-static) | 2.2.1 | MIT |
-| [set-cookie-parser](https://github.com/nfriedly/set-cookie-parser) | 2.7.2 | MIT |
 | [set-cookie-parser](https://github.com/nfriedly/set-cookie-parser) | 3.1.3 | MIT |
 | [set-function-length](https://github.com/ljharb/set-function-length) | 1.2.2 | MIT |
 | [setimmediate](https://github.com/YuzuJS/setImmediate) | 1.0.5 | MIT |
@@ -870,18 +943,20 @@ Their copyright notices and full license texts ship inside each package and are 
 | [stats.js](https://github.com/mrdoob/stats.js) | 0.17.0 | MIT |
 | [statuses](https://github.com/jshttp/statuses) | 2.0.2 | MIT |
 | stream-transform | 0.1.2 | BSD-3-Clause |
+| [streamdown](https://github.com/vercel/streamdown) | 2.7.0 | Apache-2.0 |
 | [string_decoder](https://github.com/nodejs/string_decoder) | 1.1.1 | MIT |
 | [string_decoder](https://github.com/nodejs/string_decoder) | 1.3.0 | MIT |
 | [string-to-stream](https://github.com/feross/string-to-stream) | 1.1.1 | MIT |
 | [string-width](https://github.com/sindresorhus/string-width) | 7.2.0 | MIT |
 | [string-width](https://github.com/sindresorhus/string-width) | 8.3.0 | MIT |
-| [string.prototype.codepointat](https://github.com/mathiasbynens/String.prototype.codePointAt) | 0.2.1 | MIT |
 | [stringify-entities](https://github.com/wooorm/stringify-entities) | 4.0.4 | MIT |
 | [strip-ansi](https://github.com/chalk/strip-ansi) | 7.2.0 | MIT |
 | [strip-json-comments](https://github.com/sindresorhus/strip-json-comments) | 5.0.3 | MIT |
 | [strip-literal](https://github.com/antfu/strip-literal) | 3.1.0 | MIT |
 | [strnum](https://github.com/NaturalIntelligence/strnum) | 2.5.1 | MIT |
 | [style-mod](https://code.haverbeke.berlin/marijn/style-mod) | 4.1.4 | MIT |
+| [style-to-js](https://github.com/remarkablemark/style-to-js) | 1.1.21 | MIT |
+| [style-to-object](https://github.com/remarkablemark/style-to-object) | 1.0.14 | MIT |
 | [suspend-react](https://github.com/pmndrs/suspend-react) | 0.1.3 | MIT |
 | [swr](https://github.com/vercel/swr) | 2.5.1 | MIT |
 | [tagged-tag](https://github.com/sindresorhus/tagged-tag) | 1.0.0 | MIT |
@@ -892,7 +967,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) | 0.9.16 | MIT |
 | [three-stdlib](https://github.com/pmndrs/three-stdlib) | 2.36.1 | MIT |
 | [throttleit](https://github.com/sindresorhus/throttleit) | 2.1.0 | MIT |
-| [tiny-inflate](https://github.com/devongovett/tiny-inflate) | 1.0.3 | MIT |
 | [tiny-invariant](https://github.com/alexreardon/tiny-invariant) | 1.3.3 | MIT |
 | [tiny-typed-emitter](https://github.com/binier/tiny-typed-emitter) | 2.1.0 | MIT |
 | [to-buffer](https://github.com/browserify/to-buffer) | 1.2.2 | MIT |
@@ -919,8 +993,10 @@ Their copyright notices and full license texts ship inside each package and are 
 | [undici-types](https://github.com/nodejs/undici) | 8.9.0 | MIT |
 | [unified](https://github.com/unifiedjs/unified) | 11.0.5 | MIT |
 | [uniq](https://github.com/mikolalysenko/uniq) | 1.0.1 | MIT |
+| [unist-util-find-after](https://github.com/syntax-tree/unist-util-find-after) | 5.0.0 | MIT |
 | [unist-util-is](https://github.com/syntax-tree/unist-util-is) | 6.0.1 | MIT |
 | [unist-util-position](https://github.com/syntax-tree/unist-util-position) | 5.0.0 | MIT |
+| [unist-util-remove-position](https://github.com/syntax-tree/unist-util-remove-position) | 5.0.0 | MIT |
 | [unist-util-stringify-position](https://github.com/syntax-tree/unist-util-stringify-position) | 4.0.0 | MIT |
 | [unist-util-visit](https://github.com/syntax-tree/unist-util-visit) | 5.1.0 | MIT |
 | [unist-util-visit-parents](https://github.com/syntax-tree/unist-util-visit-parents) | 6.0.2 | MIT |
@@ -928,6 +1004,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [unpipe](https://github.com/stream-utils/unpipe) | 1.0.0 | MIT |
 | [uqr](https://github.com/unjs/uqr) | 0.1.3 | MIT |
 | [use-callback-ref](https://github.com/theKashey/use-callback-ref/) | 1.3.3 | MIT |
+| [use-isomorphic-layout-effect](https://github.com/Andarist/use-isomorphic-layout-effect) | 1.2.1 | MIT |
 | [use-sidecar](https://github.com/theKashey/use-sidecar) | 1.1.3 | MIT |
 | [use-sync-external-store](https://github.com/react/react) | 1.7.0 | MIT |
 | [utif2](https://github.com/photopea/UTIF.js) | 4.1.0 | MIT |
@@ -937,6 +1014,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [vary](https://github.com/jshttp/vary) | 1.1.2 | MIT |
 | [vaul](https://github.com/emilkowalski/vaul) | 1.1.2 | MIT |
 | [vfile](https://github.com/vfile/vfile) | 6.0.3 | MIT |
+| [vfile-location](https://github.com/vfile/vfile-location) | 5.0.3 | MIT |
 | [vfile-message](https://github.com/vfile/vfile-message) | 4.0.3 | MIT |
 | [victory-vendor](https://github.com/FormidableLabs/victory) | 37.3.6 | MIT AND ISC |
 | [vscode-json-languageservice](https://github.com/Microsoft/vscode-json-languageservice) | 5.7.2 | MIT |
@@ -947,12 +1025,18 @@ Their copyright notices and full license texts ship inside each package and are 
 | [vscode-uri](https://github.com/microsoft/vscode-uri) | 3.1.0 | MIT |
 | [w3c-keyname](https://github.com/marijnh/w3c-keyname) | 2.2.8 | MIT |
 | [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) | 1.10.1 | Apache-2.0 |
+| [web-namespaces](https://github.com/wooorm/web-namespaces) | 2.0.1 | MIT |
 | [web-streams-polyfill](https://github.com/MattiasBuelens/web-streams-polyfill) | 3.3.3 | MIT |
 | webgl-constants | 1.1.1 | Not declared |
 | [webgl-sdf-generator](https://github.com/lojjic/webgl-sdf-generator) | 1.1.1 | MIT |
 | [which](https://github.com/isaacs/node-which) | 2.0.2 | ISC |
 | [which-typed-array](https://github.com/inspect-js/which-typed-array) | 1.1.24 | MIT |
 | [widest-line](https://github.com/sindresorhus/widest-line) | 6.0.0 | MIT |
+| [workbox-core](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
+| [workbox-expiration](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
+| [workbox-precaching](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
+| [workbox-routing](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
+| [workbox-strategies](https://github.com/googlechrome/workbox) | 7.4.1 | MIT |
 | [worker-factory](https://github.com/chrisguttandin/worker-factory) | 7.0.50 | MIT |
 | [worker-timers](https://github.com/chrisguttandin/worker-timers) | 8.0.34 | MIT |
 | [worker-timers-broker](https://github.com/chrisguttandin/worker-timers-broker) | 8.0.18 | MIT |

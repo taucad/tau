@@ -16,7 +16,7 @@ import type { CadAgentExecution } from '@taucad/chat';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
-import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
+import type { DraftAttachment, DraftAttachmentSource, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
 import type { ChatTextareaSubmitPayload } from '#components/chat/chat-textarea-types.js';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 
@@ -81,6 +81,8 @@ const defaultDraftState = {
   editDraftAttachments: [] as DraftAttachment[],
   attachingMain: false,
   attachingEdit: false,
+  pendingMain: [] as PendingDraftImage[],
+  pendingEdit: [] as PendingDraftImage[],
 };
 
 let draftState = defaultDraftState;
@@ -429,6 +431,18 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     expect(result.current.isAttaching).toBe(true);
     await act(async () => result.current.handleSubmit());
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("should hand the rail its own draft's images still converting, the main one's or the edit's", () => {
+    const converting = [{ isConverting: true }];
+    const adding = [{ isConverting: false }];
+    draftState = { ...defaultDraftState, attachingMain: true, pendingMain: converting, pendingEdit: adding };
+
+    const main = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn() }));
+    const edit = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(), mode: 'edit' }));
+
+    expect(main.result.current.pendingImages).toBe(converting);
+    expect(edit.result.current.pendingImages).toBe(adding);
   });
 
   it('should send the stored PDF reference when the model reads PDFs', async () => {

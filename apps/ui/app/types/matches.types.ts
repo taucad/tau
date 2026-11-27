@@ -1,7 +1,7 @@
 import type { UIMatch } from 'react-router';
 import type { ReactNode } from 'react';
 import type { SetNonNullable } from 'type-fest';
-import type { FeatureFlags } from '#flags/flag.constants.js';
+import type { LocalFeatureFlags } from '#flags/flag.constants.js';
 import type { ResolvedAuth } from '#hooks/use-resolved-auth.js';
 
 /**
@@ -10,7 +10,7 @@ import type { ResolvedAuth } from '#hooks/use-resolved-auth.js';
  */
 export type PageChromeContext = {
   readonly authState: ResolvedAuth;
-  readonly flags: FeatureFlags;
+  readonly flags: LocalFeatureFlags;
 };
 
 export type Handle = {
@@ -65,9 +65,11 @@ export type Handle = {
   /** Render the generic page header. Defaults to true. */
   enablePageHeader?: boolean;
   /**
-   * Enable overflow-y on the page. Use this when you have scrollable content in the page.
+   * Who scrolls the page. `document` (the default): the page grows and the shell scrolls it, wrapped or wrapperless.
+   * `contained`: the route owns its scroll areas and keeps `min-h-0` down to a named inner scroller; only the reviewed
+   * routes in `docs/policy/page-composition-policy.md` Rule 1 declare it.
    */
-  enableOverflowY?: boolean;
+  scroll?: 'document' | 'contained';
 };
 
 export type TypedUiMatch = UIMatch & {

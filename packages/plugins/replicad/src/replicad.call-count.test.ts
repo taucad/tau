@@ -81,13 +81,17 @@ const spyOnBindings = (): (() => Counts) => {
     'ReplicadPrototypeMeshExtractor.ExtractEdges': statics('ReplicadPrototypeMeshExtractor', 'ExtractEdges'),
     'ReplicadShapeIdentity.Inspect': statics('ReplicadShapeIdentity', 'Inspect'),
     'ReplicadShapeIdentityInfo.MatrixValue': members('ReplicadShapeIdentityInfo', 'MatrixValue'),
+    'ReplicadShapeHasher.HashCode': statics('ReplicadShapeHasher', 'HashCode'),
+    'ReplicadShapeIdentity.IsPartner': statics('ReplicadShapeIdentity', 'IsPartner'),
+    'gp_Trsf.Value': members('gp_Trsf', 'Value'),
     'Poly_Triangulation.UVNode': members('Poly_Triangulation', 'UVNode'),
     'BRepAdaptor_Surface.EvalD1': members('BRepAdaptor_Surface', 'EvalD1'),
+    'ReplicadSurfaceCoordinates.Extract': statics('ReplicadSurfaceCoordinates', 'Extract'),
   };
   return () => Object.fromEntries(Object.entries(spies).map(([name, spy]) => [name, spy.mock.calls.length]));
 };
 
-type Measured = { render: Counts; glb: Counts; stl: Counts; step: Counts };
+type Measured = { render: Counts; glb: Counts; stl: Counts; step: Counts; coldGlb: Counts };
 
 /** Explicit tolerances, so the mesh of each copy does not change with the model's size. */
 const coarse = { linearTolerance: 0.1, angularTolerance: 10 };
@@ -131,7 +135,14 @@ const measureCylinders = async (
     const step = await counted(async () => {
       await expectExported(document.export('step'));
     });
-    return { render, glb, stl, step };
+    // A GLB at tolerances no render used: nothing is kept, so it meshes as the render did (N14).
+    const coldGlb = await counted(async () => {
+      const cold = { ...tessellation, linearTolerance: tessellation.linearTolerance * 3 };
+      await expectExported(
+        document.export('glb', { options: { tessellation: cold }, content: { includeEdges: true } }),
+      );
+    });
+    return { render, glb, stl, step, coldGlb };
   } finally {
     document.close();
   }
@@ -144,18 +155,45 @@ const none: Counts = {
   'ReplicadPrototypeMeshExtractor.ExtractEdges': 0,
   'ReplicadShapeIdentity.Inspect': 0,
   'ReplicadShapeIdentityInfo.MatrixValue': 0,
+  'ReplicadShapeHasher.HashCode': 0,
+  'ReplicadShapeIdentity.IsPartner': 0,
+  'gp_Trsf.Value': 0,
   'Poly_Triangulation.UVNode': 0,
   'BRepAdaptor_Surface.EvalD1': 0,
+  'ReplicadSurfaceCoordinates.Extract': 0,
 };
 
 /**
  * Blueprint A19 (deferred: needs a `@taulabs/replicad-opencascadejs` rebuild that returns the
- * matrix in one call, charter D6): every shape's identity is inspected once, which is per shape,
- * but its 4 × 4 location matrix is then read with one `MatrixValue` call per entry.
+ * matrix in one call, charter D6): STEP product reuse inspects every shape's identity once, which
+ * serializes and hashes its BRep, and then reads its 4 × 4 location matrix with one `MatrixValue`
+ * call per entry.
  */
 const identities = (copies: number): Counts => ({
   'ReplicadShapeIdentity.Inspect': copies,
   'ReplicadShapeIdentityInfo.MatrixValue': 16 * copies,
+});
+
+/**
+ * Tessellation instancing reads no BRep content: one partner hash per shape, one `IsPartner`
+ * check per shape after the first of its hash, and the 3 × 4 placement with one `gp_Trsf.Value`
+ * call per entry (the same A19 deferral as `identities`).
+ */
+const occurrences = (copies: number): Counts => ({
+  'ReplicadShapeHasher.HashCode': copies,
+  'ReplicadShapeIdentity.IsPartner': copies - 1,
+  'gp_Trsf.Value': 12 * copies,
+});
+
+/**
+ * A GLB export after a render at the same tolerances (compute reuse on) composes the meshes the memo kept (N14): no
+ * extraction and no surface-coordinate read, only the occurrence reads, with one more `IsPartner` check against the
+ * memo's kept representative.
+ */
+const keptOccurrences = (copies: number): Counts => ({
+  ...none,
+  ...occurrences(copies),
+  'ReplicadShapeIdentity.IsPartner': copies,
 });
 
 describe('Replicad kernel call counts', () => {
@@ -171,19 +209,25 @@ describe('Replicad kernel call counts', () => {
     texturedFine = await measureCylinders({ copies: 2, anisotropic: true }, fine);
   });
 
-  it('should mesh faces and edges once per prototype on the render-with-edges and GLB export paths', () => {
+  it('should mesh faces and edges once per prototype on render with edges, and compose them on the GLB export', () => {
     // The copies share one prototype, so faces and edges are one native extraction each whatever
-    // the copy count; only the per-shape identity reads (A19) grow with it.
+    // the copy count; only the per-shape occurrence reads (A19) grow with it.
     const meshed = {
       ...none,
       'ReplicadPrototypeMeshExtractor.ExtractFaces': 1,
       'ReplicadPrototypeMeshExtractor.ExtractEdges': 1,
     };
     expect({ small: small.render, large: large.render }).toEqual({
-      small: { ...meshed, ...identities(2) },
-      large: { ...meshed, ...identities(6) },
+      small: { ...meshed, ...occurrences(2) },
+      large: { ...meshed, ...occurrences(6) },
     });
-    expect({ small: small.glb, large: large.glb }).toEqual({ small: small.render, large: large.render });
+    expect({ small: small.glb, large: large.glb }).toEqual({ small: keptOccurrences(2), large: keptOccurrences(6) });
+    // A GLB at tolerances no render used meshes once per prototype, as the render did; its only extra call is the
+    // partner check against the representative the memo already keeps.
+    expect({ small: small.coldGlb, large: large.coldGlb }).toEqual({
+      small: { ...small.render, 'ReplicadShapeIdentity.IsPartner': 2 },
+      large: { ...large.render, 'ReplicadShapeIdentity.IsPartner': 6 },
+    });
   });
 
   it('should export STL with no per-element binding call and STEP with only the identity reads', () => {
@@ -194,22 +238,20 @@ describe('Replicad kernel call counts', () => {
     });
   });
 
-  it('should record per-vertex surface-coordinate calls for a material that needs them', () => {
-    // Blueprint A4 (deferred: needs UV and D1U/D1V buffers in the fork's mesh extractor, charter
-    // D6): an anisotropic or textured material reads `UVNode` and `EvalD1` once per prototype mesh
-    // vertex, so the count grows as the tolerance tightens.
+  it('should read surface coordinates in one native call per prototype mesh, at any tolerance', () => {
+    // Blueprint A4 (N13): an anisotropic or textured material used to read `UVNode` and `EvalD1`
+    // once per prototype mesh vertex (290 coarse, 578 fine). `ReplicadSurfaceCoordinates.Extract`
+    // (replicad-opencascadejs 0.23.0-beta.3) returns them in one call, whatever the vertex count.
     const meshed = {
       ...none,
-      ...identities(2),
+      ...occurrences(2),
       'ReplicadPrototypeMeshExtractor.ExtractFaces': 1,
       'ReplicadPrototypeMeshExtractor.ExtractEdges': 1,
+      'ReplicadSurfaceCoordinates.Extract': 1,
     };
-    expect({ coarse: texturedCoarse.render, fine: texturedFine.render }).toEqual({
-      coarse: { ...meshed, 'Poly_Triangulation.UVNode': 290, 'BRepAdaptor_Surface.EvalD1': 290 },
-      fine: { ...meshed, 'Poly_Triangulation.UVNode': 578, 'BRepAdaptor_Surface.EvalD1': 578 },
-    });
-    expect(texturedCoarse.glb).toEqual(texturedCoarse.render);
-    expect(texturedFine.glb).toEqual(texturedFine.render);
+    expect({ coarse: texturedCoarse.render, fine: texturedFine.render }).toEqual({ coarse: meshed, fine: meshed });
+    expect(texturedCoarse.glb).toEqual(keptOccurrences(2));
+    expect(texturedFine.glb).toEqual(keptOccurrences(2));
   });
 });
 
@@ -309,7 +351,11 @@ describe('Replicad ocTracing summary', () => {
       'replicad.render-output',
       'kernel.export-compute',
     ]);
-    // The anisotropic material makes render read surface coordinates through OpenCASCADE, so each phase has calls.
-    expect(summaries.map((entry) => entry.detail?.['total.calls'])).toEqual([12, 7, 13]);
+    // The anisotropic material makes render read surface coordinates through OpenCASCADE (one native call since
+    // replicad-opencascadejs 0.23.0-beta.3; the per-vertex loop's summary counted 9), so each phase has calls.
+    // Render's count includes one identity `TopLoc_Location` per shape for its partner hash. Run-main makes 10 calls
+    // since `@taulabs/replicad` 1.2.0-beta.1 builds each operation once (taucad/replicad#9), and the live tier's cost
+    // estimate of the entry it stores walks its faces (a `TopExp_Explorer`, `More` and `Next`: 3 more).
+    expect(summaries.map((entry) => entry.detail?.['total.calls'])).toEqual([13, 2, 13]);
   });
 });

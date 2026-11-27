@@ -11,6 +11,12 @@ import { ResourceQueue } from '#resource-queue.js';
 import { createWorkspaceFileService, decoder, encoder, waitFor } from '#testing/workspace-service-harness.js';
 import type { ChangeEvent, FileSystemProvider } from '#types.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
+import { serveNodeFsProvider } from '#backend/node/host.js';
+import { NodeFsProvider } from '#backend/node/provider.js';
+import { tauPathPolicy } from '#path-registry.js';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   parseProjectManifestBytes,
   projectManifestSchemaUrl,
@@ -87,6 +93,31 @@ describe('WorkspaceFileService', () => {
         ['b-copy', 'duplicate-id'],
       ]);
       expect(result.roots).toEqual([{ status: 'complete', root: { backend: 'indexeddb' } }]);
+    });
+
+    it('should tell copies that share an id apart by when each tau.json changed, and stat no other project', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const duplicateId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
+      await writeManifest(provider, 'a-original', manifestProject(duplicateId, 'original'));
+      await writeManifest(provider, 'b-copy', manifestProject(duplicateId, 'copy'));
+      await writeManifest(provider, 'c-single', manifestProject('proj_ccccccccccccccccccccc', 'single'));
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      /* This provider synthesises a zero mtime, which is left out; report a real one. */
+      const originalStat = provider.stat.bind(provider);
+      const stat = vi
+        .spyOn(provider, 'stat')
+        .mockImplementation(async (path) => ({ ...(await originalStat(path)), mtimeMs: 1_700_000_000_000 }));
+
+      const result = await service.listProjectManifests();
+
+      const times = Object.fromEntries(
+        result.entries.map((entry) => [
+          entry.locator.relativeDirectory,
+          'modifiedAt' in entry ? entry.modifiedAt : 'absent',
+        ]),
+      );
+      expect(times).toEqual({ 'a-original': 1_700_000_000_000, 'b-copy': 1_700_000_000_000, 'c-single': 'absent' });
+      expect(stat.mock.calls.map(([path]) => path)).not.toContain('c-single/tau.json');
     });
 
     it('should initialize hand-authored manifests without rewriting their bytes', async () => {
@@ -823,6 +854,43 @@ describe('WorkspaceFileService', () => {
         coordinator.dispose();
       }
     });
+
+    /* Blueprint audit row 4: deleting one copy of a shared id never revokes the route another copy holds. */
+    it('keeps the project route of another copy of the id and revokes only the bound one', async () => {
+      const writeCopy = async (copy: string): Promise<void> => {
+        await rootProvider.mkdir(copy, { recursive: true });
+        await rootProvider.writeFile(
+          `${copy}/tau.json`,
+          serializeProjectManifest(
+            projectToManifest({ name: copy, description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } }),
+          ),
+        );
+        await rootProvider.writeFile(
+          `${copy}/${projectIdentityPath}`,
+          serializeProjectIdentity({ version: 1, projectId }),
+        );
+        await rootProvider.writeFile(`${copy}/main.ts`, encoder.encode(`export const copy = '${copy}';`));
+      };
+      await writeCopy('bound-copy');
+      await writeCopy('other-copy');
+      await service.configureProjectRoots({
+        projects: [{ projectId, backend: 'indexeddb', providerBasePath: 'bound-copy' }],
+        roots: [{ backend: 'indexeddb' }],
+      });
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: 'other-copy', scope }),
+      ).resolves.toEqual({ status: 'deleted' });
+      expect(await rootProvider.exists('other-copy')).toBe(false);
+      await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).resolves.toBe(
+        "export const copy = 'bound-copy';",
+      );
+
+      await expect(
+        service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: 'bound-copy', scope }),
+      ).resolves.toEqual({ status: 'deleted' });
+      await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).rejects.toThrow();
+    });
   });
 
   describe('commitPendingProjectDirectory', () => {
@@ -1367,5 +1435,149 @@ describe('WorkspaceFileService', () => {
         second.service.dispose();
       }
     });
+  });
+});
+
+describe('project discovery over unavailable roots (T-B13.3)', () => {
+  it('should list Home and report a root that is not available as inaccessible without resolving its provider', async () => {
+    const homeProjectId = 'proj_hhhhhhhhhhhhhhhhhhhhh';
+    const home = mkdtempSync(join(tmpdir(), 'tau-discovery-home-'));
+    const hung = mkdtempSync(join(tmpdir(), 'tau-discovery-hung-'));
+    mkdirSync(join(home, 'alpha'));
+    const project: Project = {
+      id: homeProjectId,
+      ...projectToManifest({ name: 'Alpha', description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } }),
+    };
+    writeFileSync(join(home, 'alpha', 'tau.json'), serializeProjectManifest(projectToManifest(project)));
+    mkdirSync(join(home, 'alpha', projectIdentityPath, '..'), { recursive: true });
+    writeFileSync(
+      join(home, 'alpha', projectIdentityPath),
+      serializeProjectIdentity({ version: 1, projectId: homeProjectId }),
+    );
+    const nativeWatch = NodeFsProvider.prototype.watch;
+    /* Released at teardown, so the host can close; never during the row. */
+    const release = Promise.withResolvers<() => void>();
+    vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(
+      async function (this: NodeFsProvider, request, handler) {
+        if (this.root === hung) {
+          return release.promise;
+        }
+        return nativeWatch.call(this, request, handler);
+      },
+    );
+    const { port1, port2 } = new MessageChannel();
+    const stopHost = serveNodeFsProvider(port2, {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === home || candidate === hung,
+    }).close;
+    const registry = new ProviderRegistry({ createNodeFsPort: async () => port1 });
+    const nodeService = new WorkspaceFileService({
+      providerRegistry: registry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable: new MountTable(),
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const configured = nodeService.configureProjectRoots({
+        projects: [],
+        roots: [
+          { backend: 'node', path: home },
+          { backend: 'node', path: hung },
+        ],
+      });
+      await vi.advanceTimersByTimeAsync(5000);
+      await configured;
+      vi.useRealTimers();
+      const getProvider = vi.spyOn(registry, 'getProvider');
+
+      const result = await nodeService.listProjectManifests();
+
+      expect(result.entries.map((entry) => (entry.status === 'valid' ? entry.projectId : entry.status))).toEqual([
+        homeProjectId,
+      ]);
+      expect(result.roots).toEqual([
+        expect.objectContaining({ status: 'complete' }),
+        expect.objectContaining({ status: 'inaccessible', reason: 'unreachable' }),
+      ]);
+      expect(getProvider.mock.calls.some(([scope]) => scope.backend === 'node' && scope.path === hung)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      release.resolve(() => undefined);
+      nodeService.dispose();
+      await stopHost();
+      port2.close();
+      rmSync(home, { recursive: true, force: true });
+      rmSync(hung, { recursive: true, force: true });
+    }
+  });
+
+  /* Review of #2384 (CodeRabbit): while a configuration admits a root, the root has no published state, so discovery
+   * resolved its provider and listed it with no deadline. */
+  it('should report a root still in admission as pending without resolving its provider', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'tau-discovery-home-'));
+    const hung = mkdtempSync(join(tmpdir(), 'tau-discovery-hung-'));
+    mkdirSync(join(home, 'alpha'));
+    const nativeWatch = NodeFsProvider.prototype.watch;
+    /* Released at teardown, so the host can close; never during the row. */
+    const release = Promise.withResolvers<() => void>();
+    vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(
+      async function (this: NodeFsProvider, request, handler) {
+        if (this.root === hung) {
+          return release.promise;
+        }
+        return nativeWatch.call(this, request, handler);
+      },
+    );
+    const { port1, port2 } = new MessageChannel();
+    const stopHost = serveNodeFsProvider(port2, {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === home || candidate === hung,
+    }).close;
+    const registry = new ProviderRegistry({ createNodeFsPort: async () => port1 });
+    const nodeService = new WorkspaceFileService({
+      providerRegistry: registry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable: new MountTable(),
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const configured = nodeService.configureProjectRoots({
+        projects: [],
+        roots: [
+          { backend: 'node', path: home },
+          { backend: 'node', path: hung },
+        ],
+      });
+      /* Home is admitted and the other root's probe is still pending: the configuration has not settled. */
+      for (let turn = 0; turn < 100; turn += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- Each turn yields to the host's message port.
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
+      }
+      const getProvider = vi.spyOn(registry, 'getProvider');
+
+      const result = await nodeService.listProjectManifests();
+
+      expect(result.roots).toEqual([
+        expect.objectContaining({ status: 'complete' }),
+        expect.objectContaining({ status: 'inaccessible', reason: 'pending' }),
+      ]);
+      expect(getProvider.mock.calls.some(([scope]) => scope.backend === 'node' && scope.path === hung)).toBe(false);
+      await vi.advanceTimersByTimeAsync(5000);
+      await configured;
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      release.resolve(() => undefined);
+      nodeService.dispose();
+      await stopHost();
+      port2.close();
+      rmSync(home, { recursive: true, force: true });
+      rmSync(hung, { recursive: true, force: true });
+    }
   });
 });

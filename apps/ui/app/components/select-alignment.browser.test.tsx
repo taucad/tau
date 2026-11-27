@@ -32,7 +32,7 @@ vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
 const { RevisionCollaborators } = await import('#routes/w.$workspace.$project/revision-collaborators.js');
 const { WorkspaceUnavailableRecovery } =
   await import('#routes/w.$workspace.$project/workspace-unavailable-recovery.js');
-const { PublicationAccessPanel } = await import('#components/publish/publication-access-panel.js');
+const { PublicationAccessPanel } = await import('@taucad/publish-ui/components/publish/publication-access-panel');
 const { AdditionalField } = await import('#components/auth/additional-field.js');
 const { DataTablePagination } = await import('@taucad/ui-kit/components/data-table');
 
@@ -75,9 +75,9 @@ afterEach(() => {
 });
 
 const sites = [
-  'Invitation role',
+  'Role',
   'Role for teammate@example.test',
-  'General access',
+  'Who can open the link',
   'Account choice',
   'Workspace recovery',
   'Items per page',
@@ -101,13 +101,13 @@ it.each(
   );
   const narrow = width === 320;
   const child =
-    site === 'Invitation role' || site === 'Role for teammate@example.test' ? (
+    site === 'Role' || site === 'Role for teammate@example.test' ? (
       <RevisionCollaborators projectId='fixture' />
-    ) : site === 'General access' ? (
+    ) : site === 'Who can open the link' ? (
       <PublicationAccessPanel
         apiBaseUrl='http://localhost:4000'
-        publicationId='fixture'
-        shareUrl='https://tau.new/fixture'
+        projectId='fixture'
+        shareUrl='https://tau.example/s/tau~shr_fixture'
         visibility={narrow ? 'public' : 'private'}
         grants={[]}
         onVisibilityChange={vi.fn()}
@@ -149,14 +149,14 @@ it.each(
       ? await screen.findByRole('combobox')
       : await screen.findByRole('combobox', { name: site });
   const current =
-    site === 'Invitation role'
+    site === 'Role'
       ? 'Can edit'
       : site === 'Role for teammate@example.test'
         ? 'Can view'
-        : site === 'General access'
+        : site === 'Who can open the link'
           ? narrow
-            ? 'Public'
-            : 'Private'
+            ? 'Anyone with the link'
+            : 'Only people you invite'
           : site === 'Account choice'
             ? narrow
               ? 'A much longer account choice than the available space'

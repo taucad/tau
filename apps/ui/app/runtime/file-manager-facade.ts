@@ -26,7 +26,6 @@ import { Topic } from '@taucad/events';
 import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
 import {
   disconnectWorkspace as disconnectStoredWorkspace,
-  getProjectRootConfigs,
   restoreWorkspaceHandle as restoreStoredWorkspaceHandle,
   updateWorkspaceHandle,
 } from '@taucad/files-ui/filesystem/handle-store';
@@ -36,10 +35,29 @@ import { recordConnectionsOf } from '#runtime/file-manager-record-connections.js
 import type { RecordBridgeOpener } from '#runtime/file-manager-record-connections.js';
 import type { SessionFilesPort } from '#runtime/session-file-manager.js';
 import type { AppRuntimeFiles } from '#runtime/app-runtime.js';
-import type { FileSystemClientFacade, WorkspaceFacade } from '#hooks/use-file-manager.js';
-import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
+import type { FileSystemClientFacade, useFileManager, WorkspaceFacade } from '#hooks/use-file-manager.js';
 import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import { ENV } from '#environment.config.js';
+import { readRootConfigurationOnly } from '#runtime/root-configuration.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
+
+/**
+ * The root file manager's facade the project library runs on (D15 ruling, A2). It satisfies project-library's structural
+ * `ProjectLibraryFileManager`, which the moved storage calls and observations read, and adds what the app's commands,
+ * route access and workspace commands read: route verification, adoption, the scoped storage and duplicate reads.
+ *
+ * @public
+ */
+export type ProjectLibraryFacade = Pick<
+  ReturnType<typeof useFileManager>,
+  | 'client'
+  | 'recordFiles'
+  | 'workspace'
+  | 'scopedStorage'
+  | 'workerChangeChannel'
+  | 'watchRecordFile'
+  | 'readDuplicateProjectFiles'
+>;
 
 /** A file manager's content and tree services. @public */
 export type FileManagerServices = Readonly<{ contentService: FileContentService; treeService: FileTreeService }>;
@@ -114,6 +132,14 @@ export const selectActiveWorkspaceId = (fileManagerRef: FileManagerRef): string 
 export const selectProxy = (fileManagerRef: FileManagerRef): FileManagerSnapshot['context']['proxy'] =>
   fileManagerRef.getSnapshot().context.proxy;
 
+/**
+ * Whether the ref's file service started in safe mode, read in a callback.
+ *
+ * @public
+ */
+export const selectSafeMode = (fileManagerRef: FileManagerRef): boolean =>
+  fileManagerRef.getSnapshot().context.safeMode;
+
 /** The ref's tree service, read in a callback. */
 const selectTreeService = (fileManagerRef: FileManagerRef): FileTreeService | undefined =>
   fileManagerRef.getSnapshot().context.treeService;
@@ -170,7 +196,10 @@ export const createRecordWatch =
       try {
         await whenServicesReady();
         abort.signal.throwIfAborted();
-        const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+        const { createFileSystemBridgeProxy } = await loadCode(async () => {
+          const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+          return { createFileSystemBridgeProxy };
+        });
         abort.signal.throwIfAborted();
         const proxy = createFileSystemBridgeProxy(opener(root, 'working-copy'));
         /* A chat's append storm reaches this watch once per committed changeset (D6, D23). */
@@ -243,7 +272,10 @@ export const createDuplicateProjectReader =
   ): ((projectRoot: string) => Promise<Record<string, Uint8Array<ArrayBuffer>>>) =>
   async (projectRoot) => {
     await whenServicesReady();
-    const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+    const { createFileSystemBridgeProxy } = await loadCode(async () => {
+      const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+      return { createFileSystemBridgeProxy };
+    });
     const proxy = createFileSystemBridgeProxy(opener(projectRoot, 'user'));
     try {
       const files = await proxy.contents('', { versionedOnly: true });
@@ -320,6 +352,7 @@ export const createAuthorityClient = (getReadiedProxy: () => Promise<FileManager
   return {
     listProjectManifests: gated('listProjectManifests'),
     verifyProjectRoute: gated('verifyProjectRoute'),
+    verifyAbsent: gated('verifyAbsent'),
     commitPendingProjectDirectory: gated('commitPendingProjectDirectory'),
     permanentlyDeleteProjectDirectory: gated('permanentlyDeleteProjectDirectory'),
     adoptProjectDirectory: gated('adoptProjectDirectory'),
@@ -375,7 +408,7 @@ export const createWorkspaceFacade = ({
     const [proxy, services, configuration] = await Promise.all([
       getReadiedProxy(),
       whenServicesReady(),
-      getProjectRootConfigs(),
+      readRootConfigurationOnly(selectSafeMode(fileManagerRef)),
     ]);
     assertOpen(owner);
     if (selectProxy(fileManagerRef) !== proxy) {
@@ -456,7 +489,7 @@ export const createWorkspaceFacade = ({
       const proxy = await getConnectedProxy();
       await updateWorkspaceHandle(workspaceId, handle);
       proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
-      await proxy.configureProjectRoots(await getProjectRootConfigs());
+      await proxy.configureProjectRoots(await readRootConfigurationOnly(selectSafeMode(fileManagerRef)));
     },
     disconnectWorkspace: async (workspaceId) => {
       const proxy = await getReadiedProxy();
@@ -507,7 +540,7 @@ export const createWorkspaceFacade = ({
 /** The root's facade: what the project library reads, as it changes, and the root layout's scope reads too. @public */
 export type RootFileFacade = Readonly<{
   /** The facade now: a new object only when the record client, the record watch or the change channel changed. */
-  get: () => ProjectLibraryFileManager;
+  get: () => ProjectLibraryFacade;
   /** Called after each change. @returns The unsubscribe. */
   subscribe: (listener: () => void) => () => void;
   /** The root's working-copy client, as a session child's port: the root scope reads it instead of its own. */
@@ -577,7 +610,7 @@ export function createRootFileFacade({ fileManagerRef, files, telemetry }: RootF
   connections.install(owner);
   /* As the scope's callback: a new opener gives a new watch; the same one keeps it. */
   let watchRecordFile = createRecordWatch(opener ?? fallback, whenServicesReady);
-  const build = (): ProjectLibraryFileManager => ({
+  const build = (): ProjectLibraryFacade => ({
     ...fixed,
     recordFiles: owner.files('working-copy'),
     watchRecordFile,

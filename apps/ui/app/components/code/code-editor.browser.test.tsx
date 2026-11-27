@@ -1,10 +1,10 @@
-import { editorSyntaxFixtures } from '#lib/editor-syntax.fixtures.js';
+import { editorSyntaxFixtures } from '@taucad/editor-ui/lib/editor-syntax.fixtures';
 import { StateEffect } from '@codemirror/state';
 import { showTooltip } from '@codemirror/view';
 import { openLintPanel, setDiagnostics } from '@codemirror/lint';
 import { gotoLine, openSearchPanel } from '@codemirror/search';
-import { definitionProvider } from '#components/code/editor-definition.js';
-import { renderTypeScriptDocumentation } from '#components/code/editor-documentation.js';
+import { definitionProvider } from '@taucad/editor-ui/components/code/editor-definition';
+import { renderTypeScriptDocumentation } from '@taucad/editor-ui/components/code/editor-documentation';
 import '#styles/global.css';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -17,18 +17,22 @@ import {
   selectedCompletion,
   startCompletion,
 } from '@codemirror/autocomplete';
-import { CodeEditor } from '#components/code/code-editor.client.js';
-import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
-import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
-import { EditorDocument } from '#lib/editor-document.js';
-import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
-import type { EditorDiagnostic } from '#lib/editor-diagnostics.js';
-import { storeDiagnostics } from '#components/code/editor-lint.js';
-import { EditorDocumentSession, maxBackgroundDocuments } from '#lib/editor-document-session.js';
-import { clearEditorNavigation, registerEditorView, requestEditorNavigation } from '#lib/editor-navigation-service.js';
+import { CodeEditor } from '@taucad/editor-ui/components/code/code-editor.client';
+import { EditorPanePlaceholder } from '@taucad/editor-ui/components/code/editor-pane-placeholder';
+import { jsonDepthHighlighting } from '@taucad/editor-ui/components/code/json-depth-highlighting';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
+import { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
+import type { EditorDiagnostic } from '@taucad/editor-ui/lib/editor-diagnostics';
+import { storeDiagnostics } from '@taucad/editor-ui/components/code/editor-lint';
+import { EditorDocumentSession, maxBackgroundDocuments } from '@taucad/editor-ui/lib/editor-document-session';
+import {
+  clearEditorNavigation,
+  registerEditorView,
+  requestEditorNavigation,
+} from '@taucad/editor-ui/lib/editor-navigation-service';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
-import type { EditorNavigationTarget } from '#lib/editor-language-environment.js';
-import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
+import type { EditorNavigationTarget } from '@taucad/editor-ui/lib/editor-language-environment';
+import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
 import { Theme, ThemeProvider } from '#hooks/use-theme.js';
 import type { EditorView } from '@codemirror/view';
 
@@ -330,8 +334,8 @@ it('keeps a rejected read-only view transaction out of its document', async () =
 
 it('opens a real TypeScript standard-library definition as read-only source', async () => {
   const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
-    import('#lib/typescript-language/typescript-service.js'),
-    import('#lib/typescript-language/create-typescript-extensions.js'),
+    import('@taucad/editor-ui/lib/typescript-language/typescript-service'),
+    import('@taucad/editor-ui/lib/typescript-language/create-typescript-extensions'),
   ]);
   const sourceDocument = new EditorDocument(
     'main.ts',
@@ -454,8 +458,8 @@ it('underlines a symbol under the definition modifier and opens it on Mod-click 
 
 it('opens TypeScript definitions on Mod-click and from {@link} references in hover documentation', async () => {
   const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
-    import('#lib/typescript-language/typescript-service.js'),
-    import('#lib/typescript-language/create-typescript-extensions.js'),
+    import('@taucad/editor-ui/lib/typescript-language/typescript-service'),
+    import('@taucad/editor-ui/lib/typescript-language/create-typescript-extensions'),
   ]);
   const sourceDocument = new EditorDocument(
     'main.ts',
@@ -519,8 +523,8 @@ it('opens TypeScript definitions on Mod-click and from {@link} references in hov
 
 it('offers VS Code symbol navigation, references, call hierarchy, occurrences and parameter hints for TypeScript', async () => {
   const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
-    import('#lib/typescript-language/typescript-service.js'),
-    import('#lib/typescript-language/create-typescript-extensions.js'),
+    import('@taucad/editor-ui/lib/typescript-language/typescript-service'),
+    import('@taucad/editor-ui/lib/typescript-language/create-typescript-extensions'),
   ]);
   const source = [
     'export function area(width: number): number {',
@@ -672,8 +676,8 @@ it('offers VS Code symbol navigation, references, call hierarchy, occurrences an
 
 it('adds the import when a TypeScript auto-import completion is accepted with Enter after more typing', async () => {
   const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
-    import('#lib/typescript-language/typescript-service.js'),
-    import('#lib/typescript-language/create-typescript-extensions.js'),
+    import('@taucad/editor-ui/lib/typescript-language/typescript-service'),
+    import('@taucad/editor-ui/lib/typescript-language/create-typescript-extensions'),
   ]);
   const sourceDocument = new EditorDocument(
     'layout.ts',
@@ -814,8 +818,8 @@ it('colors JSON keys by seven nesting levels and cycles brace colors', async () 
 
 it('releases views and TypeScript mirrors across twenty open/switch/close cycles', async () => {
   const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
-    import('#lib/typescript-language/typescript-service.js'),
-    import('#lib/typescript-language/create-typescript-extensions.js'),
+    import('@taucad/editor-ui/lib/typescript-language/typescript-service'),
+    import('@taucad/editor-ui/lib/typescript-language/create-typescript-extensions'),
   ]);
   const content = mock<FileContentService>();
   content.addEditorSaveFlusher.mockReturnValue(() => undefined);
@@ -946,8 +950,8 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
   'renders real TypeScript widgets in %s',
   async (theme) => {
     const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
-      import('#lib/typescript-language/typescript-service.js'),
-      import('#lib/typescript-language/create-typescript-extensions.js'),
+      import('@taucad/editor-ui/lib/typescript-language/typescript-service'),
+      import('@taucad/editor-ui/lib/typescript-language/create-typescript-extensions'),
     ]);
     await page.viewport(1000, 700);
     document.documentElement.className =
@@ -1178,8 +1182,8 @@ it.each(editorSyntaxFixtures)('renders visible syntax styles for %s', async (lan
 
 it.each([false, true])('refreshes delayed acquisition without editing (stale response: %s)', async (delayResponse) => {
   const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
-    import('#lib/typescript-language/typescript-service.js'),
-    import('#lib/typescript-language/create-typescript-extensions.js'),
+    import('@taucad/editor-ui/lib/typescript-language/typescript-service'),
+    import('@taucad/editor-ui/lib/typescript-language/create-typescript-extensions'),
   ]);
   let release: () => void = () => undefined;
   const ready = new Promise<void>((resolve) => {
@@ -1391,8 +1395,8 @@ it('shows kernel and language diagnostics together on their own rows', async () 
 it('draws real TypeScript diagnostics with gutter markers on their underlined rows', async () => {
   await page.viewport(1000, 600);
   const [{ createTypeScriptService }, { createTypeScriptExtensions }] = await Promise.all([
-    import('#lib/typescript-language/typescript-service.js'),
-    import('#lib/typescript-language/create-typescript-extensions.js'),
+    import('@taucad/editor-ui/lib/typescript-language/typescript-service'),
+    import('@taucad/editor-ui/lib/typescript-language/create-typescript-extensions'),
   ]);
   const sourceDocument = new EditorDocument(
     'main.ts',

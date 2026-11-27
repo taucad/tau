@@ -141,6 +141,9 @@
 \* WP5 (composer image formats): the store and the composer draft provide the image step from the app's
 \* attachment image actor, and a queued image carries its declared type for the intake counter only; admission,
 \* delivery, persistence and the queue barrier are unchanged.
+\* Composer drop zone and converting slot: the chat pane and Home hero forward dropped files to the composer's
+\* existing drop handler, and the draft lists images still being converted as placeholder slots. Draft, admission,
+\* delivery, persistence and the queue barrier are unchanged. No action or verdict changes.
 \* SP2g (change-event netting): the store's watch of a chat's foreign segment directory also refolds on a
 \* summary of that directory or any ancestor (the project root included), as the coalescer now delivers scoped
 \* `directoryChanged` resets; a refold only re-reads segments, so admission, delivery, persistence and the queue
@@ -151,10 +154,132 @@
 \* account may not continue it (re-read on an account switch), and with the stop's reason on Stop or the turn
 \* host's unmount, which is checked again after the catalog wait. The composer disables
 \* send meanwhile. Admission still decides once, so delivery order, persistence and the queue barrier are unchanged.
+\* A15d (early input, on PL6's hand-off): while the chat's record is unread (read through a selector, never a
+\* snapshot in the component), the composer takes a painted draft through `hydrateDraft`, which skips a touched draft.
+\* PL6's queued submit is shown until it is sent or cancelled, and Escape cancels it as an edit does. An Enter queued on
+\* a painted draft nobody edited waits for the composer's record (the chat's, or Home's own) and is replayed only when
+\* the record holds that text and nothing more;
+\* otherwise it is cancelled and never sent. A send still enters the queue only through the composer's submit, so
+\* admission, delivery, persistence and the queue barrier are unchanged, and no action or verdict changes.
+\* External-agent sign-in: the store answers which host a chat is attached to (a read of the observation it already
+\* keeps), so a login card can offer the sign-in where that host refused the turn, and an exit-0 sign-in retries the
+\* refused turn through the existing regenerate gesture. No action or verdict changes.
+\* DC-10 revisions-ui slice 2 (2026-11-18): `use-turn-admission.ts` takes the revision client registry from
+\* `@taucad/revisions-ui`; only the import moved. No action or verdict changes.
+\* revisions-ui slice 6 (2026-11-19): `use-turn-admission.ts` takes `subscribeRevisionSessionUser` from
+\* `@taucad/revisions-ui/lib/revision-actor`; only the import moved. No action or verdict changes.
+\* Tau Cloud naming audit (2026-11-18): `chat-session-store.ts` rewords the queue-updates error sentence; copy only.
+\* No action or verdict changes.
+\* DC-10 files-ui slice 9 (2026-11-19): `chat-session-store.ts` takes the `CommitCancelledDraftRestoreInput` type
+\* from `@taucad/files-ui`; only the import moved. No action or verdict changes.
+\* Adaptive app deployment mode C6 (2026-11-19): `chat-turn-host.tsx` rebuilds `snapshot.kernel` from the plan read at
+\* admission; delivery, persistence and the queue are untouched. No action or verdict changes.
+\* DC-10 chat-ui slice 1 (2026-11-19): `chat-message-queue.machine.ts` moves unchanged to `@taucad/chat-ui`, and
+\* `chat-session-store.ts`, `chat-message-queue.tsx`, `chat-textarea.tsx` and `use-chat.tsx` import it, the draft
+\* machine and the chat SDK loader from there; only paths moved. No action or verdict changes.
+\* PL7 staging defects FP9 (2026-11-20): `chat-textarea.tsx` loads the headless capture service through the
+\* code-loading owner (`loadCode`); delivery, persistence and the queue are untouched. No action or verdict changes.
+\* UI layering W2 (2026-11-21): `chat-session-store.ts` takes `run-auto-resume` from `@taucad/chat-ui`, where it moved
+\* unchanged from `@taucad/ui-core`; only the import moved. No action or verdict changes.
+\* UI layering W5 (2026-11-21): `chat-session-store.ts` takes the `CommitCancelledDraftRestoreInput` type from
+\* `@taucad/project-library`, where `chat-storage.types` moved unchanged from `@taucad/files-ui`; only the import
+\* moved. No action or verdict changes.
+\* FP10 held seed (2026-11-25): `chat-session-store.ts` shows the agent host's terminal code load failure, which the
+\* chat's host read met before a seed's command could, as the chat's error once the chat has loaded. The seed stays
+\* held, as before, until a host read answers; delivery, persistence and the queue are untouched. No action or verdict
+\* changes.
+\* Launch audit first fixes (2026-11-25): `chat-session-store.ts` compares the composer's draft with a sent message in
+\* the composed form before it clears the draft or returns the message to it. `use-turn-admission.ts` refuses a
+\* signed-out person's turn on the existing refused-admission path and records the refused gesture's identity and kind
+\* on the saved error; `chat-turn-host.tsx` and `use-cad-chat-client.ts` pass that kind. Delivery, persistence and the
+\* queue barrier are unchanged. No action or verdict changes.
+\* Launch audit review fixes (2026-11-25): `use-cad-chat-client.ts` names a refused attachment send or edit by its own
+\* gesture kind instead of always `send`. Delivery, persistence and the queue barrier are unchanged. No action or
+\* verdict changes.
+\* Chat UX F1/F2 (2026-11-25): a send made with nothing running is shown in the thread while it is admitted,
+\* not as a queue row. Stop during that admission, or a host refusal of it, withdraws the entry (Withdraw): an
+\* unprepared, unsteered, never-accepted entry leaves the queue and the submitted set and returns to the composer,
+\* and the session machine's `withdrawTurn` abandons the admission. The person may submit it again.
+\* The store waits for a withdrawal's removal before it re-reads the outbox, so no delivery reads it half-written.
+\* A Stop with no run, or over a run that already ended, sends no cancel (Cancel needs a live observed run).
+\* Audit A-5: a cancel the host refuses or never answers lets go of the Stop; one owed while no host is attached is
+\* sent when it attaches; a Stop deferred to a command that started no run is let go. Cancel and delivery unchanged.
+\* The outbox logs which gate holds its head each time that gate changes; the gates themselves are unchanged.
+\* Chat UX review (2026-11-25): the delivery gate moved into `outbox-gate.ts` as one pure selector that both the
+\* advance and the thread's departing send read, so the two cannot disagree. Withdraw now returns the message to
+\* the composer in the same step that removes it under the file lock (`composer`), and marks every unprepared,
+\* unsteered send still behind it held (`held`): the person stopped, so nothing queued behind leaves until they
+\* send it now (Steer). ComposerExclusive and HeldWaitsForPerson state both; the withdraw-releases-held witness
+\* removes the hold.
+\* Review round 2: held sends are parked, so a later send goes ahead of them (FIFO among the unheld, `NextUp`).
+\* A steered send not yet prepared may be withdrawn too. TakeBack models the host's take-back of an accepted,
+\* still-live turn (`TURN_WITHDRAWN`): the run is cancelled and its request returns to the composer, never shown.
+\* Stop is one value on the session (`PendingStop`); a cancel refused `RUN_NOT_LIVE` lets it go quietly, and a Stop
+\* during a resume's answer cancels the accepted attempt. Cancel's guards and every action above are unchanged.
+\* Review round 3: a withdrawn send is parked first and leaves the outbox only once an empty composer has taken it,
+\* so Withdraw may also leave it queued and parked (a composer holding new text); either way it is in one place.
+\* Parking drops the send's spent steer, so it never reads as Send now. Admission refusals use the same offer.
+\* The thread calls a handed-over send departing only until the log has its request. A take-back is restored
+\* from the log's `TURN_WITHDRAWN` row even when the Stop was let go before that row arrived.
+\* A `TURN_RELEASED` that reaches the page before its run's ending row waits briefly for that row before it is
+\* judged; that changes no action or verdict.
+\* TakeBack now holds the sends queued behind a taken-back turn, as Withdraw does. A Stop aimed at a run settles
+\* from that run's end, and each cancel's answer settles only the Stop that sent it.
+\* use_skill startup latency T2 (2026-11-26): the transcript `chat-session-store.ts`, `chat-turn-host.tsx`,
+\* `use-cad-chat-client.ts` and `use-chat.tsx` read is the fold of the projection, with a durably accepted gesture shown
+\* until its run folds; delivery, persistence, acknowledgement and the queue are untouched. No action or verdict changes.
+\* use_skill startup latency T3 (2026-11-26): the chat's status in `chat-session-store.ts`, `use-chat.tsx` and
+\* `use-cad-chat-client.ts` is the run phase, else the command in flight; the store arms no SDK stream, and its usage,
+\* trays and first-text timing read the fold. Dispatch, acknowledgement and the queue are untouched. No action or
+\* verdict changes.
+\* use_skill startup latency T4 (2026-11-26): `chat-session-store.ts` and `use-chat.tsx` hold no AI SDK `Chat`, watch,
+\* presentation hold, retry or materialization; the fold is the transcript's one owner and settles its load. A Start
+\* whose log read is refused for good no longer shows as submitted. Dispatch, acknowledgement and the queue are
+\* untouched. No action or verdict changes.
+\* T4 review (2026-11-26): the store's transcript holds its D-UI-10 announcement, a refused read releases its held run
+\* and a Resume stays submitted until its run reopens. Dispatch, acknowledgement and the queue are untouched.
+\* T4 review round 3 (2026-11-26): a command answered on a refused read releases its run, and a gesture's admission
+\* in `use-chat.tsx` reads the current fold rather than the throttled transcript, and `chat-turn-host.tsx` builds
+\* its command from the fold read after its admission waits. No action or verdict changes.
+\* Chat UX F1/F2 with T2: the departing send is shown on the fold until the host accepts it, and the accepted
+\* gesture shows it after; a handed-over send no longer needs its own copy. No action or verdict changes.
+\* Chat UX F1/F2 with T3: a Stop that dispatch lets go also refreshes the run-phase status. No action or verdict
+\* changes.
+\* Chat UX F1/F2 with T4: the departing send is appended to the throttled transcript, so it shows at once. No
+\* action or verdict changes.
+\* Chat UX second automated review: the return to the composer moves under the delivery lock and leaves the outbox
+\* only once the composer's record holds it; `Withdraw`'s two outcomes already cover both. No action or verdict changes.
+\* PERF-5 (2026-11-26): an owner `wait` refusal (WRITER_LOCKED, LOG_FENCED, HOST_CLOSED and kin) of a prepared send is
+\* no longer a failure. The delivery lets go of the lock and keeps the command (`Yield`), and the outbox sends it again
+\* by its key after a backoff of 250 ms doubling to 30 s (`Recover`, `Deliver`). Stop meanwhile takes it back: a
+\* prepared send no delivery holds and the host never accepted may now be withdrawn, dropping its command.
+\* PERF-8 (2026-11-26): a reload between a send's outbox write and its composer clear restored the queued message
+\* as a draft. The composer lets go of a restored draft that an outbox entry composes; no action or verdict changes.
+\* Comment pins S1 review (2026-11-26): `use-cad-chat-client.ts` flattens a message's commented images before it
+\* builds the message, only for a submit that carries annotations and after the gesture's queue intent is captured, as
+\* attachment promotion already waits there; a failed flatten sends nothing. `chat-session-store.ts` gains a reader of
+\* the draft's attachment bytes, `use-chat.tsx` the draft's annotations and their setter, and `chat-textarea.tsx` a
+\* slot for the draft's comment list. Dispatch, acknowledgement and the queue are untouched. No action or verdict
+\* changes.
+\* The flatten step and its painter load on demand as one module (`annotated-send.ts`), in the same place and order.
+\* Launch audit merged with PERF-8 (2026-11-26): the restored draft is matched to an outbox entry in the composed form,
+\* as a sent draft is, so a draft with trailing whitespace is let go too. No action or verdict changes.
+\* Comment pins S2 review (2026-11-26): an edit names its comments and is flattened like a send before its turn is
+\* requested (`use-cad-chat-client.ts`, `chat-turn-host.tsx`, `use-chat.tsx`); a returned message's originals are
+\* re-retained with its parts and the draft bytes reader falls back to the chat's directory (`chat-session-store.ts`);
+\* the edit composer shows its comment list (`chat-textarea.tsx`). A send without annotations still takes no tick
+\* before it is sent. No action or verdict changes.
+\* Chat performance WP-06a (2026-11-26): `useChatSelector` (`use-chat.tsx`) reads each field on demand and wakes a
+\* selector only for the sources its last evaluation read; it sends nothing to the queue. No action or verdict changes.
+\* Its per-evaluation view is a class instance (`ChatStateView`), not an object literal of accessors. No action or verdict
+\* changes.
+\* Chat performance WP-06 (2026-11-26): `ChatSessionStore` publishes a projection change that touches only the live
+\* preview from the next animation frame (`LiveOverlay.tla` `FrameClock`); ledger and durable changes, which this
+\* model reads, still publish at once. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,
-          RequireTerminalIntent, CaptureTerminalAtSubmit
+          RequireTerminalIntent, CaptureTerminalAtSubmit, HoldBehindWithdraw
 VARIABLE s
 vars == <<s>>
 None == "none"
@@ -166,7 +291,9 @@ Terminal(p) == p = "completed" \/ Stopped(p)
 Members(q) == {q[i] : i \in 1..Len(q)}
 Remove(q, m) == SelectSeq(q, LAMBDA x : x # m)
 Accepted == {key[1] : key \in s.accepted}
-Chosen == IF s.steerItem # None THEN s.steerItem ELSE Head(s.queue)
+Unheld(q) == SelectSeq(q, LAMBDA x : x \notin s.held)
+NextUp == IF HoldBehindWithdraw /\ Len(Unheld(s.queue)) > 0 THEN Head(Unheld(s.queue)) ELSE Head(s.queue)
+Chosen == IF s.steerItem # None THEN s.steerItem ELSE NextUp
 BarrierSeen(t) == ~ObserveBarrier \/ s.after = None \/ s.after \in s.observed[t].known
 Ready(t) == /\ BarrierSeen(t)
             /\ IF s.steerItem = None
@@ -174,6 +301,7 @@ Ready(t) == /\ BarrierSeen(t)
                        \/ (Stopped(s.observed[t].phase) /\
                            (~RequireTerminalIntent \/ s.afterTerminal[Chosen] = s.observed[t].run))
                   ELSE ~TerminalBeforeSend \/ Terminal(s.observed[t].phase)
+            /\ (~HoldBehindWithdraw \/ s.steerItem # None \/ Chosen \notin s.held)
 Init == s = [queue |-> <<>>, saved |-> <<>>, submitted |-> {}, prepared |-> None,
              owner |-> None, alive |-> Tabs, after |-> None, active |-> Original,
              pending |-> None, pendingTab |-> None,
@@ -184,7 +312,8 @@ Init == s = [queue |-> <<>>, saved |-> <<>>, submitted |-> {}, prepared |-> None
              observed |-> [t \in Tabs |-> [run |-> Original, phase |-> "running", known |-> {Original}]],
              earlyDelivery |-> FALSE, earlySteer |-> FALSE, outOfOrder |-> FALSE,
              steerItem |-> None, target |-> None,
-             cancelPending |-> {}, wrongCancellation |-> FALSE, submitInterrupted |-> FALSE]
+             cancelPending |-> {}, wrongCancellation |-> FALSE, submitInterrupted |-> FALSE,
+             composer |-> {}, held |-> {}, heldDelivery |-> FALSE, takenBack |-> {}]
 \* Capture authorization at UI submit entry before attachment promotion, then
 \* forward the same intent through execution lookup and storage lock awaits.
 Submit(t, m) == /\ t \in s.alive /\ m \notin s.submitted /\ s.pending = None
@@ -192,6 +321,7 @@ Submit(t, m) == /\ t \in s.alive /\ m \notin s.submitted /\ s.pending = None
                     !.capturedTerminal[m] = IF Stopped(s.observed[t].phase)
                                              THEN s.observed[t].run ELSE None,
                     !.submitInterrupted = @ \/ (~QuietSubmit /\ Live(s.phase[s.active])),
+                    !.composer = @ \ {m},
                     !.phase[s.active] = IF QuietSubmit THEN @ ELSE "cancelled"]
 Persist == LET m == s.pending IN
            /\ m # None
@@ -256,7 +386,8 @@ Deliver(t) == LET m == s.prepared
                         (Stopped(s.phase[s.active]) /\ s.capturedTerminal[m] = s.active))),
                     !.earlySteer = @ \/ (m \notin Accepted /\ s.steerItem = m /\
                       s.target # None /\ ~Terminal(s.phase[s.target])),
-                    !.outOfOrder = @ \/ (m \notin Accepted /\ s.steerItem # m /\ m # Head(s.queue)),
+                    !.outOfOrder = @ \/ (m \notin Accepted /\ s.steerItem # m /\ m # NextUp),
+                    !.heldDelivery = @ \/ (m \notin Accepted /\ s.steerItem # m /\ m \in s.held),
                     !.accepted = IF accept THEN @ \cup {key} ELSE @,
                     !.active = IF accept THEN m ELSE @,
                     !.phase[m] = IF accept THEN "running" ELSE @,
@@ -271,11 +402,45 @@ Acknowledge(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \in Accepted
                      !.saved = IF Durable THEN Remove(@, s.prepared) ELSE @,
                      !.after = s.prepared, !.prepared = None, !.owner = None,
                      !.capturedTerminal[s.prepared] = None, !.afterTerminal[s.prepared] = None,
-                     !.counts[s.prepared] = 0,
+                     !.counts[s.prepared] = 0, !.held = @ \ {s.prepared},
                      !.target = IF s.steerItem = s.prepared THEN None ELSE @,
                      !.steerItem = IF s.steerItem = s.prepared THEN None ELSE @]
+\* A prepared send no delivery holds, which the host refused with a wait and never accepted, is withdrawn the same
+\* way, and its command is dropped (PERF-5).
+\* Withdrawing a send that was never prepared or accepted parks it, and every other unprepared, unsteered send
+\* still queued, until the person sends it now; its spent steer is dropped. Then either an empty composer takes it,
+\* and it leaves the queue, its saved copy and the submitted set with its per-message facts (the person may submit
+\* it again), or the composer holds new text and it stays queued, parked. The store holds it first and removes it
+\* only once the composer has it; the model takes both writes as one step.
+Withdraw(t, m) == /\ t \in s.alive /\ m \in Members(s.queue)
+                  /\ (m # s.prepared \/ s.owner = None) /\ m \notin Accepted
+                  /\ \/ s' = [s EXCEPT !.queue = Remove(@, m),
+                          !.prepared = IF @ = m THEN None ELSE @,
+                          !.steerItem = IF @ = m THEN None ELSE @,
+                          !.target = IF s.steerItem = m THEN None ELSE @,
+                          !.saved = IF Durable THEN Remove(@, m) ELSE @,
+                          !.submitted = @ \ {m}, !.counts[m] = 0,
+                          !.capturedTerminal[m] = None, !.afterTerminal[m] = None,
+                          !.composer = @ \cup {m},
+                          !.held = (@ \ {m}) \cup (Members(s.queue) \ {m, s.prepared, s.steerItem})]
+                     \/ s' = [s EXCEPT !.steerItem = IF @ = m THEN None ELSE @,
+                          !.prepared = IF @ = m THEN None ELSE @, !.counts[m] = IF s.prepared = m THEN 0 ELSE @,
+                          !.target = IF s.steerItem = m THEN None ELSE @,
+                          !.held = @ \cup {m} \cup (Members(s.queue) \ {s.prepared, s.steerItem})]
+\* The host takes back an accepted turn it had not kept: the run is cancelled and its request goes back to the
+\* composer instead of the thread. A later send is a new request, so the message stays accepted and submitted.
+\* Every unprepared, unsteered send queued behind it is held, as after a withdrawal. A composer holding new text
+\* declines the request, and the store parks it as a new held send under a new identity, which this finite message
+\* set does not model. The store writes the outbox and the composer separately; the model takes them as one step.
+TakeBack(m) == /\ m \in Accepted /\ m = s.active /\ Live(s.phase[m]) /\ m \notin s.takenBack
+               /\ s' = [s EXCEPT !.phase[m] = "cancelled", !.takenBack = @ \cup {m}, !.composer = @ \cup {m},
+                    !.held = @ \cup (Members(s.queue) \ {s.prepared, s.steerItem})]
 LoseAck(t) == /\ t = s.owner /\ s.prepared \in Accepted
               /\ s' = [s EXCEPT !.owner = None]
+\* PERF-5: a delivery the host refused with an owner wait (RH-R17) lets go of the delivery lock and keeps the command;
+\* Recover sends it again by the same key after the backoff.
+Yield(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \notin Accepted /\ s.counts[s.prepared] > 0
+            /\ s' = [s EXCEPT !.owner = None]
 \* The finite crash scenario begins only after a queue save has answered.
 Crash(t) == /\ t \in s.alive /\ s.pending = None
             /\ s' = [s EXCEPT !.alive = @ \ {t},
@@ -285,10 +450,11 @@ Crash(t) == /\ t \in s.alive /\ s.pending = None
 Reopen(t) == /\ t \notin s.alive /\ s' = [s EXCEPT !.alive = @ \cup {t}]
 Next == Persist \/ Complete \/ Pause \/ Resume \/ Stop \/ Fail
         \/ (\E t \in Tabs : Observe(t) \/ Prepare(t) \/ Recover(t) \/ Deliver(t)
-             \/ Acknowledge(t) \/ LoseAck(t) \/ Crash(t) \/ Reopen(t) \/ Cancel(t)
-             \/ (\E m \in Messages : Submit(t, m) \/ Steer(t, m)
+             \/ Acknowledge(t) \/ LoseAck(t) \/ Yield(t) \/ Crash(t) \/ Reopen(t) \/ Cancel(t)
+             \/ (\E m \in Messages : Submit(t, m) \/ Steer(t, m) \/ Withdraw(t, m)
                  \/ (\E n \in Messages \cup {None} : Reorder(t, m, n))))
         \/ (\E r \in Runs : FinishCancel(r))
+        \/ (\E m \in Messages : TakeBack(m))
 Spec == Init /\ [][Next]_vars
 TypeOK == /\ s.queue \in Seq(Messages) /\ s.saved \in Seq(Messages)
           /\ s.submitted \subseteq Messages /\ s.active \in Runs
@@ -301,6 +467,7 @@ TypeOK == /\ s.queue \in Seq(Messages) /\ s.saved \in Seq(Messages)
           /\ s.capturedTerminal \in [Messages -> Runs \cup {None}]
           /\ s.afterTerminal \in [Messages -> Runs \cup {None}]
           /\ Len(s.queue) = Cardinality(Members(s.queue))
+          /\ s.composer \subseteq Messages /\ s.held \subseteq Messages /\ s.takenBack \subseteq Messages
 PayloadSurvives == s.submitted \subseteq Members(s.queue) \cup Accepted
 PreparedPayloadSurvives == s.prepared = None \/ s.prepared \in Members(s.queue)
 AtMostOnceCharge == \A m \in Messages : Cardinality({key \in s.accepted : key[1] = m}) <= 1
@@ -313,6 +480,12 @@ NoEarlyDelivery == ~s.earlyDelivery
 SteerWaitsForTerminal == ~s.earlySteer
 CancelTargetsObservedRun == ~s.wrongCancellation
 FIFOExceptExplicitSteer == ~s.outOfOrder
+\* A request is in one place: a send in the composer is neither deliverable from the outbox nor a kept turn. (An
+\* accepted entry the host took back may wait for its acknowledgement, but it can never start a turn again.)
+ComposerExclusive == s.composer \cap (((Members(s.queue) \cup {s.prepared}) \ Accepted)
+                                      \cup (Accepted \ s.takenBack) \cup {s.pending}) = {}
+\* Work queued behind a taken-back send leaves only when the person sends it now.
+HeldWaitsForPerson == ~s.heldDelivery
 Quiescent == s.pending = None /\ s.queue = <<>> /\ s.prepared = None /\ s.owner = None
 Symmetry == {messages @@ tabs : messages \in Permutations(Messages), tabs \in Permutations(Tabs)}
 =============================================================================

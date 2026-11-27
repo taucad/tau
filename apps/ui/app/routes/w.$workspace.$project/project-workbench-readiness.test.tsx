@@ -65,14 +65,16 @@ describe('Workbench first-checkout readiness', () => {
     ['Print', PrintPanelBody],
     ['Export', ConverterPanelBody],
     ['Agents', AgentsPanelBody],
-  ] as const)('should show download progress before mounting %s consumers', (_name, Component) => {
+  ] as const)('should draw the pane’s shape, with no words, before mounting %s consumers', (name, Component) => {
     render(
       <MemoryRouter>
         <Component />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('region')).toHaveTextContent('Downloading project files');
-    expect(screen.getByRole('region')).toHaveAttribute('aria-busy', 'true');
+    /* The viewer says the open; the pane keeps its frame and draws its shape (Progressive Loading Policy rule 17). */
+    const pane = screen.getByRole('group', { name: name === 'Export' ? 'Converter' : name });
+    expect(pane).toHaveAttribute('aria-busy', 'true');
+    expect(pane.textContent).toBe('');
     expect(mocks.machines).not.toHaveBeenCalled();
     expect(mocks.approvalBridge).not.toHaveBeenCalled();
     expect(mocks.agents).not.toHaveBeenCalled();
@@ -90,7 +92,7 @@ describe('Workbench first-checkout readiness', () => {
         </MemoryRouter>,
       ),
     ).toThrow('useChatSessionStore');
-    expect(screen.queryByRole('region')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Agents' })).toBeNull();
   });
 
   it('should open the Print pane without a chat approval provider once files are ready', () => {
@@ -101,7 +103,7 @@ describe('Workbench first-checkout readiness', () => {
       </MemoryRouter>,
     );
     expect(screen.getByText('Machines unavailable')).toBeInTheDocument();
-    expect(screen.queryByText('Downloading project files')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Print' })).not.toBeInTheDocument();
     expect(mocks.machines).toHaveBeenCalledOnce();
     expect(mocks.approvalBridge).not.toHaveBeenCalled();
   });

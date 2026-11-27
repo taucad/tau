@@ -14,8 +14,24 @@ import type { HomeStorageBackend } from '#filesystem/handle-store.js';
 const workerNamePrefix = 'fm-root';
 
 /** Worker name carrying the resolved Home engine to the worker's `/` mount. */
-export function fileManagerWorkerName(backend: HomeStorageBackend): string {
-  return `${workerNamePrefix}:${backend}`;
+export function fileManagerWorkerName(
+  backend: HomeStorageBackend,
+  options: { readonly safeMode?: boolean } = {},
+): string {
+  return `${workerNamePrefix}${options.safeMode === true ? `:${safeModeSegment}` : ''}:${backend}`;
+}
+
+/* Safe mode is known at boot and travels on the name too, so the worker reads it once, never live (W9 R5). */
+const safeModeSegment = 'safe';
+
+/**
+ * Whether a worker name says its page load started in safe mode.
+ *
+ * @param name - The worker's name.
+ * @returns Whether it is in safe mode.
+ */
+export function isSafeModeWorkerName(name: string): boolean {
+  return name.split(':').includes(safeModeSegment);
 }
 
 /**

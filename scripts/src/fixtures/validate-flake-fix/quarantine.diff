@@ -1,0 +1,7 @@
+--- a/apps/ui-e2e/quarantine.json
++++ b/apps/ui-e2e/quarantine.json
+@@
+ {
+-  "entries": []
++  "entries": [{ "test": "src/boot.test.ts > boot > mounts the worker", "issue": 2787 }]
+ }

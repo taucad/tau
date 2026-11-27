@@ -439,6 +439,55 @@ describe('machine camera stills as chat attachments (D-UI-04 WP5)', () => {
   });
 });
 
+describe('steering while an answer streams (use_skill startup latency, T3)', () => {
+  /* The page folds a steer as the end of the segment before it: what it showed live of that answer must already be
+   * durable, so the answer's own row has to precede the steering row in the log. */
+  it('should commit the streaming answer before the steering input that interrupts it', async () => {
+    const file = createMemoryEventLogFile();
+    const current: { session?: Awaited<ReturnType<typeof openSession>> } = {};
+    let calls = 0;
+    const transport: ModelTransport = {
+      funding: { type: 'unfunded' },
+      async *stream(): AsyncGenerator<ModelStreamEvent> {
+        calls++;
+        if (calls === 1) {
+          yield { type: 'text-delta', text: 'Drafting' };
+          current.session?.steer('Make it red.', 'steer:command-1');
+          yield { type: 'text-delta', text: ' a cube.' };
+          yield { type: 'completed', stopReason: 'stop' };
+          return;
+        }
+        yield { type: 'text-delta', text: 'A red cube.' };
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    };
+    const session = await openSession({ file, runId: 'run-1', transport });
+    current.session = session;
+
+    await session.prompt({ id: 'user-1', role: 'user', content: 'Make a cube.' });
+
+    const log = await file.open();
+    const events = await log.read();
+    const rows = events.flatMap((event, index) =>
+      event.type === 'message.appended'
+        ? [{ index, message: event.message }]
+        : event.type === 'message.envelope-replaced'
+          ? [{ index, message: event.replacement }]
+          : [],
+    );
+    const steer = rows.find(({ message }) => message.id === 'steer:command-1');
+    const answer = rows.filter(
+      ({ message }) => message.role === 'assistant' && JSON.stringify(message.content).includes('Drafting a cube.'),
+    );
+    expect(calls).toBe(2);
+    expect(steer).toBeDefined();
+    expect(answer.length).toBeGreaterThan(0);
+    /* Every row of the interrupted answer, its final envelope included, comes before the steer. */
+    const answerId = answer[0]!.message.id;
+    expect(rows.filter(({ message }) => message.id === answerId).every(({ index }) => index < steer!.index)).toBe(true);
+  });
+});
+
 describe('start-of-turn compaction refusal', () => {
   /*
    * A chat whose durable history is one message too large to evict cannot be

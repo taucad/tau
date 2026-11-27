@@ -4,7 +4,8 @@ import type { ReactElement, ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { entitlementsFromTier } from '@taucad/billing';
 import { DataControlsSettings } from '#components/settings/data-controls-settings.js';
-import { getAnonymousRevisions, setAnonymousRevisions } from '#lib/revision-actor.js';
+import { DeploymentSettingsProvider } from '#components/settings/deployment-settings-provider.js';
+import { getAnonymousRevisions, setAnonymousRevisions } from '@taucad/revisions-ui/lib/revision-actor';
 import type * as TelemetrySwitchModule from '#hooks/use-telemetry-switch.js';
 
 const clientEnvironment = globalThis.window.ENV;
@@ -101,7 +102,7 @@ describe('DataControlsSettings', () => {
 
   it("lets a paid plan opt in, showing the server's default-off answer", async () => {
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('pro'));
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
     const user = userEvent.setup();
 
     const toggle = screen.getByRole('switch', { name: improve });
@@ -113,7 +114,7 @@ describe('DataControlsSettings', () => {
   });
 
   it('lets free-tier users choose whether their chats improve the service', async () => {
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
     const user = userEvent.setup();
 
     const toggle = screen.getByRole('switch', { name: improve });
@@ -128,7 +129,7 @@ describe('DataControlsSettings', () => {
 
   it('asks a signed-out visitor to sign in before choosing', () => {
     mockSession = undefined;
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     expect(screen.getByRole('switch', { name: improve })).toBeDisabled();
     expect(screen.getByRole('group', { name: improve })).toHaveAccessibleDescription('Sign in to choose');
@@ -139,7 +140,7 @@ describe('DataControlsSettings', () => {
     (tier) => {
       useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
 
-      render(<DataControlsSettings />);
+      render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
@@ -161,7 +162,7 @@ describe('DataControlsSettings', () => {
         TAU_FRONTEND_URL: 'https://taucad.dev',
       };
 
-      render(<DataControlsSettings />);
+      render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
@@ -175,7 +176,7 @@ describe('DataControlsSettings', () => {
     'should offer the usage and diagnostics switch beside the training choice on every tier (%s)',
     async (tier) => {
       useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
-      render(<DataControlsSettings />);
+      render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
       const user = userEvent.setup();
 
       expect(screen.getByRole('switch', { name: usage })).toHaveAttribute('data-state', 'checked');
@@ -192,7 +193,7 @@ describe('DataControlsSettings', () => {
   );
 
   it('should route switching usage and diagnostics off through the one switch', async () => {
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
     const user = userEvent.setup();
 
     await user.click(screen.getByRole('switch', { name: usage }));
@@ -203,7 +204,7 @@ describe('DataControlsSettings', () => {
   it('should render the switch as off when the resolved consent is off', () => {
     mockTelemetrySwitch = { checked: false, pending: false, forcedOff: false };
 
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     expect(screen.getByRole('switch', { name: usage })).toHaveAttribute('data-state', 'unchecked');
   });
@@ -211,7 +212,7 @@ describe('DataControlsSettings', () => {
   it('should disable the switch and say why when GPC or declined analytics force it off', () => {
     mockTelemetrySwitch = { checked: false, pending: false, forcedOff: true };
 
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     expect(screen.getByRole('switch', { name: usage })).toBeDisabled();
     expect(screen.getByRole('group', { name: usage })).toHaveAccessibleDescription(/global privacy control/i);
@@ -220,13 +221,13 @@ describe('DataControlsSettings', () => {
   it('should disable the switch while a signed-in preference loads', () => {
     mockTelemetrySwitch = { checked: false, pending: true, forcedOff: false };
 
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     expect(screen.getByRole('switch', { name: usage })).toBeDisabled();
   });
 
   it('opens cookie preferences from its row', async () => {
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
     const user = userEvent.setup();
 
     await user.click(screen.getByRole('button', { name: 'Manage' }));
@@ -236,7 +237,7 @@ describe('DataControlsSettings', () => {
 
   it('records each improvement purpose with the one switch once a recording notice is in force', async () => {
     mockCanDecide = true;
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     await userEvent.click(screen.getByRole('switch', { name: improve }));
 
@@ -252,7 +253,7 @@ describe('DataControlsSettings', () => {
   it('withdraws every improvement purpose and the rating grant when switched off', async () => {
     mockCanDecide = true;
     mockAllowsAiTraining = true;
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     await userEvent.click(screen.getByRole('switch', { name: improve }));
 
@@ -262,7 +263,7 @@ describe('DataControlsSettings', () => {
   });
 
   it('records no recording decision while no notice is in force', async () => {
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     await userEvent.click(screen.getByRole('switch', { name: improve }));
 
@@ -271,7 +272,7 @@ describe('DataControlsSettings', () => {
   });
 
   it('should not offer the desktop analytics switch on the web, where cookie preferences decide analytics', () => {
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     expect(screen.queryByRole('switch', { name: 'Analytics' })).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Cookie preferences' })).toBeInTheDocument();
@@ -279,7 +280,7 @@ describe('DataControlsSettings', () => {
 
   it('chooses Hide my name in history for the workspace it opened over, and is absent outside one (C2)', async () => {
     const user = userEvent.setup();
-    const outside = render(<DataControlsSettings />);
+    const outside = render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
     expect(screen.queryByRole('switch', { name: 'Hide my name in history' })).not.toBeInTheDocument();
     outside.unmount();
     routeParams = { workspace: 'acme' };
@@ -287,7 +288,7 @@ describe('DataControlsSettings', () => {
       routeParams = {};
       setAnonymousRevisions('acme', false);
     });
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     const row = screen.getByRole('group', { name: 'Hide my name in history' });
     expect(row).toHaveTextContent(
@@ -302,7 +303,7 @@ describe('DataControlsSettings', () => {
   });
 
   it('keeps data controls to four rows, with account closure last', () => {
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     for (const name of [usage, improve, 'Cookie preferences']) {
       expect(screen.getByRole('group', { name })).toBeInTheDocument();

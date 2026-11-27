@@ -12,9 +12,9 @@ import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 // oxlint-disable-next-line import/extensions -- React Router generates this virtual route-type module.
 import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
-import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
-import type { ImportArchiveEvents, ImportArchiveInput } from '#machines/import-github.machine.js';
-import { importDiskMachine } from '#machines/import-disk.machine.js';
+import { ImportGitHubError, importGitHubMachine } from '@taucad/publish-ui/machines/import-github.machine';
+import type { ImportArchiveEvents, ImportArchiveInput } from '@taucad/publish-ui/machines/import-github.machine';
+import { importDiskMachine } from '@taucad/publish-ui/machines/import-disk.machine';
 import { ImportChannelError, createFromStagedImport, openImportSession } from '@taucad/ui-core/machines/import-staging';
 import type { HostImportGrant } from '@taucad/filesystem/importer';
 import type { ImportSession } from '@taucad/ui-core/machines/import-staging';
@@ -25,25 +25,26 @@ import { Label } from '@taucad/ui/components/label';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { useProjects } from '#hooks/use-projects.js';
-import { withNamedLock } from '#lib/named-lock.js';
+import { withNamedLock } from '@taucad/ui-core/lib/named-lock';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { RepositoryCard } from '#routes/import.$/repository-card.js';
 import { BranchSelector } from '#routes/import.$/branch-selector.js';
 import { createStaticDataSource } from '@taucad/workbench-panes/files/file-selector';
-import { FileSelector } from '#components/files/file-selector.js';
+import { FileSelector } from '@taucad/files-ui/components/files/file-selector';
 import { SuggestedClones } from '#routes/import.$/suggested-clones.js';
 import { UploadCard } from '#routes/import.$/upload-card.js';
 import {
   describeGitHubImport,
-  parseGitHubUrl,
   normalizeGitHubUrl,
   resolveGitHubImportTarget,
   resolveImportRoute,
-  supportedKernelExtensions,
+  isMainFileCandidate,
   findMainFile,
   handOverHostGrants,
 } from '#routes/import.$/import.utils.js';
+import { parseGitHubUrl } from '@taucad/publish-ui/lib/github-url';
+import { getGitHubClient } from '#lib/github-api.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { ImportErrorView } from '#routes/import.$/import-error-view.js';
 import { ImportProcessingView } from '#routes/import.$/import-processing-view.js';
@@ -52,7 +53,7 @@ import { inspect } from '#machines/inspector.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { isExcludedImportPath } from '@taucad/ui-core/utils/file-reader.utils';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
@@ -75,7 +76,6 @@ import { shareOrigin } from '#lib/share-origin.js';
 
 export const handle: Handle = {
   title: 'Import',
-  enableOverflowY: true,
 };
 
 const readSplatPath = (params: Record<string, string | undefined>): string => params['*'] ?? '';
@@ -237,11 +237,11 @@ const linkedImportRefusal = (
   /* Another branch already holds the chosen name; the reviewed branch itself moving is a change, not a taken name. */
   if (
     targetBranch !== sourceBranch &&
-    error.message === `Remote branch ${targetBranch} already names another revision.`
+    error.message === `GitHub already has a different branch named ${targetBranch}.`
   ) {
     return {
       title: 'This branch name is taken on GitHub',
-      message: 'Choose another name for the local and sync branch.',
+      message: 'Choose another branch name.',
     };
   }
   return {
@@ -324,7 +324,7 @@ export default function ImportRoute(): React.JSX.Element {
       routeActiveRef.current = false;
     };
   }, [holdHostGrants]);
-  const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ includeDeleted: true });
+  const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ scope: 'all' });
   const presentLocationError = useProjectCreationLocationError();
   const [linkedSelection, setLinkedSelection] = useState<GithubRepositorySelection>();
   const [linkedMainFile, setLinkedMainFile] = useState('');
@@ -451,6 +451,7 @@ export default function ImportRoute(): React.JSX.Element {
     }),
     {
       input: {
+        githubClient: getGitHubClient(),
         owner,
         repo,
         ref,
@@ -520,6 +521,7 @@ export default function ImportRoute(): React.JSX.Element {
           const session = await importSession();
           return session.plan(source, signal === undefined ? undefined : { signal });
         },
+        pickMainFile: findMainFile,
       },
       inspect,
     },
@@ -580,12 +582,12 @@ export default function ImportRoute(): React.JSX.Element {
     () =>
       createStaticDataSource(
         linkedSelection?.files
-          .filter(({ path }) => supportedKernelExtensions.some((extension) => path.endsWith(extension)))
+          .filter(({ path }) => isMainFileCandidate(path))
           .map(({ path, size }) => ({ path, size })) ?? [],
       ),
     [linkedSelection],
   );
-  const linkedMainFileSupported = supportedKernelExtensions.some((extension) => linkedMainFile.endsWith(extension));
+  const linkedMainFileSupported = isMainFileCandidate(linkedMainFile);
   const linkedManifest = useMemo(
     () => (linkedSelection?.manifest === undefined ? undefined : readLinkedGithubManifest(linkedSelection.manifest)),
     [linkedSelection],
@@ -850,9 +852,7 @@ export default function ImportRoute(): React.JSX.Element {
   const reviewLinkedRepository = useCallback((selection: GithubRepositorySelection): void => {
     const manifest = selection.manifest === undefined ? undefined : readLinkedGithubManifest(selection.manifest);
     const paths = selection.files.map((file) => file.path);
-    const supportedPaths = paths.filter((path) =>
-      supportedKernelExtensions.some((extension) => path.endsWith(extension)),
-    );
+    const supportedPaths = paths.filter((path) => isMainFileCandidate(path));
     const manifestMain = manifest?.success === true ? manifest.data.assets.main?.entryPath : undefined;
     const unsupportedLargeBlob = selection.files.find((file) => file.size >= largeObjectThresholdBytes);
     setLinkedSelection(selection);
@@ -1174,7 +1174,7 @@ export default function ImportRoute(): React.JSX.Element {
                         </p>
                       ) : fetchErrors.branches ? (
                         <p role='status' className='text-sm'>
-                          Could not fetch branches. Import will use the{' '}
+                          Couldn’t list branches. Import will use the{' '}
                           <span className='font-mono'>{selectedBranch}</span> branch.
                         </p>
                       ) : (
@@ -1339,7 +1339,7 @@ export default function ImportRoute(): React.JSX.Element {
                     <p id={repoUrlHintId} className='text-xs text-muted-foreground'>
                       {isRepoUrlRejected
                         ? 'Enter a github.com repository address, like https://github.com/owner/repo.'
-                        : 'Copies files without Git history or sync.'}
+                        : 'Copies the files only. No Git history, and no backup to this repository.'}
                     </p>
                     <Button type='submit' variant='outline' disabled={!canReviewRepository}>
                       Review repository
@@ -1452,7 +1452,7 @@ export default function ImportRoute(): React.JSX.Element {
                   )}
                 </div>
                 <label htmlFor='linked-target-branch' className='text-sm font-medium'>
-                  Local and sync branch
+                  Branch name
                 </label>
                 <div className='max-w-sm space-y-2'>
                   <Input
@@ -1462,17 +1462,17 @@ export default function ImportRoute(): React.JSX.Element {
                     disabled={linkedBusy}
                     onChange={(event) => {
                       setLinkedTargetBranch(event.target.value);
-                      /* A refusal of the old name ("…already names another revision.") is not about the new one. */
+                      /* A refusal of the old name ("GitHub already has a different branch named …") is not about the new one. */
                       if (!linkedReviewBlocked) {
                         setLinkedError(undefined);
                       }
                     }}
                   />
                   <p className='text-xs text-muted-foreground'>
-                    Tau preserves the selected branch’s commits, tracked files, executable modes and Git remote.
+                    Tau keeps the branch’s commits and files, and stays connected to this repository.
                     {linkedSelection.repository.access === 'write'
-                      ? ' Importing does not push to GitHub. Enable writes for this repository in Settings, then choose Push to upload your history.'
-                      : ' This repository is linked read-only; your history stays available on this device.'}
+                      ? ' Importing doesn’t back anything up to GitHub. To back up to it, allow backups to this repository in Settings.'
+                      : ' This repository is read-only, so Tau won’t back up to it. Your history stays on this device.'}
                   </p>
                 </div>
                 <span className='text-sm font-medium'>Chats</span>
@@ -1486,7 +1486,7 @@ export default function ImportRoute(): React.JSX.Element {
                     }}
                   />
                   <Label htmlFor='linked-sync-chats' className='text-sm leading-none font-normal'>
-                    Sync project chats with this repository
+                    Include chats
                   </Label>
                 </div>
                 {/* A blocked review writes nothing, so it lists no setup change (R5). */}

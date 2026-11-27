@@ -1,0 +1,15 @@
+--- a/apps/ui/src/debounce.test.ts
++++ b/apps/ui/src/debounce.test.ts
+@@
+ import { expect, it, vi } from 'vitest';
+
+ it('flushes once after the delay', async () => {
+   vi.useFakeTimers();
+   const flush = vi.fn();
+   debounce(flush, 50)();
+-  setTimeout(callback, 10);
+   vi.advanceTimersByTime(100);
+   vi.useRealTimers();
++  await new Promise((resolve) => setTimeout(resolve, 100));
+   expect(flush).toHaveBeenCalledTimes(1);
+ });

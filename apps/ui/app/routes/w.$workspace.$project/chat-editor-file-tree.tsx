@@ -1,7 +1,7 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
 import { runWhenRendered, subscribeWorkbenchFileReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 import { useLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { useCallback, useId, useState, useRef, useMemo, useEffect, memo } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { ItemInstance, TreeInstance } from '@headless-tree/core';
@@ -76,7 +76,7 @@ import {
   DropdownMenuLabel,
 } from '@taucad/ui/components/dropdown-menu';
 import { useProject } from '#hooks/use-project.js';
-import { mountFileOperationParticipants } from '#filesystem/file-operation-participants.js';
+import { mountFileOperationParticipants } from '@taucad/files-ui/filesystem/file-operation-participants';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { ViewerNode } from '@taucad/workbench';
@@ -94,7 +94,7 @@ import { getFileExtension, encodeTextFile } from '@taucad/ui-core/utils/filesyst
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
 import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useFileTreeSelector } from '#hooks/use-file-tree.js';
+import { useFileTreeSelector } from '@taucad/files-ui/hooks/use-file-tree';
 import { useDirectoryListing } from '@taucad/fs-client/react/use-directory-listing';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
@@ -102,12 +102,12 @@ import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { parentDirectory } from '@taucad/utils/path';
 import { useRowWindow } from '@taucad/project-workspace/hooks/use-row-window';
 
-import type { TreeItemData } from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
+import type { TreeItemData } from '@taucad/files-ui/utils/file-tree.utils';
 import {
   buildFileTreeIndex,
   indexedItemData,
   isEditorSystemArtifactPath,
-} from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
+} from '@taucad/files-ui/utils/file-tree.utils';
 import { fileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import type { FileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@taucad/ui-core/filesystem/workspace-errors';
@@ -138,11 +138,14 @@ import {
   createFileTreeDownloadError,
   getFileTreeDownloadErrorMessage,
   getFileTreeDownloadPolicy,
-} from '#routes/w.$workspace.$project/file-tree-download-policy.js';
+} from '@taucad/files-ui/utils/file-tree-download-policy';
 import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
-import { previewProjectFileInQuickLook } from '#filesystem/desktop-quick-look.js';
+import { previewProjectFileInQuickLook } from '@taucad/files-ui/filesystem/desktop-quick-look';
+import type { QuickLookServices } from '@taucad/files-ui/filesystem/desktop-quick-look';
+import { desktopKernelOptions } from '#constants/desktop-kernel-options.js';
 import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
 import type { RevealInFileManager } from '#hooks/use-native-file-manager.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * What one row shows about where its bytes come from.
@@ -169,6 +172,18 @@ type RowPresentation = FileProvenanceLabel & {
 };
 
 /** The shared read-only refusal copy, read once so the call site is not a pseudo-constructor. */
+/** Quick Look converts through the project's desktop kernel, its attempts reported as `quicklook`. */
+const quickLookServices: QuickLookServices = {
+  resolveKernelOptions: async (projectId, computeMode) => desktopKernelOptions(projectId, undefined, computeMode)(),
+  async loadRuntimeObserver() {
+    const { observeRuntimeClient } = await loadCode(async () => {
+      const { observeRuntimeClient } = await import('#telemetry/runtime-telemetry.js');
+      return { observeRuntimeClient };
+    });
+    return (client) => observeRuntimeClient(client, 'quicklook');
+  },
+};
+
 const readOnlyPathMessage = (path: string): string => {
   const copy = workspaceMutationErrorCopy.READ_ONLY_MOUNT;
   return typeof copy === 'function' ? copy({ path }) : copy;
@@ -1416,7 +1431,7 @@ export const ChatEditorFileTree = memo(function ({
         return;
       }
       const name = path.split('/').pop() ?? path;
-      toast.promise(previewProjectFileInQuickLook({ path, projectId, runtimeFileSystem }), {
+      toast.promise(previewProjectFileInQuickLook({ path, projectId, runtimeFileSystem }, quickLookServices), {
         loading: `Preparing ${name} for Quick Look…`,
         success: `Opened ${name} in Quick Look`,
         error: (error: unknown) => (error instanceof Error ? error.message : 'Quick Look failed'),
@@ -2217,7 +2232,7 @@ function FileTreeEmptyState({ onUpload }: { readonly onUpload: (() => void) | un
   /* "No files" speaks for every authored file: while an open's apply still writes them, it waits (I7). */
   const availability = useProjectAvailability('absence');
   if (availability !== 'ready') {
-    return <ProjectSyncPlaceholder state={availability} />;
+    return <ProjectWaitSkeleton state={availability} shape='tree' label='Files' />;
   }
   return (
     <PanelEmptyState icon={FolderOpen} title='No files available' className='rounded-xl border bg-card'>

@@ -70,6 +70,13 @@ test.each(layouts.flatMap((layout) => surfaces.map((surface) => ({ ...layout, ..
     await target.setViewport(viewport);
     await target.navigate('/__e2e/chat-attachments');
     await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
+    if (touch) {
+      // A phone opens a project on the model stage (Option B); the chat is its own surface.
+      await target.click(
+        selectors.getByRole('navigation', { name: 'Workbench' }).getByRole('button', { name: 'Chat', exact: true }),
+        { touch },
+      );
+    }
     await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
 
     await sendDraft(sentText);

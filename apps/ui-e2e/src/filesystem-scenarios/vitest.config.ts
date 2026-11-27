@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import process from 'node:process';
 import { resolve } from 'node:path';
+import { testReporters } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
 import type { BrowserInstanceOption } from 'vitest/node';
@@ -102,6 +103,7 @@ export default defineConfig({
     ],
   },
   test: {
+    reporters: testReporters('default'),
     include: ['**/*.scenario.ts'],
     testTimeout: profile === 'full' ? 3_600_000 : 600_000,
     hookTimeout: 600_000,

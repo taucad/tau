@@ -3,6 +3,29 @@ import type { WireRendering, WireExportResult } from '#types/runtime-document-pr
 import type { BinaryContentDelivery } from '#types/runtime-wire.types.js';
 import { asKnownArtifact } from '#types/runtime-artifact.js';
 
+/**
+ * A delivered view artifact broke its media's content rule, so the client cannot hand it to a viewer. It carries the
+ * code the worker gives the same rule (`GLTF_BYTES_INVALID`, `SVG_DOCUMENT_INVALID`), so a `discarded` observation names
+ * the failure as the worker would rather than as `UNKNOWN`. Still a `TypeError`, as `asKnownArtifact` throws.
+ *
+ * @internal
+ */
+export class ArtifactContentInvalidError extends TypeError {
+  public override readonly name = 'ArtifactContentInvalidError';
+  public readonly code: 'GLTF_BYTES_INVALID' | 'SVG_DOCUMENT_INVALID';
+
+  /**
+   * Name the broken rule by the worker's code for it.
+   *
+   * @param mimeType - The known media type whose rule the content broke.
+   * @param cause - The rule's own error.
+   */
+  public constructor(mimeType: 'image/svg+xml' | 'model/gltf-binary', cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.code = mimeType === 'image/svg+xml' ? 'SVG_DOCUMENT_INVALID' : 'GLTF_BYTES_INVALID';
+  }
+}
+
 /** Decode a view and admit it only after asynchronous binary ownership is released. @internal */
 export async function materialiseRendering(
   wire: WireRendering,
@@ -18,7 +41,16 @@ export async function materialiseRendering(
     return undefined;
   }
   const artifact = { ...wire.artifact, content: materialised };
-  return { ...wire, artifact: asKnownArtifact(artifact) ?? artifact };
+  let known: ReturnType<typeof asKnownArtifact>;
+  try {
+    known = asKnownArtifact(artifact);
+  } catch (error) {
+    throw new ArtifactContentInvalidError(
+      artifact.mimeType === 'image/svg+xml' ? artifact.mimeType : 'model/gltf-binary',
+      error,
+    );
+  }
+  return { ...wire, artifact: known ?? artifact };
 }
 
 /** Decode all export files, preserving the nonempty tuple and file order. @internal */

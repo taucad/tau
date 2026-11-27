@@ -12,7 +12,7 @@ import {
 } from '@taucad/chat-ui/components/chat-tool-card';
 import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
-import { FileLink } from '#components/files/file-link.js';
+import { FileLink } from '@taucad/files-ui/components/files/file-link';
 
 export function ChatMessageToolFileEdit({
   part,

@@ -8,6 +8,9 @@ import type { SyncFacet } from '@taucad/revisions';
 import type { useProjects } from '#hooks/use-projects.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
+/** Every label the sidebar's project status button can carry as its accessible name. */
+const projectStatusName =
+  /^(Needs your decision|Offline|Sign in to continue|Project unavailable|Couldn’t back up|Downloading files…|Preparing files…|Couldn’t load chats|Loading chats…|Opening project…|Checking for changes…|Backing up changes…)$/u;
 const mockUseProjects = vi.fn();
 const mockCloudIntent = vi.fn();
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: () => mockCloudIntent() as string | undefined }));
@@ -287,7 +290,7 @@ describe('ProjectNavigation', () => {
     mockCloudIntent.mockReturnValue(undefined);
     rerender(<ProjectNavigation />);
     expect(newChat).toHaveAttribute('aria-disabled', 'false');
-    expect(screen.queryByRole('button', { name: /^Project sync:/u })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: projectStatusName })).not.toBeInTheDocument();
   });
 
   it('renders one Projects group with every project in deterministic activity order', () => {
@@ -563,8 +566,8 @@ describe('ProjectNavigation', () => {
     expect(descriptionOf(expandedLink)).toHaveTextContent(/^Live, busy$/u);
   });
 
-  /* D15: the name dissolves at the row's edge rather than clipping. */
-  it('keeps project actions in flow beside the name', () => {
+  /* D13, D15: the name dissolves at the row's edge rather than clipping, and the actions sit over its tail. */
+  it('lays project actions over the name instead of beside it', () => {
     render(<ProjectNavigation />);
     const link = screen.getByRole('link', { name: 'Two' });
     const row = link.closest<HTMLElement>('[data-slot=project-trigger]');
@@ -575,10 +578,18 @@ describe('ProjectNavigation', () => {
     const newChat = screen.getByRole('button', { name: 'New chat in Two' });
     expect(more.compareDocumentPosition(newChat)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     /* R13: the actions rest hidden on fine pointers and show on hover, focus and coarse pointers. */
-    const actions = more.closest('[data-slot=project-row-actions]');
-    expect(actions).toHaveClass('hidden', 'group-hover/row:flex', 'group-focus-within/row:flex', 'pointer-coarse:flex');
+    const actions = more.closest('[data-slot=row-actions]');
+    expect(actions).toHaveClass(
+      'fade-action',
+      'absolute',
+      'hidden',
+      'group-hover/row:flex',
+      'group-focus-within/row:flex',
+      'pointer-coarse:flex',
+    );
     expect(actions).toContainElement(newChat);
-    expect(screen.queryByRole('button', { name: /^Project sync:/u })).not.toBeInTheDocument();
+    expect(link).not.toContainElement(actions as HTMLElement);
+    expect(screen.queryByRole('button', { name: projectStatusName })).not.toBeInTheDocument();
   });
 
   /* On a phone both menus open in drawers. */

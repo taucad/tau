@@ -9,11 +9,12 @@ set -euo pipefail
 umask 022
 export PATH="$HOME/node/bin:$PATH"
 [[ "$(id -un)" == tau && "$(id -u)" != 0 && "$(cat /proc/1/comm)" == systemd ]]
+# libatomic1: the official Node 26 binary copied into ~/node links libatomic.so.1, which minimal images lack.
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  git git-lfs curl ca-certificates gh unzip python3 openssl gnupg gpgv apt-utils unattended-upgrades \
+  libatomic1 git git-lfs curl ca-certificates gh unzip python3 openssl gnupg gpgv apt-utils unattended-upgrades \
   libnss3-tools xdg-utils xdotool wmctrl bubblewrap desktop-file-utils libgtk-3-0t64 libsecret-1-0 libasound2t64 \
   libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 \
-  libxdamage1 libxrandr2 libgbm1
+  libxdamage1 libxrandr2 libgbm1 squashfs-tools
 sudo systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
 # Clone public source without credentials; only the checked main-dispatch commit is admitted.
 source_sha="$(python3 -c 'import json,pathlib; print(json.loads((pathlib.Path.home()/"qualification-env.json").read_text())["GITHUB_SHA"])')"

@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { Resend } from 'resend';
 import type { Environment } from '@taucad/api-core';
-import type { EmailMessage, EmailTemplateKind } from '#email.types.js';
+import type { EmailMessage, EmailSendOutcome, EmailTemplateKind } from '#email.types.js';
 import { renderEmailTemplate, subjectForEmailTemplate } from '#email-templates.js';
 import { assertEmailTemplateUrlAllowed } from '#email-link-builder.js';
 import { emailEnvironmentOf, maskRecipient } from '#email-address.js';
@@ -19,6 +19,7 @@ const senderClassByKind: Record<EmailTemplateKind, SenderClass> = {
   'reset-password': 'identity',
   'password-changed': 'identity',
   'publication-invite': 'notifications',
+  'project-invite': 'notifications',
   'payment-failed': 'billing',
   'auto-reload-disabled': 'billing',
   'auto-reload-action-required': 'billing',
@@ -40,7 +41,19 @@ export class EmailService {
     this.resend = apiKey ? new Resend(apiKey) : undefined;
   }
 
-  public async send(message: EmailMessage): Promise<void> {
+  /** Whether a send reaches a provider. False on a deployment without `RESEND_API_KEY`. */
+  public get isDeliveryEnabled(): boolean {
+    return this.resend !== undefined;
+  }
+
+  /**
+   * Renders and sends one email.
+   *
+   * @param message - The recipient and template.
+   * @returns `'sent'` once the provider accepted it, `'disabled'` when no provider is configured.
+   * @throws Error When the template URL is not allowed or the provider refused the send.
+   */
+  public async send(message: EmailMessage): Promise<EmailSendOutcome> {
     const templateKind = message.template.kind;
     const frontendURL = this.configService.get('TAU_FRONTEND_URL', { infer: true });
     assertEmailTemplateUrlAllowed({ template: message.template, frontendURL });
@@ -53,7 +66,7 @@ export class EmailService {
       this.logger.log(
         `Email delivery disabled because RESEND_API_KEY is not set; rendered ${templateKind} email for ${this.describeRecipient(message.to)}`,
       );
-      return;
+      return 'disabled';
     }
 
     const response = await this.resend.emails.send({
@@ -84,6 +97,7 @@ export class EmailService {
     this.logger.log(
       `Sent ${templateKind} email to ${this.describeRecipient(message.to)} via Resend (${response.data.id})`,
     );
+    return 'sent';
   }
 
   public async sendMagicLink(args: {
@@ -158,8 +172,20 @@ export class EmailService {
     readonly ownerName: string;
     readonly publicationTitle: string;
     readonly url: string;
-  }): Promise<void> {
-    await this.send({ to: args.recipientEmail, template: { kind: 'publication-invite', ...args } });
+  }): Promise<EmailSendOutcome> {
+    return this.send({ to: args.recipientEmail, template: { kind: 'publication-invite', ...args } });
+  }
+
+  /** Emails a collaborator invitation. The URL carries the one-time token, so it is never logged. */
+  public async sendProjectInvite(args: {
+    readonly recipientEmail: string;
+    readonly ownerName: string;
+    readonly projectName: string;
+    readonly role: 'read' | 'write';
+    readonly expiresAt: string;
+    readonly url: string;
+  }): Promise<EmailSendOutcome> {
+    return this.send({ to: args.recipientEmail, template: { kind: 'project-invite', ...args } });
   }
 
   /**

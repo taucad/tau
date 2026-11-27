@@ -8,20 +8,25 @@ import { observeLongAnimationFrames } from '@taucad/viewer/lib/renderer-telemetr
 import { startErrorReporting } from '#lib/error-reporting.js';
 import { readRouteId, routePathInstrumentation } from '#lib/sentry-context.lib.js';
 import { routeClassOfRouteId } from '#lib/route-classes.js';
+import { scheduleNextStepWarm } from '#lib/warm-next-step.js';
 import { reactRootErrorHooks } from '#lib/react-root-errors.js';
 import { projectRouteId, registerEagerRouteModules } from '#lib/eager-route-modules.js';
 import * as projectRouteModule from '#routes/w.$workspace.$project/route.js';
-import { installStaleBuildNavigation } from '#lib/stale-build-navigation.js';
+import { installLiveBuildChecks } from '#lib/stale-build-navigation.js';
 import { installStaleBuildRecovery, recoverFromSdkLoadFailure } from '#lib/stale-build-recovery.js';
+import { installWorkerRealmRecovery } from '#lib/worker-realm-recovery.js';
 import { installProjectOpenLoadTiming } from '@taucad/ui-core/lib/project-open-load-timing';
 import { setProjectOpenRouteClassReader } from '@taucad/ui-core/lib/project-open-performance';
 import { inspect } from '#machines/inspector.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
+import { readDocumentDeploymentSeed } from '#cloud/deployment-seed.js';
 import { heldAppRuntime, holdAppRuntime } from '#runtime/app-runtime-holder.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { admittedAnalytics } from '#providers/posthog-analytics-provider.js';
 import { ENV } from '#environment.config.js';
 import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
+import { isSafeModeRequested } from '#lib/boot-signals.js';
+import { desktopSafeMode } from '#lib/desktop-safe-mode.js';
 
 /* D21: started before hydration and never stopped, so the frames that block the first paint are
  * recorded too (the observer is buffered, and the platform only reports frames over 50 ms). */
@@ -42,8 +47,11 @@ void startErrorReporting(recoverFromSdkLoadFailure);
 // TAU-UI-6: a lazy chunk a deploy stopped serving reloads the page into the live build once.
 installStaleBuildRecovery();
 
-// TAU-UI-S: notice a deploy before the next click, and load in-app links as documents once one replaced this build.
-installStaleBuildNavigation();
+// FP10: a module worker whose code failed to load is replaced by a new worker, within a bound, then the recovery above.
+installWorkerRealmRecovery();
+
+// TAU-UI-S: notice a deploy before the next click; the root's client middleware then loads the next page as a document.
+installLiveBuildChecks();
 
 /* D5: the app runtime, created here and held, not started; `AppRuntimeProvider` starts it once after hydration. A
  * hot update keeps the held one (`import.meta.hot.data`), so development never makes a second. */
@@ -54,6 +62,11 @@ if (heldAppRuntime() === undefined) {
       analytics: admittedAnalytics,
       /* The remote-host harness renders no file manager (`root-layout.tsx`), so its runtime starts none. */
       idleFileManagers: isRemoteHostHarness(ENV.TAU_DEBUG, globalThis.location.pathname),
+      /* D0: `?safe=1` starts this page load in safe mode, read before the runtime exists. The next navigation drops the
+       * parameter, and a reload without it is a normal start. */
+      safeMode: isSafeModeRequested(globalThis.location.search) || desktopSafeMode() !== undefined,
+      /* W11: the deployment answer the server rendered the document with, so the first render matches it. */
+      deploymentSeed: readDocumentDeploymentSeed(),
       ...(inspect === undefined ? {} : { inspect }),
     }),
   );
@@ -76,4 +89,13 @@ startTransition(() => {
     // deploy stopped serving goes to the recovery instead. React's console output stays.
     reactRootErrorHooks,
   );
+});
+
+// PL8 (LB9): once Home is loaded and idle, prefetch the project route's interactive tier, so opening a project
+// downloads no module. Nothing under Save-Data, and only the files the warm manifest lists.
+scheduleNextStepWarm({
+  readRouteClass: () => {
+    const routeId = readRouteId();
+    return routeId === undefined ? undefined : routeClassOfRouteId(routeId);
+  },
 });

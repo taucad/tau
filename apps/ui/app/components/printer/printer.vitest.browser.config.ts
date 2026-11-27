@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 
@@ -11,7 +12,7 @@ import { tauRuntime } from '@taucad/runtime/vite';
  */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss(), tauRuntime()],
   server: {
     host: '127.0.0.1',
@@ -20,6 +21,8 @@ export default defineConfig({
   // Discovered mid-run otherwise, which makes Vite reload the test.
   optimizeDeps: { include: ['vitest-mock-extended'] },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     provide: { webGpuProfile: process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software' ? 'software' : 'hardware' },
     include: ['app/components/printer/printer-viewer.browser.test.tsx'],
     testTimeout: 60_000,

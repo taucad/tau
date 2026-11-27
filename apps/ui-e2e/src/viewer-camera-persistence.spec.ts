@@ -27,13 +27,6 @@ type CameraPose = Readonly<{
 type PointerMark = Readonly<{ type: string; at: number; pose?: CameraPose }>;
 
 type CameraBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST__?: {
-    getCamera(): CameraPose & { lastChangeSource: string };
-    getViewSettings(): { cameraView?: unknown } | undefined;
-    getModelComponents(): Array<{ id: string }>;
-    projectModelComponent(componentId: string): Array<{ x: number; y: number; visible: boolean }>;
-    getModelHoverState(): { hoveredComponentId: string | undefined };
-  };
   __TAU_E2E_POINTER_MARKS__?: PointerMark[];
 };
 
@@ -92,7 +85,7 @@ async function openBirdhouseFixture(): Promise<void> {
 async function readCameraPose(surface?: TargetSurface): Promise<CameraPose> {
   return target.evaluate(
     () => {
-      const bridge = (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       if (!bridge) {
         throw new Error('Section view e2e bridge is not installed.');
       }
@@ -128,7 +121,7 @@ async function recordPointerMarks(): Promise<void> {
       page.addEventListener(
         type,
         () => {
-          const pose = type === 'pointerdown' ? page.__TAU_SECTION_VIEW_TEST__?.getCamera() : undefined;
+          const pose = type === 'pointerdown' ? globalThis.__TAU_SECTION_VIEW_TEST__?.getCamera() : undefined;
           marks.push({
             type,
             at: performance.now(),
@@ -344,31 +337,18 @@ async function pollCameraPose(
 
 /** Whether the view's record holds a saved camera pose. */
 async function hasSavedPose(): Promise<boolean> {
-  return target.evaluate(
-    () =>
-      (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getViewSettings()?.cameraView !==
-      undefined,
-  );
+  return target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__?.getViewSettings()?.cameraView !== undefined);
 }
 
 /** Moves the camera toward its target, so a later fit or focus visibly moves it back. */
 async function zoomIn(): Promise<void> {
   await target.evaluate(() => {
-    const bridge = (
-      globalThis as unknown as {
-        __TAU_SECTION_VIEW_TEST__?: {
-          getCamera(): { position: readonly [number, number, number]; target: readonly [number, number, number] };
-          setCamera(camera: { position: readonly number[]; target: readonly number[] }): void;
-        };
-      }
-    ).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     const camera = bridge?.getCamera();
     if (bridge && camera) {
       const { position, target: orbitTarget } = camera;
-      bridge.setCamera({
-        position: position.map((value, axis) => orbitTarget[axis]! + (value - orbitTarget[axis]!) * 0.4),
-        target: orbitTarget,
-      });
+      const toward = (axis: 0 | 1 | 2): number => orbitTarget[axis] + (position[axis] - orbitTarget[axis]) * 0.4;
+      bridge.setCamera({ position: [toward(0), toward(1), toward(2)], target: orbitTarget });
     }
   });
 }
@@ -376,7 +356,7 @@ async function zoomIn(): Promise<void> {
 /** A point on screen over a part: a projected point of the model the pointer's raycast confirms. */
 async function partHitPoint(): Promise<{ x: number; y: number }> {
   const points = await target.evaluate(() => {
-    const bridge = (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     return (bridge?.getModelComponents() ?? [])
       .flatMap(({ id }) => bridge?.projectModelComponent(id) ?? [])
       .filter((point) => point.visible);
@@ -390,9 +370,7 @@ async function partHitPoint(): Promise<{ x: number; y: number }> {
     await target.delay(150);
     // oxlint-disable-next-line no-await-in-loop -- the raycast confirms the point before the next is tried.
     const hovered = await target.evaluate(
-      () =>
-        (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getModelHoverState()
-          .hoveredComponentId,
+      () => globalThis.__TAU_SECTION_VIEW_TEST__?.getModelHoverState().hoveredComponentId,
     );
     if (hovered !== undefined) {
       return point;
@@ -405,8 +383,7 @@ async function partHitPoint(): Promise<{ x: number; y: number }> {
 async function savedPose(surface?: TargetSurface): Promise<string | undefined> {
   return target.evaluate(
     () => {
-      const cameraView = (globalThis as unknown as CameraBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getViewSettings()
-        ?.cameraView;
+      const cameraView = globalThis.__TAU_SECTION_VIEW_TEST__?.getViewSettings()?.cameraView;
       return cameraView === undefined ? undefined : JSON.stringify(cameraView);
     },
     undefined,
@@ -426,11 +403,7 @@ async function openSecondWindow(): Promise<{ x: number; y: number }> {
   await target.expectVisible(selectors.getByCss(previewCanvasSelector), 60_000, 'secondary');
   await target.waitFor(
     () => {
-      const bridges = (
-        globalThis as typeof globalThis & {
-          __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{ isGeometryFramed(): boolean }>;
-        }
-      ).__TAU_SECTION_VIEW_TEST_BRIDGES__;
+      const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__;
       return Boolean(bridges && bridges.length > 0 && bridges.every((bridge) => bridge.isGeometryFramed()));
     },
     undefined,

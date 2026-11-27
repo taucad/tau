@@ -15,14 +15,14 @@ import { probeImage } from '@taucad/utils/image-probe';
 import { handleClipboardImagePaste } from '@taucad/chat-ui/components/chat-paste-handler';
 import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
 import type { StoredAttachment } from '@taucad/chat-ui/utils/attachment.utils';
-import { draftMachine } from '#hooks/draft.machine.js';
-import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
+import { draftMachine, pendingDraftImages } from '@taucad/chat-ui/hooks/draft.machine';
+import type { DraftAttachmentModel, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
 import { createResizeImageActor } from '#hooks/attachment-image.actor.js';
 import { attachmentImageBackend } from '#services/attachment-image-backend.js';
 import type { AttachmentImageClient } from '#services/attachment-image.service.js';
 import { AttachmentImageService } from '#services/attachment-image.service.js';
 import { loadAttachmentTranscodeSources } from '#services/attachment-transcode-sources-store.js';
-import { attachmentRefusalCopy } from '#utils/attachment-refusal.js';
+import { attachmentRefusalCopy } from '@taucad/chat-ui/utils/attachment-refusal';
 
 const fixtureUrls = import.meta.glob<string>('../../../../packages/plugins/image/src/raster/fixtures/*', {
   query: '?url',
@@ -202,6 +202,8 @@ type Stored = { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: str
 const composerDraft = (service: AttachmentImageService) => {
   const stored: Stored[] = [];
   const failures: Error[] = [];
+  /** The thumbnail slots the composer held as each pick entered the draft. */
+  const pendingAtPick: Array<readonly PendingDraftImage[]> = [];
   const actor = createActor(
     draftMachine.provide({
       actors: {
@@ -237,6 +239,11 @@ const composerDraft = (service: AttachmentImageService) => {
   return {
     stored,
     failures,
+    pendingAtPick,
+    /** The thumbnail slots the composer holds now. */
+    get pending(): readonly PendingDraftImage[] {
+      return pendingDraftImages(actor.getSnapshot().context, 'main');
+    },
     /** Pick a file as the composer does: intake, then the draft. */
     async pick(file: File): Promise<void> {
       const intake = await readAttachmentFile(file, { transcodeSources: await loadAttachmentTranscodeSources() });
@@ -249,6 +256,7 @@ const composerDraft = (service: AttachmentImageService) => {
           ? { type: 'addDraftAttachment', dataUrl: source, declaredType: file.type, model: visionModel }
           : { type: 'addDraftAttachment', ...source, declaredType: file.type, model: visionModel },
       );
+      pendingAtPick.push(pendingDraftImages(actor.getSnapshot().context, 'main'));
       await settle();
     },
     /** Paste a file as the composer does. */
@@ -357,6 +365,37 @@ describe('composer image conversion through the attachment worker', () => {
 
       expect(draft.failures).toEqual([]);
       expect(draft.stored.map(({ mediaType }) => mediaType)).toEqual(['image/jpeg', 'image/jpeg']);
+    } finally {
+      draft.stop();
+    }
+  });
+
+  it('should hold a converting slot for a HEIC until its JPEG is stored, and an adding slot for a PNG', async () => {
+    service = new AttachmentImageService();
+    const draft = composerDraft(service);
+    try {
+      await draft.pick(new File([await heifFixture('heic-rot6.heic')], 'IMG_0002.HEIC', { type: 'image/heic' }));
+      await draft.pick(new File([await fixture('small.png')], 'small.png', { type: 'image/png' }));
+
+      expect(draft.pendingAtPick).toEqual([[{ isConverting: true }], [{ isConverting: false }]]);
+      expect(draft.pending).toEqual([]);
+      expect(draft.failures).toEqual([]);
+      expect(draft.stored.map(({ mediaType }) => mediaType)).toEqual(['image/jpeg', 'image/png']);
+    } finally {
+      draft.stop();
+    }
+  });
+
+  it('should release the slot of a refused image, with the refusal unchanged', async () => {
+    service = new AttachmentImageService();
+    const draft = composerDraft(service);
+    try {
+      await draft.pick(new File([await heifFixture('bomb-16384.heic')], 'IMG_0003.HEIC', { type: 'image/heic' }));
+
+      expect(draft.pendingAtPick).toEqual([[{ isConverting: true }]]);
+      expect(draft.pending).toEqual([]);
+      expect(draft.failures).toHaveLength(1);
+      expect(draft.stored).toEqual([]);
     } finally {
       draft.stop();
     }

@@ -4,10 +4,14 @@
  *
  * It runs no suite. Each oracle is a job in a workflow that already runs it, and this script reads that job's latest
  * conclusion through the GitHub REST API: in this run for the nightly's own jobs (falling back to the latest nightly
- * on `main` when this run skipped them), on `main` for the push and candidate workflows, and the
- * latest run on any ref for the path-filtered pull-request workflows and the affected-only merge-queue rows, marked
- * stale but still deciding after seven days
- * (ruling X62). An oracle may name one step of a job that runs several. A consumer whose oracle runs in no workflow is
+ * on `main` when this run skipped them), on `main` for the push, merge-queue and candidate workflows, and the latest
+ * run on any ref for the path-filtered pull-request workflows, marked stale but still deciding after seven days
+ * (ruling X62).
+ *
+ * Evidence on `main` is keyed by commit. A `main` push whose identical commit passed the merge queue reuses that
+ * verdict and skips its lanes (`.github/actions/queue-verdict`, DC-16), so a lane the push skipped is read from the
+ * `merge_group` run on the same commit, the run the push reused. Queue runs of groups that never landed are never read,
+ * and the oracle and the queue reuse agree by construction (#2296). An oracle may name one step of a job that runs several. A consumer whose oracle runs in no workflow is
  * a failing row, not an omission.
  *
  * Usage: node scripts/src/consumer-parity-summary.ts [--summary <file>] [--detail <consumer>=<text>]…
@@ -24,7 +28,10 @@ import { pathToFileURL } from 'node:url';
 export type OracleScope =
   /** This nightly run, or the latest nightly run on `main` that ran the job. */
   | 'this-run'
-  /** The latest run on `main` that ran the job. */
+  /**
+   * The latest `main` commit that ran the job: in its own run, or, for a push that skipped the job because it reused
+   * the merge-queue verdict, in the `merge_group` run on the identical commit.
+   */
   | 'main'
   /** The latest run on any ref that ran the job: path-filtered pull-request workflows have no `main` runs. */
   | 'any';
@@ -57,7 +64,10 @@ export type Consumer = { readonly name: string; readonly oracles: readonly Oracl
 
 const nightly = 'e2e-nightly.yml';
 
-/** The shards of `ci.yml` that run every affected `test` target, `cli:test` and `host:test` among them. */
+/**
+ * The shards of `ci.yml` that run every affected `test` target, `cli:test` and `host:test` among them. A `main` push
+ * that reuses the queue verdict skips them, so they are read from the merge-queue run on the same commit.
+ */
 const ciTests = (proves: string): Oracle => ({
   kind: 'job',
   workflow: 'ci.yml',
@@ -69,29 +79,30 @@ const ciTests = (proves: string): Oracle => ({
 
 /**
  * The `ci.yml` lane that runs `cli-e2e:test:scenarios`, the CLI's end-to-end suites, when they are affected: every
- * shard. It runs in the merge queue only; a `main` push reuses the queue's verdict and skips it.
+ * shard. It runs in the merge queue only; a `main` push reuses the queue's verdict and skips it, so the evidence is
+ * the merge-queue run on a `main` commit.
  */
 const cliEndToEnd = (proves: string): Oracle => ({
   kind: 'job',
   workflow: 'ci.yml',
   job: 'CLI end-to-end (',
   match: 'prefix',
-  scope: 'any',
-  event: 'merge_group',
+  scope: 'main',
   proves,
 });
 
 /**
  * The merge-queue `native-darwin` lane of `ci.yml` (Q-2), which runs `test:native-darwin` when it is affected. A `main`
- * push reuses the queue's verdict and skips it, and `native-darwin.yml` itself runs only when called or dispatched.
+ * push reuses the queue's verdict and skips it, so the evidence is the merge-queue run on a `main` commit;
+ * `native-darwin.yml` itself runs only when called or dispatched. Each selected project is a job of its own,
+ * `Native kernels on darwin-arm64 (<project>)` (ST-3), and every one of them must pass.
  */
 const nativeDarwin = (proves: string): Oracle => ({
   kind: 'job',
   workflow: 'ci.yml',
-  job: 'Native darwin / Native kernels on darwin-arm64',
-  match: 'exact',
-  scope: 'any',
-  event: 'merge_group',
+  job: 'Native darwin / Native kernels on darwin-arm64 (',
+  match: 'prefix',
+  scope: 'main',
   proves,
 });
 
@@ -191,12 +202,11 @@ export const consumers: readonly Consumer[] = [
       {
         kind: 'job',
         /* Ratcheted out of the nightly into the merge queue (`test:e2e:queue`): ci.yml's `e2e-queue` row, which runs only
-        when `agent-plugin` is affected, so the latest merge-queue run that ran it. */
+        when `agent-plugin` is affected, so the latest `main` commit whose merge-queue run ran it. */
         workflow: 'ci.yml',
         job: 'Browser end-to-end (agent-plugin test:e2e)',
         match: 'exact',
-        scope: 'any',
-        event: 'merge_group',
+        scope: 'main',
         proves: '`agent-plugin:test:e2e`, the viewer page against a real `tau mcp`',
       },
       {
@@ -233,6 +243,8 @@ export type WorkflowRun = {
   /** Absent for a run with no branch (the API's `null`). */
   readonly branch: string | undefined;
   readonly sha: string;
+  /** The trigger, such as `push` or `merge_group`. */
+  readonly event: string;
   readonly createdAt: string;
 };
 
@@ -246,8 +258,8 @@ export type WorkflowJob = {
   readonly url: string;
 };
 
-/** Which runs of a workflow to read. */
-export type RunFilter = { readonly branch?: string; readonly event?: string };
+/** Which runs of a workflow to read; `sha` is the run's head commit. */
+export type RunFilter = { readonly branch?: string; readonly event?: string; readonly sha?: string };
 
 /** What the script reads from GitHub. */
 export type ActionsReader = {
@@ -330,6 +342,44 @@ const day = 24 * 60 * 60 * 1000;
 type Where = { readonly branch?: string; readonly origin: string; readonly staleFrom?: Date };
 
 /**
+ * The jobs one run holds for an oracle, from wherever they ran on its commit: the run itself, or, for a `main` push that
+ * skipped them by reusing the merge-queue verdict, the newest `merge_group` run on the identical commit that ran them.
+ * The lookup is the one `queue-verdict` makes (by `head_sha`), so only a queue run on a commit that landed is read.
+ * @param oracle - The job oracle.
+ * @param reader - The GitHub reader.
+ * @param at - A run of the oracle's workflow, and how the evidence names where it came from.
+ * @returns The jobs and their source, or `undefined` when nothing on this commit ran them.
+ */
+const onCommit = async (
+  oracle: Extract<Oracle, { kind: 'job' }>,
+  reader: ActionsReader,
+  at: Where & { readonly run: WorkflowRun },
+): Promise<{ readonly jobs: WorkflowJob[]; readonly source: Source } | undefined> => {
+  const { run, ...where } = at;
+  const jobs = matching(oracle, await reader.jobs(run.id));
+  if (ran(jobs)) {
+    return { jobs, source: { run, origin: where.origin } };
+  }
+  if (where.branch !== 'main' || run.event !== 'push') {
+    return undefined;
+  }
+  for (const queued of await reader.runs(oracle.workflow, { sha: run.sha, event: 'merge_group' })) {
+    // oxlint-disable-next-line no-await-in-loop -- newest first, stopping at the first queue run that ran the job.
+    const queuedJobs = matching(oracle, await reader.jobs(queued.id));
+    if (ran(queuedJobs)) {
+      return {
+        jobs: queuedJobs,
+        source: {
+          run: queued,
+          origin: `${where.origin}: merge-queue run on this commit, reused by push [run ${String(run.id)}](${run.url})`,
+        },
+      };
+    }
+  }
+  return undefined;
+};
+
+/**
  * Find the newest run of a workflow whose matching jobs ran, and judge them.
  * @param oracle - The job oracle.
  * @param reader - The GitHub reader.
@@ -348,18 +398,19 @@ const latest = async (
     ...(oracle.event === undefined ? {} : { event: oracle.event }),
   });
   for (const run of runs.slice(0, lookback)) {
-    // oxlint-disable-next-line no-await-in-loop -- newest first, stopping at the first run that ran the job.
-    const jobs = matching(oracle, await reader.jobs(run.id));
-    if (ran(jobs)) {
-      const age = staleFrom === undefined ? 0 : (staleFrom.getTime() - Date.parse(run.createdAt)) / day;
+    // oxlint-disable-next-line no-await-in-loop -- newest first, stopping at the first commit that ran the job.
+    const found = await onCommit(oracle, reader, { ...where, run });
+    if (found !== undefined) {
+      const { jobs, source } = found;
+      const age = staleFrom === undefined ? 0 : (staleFrom.getTime() - Date.parse(source.run.createdAt)) / day;
       const stale = age > staleAfterDays ? `; stale (${String(Math.floor(age))} days old)` : '';
-      return judged(oracle, jobs, { run, origin: `${origin}${stale}` });
+      return judged(oracle, jobs, { run: source.run, origin: `${source.origin}${stale}` });
     }
   }
   return {
     oracle,
     status: 'fail',
-    evidence: `no completed ${oracle.event === undefined ? '' : `${oracle.event} `}run of \`${oracle.workflow}\`${branch === undefined ? '' : ` on \`${branch}\``} ran \`${oracle.job}\` in the last ${String(lookback)}`,
+    evidence: `no completed ${oracle.event === undefined ? '' : `${oracle.event} `}run of \`${oracle.workflow}\`${branch === undefined ? '' : ` on \`${branch}\``}${branch === 'main' ? ' (nor the merge-queue run on its commit)' : ''} ran \`${oracle.job}\` in the last ${String(lookback)}`,
   };
 };
 
@@ -458,6 +509,7 @@ type RawRun = {
   readonly html_url: string;
   readonly head_branch: unknown;
   readonly head_sha: string;
+  readonly event: string;
   readonly created_at: string;
 };
 
@@ -476,6 +528,7 @@ const toRun = (raw: RawRun): WorkflowRun => ({
   url: raw.html_url,
   branch: optionalString(raw.head_branch),
   sha: raw.head_sha,
+  event: raw.event,
   createdAt: raw.created_at,
 });
 
@@ -509,8 +562,10 @@ const restReader = (environment: NodeJS.ProcessEnv): ActionsReader => {
     return response.json();
   };
   const jobCache = new Map<number, readonly WorkflowJob[]>();
+  /* Several oracles walk the same `main` runs of `ci.yml` and ask for the queue runs on the same commits. */
+  const runCache = new Map<string, readonly WorkflowRun[]>();
   return {
-    runs: async (workflow, { branch, event }) => {
+    runs: async (workflow, { branch, event, sha }) => {
       const query = new URLSearchParams({ status: 'completed' });
       query.set('per_page', String(lookback));
       if (branch !== undefined) {
@@ -519,10 +574,18 @@ const restReader = (environment: NodeJS.ProcessEnv): ActionsReader => {
       if (event !== undefined) {
         query.set('event', event);
       }
-      const page = (await get(`/actions/workflows/${workflow}/runs?${query.toString()}`)) as {
-        workflow_runs: RawRun[];
-      };
-      return page.workflow_runs.map((raw) => toRun(raw));
+      if (sha !== undefined) {
+        query.set('head_sha', sha);
+      }
+      const path = `/actions/workflows/${workflow}/runs?${query.toString()}`;
+      const cached = runCache.get(path);
+      if (cached !== undefined) {
+        return cached;
+      }
+      const page = (await get(path)) as { workflow_runs: RawRun[] };
+      const runs = page.workflow_runs.map((raw) => toRun(raw));
+      runCache.set(path, runs);
+      return runs;
     },
     jobs: async (id) => {
       const cached = jobCache.get(id);

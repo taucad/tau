@@ -1,22 +1,16 @@
 import { useState, useEffect } from 'react';
 import { AlertCircle } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
-import { SettingsGroup, SettingsItem, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsItem, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
-import { BrowserStorageStatus } from '#components/settings/browser-storage-status.js';
+import { BrowserStorageStatus } from '@taucad/settings-ui/components/settings/browser-storage-status';
 import { usePersistentStorageStatus } from '@taucad/files-ui/filesystem/use-persistent-storage-status';
-import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
-import { materializeOnSignIn, useMaterializeOnSignInLocation } from '#hooks/use-cloud-projects.js';
-import { useCommercialFeatures } from '#cloud/commercial-features.js';
-import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { useHasFolderAccess } from '#components/settings/settings-registry.js';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 
 export function FileSystemSettings(): React.JSX.Element {
   const persistenceStatus = usePersistentStorageStatus();
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const { isResolved, canSyncFiles } = useCommercialFeatures();
+  const hasFolderAccess = useHasFolderAccess();
   const [storageUsage, setStorageUsage] = useState<{ used: number; quota: number } | undefined>(undefined);
 
   useEffect(() => {
@@ -42,12 +36,10 @@ export function FileSystemSettings(): React.JSX.Element {
     storageUsage !== undefined && storageUsage.quota > 0 && storageUsage.used / storageUsage.quota > 0.8;
   return (
     <div className='flex flex-col gap-6 pb-6'>
-      <SettingsItem settingId='workspaces'>
-        <WorkspaceConnections onWorkspacesChange={setWorkspaces} />
-      </SettingsItem>
-      {isResolved && canSyncFiles ? (
-        <SettingsItem settingId='tau-cloud-projects'>
-          <TauCloudProjectsSetting workspaces={workspaces} />
+      {/* Without folder access the connections list renders nothing, which would leave an empty Workspaces section. */}
+      {hasFolderAccess ? (
+        <SettingsItem settingId='workspaces'>
+          <WorkspaceConnections />
         </SettingsItem>
       ) : undefined}
 
@@ -81,56 +73,5 @@ export function FileSystemSettings(): React.JSX.Element {
         </SettingsItem>
       )}
     </div>
-  );
-}
-
-/**
- * Materialize on sign-in (charter D20): which workspace, if any, receives this
- * account's Tau Cloud projects when it signs in. Off by default; one workspace
- * at most, because a project is one directory per device.
- *
- * @param props - This device's connected workspaces; Home is always offered.
- * @returns The setting.
- */
-function TauCloudProjectsSetting({ workspaces }: { readonly workspaces: readonly Workspace[] }): React.JSX.Element {
-  const selected = useMaterializeOnSignInLocation();
-  const options: ReadonlyArray<{ key: string; label: string; location: ProjectCreationLocation | undefined }> = [
-    { key: 'off', label: 'Off', location: undefined },
-    { key: 'home', label: 'Home', location: homeProjectCreationLocation },
-    ...workspaces.map((entry) => ({
-      key: entry.workspaceId,
-      label: entry.name,
-      location: { kind: 'workspace', workspaceId: entry.workspaceId } as const,
-    })),
-  ];
-  const selectedKey = selected === undefined ? 'off' : selected.kind === 'home' ? 'home' : selected.workspaceId;
-  return (
-    <SettingsGroup>
-      <SettingsRow
-        title='Tau Cloud projects'
-        description='Where your cloud projects appear when you sign in'
-        info='Each project downloads the first time you open it.'
-        control={
-          <Select
-            size='md'
-            value={selectedKey}
-            onValueChange={(key) => {
-              materializeOnSignIn.set(options.find((option) => option.key === key)?.location);
-            }}
-          >
-            <SelectTrigger aria-label='Tau Cloud projects' className='w-40'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((option) => (
-                <SelectItem key={option.key} value={option.key}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        }
-      />
-    </SettingsGroup>
   );
 }

@@ -101,6 +101,15 @@ type ResolvedTarget = Readonly<
 >;
 
 /**
+ * How long a language worker waits on one slot request, in milliseconds: past the filesystem's stall bound
+ * (`pendingStallMilliseconds`, 60 s), so a read held while a tree write lands its path (D10, STO-25) is answered, or
+ * refused with the filesystem's own error, rather than timed out here first.
+ *
+ * @public
+ */
+export const syncFsRequestTimeout = 70_000;
+
+/**
  * Worker-side sync client: every read is a slot round-trip to the FM worker.
  *
  * @public
@@ -118,6 +127,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
   const syncClient = createSyncRequestClient({
     port: options.port,
     slotSab: options.slotSab,
+    requestTimeout: syncFsRequestTimeout,
   });
 
   const resolveTarget = (fileName: string): ResolvedTarget => {

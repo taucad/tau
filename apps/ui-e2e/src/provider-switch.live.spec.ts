@@ -30,7 +30,7 @@ import {
 
 const models = {
   anthropic: { id: 'anthropic-claude-haiku-5.5', providerId: 'anthropic' },
-  openai: { id: 'openai-gpt-5.6-sol', providerId: 'openai' },
+  openai: { id: 'openai-gpt-6-sol', providerId: 'openai' },
   vertex: { id: 'google-gemini-4-hydrogen', providerId: 'vertexai' },
 } as const satisfies Record<string, LiveModel>;
 

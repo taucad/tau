@@ -47,7 +47,15 @@ export const commandPayloads = {
   ),
   steer: z.strictObject({ chatId: chatIdSchema, runId, message: z.string() }),
   /** D17's "request cancellation". Aborting a wait and detaching are client-local. */
-  cancel: z.strictObject({ chatId: chatIdSchema, runId }),
+  cancel: z.strictObject({
+    chatId: chatIdSchema,
+    runId,
+    /**
+     * The person takes the request back. When the turn is not kept, the run's `cancelled` row says so
+     * (`TURN_WITHDRAWN`); a kept turn's Stop is `USER_STOPPED` either way.
+     */
+    withdraw: z.literal(true).optional(),
+  }),
   /** EQ1: no consent field. A charged lost reply is recorded and retried by the host without a gesture. */
   resume: z.strictObject({
     chatId: chatIdSchema,

@@ -48,6 +48,48 @@ export const transportFailureDiagnosticType = 'tau.model-transport-failure';
 const providerMetadataDiagnosticType = 'tau.provider-message-metadata';
 const liveMessageIdentityDiagnosticType = 'tau.live-message-identity';
 
+/** How many errors under a transport failure its diagnostic names, and how many members of one aggregate. */
+const transportCauseDepth = 4;
+
+/** The fields of one underlying error that are safe to keep: never its message, which can name local paths. */
+const transportCause = (error: Record<string, unknown>): Record<string, JsonValue> => {
+  const name = error instanceof Error ? error.name : undefined;
+  const code =
+    typeof error['code'] === 'string' || typeof error['code'] === 'number' ? String(error['code']) : undefined;
+  const syscall = typeof error['syscall'] === 'string' ? error['syscall'] : undefined;
+  return {
+    ...(name === undefined ? {} : { name }),
+    ...(code === undefined ? {} : { code }),
+    ...(syscall === undefined ? {} : { syscall }),
+  };
+};
+
+/**
+ * The chain of errors under a coded transport failure, outermost first, by name,
+ * code and syscall. A `NETWORK_ERROR` on its own says only that the request did
+ * not complete; the cause tells a refused connection (`ECONNREFUSED`) from a
+ * socket the OS would not create or a request the runtime rejected before it
+ * left. An `AggregateError` (Node's dual-stack connect) lists its members.
+ */
+const transportFailureCauses = (error: Record<string, unknown>): JsonValue[] => {
+  const causes: JsonValue[] = [];
+  let current: unknown = error['cause'];
+  while (causes.length < transportCauseDepth && zodUtility.isObject(current)) {
+    const members = Array.isArray(current['errors'])
+      ? current['errors']
+          .slice(0, transportCauseDepth)
+          .filter((member): member is Record<string, unknown> => zodUtility.isObject(member))
+          .map((member) => transportCause(member))
+      : [];
+    causes.push({
+      ...transportCause(current),
+      ...(members.length === 0 ? {} : { errors: members }),
+    });
+    current = current['cause'];
+  }
+  return causes;
+};
+
 /** Convert a coded transport exception into pi's durable diagnostic shape. @internal */
 export const createTransportFailureDiagnostic = (
   error: unknown,
@@ -60,7 +102,12 @@ export const createTransportFailureDiagnostic = (
     error instanceof Error ? error.message : typeof error['message'] === 'string' ? error['message'] : error['code'];
   const status = typeof error['status'] === 'number' && Number.isFinite(error['status']) ? error['status'] : undefined;
   const refusal = zodUtility.isObject(error['details']) ? toJsonValue(error['details']) : undefined;
-  const details = { ...(status === undefined ? {} : { status }), ...(refusal === undefined ? {} : { refusal }) };
+  const causes = transportFailureCauses(error);
+  const details = {
+    ...(status === undefined ? {} : { status }),
+    ...(refusal === undefined ? {} : { refusal }),
+    ...(causes.length === 0 ? {} : { causes }),
+  };
   return {
     type: transportFailureDiagnosticType,
     timestamp,
@@ -176,6 +223,8 @@ export type SessionLogEvent = WithoutBase<AgentLogEvent>;
 export type SessionRecord = {
   readonly messages: MessageIdentities;
   append(event: SessionLogEvent): Promise<void>;
+  /** Append rows that go together as one batch: one write and one flush where the owner's writer batches (WP-10). */
+  appendAll(events: readonly SessionLogEvent[]): Promise<void>;
   events(): Promise<readonly AgentLogEvent[]>;
   /** The chat's rows across every device, in the order the history folds them (XD1); `events` is this device's. */
   rows(): Promise<readonly AgentLogEvent[]>;
@@ -261,6 +310,8 @@ type CreateSessionRecordOptions = {
    * decides nothing: position and legality belong to whoever owns the log.
    */
   readonly append?: ((event: SessionLogEvent) => Promise<void>) | undefined;
+  /** The owner's writer for a batch, with `append`; absent, a batch goes through `append` one row at a time. */
+  readonly appendAll?: ((events: readonly SessionLogEvent[]) => Promise<void>) | undefined;
   /**
    * Writes one attachment of the owning chat (D-UI-04). Given, each screenshot
    * capture is stored as `attachments/<sha256>.<ext>` before its row is
@@ -304,37 +355,58 @@ export const createSessionRecord = async (options: CreateSessionRecordOptions): 
   let pending: Promise<void> = Promise.resolve();
 
   const write = options.append;
-  const append = async (body: SessionLogEvent): Promise<void> => {
+  const queued = async (operation: () => Promise<void>): Promise<void> => {
     const prior = pending;
     const next = Promise.withResolvers<void>();
     pending = next.promise;
     await prior;
     try {
-      const stored = await storedBody(body, options.writeAttachment);
-      if (write) {
-        await write(stored);
-        return;
-      }
-      const event: AgentLogEvent = {
-        ...stored,
-        version: 1,
-        leaderEpoch: options.leaderEpoch,
-        sequence,
-        recordedAt: now(),
-        runId: options.runId,
-      };
-      const outcome = await options.log.append(event);
-      if (outcome.appended) {
-        sequence++;
-      }
+      await operation();
     } finally {
       next.resolve();
     }
   };
+  const appendOne = async (stored: SessionLogEvent): Promise<void> => {
+    if (write) {
+      await write(stored);
+      return;
+    }
+    const event: AgentLogEvent = {
+      ...stored,
+      version: 1,
+      leaderEpoch: options.leaderEpoch,
+      sequence,
+      recordedAt: now(),
+      runId: options.runId,
+    };
+    const outcome = await options.log.append(event);
+    if (outcome.appended) {
+      sequence++;
+    }
+  };
+  const append = async (body: SessionLogEvent): Promise<void> =>
+    queued(async () => appendOne(await storedBody(body, options.writeAttachment)));
+  const appendAll = async (bodies: readonly SessionLogEvent[]): Promise<void> =>
+    queued(async () => {
+      const stored: SessionLogEvent[] = [];
+      for (const body of bodies) {
+        // oxlint-disable-next-line no-await-in-loop -- each row's attachments are written before its row (D-UI-04).
+        stored.push(await storedBody(body, options.writeAttachment));
+      }
+      if (write && options.appendAll) {
+        await options.appendAll(stored);
+        return;
+      }
+      for (const body of stored) {
+        // oxlint-disable-next-line no-await-in-loop -- rows are appended in order (W1).
+        await appendOne(body);
+      }
+    });
 
   return {
     messages,
     append,
+    appendAll,
     events: async () => {
       await pending;
       return options.log.read();
@@ -398,10 +470,14 @@ export type AttachmentReader = {
  */
 export const chatAttachmentPath = (chatId: string, path: string): string => {
   if (!chatId || chatId === '.' || chatId === '..' || /[/\\]/u.test(chatId)) {
-    throw Object.assign(new Error('chatId must be one storage path segment.'), { code: 'STORAGE_PATH_INVALID' });
+    throw Object.assign(new Error('chatId must be one storage path segment.'), {
+      code: 'STORAGE_PATH_INVALID',
+    });
   }
   if (!attachmentPathPattern.test(path)) {
-    throw Object.assign(new Error(`"${path}" is not an attachment path.`), { code: 'STORAGE_PATH_INVALID' });
+    throw Object.assign(new Error(`"${path}" is not an attachment path.`), {
+      code: 'STORAGE_PATH_INVALID',
+    });
   }
   return `.tau/chats/${chatId}/${path}`;
 };
@@ -490,7 +566,10 @@ const isBlockList = (built: JsonValue | readonly JsonValue[]): built is readonly
 export const materializeAttachments = async (
   messages: readonly ProviderMessage[],
   read: (path: string) => Promise<Uint8Array<ArrayBuffer> | undefined>,
-  buildDocument: DocumentBlockBuilder = (hash) => ({ type: 'text', text: documentSentinel(hash) }),
+  buildDocument: DocumentBlockBuilder = (hash) => ({
+    type: 'text',
+    text: documentSentinel(hash),
+  }),
 ): Promise<MaterializedAttachments> => {
   const documents = new Map<string, MaterializedDocument>();
   const absent: string[] = [];
@@ -547,7 +626,10 @@ export const materializeAttachments = async (
       }
       const blocks = await Promise.all(message.content.map(materializeBlock));
       const content = blocks.flat();
-      return { ...message, content: content.length === 0 ? [{ type: 'text', text: absentAttachmentMarker }] : content };
+      return {
+        ...message,
+        content: content.length === 0 ? [{ type: 'text', text: absentAttachmentMarker }] : content,
+      };
     }),
   );
   return { messages: materialized, documents, absent, malformed };
@@ -580,13 +662,19 @@ export const piMessageToProvider = (message: AgentMessage, identities: MessageId
       id,
       role: 'user',
       content: toJsonValue(message.content),
-      metadata: { ...identities.metadata(message), timestamp: message.timestamp },
+      metadata: {
+        ...identities.metadata(message),
+        timestamp: message.timestamp,
+      },
     };
   }
   if (message.role === 'assistant') {
     const content = message.content.map((block) =>
       block.type === 'toolCall'
-        ? { ...block, arguments: normalizeToolInput(block.name, block.arguments) as typeof block.arguments }
+        ? {
+            ...block,
+            arguments: normalizeToolInput(block.name, block.arguments) as typeof block.arguments,
+          }
         : block,
     );
     const diagnostics = message.diagnostics?.filter(
@@ -705,7 +793,9 @@ export function providerMessageToPi(
       /* Pi-ai puts the level back in front of the reply when the model reads its effort from the transcript. */
       ...(typeof metadata.reasoningLevel === 'string' ? { providerThinkingLevel: metadata.reasoningLevel } : {}),
       ...(Array.isArray(metadata.diagnostics)
-        ? { diagnostics: metadata.diagnostics as AssistantMessage['diagnostics'] }
+        ? {
+            diagnostics: metadata.diagnostics as AssistantMessage['diagnostics'],
+          }
         : {}),
       usage: isUsage(metadata.usage) ? metadata.usage : zeroUsage,
       stopReason: metadata.stopReason ?? 'stop',

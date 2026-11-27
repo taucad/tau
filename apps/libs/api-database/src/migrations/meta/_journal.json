@@ -491,6 +491,13 @@
       "when": 1794729193095,
       "tag": "0070_email_event_inbox",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1795079709962,
+      "tag": "0071_project_share",
+      "breakpoints": true
     }
   ]
 }

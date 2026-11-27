@@ -5,6 +5,7 @@ import { PageContent } from '#components/layout/page-content.js';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { BuiltWithTau } from '#routes/_index/built-with-tau.js';
 import { HomepageChatHero } from '#routes/_index/homepage-chat-hero.js';
+import { UnavailableFoldersNotice } from '#components/filesystem/unavailable-folders-notice.js';
 import { SetupInvite } from '#components/onboarding/setup-invite.js';
 import { useSetupOffer } from '#components/onboarding/use-setup-offer.js';
 import type { Handle } from '#types/matches.types.js';
@@ -17,7 +18,6 @@ export const meta: MetaFunction = () => [
 ];
 
 export const handle: Handle = {
-  enableOverflowY: true,
   enablePageWrapper: true,
 };
 
@@ -27,6 +27,7 @@ export default function WebHome(): React.JSX.Element {
   useSetupOffer({ isDesktopFirstRun: false });
   return (
     <div className='pb-10'>
+      <UnavailableFoldersNotice />
       <HomepageChatHero />
       <SetupInvite />
       <ProjectLibrary

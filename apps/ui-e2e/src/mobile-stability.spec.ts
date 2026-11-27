@@ -104,13 +104,6 @@ const benignConsole: ReadonlyArray<
       new URL(url).origin === esmShOrigin,
   },
   {
-    // The served Content-Security-Policy-Report-Only header names a directive that only an enforced policy can carry.
-    name: 'report-only CSP notice',
-    matches: ({ text }) =>
-      text ===
-      "The Content Security Policy directive 'upgrade-insecure-requests' is ignored when delivered in a report-only policy.",
-  },
-  {
     /* On the software WebGPU profile the stage's startup GPU device is lost ("no valid external Instance") and the
      * stage draws with WebGL. Observed in most runs, always before the baseline: the probe shows the one device made
      * at startup, none live at the baseline, and none made afterwards. Pinned to that exact message and to the opening
@@ -353,6 +346,8 @@ type Ledger = {
       cycle: number;
       /** Evidence only: how long the cycle took on this machine. Not a budget. */
       milliseconds: number;
+      /** Evidence only: when each step of the cycle ended, in milliseconds from the cycle's start. */
+      steps: ReadonlyArray<Readonly<{ step: string; at: number }>>;
       counts: ResourceCounts;
       faults: Fault[];
       consoleErrors: string[];
@@ -384,7 +379,7 @@ const runCircuit = async ({
 }: Readonly<{
   name: string;
   viewport: PhoneViewport;
-  cycle: (index: number) => Promise<void>;
+  cycle: (index: number, step: (name: string) => void) => Promise<void>;
   settle: () => Promise<void>;
 }>): Promise<void> => {
   await openPhone(viewport, seedRoute, { beforeNavigate: installResourceProbe });
@@ -409,8 +404,11 @@ const runCircuit = async ({
   try {
     for (let index = 0; index <= cycles; index++) {
       const started = performance.now();
+      const steps: Array<{ step: string; at: number }> = [];
       // oxlint-disable-next-line no-await-in-loop -- the cycles run one after another in one document.
-      await cycle(index);
+      await cycle(index, (step) => {
+        steps.push({ step, at: Math.round(performance.now() - started) });
+      });
       // oxlint-disable-next-line no-await-in-loop -- one cycle at a time.
       await settle();
       // oxlint-disable-next-line no-await-in-loop -- one cycle at a time.
@@ -432,6 +430,7 @@ const runCircuit = async ({
       ledger.cycles.push({
         cycle: index,
         milliseconds: Math.round(performance.now() - started),
+        steps,
         counts,
         faults,
         consoleErrors: read.consoleErrors,
@@ -476,7 +475,7 @@ test(
     await runCircuit({
       name: 'workbench-390',
       viewport: phone,
-      cycle: async (index) => {
+      cycle: async (index, step) => {
         if (index === 0) {
           await target.click(navButton('All'), { touch: true });
           await target.expectVisible(allSheet());
@@ -496,6 +495,7 @@ test(
           await chooseTheme(theme);
         }
         const theme = cycleThemes.at(-1)!;
+        step('theme');
 
         // Every surface: Chat and Parameters from the nav, the rest from All, each back to the Model. The Editor shows
         // this project's own source, in this cycle's theme.
@@ -523,8 +523,10 @@ test(
           await tapDestination('Model');
           // oxlint-disable-next-line no-await-in-loop -- one surface at a time.
           await target.expectCount(mobileSurfaces(), 0, 30_000);
+          step(title);
         }
         await waitForModelReady();
+        step('model ready');
 
         // The other project through the sidebar, with its own model; the next cycle's Editor reads its source. The
         // warm cycle goes there and back.
@@ -536,6 +538,7 @@ test(
           await target.expectVisible(projectTitle(projects[current]), 60_000);
           // oxlint-disable-next-line no-await-in-loop -- one project at a time.
           await waitForModelReady();
+          step(`project ${current}`);
         }
       },
       settle: async () => {

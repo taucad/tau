@@ -1,21 +1,13 @@
 /**
- * B5 R2: prerendering `/usage` must not advertise an account route as public
- * content, so the prerender list and the sitemap list are separate.
+ * The prerender list and the sitemap list are separate: a prerendered shell is a build artefact, not public content.
+ * `/usage` is function-rendered since the offline usage shell was retired with the `cloud` build (adaptive app
+ * deployment mode W12).
  */
 import { expect, it } from 'vitest';
-import { listOfflineShellPaths, listSitemapPaths, listStaticPrerenderPaths } from '#lib/static-paths.js';
+import { listSitemapPaths, listStaticPrerenderPaths } from '#lib/static-paths.js';
 
-it('prerenders the neutral usage shell', () => {
-  expect(listStaticPrerenderPaths()).toContain('/usage');
-  expect(listOfflineShellPaths()).toStrictEqual(['/usage']);
-});
-
-it('keeps every offline shell path out of the sitemap', () => {
-  const sitemapPaths = listSitemapPaths();
-
-  for (const path of listOfflineShellPaths()) {
-    expect(sitemapPaths).not.toContain(path);
-  }
+it('prerenders no usage shell', () => {
+  expect(listStaticPrerenderPaths()).not.toContain('/usage');
 });
 
 it('prerenders every sitemap path', () => {

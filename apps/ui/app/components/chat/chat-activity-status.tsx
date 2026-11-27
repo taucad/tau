@@ -18,7 +18,13 @@ const activityShimmerStyle = {
   animationDuration: `${(2 * (defaultMorphTiming.restDuration + defaultMorphTiming.morphDuration)) / metalMorphSpinnerSpeed}ms`,
 };
 
-const formatElapsed = (elapsed: number): string => {
+/**
+ * A duration as the chat shows it: "43s", "5m 32s" or "1h 2m 3s".
+ *
+ * @param elapsed - Milliseconds.
+ * @returns The label, floored to whole seconds.
+ */
+export const formatElapsed = (elapsed: number): string => {
   const total = Math.max(0, Math.floor(elapsed / 1000));
   const seconds = total % 60;
   const minutes = Math.floor(total / 60) % 60;

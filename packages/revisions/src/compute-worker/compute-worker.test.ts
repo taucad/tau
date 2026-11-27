@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -165,6 +166,82 @@ describe('the compute worker seam', () => {
     expect(packIndex.offsetOf(built.entries[0]!.oid)).toBe(12);
   });
 
+  it('inflates a whole entry and hashes the object it frames in one call, the bytes moved back (SP6-import)', async () => {
+    const body = encoder.encode('cube(2);\n'.repeat(4096));
+    const deflated = new Uint8Array(await createInlineCompute().deflate(body));
+    const oid = digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(body.byteLength)}\0`), ...body]));
+    for (const compute of [remoteCompute(), createInlineCompute()]) {
+      // oxlint-disable-next-line no-await-in-loop -- one compute at a time.
+      const inflated = await compute.inflateObject!('blob', deflated, body.byteLength);
+      expect(inflated.oid).toBe(oid);
+      expect(new Uint8Array(inflated.data)).toStrictEqual(body);
+      /* The caller's deflated bytes are cloned to the worker, never detached. */
+      expect(deflated.byteLength).toBeGreaterThan(0);
+    }
+    const empty = await remoteCompute().inflateObject!(
+      'tree',
+      new Uint8Array(await createInlineCompute().deflate(new Uint8Array(0))),
+      0,
+    );
+    expect(empty).toEqual({ data: new Uint8Array(0), oid: digestHex('sha1', encoder.encode('tree 0\0')) });
+  });
+
+  it('never allocates for the size an entry declares before its body has inflated to it', async () => {
+    // A 1 MiB body declaring 1000 MiB passed the deflate-ratio bound and allocated 1000 MiB before it was refused:
+    // in a browser, a RangeError that judged nothing, not the corrupt entry it was (SP6-import review).
+    const compute = createInlineCompute();
+    const body = new Uint8Array(randomBytes(1024 * 1024));
+    const deflated = await compute.deflate(body);
+    const before = process.memoryUsage().arrayBuffers;
+    let peak = before;
+    const sample = setInterval(() => {
+      peak = Math.max(peak, process.memoryUsage().arrayBuffers);
+    }, 1);
+    try {
+      const refusing = compute.inflateObject!('blob', deflated, 1000 * 1024 * 1024);
+      /* Whatever ran before the first wait has allocated what it allocates up front. */
+      peak = Math.max(peak, process.memoryUsage().arrayBuffers);
+      const refusal = await refusing.catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(CorruptBytesError);
+    } finally {
+      clearInterval(sample);
+    }
+    expect(peak - before).toBeLessThan(16 * 1024 * 1024);
+  });
+
+  it('refuses an entry that is not zlib or inflates to another size than it declares, typed and with nothing left running', async () => {
+    const rejected = vi.fn();
+    process.on('unhandledRejection', rejected);
+    try {
+      const body = encoder.encode('sphere(3);\n'.repeat(1000));
+      const deflated = await createInlineCompute().deflate(body);
+      for (const compute of [remoteCompute(), createInlineCompute()]) {
+        for (const [bytes, declared] of [
+          [encoder.encode('not zlib at all'), 10],
+          [deflated, body.byteLength - 1],
+          [deflated, 1],
+          [deflated, body.byteLength + 1],
+          [deflated.subarray(0, deflated.byteLength - 8), body.byteLength],
+          /* More than any body this long inflates to: refused before anything is allocated. */
+          [deflated, 2 ** 52],
+          [deflated, -1],
+        ] as const) {
+          // oxlint-disable-next-line no-await-in-loop -- one refusal at a time.
+          const refusal = await compute.inflateObject!('blob', new Uint8Array(bytes), declared).catch(
+            (error: unknown) => error,
+          );
+          expect(refusal).toBeInstanceOf(CorruptBytesError);
+        }
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(rejected).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', rejected);
+    }
+  });
+
   it('indexes a pack in a realm with no Buffer global, as a browser worker is', async () => {
     const inline = createInlineCompute();
     const body = encoder.encode('board();\n'.repeat(32));
@@ -233,6 +310,33 @@ describe('the compute worker seam', () => {
     expect(refusal).toBeInstanceOf(CorruptBytesError);
     expect((refusal as Error).message).toMatch(/^The pack does not index: .*packfile version/u);
     expect(((refusal as Error).cause as Error | undefined)?.message).toMatch(/packfile version/u);
+  });
+
+  it('sends a view over part of a wider read as its own bytes, and leaves the caller its view', async () => {
+    const sent: Array<Readonly<{ args: readonly unknown[]; transfer: readonly unknown[] }>> = [];
+    const connection = openComputeConnection({
+      postMessage: (message, transfer) => {
+        sent.push({ args: (message as { args: readonly unknown[] }).args, transfer });
+      },
+      addEventListener: () => undefined,
+    });
+    /* One entry out of a wide Range read: a clone would carry the whole read behind it. */
+    const read = new Uint8Array(1024 * 1024).fill(7);
+    const entry = read.subarray(4096, 4096 + 64);
+    void connection.compute.inflate(entry);
+    void connection.compute.sha1(read);
+
+    const [partial, whole] = sent;
+    const carried = partial!.args[0] as Uint8Array<ArrayBuffer>;
+    expect(carried.buffer.byteLength).toBe(64);
+    expect(carried).toStrictEqual(entry);
+    expect(partial!.transfer).toStrictEqual([carried.buffer]);
+    /* The caller's read and view are whole and untouched. */
+    expect(read.byteLength).toBe(1024 * 1024);
+    expect(entry.byteLength).toBe(64);
+    /* A view over its whole buffer is cloned as before, never handed over. */
+    expect(whole!.args[0]).toBe(read);
+    expect(whole!.transfer).toStrictEqual([]);
   });
 
   it('waits for nothing when a call cannot be posted', async () => {

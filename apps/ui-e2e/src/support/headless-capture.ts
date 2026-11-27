@@ -526,25 +526,14 @@ export const waitForRenderedGeometry = async (format: 'gltf' | 'svg'): Promise<v
           ? (document
               .querySelector('[data-testid="svg-viewer-host"]')
               ?.shadowRoot?.querySelector('[data-slot="geometry"]')?.childElementCount ?? 0) > 0
-          : ((
-              globalThis as {
-                __TAU_SECTION_VIEW_TEST__?: { getModelComponents(): readonly unknown[] };
-              }
-            ).__TAU_SECTION_VIEW_TEST__?.getModelComponents().length ?? 0) > 0,
+          : (globalThis.__TAU_SECTION_VIEW_TEST__?.getModelComponents().length ?? 0) > 0,
       format,
       { timeout: 60_000 },
     );
   } catch (error) {
     const diagnostics = await target.events();
     const bridge = await target.evaluate(() => {
-      const value = (
-        globalThis as {
-          __TAU_SECTION_VIEW_TEST__?: {
-            getModelComponents(): readonly unknown[];
-            getModelHoverState(): unknown;
-          };
-        }
-      ).__TAU_SECTION_VIEW_TEST__;
+      const value = globalThis.__TAU_SECTION_VIEW_TEST__;
       return value ? { components: value.getModelComponents(), hover: value.getModelHoverState() } : undefined;
     });
     throw new Error(

@@ -1,7 +1,6 @@
 import { flatRoutes } from '@react-router/fs-routes';
 import type { RouteConfigEntry } from '@react-router/dev/routes';
 // oxlint-disable-next-line eslint/no-restricted-imports -- route generation runs outside the app alias root.
-import { resolveTauCloudBuildEnabled } from '../../build-environment.js';
 
 /**
  * Desktop route manifest: the web route tree minus every module SPA mode
@@ -26,8 +25,6 @@ const routes: RouteConfigEntry[] = await flatRoutes({
     // `+types/*.test.ts` modules vitest then fails to collect).
     '../../app/routes/**/*.test.{ts,tsx}',
     '../../app/routes/**/*.spec.{ts,tsx}',
-    // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
-    ...(resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']) ? [] : ['../../app/routes/usage/**']),
 
     // Web-only: the desktop sign-in callback lands in the system browser, not
     // in the shell (see `desktop-auth-signin-blueprint.md`).
@@ -68,10 +65,14 @@ const routes: RouteConfigEntry[] = await flatRoutes({
  * is where `tau://s/<slug>` lands (R4) and the web module resolves a Tau
  * publication in a server `loader` SPA mode forbids, so the desktop swaps the
  * module and leaves the web route's SSR, cookies and meta untouched.
+ * `/invitations/:token` is where `tau://invitations/<token>` lands, and its web
+ * module is a server redirect that moves the token out of the address (#2290);
+ * the desktop module does the same in the renderer.
  */
 const desktopRouteFiles = new Map<string, string>([
   ['../../app/routes/_index', '../../app/routes/_index/home-surface.desktop.tsx'],
   ['../../app/routes/s.$slug', '../../app/routes/s.$slug/desktop-route.tsx'],
+  ['../../app/routes/invitations.$token', '../../app/routes/invitations.$token/desktop-route.tsx'],
 ]);
 
 export default routes.map((entry) => {

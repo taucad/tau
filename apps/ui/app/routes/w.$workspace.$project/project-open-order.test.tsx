@@ -24,7 +24,7 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import type { ViewerNode } from '@taucad/workbench';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
-import type { ProjectRouteAccess } from '#runtime/project-library.js';
+import type { ProjectRouteAccess } from '@taucad/project-library/runtime/project-library';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
 import type { SessionWiring } from '#services/sessions-store.js';
@@ -461,8 +461,10 @@ vi.mock('#routes/w.$workspace.$project/workspace-frame.js', async (importOrigina
 }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   ActiveChatProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  useOptionalChatComposer: () => undefined,
 }));
 vi.mock('#chat-clients/chat-turn-host.js', () => ({ ChatTurnHost: () => null }));
+vi.mock('#routes/w.$workspace.$project/chat-sign-in-return.js', () => ({ ChatSignInReturn: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-history.js', () => ({
   ChatHistory: () => <div data-testid='chat-lane' />,
 }));
@@ -515,12 +517,12 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', async (importOr
 vi.mock('#workbench-records/view-actions.js', () => ({
   useWorkbenchViewCommands: () => ({ edit: async () => true, remove: async () => true }),
 }));
-vi.mock('#hooks/use-file-tree.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({
   useFileTreeSelector: <T,>(selector: (tree: ReadonlyMap<string, unknown>) => T) => selector(new Map()),
   useFileTreeMap: () => new Map(),
 }));
 /* The viewer content's file read: its effect is the viewer marker's mount and removal. */
-vi.mock('#hooks/use-file-content.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: () => {
     useEffect(() => {
       facts.viewer.mounts += 1;
@@ -547,7 +549,7 @@ vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => ({
   ...(await importOriginal<typeof SidebarStatusModule>()),
   useProjectSidebarRow: () => ({ attention: 0, conflicted: false, settings: 0, failed: 0 }),
 }));
-vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false, useFeatureState: () => 'off' }));
 vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({
   MobileProjectTopBar: () => null,
 }));
@@ -984,8 +986,10 @@ describe('phone viewer box while the focused chat is ensured (A0.7)', () => {
     /* Today the layout mounts while the chat is ensured and its pane waits below the viewer; once the open waits for
      * the chat, nothing of the layout mounts until it is ready. Either way, no viewer box shows an empty state. */
     const boxes = viewerBoxes();
+    /* The chat pane, still ensured, keeps its lane frame busy with the transcript's shape (rule 15). */
     expect(
-      boxes.length === 0 || document.querySelector('[data-testid="chat-lane-frame"][aria-busy="true"]') !== null,
+      boxes.length === 0 ||
+        document.querySelector('[data-testid="chat-lane-frame"] [data-slot="project-wait"][aria-busy="true"]') !== null,
     ).toBe(true);
     expect(boxes.filter((box) => box.querySelector(emptyState) !== null)).toEqual([]);
     expect(added.map((node) => node.textContent)).toEqual([]);

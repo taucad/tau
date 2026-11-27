@@ -2,24 +2,6 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
-type SectionViewBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST__?: {
-    setSectionCuts(
-      cuts: ReadonlyArray<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>,
-    ): void;
-    getSectionState(): { isCommitted: boolean };
-    setCamera(camera: {
-      position: readonly [number, number, number];
-      target?: readonly [number, number, number];
-      fov?: number;
-      zoom?: number;
-    }): void;
-    projectWorldPoint(point: readonly [number, number, number]): { x: number; y: number; visible: boolean };
-    getModelHoverState(): { activeUnitId: string | undefined; hoveredComponentId: string | undefined };
-    getRenderFrame(): { metersPerRenderUnit: number };
-  };
-};
-
 const previewCanvasSelector = 'canvas[data-engine]';
 const sectionPickingFixtureRoute = '/__e2e/example-fixture?locator=jscad.section-picking-fixture&graphicsBackend=webgl';
 
@@ -39,7 +21,7 @@ async function openSectionPickingFixture(): Promise<void> {
 
 async function driveClippedPickingView(): Promise<void> {
   await target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -54,18 +36,16 @@ async function driveClippedPickingView(): Promise<void> {
     // Removes the +X side; picking reads the cuts once the caps commit them.
     bridge.setSectionCuts([{ kind: 'plane', plane: 'yz', offset: 0, isFlipped: false }]);
   });
-  await target.waitFor(
-    () => (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getSectionState().isCommitted,
-    undefined,
-    { timeout: 30_000 },
-  );
+  await target.waitFor(() => globalThis.__TAU_SECTION_VIEW_TEST__?.getSectionState().isCommitted, undefined, {
+    timeout: 30_000,
+  });
 }
 
 async function projectWorldPoint(
   point: readonly [number, number, number],
 ): Promise<{ x: number; y: number; visible: boolean }> {
   return target.evaluate((nextPoint) => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -76,7 +56,7 @@ async function projectWorldPoint(
 
 async function currentHoveredComponentId(): Promise<string | undefined> {
   return target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }

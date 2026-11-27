@@ -47,4 +47,7 @@ jobs:
       # Real compiler subprocesses prove failure accumulation and paths with spaces.
       # This is tooling qualification, not a desktop package or signing result.
       - name: Exercise portable compiler runner
-        run: pnpm nx run scripts:test --watch=false src/typecheck-projects.test.ts src/tsgo-plugin-target.test.ts
+        run: pnpm nx run scripts:test --watch=false src/typecheck-projects.test.ts
+      # The tsgo plugin test reads the Nx project graph, so it runs in `scripts:validate-workspace-tests`.
+      - name: Exercise the tsgo plugin target
+        run: pnpm nx run scripts:validate-workspace-tests src/tsgo-plugin-target.test.ts

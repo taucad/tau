@@ -1,0 +1,286 @@
+<!doctype html>
+<!--
+  Tau's recovery window (desktop resilient startup blueprint, D0; R12). Static, with no network: main loads it with
+  loadFile in its own in-memory session, beside or instead of an app page that did not start. It talks to main only
+  through window.tauRecovery (src/preload/recovery-preload.ts).
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tau Recovery</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --background: #ffffff;
+        --foreground: #18181b;
+        --muted: #52525b;
+        --border: #e4e4e7;
+        --button: #f4f4f5;
+        --button-hover: #e4e4e7;
+        --primary: #18181b;
+        --primary-foreground: #fafafa;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #18181b;
+          --foreground: #fafafa;
+          --muted: #a1a1aa;
+          --border: #3f3f46;
+          --button: #27272a;
+          --button-hover: #3f3f46;
+          --primary: #fafafa;
+          --primary-foreground: #18181b;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 20px;
+        background: var(--background);
+        color: var(--foreground);
+        font:
+          13px/1.45 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 17px;
+      }
+      h2 {
+        margin: 18px 0 6px;
+        font-size: 13px;
+      }
+      p {
+        margin: 0 0 8px;
+        color: var(--muted);
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      button {
+        font: inherit;
+        padding: 6px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--button);
+        color: var(--foreground);
+        cursor: pointer;
+      }
+      button:hover {
+        background: var(--button-hover);
+      }
+      button.primary {
+        background: var(--primary);
+        color: var(--primary-foreground);
+        border-color: var(--primary);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      details {
+        margin-top: 18px;
+        border-top: 1px solid var(--border);
+        padding-top: 10px;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 600;
+      }
+      #status,
+      #update-status,
+      #resets-status {
+        color: var(--foreground);
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Tau isn’t starting as it should</h1>
+    <p id="status">Choose how to continue. Nothing here deletes your projects or files.</p>
+
+    <div class="row">
+      <button type="button" class="primary" data-action="restart-safe">Restart in Safe Mode</button>
+      <button type="button" data-action="restart-normal">Restart normally</button>
+    </div>
+
+    <h2>Updates</h2>
+    <div id="auto-install" class="row" role="status" hidden>
+      <p id="auto-install-status"></p>
+      <button type="button" data-action="cancel-auto-install">Cancel</button>
+    </div>
+    <p id="update-status">Checking the updater…</p>
+    <div class="row">
+      <button type="button" class="primary" data-action="install-update" hidden>Install update and restart</button>
+      <button type="button" data-action="check-for-updates">Check for Updates</button>
+      <button type="button" data-action="download-tau">Download Tau</button>
+    </div>
+
+    <h2>Diagnostics</h2>
+    <div class="row">
+      <button type="button" data-action="show-logs">Show Logs</button>
+      <button type="button" data-action="copy-diagnostics">Copy Diagnostics</button>
+    </div>
+
+    <details>
+      <summary>Reset…</summary>
+      <p>
+        A reset moves one item aside into Tau’s recovery folder the next time Tau starts. Nothing is deleted, and your
+        projects and Home folder are never touched.
+      </p>
+      <div class="row">
+        <button type="button" data-reset="folder-list">Saved folder list</button>
+        <button type="button" data-reset="window-layout">Window layout</button>
+        <button type="button" data-reset="local-database">Local database</button>
+        <button type="button" data-reset="caches">GPU and code caches</button>
+      </div>
+      <p id="resets-status"></p>
+    </details>
+
+    <script>
+      (() => {
+        const bridge = window.tauRecovery;
+        const status = document.querySelector('#status');
+        const updateStatus = document.querySelector('#update-status');
+        const resetsStatus = document.querySelector('#resets-status');
+        const installButton = document.querySelector('[data-action="install-update"]');
+        const autoInstall = document.querySelector('#auto-install');
+        const autoInstallStatus = document.querySelector('#auto-install-status');
+        const autoInstallNote = document.createElement('p');
+        updateStatus.after(autoInstallNote);
+        let countdownTimer;
+        const storeNames = {
+          'folder-list': 'saved folder list',
+          'window-layout': 'window layout',
+          'local-database': 'local database',
+          caches: 'GPU and code caches',
+        };
+        const phaseText = {
+          'system-managed': 'Updates are managed by your system.',
+          disabled: 'Updates are turned off for this build.',
+          checking: 'Checking for updates…',
+          current: 'Tau is up to date.',
+          downloading: 'Downloading an update…',
+          ready: 'An update is ready to install.',
+          available: 'An update is available.',
+          error: 'The update check did not finish.',
+          saving: 'Saving before the restart…',
+          'restart-blocked': 'The restart is waiting.',
+          restarting: 'Restarting…',
+          'move-required': 'Move Tau to Applications to update it.',
+        };
+        const blockedText = {
+          clock:
+            'Tau couldn’t verify the update because your computer’s date and time look wrong. Correct them, then check again.',
+          'installation-marker':
+            'This copy of Tau can’t update itself. Download Tau and install it again; your projects stay where they are.',
+        };
+        const render = (state) => {
+          if (!state || typeof state !== 'object') {
+            return;
+          }
+          if (state.mode === 'safe-auto') {
+            status.textContent = 'Tau started in safe mode because it did not start properly before.';
+          } else if (state.mode === 'safe-requested') {
+            status.textContent = 'Tau is running in safe mode.';
+          } else if (state.trigger === 'load-failed') {
+            status.textContent = 'Tau’s window could not load. Choose how to continue.';
+          } else if (state.trigger === 'shell-timeout') {
+            status.textContent = 'Tau’s window is taking too long to start. It stays open; choose how to continue.';
+          }
+          const update = state.update;
+          if (update && typeof update.phase === 'string') {
+            const version = update.version ? ` (${update.version})` : '';
+            /* Main words only an update APT installed; the two refusals only the person can fix are worded here (B25, B27). */
+            const note = blockedText[update.blockedReason] ?? update.detail;
+            updateStatus.textContent = `${phaseText[update.phase] ?? update.phase}${version}${note ? ` ${note}` : ''}`;
+            installButton.hidden = update.phase !== 'ready';
+          } else {
+            updateStatus.textContent = 'The updater is not running yet. Download Tau always works.';
+            installButton.hidden = true;
+          }
+          /* N1: an update that installs by itself shows a countdown the person can cancel. */
+          clearInterval(countdownTimer);
+          const auto = state.autoInstall;
+          if (auto && auto.status === 'counting') {
+            let seconds = Math.ceil(auto.milliseconds / 1000);
+            const tick = () => {
+              autoInstallStatus.textContent = `Installing an update to repair Tau… Tau restarts in ${seconds} s.`;
+              seconds = Math.max(0, seconds - 1);
+            };
+            tick();
+            countdownTimer = setInterval(tick, 1000);
+            autoInstall.hidden = false;
+          } else {
+            autoInstall.hidden = true;
+          }
+          autoInstallNote.textContent =
+            auto && auto.status === 'skipped-repeat'
+              ? `Installing Tau ${auto.targetVersion} by itself did not work last time. Install it yourself, or download Tau.`
+              : '';
+          const pending = Array.isArray(state.pendingResets) ? state.pendingResets : [];
+          resetsStatus.textContent =
+            pending.length === 0
+              ? ''
+              : `At the next start Tau will move aside: ${pending.map((store) => storeNames[store] ?? store).join(', ')}.`;
+        };
+        const act = async (action, button) => {
+          if (button) {
+            button.disabled = true;
+          }
+          try {
+            await bridge.act(action);
+          } catch (error) {
+            status.textContent = String(error && error.message ? error.message : error);
+          } finally {
+            if (button) {
+              button.disabled = false;
+            }
+          }
+        };
+        const actions = {
+          'restart-safe': { type: 'restart', mode: 'safe' },
+          'restart-normal': { type: 'restart', mode: 'normal' },
+          'install-update': { type: 'install-update' },
+          'cancel-auto-install': { type: 'cancel-auto-install' },
+          'check-for-updates': { type: 'check-for-updates' },
+          'download-tau': { type: 'download-tau' },
+          'show-logs': { type: 'show-logs' },
+          'copy-diagnostics': { type: 'copy-diagnostics' },
+        };
+        for (const button of document.querySelectorAll('[data-action]')) {
+          button.addEventListener('click', () => {
+            void act(actions[button.dataset.action], button);
+          });
+        }
+        for (const button of document.querySelectorAll('[data-reset]')) {
+          button.addEventListener('click', () => {
+            const store = button.dataset.reset;
+            if (window.confirm(`Move the ${storeNames[store]} aside the next time Tau starts?`)) {
+              void act({ type: 'reset', store }, button);
+            }
+          });
+        }
+        if (!bridge) {
+          status.textContent = 'This window could not reach Tau. Quit and start Tau again.';
+          return;
+        }
+        bridge.onChange(render);
+        bridge.state().then(render, () => undefined);
+      })();
+    </script>
+  </body>
+</html>

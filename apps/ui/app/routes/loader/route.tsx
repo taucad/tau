@@ -1,6 +1,6 @@
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import type { MetaFunction } from 'react-router';
 import { ArrowRight, Pause, Play } from 'lucide-react';
@@ -27,14 +27,14 @@ import { LazySection } from '@taucad/ui-kit/components/lazy-section';
 import { ChatActivitySpinner } from '#components/chat/chat-activity-spinner.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { useFeature } from '#flags/use-feature.js';
-import type { Handle } from '#types/matches.types.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
-const MetalMorphLoaderLazy = lazy(async () => {
+const MetalMorphLoaderLazy = lazyCode(async () => {
   const module = await import('#components/geometry/loader/metal-morph-loader.js');
   return { default: module.MetalMorphLoader };
 });
 
-const MetalMorphSpinnerLazy = lazy(async () => {
+const MetalMorphSpinnerLazy = lazyCode(async () => {
   const module = await import('#components/geometry/loader/metal-morph-spinner.js');
   return { default: module.MetalMorphSpinner };
 });
@@ -94,10 +94,6 @@ export const meta: MetaFunction = () => [
   { name: 'description', content: pageDescription },
   { name: 'robots', content: 'noindex' },
 ];
-
-export const handle: Handle = {
-  enableOverflowY: true,
-};
 
 const backendLabels: Readonly<Record<MetalMorphLoaderStatistics['backend'], string>> = {
   webgpu: 'WebGPU',

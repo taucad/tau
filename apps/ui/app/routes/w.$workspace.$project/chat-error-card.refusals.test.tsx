@@ -133,7 +133,12 @@ const showFailedRun = (code: string): void => {
       ],
     },
   });
-  const error: ChatErrorPayload = { code, message: rawMessageOf(code), category: errorCategory.generic };
+  const error: ChatErrorPayload = {
+    code,
+    title: 'Something went wrong',
+    message: rawMessageOf(code),
+    category: errorCategory.generic,
+  };
   const state = { persistedError: error, projection: projection.getSnapshot().context, attachmentStatus: 'attached' };
   projection.stop();
   vi.mocked(useChatSelector).mockImplementation((selector) => selector(state as unknown as CombinedChatState));

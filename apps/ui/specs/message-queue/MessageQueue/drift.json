@@ -32,7 +32,7 @@
     "apps/ui/app/components/chat/chat-textarea.tsx": "8f684f3dc647ab0182bffd90ef3c163adde71ef24f06a33ada6807870c25a309",
     "apps/ui/app/hooks/use-chat.tsx": "31b598f35717dca5c2be31a7540e37af62ac920600c4a78f7679fd6fe059a814",
     "apps/ui/app/machines/chat-session.machine.ts": "2076bc41cb203f45c0049297df17be9a4a4eed966d704f34423e3a2aa3f733cf",
-    "apps/ui/app/services/chat-session-store.ts": "4d4b80a7e5d1245473e6ff04fef86d1e9f04a0b18eec59f479b476106b0a59ef",
+    "apps/ui/app/services/chat-session-store.ts": "5c8231544e49d9e938d119340b4e55652389f33d29dd76d5892fc401e53d7cf7",
     "apps/ui/app/services/outbox-gate.ts": "c9d5a33f02c06d6bb45657f76e30a6c3a28b31bf6403d7dc0e9d3c840c4e357e"
   },
   "specs": {

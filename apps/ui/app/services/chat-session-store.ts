@@ -2949,11 +2949,14 @@ export class ChatSessionStore {
     };
   }
 
-  /** Whether `client` is still the attached connection of `observed`, on `connector`, and no command failed on it. */
+  /**
+   * Whether `client` is still the attached connection of `observed`, on `connector`, and no command failed on it. A
+   * local placement keeps no attachment status (HA2): its connection is attached while its live overlay is subscribed.
+   */
   #lendsCommands(observed: ObservedChat, client: ConnectedHostClient, connector: ProjectHostConnector): boolean {
     return (
       observed.client === client &&
-      observed.status === 'attached' &&
+      (observed.ownStart === undefined ? observed.status === 'attached' : observed.subscribed === true) &&
       !this.#retiredCommandClients.has(client) &&
       this.#projectHostConnectors.get(observed.projectId) === connector
     );
@@ -4608,6 +4611,7 @@ export class ChatSessionStore {
       if (observed.attachment === attachment) {
         attachment.stop();
         observed.attachment = undefined;
+        observed.client = undefined;
       }
     });
     this.#refreshReconnecting(chatId);
@@ -4725,13 +4729,14 @@ export class ChatSessionStore {
         connect: async () => {
           try {
             const client = await connector.connect(chatId);
-            if (observed.attachment === attachment && observed.placement?.hostId !== client.placement?.hostId) {
-              observed.placement = client.placement;
-              /* `getAttachedHostId` readers follow the projection topic. */
-              this.#projectionTopics.get(chatId)?.emit();
-            } else if (observed.attachment === attachment) {
+            if (observed.attachment === attachment) {
+              const moved = observed.placement?.hostId !== client.placement?.hostId;
               observed.placement = client.placement;
               observed.client = client;
+              if (moved) {
+                /* `getAttachedHostId` readers follow the projection topic. */
+                this.#projectionTopics.get(chatId)?.emit();
+              }
             }
             return client;
           } finally {

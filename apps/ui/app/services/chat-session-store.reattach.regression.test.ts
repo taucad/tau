@@ -551,6 +551,41 @@ describe('HA2 successors: a local placement keeps no attachment state', () => {
     }
   });
 
+  /* WP-12's borrowed command client: a local chat keeps no attachment status, so its overlay's subscription decides
+   * whether a command borrows the overlay's connection or dials its own. */
+  it.each([
+    ['send a command on the subscribed overlay client', false],
+    ['not send a command on the client of an overlay that was lost', true],
+  ] as const)('should %s', async (_name, lose) => {
+    const host = overlayHost('desktop');
+    const store = createStore(createDisk({ [ownLog]: unsettledLog }));
+    const unpublish = store.publishProjectHostConnector(projectId, host.connect, {
+      placement: async () => ({ hostId: 'desktop' }),
+    });
+    const unobserve = store.observe(chatId, projectId);
+    store.acquire(chatId, projectId);
+    try {
+      await vi.waitFor(() => {
+        expect(host.subscribed()).toBe(true);
+      }, coldBound);
+      const overlay = (await host.connect.mock.results[0]?.value) as AgentHostClient;
+      if (lose) {
+        host.end(Object.assign(new Error('gone'), { code: 'PEER_GONE' }));
+        await vi.waitFor(() => {
+          expect(host.released()).toBe(true);
+        });
+        await Promise.resolve();
+      }
+      const sentBefore = vi.mocked(overlay.hostCommand).mock.calls.length;
+      await store.cancelProjectedRun(chatId);
+      expect(vi.mocked(overlay.hostCommand).mock.calls.length - sentBefore).toBe(lose ? 0 : 1);
+    } finally {
+      store.release(chatId);
+      unobserve();
+      unpublish();
+    }
+  });
+
   /* `getAttachedHostId` no longer reads the attachment state: a local chat's connected placement outlives an overlay
    * loss, so approvals and the sign-in card keep the run's host (U7). */
   it('should keep the connected placement of a local chat across an overlay loss', async () => {

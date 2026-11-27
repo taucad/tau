@@ -1,7 +1,9 @@
+import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { useFlagState } from '#support/flag-state-test.js';
 import type { CaptureEvidence } from '#support/headless-capture.js';
 import {
   hasDarkGrayBackground,
@@ -88,6 +90,14 @@ const captureFailurePatterns = [
   /resvg.*(?:error|fail|initial)/iu,
 ] as const;
 
+/**
+ * The viewport stage's own startup device on the software WebGPU profile: Three.js reports it lost ("no valid external
+ * Instance") and the stage draws with WebGL (see mobile-stability.spec.ts). Headless captures render with nanoraster,
+ * never Three.js, so this exact viewport message is not a capture failure; any other device loss still is.
+ */
+const viewportStartupDeviceLoss =
+  /^THREE\.THREE\.WebGPURenderer: WebGPU Device Lost:\s+Message: A valid external Instance reference no longer exists\.\s+Reason: unknown$/u;
+
 const eventOffsets = async (): Promise<EventOffsets> => {
   const events = await target.events();
   return { consoleMessages: events.consoleMessages.length, pageErrors: events.pageErrors.length };
@@ -101,7 +111,9 @@ const expectNoCaptureFailures = async (from: EventOffsets): Promise<void> => {
   ];
   const failures = messages.filter(
     (message) =>
-      !message.includes('kind: automatic-thumbnail') && captureFailurePatterns.some((pattern) => pattern.test(message)),
+      !message.includes('kind: automatic-thumbnail') &&
+      !viewportStartupDeviceLoss.test(message) &&
+      captureFailurePatterns.some((pattern) => pattern.test(message)),
   );
   expect(failures, `Headless capture errors leaked to the browser:\n${failures.join('\n')}`).toEqual([]);
 };
@@ -140,6 +152,26 @@ const attachmentSource = async (index: number): Promise<string> => {
   }, source);
 };
 
+/**
+ * Open the viewer in Free orbit, the orbit style a person picks in viewer settings. Roll ruling E: Turntable, the
+ * default, keeps the scene up as its orbit axis and straightens any rolled pose it did not make itself (#2686), so only
+ * Free orbit holds the roll a capture must carry. The orbit style is a viewer preference behind `viewerControls`.
+ * Call it before the test's first navigation.
+ */
+const openInFreeOrbit = async (): Promise<void> => {
+  await useFlagState('viewer-controls');
+  await target.addInitScript(() => {
+    // The stored `viewer-preferences` section (`@taucad/preferences`), as the settings' orbit style choice writes it.
+    const key = 'tau-viewer-preferences';
+    if (localStorage.getItem(key) === null) {
+      localStorage.setItem(
+        key,
+        JSON.stringify({ value: { version: 1, controls: { orbitStyle: 'free' }, gizmo: {}, viewDefaults: {} } }),
+      );
+    }
+  });
+};
+
 const setViewerCamera = async (camera: ViewerCamera): Promise<void> => {
   await target.evaluate((nextCamera) => {
     const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
@@ -156,6 +188,10 @@ const setViewerCamera = async (camera: ViewerCamera): Promise<void> => {
       }),
   );
 };
+
+/** Stroke width in output pixels of a capture of `size`: the viewer's 1 CSS px edge at that capture's pixel ratio. */
+const expectedEdgeWidth = (size: readonly [number, number]): number =>
+  buildViewerCaptureImageOptions({ width: size[0], height: size[1], colorScheme: 'light' }).lineWidth;
 
 const currentCaptureSize = async (): Promise<readonly [number, number]> => {
   const aspect = await target.evaluate(() => {
@@ -329,10 +365,24 @@ const openCommandPalette = async (query: string): Promise<void> => {
   await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), query);
 };
 
-const openScreenshotMenu = async (): Promise<void> => {
+/** On a phone only the drawer's active surface is mounted: show Chat, where the draft and its attachments live. */
+const showPhoneChat = async (): Promise<void> => {
   if (await target.evaluate(() => innerWidth < 768)) {
-    await target.click(selectors.getByRole('tab', { name: 'Chat', exact: true }));
+    /* A toast sits over the phone's bottom bar, and a pointer resting on it holds it there, so let it leave first. */
+    await expect
+      .poll(async () => target.evaluate(() => document.querySelectorAll('[data-sonner-toast]').length), {
+        timeout: 15_000,
+      })
+      .toBe(0);
+    /* The phone layout's bottom bar is the Workbench navigation; Chat is one of its buttons. */
+    await target.click(
+      selectors.getByRole('navigation', { name: 'Workbench' }).getByRole('button', { name: 'Chat', exact: true }),
+    );
   }
+};
+
+const openScreenshotMenu = async (): Promise<void> => {
+  await showPhoneChat();
   const editor = selectors.getByCss('.tiptap[contenteditable="true"]');
   await target.expectVisible(editor);
   /* A click waits for the editor to hold still: on a phone the chat sheet slides
@@ -347,6 +397,11 @@ const openScreenshotMenu = async (): Promise<void> => {
 
 const openSecondaryViewer = async (): Promise<void> => {
   const fileName = 'secondary.ts';
+  // The main viewer's bridge is mounted already: remember it, so the camera is set on the new viewer's own bridge.
+  await target.evaluate(() => {
+    const state = globalThis as typeof globalThis & { __TAU_E2E_PREVIOUS_VIEWER_BRIDGE__?: unknown };
+    state.__TAU_E2E_PREVIOUS_VIEWER_BRIDGE__ = globalThis.__TAU_SECTION_VIEW_TEST__;
+  });
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
   const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.fill(commandSearch, 'Open files');
@@ -361,11 +416,19 @@ const openSecondaryViewer = async (): Promise<void> => {
   await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer' }));
   await target.expectClass(selectors.getByCss(`.dv-tab[aria-label="src/${fileName}"]`), /\bdv-active-tab\b/u, 60_000);
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
-  await target.waitFor(() => Boolean(globalThis.__TAU_SECTION_VIEW_TEST__));
+  await target.waitFor(() => {
+    const state = globalThis as typeof globalThis & { __TAU_E2E_PREVIOUS_VIEWER_BRIDGE__?: unknown };
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
+    return bridge !== undefined && bridge !== state.__TAU_E2E_PREVIOUS_VIEWER_BRIDGE__;
+  });
+  // A capture reads the camera the viewer has settled on, so the new viewer finishes framing its model first.
+  await target.expectGeometryFramed();
 };
 
 test('GLTF toolbar and @ actions use one annotated headless camera path', async () => {
   const eventsBefore = await eventOffsets();
+  // The rolled-camera capture below needs a viewer that keeps a roll.
+  await openInFreeOrbit();
   await seedVisionModel();
   await target.setViewport({ width: 1440, height: 960 });
   await target.navigate('/__e2e/headless-chat-image-capture');
@@ -618,10 +681,13 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
       }),
     )
     .toBe(true);
+  // The capture frames the viewer as it is when clicked; showing Chat afterwards resizes the viewer.
+  const mobileCaptureSize = await currentCaptureSize();
   // The phone layout's open drawer hides the workbench from the accessibility tree, so find the button by its label.
   await target.click(selectors.getByCss('[data-slot="viewer-controls"] button[aria-label="Capture view to chat"]'));
+  // The phone drawer shows one surface at a time, and it need not be Chat; the capture lands in the chat draft.
+  await showPhoneChat();
   await waitForCaptureAttachments(1);
-  const mobileCaptureSize = await currentCaptureSize();
   expectAnnotated(await readCaptureEvidence(attachment(0)), 'image/webp', mobileCaptureSize);
 
   await clearAttachments();
@@ -736,7 +802,7 @@ test('section captures preserve complete caps and positive-area overlap evidence
   await expectNoCaptureFailures(eventsBefore);
 });
 
-test('capture edges retain the shared 800-pixel reference through the attachment modal', async () => {
+test('capture edges keep the viewer line weight at each capture size through the attachment modal', async () => {
   const eventsBefore = await eventOffsets();
   await seedVisionModel();
   await target.setViewport({ width: 1440, height: 960 });
@@ -776,8 +842,9 @@ test('capture edges retain the shared 800-pixel reference through the attachment
   await waitForCaptureAttachments(1);
   const currentWithoutLines = await attachmentSource(0);
   const currentCoverage = await readLineCoverageEvidence(currentWithLines, currentWithoutLines);
-  expect(Math.abs(currentCoverage.straight - 3), JSON.stringify(currentCoverage)).toBeLessThan(0.35);
-  expect(Math.abs(currentCoverage.diagonal - 3), JSON.stringify(currentCoverage)).toBeLessThan(0.35);
+  const currentEdgeWidth = expectedEdgeWidth(currentSize);
+  expect(Math.abs(currentCoverage.straight - currentEdgeWidth), JSON.stringify(currentCoverage)).toBeLessThan(0.35);
+  expect(Math.abs(currentCoverage.diagonal - currentEdgeWidth), JSON.stringify(currentCoverage)).toBeLessThan(0.35);
   const displayedCoverage = await readLineCoverageEvidence(currentWithLines, currentWithoutLines, previewBox);
   expect(displayedCoverage.straight, JSON.stringify(displayedCoverage)).toBeGreaterThan(0.1);
   expect(displayedCoverage.diagonal, JSON.stringify(displayedCoverage)).toBeGreaterThan(0.1);
@@ -796,8 +863,14 @@ test('capture edges retain the shared 800-pixel reference through the attachment
   await waitForCaptureAttachments(6);
   const topWithLines = await attachmentSource(4);
   const canonicalCoverage = await readLineCoverageEvidence(topWithLines, topWithoutLines);
-  expect(Math.abs(canonicalCoverage.straight - 3), JSON.stringify(canonicalCoverage)).toBeLessThan(0.35);
-  expect(Math.abs(canonicalCoverage.diagonal - 3), JSON.stringify(canonicalCoverage)).toBeLessThan(0.35);
+  // A square 1600 px view is a smaller diagonal than the 2400 px current view, so its stroke is thinner (about 2.36 px).
+  const canonicalEdgeWidth = expectedEdgeWidth([1600, 1600]);
+  expect(Math.abs(canonicalCoverage.straight - canonicalEdgeWidth), JSON.stringify(canonicalCoverage)).toBeLessThan(
+    0.35,
+  );
+  expect(Math.abs(canonicalCoverage.diagonal - canonicalEdgeWidth), JSON.stringify(canonicalCoverage)).toBeLessThan(
+    0.35,
+  );
 
   expect(await readCaptureErrorToasts()).toEqual([]);
   await expectNoCaptureFailures(eventsBefore);
@@ -844,7 +917,28 @@ test('SVG toolbar, desktop, and mobile actions use real resvg', async () => {
   await expectNoCaptureFailures(eventsBefore);
 });
 
-test('capture retains one image worker and warm GPU resources beyond the former idle timeout', async () => {
+/** `imageWorkerIdleMilliseconds` in `apps/ui/app/services/headless-image.service.ts`: an idle image worker's lifetime. */
+const imageWorkerIdleMilliseconds = 30_000;
+
+const imageWorkerNames = async (): Promise<string[]> => {
+  const names = await target.evaluate(
+    () => (globalThis as typeof globalThis & { __TAU_E2E_WORKER_NAMES__?: string[] }).__TAU_E2E_WORKER_NAMES__ ?? [],
+  );
+  return names.filter((name) => name === 'tau-headless-image-transcoder-worker');
+};
+
+const resetImageDebugRecords = async (): Promise<void> =>
+  target.evaluate(() => {
+    (
+      globalThis as typeof globalThis & { __TAU_HEADLESS_IMAGE_DEBUG__?: { reset(): void } }
+    ).__TAU_HEADLESS_IMAGE_DEBUG__?.reset();
+  });
+
+/*
+ * The image worker holds a WebGPU device and a wasm heap, so it stays warm while captures follow each other and is
+ * released after `imageWorkerIdleMilliseconds` without work (#830): the next capture starts a new, cold worker.
+ */
+test('capture keeps one warm image worker between captures and releases it once idle', async () => {
   const eventsBefore = await eventOffsets();
   await seedVisionModel();
   await installWorkerTracking();
@@ -855,23 +949,18 @@ test('capture retains one image worker and warm GPU resources beyond the former 
   await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));
   await waitForCaptureAttachments(1);
   const first = await readCaptureEvidence(attachment(0));
-  await target.delay(60_100);
 
   await clearAttachments();
   await setViewerCamera({ position: [0.105, -0.125, 0.082], target: [0, 0, 0.006], fov: 47, zoom: 1.1 });
-  await target.evaluate(() => {
-    (
-      globalThis as typeof globalThis & { __TAU_HEADLESS_IMAGE_DEBUG__?: { reset(): void } }
-    ).__TAU_HEADLESS_IMAGE_DEBUG__?.reset();
-  });
+  await resetImageDebugRecords();
   await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));
   await waitForCaptureAttachments(1);
   const second = await readCaptureEvidence(attachment(0));
   expect(second.digest).not.toBe(first.digest);
+  expect(await imageWorkerNames()).toHaveLength(1);
   const workerNames = await target.evaluate(
     () => (globalThis as typeof globalThis & { __TAU_E2E_WORKER_NAMES__?: string[] }).__TAU_E2E_WORKER_NAMES__ ?? [],
   );
-  expect(workerNames.filter((name) => name === 'tau-headless-image-transcoder-worker')).toHaveLength(1);
   expect(workerNames).not.toContain('tau-headless-image-runtime-worker');
   const records = await imageDebugRecords();
   expect(records.find(({ name }) => name === 'worker.ready')?.detail).toMatchObject({ cold: false });
@@ -886,6 +975,17 @@ test('capture retains one image worker and warm GPU resources beyond the former 
     pipelineSets: 0,
     success: true,
   });
+
+  await target.delay(imageWorkerIdleMilliseconds + 1000);
+  await clearAttachments();
+  await setViewerCamera({ position: [0.12, -0.11, 0.07], target: [0, 0, 0.006], fov: 45, zoom: 1 });
+  await resetImageDebugRecords();
+  await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));
+  await waitForCaptureAttachments(1);
+  await readCaptureEvidence(attachment(0));
+  expect(await imageWorkerNames()).toHaveLength(2);
+  const recordsAfterIdle = await imageDebugRecords();
+  expect(recordsAfterIdle.find(({ name }) => name === 'worker.ready')?.detail).toMatchObject({ cold: true });
   expect(await readCaptureErrorToasts()).toEqual([]);
   await expectNoCaptureFailures(eventsBefore);
 });

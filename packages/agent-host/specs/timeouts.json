@@ -906,6 +906,14 @@
       "owner": "chat performance WP-06"
     },
     {
+      "id": "HA0-READ-LOSS",
+      "bound": "Report-only: a lost or refused chat read (not a leadership handoff) that lasts 10 s (chatReadLossBoundMilliseconds) reports chat.read.cold-hidden and run.unsettled.own; an attach clears it",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "observed.lossReport = setTimeout",
+      "class": "Presentation",
+      "owner": "host attachment reliability HA0"
+    },
+    {
       "id": "D19",
       "bound": "Host command retry delay (20 ms doubling to 250 ms within its 30 s deadline)",
       "site": "apps/ui/app/chat-clients/_internal/host-command.ts",

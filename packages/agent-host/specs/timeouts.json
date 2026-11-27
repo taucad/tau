@@ -655,6 +655,22 @@
       "owner": "W10"
     },
     {
+      "id": "E24-POSIX",
+      "bound": "ACP CLI version probe's budget on POSIX, handed to execFile as its own timeout: the budget acpCliProbeTimeout (or a caller's probeTimeout) sets, and expiry ends the probe with SIGTERM",
+      "site": "packages/host/src/acp/registry.ts",
+      "token": "timeout: budget",
+      "class": "External edge",
+      "owner": "W10"
+    },
+    {
+      "id": "E24-WINDOWS-TREE",
+      "bound": "ACP CLI version probe's budget on Windows, a timer that ends the probe's whole process tree with taskkill /T /F, since execFile's own timeout ends the root first and leaves the tree's children holding its pipes; the same budget as E24-POSIX",
+      "site": "packages/host/src/acp/registry.ts",
+      "token": "}, budget)",
+      "class": "External edge",
+      "owner": "W10"
+    },
+    {
       "id": "E25",
       "bound": "ACP model probe",
       "site": "packages/host/src/acp/registry.ts",

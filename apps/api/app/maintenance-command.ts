@@ -14,6 +14,7 @@ import type { StorageAccount } from '@taucad/api-object-storage';
 import { repositoryLocator } from '@taucad/api-git-core/store/locator';
 import { S3RepositoryStore } from '@taucad/api-git-core/store/s3-repository-store';
 import { dueCondition, lfsRetirementWindowMilliseconds, retireDueLfsObjects } from '#api/git/lfs-retirement.js';
+import { markOrphanedLfsObjects } from '#api/git/lfs-orphans.js';
 import { collectZeroCountBlobs } from '@taucad/api-git-mirror/maintenance/blob-collector';
 import { liveOwnerIds, purgeTombstonedTenants } from '@taucad/api-git-mirror/maintenance/purge';
 import { assertProjectActive } from '@taucad/api-database/project-lifecycle';
@@ -121,10 +122,14 @@ const usage = `Usage: revisions-maintenance <command>
       the packs it names) at TAU_S3_RESTORE_*: for a store move's copy, not B2.
 
   retire-lfs [--dry-run]
-      Retire every LFS object whose unreachable mark is older than the 30-day
-      window and that a fresh walk of its repository still does not reach. One
-      read-only lease per project that has a candidate; --dry-run lists the
-      candidates and hydrates nothing.
+      First marks unreachable the finalized LFS objects of every project with
+      no committed push that nobody has requested for a day (the orphans of a
+      refused first backup), one revisions_maintenance.lfs_orphans line per
+      project, so their window starts. Then retires every LFS object whose
+      unreachable mark is older than the 30-day window and that a fresh walk
+      of its repository still does not reach. One read-only lease per project
+      that has a candidate; --dry-run lists the candidates, marks nothing and
+      hydrates nothing.
 
   lfs-integrity [--concurrency <n>]
       Read-only inventory of stored LFS checksums. Scope: the reservation rows
@@ -359,6 +364,13 @@ async function main(): Promise<void> {
      `status` judges. A flagged run is an operator's and leaves no record. */
   const pass = async <T>(scheduled: ScheduledMaintenanceCommand, run: () => Promise<T>): Promise<T> =>
     args.length === 1 ? recordMaintenancePass({ store: driver, command: scheduled, run, report }) : run();
+  /** The orphan sweep (cloud backup admission WP12) that starts the window `retireDueLfsObjects` then measures. */
+  const markOrphans = async (now: Date): Promise<void> => {
+    for await (const outcome of markOrphanedLfsObjects({ database }, { now })) {
+      // oxlint-disable-next-line no-await-in-loop -- report with backpressure.
+      await writeLine(JSON.stringify({ event: 'revisions_maintenance.lfs_orphans', ...outcome }));
+    }
+  };
 
   try {
     switch (command) {
@@ -435,6 +447,8 @@ async function main(): Promise<void> {
               });
               stop.signal.throwIfAborted();
               await pass('retire-lfs', async () => {
+                await markOrphans(new Date());
+                stop.signal.throwIfAborted();
                 for await (const outcome of retireDueLfsObjects(
                   { database, store: new S3RepositoryStore(driver), storage: driver },
                   { now: new Date() },
@@ -658,6 +672,7 @@ async function main(): Promise<void> {
           break;
         }
         await pass('retire-lfs', async () => {
+          await markOrphans(now);
           for await (const outcome of retireDueLfsObjects(
             { database, store: new S3RepositoryStore(driver), storage: driver },
             { now },

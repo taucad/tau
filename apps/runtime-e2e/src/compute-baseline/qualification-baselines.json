@@ -358,6 +358,45 @@
           }
         ]
       },
+      "offByHost": {
+        "darwin-arm64": {
+          "capture": "e2e-nightly run 45714812711 (job 139559132288), main 552b5b46d, macos-26-arm64, Node 26.13.1, single-thread WASM: the reuse-off and reuse-on processes rendered these same bytes on every step",
+          "matrix": [
+            {
+              "token": "base",
+              "sha256": "6659397842f867b1c15833fe3364c815c5bac3ebadf646156ee46520ad018c50"
+            },
+            {
+              "token": "A",
+              "sha256": "cb3c68954bcc65d62be28b99c9528b7391e85c09a42bcbe6bdc8ec7f4dd7e34d"
+            },
+            {
+              "token": "base",
+              "sha256": "6659397842f867b1c15833fe3364c815c5bac3ebadf646156ee46520ad018c50"
+            },
+            {
+              "token": "B",
+              "sha256": "85e99c49df04babb4fd1ef0503ca6995b66606585a87fbcdff8a5fc378878667"
+            },
+            {
+              "token": "base",
+              "sha256": "6659397842f867b1c15833fe3364c815c5bac3ebadf646156ee46520ad018c50"
+            },
+            {
+              "token": "comment",
+              "sha256": "6659397842f867b1c15833fe3364c815c5bac3ebadf646156ee46520ad018c50"
+            },
+            {
+              "token": "literal",
+              "sha256": "4b2e93be0781ae53d518c53c8ba6eb12b20c1133eadc45e0f003528ec35270bd"
+            },
+            {
+              "token": "original",
+              "sha256": "6659397842f867b1c15833fe3364c815c5bac3ebadf646156ee46520ad018c50"
+            }
+          ]
+        }
+      },
       "counts": {
         "off": {
           "matrix": [

@@ -55,6 +55,8 @@
     "./routing/route-guard": "./src/routing/route-guard.ts",
     "./routing/routing.providers": "./src/routing/routing.providers.ts",
     "./storage-environment.config": "./src/storage-environment.config.ts",
+    "./store/attestation": "./src/store/attestation.ts",
+    "./store/attestation-keys": "./src/store/attestation-keys.ts",
     "./store/commit": "./src/store/commit.ts",
     "./store/errors": "./src/store/errors.ts",
     "./store/fence": "./src/store/fence.ts",

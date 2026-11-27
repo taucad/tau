@@ -13,8 +13,8 @@ import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
 /** The DER prefix of a PKCS#8 Ed25519 private key; the 32-byte seed follows. */
 const pkcs8Ed25519Prefix = Buffer.from('302e020100300506032b657004220420', 'hex');
 
-/** The two development key pairs, by what they sign. */
-export type DevelopmentKeyName = 'grant' | 'receipt';
+/** The development key pairs, by what they sign. */
+export type DevelopmentKeyName = 'grant' | 'receipt' | 'attestation';
 
 /** The kid each development key carries; production kids come from tau-cloud. */
 export const developmentKid = (name: DevelopmentKeyName): string => `${name}-development`;
@@ -54,5 +54,21 @@ export const developmentPublicKeysJson = (name: DevelopmentKeyName): string =>
       kid: developmentKid(name),
       alg: 'Ed25519',
       publicKeyPem: createPublicKey(privateKeyFor(name)).export({ type: 'spki', format: 'pem' }),
+    },
+  ]);
+
+/**
+ * The attestation verifier list of the development key (contracts § 2): the shape tau-cloud writes, with the
+ * `notBefore` every attestation key carries and no revocation.
+ *
+ * @returns `[{kid, alg, publicKeyPem, notBefore}]` as JSON.
+ */
+export const developmentAttestationPublicKeysJson = (): string =>
+  JSON.stringify([
+    {
+      kid: developmentKid('attestation'),
+      alg: 'Ed25519',
+      publicKeyPem: createPublicKey(privateKeyFor('attestation')).export({ type: 'spki', format: 'pem' }),
+      notBefore: '2026-11-27T00:00:00.000Z',
     },
   ]);

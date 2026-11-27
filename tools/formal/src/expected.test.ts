@@ -75,6 +75,21 @@ describe('lintExpectedFile', () => {
       'A.y.cfg: a defect names the work package that fixes it (fixedBy)',
     ]);
   });
+
+  it('should accept a whole heap of 1 to 4 GB and nothing else', () => {
+    const file: ExpectedFile = {
+      configs: {
+        'A.big.cfg': { tier: 'nightly', expect: 'pass', heapGigabytes: 4 },
+        'A.half.cfg': { tier: 'nightly', expect: 'pass', heapGigabytes: 1.5 },
+        'A.huge.cfg': { tier: 'nightly', expect: 'pass', heapGigabytes: 8 },
+      },
+    };
+
+    expect(lintExpectedFile(file)).toEqual([
+      'A.half.cfg: heapGigabytes is a whole number from 1 to 4',
+      'A.huge.cfg: heapGigabytes is a whole number from 1 to 4',
+    ]);
+  });
 });
 
 describe('knownFailures', () => {

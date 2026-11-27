@@ -297,7 +297,7 @@
 \* model's `Observe` of a terminal phase; no action or verdict changes.
 \* H-1 review (2026-11-27): `Deliver` may now be refused on any try, including a fresh key on an idle host, so `Refuse`
 \* is reached from the state the runtime meets. `RefuseOnlyUnapplied` gates `Refuse`'s `m \notin Accepted`; the
-\* `refuse-accepted` witness drops it and must violate `ComposerExclusive`.
+\* `refuse-accepted` witness (pinned with the other tables) drops it and must violate `ComposerExclusive`.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

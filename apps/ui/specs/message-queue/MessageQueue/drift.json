@@ -36,7 +36,7 @@
     "apps/ui/app/services/outbox-gate.ts": "c9d5a33f02c06d6bb45657f76e30a6c3a28b31bf6403d7dc0e9d3c840c4e357e"
   },
   "specs": {
-    "MessageQueue.tla": "4b9f643b0dc2934774ecc0c5bd1b50e57ce2f8582317f35086de78af1696e1e4",
+    "MessageQueue.tla": "5db89b5c6c13b46bd3201702baecb591d8972fd91c019f729800ccf4f25f4c15",
     "QueuePlacement.tla": "b4c85bb439e54faeef87790711cc1da9f5a3e21be4f589c58b83069f15f86c47"
   },
   "tables": {
@@ -45,6 +45,7 @@
     "MessageQueue.follower-lag.cfg": "0bef8a34558145f144ae1948fc7f715c7e8d215d90b338151578154ee639e7d2",
     "MessageQueue.late-terminal-capture.cfg": "12ad05df1ccb88b2a0730151f96e157516ef3764a96ead73ebf8cad77ee17cbc",
     "MessageQueue.lost-payload.cfg": "889fe8452ab7fa09cfbd7770fe9a430a5422e064f76c8b6db6d603234d52b5c5",
+    "MessageQueue.refuse-accepted.cfg": "a2af002213e7e96aa08991c68c6572b00a3db9a1ad4f7ae34eb1a7a83d63f11c",
     "MessageQueue.release-stopped.cfg": "2c45d7e48be9be5958a07423ddc443d40e337e70cc53028a84622f3e10c802c0",
     "MessageQueue.target.cfg": "d3efad0ab6d51b5044927e530befe7443efab462efb2841d556692b7cec0ddf6",
     "MessageQueue.today.cfg": "b741c4e89c699441e1b23eeb4cef446659201dd44c66564d31eac6a7134c6763",

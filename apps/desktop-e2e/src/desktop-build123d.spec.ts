@@ -841,7 +841,8 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
 
     const workersBeforeReload = ownedPicoGkWorkers(session.application.process().pid);
     expect(workersBeforeReload).not.toHaveLength(0);
-    const renderingStatus = page.getByText('rendering…', { exact: true });
+    // The viewer's build pill reads "Rendering…" for every phase of a build (#2857).
+    const renderingStatus = page.getByText('Rendering…', { exact: true });
     await expectCount(renderingStatus, 0, 120_000);
     writeFileSync(sourcePath, slowPicogkSource, 'utf8');
     await expectVisible(renderingStatus, 120_000);

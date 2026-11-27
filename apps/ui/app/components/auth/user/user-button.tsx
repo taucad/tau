@@ -1,5 +1,6 @@
 import { useAuth, useSession } from '@better-auth-ui/react';
-import { ChevronsUpDown, CloudOff, LogIn, LogOut, Settings } from 'lucide-react';
+import { ChevronsUpDown, CloudOff, LogIn, LogOut, Settings, UserRoundCog } from 'lucide-react';
+import { toast } from 'sonner';
 import { isValidElement } from 'react';
 import type { ComponentType, ReactElement, ReactNode } from 'react';
 
@@ -16,6 +17,8 @@ import { cn } from '@taucad/ui/utils/cn';
 import { UserAvatar } from '#components/auth/user/user-avatar.js';
 import { UserView } from '#components/auth/user/user-view.js';
 import { useIdentity } from '#hooks/use-identity.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { startDesktopSignIn } from '#providers/auth-provider.js';
 /** Auth states a `UserButton` link can be visible in. */
 export type UserButtonLinkVisibility = 'authenticated' | 'unauthenticated' | 'always';
 
@@ -200,6 +203,19 @@ export function UserButton({
             )}
 
             <DropdownMenuSeparator />
+
+            {isDesktopTarget() ? (
+              <DropdownMenuItem
+                onSelect={() => {
+                  /* The account is chosen in the browser; the sign-in held here stays until the new one arrives. */
+                  toast('Continue in your browser', { description: 'Sign in there with the account to use here.' });
+                  void startDesktopSignIn('different-account');
+                }}
+              >
+                <UserRoundCog className='text-muted-foreground' />
+                Use a different account
+              </DropdownMenuItem>
+            ) : null}
 
             <DropdownMenuItem asChild>
               <Link href={`${basePaths.auth}/${viewPaths.auth.signOut}`}>

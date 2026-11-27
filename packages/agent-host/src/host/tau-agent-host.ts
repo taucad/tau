@@ -3445,17 +3445,24 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     return answer;
   };
 
+  /*
+   * Read inside the chat's chain: a batch is written, then flushed, and its rows fold into the ledger only once the
+   * flush returns, so a read beside the chain could find a resolution in the log while the ledger still held its
+   * interrupt pending. Behind every write already begun, the ledger and the rows agree.
+   */
   const pendingInterrupts = async (runId: string): Promise<readonly InterruptRequest[]> => {
     const chatId = runChats.get(runId);
     if (chatId === undefined) {
       return [];
     }
-    const ledger = await ledgerOf(chatId);
-    const pending = ledger.runs[runId]?.pendingInterrupts ?? {};
+    const { pending, events } = await serial(chatId, async () => {
+      const ledger = await ledgerOf(chatId);
+      const held = ledger.runs[runId]?.pendingInterrupts ?? {};
+      return { pending: held, events: Object.keys(held).length === 0 ? [] : await readRows(chatId) };
+    });
     if (Object.keys(pending).length === 0) {
       return [];
     }
-    const events = await readRows(chatId);
     return events.flatMap((event): InterruptRequest[] =>
       event.runId === runId &&
       event.type === 'interrupt.recorded' &&

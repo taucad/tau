@@ -442,9 +442,22 @@ type NativeWatcher = {
   subscribe(
     directory: string,
     handler: (error: unknown, events: Array<{ path: string; type: string }>) => void,
-    options?: { ignore?: string[] },
+    options?: { ignore?: string[]; backend?: NativeBackend },
   ): Promise<NativeSubscription>;
 };
+type NativeBackend = 'inotify' | 'fs-events' | 'windows';
+/*
+ * The platform's own backend, named. Left to choose, @parcel/watcher first probes for watchman with
+ * `popen("watchman … get-sockname", "r")`, installed or not, and never closes that pipe: glibc clears its read end's
+ * close-on-exec flag, so every process this one starts afterwards (a shell launch's bubblewrap among them) inherits it
+ * (E05). Tau never watches through watchman.
+ */
+const nativeBackends: Partial<Record<NodeJS.Platform, NativeBackend>> = {
+  linux: 'inotify',
+  darwin: 'fs-events',
+  win32: 'windows',
+};
+const nativeBackend = nativeBackends[process.platform];
 /*
  * @parcel/watcher keeps one native backend per process and tears it down, on a libuv pool thread, when its last
  * subscription closes. A `subscribe` sent while that close is still queued or running takes the same backend, binds to
@@ -466,7 +479,12 @@ const serializeNative = async <T>(operation: () => Promise<T>): Promise<T> => {
 };
 const serializedWatcher = (watcher: NativeWatcher): NativeWatcher => ({
   subscribe: async (directory, handler, options) => {
-    const subscription = await serializeNative(async () => watcher.subscribe(directory, handler, options));
+    const subscription = await serializeNative(async () =>
+      watcher.subscribe(directory, handler, {
+        ...options,
+        ...(nativeBackend === undefined ? {} : { backend: nativeBackend }),
+      }),
+    );
     return { unsubscribe: async () => serializeNative(async () => subscription.unsubscribe()) };
   },
 });

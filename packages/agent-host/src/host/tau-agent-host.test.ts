@@ -1472,8 +1472,14 @@ the cancelled tools left the system unchanged.
     await vi.waitFor(async () => {
       await expect(host.snapshot(chatId)).resolves.toMatchObject({ state: 'paused' });
     });
-    const [pending] = await host.pendingInterrupts(runId);
-    return { host, file, chatId, runId, interruptId: pending!.interruptId, epochs, hooks, held: held.promise, release };
+    /* From the log, not `pendingInterrupts`: that answers behind the chat's writes, and `hold` keeps one in flight. */
+    const rows = await readLog(file);
+    const [interruptId] = rows.flatMap((event) =>
+      event.type === 'interrupt.recorded' && event.runId === runId && event.phase === 'requested'
+        ? [event.interruptId]
+        : [],
+    );
+    return { host, file, chatId, runId, interruptId: interruptId!, epochs, hooks, held: held.promise, release };
   };
 
   /*

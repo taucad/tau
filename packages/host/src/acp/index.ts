@@ -24,7 +24,6 @@ export {
   acpAdapterEnvironment,
   acpEnvironmentAllowlist,
   acpEnvironmentPrefixAllowlist,
-  acpWindowsEnvironmentAllowlist,
   spawnAcpAdapter,
 } from '#acp/spawn.js';
 export type { AcpWireFrame, SpawnedAcpAdapter } from '#acp/spawn.js';

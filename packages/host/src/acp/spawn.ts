@@ -64,10 +64,8 @@ export const acpEnvironmentAllowlist: readonly string[] = [
  * its providers, so a CLI cannot reach its vendor; without `ComSpec` and `PATHEXT` it cannot start a
  * shell tool; and `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TEMP` and `TMP` are where a CLI finds its
  * sign-in, its configuration and its scratch space.
- *
- * @public
  */
-export const acpWindowsEnvironmentAllowlist: readonly string[] = [
+const acpWindowsEnvironmentAllowlist: readonly string[] = [
   'SystemRoot',
   'windir',
   'SystemDrive',

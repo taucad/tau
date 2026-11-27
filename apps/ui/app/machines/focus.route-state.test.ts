@@ -79,6 +79,17 @@ describe('selectProjectRouteState: one row per route state', () => {
     expect(select(harness, registry({ a: { ...live, state: 'closing' } }), committedFor('a'))?.kind).toBe('closed');
   });
 
+  it('session-failed: focused on the committed project whose session failed, which nobody closed', () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r1', 'a');
+
+    expect(select(harness, registry({ a: { ...live, state: 'failed' } }), committedFor('a'))).toEqual({
+      kind: 'session-failed',
+      projectId: 'a',
+      project: projectFixture('a'),
+    });
+  });
+
   it('trashed', () => {
     expect(select(heldOn({ status: 'trashed', project: projectFixture('a') }), registry(), committedFor('a'))).toEqual({
       kind: 'trashed',

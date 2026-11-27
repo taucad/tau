@@ -65,6 +65,8 @@ const rootFiles = testRootFiles({
   client: {
     verifyProjectRoute: vi.fn(async () => ({ status: 'discovery-required' })),
     listProjectManifests: vi.fn(async () => ({ roots: [], entries: [] })),
+    /* Fast-path FW3: the duplicate's directory is allocated against one fresh listing of its root's names. */
+    probeProjectDirectories: vi.fn(async () => ({ locations: [], names: [] })),
     commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
   },
   workspace: { syncProjectRoots: mockSyncProjectRoots },

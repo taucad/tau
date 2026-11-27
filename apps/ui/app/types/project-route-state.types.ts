@@ -29,6 +29,8 @@ export type ProjectRouteState =
       project: Project;
       reason: ProjectSessionCloseReason | undefined;
     }>
+  /** The project's session failed (its open, offline or without its code, or a close step): nobody closed it. */
+  | Readonly<{ kind: 'session-failed'; projectId: string; project: Project }>
   | Readonly<{ kind: 'trashed'; projectId: string; project: Project }>
   | Readonly<{ kind: 'missing'; slugs: ProjectRouteSlugs | undefined }>
   | Readonly<{ kind: 'conflict'; projectId: string }>

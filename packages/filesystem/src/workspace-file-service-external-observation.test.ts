@@ -9,6 +9,7 @@ import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 import type { ProjectRootConfiguration } from '#mount-table.js';
 import type { ExternalChangeFact, FileSystemProvider, WatchEvent } from '#types.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
+import { racyTimestampMilliseconds } from '#external-change-ingest.js';
 
 type ObserverRecord = {
   readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
@@ -68,6 +69,7 @@ afterEach(() => {
   TestFileSystemObserver.instances.length = 0;
   TestFileSystemObserver.observeHook = undefined;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 async function createWebAccessService(options?: {
@@ -842,6 +844,10 @@ describe('WorkspaceFileService external webaccess observation', () => {
     await service.pollExternalChanges();
     expect(globalEvents).toEqual([]);
     await provider.writeFile('dropped-project/tau.json', '{}');
+    /* Past the racy window, so the write is settled when the poll captures it: a row inside the window is reported
+     * changed again by the next poll (discovery index A3), which `the racy guard` tests cover. */
+    const settledAt = Date.now() + racyTimestampMilliseconds + 1000;
+    vi.spyOn(Date, 'now').mockReturnValue(settledAt);
     await service.pollExternalChanges();
 
     expect(globalEvents).toEqual([{ type: 'reset' }, { type: 'reset' }, { type: 'reset' }]);

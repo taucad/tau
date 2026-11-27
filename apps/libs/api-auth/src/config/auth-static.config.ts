@@ -2,6 +2,7 @@ import type { BetterAuthOptions } from 'better-auth';
 import { apiKey } from '@better-auth/api-key';
 import { bearer, magicLink, oneTimeToken } from 'better-auth/plugins';
 import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
+import { desktopOauthDisabledPaths, desktopOauthProvider, desktopTokenPolicy } from '#config/desktop-oauth.js';
 import { tokenLifetimeSeconds } from '@taucad/api-email';
 
 const accountOptions: NonNullable<BetterAuthOptions['account']> = {
@@ -41,6 +42,9 @@ export const staticAuthConfig = {
     // Reuses the existing `verification` table — no schema change.
     oneTimeToken({ storeToken: 'hashed' }),
     cliDeviceAuthorization('https://tau.new'),
+    // Tau Desktop as a public native OAuth client (desktop sign-in execution plan DSI-1).
+    desktopOauthProvider('https://tau.new'),
+    desktopTokenPolicy(),
     // `bearer()` stays LAST: its after-hook reads the `set-cookie` every earlier
     // plugin may have written and re-emits it as `set-auth-token`.
     // Only signed session tokens (`token.signature`): a session row alone never authenticates.
@@ -64,7 +68,8 @@ export const staticAuthConfig = {
     },
   },
   // Provider tokens are consumed by server-owned capability endpoints only.
-  disabledPaths: ['/get-access-token', '/refresh-token'],
+  // Provider routes Tau does not use answer 404 (see `desktopOauthDisabledPaths`).
+  disabledPaths: ['/get-access-token', '/refresh-token', ...desktopOauthDisabledPaths],
   basePath: '/v1/auth',
   appName: 'Tau',
   session: {

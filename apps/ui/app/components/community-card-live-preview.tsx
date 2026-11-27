@@ -1,5 +1,6 @@
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
-import { ProjectCardCadPreview, projectCardVerticalFieldOfView } from '#components/project-card.js';
+import { ProjectCardCadPreview } from '#components/project-card.js';
+import { projectCardVerticalFieldOfView } from '#components/project-card-camera.js';
 import type { ProjectFiles } from '#constants/project-examples.js';
 
 /*

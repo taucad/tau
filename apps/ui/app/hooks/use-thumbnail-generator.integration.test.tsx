@@ -69,6 +69,8 @@ const on = vi.fn((_event: string, listener: (event: RenderEvent) => void) => {
 });
 
 vi.mock('#hooks/use-project.js', () => ({
+  // No viewer shows the entry here, so no viewport holds the automatic thumbnail back.
+  useMainGraphics: () => undefined,
   useProject: () => ({
     geometryUnits: new Map([['src/main.ts', { getSnapshot, on, subscribe }]]),
     mainEntryPath: 'src/main.ts',

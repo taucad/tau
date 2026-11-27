@@ -9,6 +9,7 @@
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/lib-storage": "catalog:",
     "@aws-sdk/s3-request-presigner": "catalog:",
+    "@better-auth/oauth-provider": "catalog:",
     "@pyroscope/nodejs": "catalog:",
     "@sentry/node": "catalog:",
     "@taucad/agent-observability": "workspace:*",

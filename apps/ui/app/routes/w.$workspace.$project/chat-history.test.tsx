@@ -850,9 +850,8 @@ describe('ChatHistory — transcript load (I21)', () => {
  */
 describe('ChatHistory — transcript wait shape (A15d)', () => {
   const history = [message('u1', 'user'), message('a1', 'assistant')];
-  const headerIndicator = (): HTMLElement | undefined =>
-    document.querySelector<HTMLElement>('[data-slot="floating-panel-content-header"] [data-slot="project-wait"]') ??
-    undefined;
+  const feedWait = (): HTMLElement | undefined =>
+    document.querySelector<HTMLElement>('[data-slot="project-wait"][aria-label="Chat"]') ?? undefined;
   const navigationEntry = (name: string): PerformanceEntry => ({
     name,
     entryType: 'navigation',
@@ -862,7 +861,7 @@ describe('ChatHistory — transcript wait shape (A15d)', () => {
     toJSON: () => ({ name }),
   });
   const revealDelay = (): number => {
-    const body = headerIndicator()?.querySelector<HTMLElement>('[data-slot="project-wait-skeleton"]');
+    const body = feedWait()?.querySelector<HTMLElement>('[data-slot="project-wait-skeleton"]');
     const revealValue = body?.style.getPropertyValue('--wait-skeleton-delay') ?? '';
     const match = /^calc\((-?[\d.]+)ms \+ var\(--wait-offset, 0ms\)\)$|^(-?[\d.]+)ms$/u.exec(revealValue);
     return Number(match?.[1] ?? match?.[2] ?? Number.NaN);
@@ -891,7 +890,7 @@ describe('ChatHistory — transcript wait shape (A15d)', () => {
       vi.spyOn(performance, 'now').mockReturnValue(400);
       renderOverDeferredTranscript(history);
 
-      const indicator = headerIndicator();
+      const indicator = feedWait();
       expect(indicator).toHaveAttribute('data-state', 'waiting');
       expect(indicator).toHaveAttribute('aria-busy', 'true');
       expect(indicator!.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
@@ -963,7 +962,7 @@ describe('ChatHistory — transcript wait shape (A15d)', () => {
     vi.spyOn(performance, 'now').mockReturnValue(10_400);
     renderOverDeferredTranscript(history, clock);
 
-    expect(headerIndicator()).toHaveAttribute('data-state', 'waiting');
+    expect(feedWait()).toHaveAttribute('data-state', 'waiting');
     expect(revealDelay()).toBe(300);
   });
 
@@ -1001,7 +1000,7 @@ describe('ChatHistory — transcript wait shape (A15d)', () => {
     vi.spyOn(performance, 'now').mockReturnValue(5000);
     renderOverDeferredTranscript(history);
 
-    expect(headerIndicator()).toHaveAttribute('data-state', 'waiting');
+    expect(feedWait()).toHaveAttribute('data-state', 'waiting');
     expect(revealDelay()).toBe(300);
   });
 
@@ -1009,7 +1008,7 @@ describe('ChatHistory — transcript wait shape (A15d)', () => {
     publishChatState({ messages: history, transcript: 'loaded' });
     render(<ChatHistory />);
 
-    expect(headerIndicator()).toBeUndefined();
+    expect(feedWait()).toBeUndefined();
   });
 
   /* A project reached by a click: the frame's open started at the click, and the lane mounted before the reveal

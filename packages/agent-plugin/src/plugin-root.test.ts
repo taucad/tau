@@ -160,9 +160,13 @@ describe('attribution', () => {
 
 describe('published package', () => {
   it('should pack the manifests, MCP configs, launcher, doctor and skills, and nothing from the workspace', async () => {
-    const { stdout } = await promisify(execFile)('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
-      cwd: root,
-    });
+    /* Windows installs npm as `npm.cmd`, which starts only through a shell. */
+    const windows = process.platform === 'win32';
+    const { stdout } = await promisify(execFile)(
+      windows ? 'npm.cmd' : 'npm',
+      ['pack', '--dry-run', '--json', '--ignore-scripts'],
+      { cwd: root, shell: windows },
+    );
     const [pack] = JSON.parse(stdout) as [{ readonly files: ReadonlyArray<{ readonly path: string }> }];
     const paths = pack.files.map((file) => file.path);
 

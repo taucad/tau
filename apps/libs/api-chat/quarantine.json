@@ -1,0 +1,14 @@
+{
+  "$schema": "../../../tools/vitest-ci/quarantine.schema.json",
+  "entries": [
+    {
+      "test": "src/chat.controller.json-schema.test.ts > chatTurnRequestSchema JSON Schema contract (R13) > agent field structure > should keep the cad agent branch contract stable (inline snapshot guards regressions)",
+      "owner": "rifont",
+      "issue": 2944,
+      "class": "unreproduced",
+      "created": "2026-11-27",
+      "expires": "2026-12-11",
+      "evidence": "2 flake events (lineage 2) in its last 22 executions; runs 45918825121, 45924035430"
+    }
+  ]
+}

@@ -13,7 +13,7 @@ import type { AuthSession, AuthUser } from '@taucad/api-auth';
 import { fakeSessionResolver } from '@taucad/api-auth/testing';
 import { DatabaseService } from '@taucad/api-database';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import { GitBasicAuthMiddleware } from '#api/git/git-transport.js';
+import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { mintHostGitCredential } from '@taucad/api-hosts';
 
 /*
@@ -51,6 +51,16 @@ class StubGitController {
   @HttpCode(200)
   public receivePack(@Param('repo') _repository: string, @User('id') userId: string, @Req() request: FastifyRequest) {
     return whoAmI(userId, request);
+  }
+
+  @Post(':repo/info/lfs/locks/verify')
+  @HttpCode(200)
+  public verifyLocks(
+    @Param('repo') _repository: string,
+    @User('id') userId: string,
+    @Req() request: FastifyRequest<{ Body: unknown }>,
+  ) {
+    return { ...whoAmI(userId, request), body: request.body };
   }
 
   @Delete(':repo/refs')
@@ -114,6 +124,7 @@ beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({ imports: [TransportTestModule] }).compile();
   app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
   app.enableVersioning({ type: VersioningType.URI });
+  registerGitContentTypeParsers(app.getHttpAdapter().getInstance());
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
 });
@@ -159,6 +170,23 @@ describe('GitBasicAuthMiddleware — a cloud host push credential (D21)', () => 
 
     expect(response.statusCode).toBe(404);
     expect(response.json()).toMatchObject({ code: 'PROJECT_NOT_FOUND' });
+  });
+
+  /* M2-fix review m6: git-lfs's own media type through Fastify, and the allow-list entry for a host credential. */
+  it('should carry a git-lfs locks/verify request with its media type, as the owner via its device', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/v1/git/${boundProject}.git/info/lfs/locks/verify`,
+      headers: { authorization: basic(pushCredential), 'content-type': 'application/vnd.git-lfs+json' },
+      payload: JSON.stringify({ ref: { name: 'refs/heads/main' } }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      userId: ownerId,
+      viaDevice: hostDeviceId,
+      body: { ref: { name: 'refs/heads/main' } },
+    });
   });
 
   it('should refuse the owner-only ref removal, since the credential yields write and never owner', async () => {

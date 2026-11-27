@@ -1002,7 +1002,9 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       await waitFor(() => {
         expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
       });
-      expect(screen.getByRole('status')).toHaveTextContent('Send queued. Press Escape to cancel.');
+      /* Staging QA 2026-11-27 (recheck 3): the served input already said the queued send; adopting it says nothing
+       * again. Send's pending state still shows it. */
+      expect(screen.getByRole('status')).toBeEmptyDOMElement();
       await act(async () => {
         await Promise.resolve();
       });

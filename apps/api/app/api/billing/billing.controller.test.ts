@@ -294,6 +294,18 @@ describe('billing authenticated reporting endpoints', () => {
         operationId: 'operation-b',
         rawQuery: { snapshotRevision: '5' },
       });
+      usage.getOperationReceipts.mockResolvedValue({ receipts: [] });
+      const batch = await app.inject({
+        method: 'GET',
+        url: '/v1/billing/operations?operationIds=operation-b&operationIds=operation-a',
+      });
+      expect(batch.statusCode).toBe(200);
+      expect(batch.headers['cache-control']).toBe('private, no-store');
+      /* A repeated query key reaches the service as a list; the owner is the session's, never the query's. */
+      expect(usage.getOperationReceipts).toHaveBeenCalledWith({
+        authUserId: owner.id,
+        rawQuery: { operationIds: ['operation-b', 'operation-a'] },
+      });
       const holds = await app.inject({ method: 'GET', url: '/v1/billing/holds?accountId=other' });
       expect(holds.statusCode).toBe(200);
       expect(holds.json()).toEqual(openHolds);

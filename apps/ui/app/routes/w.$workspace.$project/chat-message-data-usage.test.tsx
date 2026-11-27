@@ -120,23 +120,40 @@ const usagePart = (overrides: Partial<UsageData> = {}): UsageData => ({
   ...overrides,
 });
 
-/** Answers each `/v1/billing/operations/:id` read from a fixed table. */
-const stubReceipts = (byOperationId: Readonly<Record<string, unknown>>): void => {
+/**
+ * Answers receipt reads from a fixed table: the batch route (`/v1/billing/operations?operationIds=…`) with the
+ * receipts it holds, and, for an API without the batch route (`batch: false`), each `/v1/billing/operations/:id`.
+ */
+const stubReceipts = (byOperationId: Readonly<Record<string, unknown>>, { batch = true } = {}): void => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string) => {
-      const operationId = decodeURIComponent(input.split('/').at(-1) ?? '');
+      const url = new URL(input);
+      if (url.pathname === '/v1/billing/operations') {
+        if (!batch) {
+          return { ok: false, status: 404 };
+        }
+        const receipts = url.searchParams
+          .getAll('operationIds')
+          .flatMap((operationId) => (byOperationId[operationId] === undefined ? [] : [byOperationId[operationId]]));
+        return { ok: true, json: async () => ({ receipts }) };
+      }
+      const operationId = decodeURIComponent(url.pathname.split('/').at(-1) ?? '');
       const body = byOperationId[operationId];
       return body === undefined ? { ok: false, status: 404 } : { ok: true, json: async () => body };
     }),
   );
 };
 
-function renderUsage(usageParts: UsageData[], userId: string | undefined = 'user'): void {
+function renderUsage(
+  usageParts: UsageData[],
+  userId: string | undefined = 'user',
+  { apiBaseUrl = 'https://api.example' } = {},
+): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { readonly children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <BillingSessionProvider value={{ apiBaseUrl: 'https://api.example', userId, environment: 'development' }}>
+      <BillingSessionProvider value={{ apiBaseUrl, userId, environment: 'development' }}>
         {children}
       </BillingSessionProvider>
     </QueryClientProvider>
@@ -184,6 +201,36 @@ describe('ChatMessageDataUsage', () => {
     await waitFor(() => {
       expect(screen.getByLabelText(/Tau credits: 1 · 1 pending/)).toBeInTheDocument();
     });
+  });
+
+  /* Chat performance WP-13 step 6: a turn's operations are read in one request, not one per operation. */
+  it('should read every operation of a turn in one batch request', async () => {
+    stubReceipts({ op1: terminalReceipt('op1', '12345'), op2: pendingReceipt('op2') });
+    renderUsage([usagePart({ operationId: 'op2' }), usagePart({ id: 'dat_2', operationId: 'op1' })]);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Tau credits: 1 · 1 pending/)).toBeInTheDocument();
+    });
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => input)).toEqual([
+      'https://api.example/v1/billing/operations?operationIds=op1&operationIds=op2',
+    ]);
+    expect(recordBillingRevisionMinimum).toHaveBeenCalledTimes(1);
+  });
+
+  it('should read one operation at a time from an API without the batch route', async () => {
+    stubReceipts({ op1: terminalReceipt('op1', '12345'), op2: pendingReceipt('op2') }, { batch: false });
+    renderUsage([usagePart({ operationId: 'op1' }), usagePart({ id: 'dat_2', operationId: 'op2' })], 'user', {
+      apiBaseUrl: 'https://legacy.example',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Tau credits: 1 · 1 pending/)).toBeInTheDocument();
+    });
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => input)).toEqual([
+      'https://legacy.example/v1/billing/operations?operationIds=op1&operationIds=op2',
+      'https://legacy.example/v1/billing/operations/op1',
+      'https://legacy.example/v1/billing/operations/op2',
+    ]);
   });
 
   /* B4 R4/R5: a receipt answering for another account, another environment or

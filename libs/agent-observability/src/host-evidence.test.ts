@@ -246,33 +246,39 @@ describe('createHostEvidence', () => {
     expect(reads).toBe(2);
   });
 
-  it('should ask again for an answer that granted nothing, and for another account', async () => {
+  it('should reuse an undecided answer, and ask again for a project not yet the account’s or another account', async () => {
     let reads = 0;
-    let allowed: readonly string[] = [];
+    let refusal = 'no-decision';
     let account = 'user-1';
     const { evidence } = setup(
       () => {
         reads += 1;
-        return allowing(allowed)();
+        return new Response(
+          JSON.stringify({
+            epoch: 'policy-1',
+            projectId: 'project-1',
+            purposes: [{ purpose: 'summary', allowed: false, refusal }],
+          }),
+          { status: 200 },
+        );
       },
       () => account,
       undefined,
       () => 1000,
     );
-    /* The host's read at composition granted nothing; each later moment asks again. */
+    /* Most accounts have not decided: that answer serves the moments after it too. */
     await evidence.reporter.refresh();
     const opened = reads;
     await evidence.reporter.refresh();
-    expect(reads).toBe(opened + 1);
+    expect(reads).toBe(opened);
 
-    allowed = ['summary'];
+    /* A new project the API does not know yet as this account's is asked about again at every moment. */
+    account = 'user-2';
+    refusal = 'project-not-owned';
     await evidence.reporter.refresh();
+    expect(reads).toBe(opened + 1);
     await evidence.reporter.refresh();
     expect(reads).toBe(opened + 2);
-
-    account = 'user-2';
-    await evidence.reporter.refresh();
-    expect(reads).toBe(opened + 3);
   });
 
   it('should bind a grant given after the host opened when a run starts, and report that run', async () => {

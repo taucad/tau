@@ -188,8 +188,9 @@ export const recommendedChoice = (
   }
   // ponytail: an agent whose "Default" names no level (Claude Code) runs medium, as Claude Code's own picker
   // recommends; read the level from the agent once ACP or the adapter publishes it.
-  // Only when the agent offers its own "Default": without one, nothing recommends a level.
-  return levels.some((level) => isDefaultChoice(level)) && concrete.some((level) => level.id === 'medium')
+  // Only when a fresh session starts on the agent's own "Default": otherwise nothing recommends a level.
+  return levels.some((level) => isDefaultChoice(level) && level.id === defaultValue) &&
+    concrete.some((level) => level.id === 'medium')
     ? 'medium'
     : undefined;
 };

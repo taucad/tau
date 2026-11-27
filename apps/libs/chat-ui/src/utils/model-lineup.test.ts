@@ -152,6 +152,8 @@ describe('recommendedChoice', () => {
 
   it('should recommend nothing when no level is marked, none is in force and there is no Default', () => {
     expect(recommendedChoice(levels, undefined)).toBeUndefined();
+    expect(recommendedChoice([{ id: 'default', name: 'Default' }, ...levels], undefined)).toBeUndefined();
+    expect(recommendedChoice([{ id: 'default', name: 'Default' }, ...levels], 'unknown')).toBeUndefined();
   });
 
   it('should treat only default ids and names as the sentinel', () => {

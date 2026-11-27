@@ -21,7 +21,7 @@ import {
   receivePackRefResults,
   syncOutcomeOf,
 } from '#api/git/git.controller.js';
-import { countedHookRefusalCodes } from '@taucad/api-git-core/hook-refusals';
+import { countedHookRefusalCodes, unflaggedPagingRefusalCodes } from '@taucad/api-git-core/hook-refusals';
 import { TauMetrics } from '@taucad/telemetry';
 import type { GitExecution } from '@taucad/api-git-core/forwarding/git-execution';
 import type { GitLfsService } from '#api/git/git-lfs.service.js';
@@ -51,7 +51,10 @@ const countingRedis = (): RedisService => {
   } as unknown as RedisService;
 };
 
-const replyStub = (): { reply: FastifyReply; headers: Record<string, string> } => {
+const replyStub = (): {
+  reply: FastifyReply;
+  headers: Record<string, string>;
+} => {
   const headers: Record<string, string> = {};
   const reply = {
     header: (name: string, value: string) => {
@@ -68,7 +71,11 @@ const ownRequest = (): FastifyRequest => ({ raw: mock<IncomingMessage>(), header
 /** A request the git transport admitted as the cloud host `agent_cloud` of `user-owner`. */
 const hostRequest = (projectId: string): FastifyRequest => {
   const raw = mock<IncomingMessage>();
-  attachHostDevice(raw, { ownerId: 'user-owner', deviceId: 'agent_cloud', projectId });
+  attachHostDevice(raw, {
+    ownerId: 'user-owner',
+    deviceId: 'agent_cloud',
+    projectId,
+  });
   return { raw, headers: {} } as unknown as FastifyRequest;
 };
 
@@ -78,7 +85,13 @@ describe('GitController request budget (D22)', () => {
     const repositories = {
       authorize: async () => {
         authorized += 1;
-        return { projectId: 'proj_w9', ownerId: 'user-owner', role: 'read', remainingBytes: 0, storageLimitBytes: 0 };
+        return {
+          projectId: 'proj_w9',
+          ownerId: 'user-owner',
+          role: 'read',
+          remainingBytes: 0,
+          storageLimitBytes: 0,
+        };
       },
       advertiseRefs: async () => new Uint8Array(),
     } as unknown as GitRepositoryService;
@@ -151,10 +164,18 @@ describe('GitController request budget (D22)', () => {
     const controller = new GitController(
       { get: () => 'https://api.tau.test' } as unknown as ConfigService<Environment, true>,
       {
-        authorize: async () => ({ projectId: 'proj_w9', ownerId: 'user-owner', role: 'read' }),
+        authorize: async () => ({
+          projectId: 'proj_w9',
+          ownerId: 'user-owner',
+          role: 'read',
+        }),
         advertiseRefs: async () => {
           throw new HttpException(
-            { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED', message: 'spent', retryAfterSeconds: 3600 },
+            {
+              code: 'GIT_HYDRATE_BUDGET_EXHAUSTED',
+              message: 'spent',
+              retryAfterSeconds: 3600,
+            },
             HttpStatus.TOO_MANY_REQUESTS,
           );
         },
@@ -189,14 +210,20 @@ describe('GitController cloud host attribution (W10, D21)', () => {
             storageLimitBytes: 1,
           };
         },
-        receivePack: async () => ({ report: new Uint8Array(), historyBefore: false }),
+        receivePack: async () => ({
+          report: new Uint8Array(),
+          historyBefore: false,
+        }),
       } as unknown as GitRepositoryService,
       {} as unknown as GitLfsService,
       new PublicationRateLimiterService(countingRedis()),
     );
     const push = async (request: FastifyRequest): Promise<void> => {
       const { reply } = replyStub();
-      Reflect.set(reply, 'raw', { once: () => undefined, writableFinished: true });
+      Reflect.set(reply, 'raw', {
+        once: () => undefined,
+        writableFinished: true,
+      });
       await controller.receivePack('proj_w10', 'user-owner', request, reply);
     };
 
@@ -387,7 +414,10 @@ describe('GitController sync telemetry', () => {
     remainingBytes: 1,
     storageLimitBytes: 1,
   };
-  const push = { raw: mock<IncomingMessage>(), headers: {} } as unknown as FastifyRequest;
+  const push = {
+    raw: mock<IncomingMessage>(),
+    headers: {},
+  } as unknown as FastifyRequest;
 
   it('counts a push git refused inside its 200 as ref_rejected, once', async () => {
     const recorded = metrics();
@@ -403,7 +433,10 @@ describe('GitController sync telemetry', () => {
     );
 
     const { reply: stub } = replyStub();
-    const reply = { header: stub.header, raw: { once: vi.fn() } } as unknown as FastifyReply;
+    const reply = {
+      header: stub.header,
+      raw: { once: vi.fn() },
+    } as unknown as FastifyReply;
     await controller.receivePack('proj_d1.git', 'user-owner', push, reply);
 
     expect(recorded.syncOperations.add).toHaveBeenCalledExactlyOnceWith(1, {
@@ -424,25 +457,41 @@ describe('GitController sync telemetry', () => {
       const controller = controllerWith(
         {
           authorize: async () => access as unknown as GitAccess,
-          receivePack: async () => ({ report: answers.shift() ?? Buffer.from('0000'), historyBefore: true }),
+          receivePack: async () => ({
+            report: answers.shift() ?? Buffer.from('0000'),
+            historyBefore: true,
+          }),
         },
         metrics(),
       );
       const { reply: stub } = replyStub();
-      const reply = { header: stub.header, raw: { once: vi.fn() } } as unknown as FastifyReply;
+      const reply = {
+        header: stub.header,
+        raw: { once: vi.fn() },
+      } as unknown as FastifyReply;
 
       await controller.receivePack('proj_d1.git', 'user-owner', push, reply);
       expect(warn).toHaveBeenCalledExactlyOnceWith(
         {
           projectId: 'proj_d1',
           outcome: 'ref_rejected',
-          refs: [{ ref: 'refs/heads/main', status: 'ng', reason: 'non-fast-forward' }],
+          refs: [
+            {
+              ref: 'refs/heads/main',
+              status: 'ng',
+              reason: 'non-fast-forward',
+            },
+          ],
         },
         'A push was refused for some refs',
       );
       await controller.receivePack('proj_d1.git', 'user-owner', push, reply);
       expect(log).toHaveBeenCalledWith(
-        { projectId: 'proj_d1', outcome: 'ok', refs: [{ ref: 'refs/heads/main', status: 'ok' }] },
+        {
+          projectId: 'proj_d1',
+          outcome: 'ok',
+          refs: [{ ref: 'refs/heads/main', status: 'ok' }],
+        },
         'A push updated its refs',
       );
       /* The flush-only probe names no ref, and is not logged as a push. */
@@ -504,7 +553,10 @@ describe('GitController sync telemetry', () => {
     );
 
     const { reply: stub } = replyStub();
-    const reply = { header: stub.header, raw: { once: vi.fn() } } as unknown as FastifyReply;
+    const reply = {
+      header: stub.header,
+      raw: { once: vi.fn() },
+    } as unknown as FastifyReply;
     await controller.receivePack('proj_d1.git', 'user-owner', push, reply);
 
     expect(recorded.syncOperations.add).toHaveBeenCalledExactlyOnceWith(1, {
@@ -662,22 +714,34 @@ describe('GitController sync telemetry', () => {
       ]);
     });
 
-    it('seeds every first-backup series at zero at boot, so the first refusal after a restart is an increase', () => {
+    it('seeds every first-backup series, and the retired, check-failed, unknown and other codes for every flag, at zero at boot', () => {
       const recorded = metrics();
       controllerWith({}, recorded).onModuleInit();
-      expect(recorded.syncHookRefusals.add).toHaveBeenCalledTimes(countedHookRefusalCodes.length * 3);
       expect(countedHookRefusalCodes).toHaveLength(22);
+      expect(unflaggedPagingRefusalCodes).toHaveLength(7);
+      expect(recorded.syncHookRefusals.add).toHaveBeenCalledTimes(22 * 3 + 7 * 2 * 3);
       expect(recorded.syncHookRefusals.add).toHaveBeenCalledWith(0, {
         'tau.sync.refusal.code': 'GIT_PUSH_FILE_TOO_LARGE',
         'tau.sync.first_backup': 'true',
         'tau.sync.client_rules': 'none',
       });
-      expect(
-        recorded.syncHookRefusals.add.mock.calls.every(
-          ([value, attributes]) =>
-            value === 0 && (attributes as Record<string, string>)['tau.sync.first_backup'] === 'true',
-        ),
-      ).toBe(true);
+      for (const firstBackup of ['false', 'unknown']) {
+        for (const code of ['GIT_PUSH_RECORD_UNREADABLE', 'GIT_PUSH_CHECK_FAILED', 'unknown', 'other']) {
+          expect(recorded.syncHookRefusals.add).toHaveBeenCalledWith(0, {
+            'tau.sync.refusal.code': code,
+            'tau.sync.first_backup': firstBackup,
+            'tau.sync.client_rules': 'older',
+          });
+        }
+      }
+      expect(recorded.syncHookRefusals.add).not.toHaveBeenCalledWith(
+        0,
+        expect.objectContaining({
+          'tau.sync.refusal.code': 'GIT_PUSH_FILE_TOO_LARGE',
+          'tau.sync.first_backup': 'false',
+        }),
+      );
+      expect(recorded.syncHookRefusals.add.mock.calls.every(([value]) => value === 0)).toBe(true);
     });
 
     /* The reported incident recurring after WP2a: a kept guard refuses `main` on a first backup. */
@@ -698,7 +762,10 @@ describe('GitController sync telemetry', () => {
           recorded,
         );
         const { reply: stub } = replyStub();
-        const reply = { header: stub.header, raw: { once: vi.fn() } } as unknown as FastifyReply;
+        const reply = {
+          header: stub.header,
+          raw: { once: vi.fn() },
+        } as unknown as FastifyReply;
         await controller.receivePack('proj_d1.git', 'user-owner', pushWith({ 'user-agent': 'git/2.55.0' }), reply);
 
         expect(recorded.syncHookRefusals.add).toHaveBeenCalledExactlyOnceWith(1, {
@@ -735,12 +802,18 @@ describe('GitController sync telemetry', () => {
       const controller = controllerWith(
         {
           authorize: async () => access as unknown as GitAccess,
-          receivePack: async () => ({ report: refusedReport('Tau: refused for a reason\n'), historyBefore: undefined }),
+          receivePack: async () => ({
+            report: refusedReport('Tau: refused for a reason\n'),
+            historyBefore: undefined,
+          }),
         },
         recorded,
       );
       const { reply: stub } = replyStub();
-      const reply = { header: stub.header, raw: { once: vi.fn() } } as unknown as FastifyReply;
+      const reply = {
+        header: stub.header,
+        raw: { once: vi.fn() },
+      } as unknown as FastifyReply;
       await controller.receivePack('proj_d1.git', 'user-owner', pushWith({ 'tau-client-rules': '1' }), reply);
       expect(recorded.syncHookRefusals.add).toHaveBeenCalledExactlyOnceWith(1, {
         'tau.sync.refusal.code': 'unknown',
@@ -767,7 +840,10 @@ describe('GitController sync telemetry', () => {
         recorded,
       );
       const { reply: stub } = replyStub();
-      const reply = { header: stub.header, raw: { once: vi.fn() } } as unknown as FastifyReply;
+      const reply = {
+        header: stub.header,
+        raw: { once: vi.fn() },
+      } as unknown as FastifyReply;
       await controller.receivePack('proj_d1.git', 'user-owner', push, reply);
       expect(recorded.syncHookRefusals.add).not.toHaveBeenCalled();
     });

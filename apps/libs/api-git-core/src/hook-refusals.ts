@@ -30,6 +30,18 @@ export const countedHookRefusalCodes = [
   otherHookRefusal,
 ] as const;
 
+/**
+ * The codes a backup rule pages on whatever the first-backup flag says: the retired authorship codes (a worker
+ * below WP2a, whose refusals carry `first_backup="unknown"`), `unknown`, `other`, and `GIT_PUSH_CHECK_FAILED`
+ * (`backup-check-repeat`). tau-api seeds them for every flag so `increase()` sees the first one after a restart.
+ */
+export const unflaggedPagingRefusalCodes = [
+  ...(Object.keys(retiredAuthorshipRefusals) as RetiredAuthorshipRefusal[]),
+  'GIT_PUSH_CHECK_FAILED',
+  unknownHookRefusal,
+  otherHookRefusal,
+] as const;
+
 export type CountedHookRefusalCode =
   | HookRefusalCode
   | RetiredAuthorshipRefusal
@@ -38,7 +50,10 @@ export type CountedHookRefusalCode =
   | typeof otherHookRefusal;
 
 /** One code a refused push carried, and how many refusals the hook filed under it. */
-export type HookRefusalCount = Readonly<{ code: CountedHookRefusalCode; count: number }>;
+export type HookRefusalCount = Readonly<{
+  code: CountedHookRefusalCode;
+  count: number;
+}>;
 
 /** A push the hook or git's receive refused. */
 export type HookRefusal = Readonly<{
@@ -177,5 +192,8 @@ export const readHookRefusal = (report: Uint8Array<ArrayBuffer>): HookRefusal | 
     }
   }
   const codes = [...counts].map(([code, count]) => Object.freeze({ code, count }));
-  return Object.freeze({ codes, terminal: codes.some(({ code }) => terminalCodes.has(code)) });
+  return Object.freeze({
+    codes,
+    terminal: codes.some(({ code }) => terminalCodes.has(code)),
+  });
 };

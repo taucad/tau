@@ -46,7 +46,11 @@ import type { LfsBatchResponse, LfsQuotaRefusal } from '#api/git/git-lfs.service
 import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filter.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { gitRetryAfterSeconds } from '@taucad/api-git-core/git-refusals';
-import { countedHookRefusalCodes, readHookRefusal } from '@taucad/api-git-core/hook-refusals';
+import {
+  countedHookRefusalCodes,
+  readHookRefusal,
+  unflaggedPagingRefusalCodes,
+} from '@taucad/api-git-core/hook-refusals';
 import type { HookRefusal } from '@taucad/api-git-core/hook-refusals';
 import type { ReceivePackReply, RefRemoval } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
@@ -96,7 +100,11 @@ export const loggedPushRefLimit = 20;
 const loggedPushTextLength = 160;
 
 /** One ref's answer in a push's report-status: `ok`, or `ng` with git's or the hook's reason. */
-export type ReceivePackRefResult = Readonly<{ ref: string; status: 'ok' | 'ng'; reason?: string }>;
+export type ReceivePackRefResult = Readonly<{
+  ref: string;
+  status: 'ok' | 'ng';
+  reason?: string;
+}>;
 
 /* Control bytes (side-band markers, NULs) never reach a log line. */
 const printable = (text: string): string =>
@@ -276,7 +284,9 @@ export class GitController implements OnModuleInit {
     private readonly lfs: GitLfsService,
     private readonly rateLimiter: PublicationRateLimiterService,
     @Optional() private readonly metrics: MetricsService = new MetricsService(),
-    @Optional() @Inject(gitExecutionKey) execution?: Pick<GitExecution, 'mode' | 'affinity'>,
+    @Optional()
+    @Inject(gitExecutionKey)
+    execution?: Pick<GitExecution, 'mode' | 'affinity'>,
   ) {
     this.#apiUrl = configService.get('TAU_API_URL', { infer: true }).replace(/\/+$/u, '');
     this.#execution = {
@@ -353,11 +363,22 @@ export class GitController implements OnModuleInit {
   ): Promise<StreamableFile> {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
-    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc', operation: 'fetch' });
+    await this.admitRequest(reply, {
+      userId,
+      viaDevice,
+      projectId,
+      family: 'rpc',
+      operation: 'fetch',
+    });
     const startedAt = performance.now();
     let output: Readable;
     try {
-      const access = await this.repositories.authorize({ projectId, userId, mode: 'read', viaDevice });
+      const access = await this.repositories.authorize({
+        projectId,
+        userId,
+        mode: 'read',
+        viaDevice,
+      });
       applyHeaders(reply, noCacheHeaders);
       output = await this.withRetryAfter(reply, async () =>
         this.repositories.uploadPack({
@@ -386,10 +407,14 @@ export class GitController implements OnModuleInit {
         this.recordSync('fetch', 'error', startedAt);
         return;
       }
-      this.metrics.syncPackBytes.record(bytes, { 'tau.sync.operation': 'fetch' });
+      this.metrics.syncPackBytes.record(bytes, {
+        'tau.sync.operation': 'fetch',
+      });
       this.recordSync('fetch', 'ok', startedAt);
     });
-    return new StreamableFile(counted, { type: 'application/x-git-upload-pack-result' });
+    return new StreamableFile(counted, {
+      type: 'application/x-git-upload-pack-result',
+    });
   }
 
   /**
@@ -410,12 +435,23 @@ export class GitController implements OnModuleInit {
   ): Promise<StreamableFile> {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
-    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc', operation: 'push' });
+    await this.admitRequest(reply, {
+      userId,
+      viaDevice,
+      projectId,
+      family: 'rpc',
+      operation: 'push',
+    });
     const startedAt = performance.now();
     let answer: ReceivePackReply;
     try {
       /* D21/EQ11: a cloud host's push is the owner's, via that device. */
-      const access = await this.repositories.authorize({ projectId, userId, mode: 'write', viaDevice });
+      const access = await this.repositories.authorize({
+        projectId,
+        userId,
+        mode: 'write',
+        viaDevice,
+      });
       applyHeaders(reply, noCacheHeaders);
       answer = await this.withRetryAfter(reply, async () =>
         this.repositories.receivePack({
@@ -449,7 +485,9 @@ export class GitController implements OnModuleInit {
         startedAt,
       });
     }
-    return new StreamableFile(Buffer.from(output), { type: 'application/x-git-receive-pack-result' });
+    return new StreamableFile(Buffer.from(output), {
+      type: 'application/x-git-receive-pack-result',
+    });
   }
 
   /**
@@ -469,7 +507,13 @@ export class GitController implements OnModuleInit {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
     const operation: SyncOperation = body.operation === 'upload' ? 'lfs_upload' : 'lfs_download';
-    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'lfs', operation });
+    await this.admitRequest(reply, {
+      userId,
+      viaDevice,
+      projectId,
+      family: 'lfs',
+      operation,
+    });
     const startedAt = performance.now();
     let outcome: Awaited<ReturnType<GitLfsService['batch']>>;
     try {
@@ -507,8 +551,18 @@ export class GitController implements OnModuleInit {
   ): Promise<void> {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
-    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'lfs' });
-    const access = await this.repositories.authorize({ projectId, userId, mode: 'finalize', viaDevice });
+    await this.admitRequest(reply, {
+      userId,
+      viaDevice,
+      projectId,
+      family: 'lfs',
+    });
+    const access = await this.repositories.authorize({
+      projectId,
+      userId,
+      mode: 'finalize',
+      viaDevice,
+    });
     const stored = await this.lfs.verify({
       access,
       oid: body.oid,
@@ -550,27 +604,46 @@ export class GitController implements OnModuleInit {
   ): Promise<RefRemoval> {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
-    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc' });
+    await this.admitRequest(reply, {
+      userId,
+      viaDevice,
+      projectId,
+      family: 'rpc',
+    });
     if (ref === undefined || ref === '') {
-      throw new BadRequestException({ code: 'GIT_REF_NOT_REMOVABLE', message: 'Name the ref to remove.' });
+      throw new BadRequestException({
+        code: 'GIT_REF_NOT_REMOVABLE',
+        message: 'Name the ref to remove.',
+      });
     }
     /* A cloud host authorizes as `write` (I10), which `removeRef` refuses as
        not the owner — behind the transport's allowlist, which refuses it first. */
-    const access = await this.repositories.authorize({ projectId, userId, mode: 'finalize', viaDevice });
+    const access = await this.repositories.authorize({
+      projectId,
+      userId,
+      mode: 'finalize',
+      viaDevice,
+    });
     return this.withRetryAfter(reply, async () => this.repositories.removeRef({ access, ref, committedBy: userId }));
   }
 
   /**
-   * Starts every series `backup-first-refused` reads at zero (cloud backup admission D12, R3-1): every hook code,
-   * `unknown` and `other` on a first backup, for each client-rules value. `increase()` cannot see a counter's
-   * first sample, so without this the first refused first backup after a restart would not page.
+   * Starts every series a backup rule reads at zero (cloud backup admission D12, R3-1): every hook code,
+   * `unknown` and `other` on a first backup, and the retired codes, check-failed, `unknown` and `other` on any other push
+   * (`first_backup` `false` or `unknown`, which a worker below WP2a reports), each for every client-rules value.
+   * `increase()` cannot see a counter's first sample, so without this the first such refusal after a restart
+   * would not page.
    */
   public onModuleInit(): void {
-    for (const code of countedHookRefusalCodes) {
+    const seeds: ReadonlyArray<readonly [HookRefusalCode, FirstBackup]> = [
+      ...countedHookRefusalCodes.map((code) => [code, 'true'] as const),
+      ...unflaggedPagingRefusalCodes.flatMap((code) => [[code, 'false'] as const, [code, 'unknown'] as const]),
+    ];
+    for (const [code, firstBackup] of seeds) {
       for (const rules of ['current', 'older', 'none'] as const) {
         this.metrics.syncHookRefusals.add(0, {
           'tau.sync.refusal.code': code,
-          'tau.sync.first_backup': 'true',
+          'tau.sync.first_backup': firstBackup,
           'tau.sync.client_rules': rules,
         } satisfies SyncHookRefusalAttributes);
       }
@@ -606,14 +679,23 @@ export class GitController implements OnModuleInit {
     const caller = args.viaDevice === undefined ? args.userId : `device:${args.viaDevice}`;
     for (const bucket of [
       { key: `git:user:${caller}`, limit: gitRequestsPerUserPerWindow },
-      { key: `git:${args.family}:${caller}:${args.projectId}`, limit: gitRequestsPerWindow[args.family] },
+      {
+        key: `git:${args.family}:${caller}:${args.projectId}`,
+        limit: gitRequestsPerWindow[args.family],
+      },
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- the account-wide budget first, then this project's
-      const budget = await this.rateLimiter.consumeWindowBudget({ ...bucket, windowSeconds: gitRequestWindowSeconds });
+      const budget = await this.rateLimiter.consumeWindowBudget({
+        ...bucket,
+        windowSeconds: gitRequestWindowSeconds,
+      });
       if (!budget.allowed) {
         void reply.header('retry-after', String(budget.retryAfterSeconds));
         const refusal = new HttpException(
-          { code: 'GIT_RATE_LIMITED', message: 'Too many requests; retry shortly.' },
+          {
+            code: 'GIT_RATE_LIMITED',
+            message: 'Too many requests; retry shortly.',
+          },
           HttpStatus.TOO_MANY_REQUESTS,
         );
         if (args.operation !== undefined) {
@@ -678,7 +760,7 @@ export class GitController implements OnModuleInit {
   /**
    * A push the hook or git's receive refused (cloud backup admission D12): one `tau.sync.hook_refusals`
    * increment per distinct code, and one `A push was refused` line naming the codes, never a sentence, ref name,
-   * path or commit id. `backup-first-refused`'s Loki twin and `backup-terminal-loop` read the line.
+   * path or commit id. `backup-first-logs`, `backup-retired-logs` and `backup-terminal-loop` read the line.
    */
   private recordHookRefusal(
     refusal: HookRefusal,
@@ -717,7 +799,10 @@ export class GitController implements OnModuleInit {
 
   /** One sync request's count and latency, recorded once where its answer is decided; the latency says where git ran. */
   private recordSync(operation: SyncOperation, outcome: SyncOutcome, startedAt: number): void {
-    const attributes = { 'tau.sync.operation': operation, outcome } satisfies SyncOperationAttributes;
+    const attributes = {
+      'tau.sync.operation': operation,
+      outcome,
+    } satisfies SyncOperationAttributes;
     this.metrics.syncOperations.add(1, attributes);
     this.metrics.syncOperationDuration.record((performance.now() - startedAt) / 1000, {
       ...attributes,
@@ -735,7 +820,10 @@ export class GitController implements OnModuleInit {
   private recordRefusal(operation: SyncOperation, error: unknown): void {
     const refusal = syncRefusalOf(error);
     if (refusal !== undefined) {
-      this.metrics.syncRefusals.add(1, { 'tau.sync.operation': operation, ...refusal } satisfies SyncRefusalAttributes);
+      this.metrics.syncRefusals.add(1, {
+        'tau.sync.operation': operation,
+        ...refusal,
+      } satisfies SyncRefusalAttributes);
     }
   }
 
@@ -758,7 +846,9 @@ export class GitController implements OnModuleInit {
         void reply.header('retry-after', String(gitRetryAfterSeconds));
       } else if (error instanceof HttpException) {
         /* The daily hydrate budget's 429 names its own wait in the body. */
-        const { retryAfterSeconds } = error.getResponse() as { retryAfterSeconds?: unknown };
+        const { retryAfterSeconds } = error.getResponse() as {
+          retryAfterSeconds?: unknown;
+        };
         if (typeof retryAfterSeconds === 'number') {
           void reply.header('retry-after', String(retryAfterSeconds));
         }

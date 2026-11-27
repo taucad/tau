@@ -1,5 +1,5 @@
 import { Heading } from '@taucad/ui/components/heading';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { MetaFunction } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
@@ -14,6 +14,7 @@ import type { Handle } from '#types/matches.types.js';
 import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { desktopContinuationPath, readDesktopAuthorization } from '#lib/desktop-oauth.js';
 import type { ShellAuthHandoff } from '#providers/auth-provider.js';
 import { authLocalization, callDesktopShell, useShellAuthHandoff } from '#providers/auth-provider.js';
 import { Button } from '@taucad/ui/components/button';
@@ -101,15 +102,42 @@ export default function AuthPage(): React.JSX.Element {
   const { data: session, isSuccess, isFetching, isError, refetch } = useSession(authClient);
   const [hasWaitExpired, setHasWaitExpired] = useState(false);
   const [shouldShowForm, setShouldShowForm] = useState(false);
-  const [searchParameters] = useSearchParams();
+  const [searchParameters, setSearchParameters] = useSearchParams();
+  const search = searchParameters.toString();
   const navigate = useNavigate();
+  /* Tau Desktop's OAuth sign-in (DSI-3): the provider sends the browser here with a signed request when no one is
+     signed in, or when "Use a different account" asked for `prompt=login`. The form shows even over a session, and
+     every sign-in (password, an emailed link, a provider round trip) returns through `redirectTo` to the consent page,
+     which asks the provider again with the same signed request. */
+  const desktopAuthorization = useMemo(() => readDesktopAuthorization(search), [search]);
+  const desktopContinuation =
+    desktopAuthorization === undefined ? undefined : desktopContinuationPath(desktopAuthorization);
+  useEffect(() => {
+    if (desktopContinuation !== undefined && searchParameters.get('redirectTo') !== desktopContinuation) {
+      setSearchParameters(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.set('redirectTo', desktopContinuation);
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [desktopContinuation, searchParameters, setSearchParameters]);
   const requestedDestination = sanitizeVerifyEmailRedirectTo(searchParameters.get('redirectTo') ?? undefined);
   const destinationPath = requestedDestination.split(/[?#]/u)[0]?.replace(/\/+$/u, '');
   const redirectTo =
     destinationPath === '/auth/sign-in' || destinationPath === '/auth/sign-up' ? '/' : requestedDestination;
   const isSignInPage =
     shellHandoff === undefined ? segment === 'sign-in' || segment === 'sign-up' : shellHandoff.action === 'signIn';
-  const isSignedIn = isSignInPage && Boolean(session);
+  /* A desktop request asking for `login` wants a fresh sign-in: a session older than the request is not one. */
+  const isStaleForDesktop =
+    desktopAuthorization?.prompts.includes('login') === true &&
+    session !== undefined &&
+    session !== null &&
+    (desktopAuthorization.issuedAt === undefined ||
+      new Date(session.session.createdAt).getTime() < desktopAuthorization.issuedAt);
+  const isSignedIn = isSignInPage && Boolean(session) && !isStaleForDesktop;
   useEffect(() => {
     // Preserve explicit app intent before OAuth leaves this origin or a magic
     // link finishes. An older website choice must not intercept its callback.
@@ -126,10 +154,10 @@ export default function AuthPage(): React.JSX.Element {
     }
   }, [desktopTarget, isSignedIn, navigate, redirectTo]);
   useEffect(() => {
-    if (isSuccess && !isFetching && !session) {
+    if (isSuccess && !isFetching && (!session || isStaleForDesktop)) {
       setShouldShowForm(true);
     }
-  }, [isSuccess, isFetching, session]);
+  }, [isSuccess, isFetching, session, isStaleForDesktop]);
   useEffect(() => {
     if (!isSignInPage || shouldShowForm || hasWaitExpired || shellHandoff !== undefined) {
       return;

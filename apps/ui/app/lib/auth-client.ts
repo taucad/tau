@@ -24,6 +24,8 @@ export const authClient = createAuthClient({
   // every real request to runtimeAuthFetch where the injected host is resolved.
   baseURL: 'https://window-env.invalid/v1/auth',
   fetchOptions: { customFetchImpl: runtimeAuthFetch },
+  // No `oauthProviderClient`: a Tau Desktop sign-in continues through the sign-in page's `redirectTo` (DSI-3), and the
+  // plugin would add the page's query to every non-GET call and its modules to the critical path.
   plugins: [magicLinkClient(), apiKeyClient(), deviceAuthorizationClient()],
   emailAndPassword: {
     enabled: true,

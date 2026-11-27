@@ -5,6 +5,8 @@ import { SettingsGroup, SettingsItem } from '@taucad/settings-ui/components/sett
 import { useAuth } from '@better-auth-ui/react';
 import { cn } from '@taucad/ui/utils/cn';
 import { ActiveSessions } from '#components/auth/settings/security/active-sessions.js';
+import { DesktopSignIns } from '#components/auth/settings/security/desktop-sign-ins.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { ChangePassword } from '@taucad/settings-ui/components/auth/settings/security/change-password';
 import { LinkedAccounts } from '@taucad/settings-ui/components/auth/settings/security/linked-accounts';
 import { GithubPermissions } from '#components/auth/settings/security/github-permissions.js';
@@ -44,6 +46,12 @@ export function SecuritySettings({ className }: SecuritySettingsProps): React.JS
       <SettingsItem settingId='active-sessions'>
         <ActiveSessions />
       </SettingsItem>
+      {/* Desktop sign-ins are listed and ended on the web only (rulings D1=A, D5=B). */}
+      {isDesktopTarget() ? null : (
+        <SettingsItem settingId='desktop-sign-ins'>
+          <DesktopSignIns />
+        </SettingsItem>
+      )}
       {plugins.flatMap(
         (plugin) => plugin.securityCards?.map((Card, index) => <Card key={`${plugin.id}-${index.toString()}`} />) ?? [],
       )}

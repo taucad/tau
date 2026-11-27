@@ -87,6 +87,9 @@
 \* FW3 re-review (2026-11-27): the probe's install guard asks the index whether the root's names hold the directory
 \* (`hasName`); a same-root surviving copy is listed, one in another root or found by the sweep is not. Reads only;
 \* every action and verdict is unchanged.
+\* Staging path (2026-11-27): `project-directories.ts` names the storage root's import staging `.tau/staging/` instead
+\* of `.tau-staging/` (taucad/tau#2909), in a comment only. Discovery still skips every dot-named root entry; no action
+\* or verdict changes.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

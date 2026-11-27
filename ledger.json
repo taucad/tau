@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T17:03:40.332Z",
+  "updatedAt": "2026-11-27T17:05:39.312Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -6685,6 +6685,19 @@
       "rejected": 0
     },
     {
+      "run": 46038042686,
+      "attempt": 1,
+      "event": "push",
+      "lineage": "push:main",
+      "sha": "77ce475d78282aa5d980d54338a83dc95e50d7cf",
+      "at": "2026-11-27T17:03:48Z",
+      "conclusion": "success",
+      "artifacts": 1,
+      "counted": 1,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
       "run": 46038049729,
       "attempt": 1,
       "event": "merge_group",
@@ -6720,6 +6733,19 @@
       "conclusion": "cancelled",
       "artifacts": 2,
       "counted": 162,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 46038219789,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2991",
+      "sha": "de54284d237e7e08303cb62283b6f2f6849c90c9",
+      "at": "2026-11-27T17:03:49Z",
+      "conclusion": "cancelled",
+      "artifacts": 0,
+      "counted": 0,
       "replayed": 0,
       "rejected": 0
     }
@@ -7067,14 +7093,14 @@
       }
     },
     "apps-runtime-e2e:vitest": {
-      "executions": 110,
-      "tests": 110,
+      "executions": 111,
+      "tests": 111,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:40:19Z",
-      "lastSeen": "2026-11-27T16:40:58Z",
+      "lastSeen": "2026-11-27T17:03:48Z",
       "targets": {
-        "vitest linux-x64 project=suites": 77
+        "vitest linux-x64 project=suites": 78
       }
     },
     "archive-core:test": {

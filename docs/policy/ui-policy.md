@@ -173,7 +173,7 @@ A piece of UI that appears on more than one surface has one implementation, and 
 
 A dialog or sheet closes from one control: a ghost icon button (`variant='ghost'`, `size='icon-sm'`) in the top inline-end corner, with the `X` glyph, `text-muted-foreground`, and the screen-reader name "Close". It is the same control, with the same hover and focus treatment, as "Close settings". `DialogContent` and `SheetContent` render it; never restyle it, reposition it or add a second bare `X`.
 
-This rule covers a centred dialog at every width and a side sheet from `md` up. Under `md`, a bottom drawer and a surface that fills the screen take the header of [Mobile UI Policy](mobile-ui-policy.md) Rule 6 instead: the control that leaves the surface is a 44 px chrome circle at the inline start of the header, rendered by `DrawerHeader` and `DrawerAction`.
+This rule covers a centred dialog at every width and a side sheet from `md` up. Under `md`, a bottom drawer and a surface that fills the screen take the header of [Mobile UI Policy](mobile-ui-policy.md) Rule 6 instead: the control that leaves the surface is a 44 px chrome circle at the inline start of the header, in the start slot of `DrawerBar` (a drawer) or `HeaderBar` (a full-screen surface).
 
 **Why**: the old close mark was a bare, half-opaque glyph with no hover surface and a 16px target; it read as decoration and was hard to hit.
 

@@ -93,9 +93,11 @@ measurements remain explicit.
   not recover information hidden from touch users.
   The composer is one row on every device: one + for attachments and
   context, and one agent control beside Send that opens the model, its reasoning
-  level and the agent's own settings. Its controls are ghost from `md` up and
-  filled, outline-free capsules at phone width, where a control's edge has to
-  show without hover ([Mobile UI Policy](mobile-ui-policy.md) Rules 2 and 4).
+  level and the agent's own settings. Its controls are ghost under a fine
+  pointer and filled and outline-free under a coarse pointer at any width,
+  where a control's edge has to show without hover; their drawn size and shape
+  follow the viewport, so a touch tablet at desktop width keeps the desktop
+  layout ([Mobile UI Policy](mobile-ui-policy.md) Rules 2, 4 and 10).
   As the row narrows, measured labels give
   way to their glyphs; the reasoning level stays. Readiness may be summarized in
   its accessible tooltip, never the sole approval or recovery surface. Verify
@@ -326,7 +328,7 @@ Verify both desktop and browser behavior, not a screenshot from a stale build.
 
 ## Accessibility
 
-- **WCAG 2.2 Level AA is the normative floor** for all web surfaces. Two of its newest criteria bite hardest on a CAD app and get explicit treatment: **2.5.7 Dragging Movements** — every drag interaction (viewport orbit, gizmo transforms, sliders, panel resize) has a non-drag path (typed input, keyboard nudge, menu command); **2.5.8 Target Size** — interactive targets are ≥24×24 CSS px or spaced per the exception; the icon-button `xs` size is the sanctioned minimum, nothing smaller ships. Under a coarse pointer a target's hit area is 44×44, grown by one shared utility and never per component ([Mobile UI Policy](mobile-ui-policy.md) Rule 1).
+- **WCAG 2.2 Level AA is the normative floor** for all web surfaces. Two of its newest criteria bite hardest on a CAD app and get explicit treatment: **2.5.7 Dragging Movements** — every drag interaction (viewport orbit, gizmo transforms, sliders, panel resize) has a non-drag path (typed input, keyboard nudge, menu command); **2.5.8 Target Size** — interactive targets are ≥24×24 CSS px or spaced per the exception; the icon-button `xs` size is the sanctioned minimum, nothing smaller ships. Under a coarse pointer a target's hit area grows to 44×44, or to the room its bar declares, through one shared utility and never per component ([Mobile UI Policy](mobile-ui-policy.md) Rule 1).
 - **The component library is the choke point.** Accessibility work lands in `packages/ui`, so `apps/ui`, `apps/docs`, and external consumers inherit fixes from one place. Every `@taucad/ui` component names the APG pattern it implements (or states that none exists and documents its own keyboard/AT contract); the keyboard contract is part of the component's public API. Radix supplies the base semantics — prefer native HTML semantics first, and never add ARIA that the primitive already provides; incorrect ARIA is worse than none.
 - **Enforcement**: role-based selectors are mandatory in tests (`getByRole`/`getByLabel`; class and testid selectors are forbidden — `docs/policy/accessibility-policy.md`), which makes a11y a side effect of testability. `packages/ui` component tests include axe-core smoke checks (jsdom). Automated checks catch only a subset: new interactive patterns get a manual keyboard + screen-reader pass before they ship.
 - Codified ARIA per `docs/policy/accessibility-policy.md`: loading = `role="status"` + `aria-busy`, errors = `role="alert"`, canvas/preview = `role="img"` + label, toggles carry `aria-expanded`/`aria-pressed`, dialogs are labelled. Focus is always visible, and its geometry has exactly one owner: the `focus-outline` utility in `@taucad/ui`'s `tokens.css`, composed under whatever variant a control needs (`focus-visible:focus-outline`, `has-[…:focus-visible]:focus-outline`, `focus-within:focus-outline`). It renders a 2px inset outline in the `ring` token; `focus-outline-outside` is the only exception, for controls too thin to host an inset outline. Never restate the geometry in a component, and never use a box-shadow ring. Focus is never fully obscured by sticky chrome (2.4.11).
@@ -355,7 +357,7 @@ Dense, dark-first, keyboard-first. Panels and floating surfaces come from the sh
 
 Route-level pages compose from one recipe per part — frame, title row, view controls, collection grid and pagination, cards and their states, busy and collection states, view URL state and the first-viewport budget — owned with its gates by `docs/policy/page-composition-policy.md`.
 
-Phone-width chrome and touch (the one touch-target mechanism, the drawn-size ladder, the radius language, the surface-to-style mapping, drawer and header geometry) and the open-trigger, shortcut-hint and sidebar rules that hold at every width are owned with their gates by `docs/policy/mobile-ui-policy.md`.
+Phone-width chrome and touch (the one touch-target mechanism, the drawn-size ladder, the radius language, the surface-to-style mapping, drawer and header geometry, and which of these follow the pointer and which the viewport) and the open-trigger, shortcut-hint and sidebar rules that hold at every width are owned with their gates by `docs/policy/mobile-ui-policy.md`.
 
 Workbench empty states use the shared clean panel presentation, not decorative
 dashed boxes; intentional dropzones retain their functional boundaries. Settings

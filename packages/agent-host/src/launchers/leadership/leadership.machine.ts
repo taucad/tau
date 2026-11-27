@@ -604,18 +604,18 @@ const releaseRefusedTerm = (
     : { context: { ...context, refusedClaim: true, releaseRefused: true } };
 };
 
-/** HA4 (review I1): a durable answer here proves the writer open, so a refused term's retry and bound are off. */
-const writerProven = (
-  context: LeadingContext,
-  answer: CommandAnswer,
-  enq: { cancel: (id: string) => void },
-): LeadingContext => {
-  if (!context.refusedClaim || answer.status === 'refused' || answer.effect !== 'durable') {
-    return context;
-  }
+/** HA4 (review I1): a durable answer here proves a refused term's writer open. Pure: a branch decides before it enqueues. */
+const provesWriter = (context: LeadingContext, answer: CommandAnswer): boolean =>
+  context.refusedClaim && answer.status !== 'refused' && answer.effect === 'durable';
+
+/** The context once a proving answer ended the refusal; unchanged otherwise. */
+const proven = (context: LeadingContext, answer: CommandAnswer): LeadingContext =>
+  provesWriter(context, answer) ? { ...context, refusedClaim: false, releaseRefused: false } : context;
+
+/** Cancel a refused term's retry and bound, once a branch that ends the refusal is taken. */
+const cancelClaimTimers = (context: LeadingContext, enq: { cancel: (id: string) => void }): void => {
   enq.cancel(claimRetryId(context.lock.corr));
   enq.cancel(claimRefusalId(context.lock.corr));
-  return { ...context, refusedClaim: false, releaseRefused: false };
 };
 
 /** A claim report or retry for the term this worker leads now: its grant and its epoch (HA4). */
@@ -1035,25 +1035,40 @@ export const leadershipMachine = machineDefinition.createMachine({
         ),
         /* The answer (`Answer`), and when it was the last thing in flight while M1 is quiescent, the release after it
          * (`Release`, which the spec enables once nothing is pending). A stale report stays under `Answer`. */
+        /* Every branch decides on its context alone and enqueues only once taken: xstate takes a branch that enqueued
+         * anything, even one that then returns `undefined` (review round 2). */
         executed: branches(
           /* HA4 (review I1): the last answer a refused term waited on releases it, unless it proved the writer open. */
           refines('ReleaseRefused', ({ context, event, actions }, enq) => {
-            const proven = writerProven(context, event.answer, enq);
-            const answered = proven.releaseRefused ? answerRunning(proven, event, enq, actions) : undefined;
-            return answered?.running.length === 0 ? releaseNow(answered, enq, actions) : undefined;
+            const rest = context.running.filter((entry) => entry.corr !== event.corr);
+            if (
+              !context.releaseRefused ||
+              provesWriter(context, event.answer) ||
+              rest.length === context.running.length ||
+              rest.length > 0
+            ) {
+              return undefined;
+            }
+            return releaseNow(answerRunning(context, event, enq, actions) ?? context, enq, actions);
           }),
           refines('Answer', ({ context: held, event, actions }, enq) => {
-            const context = writerProven(held, event.answer, enq);
+            const context = proven(held, event.answer);
             const running = context.running.filter((entry) => entry.corr !== event.corr);
             if (running.length < context.running.length && releasable({ ...context, running })) {
               return undefined;
             }
+            if (context !== held) {
+              cancelClaimTimers(held, enq);
+            }
             const answered = answerRunning(context, event, enq, actions);
             return answered === undefined ? { context } : { context: answered };
           }),
-          refines('Release', ({ context, event, actions }, enq) => {
-            const proven = writerProven(context, event.answer, enq);
-            return releaseIfQuiet(answerRunning(proven, event, enq, actions) ?? proven, enq, actions);
+          refines('Release', ({ context: held, event, actions }, enq) => {
+            const context = proven(held, event.answer);
+            if (context !== held) {
+              cancelClaimTimers(held, enq);
+            }
+            return releaseIfQuiet(answerRunning(context, event, enq, actions) ?? context, enq, actions);
           }),
         ),
         /* RH-R9: a fenced append rereads while the lock is held. */

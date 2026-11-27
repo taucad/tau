@@ -273,6 +273,7 @@ const renameRetryingTransientLocks = async (
   }
 };
 
+/* Whether a process with this pid exists: `EPERM` means it does, under another user. */
 /**
  * Whether files on this process's disk keep a Git executable bit. NTFS has
  * none: Node reports no execute bit for a Windows file and `chmod` touches
@@ -284,7 +285,6 @@ const renameRetryingTransientLocks = async (
  */
 export const nodeDiskKeepsFileModes = (): boolean => process.platform !== 'win32';
 
-/* Whether a process with this pid exists: `EPERM` means it does, under another user. */
 const isProcessAlive = (pid: number): boolean => {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     return false;

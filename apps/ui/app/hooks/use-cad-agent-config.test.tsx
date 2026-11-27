@@ -373,7 +373,7 @@ describe('useCadAgentConfig', () => {
      * it off-desktop; an external agent's refusal is decided from its execution before this wait. */
     await expect(awaitAgentHostAvailability({ projectId: 'project-test', hostId: 'desktop' }, 10)).resolves.toEqual({
       status: 'unavailable',
-      reason: 'Timed out while looking for that agent host.',
+      reason: 'That computer didn’t answer in time.',
     });
   });
 
@@ -515,7 +515,7 @@ describe('useCadAgentConfig', () => {
 
     expect(settled).toEqual({
       status: 'unavailable',
-      reason: 'Timed out while checking whether this project can run the agent in your browser.',
+      reason: 'Tau couldn’t get this project ready to run turns in your browser in time.',
     });
   });
 

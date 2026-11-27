@@ -10,7 +10,8 @@
  * reached"). "Git host" stays the one product phrase that keeps the word (revisions policy Rule 1).
  *
  * Scoped in `.oxlintrc.json` to the chat's recovery surfaces. Only authored copy is checked: string and template
- * literals and JSX text. Identifiers, object keys, import paths and type positions are code, not copy.
+ * literals and JSX text. Identifiers, object keys, import paths, type positions, comparisons, switch cases and
+ * strings with no space are code, not copy.
  */
 const BANNED_PATTERNS = [
   /\b(?<!git )hosts?\b/iu,
@@ -31,13 +32,18 @@ const bannedPhrase = (text) => {
   return undefined;
 };
 
-/** Literals that are code positions rather than copy: import sources, object keys and TS literal types. */
+/**
+ * Literals that are code positions rather than copy: import sources, object keys, TS literal types, comparisons and
+ * switch cases (`owner === 'host'`, `case 'host':`).
+ */
 const isCodePosition = (node) => {
   const { parent } = node;
   if (parent === undefined || parent === null) {
     return false;
   }
   if (
+    parent.type === 'BinaryExpression' ||
+    parent.type === 'SwitchCase' ||
     parent.type === 'ImportDeclaration' ||
     parent.type === 'ExportNamedDeclaration' ||
     parent.type === 'ExportAllDeclaration' ||
@@ -74,7 +80,8 @@ export const noSystemicChatCopyRule = {
     };
     return {
       Literal(node) {
-        if (typeof node.value === 'string' && !isCodePosition(node)) {
+        /* A string with no space is a key, a path or an id (`'tau-host'`, `'/.well-known/tau-host'`), not a sentence. */
+        if (typeof node.value === 'string' && /\s/u.test(node.value) && !isCodePosition(node)) {
           check(node, node.value);
         }
       },

@@ -671,8 +671,8 @@ export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<b
  */
 export const heldPlacementReason = (hostId: TauAgentHostId): string =>
   hostId.startsWith(loopbackHostIdPrefix)
-    ? 'This chat runs on a Tau host this tab has not been handed, so Tau runs here. Run `tau open --desktop` to hand it over.'
-    : 'This chat runs on the Tau host that served its page, which this page cannot reach, so Tau runs here. Open the chat from that host to run it there.';
+    ? 'This chat runs in `tau serve`, which this tab hasn’t been handed, so Tau runs here. Run `tau open --desktop` to hand it over.'
+    : 'This chat runs on the computer that served its page, which this page can’t reach, so Tau runs here. Open the chat from that computer to run it there.';
 
 /**
  * Why one execution cannot be placed on this device, or `undefined` when it can.
@@ -708,8 +708,8 @@ export const unplaceableExecutionReason = (execution: CadAgentExecution): string
     return `${name} runs in Tau Desktop. Open this chat there, or choose Tau to continue here.`;
   }
   return hostId === 'origin'
-    ? `${name} runs on the Tau host that served this chat's page. Open this chat from that host, or choose Tau to continue here.`
-    : `${name} runs on a Tau host this tab has not been handed. Run \`tau open --desktop\` to hand it over, or choose Tau to continue here.`;
+    ? `${name} runs on the computer that served this chat’s page. Open this chat from that computer, or choose Tau to continue here.`
+    : `${name} runs in \`tau serve\`, which this tab hasn’t been handed. Run \`tau open --desktop\` to hand it over, or choose Tau to continue here.`;
 };
 
 const loopbackTarget = (
@@ -988,7 +988,7 @@ export const desktopWorkspaceRoot = async (projectId: string): Promise<string> =
     throw new AgentHostPlacementError(
       'DESKTOP_ROOT_NOT_GRANTED',
       'in-process',
-      'This project is not stored on disk, so the desktop agent host has no folder to work in.',
+      'This project isn’t stored on disk, so Tau Desktop has no folder to work in.',
     );
   }
   return `${config.path ?? nodeHomeRoot()}/${config.providerBasePath}`;
@@ -1021,10 +1021,10 @@ const awaitSocketOpen = async (socket: WebSocket, openTimeout = socketOpenTimeou
       settle();
     };
     const onError = (): void => {
-      settle(new Error('The connection to the agent host was refused.'));
+      settle(new Error('Tau couldn’t reach that computer.'));
     };
     const deadline = globalThis.setTimeout(() => {
-      settle(new Error('The agent host did not answer in time.'));
+      settle(new Error('That computer didn’t answer in time.'));
     }, openTimeout);
     socket.addEventListener('open', onOpen, { once: true });
     socket.addEventListener('error', onError, { once: true });
@@ -1062,7 +1062,7 @@ const desktopAgentPort = async (options: OpenAgentHostChannelOptions): Promise<M
     throw new AgentHostPlacementError(
       'DESKTOP_ROOT_NOT_GRANTED',
       'in-process',
-      'The desktop agent host is only available inside the Tau desktop app, on a project stored on disk.',
+      'Tau Desktop runs turns only inside the desktop app, on a project stored on disk.',
     );
   }
   const refusal = async (): Promise<never> => {
@@ -1207,7 +1207,11 @@ export const openAgentHostChannel = async (
     if (rung === 1) {
       const origin = options.origin ?? pageOrigin();
       if (origin === undefined) {
-        throw new AgentHostPlacementError('ORIGIN_NOT_HOSTED', 1, 'This page was not served by an agent host.');
+        throw new AgentHostPlacementError(
+          'ORIGIN_NOT_HOSTED',
+          1,
+          'This page wasn’t opened from a computer running Tau.',
+        );
       }
       url = originAgentSocketUrl(origin);
     } else if (rung === 5) {
@@ -1238,7 +1242,7 @@ export const openAgentHostChannel = async (
       throw new AgentHostPlacementError(
         rung === 1 ? 'ORIGIN_NOT_HOSTED' : 'HOST_UNREACHABLE',
         rung,
-        error instanceof Error ? error.message : 'The agent host could not be reached.',
+        error instanceof Error ? error.message : 'Tau couldn’t reach that computer.',
       );
     }
     return port;

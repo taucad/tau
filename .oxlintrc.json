@@ -1998,7 +1998,7 @@
     {
       // Host attachment reliability HA-I8 (HA5): the chat's recovery copy names a physical residual and its action,
       // never "host", "attach" or a connection failure. The chat's error, residual, queue and sidebar surfaces and the
-      // page's code-to-card map. Tests are fixtures, not copy.
+      // page's code-to-card map, and the admission and placement reasons a refused turn words. Tests are fixtures.
       "files": [
         "apps/ui/app/routes/w.$workspace.$project/chat-error*.tsx",
         "apps/ui/app/routes/w.$workspace.$project/chat-residual.tsx",
@@ -2006,9 +2006,12 @@
         "apps/ui/app/components/chat/chat-message-queue.tsx",
         "apps/ui/app/hooks/use-sidebar-status.ts",
         "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx",
-        "apps/libs/chat-ui/src/utils/chat-error-card.ts"
+        "apps/libs/chat-ui/src/utils/chat-error-card.ts",
+        "apps/ui/app/chat-clients/_internal/use-turn-admission.ts",
+        "apps/ui/app/hooks/use-cad-agent-config.ts",
+        "apps/ui/app/lib/agent-host-placement.ts"
       ],
-      "excludeFiles": ["**/*.test.tsx"],
+      "excludeFiles": ["**/*.test.tsx", "**/*.test.ts"],
       "rules": {
         "tau-lint/no-systemic-chat-copy": "error"
       }

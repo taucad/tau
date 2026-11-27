@@ -26,7 +26,10 @@ describe('no-systemic-chat-copy', () => {
           code: "import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';",
         },
         { name: 'file attachments', code: "const label = 'Attached files';" },
-        { name: 'a file that could not attach is not a chat failure', code: "const ok = 'Add the file again';" },
+        { name: 'attach alone is a file action', code: "const label = 'Attach files to this message';" },
+        { name: 'a comparison', code: "if (reason === 'host went away') {}" },
+        { name: 'a switch case', code: "switch (reason) { case 'host went away': break; }" },
+        { name: 'a key with no space', code: "const key = fragment.get('tau-host');" },
         { name: 'a lost connection to a model', code: "const title = 'Connection lost';" },
         {
           name: 'JSX copy without the words',

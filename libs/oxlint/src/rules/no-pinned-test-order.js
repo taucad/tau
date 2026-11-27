@@ -108,9 +108,9 @@ export const noPinnedTestOrderRule = {
     hasSuggestions: true,
     messages: {
       pinnedSuite:
-        'Test order must not be pinned: `shuffle: false` hides an order dependence from the shuffled burn-in run. Give each test its own fixture or reset the shared state between tests, then remove the option (testing policy § 16.6, docs/policy/testing-policy.md).',
+        'Test order must not be pinned: `shuffle: false` hides an order dependence from the shuffled burn-in run. Give each test its own fixture or reset the shared state between tests, then remove the option (testing policy § 16.7, docs/policy/testing-policy.md).',
       pinnedConfig:
-        'Test order must not be pinned: `sequence.shuffle: false` pins every suite this config runs. Fix the order dependence at the fixture and remove the option (testing policy § 16.6, docs/policy/testing-policy.md).',
+        'Test order must not be pinned: `sequence.shuffle: false` pins every suite this config runs. Fix the order dependence at the fixture and remove the option (testing policy § 16.7, docs/policy/testing-policy.md).',
       remove: 'Remove `shuffle: false`. Only correct once the suite passes with `--sequence.shuffle`.',
     },
     schema: [],

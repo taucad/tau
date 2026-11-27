@@ -114,7 +114,7 @@ try {
 
 ## 4. Resource Cleanup
 
-Always clean up resources (timers, workers, ports, mocks) in `afterEach` or `finally` blocks. Never rely on the happy path reaching a manual cleanup call. Cleanup does not make sharing safe: no test depends on what another left behind (§ 16.6).
+Always clean up resources (timers, workers, ports, mocks) in `afterEach` or `finally` blocks. Never rely on the happy path reaching a manual cleanup call. Cleanup does not make sharing safe: no test depends on what another left behind (§ 16.7).
 
 ```typescript
 // INCORRECT: cleanup only runs if the test passes
@@ -386,7 +386,7 @@ A task is green when every gating test passed, at most on its second attempt; ev
 | Infrastructure steps       | Non-test steps (apt, downloads, browser install) retry up to three times with backoff, each retry recorded as a job-level event |
 | No other retry             | No task-level or job-level automatic re-run, no automatic re-queue, and no manual re-queue of an affected project               |
 
-A retried pass is debt, not a home: a test that keeps needing it is quarantined and fixed (§ 16.3). Changed and new test files run ten times with shuffled order on the pull request, capped at 5 minutes, and a failure there fails the pull request and is fixed under § 16.6. Do not knowingly land a new or changed test that flakes.
+A retried pass is debt, not a home: a test that keeps needing it is quarantined and fixed (§ 16.3). Changed and new test files run ten times with shuffled order on the pull request, capped at 5 minutes, and a failure there fails the pull request and is fixed under § 16.7. Do not knowingly land a new or changed test that flakes.
 
 ### 16.3 Quarantine
 
@@ -419,11 +419,37 @@ An agent reproduces, classifies and fixes the flake through the normal merge que
 | Test-only, reproduced, with the stress proof and a green `validate-flake-fix`                                     | Auto-merges through the queue   |
 | Touches product code, widens a tolerance (including a raised timeout) or loosens a matcher, or was not reproduced | Waits for the operator's review |
 
-A flake fix never skips or disables a test (`skip`, `todo`, `fails`, a false `runIf`), deletes a test or assertions, raises `retry` or any other retry count, pins test order (§ 16.6), adds a fixed sleep instead of awaiting the condition, or edits `quarantine.json`, the ledger, the reporter, the validators or a workflow. `validate-flake-fix` rejects each of these but the pin, which lint rejects. A fix may raise a test or hook timeout only when its pull request states the measured p99 that justifies the new value on a `Timeout-budget:` line; such a fix is classed tolerance, never auto-merges and needs the operator's review.
+A flake fix never skips or disables a test (`skip`, `todo`, `fails`, a false `runIf`), deletes a test or assertions, raises `retry` or any other retry count, pins test order (§ 16.7), adds a fixed sleep instead of awaiting the condition, or edits `quarantine.json`, the ledger, the reporter, the validators or a workflow. `validate-flake-fix` rejects each of these but the pin, which lint rejects. A fix may raise a test or hook timeout only when its pull request states the measured p99 that justifies the new value on a `Timeout-budget:` line; such a fix is classed tolerance, never auto-merges and needs the operator's review.
 
 Release is mechanical, by the ledger job: 100 consecutive executions without a failure after a linked fix lands, over at least two days, or 300 without a fix. A failure during verification returns the test to quarantine.
 
-### 16.6 Order Independence
+### 16.6 Shadow Rows
+
+A shadow row is an end-to-end suite on probation for the merge-queue gate. It runs and reports, but none of its tests gate. Probation and quarantine are one mechanism. Both run and report, and both leave on 100 straight passes. The rulings are Q1 and global review ruling 8 in the [CI decomposition blueprint](../research/ci-decomposition-blueprint.md#resolved--no-clear-alternative), and D5 and FQ-13 in the [CI flake quarantine blueprint](../research/ci-flake-quarantine-blueprint.md).
+
+| Rule               | Requirement                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Where it is listed | In the `dependsOn` of the project's `test:e2e:shadow` target. A suite is in `test:e2e:shadow` or in `test:e2e:queue`, never both                                                                                                                                                                                                                                         |
+| Where it runs      | One row per suite in the `e2e-shadow` lane of `ci.yml`. It runs in the merge queue, and on a push to `main` the queue did not prove, whenever its project (or its `metadata.lane`) is selected, and never on a pull request                                                                                                                                              |
+| Never gates        | The required gate does not need the lane, `Fail fast` does not watch it, and `continue-on-error` keeps a failure out of the run's conclusion. Its retried passes do not count toward the run's § 16.2 budget                                                                                                                                                             |
+| Counted            | The flake ledger counts each row's consecutive passing runs (`shadowRows` in `ledger.json`) from the same outcome rows as every test. Any failure of the row resets the count to 0, including a failure the entry under test caused, because that failure lands on `main` with the entry. A pass on the recorded retry counts as a pass and is reported beside the count |
+| Never quarantined  | Flake events from a shadow row never count toward the § 16.3 entry rule, so a shadow row is never quarantined                                                                                                                                                                                                                                                            |
+| Promotion          | At 100 consecutive passing runs, `shadow-row-promotion.yml` opens a pull request that moves the suite to `test:e2e:queue`. The pull request is never auto-merged, because promotion changes the gate                                                                                                                                                                     |
+| Red tests          | A red test is never skipped, disabled or quarantined to keep its row green. Its file is held out of the row, keeps running where it ran before, and gets an owner issue. The target's `metadata.description` names every held-out file with that issue                                                                                                                   |
+
+The held-out files now:
+
+| Project                                 | Held out                                                      | Owner issues |
+| --------------------------------------- | ------------------------------------------------------------- | ------------ |
+| `desktop-e2e`                           | desktop-adaptive-mode                                         | #2891        |
+| `desktop-e2e`                           | desktop-onboarding-offline, two-client                        | #2285        |
+| `desktop-e2e`                           | desktop-share-link-copy, sync-refusals, desktop-print-dry-run | #2754        |
+| `ui-e2e` (`test:e2e:browser-host-chat`) | chat-isolated-workspace                                       | #2283        |
+| `ui-e2e` (`test:e2e:browser-host-chat`) | browser-agent-host                                            | #2890, #2297 |
+
+A held-out file joins its row when its issue closes. The project's `metadata.description` is the source of truth, and this table follows it.
+
+### 16.7 Order Independence
 
 Make every test pass alone and in any order. Never let a test depend on state another test created, changed or left behind.
 
@@ -495,4 +521,4 @@ Before merging a test:
 - [ ] Test names follow `should <verb> <outcome>` pattern
 - [ ] Structured data assertions check shape, not just existence
 - [ ] A flaky test is fixed at its cause, not skipped, slept on or given more retries, and any longer timeout carries a measured `Timeout-budget:`
-- [ ] The test passes alone and in any order: shared `beforeAll` fixtures are only read, and no order is pinned (§ 16.6)
+- [ ] The test passes alone and in any order: shared `beforeAll` fixtures are only read, and no order is pinned (§ 16.7)

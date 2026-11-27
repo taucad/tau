@@ -1433,8 +1433,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         }
         if (event.type === 'revision.unavailable') {
           /* Not one turn's failure but this machine's: without `git` and
-           * `git-lfs` the app records no history at all (OQ-B8). */
-          log('agent-host.revisions-unavailable', { workspaceRoot, reason: event.reason, missing: event.missing });
+           * `git-lfs` (OQ-B8), or with a git that has not started for five
+           * minutes (I8), the app records no history at all. The page reads the
+           * engine case from the Sync facet, not from this line. */
+          log('agent-host.revisions-unavailable', {
+            workspaceRoot,
+            cause: event.cause,
+            reason: event.reason,
+            missing: event.missing,
+          });
           onRevisionsUnavailable?.(workspaceRoot, event);
           return;
         }

@@ -56,6 +56,7 @@ import { ActionButton } from '@taucad/ui/components/actions';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import {
   cloudUnavailableSentence,
+  engineUnavailableSentence,
   asksTauSignIn,
   backupCopy,
   isGithubRemote,
@@ -591,7 +592,11 @@ export function RevisionSyncRegion({
   const failureAction = syncFailureAction(sync, remote, viewer);
   /* W2a: a damaged cloud copy is terminal; the client has nothing to offer but the truth (I12). */
   const failureSentence =
-    sync.reason === 'damaged' ? describeRevisionFailure('backup', 'REMOTE_DAMAGED').description : sync.error;
+    sync.reason === 'damaged'
+      ? describeRevisionFailure('backup', 'REMOTE_DAMAGED').description
+      : sync.reason === 'engineUnavailable'
+        ? engineUnavailableSentence
+        : sync.error;
   const manageRef = useRef<HTMLButtonElement>(null);
   const backUpRef = useRef<HTMLButtonElement>(null);
   const [isManaging, setIsManaging] = useState(false);
@@ -852,7 +857,7 @@ export function RevisionSyncRegion({
     role === 'revoked' || sync.reason === 'safeMode'
       ? CloudOff
       : sync.online
-        ? sync.reason === 'damaged'
+        ? sync.reason === 'damaged' || sync.reason === 'engineUnavailable'
           ? CircleAlert
           : sync.state === 'failed' || sync.state === 'queued'
             ? CloudAlert

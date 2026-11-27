@@ -238,6 +238,12 @@ describe('the copy table', () => {
       ['Save not confirmed', { ...base, attention: 1 }, { ...onMain, isDirty: true }, 'Couldn’t confirm the save'],
       ['Backup failed', { ...base, sync: sync({ state: 'failed', reason: 'rejected' }) }, onMain, 'Couldn’t back up'],
       [
+        'Git not starting, ahead of a save to confirm (I8)',
+        { ...base, attention: 1, sync: sync({ state: 'failed', reason: 'engineUnavailable' }) },
+        { ...onMain, isDirty: true },
+        'Not saving · Git isn’t starting',
+      ],
+      [
         'Tau Cloud off in safe mode (W9 R5)',
         { ...base, remote: tau, sync: sync({ state: 'failed', reason: 'safeMode', pendingCount: 1 }) },
         onMain,

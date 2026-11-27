@@ -132,4 +132,8 @@ export type SyncFailureReason =
   | 'offline'
   /* Safe mode makes no Tau Cloud read (W9 R5): stated, never retried, cleared by a normal restart. */
   | 'safeMode'
+  /* Git has not started on this device for about five minutes (I8). Never set
+     by the sync machine: a Node host's engine gate merges it into the facet it
+     publishes, and clears it once git starts again. No action clears it. */
+  | 'engineUnavailable'
   | 'unknown';

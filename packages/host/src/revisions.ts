@@ -122,7 +122,7 @@ import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
 import { actorFor, hostRevisionActor, revisionUserActorSchema } from '#revision-actor.js';
-import { observeRevisionEngineFailures } from '#revision-engine-failures.js';
+import { gateRevisionEngine, observeRevisionEngineFailures } from '#revision-engine-failures.js';
 import type { RevisionEngineFailure } from '#revision-engine-failures.js';
 import type { HostRevisionActorResolver } from '#revision-actor.js';
 
@@ -215,11 +215,15 @@ export type HostRevisionEvent =
     } & RevisionEngineFailure)
   | {
       /**
-       * This machine cannot record revisions at all: `git` or `git-lfs` is
-       * missing (OQ-B8). Emitted once when the project opens, so a person is
-       * told before the first turn instead of finding an empty history later.
+       * This machine cannot record revisions at all. `toolchain`: `git` or
+       * `git-lfs` is missing (OQ-B8), emitted once when the project opens, so a
+       * person is told before the first turn instead of finding an empty
+       * history later. `engine`: git is installed but has not started for about
+       * five minutes (I8), emitted once when the engine gate's wait reaches its
+       * cap; the Sync region then reads `engineUnavailable` until git starts.
        */
       readonly type: 'revision.unavailable';
+      readonly cause: 'toolchain' | 'engine';
       readonly reason: string;
       readonly missing: readonly MissingGitTool[];
     };
@@ -648,7 +652,27 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       : observeRevisionEngineFailures(unobservedPort, (failure) => {
           events({ type: 'revision.engine-failed', ...failure });
         });
-  const port = options.safeMode === true ? withoutTauCloud(observedPort) : observedPort;
+  /* I8: an engine that cannot start is waited out (5 s doubling to 5 min) for every caller at once, outside the
+   * observer so only real attempts are reported, and a wait at its cap becomes one state rather than a log loop. */
+  let engineUnavailable = false;
+  let republishStatus: () => void = () => undefined;
+  const gatedPort = gateRevisionEngine(observedPort, {
+    onUnavailable: () => {
+      engineUnavailable = true;
+      options.events?.({
+        type: 'revision.unavailable',
+        cause: 'engine',
+        reason: 'Native Git has not started for five minutes.',
+        missing: [],
+      });
+      republishStatus();
+    },
+    onAvailable: () => {
+      engineUnavailable = false;
+      republishStatus();
+    },
+  });
+  const port = options.safeMode === true ? withoutTauCloud(gatedPort) : gatedPort;
   /* No Tau Cloud hook at all in safe mode: no long poll, storage read, registration or publication (W9 R5). */
   const cloudApiBaseUrl = options.safeMode === true ? undefined : apiBaseUrl;
   const channelListeners = new Set<(event: AgentChannelRevisionEvent) => void>();
@@ -671,6 +695,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       } catch (error) {
         options.events?.({
           type: 'revision.unavailable',
+          cause: 'toolchain',
           reason: error instanceof Error ? error.message : String(error),
           missing: error instanceof GitToolchainError ? error.missing : ['git', 'git-lfs'],
         });
@@ -918,6 +943,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       report(failure);
     }
   });
+  /* The gate's state is the host's, not the root's: merged here like a host-run fill, never into the actor. */
+  const engineStatus = (status: RevisionStatusProjection): RevisionStatusProjection =>
+    engineUnavailable
+      ? { ...status, sync: { ...status.sync, state: 'failed', reason: 'engineUnavailable', error: undefined } }
+      : status;
   const channelStatus = (snapshot: Parameters<typeof selectRevisionStatus>[0]): RevisionStatusProjection => {
     const status = selectRevisionStatus(snapshot);
     const route = (checkoutId: string | undefined): string | undefined => {
@@ -928,7 +958,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       return checkout?.kind === 'live' ? `/projects/${projectId}` : checkout ? `/checkouts/${checkoutId}` : undefined;
     };
     return {
-      ...status,
+      ...engineStatus(status),
       checkoutRoot: route(status.checkoutId),
       branches: status.branches.map((branch) => ({ ...branch, checkoutRoot: route(branch.checkoutId) })),
     };
@@ -937,14 +967,18 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
    * every transition, so identity never answers; without the comparator the
    * daemon sent a frame per transition and every client repainted for each. */
   let publishedStatus: RevisionStatusProjection | undefined;
-  actor.subscribe((snapshot) => {
+  const publishStatus = (snapshot: Parameters<typeof selectRevisionStatus>[0]): void => {
     const next = channelStatus(snapshot);
     if (publishedStatus !== undefined && sameRevisionStatus(publishedStatus, next)) {
       return;
     }
     publishedStatus = next;
     emitChannel({ kind: 'status', value: revisionJson(next) });
-  });
+  };
+  actor.subscribe(publishStatus);
+  republishStatus = () => {
+    publishStatus(actor.getSnapshot());
+  };
   actor.start();
   const restoreChild = actor.getSnapshot().children.restore;
   restoreChild?.on('toast.restored', (toast) => {
@@ -1972,7 +2006,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         throw openRefusal ?? new RevisionPortError('ENGINE_FAILED', 'This project has no live checkout.');
       }
     },
-    status: () => selectRevisionStatus(actor.getSnapshot()),
+    status: () => engineStatus(selectRevisionStatus(actor.getSnapshot())),
     chatDevice: async () => tree.chatDevice(),
     channel: {
       request: async (input) => ({

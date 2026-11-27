@@ -127,6 +127,18 @@ export const cloudUnavailable = 'Backup unavailable';
 export const cloudUnavailableSentence =
   'This project was deleted from the cloud, or your access changed. Your history is still on this device.';
 
+/** The status line while git has not started on this device for minutes (I8, `engineUnavailable`). @public */
+export const engineUnavailableLine = 'Not saving · Git isn’t starting';
+
+/**
+ * Why, in the Sync region. Page-owned: the host's own words (git's stderr) never reach the page, and nothing a
+ * person presses here can start git, so no action sits beside it.
+ *
+ * @public
+ */
+export const engineUnavailableSentence =
+  'Git isn’t starting on this device, so new versions aren’t saved or backed up. Tau keeps trying every few minutes; restarting Tau can help.';
+
 /**
  * A version's number as every surface writes it: `V3` (M11, B6). An entry has
  * no number, so there is no counterpart for one.
@@ -330,6 +342,9 @@ export const asksTauSignIn = (
  * @public
  */
 export const syncCopy = (sync: SyncFacet, remote?: RemoteFacet): string | undefined => {
+  if (sync.reason === 'engineUnavailable') {
+    return engineUnavailableLine;
+  }
   switch (sync.state) {
     case 'noRemote': {
       return undefined;
@@ -561,6 +576,10 @@ export const waitingSentence = (waiting: RevisionGitOperation): string => {
 /** Failed, then needs you: the two tiers that interrupt. */
 const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWhere): RevisionFacts | undefined => {
   const { sync } = status;
+  /* I8: nothing below can happen while git cannot start, so this leads. */
+  if (sync.reason === 'engineUnavailable') {
+    return { icon: CircleAlert, tone: 'text-feature', mark: 'failed', sentence: engineUnavailableLine };
+  }
   // `attention` counts conflicts too, and a conflict saved everything it was asked to (review R5).
   if (status.attention - status.conflicts.length > 0) {
     return { icon: CircleAlert, tone: 'text-feature', mark: 'failed', sentence: 'Couldn’t confirm the save' };

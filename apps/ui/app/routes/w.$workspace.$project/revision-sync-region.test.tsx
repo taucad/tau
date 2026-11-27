@@ -1685,6 +1685,20 @@ describe('RevisionSyncRegion backup line', () => {
     expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
   });
 
+  /* I8: git that has not started for minutes is the host's state, said in the page's words and with no action. */
+  it('says git is not starting, in its own words, and offers nothing a press cannot do', () => {
+    renderRegion(tau, syncFacet({ state: 'failed', pendingCount: 1, reason: 'engineUnavailable', error: undefined }));
+
+    const backup = screen.getByRole('status', { name: 'Backup status' });
+    expect(backup).toHaveTextContent('Not saving · Git isn’t starting');
+    expect(backup).toHaveTextContent(
+      'Git isn’t starting on this device, so new versions aren’t saved or backed up. Tau keeps trying every few minutes; restarting Tau can help.',
+    );
+    expect(within(backup).queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
   /* C4: the pane's last line, with no card, no heading and no Details (M8). */
   it('is one line with Manage, and no card, heading or Details', () => {
     renderRegion(tau, syncFacet({ state: 'backedUp' }));

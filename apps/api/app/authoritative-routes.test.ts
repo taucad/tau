@@ -24,6 +24,10 @@ import { apiRoot, moduleGraph, sourceFiles } from '#testing/module-graph.js';
  * `file#GET <route>`. Each reason was checked against the handler when it was added.
  */
 const cachedReadAllowlist: Readonly<Record<string, string>> = {
+  'app/api/account/account.controller.ts#GET session':
+    "Who is signed in, from the guard's resolution; mints nothing and answers no token",
+  'app/api/account/account.controller.ts#GET desktop-sign-ins':
+    'Desktop sign-ins, read from the database by user id; no credential',
   'app/api/durable-events/durable-events.controller.ts#GET :streamId/events':
     'Long-poll of stream events; mints nothing (its 25 s admission window is part of the documented bound)',
   'app/api/email-deliverability/email-deliverability.controller.ts#GET deliverability':

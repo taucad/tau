@@ -64,7 +64,11 @@ const createResolver = () => {
   const auth = {
     api: { getSession },
     options: {},
-    $context: Promise.resolve({ authCookies: { sessionData: { name: 'tau.session_data' } } }),
+    $context: Promise.resolve({
+      authCookies: { sessionData: { name: 'tau.session_data' } },
+      // No desktop access token exists here: an unsigned bearer is looked up, found absent, and left to Better Auth.
+      adapter: { findOne: vi.fn().mockResolvedValue(null) },
+    }),
   } as unknown as Auth;
   const metrics = mockDeep<MetricsService>();
   const resolver = new SessionResolver(auth, metrics);

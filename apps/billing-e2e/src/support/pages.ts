@@ -401,6 +401,8 @@ export type ChatCards = {
 /** The card titles a refused or paused turn shows (`chat-error*.tsx`). */
 const cardTitles = [
   'You’re out of credits',
+  'Add credits to send this',
+  'Credits added',
   'Tau paused this turn',
   'The model refused this request',
   'Tau could not send this request',

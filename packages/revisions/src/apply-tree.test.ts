@@ -1551,6 +1551,38 @@ describe('a cold open written from its listing (STO-25)', () => {
     const remoteTree = (await context.port.readTree(remote, { largeObjects: 'local' }))!;
     const sizes = new Map(remoteTree.entries().map(({ path, content }) => [path, content.byteLength]));
     const events: string[] = [];
+    // TEMP-DIAG: timestamps per event and event-loop lag, to measure the closure write on Windows.
+    const diagStart = performance.now();
+    const timeline: Array<[number, string]> = [];
+    const mark = (label: string): void => {
+      timeline.push([
+        Math.round(performance.now() - diagStart),
+        label.length > 90 ? `${label.slice(0, 90)}…(${String(label.split(',').length)})` : label,
+      ]);
+    };
+    const originalPush = events.push.bind(events);
+    events.push = (...items: string[]): number => {
+      for (const item of items.filter((entry) => !entry.startsWith('write src/'))) {
+        mark(item);
+      }
+      return originalPush(...items);
+    };
+    let lastTick = performance.now();
+    let maxLag = 0;
+    const lagProbe = setInterval(() => {
+      const now = performance.now();
+      const lag = now - lastTick - 20;
+      if (lag > 100) {
+        mark(`event-loop lag ${String(Math.round(lag))}ms`);
+      }
+      maxLag = Math.max(maxLag, lag);
+      lastTick = now;
+    }, 20);
+    lagProbe.unref();
+    const diagDump = (): void => {
+      clearInterval(lagProbe);
+      console.info(`TEMP-DIAG ${JSON.stringify({ maxLag: Math.round(maxLag), timeline })}`);
+    };
     /* Once a read fails, the store stays unreadable: a rollback cannot ask it either. */
     let unreadable = false;
     /* A slow object source: the model's bytes arrive only once the closure has landed, or after a bound. */
@@ -1587,7 +1619,9 @@ describe('a cold open written from its listing (STO-25)', () => {
     const { checkout } = context;
     const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
       applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        mark(`applyBatch start ${entries.map((entry) => `${entry.op}:${entry.path}`).join(',')}`);
         const receipts = await checkout.applyBatch!(entries, batchOptions);
+        mark('applyBatch end');
         events.push(...entries.flatMap((entry) => (entry.op === 'write' ? [`write ${entry.path}`] : [])));
         if (entries.some((entry) => entry.op === 'write' && entry.path === 'tau.json')) {
           landClosure();
@@ -1624,7 +1658,7 @@ describe('a cold open written from its listing (STO-25)', () => {
             .split(',')
             .includes(path),
       );
-    return { ...context, actors, remote, remoteTree, events, brackets, outcomes, readOf };
+    return { ...context, actors, remote, remoteTree, events, brackets, outcomes, readOf, diagDump };
   };
 
   it('should open the bracket and land the entry closure before the tree’s other bytes are read', async () => {
@@ -1633,6 +1667,7 @@ describe('a cold open written from its listing (STO-25)', () => {
       checkoutId: 'live',
       revisionId: opened.remote,
     });
+    opened.diagDump();
     const { events, readOf } = opened;
     /* No whole-tree read in the write: it begins from the listing. */
     expect(events.slice(0, events.indexOf('release'))).not.toContain('read *');

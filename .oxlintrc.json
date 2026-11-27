@@ -128,6 +128,8 @@
     "tau-lint/no-scene-override-material": "error",
     "tau-lint/no-impl-in-index": "error",
     "tau-lint/no-test-bridge-redeclaration": "error",
+    // Testing policy § 17: a suite never pins its order with `shuffle: false`; the fixture is fixed instead.
+    "tau-lint/no-pinned-test-order": "error",
     "tau-lint/plugin-capability-filename": "error",
     // First-party plugin surface (filename-scoped in each rule; each plugin's own lint enforces it on itself):
     // named-only implementation modules, no default import of a plugin module, the package-named `definePlugin`
@@ -2197,6 +2199,23 @@
       "files": ["packages/filesystem/src/backend/**", "**/*.test.ts", "**/*.bench.ts", "**/test-utils/**"],
       "rules": {
         "tau-lint/no-awaited-mutation-in-loop": "off"
+      }
+    },
+    {
+      /*
+       * Testing policy § 17 ratchet: suites that pinned their order before the rule. Debt to burn down, never a
+       * home: each entry leaves when its tests own their state, and no entry is added.
+       * - revision-port.conformance: the incident's shared store; the per-test fixture is the follow-up to #2909.
+       * - apps/ui/app/providers: three suites that share the PostHog SDK module singleton.
+       */
+      "files": [
+        "packages/revisions/src/revision-port.conformance.test.ts",
+        "apps/ui/app/providers/onboarding-baseline-web.test.tsx",
+        "apps/ui/app/providers/posthog-feature-flags.test.tsx",
+        "apps/ui/app/providers/web-analytics-provider.test.tsx"
+      ],
+      "rules": {
+        "tau-lint/no-pinned-test-order": "off"
       }
     },
     {

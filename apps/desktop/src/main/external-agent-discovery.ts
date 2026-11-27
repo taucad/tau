@@ -184,6 +184,8 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
   /** When the last full discovery settled: the refused-only retries between them do not reset it. */
   let fullySettledAt: number | undefined;
   let failed = false;
+  /** The last full discovery rejected while an earlier answer stood: it is tried again after the rediscovery wait. */
+  let isRefreshFailed = false;
   let inFlight: Promise<readonly ExternalAgentDescriptor[]> | undefined;
   /** The discovery in flight is a background refresh, which no listing waits for. */
   let isRefreshing = false;
@@ -202,6 +204,9 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
       });
       current = previous ? (isRefresh ? refreshed(previous, answer) : merge(previous, answer)) : answer;
       failed = false;
+      if (pins === undefined) {
+        isRefreshFailed = false;
+      }
       configure(current.agents.map((adapter) => withMainAgentEnvironment(adapter, environment)));
       /* The one canonical descriptor (VSC1): the renderer draws its rows from
        * this, the utility gets the adapters themselves, and neither builds its
@@ -212,6 +217,8 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
       if (!current) {
         failed = true;
         configure(undefined);
+      } else if (pins === undefined) {
+        isRefreshFailed = true;
       }
     } finally {
       settledAt = now();
@@ -234,7 +241,10 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
         return inFlight;
       }
       const fullAge = fullySettledAt === undefined ? Infinity : now() - fullySettledAt;
-      if (!failed && fullAge >= externalAgentRefreshMilliseconds) {
+      const isRefreshDue =
+        fullAge >= externalAgentRefreshMilliseconds ||
+        (isRefreshFailed && now() - settledAt >= externalAgentRediscoveryMilliseconds);
+      if (!failed && isRefreshDue) {
         /* The listing answers what it has; the next one gets the refreshed lists. */
         isRefreshing = true;
         inFlight = run(true);

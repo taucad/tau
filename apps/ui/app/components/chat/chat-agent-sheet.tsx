@@ -1195,16 +1195,23 @@ function Sheet({
   const modelRowRef = useRef<HTMLButtonElement>(null);
   const effortRowRef = useRef<HTMLButtonElement>(null);
   const optionsRowRef = useRef<HTMLButtonElement>(null);
+  /* One level still shows when "Default" names none: it is then the only way to choose it. */
+  const isEffortRowShown =
+    sheetModel.levels.length > 1 || (sheetModel.levels.length === 1 && sheetModel.level === undefined);
   const hasChoice = canSelectExecution && agents.some((agent) => agent.key !== current.key);
   const browsed = agents.find((agent) => agent.key === browseKey) ?? current;
   useEffect(() => {
     if (!hasNavigated || view !== 'settings') {
       return;
     }
-    (({ agent: agentRowRef, model: modelRowRef, effort: effortRowRef, options: optionsRowRef }) as const)[
-      returnTo.current
-    ].current?.focus();
-  }, [hasNavigated, view]);
+    /* A choice can remove the row it was made from (the sole effort, once the agent takes it): the model row takes
+     * focus then, so this runs again when the effort row comes or goes. */
+    (
+      (({ agent: agentRowRef, model: modelRowRef, effort: effortRowRef, options: optionsRowRef }) as const)[
+        returnTo.current
+      ].current ?? modelRowRef.current
+    )?.focus();
+  }, [hasNavigated, view, isEffortRowShown]);
   const go = (next: SheetView): void => {
     setHasNavigated(true);
     setView(next);
@@ -1311,8 +1318,7 @@ function Sheet({
               <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
             </button>
             {/* E1: Effort is a row like Model — label left, the level right — and drills into its page. */}
-            {/* One level still shows when "Default" names none: it is then the only way to choose it. */}
-            {sheetModel.levels.length > 1 || (sheetModel.levels.length === 1 && sheetModel.level === undefined) ? (
+            {isEffortRowShown ? (
               <button
                 ref={effortRowRef}
                 type='button'

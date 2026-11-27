@@ -245,6 +245,13 @@ export function ChatAddMenu({
           />
         )}
         onSelect={select}
+        onOpenChange={(isOpen) => {
+          /* A selection closes without `onClose`, so each opening starts with no focus owner left from the last. */
+          if (isOpen) {
+            isFocusMoved.current = false;
+            isEditorRefocused.current = false;
+          }
+        }}
         onClose={() => {
           if (!isFocusMoved.current) {
             focusEditor();

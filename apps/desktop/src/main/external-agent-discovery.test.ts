@@ -209,6 +209,26 @@ describe('createExternalAgentDiscovery', () => {
     expect(harness.discover).toHaveBeenCalledTimes(2);
   });
 
+  it('should try a rejected background refresh again once the rediscovery interval has passed', async () => {
+    const harness = createHarness();
+    const initial = harness.discovery.list();
+    await harness.settle({ agents: [adapterFor('claude')], refused: [] });
+    await initial;
+
+    harness.advance(externalAgentRefreshMilliseconds);
+    await harness.discovery.list();
+    await harness.settle(new Error('The external agent could not be discovered.'));
+
+    harness.advance(externalAgentRediscoveryMilliseconds - 1);
+    await harness.discovery.list();
+    expect(harness.discover).toHaveBeenCalledTimes(2);
+
+    harness.advance(1);
+    await harness.discovery.list();
+    expect(harness.discover).toHaveBeenCalledTimes(3);
+    expect(harness.discover).toHaveBeenLastCalledWith({ resolveFrom });
+  });
+
   it('should keep the longer model list when a refresh answers a shorter one', async () => {
     const harness = createHarness();
     const full = [

@@ -565,6 +565,42 @@ describe('ChatAgentSheet', () => {
     expect(select).toHaveBeenCalledWith('thought_level', 'high');
   });
 
+  it('hands focus to the model row once the sole level is taken and its row goes', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    let current = 'default';
+    const config = (): AgentConfig => ({
+      options: [
+        {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          category: 'thought_level',
+          currentValue: current,
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+      valueOf: (option) => option.currentValue,
+      select: vi.fn(),
+    });
+    const { rerender } = renderSheet(vi.fn(), config());
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model: Codex/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Effort for Codex.*not set/u }));
+    await userEvent.click(screen.getByRole('option', { name: 'High' }));
+    /* The agent answers the choice after the sheet is back on its settings. */
+    current = 'high';
+    rerender(
+      <TooltipProvider>
+        <ChatAgentSheet agentConfig={config()} placements={state.placements} focusEditor={vi.fn()} />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByRole('button', { name: /^Effort for Codex/u })).toBeNull();
+    expect(screen.getByRole('button', { name: /^Model: .*\. Change$/u })).toHaveFocus();
+  });
+
   it('shows and changes a discovered ACP reasoning option before the first session', async () => {
     state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
     state.placements = [codex()];

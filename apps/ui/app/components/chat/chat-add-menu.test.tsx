@@ -134,6 +134,20 @@ describe('ChatAddMenu', () => {
     expect(handlers.focusEditor).not.toHaveBeenCalled();
   });
 
+  it('hands focus back to the composer on a dismissal after an action owned it', async () => {
+    const user = await open();
+    await user.click(screen.getByRole('option', { name: /Attach image or PDF/u }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    await screen.findByRole('dialog');
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(handlers.focusEditor).toHaveBeenCalledOnce();
+    });
+  });
+
   it('keeps the attach row, disabled with its reason, for a model that cannot read files (F14)', async () => {
     const user = userEvent.setup();
     render(

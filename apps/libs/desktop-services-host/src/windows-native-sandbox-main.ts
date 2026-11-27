@@ -13,8 +13,10 @@ import { setUpWindowsShellSandbox } from '#services-host-shell.js';
 
 /**
  * The Windows native sandbox main composes, or `undefined` when it is off: only on Windows, with
- * `TAU_WINDOWS_SHELL_SANDBOX=1` (the same gate as the Terminal's shell, Q15) and the helper this build ships. Off, a
- * native kernel on Windows refuses to launch rather than run uncontained.
+ * `TAU_WINDOWS_SHELL_SANDBOX=1` (the same gate as the Terminal's shell, Q15; main composes it by default and drops it
+ * only for `TAU_WINDOWS_SHELL_SANDBOX=0`) and the helper this build ships. Off, a native kernel on Windows refuses to
+ * launch rather than run uncontained. On, the first native launch runs the one-time elevated setup when `status`
+ * reports none (one administrator prompt); a declined prompt fails that launch and the next launch asks again.
  *
  * @param input - The platform; the Windows sandbox environment main composed for the services utility
  *   (`windowsShellSandboxEnvironment`), never main's inherited one, so nothing that launches Tau chooses the helper it

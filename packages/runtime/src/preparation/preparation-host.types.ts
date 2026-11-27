@@ -272,6 +272,12 @@ export type SealClosureInput = {
    * never there while the step runs.
    */
   readonly root: string;
+  /**
+   * An empty directory for the step's own temporary files, such as a sandboxed command's working folder. The host
+   * creates it in the store's staging area, never inside `root` or the system temporary folder, and removes it once
+   * the step settles.
+   */
+  readonly scratch: string;
   /** Rows of the files unpacked from the dependency files, sorted by path. */
   readonly files: readonly InstalledFile[];
   readonly signal: AbortSignal;

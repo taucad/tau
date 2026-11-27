@@ -7,6 +7,8 @@ import { agentWireLimits } from '#wire/limits.js';
 
 import { projectionBatchSchema, projectionSourceHealthSchema } from '#log/projection-facts.js';
 import { jsonValueSchema } from '#log/event-schema.js';
+import { agentChannelRunKindSchema } from '#wire/admission.schema.js';
+import type { AgentChannelRunKind } from '#wire/admission.schema.js';
 import type { JsonValue } from '#log/event-types.js';
 import type { SourceLiveEvent } from '#waist/ports.js';
 import { chatIdSchema, commandAnswerSchema, commandFrameSchema, commandVerbs } from '#wire/commands.schema.js';
@@ -207,6 +209,8 @@ export type AgentWireProtocol = {
     };
   } & {
     readonly read: { args: ReadRequest; result: ReadAnswer };
+    /** Open an external agent's session for a chat ahead of its turn (WP-18); answered once asked, opened or not. */
+    readonly prewarm: { args: Readonly<{ chatId: string; agent: AgentChannelRunKind }>; result: Record<never, never> };
     readonly revision: {
       args: Readonly<{ request: JsonValue }>;
       result: Readonly<{ result: JsonValue; status: JsonValue }>;
@@ -235,6 +239,7 @@ export const agentWireProtocolSchemas = {
   calls: {
     ...commandCalls,
     read: { args: readRequestSchema, result: readAnswerSchema },
+    prewarm: { args: z.strictObject({ chatId, agent: agentChannelRunKindSchema }), result: z.strictObject({}) },
     revision: {
       args: z.strictObject({ request: jsonValueSchema }),
       result: z.strictObject({ result: jsonValueSchema, status: jsonValueSchema }),

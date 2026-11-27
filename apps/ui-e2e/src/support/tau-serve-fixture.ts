@@ -42,6 +42,8 @@ export type TauServeFixture = {
 type Running = TauServeFixture & {
   release: () => void;
   secondRequestHeld: () => boolean;
+  /** Stop the daemon and spawn it again on the same port, workspace, config, relay and gateway (HA3 unplug/replug). */
+  restart: () => Promise<void>;
   dispose: () => Promise<void>;
 };
 
@@ -274,80 +276,95 @@ export const startTauServeFixture = async (options: TauServeFixtureOptions = {})
   );
   const relay = await startStubRelay();
   const gateway = await startStubGateway();
-  const child = spawn(
-    process.execPath,
-    [
-      '--import',
-      'tsx',
-      binPath,
-      'serve',
-      '--trust-projects',
-      '--agentPort=0',
-      `--ui=${uiRoot}`,
-      `--workspace=${workspace}`,
-      `--relay=${relay.url.href}`,
-      `--gateway=${gateway.url.href}`,
-      '--model=fixture-model',
-      '--modelProvider=anthropic',
-      options.externalAgents ? '--external-agents' : '--no-external-agents',
-    ],
-    {
-      cwd: repoRoot,
-      /* eslint-disable @typescript-eslint/naming-convention -- child-process environment variable names. */
-      env: {
-        ...process.env,
-        TAU_CONFIG_DIR: configDirectory,
-        TAU_HOST_AGENT_TOKEN: agentToken,
-        /* Honoured only under `NODE_ENV=test`, which vitest already sets and the
-         * child inherits — see `acpAdapterOverrideVariable`. */
-        ...(options.externalAgents === true ? { TAU_ACP_ADAPTER_OVERRIDE: `${fakeAcpAgent}:codex` } : {}),
-        /* Vitest sets `NODE_ENV=test`, which drops consola to `warn` and
-         * silences the line naming the port this fixture connects to. */
-        CONSOLA_LEVEL: '4',
+  /** One daemon process; `agentPort` 0 picks a free port, a restart passes the one the first took. */
+  const launch = (agentPort: number) => {
+    const child = spawn(
+      process.execPath,
+      [
+        '--import',
+        'tsx',
+        binPath,
+        'serve',
+        '--trust-projects',
+        `--agentPort=${String(agentPort)}`,
+        `--ui=${uiRoot}`,
+        `--workspace=${workspace}`,
+        `--relay=${relay.url.href}`,
+        `--gateway=${gateway.url.href}`,
+        '--model=fixture-model',
+        '--modelProvider=anthropic',
+        options.externalAgents ? '--external-agents' : '--no-external-agents',
+      ],
+      {
+        cwd: repoRoot,
+        /* eslint-disable @typescript-eslint/naming-convention -- child-process environment variable names. */
+        env: {
+          ...process.env,
+          TAU_CONFIG_DIR: configDirectory,
+          TAU_HOST_AGENT_TOKEN: agentToken,
+          /* Honoured only under `NODE_ENV=test`, which vitest already sets and the
+           * child inherits — see `acpAdapterOverrideVariable`. */
+          ...(options.externalAgents === true ? { TAU_ACP_ADAPTER_OVERRIDE: `${fakeAcpAgent}:codex` } : {}),
+          /* Vitest sets `NODE_ENV=test`, which drops consola to `warn` and
+           * silences the line naming the port this fixture connects to. */
+          CONSOLA_LEVEL: '4',
+        },
+        /* eslint-enable @typescript-eslint/naming-convention -- environment literal ends here. */
+        stdio: ['ignore', 'pipe', 'pipe'],
       },
-      /* eslint-enable @typescript-eslint/naming-convention -- environment literal ends here. */
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
-  const output: string[] = [];
-  const origin = Promise.withResolvers<string>();
-  const scan = (chunk: Uint8Array<ArrayBuffer>): void => {
-    const text = Buffer.from(chunk).toString('utf8');
-    output.push(text);
-    const match = /http:\/\/127\.0\.0\.1:(\d+)/u.exec(text);
-    if (match) {
-      origin.resolve(`http://127.0.0.1:${match[1]!}`);
-    }
+    );
+    const output: string[] = [];
+    const origin = Promise.withResolvers<string>();
+    const scan = (chunk: Uint8Array<ArrayBuffer>): void => {
+      const text = Buffer.from(chunk).toString('utf8');
+      output.push(text);
+      const match = /http:\/\/127\.0\.0\.1:(\d+)/u.exec(text);
+      if (match) {
+        origin.resolve(`http://127.0.0.1:${match[1]!}`);
+      }
+    };
+    child.stdout.on('data', scan);
+    child.stderr.on('data', scan);
+    const report = (reason: string): Error => {
+      process.stderr.write(`\n--- tau serve output ---\n${output.join('')}\n--- end ---\n`);
+      return new Error(reason);
+    };
+    child.once('exit', (code) => {
+      origin.reject(report(`tau serve exited early with code ${String(code)}`));
+    });
+    const deadline = new Promise<never>((_resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(report('tau serve never announced its agent channel'));
+      }, 90_000);
+      timer.unref();
+    });
+    return { child, origin: Promise.race([origin.promise, deadline]) };
   };
-  child.stdout.on('data', scan);
-  child.stderr.on('data', scan);
-  const report = (reason: string): Error => {
-    process.stderr.write(`\n--- tau serve output ---\n${output.join('')}\n--- end ---\n`);
-    return new Error(reason);
-  };
-  child.once('exit', (code) => {
-    origin.reject(report(`tau serve exited early with code ${String(code)}`));
-  });
+  let daemon = launch(0);
   const dispose = async (): Promise<void> => {
     gateway.release();
-    await stopChild(child);
+    await stopChild(daemon.child);
     await closeServer(gateway.server);
     await closeServer(relay.server);
     await rm(workspace, { recursive: true, force: true });
     await rm(configDirectory, { recursive: true, force: true });
   };
-  const deadline = new Promise<never>((_resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(report('tau serve never announced its agent channel'));
-    }, 90_000);
-    timer.unref();
-  });
   try {
+    const origin = await daemon.origin;
+    const restart = async (): Promise<void> => {
+      await stopChild(daemon.child);
+      daemon = launch(Number(new URL(origin).port));
+      const next = await daemon.origin;
+      if (next !== origin) {
+        throw new Error(`tau serve came back on ${next}, not ${origin}`);
+      }
+    };
     return {
-      origin: await Promise.race([origin.promise, deadline]),
+      origin,
       workspace,
       release: gateway.release,
       secondRequestHeld: gateway.secondRequestHeld,
+      restart,
       dispose,
     };
   } catch (error) {

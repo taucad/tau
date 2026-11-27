@@ -7,6 +7,7 @@
  * Environment: Node 24+. Core mode: uv on PATH with access to pypi.org, unless `--python` names an interpreter that has
  * numpy and coverage. Kernel mode: the seed filled by the kernel's `seed` target; TAU_<KERNEL>_TEST_STORE optionally
  * selects an isolated native test store (default out/cache/<kernel id>-store under the working directory).
+ * On Windows, kernel mode prepares in the sandbox helper named by `TAU_WINDOWS_SANDBOX_HELPER` (see windows-sandbox.mts).
  * Usage (through `tau-python-kernel`, see tau-python-kernel.mts):
  *   tau-python-kernel test [--python <exe>]
  *   tau-python-kernel test --package <dir> [--python <exe>]
@@ -18,12 +19,15 @@ import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import process from 'node:process';
 
+import { nativeSandboxRefusal } from '@taucad/native-process-core';
 import { createPreparationHost, parsePluginDeployment } from '@taucad/runtime/preparation/node';
 
 // oxlint-disable-next-line no-restricted-imports -- The scripts' shared package reader; scripts have no `#` alias.
 import { coreRoot, readPythonKernelPackage, takePackageArgument } from './python-kernel-package.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The scripts' shared package reader; scripts have no `#` alias.
 import type { PythonKernelPackage } from './python-kernel-package.mjs';
+// oxlint-disable-next-line no-restricted-imports -- The scripts' shared Windows sandbox setup; scripts have no `#` alias.
+import { configureScriptWindowsSandbox } from './windows-sandbox.mjs';
 
 /** The closure's versions of what `tau_kernel` and the coverage gate import (build123d's `requirements.lock`). */
 const coreRequirements = ['coverage==7.10.7', 'numpy==2.5.2'] as const;
@@ -57,6 +61,8 @@ const closureInterpreter = async (kernel: PythonKernelPackage): Promise<string> 
     `${kernel.packageName} tau-plugin.json`,
   );
   const storeVariable = `TAU_${kernelId.toUpperCase().replaceAll(/\W/gu, '_')}_TEST_STORE`;
+  const store = resolve(process.env[storeVariable] ?? `out/cache/${kernelId}-store`);
+  configureScriptWindowsSandbox(store);
   const host = createPreparationHost({
     plugins: [
       {
@@ -67,8 +73,9 @@ const closureInterpreter = async (kernel: PythonKernelPackage): Promise<string> 
         launchSet: kernel.adopter.launchSet,
       },
     ],
-    store: resolve(process.env[storeVariable] ?? `out/cache/${kernelId}-store`),
+    store,
     seed: resolve(`out/cache/${kernelId}-seed`),
+    nativeContainment: nativeSandboxRefusal,
   });
   try {
     const outcome = await host.prepare({

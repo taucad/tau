@@ -18,7 +18,7 @@
  */
 
 import { Topic } from '@taucad/events';
-import { mergeResets, toChangeSet } from '#change-event-bus.js';
+import { commonAncestor, mergeResets, toChangeSet } from '#change-event-bus.js';
 import type { ChangeEventBus, ChangeSet, ChangeSetReset, ChangeSetResetReason } from '#change-event-bus.js';
 import type { ChangeEvent, PathChangeEvent, WatchRequest, WatchEvent } from '#types.js';
 import { changeEventEntries } from '#changeset.js';
@@ -317,6 +317,43 @@ function getEventPaths(event: PathChangeEvent): string[] {
 }
 
 /**
+ * What a topology change at `prefix` makes one watch re-read: `prefix` when a
+ * watched path is at or below it; `prefix`'s parent when the watch can hear
+ * `prefix` itself (a recursive watch on an ancestor, a direct watch on the
+ * parent), since the parent's listing names the changed mount; otherwise
+ * nothing. Both may hold for a watch of several paths: the parent covers both.
+ *
+ * A watch captured by a rooted view hears no ancestor's reset: the view reads
+ * through the one mount it captured, with no overlay of the mounts below it,
+ * so a mount changed below its watched path changes nothing it can see. Its
+ * paths lie under its root, so a watched ancestor of `prefix` means its
+ * captured mount is an ancestor too, never the changed one.
+ *
+ * @param prefix - A canonical mount prefix other than `/`.
+ * @param request - The watch's snapshot request.
+ * @param captured - Whether a rooted view registered the watch under its captured mount.
+ * @returns The prefix to reset, or `undefined` when the change cannot reach the watch.
+ */
+const topologyResetPrefix = (prefix: string, request: WatchRequest, captured: boolean): string | undefined => {
+  const recursive = request.recursive ?? false;
+  const parent = parentDirectory(prefix);
+  let reset: string | undefined;
+  for (const path of request.paths) {
+    const watched = canonicalizePath(path);
+    let scoped: string | undefined;
+    if (watched === prefix || watched.startsWith(`${prefix}/`)) {
+      scoped = prefix;
+    } else if (!captured && (recursive ? watched === '/' || prefix.startsWith(`${watched}/`) : watched === parent)) {
+      scoped = parent;
+    }
+    if (scoped !== undefined) {
+      reset = reset === undefined ? scoped : commonAncestor(reset, scoped);
+    }
+  }
+  return reset;
+};
+
+/**
  * Whether a fact's path may sit above a watched path, so the trie also offers the watches below it.
  *
  * @param event - One path fact.
@@ -562,18 +599,49 @@ export class WatchRegistry {
    */
   public emitResetAll(reason: ChangeSetResetReason = 'topology'): void {
     for (const subscription of this._allSubscriptions()) {
-      if (subscription.form === 'events') {
-        subscription.coalescer.flush();
-        subscription.handlers.emit({ type: 'reset' });
-        continue;
+      this._deliverReset(subscription, { prefix: '/', reason });
+    }
+  }
+
+  /**
+   * Tell the subscriptions a topology change at `prefixes` can reach that
+   * their stream is no longer reliable (project-library fast-path FW5). A
+   * changed mount at `P` changes what resolves at or below `P`, and the
+   * listing of `P`'s parent, which names `P`'s mount; nothing else. So a
+   * subscription is reset when one of its paths is at or below `P` (reset of
+   * `P`), or when it can hear `P` itself: a recursive watch on an ancestor, or
+   * a direct watch on `P`'s parent (reset of the parent), unless a rooted
+   * view captured it, since a rooted view sees no mount below its own. Every
+   * other subscription is left alone. A prefix of `/` resets every subscription, as
+   * {@link WatchRegistry.emitResetAll} does.
+   *
+   * Includes and excludes are not consulted, as `emitResetAll` never consults
+   * them: a reset is over-delivered rather than missed.
+   *
+   * @param prefixes - The mount prefixes whose resolution changed.
+   * @param reason - Why exactness was lost. Default: `topology`.
+   */
+  public emitReset(prefixes: readonly string[], reason: ChangeSetResetReason = 'topology'): void {
+    const changed = [...new Set(prefixes.map((prefix) => canonicalizePath(prefix)))];
+    if (changed.includes('/')) {
+      this.emitResetAll(reason);
+      return;
+    }
+    const resets = new Map<WatchSubscription, ChangeSetReset>();
+    const candidates = new Set<WatchSubscription>();
+    for (const prefix of changed) {
+      candidates.clear();
+      /* Recursive watches on any ancestor or `P`, direct watches on `P`'s parent or `P`, every watch below `P`. */
+      this._trie.collect(prefix, true, candidates);
+      for (const subscription of candidates) {
+        const scoped = topologyResetPrefix(prefix, subscription.request, subscription.authority !== undefined);
+        if (scoped !== undefined) {
+          resets.set(subscription, mergeResets(resets.get(subscription), { prefix: scoped, reason }));
+        }
       }
-      subscription.frame?.flush();
-      subscription.handlers.emit({
-        generation: this._eventBus.generation,
-        entries: [],
-        touchedDirectories: [],
-        reset: { prefix: '/', reason },
-      });
+    }
+    for (const [subscription, reset] of resets) {
+      this._deliverReset(subscription, reset);
     }
   }
 
@@ -780,6 +848,30 @@ export class WatchRegistry {
       tagEventOrigin(resetEvent, origin);
     }
     subscription.handlers.emit(resetEvent);
+  }
+
+  /**
+   * Deliver one reset: a per-path watch receives `reset`, a change-set watch a
+   * reset change set. Pending deliveries are flushed first so order holds.
+   *
+   * @param subscription - The subscription to reset.
+   * @param reset - The prefix it must re-read and why.
+   */
+  private _deliverReset(subscription: WatchSubscription, reset: ChangeSetReset): void {
+    if (subscription.form === 'events') {
+      subscription.coalescer.flush();
+      workerTimings.count('watch.pathEvents', subscription.handlers.size);
+      subscription.handlers.emit({ type: 'reset' });
+      return;
+    }
+    subscription.frame?.flush();
+    workerTimings.count('watch.changeSets', subscription.handlers.size);
+    subscription.handlers.emit({
+      generation: this._eventBus.generation,
+      entries: [],
+      touchedDirectories: [],
+      reset,
+    });
   }
 
   private _disposeSubscription(subscription: WatchSubscription): void {

@@ -1189,12 +1189,21 @@ export class WorkspaceFileService {
    * Subscribe to filesystem changes matching the request.
    * Identical requests share one underlying subscription (ref-counted).
    *
+   * Each path is resolved as a mount prefix is (`resolveAuthorityPath`): `.`
+   * and `..` segments are resolved.
+   *
    * @param request - paths, recursive, includes/excludes, and filter
    * @param handler - callback for matching WatchEvents
    * @returns unsubscribe function
+   * @throws `VirtualPathError` (`@taucad/utils/path`) for an empty, relative, `//`-prefixed,
+   * backslash or control-character path, or one that escapes `/`.
    */
   public watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void {
-    return this._watchRegistry.watch(request, handler);
+    /* Spelled as mount prefixes are, so a path with `.` or `..` is reset by the routes it resolves into (FW5). */
+    return this._watchRegistry.watch(
+      { ...request, paths: request.paths.map((path) => resolveAuthorityPath(path)) },
+      handler,
+    );
   }
 
   /**
@@ -2224,13 +2233,15 @@ export class WorkspaceFileService {
    * every watcher of a moved route needs.
    *
    * @param prefixes - The mount prefixes that changed. Each evicts its own index
-   * and the one that now covers it; every other root stays warm (W7c).
+   * and the one that now covers it; every other root stays warm (W7c). Each
+   * resets only the watches that can see it (fast-path FW5); `/`, a changed
+   * discovery-root set, resets every watch.
    */
   private _resetTopologyState(prefixes: readonly string[]): void {
     for (const prefix of prefixes) {
       this._projectIndexes.evict(prefix);
     }
-    this._watchRegistry.emitResetAll();
+    this._watchRegistry.emitReset(prefixes);
   }
 
   private async _statToTreeNode(

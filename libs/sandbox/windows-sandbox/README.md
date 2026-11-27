@@ -5,8 +5,11 @@ The Windows half of Tau's contained shell (desktop Bash/Terminal blueprint D14, 
 promoted from the Q2 spike (`claude/project-thread-8sx5nl`, `packages/core/native-process/spikes/shell/mxc/`, runs
 40041468455 and 40046797357) and shaped after Codex's `codex-rs/windows-sandbox-rs`, read as reference and not vendored.
 
-Nothing here is enabled by default. The desktop composes the provider only when `TAU_WINDOWS_SHELL_SANDBOX=1` until
-the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
+The desktop composes the provider by default on Windows (operator decision 2026-11-27, after WIN-X64 shell conformance
+was green on main's candidate gate, run 45966873741, Q15 acceptance). Starting Tau with `TAU_WINDOWS_SHELL_SANDBOX=0`
+turns it off for diagnostics; the shell, the Terminal and every native kernel are then unavailable, never uncontained.
+The one-time elevated `setup` (one UAC prompt) runs on the first shell, Terminal or native-kernel use, never from the
+installer; the per-user uninstaller runs `revoke` (one UAC prompt) when an install record exists.
 
 ## Model
 
@@ -455,5 +458,10 @@ Visual C++ runtime DLL or does not answer `status`, and stages it with a NOTICE 
 toolchain, and a manifest with its sha256. `desktop:package-windows` depends on `prepare-windows-sandbox` and ships
 the three files at `resources/windows-sandbox/win32-x64/`; a release archive refuses to assemble without them. The
 Windows installer's signing step signs every PE file in the app, this helper included. Main points the services host
-at it (`TAU_WINDOWS_SANDBOX_HELPER`) and passes `TAU_WINDOWS_SHELL_SANDBOX=1` through when Tau was started with it;
-the Terminal pane then offers the one-time `setup` (one UAC prompt) while the probe answers `provisioning-required`.
+at it (`TAU_WINDOWS_SANDBOX_HELPER`) and passes `TAU_WINDOWS_SHELL_SANDBOX=1` unless Tau was started with `=0`.
+While `status` reports no install record, the first use asks for the one-time `setup` (one UAC prompt): the
+Terminal's first start, the agent's first `shell` call (the registry lists a setup-pending shell meanwhile) or the
+first native kernel launch (main's seal step). A declined prompt answers `sandbox-unavailable` for that use and the next
+use asks again; one agent run is asked once. The NSIS installer never elevates; its uninstaller (not an update) runs
+`revoke` elevated when `%ProgramData%\Tau\Sandbox\install.json` exists, removing the sandbox account, group and
+network fence (`apps/desktop/src/shared/windows-installer-include.ts`).

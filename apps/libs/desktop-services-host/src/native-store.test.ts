@@ -177,6 +177,7 @@ describe('the desktop native packages', () => {
     const host = detectHostIndicators();
 
     expect(declared).toEqual(expect.arrayContaining([...desktopNativeKernelIds()]));
-    expect(desktopNativeKernelIds().length > 0).toBe(host !== undefined && host.os !== 'win32');
+    /* Build123d and SMLib declare win32-x64 (a Windows arm64 host runs it emulated), contained by the Windows sandbox. */
+    expect(desktopNativeKernelIds().length > 0).toBe(host !== undefined);
   });
 });

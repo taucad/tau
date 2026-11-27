@@ -579,38 +579,64 @@ describe('WatchRegistry', () => {
   });
 
   describe('rooted topology resets', () => {
-    it('should reset a rooted watcher after mount, unmount, and project-root configuration', async () => {
+    /*
+     * A rooted view reads through the one mount it captured, so a topology change reaches it when that mount is
+     * remounted, unmounted or re-pointed by a project-root configuration. A change below the root of a view rooted
+     * higher up changes nothing it can see, and since fast-path FW5 (review m3) it hears nothing.
+     */
+    it('should reset a rooted watcher after mount, unmount, and project-root configuration of its own mount', async () => {
       const context = await createWorkspaceFileService();
-      const handler = vi.fn();
-      const stop = context.service.createRootedFileSystem('/').watch({ paths: [''], recursive: true }, handler);
+      const above = vi.fn();
+      const stopAbove = context.service.createRootedFileSystem('/').watch({ paths: [''], recursive: true }, above);
+      const preview = {
+        class: 'authored',
+        backend: 'memory',
+        storageRootKey: 'memory:preview:topology',
+      } as const;
+      const projectId = 'proj_ccccccccccccccccccccc';
+      const project = (providerBasePath: string) =>
+        ({
+          projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:topology-project', providerBasePath }],
+          roots: [],
+        }) as const;
+      const stops: Array<() => void> = [stopAbove];
 
       try {
-        await context.service.mount('/previews/topology', {
-          class: 'authored',
-          backend: 'memory',
-          storageRootKey: 'memory:preview:topology',
-        });
-        expect(handler).toHaveBeenLastCalledWith({ type: 'reset' });
+        await context.service.mount('/previews/topology', preview);
+        const previewHandler = vi.fn();
+        stops.push(
+          context.service
+            .createRootedFileSystem('/previews/topology')
+            .watch({ paths: [''], recursive: true }, previewHandler),
+        );
 
-        handler.mockClear();
+        await context.service.mount('/previews/topology', { ...preview, providerBasePath: 'other' });
+        expect(previewHandler).toHaveBeenLastCalledWith({ type: 'reset' });
+
+        const remounted = vi.fn();
+        stops.push(
+          context.service
+            .createRootedFileSystem('/previews/topology')
+            .watch({ paths: [''], recursive: true }, remounted),
+        );
         context.service.unmount('/previews/topology');
-        expect(handler).toHaveBeenLastCalledWith({ type: 'reset' });
+        expect(remounted).toHaveBeenLastCalledWith({ type: 'reset' });
 
-        handler.mockClear();
-        await context.service.configureProjectRoots({
-          projects: [
-            {
-              projectId: 'proj_ccccccccccccccccccccc',
-              backend: 'memory',
-              storageRootKey: 'memory:topology-project',
-              providerBasePath: 'project',
-            },
-          ],
-          roots: [],
-        });
-        expect(handler).toHaveBeenLastCalledWith({ type: 'reset' });
+        await context.service.configureProjectRoots(project('project'));
+        const projectHandler = vi.fn();
+        stops.push(
+          context.service
+            .createRootedFileSystem(`/projects/${projectId}`)
+            .watch({ paths: [''], recursive: true }, projectHandler),
+        );
+        await context.service.configureProjectRoots(project('moved'));
+        expect(projectHandler).toHaveBeenLastCalledWith({ type: 'reset' });
+
+        expect(above).not.toHaveBeenCalled();
       } finally {
-        stop();
+        for (const stop of stops) {
+          stop();
+        }
         context.service.dispose();
       }
     });

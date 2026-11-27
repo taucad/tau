@@ -291,6 +291,10 @@
 \* behind it. `chat-session-store.ts` now drops that command (`Refuse`): a lone send returns to the composer, and one
 \* with others behind it keeps its place for a new command. A `wait` refusal still yields, and a replay still keeps
 \* its pin.
+\* A-1 (2026-11-27): `chat-session-store.ts` shows the end of the log's current run to a chat machine that holds no
+\* turn and is not admitting its own gesture, whatever run it presents, so a read that folds a run's `running` with
+\* its end, or ends a later run too, no longer leaves the machine live and the queue waiting for good. This is the
+\* model's `Observe` of a terminal phase; no action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

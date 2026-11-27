@@ -140,6 +140,31 @@ export const ConverterViewer = memo(function ({
  * The export panel. From md up it is always open beside the viewer. Below md it folds away behind an Export toggle, so
  * the viewer and its bar stay in reach, and opens under the toggle over the viewer.
  */
+/**
+ * What the converter could not carry over from the opened file, such as the losses a native CAD import records.
+ * Collapsed by default; every warning stays readable.
+ */
+export function ConversionWarnings({
+  messages,
+}: Readonly<{ messages: readonly string[] }>): React.JSX.Element | undefined {
+  if (messages.length === 0) {
+    return undefined;
+  }
+  return (
+    <details className='text-xs text-muted-foreground'>
+      <summary className='w-fit rounded-xs select-none focus-visible:focus-outline-outside'>
+        {`${messages.length} ${messages.length === 1 ? 'warning' : 'warnings'}: some of the file's data didn't carry over`}
+      </summary>
+      <ul className='mt-2 max-h-40 list-disc space-y-1 overflow-y-auto pl-4 break-words'>
+        {messages.map((message, index) => (
+          // oxlint-disable-next-line react/no-array-index-key -- the list is replaced whole, and messages can repeat
+          <li key={index}>{message}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export function ConverterExportPanel({ children }: Readonly<{ children: React.ReactNode }>): React.JSX.Element {
   const [isOpenOnPhone, setIsOpenOnPhone] = useState(false);
   const panelId = useId();
@@ -198,6 +223,7 @@ function ConverterContentInner(): React.JSX.Element {
   const [isConverting, setIsConverting] = useState(false);
   const [openingFileName, setOpeningFileName] = useState<string>();
   const [conversionError, setConversionError] = useState<string>();
+  const [conversionWarnings, setConversionWarnings] = useState<readonly string[]>([]);
   const conversionGeneration = useRef(0);
 
   useEffect(() => {
@@ -325,6 +351,9 @@ function ConverterContentInner(): React.JSX.Element {
           throw new Error(`Converter returned unsupported preview media: ${preview.rendering.artifact.mimeType}`);
         }
         setUploadedFile({ name: entryFile.name, format, size: entryFile.size });
+        setConversionWarnings(
+          outcome.evaluation.issues.filter((issue) => issue.severity === 'warning').map((issue) => issue.message),
+        );
         documentRef.current?.close();
         documentRef.current = opened;
         pendingDocumentRef.current = undefined;
@@ -374,6 +403,7 @@ function ConverterContentInner(): React.JSX.Element {
     setIsConverting(false);
     setConversionError(undefined);
     setUploadedFile(undefined);
+    setConversionWarnings([]);
     documentRef.current?.close();
     documentRef.current = undefined;
     setRuntimeDocument(undefined);
@@ -505,6 +535,7 @@ function ConverterContentInner(): React.JSX.Element {
                         <p className='text-xs text-muted-foreground'>
                           {formatDisplayName(uploadedFile.format)} · {formatFileSize(uploadedFile.size)}
                         </p>
+                        <ConversionWarnings messages={conversionWarnings} />
                       </div>
                     ) : undefined}
                     <Converter

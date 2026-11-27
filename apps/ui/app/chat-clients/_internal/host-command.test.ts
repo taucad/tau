@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
-import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
+import { ownerWaitOf, sendHostCommand } from '#chat-clients/_internal/host-command.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 
 const start: HostCommand = {
@@ -147,5 +147,32 @@ describe('sendHostCommand', () => {
       code: 'LEADER_VERSION_MISMATCH',
     });
     expect(retryDelay).toHaveBeenCalledOnce();
+  });
+});
+
+describe('ownerWaitOf', () => {
+  const refusal = (code: string, effect: 'not-applied' | 'unknown' = 'not-applied'): CommandAnswer => ({
+    commandId: start.commandId,
+    generation: 1,
+    status: 'refused',
+    effect,
+    code,
+    message: code,
+  });
+
+  it.each(['WRITER_LOCKED', 'LOG_FENCED', 'LOG_CLOSED', 'HOST_CLOSED', 'LEADERSHIP_LOST', 'LEADER_VERSION_MISMATCH'])(
+    'should read a %s refusal that applied nothing as a wait for the chat’s writer (PERF-5)',
+    (code) => {
+      expect(ownerWaitOf(refusal(code))?.code).toBe(code);
+    },
+  );
+
+  it.each([
+    { name: 'a live run, which the outbox gate waits behind', answer: refusal('CHAT_RUN_LIVE') },
+    { name: 'a refusal the person must act on', answer: refusal('HOST_MODEL_UNAVAILABLE') },
+    { name: 'an unknown effect, which is re-sent at once', answer: refusal('WRITER_LOCKED', 'unknown') },
+    { name: 'an accepted command', answer: answer('applied') },
+  ])('should not read $name as a wait', ({ answer: given }) => {
+    expect(ownerWaitOf(given)).toBeUndefined();
   });
 });

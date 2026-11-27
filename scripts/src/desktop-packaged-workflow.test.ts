@@ -56,6 +56,7 @@ const packaged = load(read('.github/workflows/desktop-packaged.yml')) as Workflo
 const staging = load(read('.github/workflows/release-desktop-staging.yml')) as Workflow;
 const promotion = load(read('.github/workflows/desktop-route-promotion.yml')) as Workflow;
 const nightly = load(read('.github/workflows/e2e-nightly.yml')) as Workflow;
+const rehearsal = load(read('.github/workflows/desktop-rehearsal-gate.yml')) as Workflow;
 
 /** A GitHub Actions `${{ … }}` expression, built so the source holds no template-like string literal. */
 const expression = (body: string): string => ['$', '{{ ', body, ' }}'].join('');
@@ -166,14 +167,26 @@ describe('release-desktop-staging.yml candidate gates', () => {
     expect(gate?.permissions).toEqual({ contents: 'read' });
   });
 
+  it('should call the rehearsal gate (T-REH.2) on the candidate commit after a green shell gate', () => {
+    const gate = staging.jobs['rehearsal'];
+    expect(gate?.uses).toBe('./.github/workflows/desktop-rehearsal-gate.yml');
+    expect(gate?.needs).toEqual(['prerelease', 'shell']);
+    expect(gate?.if).toBe("needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success'");
+    expect(gate?.with).toEqual({ ref: expression('needs.prerelease.outputs.sha') });
+    expect(gate?.permissions).toEqual({ contents: 'read' });
+  });
+
   it('should tag a candidate only when every gate is green', () => {
     const { tag } = staging.jobs;
-    expect(tag?.needs).toEqual(['prerelease', 'shell', 'packaged', 'benchmarks']);
+    expect(tag?.needs).toEqual(['prerelease', 'shell', 'packaged', 'benchmarks', 'intel-native', 'rehearsal']);
     expect(tag?.if).toBe(
-      "needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success'",
+      "needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success' && needs.intel-native.result == 'success' && needs.rehearsal.result == 'success'",
     );
     expect(tag?.steps?.find((step) => step.id === 'release')?.run).toMatch(
       /^\s*Packaged desktop gate: run \$\{RUN_ID\}$/mu,
+    );
+    expect(tag?.steps?.find((step) => step.id === 'release')?.run).toMatch(
+      /^\s*Rehearsal gate \(T-REH\.2\): run \$\{RUN_ID\}$/mu,
     );
   });
 
@@ -330,3 +343,55 @@ describe('desktop-route-promotion.yml full candidate request (D-DS3)', () => {
 });
 
 /* eslint-enable @typescript-eslint/naming-convention -- end of the external names. */
+
+describe('desktop-rehearsal-gate.yml (T-REH.2)', () => {
+  const job = rehearsal.jobs['rehearsal']!;
+  const steps = job.steps ?? [];
+  const named = (name: string): Step | undefined => steps.find((step) => step.name === name);
+
+  it('should be callable with the candidate commit and dispatchable on any commit', () => {
+    expect(rehearsal.on['workflow_call']?.inputs?.['ref']).toMatchObject({ type: 'string', required: true });
+    expect(rehearsal.on['workflow_dispatch']?.inputs?.['ref']).toMatchObject({ type: 'string', required: false });
+    expect(Object.keys(rehearsal.on).sort()).toEqual(['workflow_call', 'workflow_dispatch']);
+    expect(named('Checkout')?.with?.['ref']).toBe(expression("inputs.ref || 'main'"));
+    expect(rehearsal.concurrency?.group ?? '').not.toContain('github.workflow');
+    expect(rehearsal.permissions).toEqual({ contents: 'read' });
+  });
+
+  it('should produce the profile with the newest published staging release, never a draft', () => {
+    const script = named('Find the base release')?.run ?? '';
+    const run = (releases: string) =>
+      runStep(
+        script,
+        {
+          gh: `case "$*" in *"release list"*) printf '%s' "$RELEASES" ;; esac`,
+          git: `case "$1" in rev-parse) case "$2" in HEAD) echo candidate ;; *) echo "base-of-$2" ;; esac ;; esac`,
+        },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- an environment variable name.
+        { RELEASES: releases },
+      );
+    const found = run('desktop-staging@0.9.1-staging.11');
+    expect(found.status).toBe(0);
+    expect(found.outputs).toEqual({
+      tag: 'desktop-staging@0.9.1-staging.11',
+      sha: 'base-of-desktop-staging@0.9.1-staging.11^{commit}',
+    });
+    expect(found.calls).toContain('--exclude-drafts');
+    expect(run('').status).not.toBe(0);
+  });
+
+  it('should build the producer in a second worktree and hand it to the rehearsal target', () => {
+    const build = named("Build the base release's unpackaged app in a second worktree");
+    expect(build?.env?.['BASE']).toBe(expression('steps.base.outputs.sha'));
+    expect(build?.run).toContain('git worktree add --detach "$worktree" "$BASE"');
+    expect(build?.run).toContain('pnpm nx run desktop:build');
+    expect(build?.run).toContain('TAU_E2E_REHEARSAL_BASE_DESKTOP_ROOT=$worktree/apps/desktop');
+    const index = (step: Step | undefined): number => steps.indexOf(step!);
+    const gate = named("Run the rehearsal over the base release's profile");
+    expect(index(build)).toBeLessThan(index(gate));
+    expect(gate?.run).toContain('xvfb-run --auto-servernum pnpm nx run desktop-e2e:test:e2e:rehearsal-gate');
+    // Both desktop builds carry the shipped renderer (adaptive app deployment mode W6): the workflow sets no ceiling, and
+    // the target sets `TAU_CLOUD_ENABLED=true` for its own cloud web build only.
+    expect((rehearsal as Workflow & { env?: Record<string, string> }).env?.['TAU_CLOUD_ENABLED']).toBeUndefined();
+  });
+});

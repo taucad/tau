@@ -205,9 +205,8 @@ it('should preserve a legacy cloud identity through browser and CLI sync without
       .toContain('Backed up');
     // Admission converts the working declaration; that edit need not already be saved.
     expect(await revisionStatus(browser.page).textContent()).not.toContain('Needs your decision');
-    expect(
-      await browser.page.getByRole('region', { name: 'Couldn’t download this project', exact: true }).count(),
-    ).toBe(0);
+    /* The viewer says a failed open in its stage failure card, the other panes in their placeholder: neither shows. */
+    expect(await browser.page.getByText('Couldn’t open this project', { exact: true }).count()).toBe(0);
     expect(JSON.parse(await browserFile(browser.page, slug, '.tau/project.json'))).toEqual({ version: 1, projectId });
     expect(JSON.parse(await browserFile(browser.page, slug, 'tau.json'))).not.toHaveProperty('id');
 

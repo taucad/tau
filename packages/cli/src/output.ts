@@ -126,6 +126,41 @@ for (const stream of [process.stdout, process.stderr]) {
   });
 }
 
+type StdoutWrite = typeof process.stdout.write;
+
+let reservedWrite: StdoutWrite | undefined;
+let redirectedWrite: StdoutWrite | undefined;
+
+/**
+ * Reserve stdout for the command's own result bytes.
+ *
+ * A command whose stdout is machine-read (`--json`, a protocol) cannot let anything
+ * else write there: a kernel's `console.log`, Emscripten glue, or a worker thread's
+ * forwarded stdout would corrupt the record. After this call every such write goes
+ * to stderr, and only the returned writer (which {@link writeStdout} and
+ * {@link emit} also use) reaches stdout. While the reservation holds, calling it
+ * again returns the same writer.
+ *
+ * @internal
+ * @returns A writer bound to the real stdout.
+ */
+export const reserveStdout = (): StdoutWrite => {
+  if (reservedWrite && process.stdout.write === redirectedWrite) {
+    return reservedWrite;
+  }
+  const write: StdoutWrite = process.stdout.write.bind(process.stdout);
+  const redirect: StdoutWrite = process.stderr.write.bind(process.stderr);
+  reservedWrite = write;
+  redirectedWrite = redirect;
+  process.stdout.write = redirect;
+  /* A worker's stdout is piped into process.stdout; once stderr is full, the pipe waits for stdout's 'drain'. */
+  process.stderr.on('drain', () => process.stdout.emit('drain'));
+  console.log = console.error;
+  console.info = console.error;
+  console.debug = console.error;
+  return write;
+};
+
 /**
  * Write result bytes to stdout and wait for them to reach the sink.
  *
@@ -142,7 +177,11 @@ export const writeStdout = async (chunk: string | Uint8Array<ArrayBuffer>): Prom
   }
 
   await new Promise<void>((resolve, reject) => {
-    process.stdout.write(chunk, (error) => {
+    const write =
+      reservedWrite && process.stdout.write === redirectedWrite
+        ? reservedWrite
+        : process.stdout.write.bind(process.stdout);
+    write(chunk, (error) => {
       if (error && (error as NodeJS.ErrnoException).code !== 'EPIPE') {
         reject(error);
         return;

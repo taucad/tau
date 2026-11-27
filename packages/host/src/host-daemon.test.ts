@@ -29,6 +29,7 @@ import type * as runtimeHostNode from '@taucad/runtime/host/node';
 import { z } from 'zod';
 
 import { startHostDaemon } from '#host-daemon.js';
+import { createNodeLauncher } from '#node-launcher.fixture.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
 import { writeHostCredential } from '#credential-store.js';
 import * as revisions from '#revisions.js';
@@ -961,10 +962,13 @@ describe('startHostDaemon', () => {
       }),
     );
     machineRuntimeSpy.mockClear();
+    /* T19: the store's refused admissions reach the daemon's runtime telemetry. */
+    const onAdmissionRefusal = vi.fn();
     const daemon = startHostDaemon({
       relayUrl: new URL('http://127.0.0.1:1'),
       runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
       agent: { ...agentOptions, machines: { providers: [fixtureMachine(), fixtureSerialMachine()] } },
+      machineTelemetry: { onAdmissionRefusal },
       onEvent: (event) => events.push(event),
     });
     await daemon.ready;
@@ -1008,6 +1012,8 @@ describe('startHostDaemon', () => {
       throw new Error('The daemon offered its tools no machines facet.');
     }
     await expect(agentFacet.list({})).resolves.toMatchObject({ entries: [] });
+    /* Admitted calls report nothing. */
+    expect(onAdmissionRefusal).not.toHaveBeenCalled();
     const person = { kind: 'user', id: 'person', label: 'Person' } as const;
     await expect(agentFacet.setTesting({ machineId: 'any', enabled: true, requestedBy: person })).rejects.toThrow(
       'ROUTE_DENIED',
@@ -1028,6 +1034,11 @@ describe('startHostDaemon', () => {
         approvedBy: person,
       }),
     ).rejects.toThrow('ROUTE_DENIED');
+    /* Each refused admission is reported once, with its closed code and the session's actor kind only. */
+    expect(onAdmissionRefusal.mock.calls).toEqual([
+      [{ code: 'ROUTE_DENIED', actor: 'agent' }],
+      [{ code: 'ROUTE_DENIED', actor: 'agent' }],
+    ]);
     /* The agent's session lives only as long as its channel. */
     const revokedBefore = revokedSessions.length;
     const closable = (facet: typeof agentFacet): facet is typeof agentFacet & Readonly<{ close(): void }> =>
@@ -1641,7 +1652,8 @@ describe('startHostDaemon', () => {
           throw new TypeError('Expected the daemon to open a project host.');
         }
         expect(project.credential()).toMatchObject({ mode });
-        const stream = project.modelTransport.stream({
+        /* A call is made only on its run's transport; the mode does not change how the call authenticates. */
+        const stream = project.modelTransport.deployment!.forRun('unfunded').stream({
           attemptId: 'attempt-model-auth',
           invocationPurpose: 'generation',
           modelId: 'fixture-model',
@@ -1713,7 +1725,7 @@ describe('startHostDaemon', () => {
         if (!project) {
           throw new TypeError('Expected the daemon to open a project host.');
         }
-        const stream = project.modelTransport.stream({
+        const stream = project.modelTransport.deployment!.forRun(tauCloudEnabled ? 'funded' : 'unfunded').stream({
           attemptId: 'attempt-host-labels',
           invocationPurpose: 'generation',
           modelId: 'fixture-model',
@@ -1735,6 +1747,340 @@ describe('startHostDaemon', () => {
       }
     },
     30_000,
+  );
+
+  /* D1: the gateway API's deployment answer, not TAU_CLOUD_ENABLED, chooses each run's billing mode; only a 404 or an
+   * explicit answer is unfunded, and a failure is unknown (I1, I2). */
+  it.each([
+    {
+      tauCloudEnabled: undefined,
+      status: 200,
+      body: { version: 1, edition: 'cloud', billing: { funded: true }, maxAgeSeconds: 300 },
+      expected: 'funded',
+    },
+    {
+      tauCloudEnabled: true,
+      status: 200,
+      body: { version: 1, edition: 'self-host', billing: { funded: false }, maxAgeSeconds: 300 },
+      expected: 'unfunded',
+    },
+    { tauCloudEnabled: true, status: 404, body: { message: 'Not Found' }, expected: 'unfunded' },
+    { tauCloudEnabled: false, status: 503, body: { message: 'unavailable' }, expected: 'unknown' },
+  ] as const)(
+    "should take a run's billing mode from the gateway's deployment answer ($status) with tauCloudEnabled=$tauCloudEnabled",
+    async ({ tauCloudEnabled, status, body, expected }) => {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-deployment-'));
+      process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+      process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+      const relay = await startRelay();
+      const paths: Array<string | undefined> = [];
+      const gateway = createServer((request, response) => {
+        paths.push(request.url);
+        response.writeHead(status, { 'content-type': 'application/json' });
+        response.end(JSON.stringify(body));
+      });
+      resources.push(gateway);
+      await new Promise<void>((resolve) => {
+        gateway.listen(0, '127.0.0.1', resolve);
+      });
+      const address = gateway.address();
+      if (!address || typeof address === 'string') {
+        throw new TypeError('Expected a TCP gateway address.');
+      }
+      projectHostSpy.mockClear();
+      const daemon = startHostDaemon({
+        relayUrl: relay.url,
+        relay: false,
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+        agent: {
+          ...(await agentOptionsIn(temporaryDirectory)),
+          ...(tauCloudEnabled === undefined ? {} : { tauCloudEnabled }),
+          gatewayBaseUrl: `http://127.0.0.1:${String(address.port)}/v1/llm`,
+        },
+      });
+      try {
+        await daemon.ready;
+        const project = projectHostSpy.mock.calls.at(-1)?.[0];
+        if (!project) {
+          throw new TypeError('Expected the daemon to open a project host.');
+        }
+
+        await expect(project.modelTransport.deployment?.resolve()).resolves.toBe(expected);
+        expect(paths).toEqual(['/v1/deployment']);
+      } finally {
+        await daemon.close();
+      }
+    },
+    30_000,
+  );
+
+  /* Each daemon asks its own API: a later daemon on a reused origin never reads an earlier daemon's cached answer. */
+  it('should not share a cached deployment answer between daemons on the same origin', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-deployment-cache-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    const answering = async (status: number, body: unknown, port = 0) => {
+      const server = createServer((_request, response) => {
+        response.writeHead(status, { 'content-type': 'application/json' });
+        response.end(JSON.stringify(body));
+      });
+      resources.push(server);
+      await new Promise<void>((resolve) => {
+        server.listen(port, '127.0.0.1', resolve);
+      });
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        throw new TypeError('Expected a TCP gateway address.');
+      }
+      return { server, port: address.port };
+    };
+    const modeFrom = async (port: number) => {
+      projectHostSpy.mockClear();
+      const daemon = startHostDaemon({
+        relayUrl: relay.url,
+        relay: false,
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+        agent: { ...(await agentOptionsIn(temporaryDirectory!)), gatewayBaseUrl: `http://127.0.0.1:${String(port)}` },
+      });
+      try {
+        await daemon.ready;
+        return await projectHostSpy.mock.calls.at(-1)?.[0].modelTransport.deployment?.resolve();
+      } finally {
+        await daemon.close();
+      }
+    };
+    const cloud = await answering(200, { version: 1, edition: 'cloud', billing: { funded: true }, maxAgeSeconds: 300 });
+    await expect(modeFrom(cloud.port)).resolves.toBe('funded');
+    await new Promise<void>((resolve) => {
+      cloud.server.close(() => {
+        resolve();
+      });
+    });
+    const selfHost = await answering(404, { message: 'Not Found' }, cloud.port);
+
+    await expect(modeFrom(selfHost.port)).resolves.toBe('unfunded');
+  }, 30_000);
+
+  /* GI-Q6 on a local-only `tau serve` signed in with `tau login`: a funded run names the CLI session's account, so a
+   * prepared attempt is stamped with it and another account's later resume is refused, not voided. */
+  it('should stamp a local-account run with the session account and refuse another account resuming it', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-local-principal-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    /* A Cloud API: it answers funded and never finishes a model call, so the run stays mid-call. */
+    const gateway = createServer((request, response) => {
+      if (request.url === '/v1/deployment') {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ version: 1, edition: 'cloud', billing: { funded: true }, maxAgeSeconds: 300 }));
+      }
+    });
+    resources.push({
+      close: () => {
+        gateway.closeAllConnections();
+        gateway.close();
+      },
+    });
+    await new Promise<void>((resolve) => {
+      gateway.listen(0, '127.0.0.1', resolve);
+    });
+    const address = gateway.address();
+    if (!address || typeof address === 'string') {
+      throw new TypeError('Expected a TCP gateway address.');
+    }
+    const launcherModel = { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 } as const;
+    const tools = { list: () => [], invoke: async () => ({ content: 'no tools', isError: true }) };
+    const signedIn = async (accountId: string, launcherRoot: string) => {
+      projectHostSpy.mockClear();
+      const daemon = startHostDaemon({
+        relayUrl: relay.url,
+        relay: false,
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+        agent: {
+          ...(await agentOptionsIn(join(temporaryDirectory!, accountId))),
+          tauApiToken: `${accountId}-session`,
+          revisionActor: { kind: 'user', id: accountId },
+          gatewayBaseUrl: `http://127.0.0.1:${String(address.port)}`,
+        },
+      });
+      await daemon.ready;
+      const options = projectHostSpy.mock.calls.at(-1)?.[0];
+      if (options === undefined) {
+        throw new TypeError('Expected the daemon to open a project host.');
+      }
+      const launcher = createNodeLauncher({
+        workspaceRoot: launcherRoot,
+        model: launcherModel,
+        systemPrompt: 'You are Tau.',
+        toolRegistry: tools,
+        modelTransport: options.modelTransport,
+        credential: options.credential,
+      });
+      return { daemon, launcher, options };
+    };
+    const events = (root: string): string => join(root, '.tau', 'chats', 'chat-account', 'events.jsonl');
+    const firstRoot = await mkdtemp(join(temporaryDirectory, 'first-'));
+    const survivorRoot = await mkdtemp(join(temporaryDirectory, 'survivor-'));
+    const first = await signedIn('user_a', firstRoot);
+    let second: Awaited<ReturnType<typeof signedIn>> | undefined;
+    try {
+      expect(first.options.credential()).toEqual({ mode: 'session', principal: 'user_a' });
+      await first.launcher.execute({
+        type: 'start',
+        commandId: 'cmd-local-account',
+        payload: {
+          trigger: 'submit',
+          chatId: 'chat-account',
+          runId: 'run-account',
+          message: { id: 'user-1', role: 'user', content: 'hello' },
+        },
+      });
+      await vi.waitFor(
+        async () => {
+          expect(await readFile(events(firstRoot), 'utf8')).toContain('"type":"model.invocation-prepared"');
+        },
+        { timeout: 10_000 },
+      );
+      const log = await readFile(events(firstRoot), 'utf8');
+      const prepared = log
+        .split('\n')
+        .filter((line) => line.includes('"type":"model.invocation-prepared"'))
+        .map((line) => JSON.parse(line) as { readonly principal?: string });
+      expect(prepared.map((row) => row.principal)).toEqual(['user_a']);
+
+      /* The crash: the durable state mid-call, under a daemon signed in as another account. */
+      await mkdir(join(survivorRoot, '.tau', 'chats', 'chat-account'), { recursive: true });
+      await writeFile(events(survivorRoot), log);
+      second = await signedIn('user_b', survivorRoot);
+      await vi.waitFor(
+        async () => {
+          const answer = await second!.launcher.execute({
+            type: 'attach',
+            commandId: `attach-${String(Date.now())}`,
+            payload: { chatId: 'chat-account' },
+          });
+          expect(answer).toMatchObject({ details: { snapshot: { state: 'failed' } } });
+        },
+        { timeout: 10_000 },
+      );
+
+      await expect(
+        second.launcher.execute({
+          type: 'resume',
+          commandId: 'cmd-local-account-resume',
+          payload: { chatId: 'chat-account', runId: 'run-account' },
+        }),
+      ).resolves.toMatchObject({ status: 'refused', code: 'MODEL_ATTEMPT_OTHER_ACCOUNT' });
+    } finally {
+      await first.launcher.close();
+      await second?.launcher.close();
+      await first.daemon.close();
+      await second?.daemon.close();
+    }
+  }, 60_000);
+
+  /* GI-Q6, I1: a local-only daemon given a session token but no account (the CLI's startup lookup failed) never runs
+   * funded unstamped: it looks the account up when a funded run is admitted, and refuses the run when it still cannot. */
+  it.each([
+    ['stamps the account it looks up', 200],
+    ['refuses DEPLOYMENT_UNKNOWN without a gateway call when the account stays unknown', 503],
+  ] as const)(
+    'should keep a local-account run with no revision actor off unstamped funding: %s',
+    async (_name, sessionStatus) => {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-lazy-principal-'));
+      process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+      process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+      const relay = await startRelay();
+      const requests: string[] = [];
+      /* A Cloud API: it answers funded and never finishes a model call, so a funded run stays mid-call. */
+      const gateway = createServer((request, response) => {
+        requests.push(request.url ?? '');
+        if (request.url === '/v1/deployment') {
+          response.writeHead(200, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ version: 1, edition: 'cloud', billing: { funded: true }, maxAgeSeconds: 300 }));
+        } else if (request.url === '/v1/auth/get-session') {
+          response.writeHead(sessionStatus, { 'content-type': 'application/json' });
+          response.end(
+            JSON.stringify(sessionStatus === 200 ? { user: { id: 'user_lazy' } } : { message: 'unavailable' }),
+          );
+        }
+      });
+      resources.push({
+        close: () => {
+          gateway.closeAllConnections();
+          gateway.close();
+        },
+      });
+      await new Promise<void>((resolve) => {
+        gateway.listen(0, '127.0.0.1', resolve);
+      });
+      const address = gateway.address();
+      if (!address || typeof address === 'string') {
+        throw new TypeError('Expected a TCP gateway address.');
+      }
+      projectHostSpy.mockClear();
+      const daemon = startHostDaemon({
+        relayUrl: relay.url,
+        relay: false,
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+        agent: {
+          ...(await agentOptionsIn(join(temporaryDirectory, 'agent'))),
+          tauApiToken: 'lazy-session',
+          gatewayBaseUrl: `http://127.0.0.1:${String(address.port)}`,
+        },
+      });
+      await daemon.ready;
+      const options = projectHostSpy.mock.calls.at(-1)?.[0];
+      if (options === undefined) {
+        throw new TypeError('Expected the daemon to open a project host.');
+      }
+      const root = await mkdtemp(join(temporaryDirectory, 'root-'));
+      const launcher = createNodeLauncher({
+        workspaceRoot: root,
+        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+        systemPrompt: 'You are Tau.',
+        toolRegistry: { list: () => [], invoke: async () => ({ content: 'no tools', isError: true }) },
+        modelTransport: options.modelTransport,
+        credential: options.credential,
+      });
+      const events = join(root, '.tau', 'chats', 'chat-lazy', 'events.jsonl');
+      try {
+        await launcher.execute({
+          type: 'start',
+          commandId: 'cmd-lazy',
+          payload: {
+            trigger: 'submit',
+            chatId: 'chat-lazy',
+            runId: 'run-lazy',
+            message: { id: 'user-1', role: 'user', content: 'hello' },
+          },
+        });
+        const settled = sessionStatus === 200 ? '"type":"model.invocation-prepared"' : '"code":"DEPLOYMENT_UNKNOWN"';
+        await vi.waitFor(
+          async () => {
+            expect(await readFile(events, 'utf8')).toContain(settled);
+          },
+          { timeout: 10_000 },
+        );
+        const log = await readFile(events, 'utf8');
+        const prepared = log
+          .split('\n')
+          .filter((line) => line.includes('"type":"model.invocation-prepared"'))
+          .map((line) => JSON.parse(line) as { readonly principal?: string });
+        if (sessionStatus === 200) {
+          expect(prepared.map((row) => row.principal)).toEqual(['user_lazy']);
+          expect(options.credential()).toEqual({ mode: 'session', principal: 'user_lazy' });
+        } else {
+          expect(prepared).toEqual([]);
+          expect(requests.filter((url) => url !== '/v1/deployment' && url !== '/v1/auth/get-session')).toEqual([]);
+        }
+      } finally {
+        await launcher.close();
+        await daemon.close();
+      }
+    },
+    60_000,
   );
 
   /* W6.r1 round 3 (GI-Q6): the account the pairing exchange returned, stored with the credential, is the principal

@@ -45,7 +45,12 @@ describe('ARM MODULE / repeatable quadrants', () => {
       ],
     });
     expectGeo(m).toHaveNoComponentInterference({
-      pairs: [{ left: 'AF-003 Arm RR', right: 'AF-004 Spar RR' }],
+      pairs: [
+        {
+          left: /^AF-003 Arm RR(?:#\d+)?$/,
+          right: /^AF-004 Spar RR(?:#\d+)?$/,
+        },
+      ],
       tolerance: 0.02,
     });
   });

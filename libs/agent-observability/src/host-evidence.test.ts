@@ -211,6 +211,30 @@ describe('createHostEvidence', () => {
     );
   });
 
+  it('should read the purposes once for both reporters when a run starts (WP-02)', async () => {
+    let reads = 0;
+    const { evidence } = setup(
+      () => {
+        reads += 1;
+        return allowing(['summary', 'feedback'])();
+      },
+      () => 'user-1',
+      memoryPendingStore(),
+    );
+    /* The host's first reads, at composition, are one request for both purposes. */
+    await vi.waitFor(() => {
+      expect(evidence.feedback?.coverage().stop).toBeDefined();
+    });
+    expect(reads).toBe(1);
+
+    /* A run's start reads again, once for both. */
+    evidence.onChatQuiescent('chat-1', false);
+    await Promise.all([evidence.reporter.refresh(), evidence.feedback?.refresh()]);
+
+    /* Both run-start reads shared one request; the two refreshes queued after them shared the next. */
+    expect(reads).toBe(3);
+  });
+
   it('should bind a grant given after the host opened when a run starts, and report that run', async () => {
     /* A new project: the host opens before the API knows it, so its first read is refused; the run then starts, ends
      * and goes quiescent. Bound only at quiescence, every fact of that run would predate the grant and be dropped. */

@@ -332,10 +332,13 @@ it.each([
       }
     }
     const ratio = renderer.getPixelRatio();
-    expect(gizmoBounds.left, 'gizmo remains in its 96px bottom-right viewport').toBeGreaterThanOrEqual(
-      canvas.width - 96 * ratio,
+    // The 96px cube sits 24px in from the right and bottom edges, where its navigation buttons ring it
+    // (`navigationOffset` in viewport-gizmo-adapter.ts).
+    const gizmoCorner = (96 + 24) * ratio;
+    expect(gizmoBounds.left, 'gizmo remains in its bottom-right viewport').toBeGreaterThanOrEqual(
+      canvas.width - gizmoCorner,
     );
-    expect(gizmoBounds.top).toBeGreaterThanOrEqual(canvas.height - 96 * ratio);
+    expect(gizmoBounds.top).toBeGreaterThanOrEqual(canvas.height - gizmoCorner);
     expect(gizmoBounds.right - gizmoBounds.left, 'gizmo retains its visible size').toBeGreaterThan(40 * ratio);
     expect(gizmoBounds.bottom - gizmoBounds.top).toBeGreaterThan(40 * ratio);
     expect(gizmoEdgePixels, 'the final gizmo silhouette retains antialiased coverage').toBeGreaterThan(20);

@@ -15,7 +15,7 @@ import type { MachineClient, MachineDirectoryEntry, MachineJob } from '@taucad/r
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useModelAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 import { useMachineApprovalBridge } from '#hooks/use-machines-approvals.js';
 import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
@@ -368,7 +368,7 @@ function AvailablePrintPanel({ isShown }: { readonly isShown: boolean }): React.
 }
 
 export const PrintPanelBody = ({ isShown = true }: { readonly isShown?: boolean }): React.JSX.Element => {
-  const availability = useModelAvailability();
+  const availability = useModelAvailability('export');
   const enabled = useFeature('machines');
   if (!enabled) {
     return <MachinesDisabled />;
@@ -376,6 +376,6 @@ export const PrintPanelBody = ({ isShown = true }: { readonly isShown?: boolean 
   return availability === 'ready' ? (
     <AvailablePrintPanel isShown={isShown} />
   ) : (
-    <ProjectSyncPlaceholder state={availability} />
+    <ProjectWaitSkeleton state={availability} shape='fields' label='Print' />
   );
 };

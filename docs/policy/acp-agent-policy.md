@@ -1,9 +1,9 @@
 ---
 title: 'ACP Agent Policy'
-description: 'Rules every external ACP agent profile and host must meet for install locations, discovery, probes, refusals, fix commands, sign-in and version floors.'
+description: 'Rules every external ACP agent profile and host must meet for install locations, discovery, probes, refusals, fix commands, sign-in, version floors and default permission modes.'
 status: active
 created: '2026-11-15'
-updated: '2026-11-15'
+updated: '2026-11-17'
 related:
   - docs/research/acp-agent-install-paths-blueprint.md
   - docs/research/external-agent-acp-topology.md
@@ -22,7 +22,7 @@ An external agent runs the user's own vendor CLI under the user's own login. Ven
 
 ## Scope
 
-This policy covers `acpAgentProfiles`, discovery, the version probe, refusal codes, fix commands, re-discovery and sign-in commands, in the desktop app and in `tau serve`. It does not cover what happens inside a turn.
+This policy covers `acpAgentProfiles`, discovery, the version probe, refusal codes, fix commands, re-discovery, sign-in commands and the permission mode a chat starts in, in the desktop app and in `tau serve`. It does not otherwise cover what happens inside a turn.
 
 ## Rules
 
@@ -40,6 +40,8 @@ Declare everything Tau knows about an agent's install locations, its install, up
 | `fallbackExecutables`                       | A key for `darwin`, `linux` and `win32`; an empty list carries a comment saying no location outside PATH is known |
 | `installCommand`, `updateCommand`           | A `posix` and a `windows` line, from the vendor's documentation                                                   |
 | `loginCommand`                              | Starts with `cli`                                                                                                 |
+| `loginArgs`                                 | The words of `loginCommand` after `cli`, none needing quotes; `[cli, ...loginArgs]` spells `loginCommand`         |
+| `defaultModePreference`                     | Mode ids, `auto` first, each with its adapter evidence (rule 14)                                                  |
 
 ### 2. Declare Verified Install Locations
 
@@ -135,7 +137,7 @@ Resolve one `fixCommand` on the host for the host's own platform and send it on 
 
 ### 10. Show a Sign-In Command That Works
 
-List Tau's `cli-login` method first on every sign-in surface. Name the CLI by its bare name when it was found on PATH and by its quoted absolute path otherwise. Drop an advertised terminal command that runs the host's own runtime or names the adapter's module path. Quote every surfaced command for the host's shell. On POSIX, single-quote an argument that is empty or holds anything outside `[A-Za-z0-9_@%+=:,./-]`, writing each `'` inside it as `'\''`. On Windows, double-quote an argument that is empty or holds whitespace, `"`, `'`, `` ` `` or `$`, escape each `` ` ``, `"` and `$` inside it with a backtick, and write a quoted program as `& "..."` so PowerShell runs it. Never run a sign-in command.
+List Tau's `cli-login` method first on every sign-in surface. Name the CLI by its bare name when it was found on PATH and by its quoted absolute path otherwise. Drop an advertised terminal command that runs the host's own runtime or names the adapter's module path. Quote every surfaced command for the host's shell. On POSIX, single-quote an argument that is empty or holds anything outside `[A-Za-z0-9_@%+=:,./-]`, writing each `'` inside it as `'\''`. On Windows, double-quote an argument that is empty or holds whitespace, `"`, `'`, `` ` `` or `$`, escape each `` ` ``, `"` and `$` inside it with a backtick, and write a quoted program as `& "..."` so PowerShell runs it.
 
 **Why**: An adapter describes sign-in as its own process invocation, which is Tau's binary when Tau hosts the adapter.
 
@@ -152,6 +154,16 @@ INCORRECT:
 /Applications/Tau.app/Contents/Frameworks/Tau Helper.app/Contents/MacOS/Tau Helper .../claude-agent-acp/dist/index.js --cli auth login --claudeai
 ```
 
+Run a sign-in only in the desktop's sign-in tab, and only the profile's own:
+
+- The page names an agent id and nothing else. Main finds the adapter in its own discovery and starts it with `acpLoginLaunch`: the located `executablePath` (located again, rule 4), the profile's `loginArgs` and the adapter's own environment (`acpAdapterEnvironment`, so `configEnv` such as `CLAUDE_CONFIG_DIR` applies). Never a shell, a renderer-supplied string or a command an adapter advertised.
+- Open each sign-in as its own workbench tab beside the Terminal, one per agent; never inside the user's shell. Show the command filled in exactly as the card shows it (bare on `PATH`, the quoted path for a fallback, D10); start it only on the user's Enter or click.
+- Tau code never parses, logs, stores or forwards the tab's input or output beyond drawing it; the vendor's page opens in the default browser, never in a Tau window.
+- One running sign-in per agent; stop it when its tab, window or the app closes. The tab ends when the CLI exits and reports the exit code alone: a real exit 0 retries the refused turn once, as **Try again** would; a non-zero exit or a signal leaves the card with how it ended. Key the offer on the host that refused the turn, not on the composer. Add no polling.
+- A surface with no local Terminal (a browser, a remote host) keeps the command to copy.
+
+**Why**: The user completes the vendor's own flow in a process Tau starts but never reads, which keeps sign-in inside the vendor's terms (`docs/research/claude-code-acp-terms-review.md`, Finding 2) and lands the login where the agent reads it.
+
 ### 11. Tie the Version Floor to the Adapter Pin
 
 Change an adapter pin, its `minimumCliVersion` and, when the banner changed, its `versionSample` in the same commit.
@@ -166,18 +178,37 @@ Add a descriptor field only as optional, and land it in the wire schema, the API
 
 Every profile passes `registry.conformance.test.ts` and `login.conformance.test.ts` unmodified; adding a profile adds no test file. `login.adapter-contract.integration.test.ts` passes against each pinned adapter. Before a profile ships, and at each quarterly pin review, run the opt-in real-vendor smokes and record them in Tau Brain. State a platform with no recorded device run as unqualified in `apps/docs/content/docs/editor/external-agents.mdx`.
 
+### 14. Start in Auto, Never in Bypass
+
+A new chat starts in the first mode of the profile's `defaultModePreference` that the agent or its current model offers. The list starts with `auto`, then the most permissive mode that still keeps a vendor safety boundary: the agent edits workspace files without asking but does not lift every check. Never list a plan mode or a bypass mode (`bypassModeIds`: Claude `bypassPermissions`, Codex `agent-full-access`, Grok `always-approve`). The one exception is `grokNoAutoFallback`, Grok's `always-approve` while Grok has not reported Auto as enabled (PR5 amendment, operator 2026-11-17T03:42Z). The host applies the rule before the prompt, keyed on mode ids (`packages/host/src/acp/acp-modes.ts`); no surface adds its own.
+
+Keep a mode the person picked for as long as the agent offers it, through model switches and restarts. A chat Tau defaulted follows its model: it falls back when the model loses `auto` and returns to `auto` when it comes back. A chat whose record predates this rule keeps its mode. Filter plan values out of the mode menu and never apply one; show the adapter's mode names and descriptions unchanged.
+
+| Agent       | Advertised                                                       | Starts in                                |
+| ----------- | ---------------------------------------------------------------- | ---------------------------------------- |
+| Claude Code | `auto` (supporting models), `default`, `acceptEdits`, `dontAsk`… | `auto`, else `acceptEdits`               |
+| Codex       | `read-only`, `agent`, `agent-full-access`                        | `agent`                                  |
+| Grok        | `ask`, `auto` (once enabled), `always-approve`                   | `auto`, else `always-approve` (operator) |
+
+**Why**: Operator ruling PR5 (2026-11-17T03:25Z): a fresh chat that asks before writing `main.ts` is not acceptable, and plan mode is no longer relevant. It replaces, for new chats, the earlier rule of keeping the user's native permission mode.
+
+**Enforced by**: `acp-modes.test.ts` (no profile lists a plan or bypass id but the ruled Grok fallback) and the `default permission mode (PR5)` cases in `acp-session.machine.test.ts` and `run.integration.test.ts`.
+
 ## Anti-Patterns
 
 - Passing `probeTimeout` from a host to make boot faster.
 - Showing an adapter's advertised terminal command without checking what it runs.
 - Testing sign-in only against a fake agent whose auth methods differ from the real adapter's.
 - Copying an install command from a blog post or from memory.
+- Running a sign-in through a shell, or keying its launch to an agent id outside the profile.
+- Defaulting a chat in the UI, or choosing a mode by agent id outside the profile.
 
 ## Adding an Agent Checklist
 
 - [ ] Profile entry with every field and an evidence comment on each fallback and command
 - [ ] Adapter pin, if the agent needs one; no edit outside `registry.ts` except that dependency
 - [ ] `versionSample` is a real line and the floor matches the adapter pin
+- [ ] `defaultModePreference` read from the adapter's own mode list, with no plan or bypass id
 - [ ] `pnpm nx test host --watch=false` passes, including both conformance files and the adapter contract test
 - [ ] Opt-in smoke on at least one real install per supported platform recorded in Tau Brain, or the platform stated as unqualified
 - [ ] The docs page lists the agent

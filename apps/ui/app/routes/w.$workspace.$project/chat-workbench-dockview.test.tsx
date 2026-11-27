@@ -28,8 +28,8 @@ import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
-import { EditorDocument } from '#lib/editor-document.js';
-import type { DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
+import type { DocumentChange, DocumentTransaction } from '@taucad/editor-ui/lib/editor-document';
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { createActor } from 'xstate';
@@ -55,21 +55,26 @@ const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastErro
 const mockEditorRuntimeImported = vi.hoisted(() => vi.fn());
 const mockEditorViewMounted = vi.hoisted(() => vi.fn());
 const mockLoadEditorSyntax = vi.hoisted(() => vi.fn(async () => []));
-vi.mock('#components/code/code-editor-view.client.js', () => {
-  mockEditorRuntimeImported();
+/* Counts each time a pane takes the editor runtime from its module, not the module's one evaluation: the module cache
+ * outlives a test, so a factory call would only count for whichever test imports it first. */
+vi.mock('@taucad/editor-ui/components/code/code-editor-view.client', () => {
+  function CodeEditorView(): React.JSX.Element {
+    mockEditorViewMounted();
+    return <div role='textbox' aria-label='Code editor' />;
+  }
   return {
-    CodeEditorView: () => {
-      mockEditorViewMounted();
-      return <div role='textbox' aria-label='Code editor' />;
+    get CodeEditorView() {
+      mockEditorRuntimeImported();
+      return CodeEditorView;
     },
   };
 });
-vi.mock('#lib/editor-syntax.js', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
+vi.mock('@taucad/editor-ui/lib/editor-syntax', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
 
 const largeObjectState = vi.hoisted(() => ({ pending: new Set<string>(), opened: [] as string[] }));
-vi.mock('#routes/w.$workspace.$project/project-sync-placeholder.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  ProjectSyncPlaceholder: ({ state }: { readonly state: string }) => <div data-testid={`sync-placeholder-${state}`} />,
+vi.mock('#routes/w.$workspace.$project/project-wait-skeleton.js', () => ({
+  ProjectWaitSkeleton: ({ state }: { readonly state: string }) => <div data-testid={`project-wait-${state}`} />,
+  PaneWaitSkeleton: ({ label }: { readonly label: string }) => <div data-testid={`pane-wait-${label}`} />,
 }));
 /* What each surface shows; a surface not named here is ready. */
 const surfaceAvailability = vi.hoisted(() => ({ current: new Map<string | undefined, string>() }));
@@ -465,7 +470,7 @@ vi.mock('#routes/w.$workspace.$project/file-viewers/built-in-viewers.js', () => 
   },
 }));
 
-vi.mock('#components/files/file-selector.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-selector', () => ({
   FileSelector: ({
     onSelect,
     placeholder,
@@ -514,6 +519,32 @@ const actualWorkspace = await vi.importActual<typeof ProjectWorkspaceContext>(
 );
 const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-provider.js');
 
+/* Every case starts from the same fixtures: a wide screen, no workspace layout, the default flags, no open files and
+ * no file, read or large-object state. A case that set one must not decide what a later one sees, whatever order the
+ * cases run in: a phone left set, for one, sends a Files request to the phone's tabs instead of the connected
+ * workbench. Cases that restore their own fixtures in `finally` keep doing so; this covers the ones that did not. */
+beforeEach(() => {
+  mobileState.value = false;
+  workspaceLayout.value = undefined;
+  featureState.value = false;
+  featureState.machines = true;
+  largeObjectState.pending.clear();
+  largeObjectState.opened.length = 0;
+  surfaceAvailability.current = new Map();
+  landedState.paths.clear();
+  freshState.held.clear();
+  freshState.failed.clear();
+  freshState.readAfresh.clear();
+  freshState.retainValue = undefined;
+  freshState.retry = () => undefined;
+  freshState.settled = () => undefined;
+  editorMachineSnapshot.context.openFiles = [];
+  editorMachineSnapshot.context.pendingOpenFile = undefined;
+  currentEditorSnapshot = editorMachineSnapshot;
+  readyDockviewApi = undefined;
+  mockDocuments.clear();
+});
+
 describe('hidden workbench operation panels', () => {
   it.each([
     ['Print', PrintWorkbenchPanel, mockPrintBody],
@@ -561,6 +592,7 @@ const createTabProperties = ({
     setActive: vi.fn(),
     updateParameters: vi.fn(),
     onDidTitleChange: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidGroupChange: vi.fn(() => ({ dispose: vi.fn() })),
   } as unknown as DockviewPanelApi;
   group.panels.push({ id, api } as unknown as IDockviewPanel);
 
@@ -768,7 +800,7 @@ describe('FileEditor routing', () => {
 
     now.mockReturnValue(20_000);
     // The slow words and Retry are laid out from the wait's start; CSS shows them at 10,000 ms.
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(retry).toHaveBeenCalledOnce();
     expect(document.activeElement).not.toBe(document.body);
@@ -818,7 +850,7 @@ describe('FileEditor routing', () => {
     expect(slot).not.toHaveAttribute('role');
 
     now.mockReturnValue(10_100);
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
 
     expect(retry).toHaveBeenCalledOnce();
     expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
@@ -1107,7 +1139,7 @@ describe('FileEditor routing', () => {
     try {
       render(<FileEditor paneId='other-pane' filePath='lib/gone.ts' panelApi={mockPanelApi} />);
       expect(screen.queryByText(/file not found/i)).not.toBeInTheDocument();
-      expect(screen.getByTestId('sync-placeholder-preparing')).toBeInTheDocument();
+      expect(screen.getByTestId('project-wait-preparing')).toBeInTheDocument();
     } finally {
       surfaceAvailability.current = new Map();
       landedState.paths.clear();
@@ -1123,7 +1155,7 @@ describe('FileEditor routing', () => {
     mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('partial') });
     try {
       render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
-      expect(screen.getByTestId('sync-placeholder-failed')).toBeInTheDocument();
+      expect(screen.getByTestId('project-wait-failed')).toBeInTheDocument();
       expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
     } finally {
       surfaceAvailability.current = new Map();
@@ -2273,6 +2305,7 @@ describe('workbench adapter record apply (A0.3)', () => {
 
   // A0.3 row 3, Y7/I10: a record apply waits in `pendingRecordNodeRef` for its file to open. The person rearranges
   // the panes before it lands; when the file opens, the late apply must not revert the person's arrangement.
+  // Expected-failure: @rifont until 2026-12-15
   it.fails("I10: should not land a record apply computed before the person's edit over that edit", () => {
     const dockview = createTestDockview([panel('utility')]);
     const subscribe = () => ({ dispose: vi.fn() });

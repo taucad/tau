@@ -100,9 +100,13 @@ describe('Esbuild runtime adapter', () => {
       ],
     });
 
-    const result = await esbuildDefinition.bundle({ entryPath: 'project/model.ts' }, bundlerRuntime, { vm });
+    const result = await esbuildDefinition.bundle(
+      { entryPath: 'project/model.ts', globals: ['geospec'] },
+      bundlerRuntime,
+      { vm },
+    );
 
-    expect(vm.bundle).toHaveBeenCalledWith('project/model.ts', expect.any(AbortSignal));
+    expect(vm.bundle).toHaveBeenCalledWith('project/model.ts', expect.any(AbortSignal), ['geospec']);
     expect(result).toEqual({
       success: false,
       code: '',

@@ -13,9 +13,9 @@
 import { useEffect, useRef } from 'react';
 import { idPrefix } from '@taucad/types/constants';
 import { useProjects } from '#hooks/use-projects.js';
-import type { ProjectListItem } from '#types/project-library.types.js';
-import type { ProjectSlugs } from '#utils/project-url.utils.js';
-import { projectUrl, projectUrlOr } from '#utils/project-url.utils.js';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
+import type { ProjectSlugs } from '@taucad/files-ui/utils/project-url.utils';
+import { projectUrl, projectUrlOr } from '@taucad/files-ui/utils/project-url.utils';
 import { legacyWorkspaceSlugTombstones } from '@taucad/files-ui/filesystem/handle-store';
 
 const equalsFolded = (a: string, b: string): boolean => a.toLocaleLowerCase() === b.toLocaleLowerCase();
@@ -67,7 +67,7 @@ export type SlugResolution<T> =
 /** Canonical slugs for a project id, for redirects and URL correction. */
 export function useProjectSlugs(projectId: string | undefined): SlugResolution<ProjectSlugs> {
   // Trashed projects still resolve: the route gate owns the "restore" UI.
-  const { projects, isLoading } = useProjects({ includeDeleted: true });
+  const { projects, isLoading } = useProjects({ scope: 'all' });
   if (isLoading) {
     return { status: 'resolving' };
   }
@@ -129,7 +129,7 @@ export function useCanonicalProjectUrlCorrection(
 
 /** `proj_` id addressed by slug or id segments in the `/w/` grammar. */
 export function useProjectIdBySlugs(workspaceSlug: string, projectSlug: string): SlugResolution<string> {
-  const { projects, isLoading } = useProjects({ includeDeleted: true });
+  const { projects, isLoading } = useProjects({ scope: 'all' });
   if (isLoading) {
     return { status: 'resolving' };
   }

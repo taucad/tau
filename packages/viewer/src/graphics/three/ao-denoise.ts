@@ -19,9 +19,9 @@ import type { sample } from 'three/tsl';
 import type { Node } from 'three/webgpu';
 import { Vector2 } from 'three';
 import type { Camera } from 'three';
-import type { ao } from 'three/addons/tsl/display/GTAONode.js';
+import type { GtaoNode } from '#graphics/three/gtao-node.js';
 
-type AoTexture = ReturnType<ReturnType<typeof ao>['getTextureNode']>;
+type AoTexture = ReturnType<GtaoNode['getTextureNode']>;
 
 /**
  * Deterministic joint bilateral AO reconstruction. Only visibility is filtered;
@@ -47,8 +47,6 @@ export function createAoDenoise({
   depthPhi: { value: number };
 }> {
   const step = uniform(new Vector2());
-  // Visibility difference at which a tap stops counting toward its neighbourhood.
-  const outlierRange = float(0.25);
   // |N·V| below which AO fades out (about 1.7° to 7° from edge-on).
   const grazingFadeStart = float(0.03);
   const grazingFadeEnd = float(0.12);
@@ -67,7 +65,6 @@ export function createAoDenoise({
       const centerNormal = (normal.sample(uv) as Node<'vec4'>).rgb.normalize().toVar();
       const sum = float(0).toVar();
       const weightSum = float(0).toVar();
-      const taps: Array<{ value: Node<'float'>; weight: Node<'float'> }> = [];
       // Build the fixed stencil once; constant weights need no per-fragment exp.
       for (let x = -2; x <= 2; x++) {
         for (let y = -2; y <= 2; y++) {
@@ -85,49 +82,11 @@ export function createAoDenoise({
           const normalWeight = pow(max(dot(centerNormal, neighborNormal), 0), 8);
           const weight = depthWeight.mul(normalWeight).toVar();
           const value = texture.sample(neighborUv).r.toVar();
-          taps.push({ value, weight });
           sum.addAssign(value.mul(weight));
           weightSum.addAssign(weight);
         }
       }
-      // A single GTAO texel can hit a sliver behind its surface. The sparse stencil would
-      // print that firefly as a dot grid, so drop the one tap furthest from the surface
-      // mean when it alone stands out. Contact seams darken several taps and keep them all.
-      const mean = sum.div(max(weightSum, 0.0001)).toVar();
-      const outlierDeviation = float(0).toVar();
-      const runnerUpDeviation = float(0).toVar();
-      const outlierValue = float(0).toVar();
-      const outlierWeight = float(0).toVar();
-      for (const { value, weight } of taps) {
-        const deviation = abs(value.sub(mean))
-          .mul(select<'float'>(weight.greaterThan(0.5), float(1), float(0)))
-          .toVar();
-        // oxlint-disable-next-line eslint/new-cap -- Three TSL conditional builder.
-        If(deviation.greaterThan(outlierDeviation), () => {
-          runnerUpDeviation.assign(outlierDeviation);
-          outlierDeviation.assign(deviation);
-          outlierValue.assign(value);
-          outlierWeight.assign(weight);
-          // oxlint-disable-next-line eslint/new-cap -- Three TSL conditional builder.
-        }).ElseIf(deviation.greaterThan(runnerUpDeviation), () => {
-          runnerUpDeviation.assign(deviation);
-        });
-      }
-      const trimmed = outlierDeviation
-        .greaterThan(outlierRange)
-        .and(runnerUpDeviation.lessThan(outlierRange.mul(0.5)))
-        .and(weightSum.sub(outlierWeight).greaterThan(0.5));
-      result.assign(
-        select<'float'>(
-          weightSum.greaterThan(0),
-          select<'float'>(
-            trimmed,
-            sum.sub(outlierValue.mul(outlierWeight)).div(max(weightSum.sub(outlierWeight), 0.0001)),
-            mean,
-          ),
-          texture.sample(uv).r,
-        ),
-      );
+      result.assign(select<'float'>(weightSum.greaterThan(0), sum.div(max(weightSum, 0.0001)), texture.sample(uv).r));
     });
     return result;
   });

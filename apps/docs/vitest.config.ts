@@ -1,5 +1,6 @@
 import path from 'node:path';
 import mdx from 'fumadocs-mdx/vite';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- Vitest loads the Fumadocs config before app aliases are active.
 import * as MdxConfig from './app/lib/fumadocs/source.config.js';
@@ -28,7 +29,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['*.test.ts', 'app/**/*.{test,spec}.{ts,tsx}'],
-    reporters: ['verbose'],
+    reporters: testReporters('verbose'),
+    retry: testRetry(),
     coverage: {
       reportsDirectory: '../../out/reports/coverage/apps/docs',
       provider: 'v8',

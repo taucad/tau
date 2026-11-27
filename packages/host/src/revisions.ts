@@ -71,11 +71,13 @@ import {
   tauRemoteUrl,
   watchRevisionStream,
   withCommitAuthor,
+  withoutTauCloud,
 } from '@taucad/revisions';
 import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
 import type { ReportingConsent } from '#telemetry.js';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { isAmbientCut } from '@taucad/revisions/checkout-machine';
+import { autoVersionName } from '@taucad/revisions/publish-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import { sameRevisionStatus } from '@taucad/revisions/revision-projection';
 import type {
@@ -84,6 +86,7 @@ import type {
   PublishDraft,
   PublishPublicationActorInput,
   PublishPublicationActorOutput,
+  PublishVisibility,
   RevisionCommitAuthor,
   RevisionDiffEntry,
   RevisionEngineDescriptor,
@@ -97,7 +100,12 @@ import type {
   RevisionVia,
   SyncPushOutcome,
 } from '@taucad/revisions';
-import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
+import {
+  GitToolchainError,
+  createNativeGitRevisionPort,
+  gitCommandActivity,
+  resolveGitToolchain,
+} from '@taucad/revisions/node';
 import type {
   MissingGitTool,
   NativeGitCheckoutOptions,
@@ -105,7 +113,11 @@ import type {
   TauApiCredential,
 } from '@taucad/revisions/node';
 import { createTurnPlacementPort } from '@taucad/revisions/turn-placement';
-import type { TurnPlacementAdapter, TurnPlacementPortOptions } from '@taucad/revisions/turn-placement';
+import type {
+  TurnAdmissionTiming,
+  TurnPlacementAdapter,
+  TurnPlacementPortOptions,
+} from '@taucad/revisions/turn-placement';
 import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
@@ -121,6 +133,22 @@ import type { HostRevisionActorResolver } from '#revision-actor.js';
  * worker injects, so a conflict re-derived here settles as it was recorded.
  */
 const parameterCodec: ParameterRecordCodec = { read: requireParameterRecord, serialize: serializeParameterRecord };
+
+/**
+ * Names a draft nobody named. Only the host has a locale, so the auto name is made here, not in the machine: by the
+ * `publish` verb and by a page's `confirmPublish`, which the Share pane sends with no name. A page's draft is not
+ * validated before it reaches here, so a missing name reads as empty rather than throwing.
+ *
+ * @internal
+ * @param draft - The draft as asked.
+ * @returns The draft, with `autoVersionName` as its name when it is auto-named and empty.
+ */
+export const autoNamed = (draft: PublishDraft): PublishDraft => {
+  const tag: unknown = draft.tag;
+  return draft.isAutoNamed === true && (typeof tag === 'string' ? tag : '').trim() === ''
+    ? { ...draft, tag: autoVersionName(new Date()) }
+    : draft;
+};
 
 /**
  * Where one prepared turn runs, and what it descends from.
@@ -223,6 +251,11 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
   readonly filesystem?: CheckoutFileSystems | undefined;
   /** Optional host-owned admission wrapper around checkout tree reads and writes. */
   readonly useFileSystem?: UseCheckoutFileSystem | undefined;
+  /**
+   * Report each turn admission's timing once its placement answers it (W8 diagnostics): its phases and the Git
+   * processes it waited on, ids and milliseconds only. A host passes its own diagnostics log.
+   */
+  readonly admissionTimed?: ((timing: TurnAdmissionTiming) => void) | undefined;
   /** Native linked-checkout mutations under the embedding host's writer authority. */
   readonly checkoutMutation?: NativeGitCheckoutOptions['withMutationAuthority'];
   /** Established identity supplied by the host's shared project identity lifecycle. */
@@ -241,6 +274,12 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
   readonly gitExecutable?: string | undefined;
   /** Tau API origin, when this host has an authenticated cloud session. */
   readonly apiBaseUrl?: string | undefined;
+  /**
+   * This launch started in safe mode, which makes no Tau Cloud read or write (W9 R5). Known when the host is created,
+   * never read live: every leg addressing the Tau remote is refused before any request, and the remote long poll,
+   * storage read, registration and publication are off. Other Git remotes and local history are unaffected.
+   */
+  readonly safeMode?: boolean | undefined;
   /** Read per remote request; never persisted under the project. */
   readonly tauCredential?: (() => TauApiCredential | undefined) | undefined;
   /**
@@ -556,16 +595,18 @@ const registryAnswered = async (actor: ProjectRevisionsActor): Promise<void> => 
  * @example <caption>Launcher 1, placing every turn</caption>
  * ```typescript
  * import { createGatewayModelTransport } from '@taucad/agent-host';
- * import type { ToolRegistry } from '@taucad/agent-host';
+ * import type { DeploymentModeAnswer, ToolRegistry } from '@taucad/agent-host';
  * import { createAgentLauncher } from '@taucad/agent-host/launcher';
  * import { createNodeChatStore } from '@taucad/agent-host/node';
  * import { createProjectRevisions } from '@taucad/host';
  *
  * declare const toolRegistry: ToolRegistry;
+ * // The API's deployment answer for the gateway's origin (`GET /v1/deployment`), fetched and cached by the host.
+ * declare const deployment: (signal: AbortSignal) => Promise<DeploymentModeAnswer>;
  * const revisions = createProjectRevisions({ workspaceRoot: '/srv/project', projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' });
  * const launcher = createAgentLauncher({
  *   chats: createNodeChatStore({ workspaceRoot: '/srv/project' }),
- *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/' }),
+ *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/', billing: { deployment } }),
  *   credential: () => ({ mode: 'session' }),
  *   systemPrompt: 'You are Tau.',
  *   toolRegistry,
@@ -601,12 +642,15 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   /* Every verb's engine failure, for the host's reporter: the only place a failed `git worktree add` is seen with
    * git's own words, since the checkout's refusal keeps the port's sentence alone. */
   const { events } = options;
-  const port =
+  const observedPort =
     events === undefined
       ? unobservedPort
       : observeRevisionEngineFailures(unobservedPort, (failure) => {
           events({ type: 'revision.engine-failed', ...failure });
         });
+  const port = options.safeMode === true ? withoutTauCloud(observedPort) : observedPort;
+  /* No Tau Cloud hook at all in safe mode: no long poll, storage read, registration or publication (W9 R5). */
+  const cloudApiBaseUrl = options.safeMode === true ? undefined : apiBaseUrl;
   const channelListeners = new Set<(event: AgentChannelRevisionEvent) => void>();
   const emitChannel = (event: AgentChannelRevisionEvent): void => {
     for (const listener of channelListeners) {
@@ -700,7 +744,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     completeChanges: options.watchWorkspace !== false,
     parameters: parameterCodec,
     ...(apiBaseUrl === undefined ? {} : { remoteUrl: (id: string) => tauRemoteUrl(apiBaseUrl, id) }),
-    ...(apiBaseUrl === undefined || options.tauCredential === undefined
+    ...(cloudApiBaseUrl === undefined || options.tauCredential === undefined
       ? {}
       : {
           /* D13: another device's push wakes this open project over the API's
@@ -709,7 +753,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             watchRevisionStream(
               {
                 projectId: input.projectId,
-                apiBaseUrl: () => apiBaseUrl,
+                apiBaseUrl: () => cloudApiBaseUrl,
                 auth: () => {
                   const credential = options.tauCredential?.();
                   return credential === undefined
@@ -726,7 +770,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             return credential === undefined
               ? undefined
               : readRemoteStorageOverHttp(
-                  apiBaseUrl,
+                  cloudApiBaseUrl,
                   { kind: 'bearer', authorization: credential.authorization },
                   projectId,
                 );
@@ -734,11 +778,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           registerRemoteProject: async (id: string) => {
             const credential = options.tauCredential?.();
             if (credential === undefined) {
-              throw new Error('This host is not signed in to Tau Cloud.');
+              throw new Error('Sign in with `tau auth login` to back up to the cloud.');
             }
             /* B4c: a GitHub-linked project says so, as the browser's registration does (K4). */
             await registerProjectOverHttp(
-              apiBaseUrl,
+              cloudApiBaseUrl,
               { kind: 'bearer', authorization: credential.authorization },
               {
                 id,
@@ -750,9 +794,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           publishPublication: async (input: PublishPublicationActorInput) => {
             const credential = options.tauCredential?.();
             if (credential === undefined) {
-              throw new Error('This host is not signed in to Tau Cloud.');
+              throw new Error('Sign in with `tau auth login` to back up to the cloud.');
             }
-            return publishOverHttp(apiBaseUrl, { kind: 'bearer', authorization: credential.authorization }, input);
+            return publishOverHttp(cloudApiBaseUrl, { kind: 'bearer', authorization: credential.authorization }, input);
           },
         }),
     onChatsProjected: (chatIds) => {
@@ -1773,7 +1817,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         }
         actor.send({
           type: 'publish',
-          event: { type: 'confirm', draft: draft as PublishDraft },
+          event: { type: 'confirm', draft: autoNamed(draft as PublishDraft) },
         });
         break;
       }
@@ -1960,6 +2004,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         root: (checkout) => (checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
         /* E1: the watcher catches up before an admission's dirty base and before a completion cut. */
         settle: settleWatch,
+        ...(options.admissionTimed === undefined
+          ? {}
+          : { admissionTiming: { activity: { git: gitCommandActivity }, report: options.admissionTimed } }),
       });
       placed = session;
       return session;
@@ -2021,9 +2068,15 @@ const readManifestField = (workspaceRoot: string, field: 'name'): string | undef
 export type RevisionPublishOutcome =
   | Readonly<{
       status: 'published';
+      /** The version's tag, `v<number>`. */
       tag: string;
+      /** The version's name, as History shows it. */
+      name: string;
       publicationId: string;
+      /** The project's cloud link, the same across publishes. */
       url: string;
+      /** Who can open that link now. */
+      visibility: PublishVisibility;
     }>
   | Readonly<{ status: 'refused'; reason: string }>;
 
@@ -2094,7 +2147,11 @@ export type ProjectRevisionVerbs = {
    * terminal verb does not outlive the window.
    */
   save(): Promise<RevisionSaveOutcome>;
-  /** Name this branch's head and publish it: one gesture, the dialog's machine. */
+  /**
+   * Name this branch's head and publish it: one gesture, the Share pane's machine.
+   * An auto-named draft with an empty `tag` is named here, `Shared Nov 19`, in
+   * this host's locale.
+   */
   publish(draft: PublishDraft): Promise<RevisionPublishOutcome>;
   /**
    * Connect Tau Cloud and let the open pull fill this directory (W18 DEF-2).
@@ -2530,7 +2587,7 @@ export const openProjectRevisions = async (
     const scheduler = actor.getSnapshot().children.sync;
     const backedUp: RevisionBackupOutcome =
       scheduler === undefined
-        ? { backup: 'failed', reason: 'This project has no sync running.' }
+        ? { backup: 'failed', reason: 'This project isn’t being backed up.' }
         : await backUp(actor, scheduler, 'This version is saved here and was not backed up yet.');
     return Object.freeze({ tag: made, ...backedUp });
   };
@@ -2541,7 +2598,8 @@ export const openProjectRevisions = async (
    * is held in `choosingVersion.reading` until the names have been read, so
    * nothing here waits for a frame.
    */
-  const publish = async (draft: PublishDraft): Promise<RevisionPublishOutcome> => {
+  const publish = async (requested: PublishDraft): Promise<RevisionPublishOutcome> => {
+    const draft = autoNamed(requested);
     const { actor } = await started();
     const child = actor.getSnapshot().children.publish;
     if (child === undefined) {
@@ -2560,8 +2618,10 @@ export const openProjectRevisions = async (
           Object.freeze({
             status: 'published',
             tag: event.tag,
+            name: event.name,
             publicationId: event.publicationId,
             url: event.url,
+            visibility: event.visibility,
           }),
         );
       });
@@ -2602,7 +2662,7 @@ export const openProjectRevisions = async (
       return place.revisionId === undefined
         ? Object.freeze({
             status: 'refused',
-            reason: 'This project has nothing on Tau Cloud yet.',
+            reason: 'This project has nothing in the cloud yet.',
           })
         : Object.freeze({
             status: 'opened',
@@ -2617,7 +2677,7 @@ export const openProjectRevisions = async (
           resolve(
             Object.freeze({
               status: 'refused',
-              reason: status.remote.error ?? 'Tau Cloud refused this project.',
+              reason: status.remote.error ?? 'Couldn’t open this project from the cloud.',
             }),
           );
           return;
@@ -2647,8 +2707,8 @@ export const openProjectRevisions = async (
                * not know. */
               reason:
                 status.sync.state === 'conflicted'
-                  ? 'This project has work of its own that Tau Cloud does not have.'
-                  : (status.sync.error ?? 'Tau Cloud did not finish opening this project.'),
+                  ? 'This project has work of its own that its cloud copy does not have.'
+                  : (status.sync.error ?? 'Couldn’t finish opening this project from the cloud.'),
             }),
           );
         }

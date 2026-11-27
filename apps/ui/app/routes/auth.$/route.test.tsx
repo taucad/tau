@@ -293,7 +293,7 @@ describe('Auth session continuation', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5000);
       });
-      expect(screen.getByRole('alert')).toHaveTextContent("couldn't check your session");
+      expect(screen.getByRole('alert')).toHaveTextContent("Couldn't check that you're signed in");
       expect(screen.queryByText('auth:sign-in')).not.toBeInTheDocument();
       vi.useRealTimers();
       const user = userEvent.setup();

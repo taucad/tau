@@ -455,7 +455,15 @@ export const uiReadTauVertexOperations: BrowserCommand<[email: string], TargetTa
 };
 
 export const uiOpenTarget: BrowserCommand<
-  [options?: { deviceScaleFactor?: number; hasTouch?: boolean; isMobile?: boolean; consentBanner?: boolean }]
+  [
+    options?: {
+      deviceScaleFactor?: number;
+      hasTouch?: boolean;
+      isMobile?: boolean;
+      consentBanner?: boolean;
+      serviceWorker?: boolean;
+    },
+  ]
 > = async (commandContext, options) => {
   if (commandContext.provider.name !== 'playwright') {
     throw new TypeError(`UI E2E requires the Playwright provider, received '${commandContext.provider.name}'.`);
@@ -469,8 +477,11 @@ export const uiOpenTarget: BrowserCommand<
   if (!browser) {
     throw new Error('Vitest Playwright browser is unavailable.');
   }
-  const { consentBanner = false, ...contextOptions } = options ?? {};
-  const context = await browser.newContext(contextOptions);
+  const { consentBanner = false, serviceWorker = false, ...contextOptions } = options ?? {};
+  /* The web app's service worker (PL7) stays out of every spec that did not ask for it: once installed it answers
+     shells and precached chunks itself, so a spec's request holds, delays and failures would stop applying from its
+     second navigation on, depending on when the install finished. */
+  const context = await browser.newContext({ ...contextOptions, serviceWorkers: serviceWorker ? 'allow' : 'block' });
   context.setDefaultTimeout(10_000);
   if (!consentBanner) {
     /* The app's first-visit analytics banner stays out of every spec that did not ask for it: Do Not Track
@@ -791,6 +802,24 @@ const realModelCatalog = async (contextWindow?: number): Promise<unknown[]> => {
 };
 
 /**
+ * Answer the page's `/v1/deployment` as a self-host API does (W4 of the unified model transport): runs take the
+ * unfunded transport. For stacks whose API is absent, where the agent host would otherwise read the answer as unknown
+ * and refuse every run before its first model call.
+ */
+const routeSelfHostDeployment = async (session: Session): Promise<void> => {
+  await session.context.route(/\/v1\/deployment(?:\?|$)/u, async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'access-control-allow-origin': new URL(testBaseURL).origin,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ version: 1, edition: 'self-host', billing: { funded: false }, maxAgeSeconds: 300 }),
+    });
+  });
+};
+
+/**
  * Answer the page's `/v1/models` with `catalog`, as the API would to this origin's credentialed fetch, after
  * `latency` milliseconds.
  */
@@ -1012,6 +1041,11 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
       );
     },
   );
+  /* One build (adaptive app deployment mode W12): the cloud-load tier's stand-in API is Tau Cloud's, so its
+   * deployment route answers funded. A spec's own deployment route, registered later, still wins. */
+  if (process.env[cloudLoadTierVariable] === 'true') {
+    await routeDeploymentAnswer(context, 'funded');
+  }
 };
 
 /** Change how long each stand-in answer is held, for the requests that arrive from now on. */
@@ -1315,6 +1349,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
   // models catalog is control-plane and is stubbed with the real catalog rows
   // so provider-aware wire gating sees genuine provider ids without a live API.
   await routeModelCatalog(session, await realModelCatalog(options.contextWindow));
+  await routeSelfHostDeployment(session);
   session.agentHostGatewayServer = server;
   const address = server.address();
   if (!address || typeof address === 'string') {
@@ -2286,6 +2321,188 @@ export const uiDelayTargetRequests: BrowserCommand<[pattern: string, millisecond
   });
 };
 
+/** The deployment answers an adaptive-build row can give (adaptive app deployment mode W7). */
+type DeploymentAnswerStub = 'funded' | 'unfunded';
+
+const deploymentAnswerBodies: Record<DeploymentAnswerStub, unknown> = {
+  funded: { version: 1, edition: 'cloud', billing: { funded: true, environment: 'development' }, maxAgeSeconds: 300 },
+  unfunded: { version: 1, edition: 'self-host', billing: { funded: false }, maxAgeSeconds: 300 },
+};
+
+/**
+ * Answer the page's `GET /v1/deployment` as a funded or an unfunded API does, for every page of the target context,
+ * whatever else answers the API origin. Hold it first with `uiDelayTargetRequests` (registered after this) to make the
+ * ask wait, or never call this to leave it to the API, or to the refusal of an absent one.
+ */
+export const uiRouteDeploymentAnswer: BrowserCommand<[answer: DeploymentAnswerStub]> = async (
+  commandContext,
+  answer,
+) => {
+  await routeDeploymentAnswer(sessionFor(commandContext).context, answer);
+};
+
+const routeDeploymentAnswer = async (context: ProviderContext, answer: DeploymentAnswerStub): Promise<void> => {
+  await context.route(/\/v1\/deployment(?:\?|$)/u, async (route, request) => {
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'access-control-allow-credentials': 'true',
+        'access-control-allow-origin': request.headers()['origin'] ?? new URL(testBaseURL).origin,
+        'content-type': 'application/json',
+        vary: 'origin',
+      },
+      body: JSON.stringify(deploymentAnswerBodies[answer]),
+    });
+  });
+};
+
+/** Whether this run is the adaptive web tier (`ui-e2e:test:e2e:adaptive` sets `TAU_E2E_ADAPTIVE_TIER`). */
+export const uiIsAdaptiveTier: BrowserCommand<[], boolean> = () => process.env['TAU_E2E_ADAPTIVE_TIER'] === 'true';
+
+/** What a seeded UI server's own API stand-in answers `GET /v1/deployment` with (W11). */
+type SeededDeploymentAnswer = DeploymentAnswerStub | 'blackholed';
+
+/** The UI servers `uiStartSeededServer` started, each with its API stand-in, stopped by `uiStopSeededServers`. */
+const seededServers: Array<{ ui: ChildProcess; api: Server }> = [];
+
+const listenOnFreePort = async (server: Server): Promise<number> =>
+  new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        reject(new Error('The stand-in has no TCP port.'));
+        return;
+      }
+      resolve(address.port);
+    });
+  });
+
+const freePort = async (): Promise<number> => {
+  const probe = createServer();
+  const port = await listenOnFreePort(probe);
+  await new Promise<void>((resolve) => {
+    probe.close(() => {
+      resolve();
+    });
+  });
+  return port;
+};
+
+/**
+ * Start a second UI server over the tier's build whose API is a stand-in of its own (adaptive app deployment mode
+ * W11), so its root loader's server-side ask gets `answer` and its per-process cache starts empty. The stand-in answers
+ * the deployment route (or holds it open, `blackholed`) for the server and the page alike, and every other API path
+ * `404`, so the page is signed out. Returns the server's origin.
+ */
+export const uiStartSeededServer: BrowserCommand<[answer: SeededDeploymentAnswer], string> = async (
+  _commandContext,
+  answer,
+) => {
+  const api = createServer((request, response) => {
+    const headers = {
+      'access-control-allow-credentials': 'true',
+      'access-control-allow-origin': request.headers.origin ?? '*',
+      vary: 'origin',
+    };
+    if (/^\/v1\/deployment(?:\?|$)/u.test(request.url ?? '')) {
+      if (answer === 'blackholed') {
+        return; // Never answered: the server's deadline and the page's own end the wait.
+      }
+      response.writeHead(200, { ...headers, 'content-type': 'application/json' });
+      response.end(JSON.stringify(deploymentAnswerBodies[answer]));
+      return;
+    }
+    response.writeHead(404, headers);
+    response.end();
+  });
+  const apiPort = await listenOnFreePort(api);
+  const uiPort = await freePort();
+  const origin = `http://localhost:${uiPort}`;
+  const uiRoot = resolve(import.meta.dirname, '../../../ui');
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+  environment['PORT'] = String(uiPort);
+  environment['NODE_ENV'] = 'production';
+  environment['TAU_DEBUG'] = 'true';
+  environment['TAU_API_URL'] = `http://127.0.0.1:${apiPort}`;
+  environment['TAU_WEBSOCKET_URL'] = `ws://127.0.0.1:${apiPort}`;
+  environment['TAU_FRONTEND_URL'] = origin;
+  environment['TAU_E2E_UI_BUILD_ROOT'] = resolve(uiRoot, process.env['TAU_E2E_UI_BUILD_DIRECTORY'] ?? 'build');
+  const ui = spawn(
+    'node',
+    ['--import', '@oxc-node/core/register', resolve(import.meta.dirname, '../../production-server.ts')],
+    { cwd: uiRoot, env: environment, stdio: 'inherit' },
+  );
+  seededServers.push({ ui, api });
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    if (ui.exitCode !== null) {
+      throw new Error(`The seeded UI server exited with ${ui.exitCode}.`);
+    }
+    try {
+      const response = await fetch(`${origin}/health/build`);
+      if (response.ok) {
+        return origin;
+      }
+    } catch {
+      /* Not listening yet. */
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`The seeded UI server at ${origin} did not start within 60 s.`);
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, 250);
+    });
+  }
+};
+
+/** Stop every server `uiStartSeededServer` started. */
+export const uiStopSeededServers: BrowserCommand = async () => {
+  for (const { ui, api } of seededServers.splice(0)) {
+    ui.kill('SIGTERM');
+    api.closeAllConnections();
+    api.close();
+  }
+};
+
+/** Fetch a document as the server renders it, with no browser: its status, its HTML and how long it took. */
+export const uiFetchDocument: BrowserCommand<
+  [url: string],
+  Readonly<{ status: number; html: string; milliseconds: number }>
+> = async (_commandContext, url) => {
+  const started = performance.now();
+  const response = await fetch(url);
+  const html = await response.text();
+  return { status: response.status, html, milliseconds: performance.now() - started };
+};
+
+/** Refuse every request of the target context whose URL matches `pattern`, as a missing file refuses it. */
+export const uiFailTargetRequests: BrowserCommand<[pattern: string]> = async (commandContext, pattern) => {
+  const { context } = sessionFor(commandContext);
+  await context.route(new RegExp(pattern, 'u'), async (route) => {
+    await route.abort('failed');
+  });
+};
+
+/**
+ * The served build's Cloud chunk files (`cloud-surfaces.lazy.tsx` and only it), as URL paths, read from the build's
+ * module-id manifest: `TAU_E2E_UI_BUILD_DIRECTORY` under `apps/ui`, else `build`.
+ */
+export const uiCloudChunkPaths: BrowserCommand<[], readonly string[]> = async () => {
+  const directory = process.env['TAU_E2E_UI_BUILD_DIRECTORY'] ?? 'build';
+  const manifest = JSON.parse(
+    await readFile(resolve(import.meta.dirname, '../../../ui', directory, 'client-module-ids.json'), 'utf8'),
+  ) as {
+    readonly chunks: ReadonlyArray<{
+      readonly fileName: string;
+      readonly modules: ReadonlyArray<{ readonly id: string }>;
+    }>;
+  };
+  return manifest.chunks
+    .filter((chunk) => chunk.modules.some((module) => module.id.endsWith('app/cloud/cloud-surfaces.lazy.tsx')))
+    .map((chunk) => `/${chunk.fileName}`);
+};
+
 /** Lets every request `uiDelayTargetRequests(pattern, 'until-released')` holds go on, and the later ones through. */
 export const uiReleaseTargetRequests: BrowserCommand = async (commandContext) => {
   const gate = targetRequestGates.get(sessionFor(commandContext).context);
@@ -2377,6 +2594,23 @@ export const uiOpenBeforeHydration: BrowserCommand<
     after = await shot(box);
   }
   return { found, hydratedBeforeAct, box, before, after };
+};
+
+/** The client entry's module, as the build names it (`/assets/entry.client-<hash>.js`). */
+const entryChunkRequest = /\/assets\/entry\.client-[^/?]+\.js(?:\?.*)?$/u;
+
+/** Answer the entry's own fetch with 500 (B28), so the bundle never runs; `false` serves it again. */
+const failEntryChunk = async (route: Parameters<Parameters<ProviderContext['route']>[1]>[0]): Promise<void> => {
+  await route.fulfill({ status: 500, contentType: 'text/plain', body: 'entry chunk refused by the test' });
+};
+
+/**
+ * Answer every request for the client entry chunk with 500 (T-B28.3), so the page has its server-rendered document and
+ * no bundle; `false` lets the entry load again.
+ */
+export const uiFailEntryChunk: BrowserCommand<[fail: boolean]> = async (commandContext, fail) => {
+  const { context } = sessionFor(commandContext);
+  await (fail ? context.route(entryChunkRequest, failEntryChunk) : context.unroute(entryChunkRequest, failEntryChunk));
 };
 
 /** Cuts the context off from the network, so a cached shell is all a navigation can be served from. */
@@ -2589,11 +2823,7 @@ export const uiSampleCameraDuringClick: BrowserCommand<[selector: string, frameC
   }
 
   const samples = page.evaluate(async (count) => {
-    const bridge = (
-      globalThis as unknown as {
-        __TAU_SECTION_VIEW_TEST__?: { getCamera(): unknown };
-      }
-    ).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Graphics e2e bridge is not installed.');
     }
@@ -3971,6 +4201,13 @@ export const uiBrowserCommands = {
   uiReadTauVertexOperations,
   uiDelayTargetRequests,
   uiReleaseTargetRequests,
+  uiRouteDeploymentAnswer,
+  uiFailTargetRequests,
+  uiCloudChunkPaths,
+  uiIsAdaptiveTier,
+  uiStartSeededServer,
+  uiStopSeededServers,
+  uiFetchDocument,
   uiReadDelayedTargetRequests,
   uiOpenBeforeHydration,
   uiReleaseAgentHostGatewayFixture,
@@ -3980,6 +4217,7 @@ export const uiBrowserCommands = {
   uiSampleCameraDuringClick,
   uiScrollTarget,
   uiSetTargetOffline,
+  uiFailEntryChunk,
   uiOpenWithStalledDocument,
   uiSetViewport,
   uiStartHostFixture,

@@ -45,6 +45,12 @@ export type BundlerRuntime = {
 export type BundleInput = {
   /** Canonical root-relative path of the entry within the runtime filesystem. */
   entryPath: string;
+  /**
+   * The built-in modules whose script globals the bundle binds, by module name. Omitted binds every
+   * registered module's global. The runtime passes the selected kernel's modules so the output does
+   * not depend on which other kernels a worker has loaded.
+   */
+  globals?: readonly string[];
 };
 
 /**

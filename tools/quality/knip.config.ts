@@ -101,6 +101,8 @@ const config: KnipConfig = {
     // Loaded by Nx plugin or build tooling, not direct imports
     '@typescript/native-preview',
     '@tailwindcss/typography',
+    // `apps/ui/app/styles/global.css` imports its styles and Tailwind scans its dist from the root node_modules
+    'streamdown',
   ],
 
   // Nx runs a target command from the workspace root (or a root-relative `cwd`), but knip's Nx
@@ -213,7 +215,7 @@ const config: KnipConfig = {
       entry: ['scripts/svg-sprite.d.ts'],
     },
     'apps/libs/desktop-services-host': {
-      // Ambient `tauCloudBuildEnabled` and `tauDesktopHostBuild`, defined by the desktop's electron.vite.config.ts.
+      // Ambient `tauTelemetryHostCloudBuild` and `tauDesktopHostBuild`, defined by the desktop's electron.vite.config.ts.
       entry: ['src/build-environment.d.ts'],
     },
     'apps/libs/api-lifecycle': {
@@ -235,7 +237,7 @@ const config: KnipConfig = {
         'scripts/*.mts',
         // `apps/desktop/macos/project.json` runs both with paths from the workspace root.
         'macos/scripts/*.mts',
-        // Ambient `tauCloudBuildEnabled`, defined by electron.vite.config.ts.
+        // Ambient build constants (`tauSentryDsn` and the rest), defined by electron.vite.config.ts.
         'src/build-environment.d.ts',
       ],
       ignoreDependencies: [
@@ -327,7 +329,10 @@ const config: KnipConfig = {
         'app/routes/**/*.tsx',
         'app/types/**/*.d.ts',
         'vite-environment.d.ts',
-        'app/offline/offline-shell-env.d.ts',
+        'app/offline/service-worker-env.d.ts',
+        // Built into `service-worker.js` by `scripts/build-service-worker.ts`; no page imports them.
+        'app/offline/service-worker.ts',
+        'app/offline/service-worker-kill-switch.ts',
         // Netlify bundles every edge function in this directory; `config` names its paths.
         'netlify/edge-functions/*.ts',
         // `apps/ui/project.json` runs every calibration script with a workspace-root path.
@@ -338,7 +343,7 @@ const config: KnipConfig = {
         'app/calibration-preview.tsx',
         // `tau-ui-source-alias` (vite.config.ts) swaps these in for their `#…` facades per build
         // target (cloud, self-host, desktop); knip only follows the facade import.
-        'app/**/*.{cloud,self-host,desktop}.{ts,tsx}',
+        'app/**/*.{cloud,self-host,adaptive,desktop}.{ts,tsx}',
         // The same resolver substitutes these no-op modules when the staging harness is disabled.
         'app/lib/observability-harness-disabled.ts',
         'app/lib/observability-harness-hydration-disabled.ts',
@@ -393,6 +398,10 @@ const config: KnipConfig = {
     'libs/api-extractor': {
       // Generated declarations are catalog data read from disk by extraction tools.
       ignore: ['src/generated/**'],
+    },
+    'tools/vitest-ci': {
+      // A child Vitest run by `src/outcome-reporter.test.ts`: the test spawns this config, nothing imports it.
+      ignore: ['fixtures/**'],
     },
     'libs/oxlint': {
       // RuleTester inputs: the tests read and lint these files, nothing imports them.

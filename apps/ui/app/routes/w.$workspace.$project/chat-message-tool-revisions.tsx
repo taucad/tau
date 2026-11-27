@@ -15,8 +15,9 @@ import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { useProject } from '#hooks/use-project.js';
-import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
-import type { RevisionWhoEntry } from '#lib/revision-actor.js';
+import { revisionWho } from '@taucad/revisions-ui/lib/revision-who';
+import type { RevisionWhoEntry } from '@taucad/revisions-ui/lib/revision-who';
+import { useRevisionWhoContext } from '#lib/revision-actor.js';
 import {
   entryTime,
   entryTitle,

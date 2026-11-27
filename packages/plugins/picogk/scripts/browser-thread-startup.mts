@@ -116,6 +116,42 @@ export const patchBrowserThreadMemory = (source: string): string => {
   return source.replace(before, 'this.appendULeb(256),this.appendULeb(65536)');
 };
 
+const threadIdChecks = [
+  [
+    'un.pthreadId==e||it(!1,"expected monoThreadInfo to be set already when registering")',
+    'un.pthreadId==e>>>0||it(!1,"expected monoThreadInfo to be set already when registering")',
+  ],
+  [
+    'un.pthreadId==e||it(!1,"expected monoThreadInfo to be set already when attaching")',
+    'un.pthreadId==e>>>0||it(!1,"expected monoThreadInfo to be set already when attaching")',
+  ],
+  [
+    'e!==un.pthreadId&&it(!1,"expected pthread_id to match when un-registering")',
+    'e>>>0!==un.pthreadId&&it(!1,"expected pthread_id to match when un-registering")',
+  ],
+] as const;
+
+/**
+ * Compare a pthread id from native code as the unsigned pointer the runtime recorded for it.
+ *
+ * With a heap above 2 GiB, a pthread created after the heap passes 2^31 gets its thread struct there.
+ * Mono records the thread's own id from Emscripten's `pthread_self` wrapper, which returns the pointer
+ * unsigned, but it installs its registration callbacks as raw wasm imports, so the same pointer arrives
+ * as a negative i32. The assert then kills the worker the first time such a thread registers with Mono.
+ * @param source - Generated managed runtime JavaScript from the admitted workload.
+ * @returns The three pthread id checks comparing unsigned ids, refusing a changed or already patched workload.
+ */
+export const patchBrowserThreadIds = (source: string): string => {
+  let patched = source;
+  for (const [before, after] of threadIdChecks) {
+    if (source.split(before).length !== 2) {
+      throw new Error('The qualified .NET pthread registration checks changed.');
+    }
+    patched = patched.replace(before, after);
+  }
+  return patched;
+};
+
 /**
  * The generated module names this bootstrap loads, as its own embedded configuration records them.
  * @param bootstrap - Generated dotnet.js containing its embedded configuration.
@@ -151,7 +187,7 @@ export const patchBrowserThreadRuntime = (input: {
 }): { bootstrap: string; modules: Map<string, string> } => {
   const native = patchBrowserThreadMailbox(patchBrowserThreadStartup(input.native));
   const boundNative = bindBrowserThreadStartup(patchBrowserThreadWorkerMessages(input.bootstrap), native);
-  const runtime = patchBrowserThreadMemory(input.runtime);
+  const runtime = patchBrowserThreadIds(patchBrowserThreadMemory(input.runtime));
   const boundRuntime = bindBrowserThreadStartup(boundNative.bootstrap, runtime, 'runtime');
   return {
     bootstrap: boundRuntime.bootstrap,

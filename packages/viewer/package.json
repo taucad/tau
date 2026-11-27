@@ -36,6 +36,7 @@
   },
   "exports": {
     "./cad/cad-viewer": "./src/cad/cad-viewer.tsx",
+    "./cad/comment-pins": "./src/cad/comment-pins.tsx",
     "./cad/fit-view-control": "./src/cad/fit-view-control.tsx",
     "./cad/fullscreen-view-control": "./src/cad/fullscreen-view-control.tsx",
     "./cad/kernel-settings": "./src/cad/kernel-settings.tsx",
@@ -76,6 +77,7 @@
     "./graphics/three/react/gltf-mesh": "./src/graphics/three/react/gltf-mesh.tsx",
     "./graphics/three/render-frame-timing": "./src/graphics/three/render-frame-timing.ts",
     "./graphics/three/render-loop-observer": "./src/graphics/three/render-loop-observer.ts",
+    "./graphics/three/render-tier": "./src/graphics/three/render-tier.ts",
     "./graphics/three/renderer": "./src/graphics/three/renderer.ts",
     "./graphics/three/scene-overlay": "./src/graphics/three/scene-overlay.tsx",
     "./graphics/three/stage": "./src/graphics/three/stage.tsx",
@@ -135,6 +137,11 @@
         "types": "./dist/cad/cad-viewer.d.mts",
         "import": "./dist/cad/cad-viewer.mjs",
         "default": "./dist/cad/cad-viewer.mjs"
+      },
+      "./cad/comment-pins": {
+        "types": "./dist/cad/comment-pins.d.mts",
+        "import": "./dist/cad/comment-pins.mjs",
+        "default": "./dist/cad/comment-pins.mjs"
       },
       "./cad/fit-view-control": {
         "types": "./dist/cad/fit-view-control.d.mts",
@@ -335,6 +342,11 @@
         "types": "./dist/graphics/three/render-loop-observer.d.mts",
         "import": "./dist/graphics/three/render-loop-observer.mjs",
         "default": "./dist/graphics/three/render-loop-observer.mjs"
+      },
+      "./graphics/three/render-tier": {
+        "types": "./dist/graphics/three/render-tier.d.mts",
+        "import": "./dist/graphics/three/render-tier.mjs",
+        "default": "./dist/graphics/three/render-tier.mjs"
       },
       "./graphics/three/renderer": {
         "types": "./dist/graphics/three/renderer.d.mts",
@@ -621,7 +633,7 @@
     "pluralize": "^8.0.0",
     "postprocessing": "catalog:",
     "three-mesh-bvh": "^0.9.10",
-    "three-viewport-gizmo": "npm:@taulabs/three-viewport-gizmo@3.0.0-beta.0"
+    "three-viewport-gizmo": "npm:@taulabs/three-viewport-gizmo@3.0.0-beta.6"
   },
   "peerDependencies": {
     "@react-three/fiber": "^9.0.0",

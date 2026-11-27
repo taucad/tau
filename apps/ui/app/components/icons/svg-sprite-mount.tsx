@@ -1,10 +1,12 @@
-import spriteUrl from '@taucad/ui-kit/icons/generated/sprite.svg?url';
-import paymentSpriteUrl from '@taucad/ui-kit/icons/generated/payment-sprite.svg?url';
-import { SvgSpriteLoader } from '@taucad/ui-kit/icons/svg-sprite-loader';
+import { FundedSurface } from '#cloud/cloud-surface.js';
+import { SvgSpriteMount as BaseSvgSpriteMount } from '#components/icons/svg-sprite-mount.unfunded.js';
 
-const spriteUrls = [spriteUrl, paymentSpriteUrl];
-
-/** Mounts the icon set and the cloud payment artwork at the app shell. */
+/** The base sprite is Core; the payment artwork arrives with the Cloud chunk while funded. */
 export function SvgSpriteMount(): React.JSX.Element {
-  return <SvgSpriteLoader urls={spriteUrls} />;
+  return (
+    <>
+      <BaseSvgSpriteMount />
+      <FundedSurface fallback={undefined} render={(cloud) => <cloud.PaymentSprite />} />
+    </>
+  );
 }

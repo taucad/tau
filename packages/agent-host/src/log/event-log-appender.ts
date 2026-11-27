@@ -18,6 +18,19 @@ import { isAbandonedTurn } from '#log/event-types.js';
  */
 export type EventLogAppendOutcome = Readonly<{ appended: boolean; endCursor: number }>;
 
+/**
+ * What one {@link EventLogAppender.appendMany} did: the outcome of each row it reached, in order, every one durable,
+ * and the failure that ended it early, if any. `known` is `false` when the rows' durability is unknown (the flush
+ * failed after the writes, or a fencing authority's answer was lost), so a caller reports the effect as unknown.
+ *
+ * @public
+ */
+export type EventLogBatchOutcome = Readonly<{
+  outcomes: readonly EventLogAppendOutcome[];
+  failure?: unknown;
+  known: boolean;
+}>;
+
 /** One bounded read from an event-log cursor. @public */
 export type EventLogBatch = {
   readonly cursor: number;
@@ -76,6 +89,12 @@ export type EventLogAppender = {
    * `LOG_FENCED`, writing nothing, when the log is no longer the log this appender read (D5).
    */
   append(event: AgentLogEvent): Promise<EventLogAppendOutcome>;
+  /**
+   * Append a batch in order under one fence check and one flush (WP-10 step A): each row passes the same rules as
+   * {@link EventLogAppender.append}, and a refused or failed row ends the batch with the rows before it written and
+   * durable. Never rejects: the outcome says what landed. Absent on an appender that writes one row at a time.
+   */
+  appendMany?(events: readonly AgentLogEvent[]): Promise<EventLogBatchOutcome>;
   /**
    * Read this device's own records, opaque rows included: the rows this appender writes and its cursors count. Run
    * bookkeeping — run ids, sequences, leadership epochs, resume markers — reads these, never another device's.
@@ -205,6 +224,14 @@ export type EventLogStorage = {
    * ignores it.
    */
   append(bytes: Uint8Array<ArrayBuffer>, expectedLength?: number): Promise<void>;
+  /**
+   * Append `bytes` without making them durable, for a batch whose rows one {@link EventLogStorage.sync} covers (WP-10
+   * step A). Only a port whose `exclusive` is the authority's lock (it does not fence at the authority) offers it,
+   * with `sync`; without them a batch appends each row durably inside one `exclusive` section.
+   */
+  write?(bytes: Uint8Array<ArrayBuffer>): Promise<void>;
+  /** Make every byte written so far durable: OPFS `flush`, Node `fsync`. */
+  sync?(): Promise<void>;
   truncate(size: number): Promise<void>;
   close(): Promise<void>;
   /** Current byte length of the log. */
@@ -664,40 +691,79 @@ export const createEventLogAppender = async (
    * holds one of the few threads every file read in this process shares, and a bound only stops the wait: a refresh
    * that began a read of its own each time took every thread after a few resends. A refresh while a read runs shares
    * the one read that begins when it ends, which still sees every write made before that refresh.
+   *
+   * Tau #1098, item 2: nor does the waiting read wait on one read for good. If the open's first read hung, the read
+   * queued behind it never began, and every start, Resume and approval on the chat was refused `SEGMENTS_UNREADABLE`
+   * until the chat was closed and reopened. The queued read now begins once the read it waits on ends, or once the
+   * segment bound has passed since that read began, whichever is first; with two reads outstanding it waits for either
+   * to end. So at most two reads are ever outstanding, and one hung read never holds the chat's history.
    */
-  let inFlight: Promise<Landing> | undefined;
-  let reading = false;
+  type Outstanding = Readonly<{ landing: Promise<Landing>; overdue: Promise<void> }>;
+  const segmentBound = options.segmentReadMilliseconds ?? segmentRefreshMilliseconds; // Bound: segmentRefreshMilliseconds.
+  const outstandingReadLimit = 2;
+  const outstanding = new Map<number, Outstanding>();
+  let readIds = 0;
+  let newest: Outstanding | undefined;
   let queued: Promise<Landing> | undefined;
   const readOnce = async (read: () => Promise<readonly ChatLogSegment[]>): Promise<Landing> => {
     readsBegun += 1;
     const order = readsBegun;
-    reading = true;
     try {
       return { order, read: { segments: await read() } };
     } catch (error) {
       return { order, read: { failure: unreadAnomaly(error instanceof Error ? error.message : String(error)) } };
+    }
+  };
+  /* A read, outstanding until it ends: then its bound stops and its slot frees. */
+  const trackedRead = async (
+    id: number,
+    timer: ReturnType<typeof setTimeout>,
+    read: () => Promise<readonly ChatLogSegment[]>,
+  ): Promise<Landing> => {
+    try {
+      return await readOnce(read);
     } finally {
-      reading = false;
+      clearTimeout(timer);
+      outstanding.delete(id);
     }
   };
   const startRead = async (read: () => Promise<readonly ChatLogSegment[]>): Promise<Landing> => {
-    inFlight = readOnce(read);
-    return inFlight;
+    const overdue = Promise.withResolvers<undefined>();
+    const timer = setTimeout(() => {
+      overdue.resolve(undefined);
+    }, segmentBound); // Bound: segmentRefreshMilliseconds.
+    (timer as { unref?: () => void }).unref?.();
+    readIds += 1;
+    const landing = trackedRead(readIds, timer, read);
+    const entry: Outstanding = { landing, overdue: overdue.promise };
+    outstanding.set(readIds, entry);
+    newest = entry;
+    return landing;
   };
-  const afterRead = async (
-    running: Promise<Landing>,
-    read: () => Promise<readonly ChatLogSegment[]>,
-  ): Promise<Landing> => {
-    await running;
+  /* The queued read's turn: a read that ends, or the newest read past the bound while a second read may still begin. */
+  const readSlot = async (): Promise<void> => {
+    const ends = Array.from(outstanding.values(), async (entry) => {
+      await entry.landing;
+    });
+    const overdue = outstanding.size < outstandingReadLimit && newest !== undefined ? [newest.overdue] : [];
+    await Promise.race([...ends, ...overdue]);
+  };
+  const afterRead = async (read: () => Promise<readonly ChatLogSegment[]>): Promise<Landing> => {
+    await readSlot();
+    /* A read that ended may have been one of two: wait again while both slots are still taken. */
+    while (outstanding.size >= outstandingReadLimit) {
+      // oxlint-disable-next-line no-await-in-loop -- waits for one of the two outstanding reads to end
+      await readSlot();
+    }
     queued = undefined;
     return startRead(read);
   };
   const sharedRead = async (read: () => Promise<readonly ChatLogSegment[]>): Promise<Landing> => {
     if (queued === undefined) {
-      if (!reading || inFlight === undefined) {
+      if (outstanding.size === 0) {
         return startRead(read);
       }
-      queued = afterRead(inFlight, read);
+      queued = afterRead(read);
     }
     return queued;
   };
@@ -741,7 +807,7 @@ export const createEventLogAppender = async (
     const expired = Promise.withResolvers<'expired'>();
     const timer = setTimeout(() => {
       expired.resolve('expired');
-    }, options.segmentReadMilliseconds ?? segmentRefreshMilliseconds); // Bound: segmentRefreshMilliseconds.
+    }, segmentBound); // Bound: segmentRefreshMilliseconds.
     (timer as { unref?: () => void }).unref?.();
     const first = await Promise.race([result, expired.promise]);
     clearTimeout(timer);
@@ -870,102 +936,191 @@ export const createEventLogAppender = async (
     return tail.byteLength === torn.byteLength && tail.every((byte, index) => byte === torn[index]);
   };
 
-  const guardedAppend = async (bytes: Uint8Array<ArrayBuffer>): Promise<void> =>
-    storage.exclusive(async () => {
-      const size = await storage.size();
-      if (tornTail !== undefined && size === byteLength + tornTail.byteLength && (await isTornTail(tornTail))) {
-        await storage.truncate(byteLength);
-      } else if (size !== byteLength) {
+  /** Inside `exclusive`: the log is still this appender's view (or that plus the torn tail it repairs), or `LOG_FENCED`. */
+  const checkFence = async (): Promise<void> => {
+    const size = await storage.size();
+    if (tornTail !== undefined && size === byteLength + tornTail.byteLength && (await isTornTail(tornTail))) {
+      await storage.truncate(byteLength);
+    } else if (size !== byteLength) {
+      fenced = true;
+      throw fencedError();
+    }
+    tornTail = undefined;
+  };
+
+  /** Inside `exclusive`, after the fence check: write one row's bytes, rolling a failed write back where that is safe. */
+  const fencedWrite = async (
+    bytes: Uint8Array<ArrayBuffer>,
+    put: (bytes: Uint8Array<ArrayBuffer>, expectedLength: number) => Promise<void>,
+  ): Promise<void> => {
+    try {
+      await put(bytes, byteLength);
+    } catch (appendError) {
+      /* D23: the authority refused the append because another writer's bytes landed first. Nothing of this
+       * append was written, and everything past `byteLength` is that writer's, so a rollback would delete it. */
+      if (isAuthorityFenceRefusal(appendError)) {
         fenced = true;
         throw fencedError();
       }
-      tornTail = undefined;
-      try {
-        await storage.append(bytes, byteLength);
-      } catch (appendError) {
-        /* D23: the authority refused the append because another writer's bytes landed first. Nothing of this
-         * append was written, and everything past `byteLength` is that writer's, so a rollback would delete it. */
-        if (isAuthorityFenceRefusal(appendError)) {
-          fenced = true;
-          throw fencedError();
-        }
-        /* A fencing port's append may have committed before it failed, and `exclusive` does not keep another
-         * writer out of the authority, so the bytes past `byteLength` may not all be this append's. */
-        if (storage.fencesAppends === true) {
-          poisoned = true;
-          throw new EventLogError(
-            'LOG_POISONED',
-            'The event-log append failed with an unknown outcome; nothing was rolled back. Reopen the log to read what it holds.',
-            { cause: appendError },
-          );
-        }
-        // Safe: no other writer can append inside this section, so the bytes past `byteLength` are this append's.
-        try {
-          await storage.truncate(byteLength);
-        } catch (rollbackError) {
-          poisoned = true;
-          throw new EventLogError(
-            'LOG_POISONED',
-            'The event-log append failed and its partial bytes could not be rolled back.',
-            { cause: new AggregateError([appendError, rollbackError], 'Append and rollback both failed.') },
-          );
-        }
-        throw appendError;
+      /* A fencing port's append may have committed before it failed, and `exclusive` does not keep another
+       * writer out of the authority, so the bytes past `byteLength` may not all be this append's. */
+      if (storage.fencesAppends === true) {
+        poisoned = true;
+        throw new EventLogError(
+          'LOG_POISONED',
+          'The event-log append failed with an unknown outcome; nothing was rolled back. Reopen the log to read what it holds.',
+          { cause: appendError },
+        );
       }
+      // Safe: no other writer can append inside this section, so the bytes past `byteLength` are this append's.
+      try {
+        await storage.truncate(byteLength);
+      } catch (rollbackError) {
+        poisoned = true;
+        throw new EventLogError(
+          'LOG_POISONED',
+          'The event-log append failed and its partial bytes could not be rolled back.',
+          { cause: new AggregateError([appendError, rollbackError], 'Append and rollback both failed.') },
+        );
+      }
+      throw appendError;
+    }
+  };
+
+  const guardedAppend = async (bytes: Uint8Array<ArrayBuffer>): Promise<void> =>
+    storage.exclusive(async () => {
+      await checkFence();
+      await fencedWrite(bytes, async (line, expectedLength) => storage.append(line, expectedLength));
     });
 
+  /**
+   * One row: the fenced flag, the strict parse, the term rules (a duplicate returns before any write), the history
+   * rules, then `write`, then the fold. `append` and `appendMany` differ only in `write`.
+   *
+   * @param candidate - The row.
+   * @param write - Writes the row's bytes under the fence.
+   * @returns Whether the row was written, and the end cursor.
+   */
+  const appendRow = async (
+    candidate: AgentLogEvent,
+    write: (bytes: Uint8Array<ArrayBuffer>) => Promise<void>,
+  ): Promise<EventLogAppendOutcome> => {
+    assertOpen();
+    if (fenced) {
+      throw fencedError();
+    }
+    const event = parseLogEvent(candidate);
+    /* The term rules first, on this device's rows: a duplicate is answered before any history rule runs. */
+    const term = terms.prepare(event);
+    if (term.duplicate) {
+      return { appended: false, endCursor: events.length };
+    }
+    const folding = history();
+    const transition = folding.prepare(term.event);
+    if (transition.duplicate) {
+      return { appended: false, endCursor: events.length };
+    }
+    const bytes = serializeLogEventBytes(event, needsSeparator);
+    await write(bytes);
+    term.commit();
+    transition.commit();
+    /* Rebuilt from the log when next needed, with this row. */
+    lenient = undefined;
+    /* Round 21: the merged fold takes the row at its tail only where a whole merge puts it; else it folds again. */
+    const atTail = merged === undefined || extendsMergedTail(transition.event);
+    /* The other fold follows tolerantly: a row naming another device's message does not apply to `own`. */
+    if (folding !== own) {
+      own.replay(transition.event);
+    } else if (merged !== undefined && atTail) {
+      merged.replay(transition.event);
+    }
+    /* At the tail, the row extends the merge's last term, so no term starts here. */
+    if (merged !== undefined && atTail) {
+      mergedRows.push(transition.event);
+    }
+    if (termFrontier?.leaderEpoch !== transition.event.leaderEpoch) {
+      termFrontier = { leaderEpoch: transition.event.leaderEpoch, rows: foreignFrontier() };
+    }
+    events.push(transition.event);
+    ownRows.push(transition.event);
+    introduce([transition.event]);
+    noteOwn(transition.event);
+    cursorOf.set(transition.event, events.length - 1);
+    byteLength += bytes.byteLength;
+    needsSeparator = false;
+    if (!atTail) {
+      merged = undefined;
+      fold();
+    }
+    return { appended: true, endCursor: events.length };
+  };
+
+  /*
+   * WP-10 step A, group commit: the batch's rows in one `exclusive` section, the fence checked at its first write only
+   * (the appender's own writes keep its view current: `appendBatch_eq_appendSeq` in ChatLedger.lean), and one flush
+   * after the last. A crash inside the batch leaves a prefix of its rows, possibly torn, which per-row flushes could
+   * also leave (`batch_crash_reachable`). A port without `write` and `sync` appends each row durably in the section.
+   */
+  const appendBatch = async (candidates: readonly AgentLogEvent[]): Promise<EventLogBatchOutcome> => {
+    const outcomes: EventLogAppendOutcome[] = [];
+    const deferred = storage.write !== undefined && storage.sync !== undefined;
+    let checked = false;
+    let unsynced = 0;
+    let failure: unknown;
+    const writeRow = async (bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
+      if (!checked) {
+        await checkFence();
+        checked = true;
+      }
+      await fencedWrite(bytes, async (line, expectedLength) =>
+        deferred ? storage.write!(line) : storage.append(line, expectedLength),
+      );
+      if (deferred) {
+        unsynced += 1;
+      }
+    };
+    try {
+      await storage.exclusive(async () => {
+        for (const candidate of candidates) {
+          // oxlint-disable-next-line no-await-in-loop -- the batch's rows are written in order (W1).
+          outcomes.push(await appendRow(candidate, writeRow));
+        }
+      });
+    } catch (error) {
+      failure = error;
+    }
+    if (unsynced > 0) {
+      try {
+        await storage.sync!();
+      } catch (syncError) {
+        /* The rows are in this appender's view but their bytes may not be durable: nothing more is written here. */
+        poisoned = true;
+        return {
+          outcomes: [],
+          failure: new EventLogError(
+            'LOG_POISONED',
+            'The event-log flush failed after a batch was written; its rows may not be durable. Reopen the log to read what it holds.',
+            {
+              cause:
+                failure === undefined
+                  ? syncError
+                  : new AggregateError([failure, syncError], 'A batch row and the flush after it both failed.'),
+            },
+          ),
+          known: false,
+        };
+      }
+    }
+    if (failure === undefined) {
+      return { outcomes, known: true };
+    }
+    const { code } = failure as { readonly code?: unknown };
+    return { outcomes, failure, known: code !== 'LOG_POISONED' };
+  };
+
   return {
-    append: async (candidate) =>
-      enqueue(async () => {
-        assertOpen();
-        if (fenced) {
-          throw fencedError();
-        }
-        const event = parseLogEvent(candidate);
-        /* The term rules first, on this device's rows: a duplicate is answered before any history rule runs. */
-        const term = terms.prepare(event);
-        if (term.duplicate) {
-          return { appended: false, endCursor: events.length };
-        }
-        const folding = history();
-        const transition = folding.prepare(term.event);
-        if (transition.duplicate) {
-          return { appended: false, endCursor: events.length };
-        }
-        const bytes = serializeLogEventBytes(event, needsSeparator);
-        await guardedAppend(bytes);
-        term.commit();
-        transition.commit();
-        /* Rebuilt from the log when next needed, with this row. */
-        lenient = undefined;
-        /* Round 21: the merged fold takes the row at its tail only where a whole merge puts it; else it folds again. */
-        const atTail = merged === undefined || extendsMergedTail(transition.event);
-        /* The other fold follows tolerantly: a row naming another device's message does not apply to `own`. */
-        if (folding !== own) {
-          own.replay(transition.event);
-        } else if (merged !== undefined && atTail) {
-          merged.replay(transition.event);
-        }
-        /* At the tail, the row extends the merge's last term, so no term starts here. */
-        if (merged !== undefined && atTail) {
-          mergedRows.push(transition.event);
-        }
-        if (termFrontier?.leaderEpoch !== transition.event.leaderEpoch) {
-          termFrontier = { leaderEpoch: transition.event.leaderEpoch, rows: foreignFrontier() };
-        }
-        events.push(transition.event);
-        ownRows.push(transition.event);
-        introduce([transition.event]);
-        noteOwn(transition.event);
-        cursorOf.set(transition.event, events.length - 1);
-        byteLength += bytes.byteLength;
-        needsSeparator = false;
-        if (!atTail) {
-          merged = undefined;
-          fold();
-        }
-        return { appended: true, endCursor: events.length };
-      }),
+    append: async (candidate) => enqueue(async () => appendRow(candidate, guardedAppend)),
+    appendMany: async (candidates) => enqueue(async () => appendBatch(candidates)),
     read: async () =>
       enqueue(async () => {
         assertOpen();

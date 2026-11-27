@@ -6,11 +6,14 @@
 
 A durable tool result projects as its output, then `finish-step` and `start-step`. The SDK reducer forgets its active text and reasoning parts on `finish-step` without closing them, and it rejects the next delta of a forgotten part. The watch stream then errors. Tool results folded after that never reach the page, so their calls keep spinning until the step ends and the transcript is materialized again.
 
-| Configuration               | Expect                         | Meaning                                                           |
-| --------------------------- | ------------------------------ | ----------------------------------------------------------------- |
-| `target`                    | pass                           | `GuardBoundary`: no step boundary while a live block is open      |
-| `today-StreamAccepted`      | violates `StreamAccepted`      | As-built: the SDK rejects the reasoning delta after the boundary  |
-| `today-FoldedToolConcluded` | violates `FoldedToolConcluded` | As-built: later results are folded but their calls never conclude |
+| Configuration               | Expect                         | Meaning                                                               |
+| --------------------------- | ------------------------------ | --------------------------------------------------------------------- |
+| `target`                    | pass                           | `GuardBoundary`: no step boundary while a live block is open          |
+| `today-StreamAccepted`      | violates `StreamAccepted`      | As-built: the SDK rejects the reasoning delta after the boundary      |
+| `today-FoldedToolConcluded` | violates `FoldedToolConcluded` | As-built: later results are folded but their calls never conclude     |
+| `today-OneLiveWakePerFrame` | violates `OneLiveWakePerFrame` | Without `FrameClock`: every live event wakes the projection's readers |
+
+The frame clock (`FrameClock`, chat performance WP-06): readers see `vis`, the folded state as of the last publish. A live-only change publishes from the next animation frame; a durable row publishes at once with any live change still waiting. `target` checks `OneLiveWakePerFrame`, `DurableAtOnce`, `FrameAtomic` and the liveness `LivePublished` under weak fairness of `Frame`.
 
 ## Correspondence to implementation
 
@@ -19,6 +22,7 @@ A durable tool result projects as its output, then `finish-step` and `start-step
 | `FoldOutput`                        | `foldLiveRow` → `projectAgentHostEvent` `tool-output` in `apps/libs/chat-ui/src/services/agent-host-event-projection.ts` |
 | `Boundary`, `GuardBoundary`         | `hasOpenStreamBlock`: an open text or reasoning block holds back the result's step boundary                              |
 | `LiveStart`, `LiveDelta`, `LiveEnd` | `reduceChatProjection` `live` → `projectAgentHostLiveEvent` `thinking-*`                                                 |
-| `active`, `errored`, `shown`        | `openRunWatch` drain → the SDK's `processUIMessageStream`                                                                |
+| `active`, `errored`, `shown`        | `selectTranscript` → `reduceChunks`, the synchronous fold of the projection (T4)                                         |
+| `Frame`, `vis`, `pending`, `wakes`  | `ChatSessionStore` `#projectionOf`: live-only snapshots publish from one frame callback per chat                         |
 
 The `paused` lifecycle row already keeps the same rule through `hasOpenBlock`. The regression tests are in `app/machines/chat-projection.logic.test.ts` under "durable tool results read after the next step went live".

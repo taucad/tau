@@ -43,12 +43,12 @@ describe('PrometheusNames', () => {
 
   it('should produce expected names for renamed metrics', () => {
     expect(PrometheusNames.wsDisconnections).toBe('ws_disconnections_total');
-    expect(PrometheusNames.kernelExecutions).toBe('kernel_executions_total');
     expect(PrometheusNames.healthReadinessFailures).toBe('health_readiness_failures_total');
     expect(PrometheusNames.publicationViewsTotal).toBe('publication_views_total');
     expect(PrometheusNames.publicationViewsRejectedTotal).toBe('publication_views_rejections_total');
     expect(PrometheusNames.publicationInviteEmailsTotal).toBe('publication_invite_emails_total');
     expect(PrometheusNames.publicationInviteEmailsSuppressedTotal).toBe('publication_invite_emails_suppressions_total');
+    expect(PrometheusNames.projectInviteEmailsTotal).toBe('project_invite_emails_total');
     expect(PrometheusNames.emailEventsTotal).toBe('email_events_total');
   });
 });
@@ -56,6 +56,6 @@ describe('PrometheusNames', () => {
 describe('prometheusNameOf', () => {
   it('should return the correct Prometheus name for a metric definition', () => {
     expect(prometheusNameOf(TauMetrics.wsMessageSize)).toBe('ws_message_size');
-    expect(prometheusNameOf(TauMetrics.kernelExecutions)).toBe('kernel_executions_total');
+    expect(prometheusNameOf(TauMetrics.wsDisconnections)).toBe('ws_disconnections_total');
   });
 });

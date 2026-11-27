@@ -25,6 +25,8 @@ import { noBareTimeIdentifierRule } from './rules/no-bare-time-identifier.js';
 import { noAsyncIifeRule } from './rules/no-async-iife.js';
 import { noBareRandomUuidRule } from './rules/no-bare-random-uuid.js';
 import { noDirectIndexeddbRule } from './rules/no-direct-indexeddb.js';
+import { noCloudImportOutsideLoaderRule } from './rules/no-cloud-import-outside-loader.js';
+import { codeLoadingOwnerRule } from './rules/code-loading-owner.js';
 import { noBareRpcErrorCodeRule } from './rules/no-bare-rpc-error-code.js';
 import { noHandrolledFanoutRule } from './rules/no-handrolled-fanout.js';
 import { noAwaitedMutationInLoopRule } from './rules/no-awaited-mutation-in-loop.js';
@@ -32,6 +34,7 @@ import { noSceneOverrideMaterialRule } from './rules/no-scene-override-material.
 import { staticImportMetaUrlRule } from './rules/static-import-meta-url.js';
 import { requireUsingOnDisposableRule } from './rules/require-using-on-disposable.js';
 import { noImplInIndexRule } from './rules/no-impl-in-index.js';
+import { noTestBridgeRedeclarationRule } from './rules/no-test-bridge-redeclaration.js';
 import { pluginCapabilityFilenameRule } from './rules/plugin-capability-filename.js';
 import { noAuthoredPointerCursorRule } from './rules/no-authored-pointer-cursor.js';
 import { noInlineActorSelectorRule } from './rules/no-inline-actor-selector.js';
@@ -49,12 +52,16 @@ import { noAccentHoverRule } from './rules/no-accent-hover.js';
 import { noButtonSizeOverrideRule } from './rules/no-button-size-override.js';
 import { noRawHeadingTypeRule } from './rules/no-raw-heading-type.js';
 import { noRaisedOverlayLayerRule } from './rules/no-raised-overlay-layer.js';
+import { noPluginDefaultExportRule } from './rules/no-plugin-default-export.js';
+import { noPluginDefaultImportRule } from './rules/no-plugin-default-import.js';
+import { requirePluginPackageBindingRule } from './rules/require-plugin-package-binding.js';
+import { noKernelTypeAssertionRule } from './rules/no-kernel-type-assertion.js';
 
 /** @type {Plugin} */
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.30.0',
+    version: '1.34.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -75,6 +82,8 @@ const plugin = {
     'no-async-iife': noAsyncIifeRule,
     'no-bare-random-uuid': noBareRandomUuidRule,
     'no-direct-indexeddb': noDirectIndexeddbRule,
+    'no-cloud-import-outside-loader': noCloudImportOutsideLoaderRule,
+    'code-loading-owner': codeLoadingOwnerRule,
     'no-bare-rpc-error-code': noBareRpcErrorCodeRule,
     'no-handrolled-fanout': noHandrolledFanoutRule,
     'no-awaited-mutation-in-loop': noAwaitedMutationInLoopRule,
@@ -82,6 +91,7 @@ const plugin = {
     'static-import-meta-url': staticImportMetaUrlRule,
     'require-using-on-disposable': requireUsingOnDisposableRule,
     'no-impl-in-index': noImplInIndexRule,
+    'no-test-bridge-redeclaration': noTestBridgeRedeclarationRule,
     'plugin-capability-filename': pluginCapabilityFilenameRule,
     'no-authored-pointer-cursor': noAuthoredPointerCursorRule,
     'no-inline-actor-selector': noInlineActorSelectorRule,
@@ -99,6 +109,10 @@ const plugin = {
     'no-button-size-override': noButtonSizeOverrideRule,
     'no-raw-heading-type': noRawHeadingTypeRule,
     'no-raised-overlay-layer': noRaisedOverlayLayerRule,
+    'no-plugin-default-export': noPluginDefaultExportRule,
+    'no-plugin-default-import': noPluginDefaultImportRule,
+    'require-plugin-package-binding': requirePluginPackageBindingRule,
+    'no-kernel-type-assertion': noKernelTypeAssertionRule,
   },
 };
 

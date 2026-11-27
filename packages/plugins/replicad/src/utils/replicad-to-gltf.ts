@@ -1,6 +1,7 @@
 import { Primitive } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { cadEdgeOverlayMaterialDefaults, cadMaterialDefaults, tauCadTopologyExtension } from '@taucad/runtime/types';
+import { checkAbort } from '@taucad/runtime/kernel';
 import {
   compactTriangleIndices,
   isClosedTriangleMesh,
@@ -49,9 +50,34 @@ type ReplicadNodeBuildResult = {
   component: Omit<ReplicadTopologyComponent, 'nodeIndex'>;
 };
 
+type CompactedFaces = ReturnType<typeof compactFaces>;
+
+/** What packing one mesh derives from it alone: its compacted triangles and, per output frame, whether it is closed. */
+type ReplicadMeshPackFacts = {
+  readonly compacted: CompactedFaces;
+  readonly closed: Map<string, boolean>;
+};
+
+/**
+ * Pack facts kept per mesh across packs (catalogue N6), keyed by the mesh's `faces` object. The mesh memo owns one, so
+ * a fact lives exactly as long as the kept mesh it was derived from; a mesh that is not kept is never looked up again.
+ * The facts are pure functions of the mesh's arrays, which nothing writes to, so a kept fact packs the same bytes.
+ * @internal
+ */
+export type ReplicadPackFacts = WeakMap<GeometryReplicad['faces'], ReplicadMeshPackFacts>;
+
+/**
+ * Creates an empty pack-fact store.
+ * @returns The store.
+ * @internal
+ */
+export const createReplicadPackFacts = (): ReplicadPackFacts => new WeakMap();
+
 type ReplicadGltfOptions = GeometryOutputTransformOptions &
   GlbResources & {
     geometries: GeometryReplicad[];
+    /** Kept pack facts (compute reuse on); without them every mesh is compacted and tested for closedness. */
+    packFacts?: ReplicadPackFacts;
     format?: 'glb' | 'gltf';
     includeTauTopology?: boolean;
     logger?: RuntimeLogger;
@@ -104,14 +130,78 @@ function convertMechanism({
   return outcome.mechanism;
 }
 
+/**
+ * The mesh's triangles without degenerate or repeated ones, with its face groups numbered by index. The packer's ids
+ * replace the kernel's, so the result depends on the mesh alone.
+ * @param faces - The mesh.
+ * @returns The compacted triangles and groups, or undefined for an empty mesh.
+ */
+function compactFaces(faces: GeometryReplicad['faces']) {
+  if (faces.vertices.length === 0 || faces.triangles.length === 0) {
+    return undefined;
+  }
+  return compactTriangleIndices({
+    positions: faces.vertices,
+    indices: faces.triangles,
+    groups: faces.faceGroups.map((group, faceId) => ({ ...group, faceId })),
+  });
+}
+
+/**
+ * The pack facts of a mesh, kept ones when the store has them.
+ * @param faces - The mesh.
+ * @param packFacts - The kept facts, if any.
+ * @returns The mesh's facts.
+ */
+function factsOf(faces: GeometryReplicad['faces'], packFacts: ReplicadPackFacts | undefined): ReplicadMeshPackFacts {
+  const kept = packFacts?.get(faces);
+  if (kept) {
+    return kept;
+  }
+  const facts = { compacted: compactFaces(faces), closed: new Map<string, boolean>() };
+  packFacts?.set(faces, facts);
+  return facts;
+}
+
 type BuildNodeFromReplicadGeometryOptions = {
   geometry: GeometryReplicad;
+  packFacts: ReplicadPackFacts | undefined;
   nodeIndex: number;
   usedNames: Map<string, number>;
   usedIds: Map<string, number>;
   transformOptions: GeometryOutputTransformOptions;
   includeTauTopology: boolean;
 };
+
+/**
+ * Whether a mesh is closed in the output frame, kept per frame: the weld compares output positions, which the frame
+ * decides.
+ * @param input - The mesh's pack facts, the output frame, and the mesh's positions in it and compacted triangles.
+ * @param input.facts - The mesh's pack facts.
+ * @param input.transformOptions - The output frame.
+ * @param input.positions - The mesh's positions in that frame.
+ * @param input.indices - The mesh's compacted triangles.
+ * @returns Whether the mesh is a closed, outward-oriented surface.
+ */
+function isClosedIn({
+  facts,
+  transformOptions,
+  positions,
+  indices,
+}: {
+  facts: ReplicadMeshPackFacts;
+  transformOptions: GeometryOutputTransformOptions;
+  positions: Float32Array;
+  indices: Uint32Array;
+}): boolean {
+  const frame = `${transformOptions.coordinateSystem ?? ''}|${transformOptions.unit?.length ?? ''}`;
+  let closed = facts.closed.get(frame);
+  if (closed === undefined) {
+    closed = isClosedTriangleMesh([{ positions, indices }]);
+    facts.closed.set(frame, closed);
+  }
+  return closed;
+}
 
 /**
  * Build a GlbNode from a single replicad geometry (surface + optional edge lines).
@@ -121,6 +211,7 @@ type BuildNodeFromReplicadGeometryOptions = {
  */
 function buildNodeFromReplicadGeometry({
   geometry,
+  packFacts,
   nodeIndex,
   usedNames,
   usedIds,
@@ -140,15 +231,8 @@ function buildNodeFromReplicadGeometry({
     usedIds,
   );
   const selector = formatNodeSelector(nodeIndex);
-  const faceOccurrences = faces.faceGroups.map((group, faceId) => ({ ...group, faceId }));
-  const compactedFaces =
-    faces.vertices.length > 0 && faces.triangles.length > 0
-      ? compactTriangleIndices({
-          positions: faces.vertices,
-          indices: faces.triangles,
-          groups: faceOccurrences,
-        })
-      : undefined;
+  const facts = factsOf(faces, packFacts);
+  const compactedFaces = facts.compacted;
   const faceGroups = compactedFaces?.groups ?? [];
   const edgeGroups = edges.edgeGroups.map((group, edgeId) => ({ ...group, edgeId }));
 
@@ -221,7 +305,7 @@ function buildNodeFromReplicadGeometry({
         : {}),
       material: material ?? {
         // A closed solid draws one side: no back face of it shows from outside (see isClosedTriangleMesh).
-        doubleSided: baseColor[3] < 1 || !isClosedTriangleMesh([{ positions, indices }]),
+        doubleSided: baseColor[3] < 1 || !isClosedIn({ facts, transformOptions, positions, indices }),
         pbrMetallicRoughness: {
           baseColorFactor: baseColor,
           metallicFactor: geometry.metalness ?? cadMaterialDefaults.metalnessFactor,
@@ -316,6 +400,12 @@ function buildNodeFromReplicadGeometry({
  * When `logger` is supplied, emits a debug log with the produced GLB byte
  * length and node count.
  *
+ * Packing makes no OpenCascade call, so the exception proxy never polls the abort word here. It polls before each
+ * part, before writing, and inside the writer before each node and before serializing, so an edit that supersedes
+ * the render while it packs stops it at the next poll instead of after the whole GLB (P9c: 70 to 150 ms on
+ * planetary-gear-system). The writer's final interval, serializing the JSON and copying the buffers, is not covered
+ * (about 20 ms on turbofan). Outside an operation the poll does nothing.
+ *
  * @param options - Conversion inputs and output transform intent.
  * @returns GLTF blob
  */
@@ -336,8 +426,10 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
   const componentIds = new Map<string, string>();
 
   for (const geometry of geometries) {
+    checkAbort();
     const result = buildNodeFromReplicadGeometry({
       geometry,
+      packFacts: options.packFacts,
       nodeIndex: nodes.length,
       usedNames,
       usedIds,
@@ -378,6 +470,9 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
   ];
   const input: GlbInput = {
     nodes,
+    // The kernel's meshes have finite attributes by construction: the writer skips scanning them (catalogue N6).
+    trustedGeometry: true,
+    checkpoint: checkAbort,
     images: options.images,
     textures: options.textures,
     samplers: options.samplers,
@@ -403,6 +498,7 @@ export function convertReplicadGeometriesToGltf(options: ReplicadGltfOptions): U
       : {}),
   };
 
+  checkAbort();
   const output = format === 'gltf' ? writeGltfJson(input) : writeGlb(input);
 
   logger?.debug(

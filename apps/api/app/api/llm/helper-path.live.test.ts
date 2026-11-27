@@ -295,7 +295,7 @@ describe.skipIf(!enabled)('self-host helper path (live)', () => {
     } as unknown as ModelService;
     // The service's own selection order.
     const model =
-      offered.find((row) => row.id === 'openai-gpt-5.6-luna') ?? offered.find((row) => row.recommended) ?? offered[0];
+      offered.find((row) => row.id === 'openai-gpt-6-luna') ?? offered.find((row) => row.recommended) ?? offered[0];
     return { service: new DirectModelInvocationService(config, narrowed), model };
   };
 

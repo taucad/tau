@@ -5,7 +5,8 @@ import {
   buildFrontendMagicLinkVerifyUrl,
   buildFrontendResetPasswordUrl,
   buildFrontendVerificationUrl,
-  buildPublicationViewUrl,
+  buildCloudLinkUrl,
+  buildProjectInvitationUrl,
   sanitizeFrontendRedirectPath,
 } from '#email-link-builder.js';
 
@@ -39,10 +40,49 @@ describe('email link builder', () => {
     ).toBe('http://localhost:3000/auth/magic-link/verify?token=secret&redirectTo=%2Fs%2Ftau%7Epub_123');
   });
 
-  it('builds publication viewer links from the frontend origin', () => {
-    expect(buildPublicationViewUrl({ frontendURL: 'https://tau.new/', publicationId: 'pub_123' })).toBe(
-      'https://tau.new/s/tau~pub_123',
+  it('builds cloud links from the frontend origin', () => {
+    expect(buildCloudLinkUrl({ frontendURL: 'https://tau.new/', shareId: 'shr_123' })).toBe(
+      'https://tau.new/s/tau~shr_123',
     );
+  });
+
+  it('builds collaborator invitation links from the frontend origin', () => {
+    expect(buildProjectInvitationUrl({ frontendURL: 'https://tau.new/', token: 'tok_abc-DEF' })).toBe(
+      'https://tau.new/invitations/tok_abc-DEF',
+    );
+  });
+
+  it('accepts only an invitation link for a project-invite email', () => {
+    const template = (url: string) =>
+      ({
+        kind: 'project-invite',
+        recipientEmail: 'friend@example.com',
+        ownerName: 'Ada',
+        projectName: 'Bracket',
+        role: 'read',
+        expiresAt: '3 Dec 2026',
+        url,
+      }) as const;
+    const check = (url: string): void => {
+      assertEmailTemplateUrlAllowed({ frontendURL: 'https://tau.new', template: template(url) });
+    };
+
+    expect(() => {
+      check('https://tau.new/invitations/tok');
+    }).not.toThrow();
+    for (const url of [
+      'https://tau.new/invitations/',
+      'https://tau.new/invitations/tok/extra',
+      'https://tau.new/invitations/tok?redirect=x',
+      'https://tau.new/s/tau~shr_123',
+    ]) {
+      expect(() => {
+        check(url);
+      }).toThrow(/project-invite email URL path/u);
+    }
+    expect(() => {
+      check('https://evil.example/invitations/tok');
+    }).toThrow(/origin/u);
   });
 
   it('keeps relative and same-origin redirects but rejects external redirects', () => {
@@ -133,7 +173,7 @@ describe('email link builder', () => {
           recipientEmail: 'friend@example.com',
           ownerName: 'Ada',
           publicationTitle: 'Bracket',
-          url: 'https://tau.new/s/tau~pub_123',
+          url: 'https://tau.new/s/tau~shr_123',
         },
       });
     }).not.toThrow();

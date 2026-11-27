@@ -5,6 +5,7 @@ import type { Camera } from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import type { RootState } from '@react-three/fiber';
+import { resolveCameraState } from '@taucad/camera';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import { createThreeCameraRig } from '@taucad/three/camera';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
@@ -110,12 +111,23 @@ const mountViewer = (projection: 'perspective' | 'orthographic'): Viewer => {
   };
 };
 
-type Reading = Readonly<{ distance: number; zoom: number; perspectiveZoom: number; verticalSpan: number }>;
+type Reading = Readonly<{
+  distance: number;
+  /** The camera-to-target distance the camera actor derives for its view, in the controls' units. */
+  derivedDistance: number;
+  zoom: number;
+  perspectiveZoom: number;
+  verticalSpan: number;
+}>;
 
 const read = (viewer: Viewer): Reading => {
   const { view } = viewer.camera.getSnapshot().context;
+  const { position } = resolveCameraState({ view });
   return {
     distance: viewer.controls().distance,
+    derivedDistance:
+      Math.hypot(...position.map((value, index) => value - view.target[index]!)) /
+      viewer.rig.renderFrame.metersPerRenderUnit,
     zoom: viewer.rig.activeCamera.zoom,
     perspectiveZoom: view.perspectiveZoom,
     verticalSpan: view.verticalSpan,
@@ -178,7 +190,13 @@ describe('camera wheel router in the browser', () => {
     // The rig presents an orthographic zoom as the span it shows, at a native zoom of 1.
     expect(Math.sign(afterPinch.verticalSpan - before.verticalSpan)).toBe(Math.sign(deltaY));
     expect(afterPinch.verticalSpan).toBeCloseTo(afterPlain.verticalSpan, 9);
-    expect(afterPinch.distance).toBeCloseTo(before.distance, 9);
+    /*
+     * At 0° the camera derives its distance from the view (`orthographicCameraDistance`: it grows with the span once the
+     * span exceeds the bounds diagonal) and the clip planes are solved for it, so the controls follow the derived
+     * distance after any zoom, a plain wheel's as much as a pinch's (the 0° clipping fix, #2003).
+     */
+    expect(afterPinch.distance).toBeCloseTo(afterPlain.distance, 9);
+    expect(afterPinch.distance).toBeCloseTo(afterPinch.derivedDistance, 9);
   });
 
   it('dollies a perspective Safari pinch by its scale, leaving the zoom at 1', () => {

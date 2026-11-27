@@ -22,14 +22,16 @@ import type { HomeStorageBackend } from '@taucad/files-ui/filesystem/handle-stor
 import type { Analytics } from '#hooks/use-analytics.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
+import type { FocusMachine } from '#machines/focus.machine.js';
 import { appRuntimeMachine } from '#runtime/app-runtime.machine.js';
+import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import type { AppRuntimeEnvironment, AppRuntimeQuitHold } from '#runtime/app-runtime.machine.js';
 import { createEnvironmentLogic, createUnloadSequencer } from '#runtime/environment.js';
 import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 import type { EnvironmentDesktopQuit, EnvironmentHost, UnloadSequencer } from '#runtime/environment.js';
 import { createFocusComposition } from '#runtime/app-runtime-focus.js';
 import type { FocusHandle } from '#runtime/app-runtime-focus.js';
-import { loadProjectWorkspace } from '#lib/project-workspace-warmup.js';
+import { openProjectWorkspace } from '#lib/project-workspace-warmup.js';
 import { onDesktopQuitRequested, reportDesktopQuiesced } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { createFileManagerHost } from '#runtime/file-manager-host.js';
 import type {
@@ -44,15 +46,16 @@ import { createLeaseTable } from '#runtime/leases.js';
 import type { LeaseEntry, LeaseStore } from '#runtime/leases.js';
 import { createRootQueryClient } from '#runtime/root-query-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
-import { chatSdkSource } from '#services/chat-sdk-loader.js';
 import type { LiveProjectSessions } from '#services/chat-session-store.js';
-import { ProjectLibrary, selectLibraryRevision } from '#runtime/project-library.js';
+import { selectLibraryRevision } from '@taucad/project-library/runtime/project-library';
+import { ProjectLibrary } from '#runtime/project-library.js';
 import { createRootFileFacade } from '#runtime/file-manager-facade.js';
 import type { RootFileFacade } from '#runtime/file-manager-facade.js';
 import { buildWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import {
   createSessionRootSync,
+  createSessionsOpenAhead,
   createSessionsRegistryLogic,
   sessionFileManagerOpener,
   sessionsRegistryInput,
@@ -67,13 +70,24 @@ import {
 } from '#lib/agent-host-placement.js';
 import { createChoicesLogic, readChoices } from '#runtime/choices.js';
 import type { ChoicesModelCatalog, ChoicesPorts, ProjectChoices } from '#runtime/choices.js';
-import type { SessionRuntimeOpener, SessionWiring, SessionsObservable } from '#services/sessions-store.js';
+import type {
+  SessionRuntimeOpener,
+  SessionWiring,
+  SessionsAheadFocusView,
+  SessionsAheadRegistryView,
+  SessionsObservable,
+  SessionsOpenAhead,
+} from '#services/sessions-store.js';
 import { store as preferenceStore } from '#hooks/use-cookie.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { getAllFlags } from '#flags/feature-flags.js';
 import { subscribeFeatureFlags } from '#flags/use-feature.js';
 import { modelsQueryKey } from '#lib/model-catalog.js';
 import type { Model } from '#lib/model-catalog.js';
+import { createDeploymentOwner, initialDeploymentMode } from '#cloud/deployment-mode.js';
+import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
+import { setReportedDeploymentMode } from '#lib/sentry-context.lib.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /** The app runtime root actor. @public */
 export type AppRuntime = Actor<typeof appRuntimeMachine>;
@@ -85,7 +99,7 @@ export type AppRuntimeOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'ins
     environment?: () => EnvironmentHost | undefined;
     /** The desktop quit seam `environment` listens to; the desktop bridge's by default. */
     desktopQuit?: EnvironmentDesktopQuit;
-    /** The session module's import focus waits for; `loadProjectWorkspace` by default. */
+    /** The session module's import focus waits for; `openProjectWorkspace` by default, which warms the layout beside it. */
     loadSessionModule?: () => Promise<unknown>;
     /**
      * The product analytics client the file manager's workspace telemetry captures through (D15). The client entry
@@ -104,7 +118,27 @@ export type AppRuntimeOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'ins
      * the runtime by default; a test passes the one it inspects.
      */
     queryClient?: QueryClient;
+    /**
+     * This page load was started in safe mode (`?safe=1` on the web; D0): the shell shows the safe-mode bar. It is a
+     * property of one page load and is never stored.
+     */
+    safeMode?: boolean;
+    /**
+     * The display mode the server rendered the document with, from its own ask (adaptive app deployment mode W11): the
+     * first snapshot, so the first client render matches the server's. An adaptive build only; ignored in safe mode.
+     */
+    deploymentSeed?: DeploymentModeSnapshot | undefined;
   }>;
+
+/**
+ * The runtime's first display mode: the server's answer the document was rendered with (W11), else the build's
+ * initial mode. A pinned build (no owner) keeps its pin, and safe mode shows no Cloud whatever the server answered.
+ */
+const firstDeploymentMode = (
+  hasOwner: boolean,
+  safeMode: boolean,
+  seed: DeploymentModeSnapshot | undefined,
+): DeploymentModeSnapshot => (hasOwner && !safeMode && seed !== undefined ? seed : initialDeploymentMode);
 
 /** The Home read of an idle runtime: it never settles, so the host stays `resolving`. */
 const neverReadHome = async (): Promise<HomeStorageBackend> => Promise.withResolvers<HomeStorageBackend>().promise;
@@ -150,6 +184,8 @@ type AppRuntimeServices = Readonly<{
   /** Focus and the bindings its ports read (A5b). */
   focus: FocusHandle;
   rootFileFacade: RootFileFacade;
+  /** The *Open* gesture's early open, owned by the registry's composition (STO-25 SP6). */
+  openAhead: SessionsOpenAhead;
 }>;
 
 /** The desktop bridge's quit seam: a no-op outside the desktop build. Read when `environment` starts, not on import. */
@@ -165,6 +201,9 @@ const runtimeServices = new WeakMap<AppRuntime, AppRuntimeServices>();
 
 /* Each runtime's lease store, by runtime; the composition writes one per runtime it creates. */
 const runtimeLeases = new WeakMap<AppRuntime, LeaseStore>();
+
+/* The runtimes created in safe mode (D0). */
+const safeModeRuntimes = new WeakSet<AppRuntime>();
 
 /* Development only: a rejected event is a machine that did not expect it (MC-R4). */
 const warnRejectedChatEvent = (rejection: EventRejection): void => {
@@ -191,8 +230,6 @@ const createChatSessions = (
     focusedProject,
     /* A7c: and every live project's session from the registry, so a run reports to the project that ran it (R2). */
     projectSessions,
-    /* PL1: each chat's AI SDK `Chat` loads on demand, by the chat's one dynamic import (D5's function form). */
-    chatSdk: chatSdkSource,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined
@@ -293,7 +330,9 @@ const lateObservable = <T>(initial: T): LateObservable<T> => {
 /**
  * The module a session builds its project runtime with, by dynamic import (D5): the entry graph never reaches it.
  */
-const loadSessionRuntimeModule = async () => import('#runtime/project-runtime.session.js');
+const loadSessionRuntimeModule = async () => loadCode(async () => import('#runtime/project-runtime.session.js'));
+/* The session's `revisions` module (D5): one loader for its children and the registry's early open (STO-25 SP6). */
+const loadSessionRevisions = async () => loadCode(async () => import('#runtime/session-revisions.js'));
 
 /**
  * How each session builds its project runtime (A6d): the lazy module, over the library, the chat store, the query
@@ -368,15 +407,21 @@ const createSessionRuntimeOpener = (
 export const createAppRuntime = ({
   environment,
   desktopQuit = desktopBridgeQuit,
-  loadSessionModule = loadProjectWorkspace,
+  loadSessionModule = openProjectWorkspace,
   analytics = noAnalytics,
   loadHomeBackend,
   idleFileManagers = false,
   queryClient = createRootQueryClient(),
+  safeMode = false,
+  deploymentSeed,
   ...options
 }: AppRuntimeOptions = {}): AppRuntime => {
   const readHome = idleFileManagers ? neverReadHome : loadHomeBackend;
-  const host = createFileManagerHost({ analytics, ...(readHome === undefined ? {} : { loadHomeBackend: readHome }) });
+  const host = createFileManagerHost({
+    analytics,
+    safeMode,
+    ...(readHome === undefined ? {} : { loadHomeBackend: readHome }),
+  });
   const table = createLeaseTable();
   /* Row L7: the library's delete asks the registry and the chat store, both built after it, so it reads them late. */
   const composed: { runtime?: AppRuntime; chatSessions?: ChatSessionStore; rootFiles?: RootFileFacade } = {};
@@ -422,8 +467,8 @@ export const createAppRuntime = ({
   const choicesPorts = createChoicesPorts(queryClient);
   /* A7b: what each session's facts are wired to. Each port is a closure over the composition, never machine context. */
   const sessionWiring: SessionWiring = {
-    loadRevisions: async () => import('#runtime/session-revisions.js'),
-    loadHostConnector: async () => import('#runtime/host-connector.js'),
+    loadRevisions: loadSessionRevisions,
+    loadHostConnector: async () => loadCode(async () => import('#runtime/host-connector.js')),
     registerCloseCut: (cut) => unload.register('session', cut),
     /* A7c: each live session's runtime writes what it owes at the producer stage, before any close cut (D26). */
     registerProducer: (flush) => unload.register('producer', flush),
@@ -448,81 +493,88 @@ export const createAppRuntime = ({
         telemetry: workspaceTelemetry,
       }),
   };
-  const runtime = createActor(
-    appRuntimeMachine.provide({
-      actors: {
-        /* A7c (D26 as amended): `beforeunload` runs the producer stage while a record write is owed. */
-        environment: createEnvironmentLogic(environment, {
-          sequencer: unload,
-          owedWrites: owedRecordWrites,
-          desktopQuit,
-        }),
-        focusLibrary: focusComposition.logics.library,
-        focusRegistry: focusComposition.logics.registry,
-        focusFlush: focusComposition.logics.flush,
-        focusModule: focusComposition.logics.module,
-        focusRoute: focusComposition.logics.route,
-        /* A6b: the device's choices over their real ports. The server never starts the runtime, so it reads none. */
-        choices: createChoicesLogic(choicesPorts),
-        /* Row L3: the library's actors and worker start with the root. An idle runtime (the remote-host harness,
-         * which mounts no `ProjectManagerProvider`) starts no worker. */
-        projectLibrary: createCallbackLogic<EventObject>(() => {
-          if (idleFileManagers) {
-            /* Idle: nothing starts, but the root facade still follows `rootFiles` until the runtime stops. */
-            return () => {
-              composed.rootFiles?.close();
-            };
-          }
-          projectLibrary.start();
-          return () => {
-            projectLibrary.stop();
-            composed.rootFiles?.close();
-          };
-        }),
-
-        fileManagerHost: host.logic,
-        leases: table.logic,
-        /* S28: the registry admits and releases compute on the host's shared worker. A6c: each session builds its
-         * file manager through the host, and waits for it on this runtime's clock. */
-        sessions: createSessionsRegistryLogic({
-          sharedWorker: host.sharedWorker,
-          fileManagerWorker: { current: host.sharedWorker, subscribe: host.onSharedWorker },
-          openFileManager: sessionFileManagerOpener({
-            build: (spec) => {
-              if (builtHost.current === undefined) {
-                throw new Error('A session opened its file manager before the app runtime was created');
-              }
-              return host.build(builtHost.current, spec, options);
-            },
-            awaitServices: async (fileManager, gone) =>
-              awaitFileManager(fileManager, 'services', {
-                reason: 'services-timeout',
-                gone,
-                ...(options.clock === undefined ? {} : { clock: options.clock }),
-              }),
-          }),
-          /* A6d: each session builds its project runtime behind a dynamic import, once it has its file manager. */
-          openRuntime: createSessionRuntimeOpener({
-            projectLibrary,
-            chatSessions,
-            queryClient,
-            choicesPorts,
-            runtime: () => composed.runtime,
-            options,
-          }),
-          wiring: sessionWiring,
-        }),
-      },
+  /* Adaptive app deployment mode D2: the display mode's owner, in an adaptive build only (I10). Its clock is the
+   * runtime's, so a test's simulated time also ages the record (D5). */
+  const clockNow = (options.clock as { now?: () => number } | undefined)?.now?.bind(options.clock);
+  const deploymentOwner = createDeploymentOwner?.(clockNow === undefined ? {} : { now: clockNow });
+  const runtimeActors = {
+    /* A7c (D26 as amended): `beforeunload` runs the producer stage while a record write is owed. */
+    environment: createEnvironmentLogic(environment, {
+      sequencer: unload,
+      owedWrites: owedRecordWrites,
+      desktopQuit,
     }),
-    {
-      ...options,
-      input: {
-        sessions: sessionsRegistryInput(),
-        rootFiles: host.rootFilesInput({ idle: idleFileManagers }),
-        focusEpoch: focusComposition.epoch(),
-      },
+    focusLibrary: focusComposition.logics.library,
+    focusRegistry: focusComposition.logics.registry,
+    focusFlush: focusComposition.logics.flush,
+    focusModule: focusComposition.logics.module,
+    focusRoute: focusComposition.logics.route,
+    /* A6b: the device's choices over their real ports. The server never starts the runtime, so it reads none. */
+    choices: createChoicesLogic(choicesPorts),
+    /* Row L3: the library's actors and worker start with the root. An idle runtime (the remote-host harness,
+     * which mounts no `ProjectManagerProvider`) starts no worker. */
+    projectLibrary: createCallbackLogic<EventObject>(() => {
+      if (idleFileManagers) {
+        /* Idle: nothing starts, but the root facade still follows `rootFiles` until the runtime stops. */
+        return () => {
+          composed.rootFiles?.close();
+        };
+      }
+      projectLibrary.start();
+      return () => {
+        projectLibrary.stop();
+        composed.rootFiles?.close();
+      };
+    }),
+
+    fileManagerHost: host.logic,
+    leases: table.logic,
+    /* S28: the registry admits and releases compute on the host's shared worker. A6c: each session builds its
+     * file manager through the host, and waits for it on this runtime's clock. */
+    sessions: createSessionsRegistryLogic({
+      sharedWorker: host.sharedWorker,
+      fileManagerWorker: { current: host.sharedWorker, subscribe: host.onSharedWorker },
+      openFileManager: sessionFileManagerOpener({
+        build: (spec) => {
+          if (builtHost.current === undefined) {
+            throw new Error('A session opened its file manager before the app runtime was created');
+          }
+          return host.build(builtHost.current, spec, options);
+        },
+        awaitServices: async (fileManager, gone) =>
+          awaitFileManager(fileManager, 'services', {
+            reason: 'services-timeout',
+            gone,
+            ...(options.clock === undefined ? {} : { clock: options.clock }),
+          }),
+      }),
+      /* A6d: each session builds its project runtime behind a dynamic import, once it has its file manager. */
+      openRuntime: createSessionRuntimeOpener({
+        projectLibrary,
+        chatSessions,
+        queryClient,
+        choicesPorts,
+        runtime: () => composed.runtime,
+        options,
+      }),
+      wiring: sessionWiring,
+    }),
+  } satisfies Partial<MachineActors<typeof appRuntimeMachine>>;
+  /* A whole map either way: `provide` rejects a slot that may be `undefined`. */
+  const adaptiveActors =
+    deploymentOwner === undefined
+      ? undefined
+      : ({ ...runtimeActors, deployment: deploymentOwner } satisfies Partial<MachineActors<typeof appRuntimeMachine>>);
+  const runtime = createActor(appRuntimeMachine.provide({ actors: adaptiveActors ?? runtimeActors }), {
+    ...options,
+    input: {
+      sessions: sessionsRegistryInput(),
+      rootFiles: host.rootFilesInput({ idle: idleFileManagers }),
+      focusEpoch: focusComposition.epoch(),
+      deployment: firstDeploymentMode(deploymentOwner !== undefined, safeMode, deploymentSeed),
+      safeMode,
     },
-  );
+  });
   const { fileManagerHost, leases, focus } = runtime.getSnapshot().context;
   focus.subscribe((snapshot) => {
     const next = selectFocusTarget(snapshot).target;
@@ -548,6 +600,15 @@ export const createAppRuntime = ({
   runtime.on('visibilityChanged', (event) => {
     documentVisible.set(event.visible);
     documentVisible.notify();
+  });
+  /* Adaptive app deployment mode W1: the mode and its basis tag every error event, from the first report on. */
+  let taggedMode: DeploymentModeSnapshot | undefined;
+  runtime.subscribe((snapshot) => {
+    const mode = selectDeploymentMode(snapshot);
+    if (mode !== taggedMode) {
+      taggedMode = mode;
+      setReportedDeploymentMode(describeDeploymentMode(mode));
+    }
   });
   builtHost.current = fileManagerHost;
   const store: LeaseStore = table.storeFor(leases);
@@ -576,9 +637,18 @@ export const createAppRuntime = ({
     unload,
     rootFileFacade,
     focus: { focus: runtime.getSnapshot().context.focus, bindings: focusComposition.bindings },
+    /* STO-25 SP6: through the session module's own loader and the shared worker its sessions use. */
+    openAhead: createSessionsOpenAhead({
+      loadRevisions: loadSessionRevisions,
+      worker: host.sharedWorker,
+      ...openAheadPorts(focus, registry),
+    }),
   });
   composed.runtime = runtime;
   runtimeLeases.set(runtime, store);
+  if (safeMode) {
+    safeModeRuntimes.add(runtime);
+  }
   return runtime;
 };
 
@@ -692,6 +762,72 @@ export const selectRuntimeLeases = (runtime: AppRuntime): LeaseStore => {
 export const selectRuntimeIdleFileManagers = (runtime: AppRuntime): boolean | undefined =>
   runtimeFiles.get(runtime)?.idleFileManagers;
 
+/**
+ * Whether a runtime was created for a page load started in safe mode (D0).
+ *
+ * @param runtime - An app runtime.
+ * @returns Whether this page load is in safe mode.
+ * @public
+ */
+export const selectRuntimeSafeMode = (runtime: AppRuntime): boolean => safeModeRuntimes.has(runtime);
+
+/**
+ * Focus and the registry as the early open reads them (STO-25 SP6): the route's request, the project focus is focused
+ * on, the project it holds on an answer that opens nothing, and the registry's sessions. Exported for the composition
+ * row that drives it over a real focus and registry.
+ *
+ * @param focus - The runtime's focus.
+ * @param registry - The runtime's sessions registry.
+ * @returns The early open's focus and registry ports.
+ * @public
+ */
+export const openAheadPorts = (
+  focus: ActorRefFrom<FocusMachine>,
+  registry: ActorRefFrom<typeof sessionsMachine>,
+): Readonly<{
+  focus: SessionsObservable<SessionsAheadFocusView>;
+  registry: SessionsObservable<SessionsAheadRegistryView>;
+}> => ({
+  focus: {
+    get: () => {
+      const snapshot = focus.getSnapshot();
+      const { answer, request } = snapshot.context;
+      return {
+        ...(request === undefined ? {} : { request }),
+        ...(snapshot.hasTag('focused') && answer?.projectId !== undefined ? { focusedOn: answer.projectId } : {}),
+        ...(snapshot.hasTag('held') && answer?.projectId !== undefined && answer.answer.status !== 'ready'
+          ? { heldOn: answer.projectId }
+          : {}),
+      };
+    },
+    subscribe: (listener) => {
+      const subscription = focus.subscribe(listener);
+      return () => {
+        subscription.unsubscribe();
+      };
+    },
+  },
+  registry: {
+    get: () => registry.getSnapshot().context,
+    subscribe: (listener) => {
+      const subscription = registry.subscribe(listener);
+      return () => {
+        subscription.unsubscribe();
+      };
+    },
+  },
+});
+
+/**
+ * The runtime's early open for the *Open* gesture (STO-25 SP6): start a project's revision client and Tau Cloud open
+ * before its route loads; its session takes them.
+ *
+ * @param runtime - The app runtime.
+ * @returns The gesture's entry point.
+ * @public
+ */
+export const selectRuntimeOpenAhead = (runtime: AppRuntime): SessionsOpenAhead => servicesOf(runtime).openAhead;
+
 /** The file manager for `/`, which the root spawned with itself and never replaces. @public */
 export const selectRootFiles = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): FileManagerRef =>
   snapshot.context.rootFiles;
@@ -745,6 +881,25 @@ export const selectAppEnvironment = (snapshot: SnapshotFrom<typeof appRuntimeMac
  */
 export const selectAppChoices = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): ProjectChoices | undefined =>
   snapshot.context.choices;
+
+/**
+ * The display mode (adaptive app deployment mode D2): the pinned constant of a pinned build, else what `deployment`
+ * last reported, `unknown` until it does (I13).
+ *
+ * @public
+ */
+export const selectDeploymentMode = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): DeploymentModeSnapshot =>
+  snapshot.context.deployment;
+
+/**
+ * The display mode as one tag value: the state and its basis, or `unknown` and its problem.
+ *
+ * @param mode - The mode.
+ * @returns Such as `funded/confirmed` or `unknown/unreachable`.
+ * @public
+ */
+export const describeDeploymentMode = (mode: DeploymentModeSnapshot): string =>
+  `${mode.state}/${mode.state === 'unknown' ? mode.problem : mode.basis}`;
 
 /** The runtime root's first fault, if any (D23). @public */
 export const selectAppRuntimeFault = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): string | undefined =>

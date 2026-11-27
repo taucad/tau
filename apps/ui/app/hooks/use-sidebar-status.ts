@@ -38,12 +38,13 @@ import type { SessionsActorRef } from '#machines/sessions.machine.js';
 import { sessionsCloseSuggestions } from '#machines/sessions.machine.js';
 import { selectProjectLiveness } from '#services/sessions-store.js';
 import type { ProjectLivenessStatus } from '#services/sessions-store.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import { useFocus, useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
 import { actorSessionIdOf } from '@taucad/ui-core/lib/xstate.lib';
 import { isQuestionTool } from '@taucad/chat-ui/utils/question-tool';
+import { chatFailureSentence } from '@taucad/chat-ui/utils/error.utils';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import {
   selectCaughtUp,
@@ -286,7 +287,7 @@ export const chatStatusLabel = (status: ChatSidebarStatus): string | undefined =
       return 'Done';
     }
     case 'failed': {
-      return `Failed · ${status.failureReason ?? 'the run failed'}`;
+      return `Failed · ${chatFailureSentence(status.failureReason) ?? 'the run failed'}`;
     }
     case 'stopped': {
       return 'Stopped';
@@ -513,7 +514,7 @@ export const selectProjectFacts = (row: ProjectSidebarRow, expanded: boolean): S
     case 'failed': {
       return {
         mark: 'failed',
-        sentence: row.runtimeFailure === undefined ? 'Failed to open' : kernelFailure(row.runtimeFailure),
+        sentence: row.runtimeFailure === undefined ? 'Couldn’t open' : kernelFailure(row.runtimeFailure),
       };
     }
     case 'opening': {

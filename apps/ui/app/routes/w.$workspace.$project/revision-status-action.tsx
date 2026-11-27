@@ -8,7 +8,7 @@ import { useRevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { revisionAccessibleName, useRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
-import { useIsHistoryPaneShown } from '#routes/w.$workspace.$project/revision-pane-requests.js';
+import { useIsHistoryPaneShown } from '@taucad/revisions-ui/lib/revision-pane-requests';
 
 /** The focused chat's other branch, and the verb that moves the workbench onto it. @public */
 export type FollowChat = Readonly<{

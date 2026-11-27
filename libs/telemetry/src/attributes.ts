@@ -27,6 +27,12 @@ export const AttributeKey = {
   AGENT_COMPACTION_LANE: 'compaction.lane',
   AGENT_COMPACTION_TIER: 'compaction.tier',
   AGENT_COMPACTION_OUTCOME: 'compaction.outcome',
+  /* Tool-result delivery and admission phases (B4, C3): bounded vocabularies from `ingest.ts`. */
+  AGENT_TOOL_RESULT_DELIVERY: 'delivery',
+  AGENT_ADMISSION_PHASE: 'phase',
+  AGENT_HOST_START: 'host.start',
+  AGENT_CHAT_STATE: 'chat.state',
+  AGENT_DEPLOYMENT_REFETCHED: 'deployment.refetched',
   /* Why a request did not reproduce the previous request's prompt prefix (provider reasoning replay contract). */
   AGENT_PREFIX_BREAK_CAUSE: 'prefix_break.cause',
   /* Hosted Remote Storage: where git ran (`in_process` | `forwarded`) and how tau-storage was chosen (`off` | `rendezvous`). */
@@ -35,8 +41,6 @@ export const AttributeKey = {
   /* Files service blueprint §4, §8: which kind of host served an open's LFS downloads, from the action host. */
   LFS_TRANSPORT: 'tau.lfs.transport',
   KERNEL_ID: 'kernel.id',
-  KERNEL_STATUS: 'kernel.status',
-  EXPORT_FORMAT: 'export.format',
   WS_CLOSE_REASON: 'ws.close.reason',
   GEN_AI_TOOL_NAME: 'gen_ai.tool.name',
   GEN_AI_TOOL_STATUS: 'gen_ai.tool.status',

@@ -18,8 +18,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
-import { lanesScenarios, oneBranchRows } from '#routes/w.$workspace.$project/history-lanes.test-harness.js';
-import type { LanesScenario } from '#routes/w.$workspace.$project/history-lanes.test-harness.js';
+import { lanesScenarios, oneBranchRows } from '@taucad/revisions-ui/lib/history-lanes.test-harness';
+import type { LanesScenario } from '@taucad/revisions-ui/lib/history-lanes.test-harness';
 
 /* eslint-disable @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.hoisted(() => {
@@ -31,7 +31,7 @@ vi.hoisted(() => {
 });
 /* eslint-enable @typescript-eslint/naming-convention -- back to the workspace rule for the rest of the file. */
 vi.mock('#cloud/commercial-features.js', async () => {
-  const cloud = await import('#cloud/commercial-features.cloud.js');
+  const cloud = await import('#cloud/commercial-features.funded.js');
   return { CommercialUpgradeLabel: cloud.CommercialUpgradeLabel, useCommercialFeatures: () => ({}) };
 });
 const projectSnapshot = { context: { project: { syncChats: true, name: 'Sensor enclosure' } } };

@@ -3,7 +3,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CommandAbortedError, runCommand, runGitCommand } from '#git-command.js';
+import { CommandAbortedError, gitCommandActivity, runCommand, runGitCommand } from '#git-command.js';
+import { removalRetries } from '#test/native-git-harness.js';
 import { writeShellExecutable } from '#test/script-executable.js';
 
 const cwd = tmpdir();
@@ -76,7 +77,7 @@ describe('bounded engine commands', () => {
           /* Already reaped. */
         }
       }
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, ...removalRetries });
     }
   });
 
@@ -112,7 +113,8 @@ describe('bounded engine commands', () => {
         CommandAbortedError,
       );
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      // Windows refuses to unlink the stand-in while the image of the launcher it just killed is still mapped.
+      await rm(directory, { recursive: true, force: true, ...removalRetries });
     }
   });
 
@@ -123,5 +125,25 @@ describe('bounded engine commands', () => {
     });
     expect(result.exitCode).toBe(3);
     expect(new TextDecoder().decode(result.stdout)).toBe('ok');
+  });
+});
+
+describe('gitCommandActivity', () => {
+  /* Node stands in for git: `-C <dir>` is its `--conditions`, so `node -C <dir> -e ''` starts and exits. */
+  const run = async (): Promise<unknown> =>
+    runGitCommand({ gitExecutable: process.execPath, cwd: tmpdir(), args: ['-e', ''] });
+
+  it('should count each process that finishes while a window is open, with its total and longest time', async () => {
+    await run();
+    const window = gitCommandActivity.open();
+    await run();
+    await run();
+    const totals = window.close();
+    await run();
+
+    expect(totals.count).toBe(2);
+    expect(totals.longestMilliseconds).toBeGreaterThan(0);
+    expect(totals.totalMilliseconds).toBeGreaterThanOrEqual(totals.longestMilliseconds);
+    expect(gitCommandActivity.open().close()).toStrictEqual({ count: 0, totalMilliseconds: 0, longestMilliseconds: 0 });
   });
 });

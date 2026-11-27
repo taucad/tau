@@ -1,7 +1,13 @@
 import type { Config } from '@react-router/dev/config';
-import { resolveTauCloudBuildEnabled } from './build-environment.ts';
+import {
+  resolveServiceWorkerKillSwitch,
+  resolveUiBuildDirectory,
+  uiBuildDirectoryVariable,
+  serviceWorkerKillSwitchVariable,
+} from './build-environment.ts';
 
-const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
+/** `TAU_SERVICE_WORKER_KILL_SWITCH=true`: `buildEnd` writes the retiring worker instead of the web app's (PL7). */
+const serviceWorkerKillSwitch = resolveServiceWorkerKillSwitch(process.env[serviceWorkerKillSwitchVariable]);
 
 /**
  * Concurrency for parallel prerender requests. React Router defaults to 1
@@ -18,6 +24,15 @@ const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABL
 const prerenderConcurrency = 4;
 
 /**
+ * Per-request prerender bound in milliseconds, through Tau's `@react-router/dev` patch (React Router's own is a fixed
+ * 10 s with no retry). The first requests pay the server bundle's cold import: on the 3-core `macos-26` runner the first
+ * prerendered file arrived 10 to 19 s after the server build, and `/manifest.webmanifest.data` hit the 10 s bound in 7
+ * of 22 probe builds, on Node 24.20.0 and 26.13.1 alike (UI asset integrity probe, 2026-11-24). Later requests take well
+ * under a second; 60 s still ends one that hangs.
+ */
+const prerenderTimeout = 60_000;
+
+/**
  * `getStaticPaths()` is not used: most routes here (`/projects`,
  * `/files`, `/usage`, `/settings_`, `/health/*`, `/action/migrate-theme`,
  * `/api/*`, `/_index`) are auth-gated, runtime-only, or proxy endpoints that
@@ -30,6 +45,8 @@ const prerenderConcurrency = 4;
  */
 export default {
   ssr: true,
+  /* `build` unless `TAU_UI_BUILD_DIRECTORY` names another. */
+  buildDirectory: resolveUiBuildDirectory(process.env[uiBuildDirectoryVariable]),
   /**
    * Hands the dev dependency optimizer its crawl entries: the client entry and every route
    * module. Without it React Router sets `optimizeDeps.entries` to `[]`, Vite's startup scan
@@ -38,12 +55,26 @@ export default {
    * open pages eight times during e2e-nightly's development tier (2026-11-12).
    * Worker entries, which no route reaches statically, are added in `vite.config.ts`.
    *
-   * `v8_passThroughRequests` is React Router 8's behaviour (blueprint B4): loaders and actions get the request as
-   * sent, so a client navigation's `request.url` is `<path>.data?_routes=…`. Anything that means the page's own URL
-   * reads the `url` argument.
+   * React Router 8 (blueprint RR8) makes the behaviour the `v8_*` flags turned on under 7 the default, and rejects
+   * the flags:
+   * - loaders and actions get the request as sent (B4), so a client navigation's `request.url` is
+   *   `<path>.data?_routes=…`. Anything that means the page's own URL reads the `url` argument;
+   * - data requests are trailing-slash aware (B5): Home's is `/_.data`, no longer `/_root.data`. The marketing edge
+   *   function and the skew protection pin accept both names, so a tab of an earlier build still gets its data;
+   * - one Vite config builds the client and server environments (B6), so server-only options live under
+   *   `environments.ssr` in `vite.config.ts`, and the Netlify adapter (4.x) writes a function that imports
+   *   `build/server/index.js` and the adapter's `serverless` handler;
+   * - middleware is always on;
+   * - route modules split (B8, `splitRouteModules` defaults to `true`): a route's `clientLoader`, `clientAction`,
+   *   `clientMiddleware` and `HydrateFallback` load as their own chunks. No route has one that splits today, and
+   *   `scripts/check-critical-budget.mts` fails when a split module first appears in the manifest, because split
+   *   chunks load outside the patched `loadRouteModule` stale-build fallback. The root's `clientMiddleware` (RR9) is
+   *   not split: React Router never splits the root route module, which hydration has already loaded.
    */
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
-  future: { unstable_optimizeDeps: true, v8_passThroughRequests: true, v8_middleware: true },
+  future: {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag name.
+    unstable_optimizeDeps: true,
+  },
   /**
    * Every route is known on boot, so no navigation waits on `/__manifest`.
    *
@@ -58,7 +89,8 @@ export default {
    * get ~4 KB smaller and a cold first visit transfers ~6 KB more.
    *
    * React Router's `/__manifest` version check goes with it; it only ever covered routes not
-   * yet discovered. Skew is handled by `build-skew` (`stale-build-navigation`,
+   * yet discovered. Skew is handled by `build-skew` (`stale-build-navigation`, whose root client
+   * middleware runs after route matching and never asks `/__manifest` either, and
    * `stale-build-recovery`) and the patched route-module loader.
    */
   routeDiscovery: { mode: 'initial' },
@@ -66,8 +98,11 @@ export default {
    * `buildEnd` is the only hook that runs after prerendering, so it is where
    * the Home shell is moved off `/`'s static path to the file the marketing edge
    * function rewrites to (progressive loading PL4, `scripts/place-static-shells.ts`),
-   * and where the offline shell worker is generated from the emitted `/usage`
-   * document and the Vite build manifest (B5 R3). The desktop and daemon configs
+   * where the warm manifest is written from the Vite build manifest and the
+   * module-id manifest (progressive loading PL8, `scripts/write-warm-manifest.ts`),
+   * and where the web app's one service worker is built, its precache list generated
+   * from the route-class registry and the emitted shell documents (progressive
+   * loading PL7, `scripts/build-service-worker.ts`). The desktop and daemon configs
    * are separate files and never run this: both already boot from a packaged SPA
    * index fallback.
    */
@@ -78,22 +113,38 @@ export default {
         `Static shell: ${placed.from} -> ${placed.to}${placed.removed.map((file) => `, removed ${file}`).join('')}`,
       );
     }
-    if (!tauCloudEnabled) {
-      return;
-    }
-    const { generateOfflineShell } = await import('./scripts/generate-offline-shell');
-    const { listOfflineShellPaths } = await import('./app/lib/static-paths');
-    await generateOfflineShell({
+    const { writeWarmManifest } = await import('./scripts/write-warm-manifest');
+    const warm = writeWarmManifest({
       clientDirectory: `${reactRouterConfig.buildDirectory}/client`,
-      workerSourcePath: `${reactRouterConfig.appDirectory}/offline/offline-shell-worker.ts`,
-      documentPaths: listOfflineShellPaths(),
+      moduleIdsPath: `${reactRouterConfig.buildDirectory}/client-module-ids.json`,
     });
+    console.log(
+      `Warm manifest: ${Object.entries(warm.classes)
+        .map(([id, files]) => `${id} ${String(files.length)} files`)
+        .join(', ')}`,
+    );
+    const { buildServiceWorker } = await import('./scripts/build-service-worker');
+    const { workerRouteClasses } = await import('./app/lib/route-classes');
+    const worker = await buildServiceWorker({
+      buildDirectory: reactRouterConfig.buildDirectory,
+      workerSourcePath: `${reactRouterConfig.appDirectory}/offline/${serviceWorkerKillSwitch ? 'service-worker-kill-switch.ts' : 'service-worker.ts'}`,
+      classes: workerRouteClasses(),
+      // Also written at /offline-shell-worker.js, retiring the /usage worker that ui@0.3.0 and earlier registered.
+      retiringWorkerSourcePath: `${reactRouterConfig.appDirectory}/offline/service-worker-kill-switch.ts`,
+      killSwitch: serviceWorkerKillSwitch,
+    });
+    console.log(
+      serviceWorkerKillSwitch
+        ? `Service worker: kill switch (${serviceWorkerKillSwitchVariable}=true), retires installed workers, precaches nothing`
+        : `Service worker: ${String(worker.entries.length)} precache entries, ${String(Math.round(worker.bytes / 1024))} KiB`,
+    );
   },
   prerender: {
     async paths() {
       const { listStaticPrerenderPaths } = await import('./app/lib/static-paths');
-      return listStaticPrerenderPaths().filter((path) => tauCloudEnabled || path !== '/usage');
+      return listStaticPrerenderPaths();
     },
     concurrency: prerenderConcurrency,
+    timeout: prerenderTimeout,
   },
 } satisfies Config;

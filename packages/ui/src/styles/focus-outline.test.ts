@@ -6,37 +6,20 @@ const stylesDirectory = join(import.meta.dirname, '.');
 const componentsDirectory = join(import.meta.dirname, '../components');
 const tokenStyles = readFileSync(join(stylesDirectory, 'tokens.css'), 'utf8');
 
-/* The app composes the same indicators, so the scan covers it too (Page Composition Policy, Rule 8). */
-const appDirectory = join(import.meta.dirname, '../../../../apps/ui/app');
-/* App code cut from `apps/ui/app` into `@taucad/ui-kit` and `@taucad/project-workspace` stays in the scan. */
-const uiKitDirectory = join(import.meta.dirname, '../../../../apps/libs/ui-kit/src');
-/* Chat components cut into `@taucad/chat-ui` (UI wave B) stay in the scan too. */
-const chatUiDirectory = join(import.meta.dirname, '../../../../apps/libs/chat-ui/src');
-const projectWorkspaceDirectory = join(import.meta.dirname, '../../../../apps/libs/project-workspace/src');
-const filesUiDirectory = join(import.meta.dirname, '../../../../apps/libs/files-ui/src');
-const editorUiDirectory = join(import.meta.dirname, '../../../../apps/libs/editor-ui/src');
-const uiCoreDirectory = join(import.meta.dirname, '../../../../apps/libs/ui-core/src');
+/* The app and its UI libraries are scanned by `apps/ui/app/styles/focus-outline.test.ts`, which `ui` owns. */
 
-const sourcesIn = (directory: string, recursive = false) =>
-  readdirSync(directory, { recursive })
+const sourcesIn = (directory: string) =>
+  readdirSync(directory)
     .map(String)
     .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
     .map((name) => [name, readFileSync(join(directory, name), 'utf8')] as const);
 
 const componentSources = sourcesIn(componentsDirectory);
-const appSources = [
-  ...sourcesIn(appDirectory, true),
-  ...sourcesIn(uiKitDirectory, true),
-  ...sourcesIn(chatUiDirectory, true),
-  ...sourcesIn(projectWorkspaceDirectory, true),
-  ...sourcesIn(filesUiDirectory, true),
-  ...sourcesIn(editorUiDirectory, true),
-  ...sourcesIn(uiCoreDirectory, true),
-];
 
 /**
  * Any focus-state utility that restates indicator geometry instead of composing `focus-outline`.
  * `outline-none` and `outline-hidden` are excluded: suppressing a delegated control is legitimate.
+ * Keep in step with `apps/ui/app/styles/focus-outline.test.ts`.
  */
 const restatedGeometry =
   /[^\s"'`]*focus[a-z-]*]?:(?:ring-\d|ring-ring|ring-inset|ring-offset-\d|outline-\d|outline-solid|outline-ring|outline-sidebar-ring|-?outline-offset-\d)/g;
@@ -63,10 +46,10 @@ describe('focus outline entry point', () => {
     expect(body.slice(0, body.indexOf('}'))).toContain('outline: var(--focus-outline-width) solid');
   });
 
-  it('routes every component and app focus indicator through the utility', () => {
-    /* An unresolved app path would pass vacuously. */
-    expect(appSources.length).toBeGreaterThan(100);
-    const offenders = [...componentSources, ...appSources].flatMap(([name, source]) =>
+  it('routes every component focus indicator through the utility', () => {
+    /* An unresolved path would pass vacuously. */
+    expect(componentSources.length).toBeGreaterThan(10);
+    const offenders = componentSources.flatMap(([name, source]) =>
       [...source.matchAll(restatedGeometry)].map((match) => `${name}: ${match[0]}`),
     );
 

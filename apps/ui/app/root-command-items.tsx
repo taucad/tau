@@ -6,7 +6,7 @@ import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { setupEntryCopy } from '#components/onboarding/setup-copy.js';
 import { setupHref } from '#components/onboarding/setup-entry.js';
 
@@ -14,7 +14,7 @@ export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }):
   const { data: authData } = useSession(authClient);
   const { signIn, signOut } = useAuthLinks();
   const { open: openSettings } = useSettingsDialog();
-  const isOnboardingEnabled = useFeature('onboarding');
+  const isOnboardingEnabled = useFeatureState('onboarding') === 'on';
 
   useCommandPaletteItems(
     match.id,

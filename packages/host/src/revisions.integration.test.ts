@@ -1795,7 +1795,7 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
       try {
         expect(await revisions.openFromRemote()).toStrictEqual({
           status: 'refused',
-          reason: 'This project has nothing on Tau Cloud yet.',
+          reason: 'This project has nothing in the cloud yet.',
         });
         /* Nothing of a project arrived: what is on disk is only the store and
            durable-sync control directories created for any opened project. */
@@ -1885,7 +1885,7 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
 
         expect(outcome).toMatchObject({ status: 'refused' });
         expect(outcome.status === 'refused' && outcome.reason).toBe(
-          'This project has work of its own that Tau Cloud does not have.',
+          'This project has work of its own that its cloud copy does not have.',
         );
         expect(outcome.status === 'refused' && outcome.reason).not.toMatch(/did not answer in time/u);
         /* This machine's own work is untouched by the refusal. */

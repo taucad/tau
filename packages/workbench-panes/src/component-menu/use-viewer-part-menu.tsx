@@ -39,8 +39,8 @@ import type { GraphicsRef } from '#host/workbench-host.jsx';
  * @public
  */
 export type UseViewerPartMenuOptions = Readonly<{
-  /** The viewer's graphics actor; the host creates and owns it. */
-  graphicsRef: GraphicsRef;
+  /** The viewer's graphics actor; the host creates and owns it. `undefined` while it has none yet: no menu opens. */
+  graphicsRef: GraphicsRef | undefined;
   /** The host's part verbs; the menu leaves out the item of an absent verb. */
   actions?: ModelComponentHostActions;
 }>;
@@ -161,11 +161,13 @@ export function useViewerPartMenu({ graphicsRef, actions }: UseViewerPartMenuOpt
   const gesture = useRef<ViewerSecondaryGestureState>(idleViewerSecondaryGestureState);
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- required by React
   const regionRef = useRef<HTMLElement | null>(null);
-  const artifactKey = useSelector(graphicsRef, (state) => state.context.artifactKey);
-  const unitId = useSelector(graphicsRef, (state) => state.context.modelInteractionUnitId);
-  const modelRef = useSelector(graphicsRef, (state) => state.context.modelInteractionRef);
+  const artifactKey = useSelector(graphicsRef, (state) => state?.context.artifactKey);
+  const unitId = useSelector(graphicsRef, (state) => state?.context.modelInteractionUnitId);
+  const modelRef = useSelector(graphicsRef, (state) => state?.context.modelInteractionRef);
   const selectedComponentId = useSelector(modelRef, (state) =>
-    unitId === undefined ? undefined : getModelInteractionUnitState(state.context, unitId).selectedComponentIds[0],
+    unitId === undefined || state === undefined
+      ? undefined
+      : getModelInteractionUnitState(state.context, unitId).selectedComponentIds[0],
   );
   // A menu opened on another model is closed: derived here, so the host need not close it on each new model.
   const open = opened?.artifactKey === artifactKey ? opened : undefined;
@@ -234,7 +236,7 @@ export function useViewerPartMenu({ graphicsRef, actions }: UseViewerPartMenuOpt
         const previous = gesture.current;
         const next = moveViewerSecondaryGesture({ state: previous, pointerId: event.pointerId, point: pointOf(event) });
         if (previous.status === 'pendingContextClick' && next.status === 'cameraPan') {
-          graphicsRef.send({ type: 'markModelPointerGestureMoved' });
+          graphicsRef?.send({ type: 'markModelPointerGestureMoved' });
         }
         gesture.current = next;
       },

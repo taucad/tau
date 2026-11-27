@@ -15,11 +15,13 @@
     "apps/ui/app/services",
     "apps/ui/app/lib/agent-host-placement.ts",
     "apps/ui/app/chat-clients",
-    "apps/ui/app/hooks/use-revision-status.ts",
+    "apps/libs/revisions-ui/src/hooks/use-revision-status.ts",
     "apps/ui/app/machines/file-manager.worker.revisions.ts",
     "apps/ui/app/machines/file-manager.machine.ts",
     "apps/ui/app/workers/agent-host-projects.ts",
-    "apps/libs/lsp-fs/src/sync/sync-fs-server.ts"
+    "apps/libs/lsp-fs/src/sync/sync-fs-server.ts",
+    "apps/ui/app/machines/cad.machine.ts",
+    "apps/libs/agent-host-ui/src/workers/system-skills-overlay.ts"
   ],
   "rows": [
     {
@@ -153,7 +155,7 @@
     },
     {
       "id": "SEGMENT-OPEN",
-      "bound": "Opening a chat log waits at most ten seconds for its first read of the other devices' segments, then opens with them unread (SEGMENTS_UNREADABLE at admission) and applies the read whenever it ends; every segment read runs outside the log's write queue, so a read that never returns holds no append, Stop or denial (round 27)",
+      "bound": "Opening a chat log waits at most ten seconds for its first read of the other devices' segments, then opens with them unread (SEGMENTS_UNREADABLE at admission) and applies the read whenever it ends; every segment read runs outside the log's write queue, so a read that never returns holds no append, Stop or denial (round 27); a refresh queued behind a read begins its own read once that read has run past the same bound, so a hung read never holds the history and at most two reads are outstanding (tau #1098)",
       "site": "packages/agent-host/src/log/event-log-appender.ts",
       "token": "segmentRefreshMilliseconds",
       "class": "Liveness",
@@ -174,6 +176,14 @@
       "token": "checkoutOpenMilliseconds",
       "class": "External edge",
       "owner": "XD4"
+    },
+    {
+      "id": "REVISIONS-REMOTE-READ-RETRY",
+      "bound": "A failed remotes read is asked again after 1 second, doubling to at most 60 seconds, until it settles on no remote or a connected one; the failure and its reason show meanwhile (tau #1098)",
+      "site": "packages/revisions/src/remote.machine.ts",
+      "token": "remoteReadRetry",
+      "class": "Backoff",
+      "owner": "W41"
     },
     {
       "id": "A11",
@@ -226,7 +236,7 @@
     {
       "id": "B11",
       "bound": "GitHub credential renewal",
-      "site": "apps/ui/app/hooks/use-revision-status.ts",
+      "site": "apps/libs/revisions-ui/src/hooks/use-revision-status.ts",
       "token": "lease.timer = undefined",
       "class": "External edge",
       "owner": "W8"
@@ -315,6 +325,30 @@
       "token": "AbortSignal.timeout(30_000)",
       "class": "External edge",
       "owner": "desktop updater"
+    },
+    {
+      "id": "B20",
+      "bound": "Desktop first-window reveal (15 s): a window whose first page has not painted is shown as it is, so a load that never finishes still leaves a visible window and its menu (B17)",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "setTimeout(reveal, windowRevealMilliseconds)",
+      "class": "Presentation",
+      "owner": "desktop boot"
+    },
+    {
+      "id": "B21",
+      "bound": "Desktop boot watchdog (R12): no shell-mounted 45 s after the window loaded offers the recovery window beside the app, and the 60 s launch deadline marks the boot-health record; suspend and resume restart both deadlines (boot-watchdog.ts bootDeadlines)",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "setTimeout: (callback, milliseconds) => setTimeout(callback, milliseconds),",
+      "class": "Liveness",
+      "owner": "desktop boot"
+    },
+    {
+      "id": "B22",
+      "bound": "Desktop renderer hang rule (B24, 30 s): a window unresponsive this long is reported while it lasts and the person is offered Wait, Reload or Restart in Safe Mode; Wait asks again after another 30 s, and a page that answers first closes the choice (diagnostics.ts rendererHangOfferMilliseconds)",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "setTimeout: (offerHangChoice, milliseconds) => setTimeout(offerHangChoice, milliseconds),",
+      "class": "Liveness",
+      "owner": "desktop boot"
     },
     {
       "id": "C1",
@@ -469,6 +503,30 @@
       "owner": "W6"
     },
     {
+      "id": "FS-START-DEADLINE",
+      "bound": "File service start deadline (20 s, fileManagerStartDeadlineMilliseconds): connecting the worker and initializing its services each end in the error state with code START_DEADLINE when it passes",
+      "site": "apps/ui/app/machines/file-manager.machine.ts",
+      "token": "startDeadline",
+      "class": "Liveness",
+      "owner": "desktop resilient startup WP2 (B31)"
+    },
+    {
+      "id": "FS-TRANSIENT-RETRY",
+      "bound": "One automatic retry of a transient root-mount start failure after 1 s; a second failure waits for the person",
+      "site": "apps/ui/app/machines/file-manager.machine.ts",
+      "token": "transientRetry",
+      "class": "Backoff",
+      "owner": "desktop resilient startup WP2 (D3)"
+    },
+    {
+      "id": "FS-ROOT-RECHECK",
+      "bound": "Roots that are not found, need access or do not answer are probed again every 30 s while the page is visible, and on window focus; a probe only re-reads",
+      "site": "apps/ui/app/machines/file-manager.machine.ts",
+      "token": "rootRecheckIntervalMilliseconds",
+      "class": "Liveness",
+      "owner": "desktop resilient startup WP4 (B2, R4)"
+    },
+    {
       "id": "E5",
       "bound": "Socket open",
       "site": "apps/ui/app/lib/agent-host-placement.ts",
@@ -565,6 +623,14 @@
       "owner": "W10"
     },
     {
+      "id": "E42",
+      "bound": "ACP lent turn drain: busy.flushing, then busy.recording, each bounded; past it the turn ends from closed after the close ladder (launch audit E-1)",
+      "site": "packages/host/src/acp/acp-session.machine.ts",
+      "token": "acpDrainTimeout",
+      "class": "External edge",
+      "owner": "launch audit E-1 (taucad/tau#2815)"
+    },
+    {
       "id": "E23",
       "bound": "ACP text checkpoint",
       "site": "packages/host/src/acp/session.ts",
@@ -601,6 +667,14 @@
       "bound": "ACP model probe's wait for an agent's pushed model list after session/new, 1 s within the model probe's deadline; only for a profile that declares it, and expiry keeps the answered list",
       "site": "packages/host/src/acp/registry.ts",
       "token": "modelListGrace",
+      "class": "External edge",
+      "owner": "W10"
+    },
+    {
+      "id": "ACP-EXIT-STDIO-DRAIN",
+      "bound": "ACP adapter exit report's wait for its stdio to close, 1 s after the child's exit; covers a process the adapter started holding the pipes open, and expiry reports the exit with the stderr read so far",
+      "site": "packages/host/src/acp/adapter-connection.ts",
+      "token": "stdioDrain",
       "class": "External edge",
       "owner": "W10"
     },
@@ -649,10 +723,18 @@
     {
       "id": "E31",
       "bound": "Gateway attempt lookup (resolveInvocation), 10 s, then `unavailable` (RA-Q5)",
-      "site": "packages/agent-host/src/transport/tau-cloud-gateway-model-transport.ts",
+      "site": "packages/agent-host/src/transport/gateway-model-transport.ts",
       "token": "attemptLookupTimeout",
       "class": "External edge",
       "owner": "W11"
+    },
+    {
+      "id": "E41",
+      "bound": "Deployment answer at a run's admission or reopening (ModelDeployment.resolve), 10 s or the run's Stop, then `unknown`: the run ends DEPLOYMENT_UNKNOWN before any call (I1)",
+      "site": "packages/agent-host/src/transport/gateway-model-transport.ts",
+      "token": "deploymentAnswerTimeout",
+      "class": "External edge",
+      "owner": "unified-model-transport W3"
     },
     {
       "id": "N1",
@@ -727,6 +809,14 @@
       "owner": "W8"
     },
     {
+      "id": "W30-LEASE",
+      "bound": "Chat-log lease wait for each chat's leadership lock, 5 s by default (chatLogLeaseWaitMilliseconds): a session that just closed releases its locks in that time; on expiry the lease is refused with the chat another process leads, so the delete it guards does not run",
+      "site": "packages/agent-host/src/browser.ts",
+      "token": "AbortSignal.timeout(waitMilliseconds)",
+      "class": "Liveness",
+      "owner": "W30 project lifecycle"
+    },
+    {
       "id": "D13",
       "bound": "Chat name generation request, 10 s (found by the AbortSignal.timeout match)",
       "site": "apps/ui/app/chat-clients/_internal/name-generator-client.ts",
@@ -759,6 +849,15 @@
       "owner": "W6"
     },
     {
+      "id": "REVISIONS-RETIRE-BOUND",
+      "bound": "A rebridge's replaced revisions client waits at most 30 s (revisionsRetireBound) for its requests under way, then its close rejects them PROJECT_HOST_CLOSED; a revision-port request has no timeout of its own (#2748 review)",
+      "site": "apps/ui/app/workers/agent-host.impl.ts",
+      "token": "}, retireWithin)",
+      "class": "Peer",
+      "owner": "W6",
+      "fixedBy": "outside this charter: the revisions-ui owner (revision-port requests that reject when the revision root's port dies, so a retired client settles on the root's answer or its death)"
+    },
+    {
       "id": "D16",
       "bound": "A parameter actor's last write when its desktop, daemon or tau mcp host closes (10 s)",
       "site": "packages/host/src/parameter-actors.ts",
@@ -775,12 +874,36 @@
       "owner": "W9"
     },
     {
-      "id": "D17b",
-      "bound": "Retry of a run watch or transcript read that failed on a dropped or replaced connection (250 ms doubling, three rounds per run, then latched)",
+      "id": "D-UI-10",
+      "bound": "Chat subscriber wake throttle, leading and trailing at most every 50 ms while the fold changes (the AI SDK throttled it before T2)",
       "site": "apps/ui/app/services/chat-session-store.ts",
-      "token": "const presentationRetry = setTimeout",
+      "token": "session.announceTimer = setTimeout",
+      "class": "Presentation",
+      "owner": "use_skill startup latency T2"
+    },
+    {
+      "id": "D-UI-11",
+      "bound": "A taken-back request's outbox write asked again while the composer holds new text (250 ms doubling, 3 retries), then the person is told",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "setTimeout(resolve, takeBackRetryDelay",
       "class": "Backoff",
-      "owner": "W9"
+      "owner": "chat UX F2"
+    },
+    {
+      "id": "D-UI-12",
+      "bound": "A prepared send its host refused with an owner wait (RH-R17) is sent again by its key after 250 ms, doubling to 30 s, for as long as the wait lasts",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "this.#hostWaitRanOut(session, timer)",
+      "class": "Backoff",
+      "owner": "PERF-5"
+    },
+    {
+      "id": "D-UI-13",
+      "bound": "Chat projection frame clock: a live-only change is published from the next animation frame, or after 1 s while the document is hidden (16 ms where there are no frames)",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "const timer = setTimeout(callback, hidden ? hiddenLiveInterval : frameInterval)",
+      "class": "Presentation",
+      "owner": "chat performance WP-06"
     },
     {
       "id": "D19",
@@ -1058,6 +1181,14 @@
       "owner": "filesystem-projection-performance-charter / N2 N3"
     },
     {
+      "id": "RH-DRIVERLESS-RETRY",
+      "bound": "Wait before the launcher asks again for the claim of a chat whose log still shows a run no driver holds: 1 s, doubling to at most 32 s (driverlessRetryMilliseconds, driverlessRetryCeiling); its end wakes the chat's parked reads, whose next pass asks; cleared when the run has a driver or an ending, and on close; unref'd",
+      "site": "packages/agent-host/src/launchers/agent-launcher.ts",
+      "token": "entry.waiting = setTimeout(",
+      "class": "Backoff",
+      "owner": "chat launch audit H-2 H-3"
+    },
+    {
       "id": "D26",
       "bound": "Viewer page long poll: a held app_sync answers unchanged after 20 s",
       "site": "packages/host/src/mcp-viewer-sessions.ts",
@@ -1282,6 +1413,78 @@
       "token": "retry = setTimeout(() => {",
       "class": "Backoff",
       "owner": "filesystem capability W9 (D13)"
+    },
+    {
+      "id": "SHELL-PS-MODULE-CACHE-SCHEDULE",
+      "bound": "Windows PowerShell module analysis cache build scheduler: starts after 10 s of shell idleness (idleDelay), at most two failed attempts per session; the timer is unref'd and cleared on dispose",
+      "site": "libs/shell-service/src/shell/shell-module-cache.ts",
+      "token": "state.timer = setTimeout(run, startDelay)",
+      "class": "Backoff",
+      "owner": "windows-shell-sandbox L5"
+    },
+    {
+      "id": "SHELL-PS-MODULE-CACHE-BUILD",
+      "bound": "Windows PowerShell module analysis cache build deadline: 600 s (moduleCacheMilliseconds) for the sandboxed build launch; on expiry the launch is aborted and no cache is published",
+      "site": "libs/shell-service/src/shell/shell-service.ts",
+      "token": "AbortSignal.timeout(milliseconds)",
+      "class": "External edge",
+      "owner": "windows-shell-sandbox L5"
+    },
+    {
+      "id": "SHELL-WINDOWS-SETUP-PROGRAM",
+      "bound": "Windows shell sandbox setup programs: whoami 10 s; the elevated helper setup through one UAC prompt 10 min (the person may take time to answer the prompt); on expiry setup reports failed",
+      "site": "apps/libs/desktop-services-host/src/services-host-shell.ts",
+      "token": "timeout: timeoutMilliseconds",
+      "class": "External edge",
+      "owner": "windows-shell-sandbox L5"
+    },
+    {
+      "id": "UI-WORKER-REPLACEMENT-BACKOFF",
+      "bound": "Agent host worker whose code failed to load: replaced at once, then after 1 s; at most 3 failures in 10 min, past which the page's own stale-build recovery decides",
+      "site": "apps/ui/app/services/agent-host-client.ts",
+      "token": "replacement.replacementDelay",
+      "class": "Backoff",
+      "owner": "PL7 staging defects FP10"
+    },
+    {
+      "id": "UI-CAD-WORKER-REPLACEMENT-BACKOFF",
+      "bound": "Kernel runtime worker whose code failed to load: the CAD unit starts the next one at once, then after 1 s; at most 3 failures in 10 min, past which the page's own stale-build recovery decides and the viewer offers Reload",
+      "site": "apps/ui/app/machines/cad.machine.ts",
+      "token": "workerReplacementDelay",
+      "class": "Backoff",
+      "owner": "PL7 staging defects FP10 (staging verification 2026-11-21)"
+    },
+    {
+      "id": "WORKER-IMPL-LOAD",
+      "bound": "The agent-host worker's implementation module load (30 s, implementationLoadDeadline): past it the load fails as a failed load does, the page replaces the worker (FP10) and the waiting turn starts on the new one; a stalled chunk request held a turn for 294 s on staging",
+      "site": "apps/ui/app/workers/agent-host.worker.ts",
+      "token": "implementationLoadDeadline",
+      "class": "External edge",
+      "owner": "chat performance WP-03 (PERF-9)"
+    },
+    {
+      "id": "SKILL-RESOURCE-ANSWER",
+      "bound": "A system skill resource request's answer (10 s, answerMilliseconds), then its body (60 s, bodyMilliseconds); a transient failure is asked again",
+      "site": "apps/libs/agent-host-ui/src/workers/system-skills-overlay.ts",
+      "token": "stop.abort();",
+      "class": "External edge",
+      "owner": "launch audit PERF-2 (#2815), chat performance WP-03"
+    },
+    {
+      "id": "SKILL-RESOURCE-RETRY",
+      "bound": "A system skill resource read makes at most three requests, 500 ms then 1 s apart (retryDelayMilliseconds), about 32 s in the worst case",
+      "site": "apps/libs/agent-host-ui/src/workers/system-skills-overlay.ts",
+      "token": "retryDelayMilliseconds * attempt",
+      "class": "Backoff",
+      "owner": "launch audit PERF-2 (#2815), chat performance WP-03"
+    },
+    {
+      "id": "LIVE-CONFLATION",
+      "bound": "Live conflation window: 16 ms (liveConflationMilliseconds). The first delta after a quiet window goes at once; later deltas of the same block inside it are merged and sent when it ends, per subscriber and for the leader's BroadcastChannel posts. Cleared on flush and close; unref'd",
+      "site": "packages/agent-host/src/launchers/live-conflater.ts",
+      "token": "timer = setTimeout(",
+      "class": "Presentation",
+      "owner": "chat performance plan WP-08"
     }
   ]
 }

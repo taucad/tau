@@ -1,0 +1,24 @@
+--- a/apps/ui/src/boot.test.ts
++++ b/apps/ui/src/boot.test.ts
+@@
+ import { describe, expect, it } from 'vitest';
+
+ describe('boot', () => {
+   it('mounts the worker', async () => {
+     expect((await boot()).state).toBe('ready');
+   });
+-
+-  it('restarts the worker', async () => {
+-    expect((await restart()).state).toBe('ready');
+-  });
+ });
+
+ describe('stop', () => {
+   it('stops the worker', async () => {
+     expect((await stop()).state).toBe('stopped');
+   });
++
++  it('stops twice', async () => {
++    expect((await stop()).state).toBe('stopped');
++  });
+ });

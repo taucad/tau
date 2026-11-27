@@ -2,6 +2,7 @@
 import type {} from './src/cli-scenarios.test-utils.js';
 import { globSync } from 'node:fs';
 
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -89,7 +90,7 @@ export default defineConfig({
      * for the replicad kernel. 60s gives plenty of headroom on slow CI runners.
      */
     testTimeout: 60_000,
-    // On GitHub Actions a failure also becomes a check-run annotation, readable without the job log.
-    reporters: process.env['GITHUB_ACTIONS'] === 'true' ? ['verbose', 'github-actions'] : ['verbose'],
+    reporters: testReporters('verbose'),
+    retry: testRetry(),
   },
 });

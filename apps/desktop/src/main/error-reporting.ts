@@ -85,8 +85,8 @@ export const rendererErrorReportingEnvironment = (): { readonly SENTRY_DSN?: str
   tauSentryDsn && Sentry.isInitialized() ? { SENTRY_DSN: tauSentryDsn } : {};
 
 /**
- * Send one main-process failure signal (SB11), beside the local diagnostics log. A no-op while Sentry is not
- * initialized, and for no signal.
+ * Send one main-process failure signal (SB11), beside the local diagnostics log, tagged `tau_event` with the
+ * signal's name (D5). A no-op while Sentry is not initialized, and for no signal.
  *
  * @param signal - The signal a `desktop-signals.ts` builder made, if any.
  */
@@ -94,13 +94,26 @@ export const reportDesktopSignal = (signal: DesktopSignal | undefined): void => 
   if (signal === undefined || !Sentry.isInitialized()) {
     return;
   }
+  /* A signal's name leads its fingerprint; the alerts and T-R9.3 search by it as `tau_event` (D5). */
+  const [name] = signal.fingerprint;
   Sentry.captureMessage(signal.message, {
     level: signal.level,
     fingerprint: [...signal.fingerprint],
-    tags: signal.tags,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry tag names are snake_case.
+    tags: name === undefined ? signal.tags : { ...signal.tags, tau_event: name },
     ...(signal.contexts === undefined ? {} : { contexts: signal.contexts }),
   });
 };
+
+/**
+ * Wait for queued events to leave, so a report sent just before the process ends or blocks on a dialog is not lost
+ * (B18). Resolves at once while Sentry is not initialized.
+ *
+ * @param timeoutMilliseconds - The longest wait.
+ * @returns Whether the queue drained in time.
+ */
+export const flushDesktopErrorReporting = async (timeoutMilliseconds = 2000): Promise<boolean> =>
+  Sentry.isInitialized() ? Sentry.flush(timeoutMilliseconds) : true;
 
 /** Milliseconds during which one revision-engine failure, by its redacted message, is sent once. */
 export const revisionEngineFailureWindow = 10 * 60_000;

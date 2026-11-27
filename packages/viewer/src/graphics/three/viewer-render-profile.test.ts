@@ -26,7 +26,7 @@ describe('viewer render profile adoption', () => {
       intensity: 3,
       gtaoIntensity: 0.75,
       distanceFalloff: 0.2,
-      gtaoDistanceFalloff: 1,
+      gtaoDistanceFalloff: 0.5,
       webglHalfResolution: false,
       webglDenoiseRadiusCssPixels: 3,
       displayMode: 'combined',

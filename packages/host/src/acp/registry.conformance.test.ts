@@ -58,6 +58,8 @@ const fourthProfile: ReviewedAcpAgentProfile = {
   },
   updateCommand: { posix: 'acme update', windows: 'acme update' },
   loginCommand: 'acme login',
+  loginArgs: ['login'],
+  defaultModePreference: ['auto'],
 };
 
 const profiles: ReadonlyArray<{ readonly label: string; readonly profile: ReviewedAcpAgentProfile }> = [
@@ -236,6 +238,16 @@ describe.each(profiles)('the $label profile', ({ profile }) => {
       expect(command).not.toMatch(/Helper|app\.asar|node_modules/u);
     }
     expect(profile.loginCommand === profile.cli || profile.loginCommand.startsWith(`${profile.cli} `)).toBe(true);
+  });
+
+  it('should declare structured login arguments that spell its login command exactly', () => {
+    /* Tau's sign-in tab runs `cli` with these and no shell, and the card shows `loginCommand`:
+     * both must be the same invocation, with no word a shell would quote or split. */
+    expect(Array.isArray(profile.loginArgs), 'loginArgs').toBe(true);
+    for (const argument of profile.loginArgs) {
+      expect(argument, argument).toMatch(/^[\w@%+=:,./-]+$/u);
+    }
+    expect([profile.cli, ...profile.loginArgs].join(' ')).toBe(profile.loginCommand);
   });
 
   describe.skipIf(process.platform === 'win32')('with stub CLIs', () => {

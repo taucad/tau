@@ -144,6 +144,24 @@
 \* render under a data router. No action or verdict changes.
 \* PL1 (runtime entry cut): `SessionProjectProvider` moved to `hooks/project-provider.tsx` so Home's graph stops at
 \* the hook; the live sessions import it from there. Only an import path changes. No action or verdict changes.
+\* SP5-warm (STO-25): the module port loads through `openProjectWorkspace`, which answers with the same session
+\* module promise and, only once it has resolved, starts the viewport's workspace layout import as a detached
+\* warm-up. The warm-up never gates, delays or fails the port's answer (a layout import that fails or a viewport
+\* that cannot be measured is swallowed there and retried by the layout's own render), so `ModuleLoaded` and the
+\* module party are unchanged and a link's warm-up still yields `ModuleAtStart = "loaded"`. The live sessions
+\* re-export the layout warm-up. No action or verdict changes.
+\* STO-25 (SP5-model): a live project's binding reads its manifest again once a tree write lands `tau.json`
+\* (`entryManifest`), so the model surfaces know from the first view which manifest the project holds. That is
+\* the session's own manifest observation, environment here; focus, the route state and the mounted live set are
+\* unchanged, so no action or verdict changes.
+\* DC-10 files-ui slice 5 (2026-11-17): `project-route-intent.tsx` takes `project-url.utils` from `@taucad/files-ui`;
+\* only the import moved. No action or verdict changes.
+\* DC-10 revisions-ui slice 2 (2026-11-18): `project-live-sessions.tsx` takes the `RevisionCommands` type from
+\* `@taucad/revisions-ui`; only the import moved. No action or verdict changes.
+\* Shared cloud-open copy (2026-11-24): `project-route.tsx` reads its "Opening project" aria-label from
+\* `#lib/project-open-copy`; only the label's source moved. No action or verdict changes.
+\* One label for the open (2026-11-25): the aria-label reads `projectOpenCopy.label`, the open's one label, in place
+\* of the connecting step's; the words are the same. Copy only. No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

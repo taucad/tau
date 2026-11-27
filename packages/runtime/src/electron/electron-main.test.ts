@@ -1251,6 +1251,7 @@ describe('Electron main runtime memory supervision', () => {
     }
   });
 
+  /* T05: the limit -1 and at the limit stay alive; only one byte past it is killed. */
   it('should kill an adopted utility whose resident memory passes the limit and report why', async () => {
     vi.useFakeTimers();
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
@@ -1276,13 +1277,24 @@ describe('Electron main runtime memory supervision', () => {
         },
       );
       const healthy = liveUtilities.at(-1)!;
+      requestRuntimePort(
+        { once: vi.fn(), removeListener: vi.fn() },
+        { postMessage: vi.fn() },
+        {
+          requestId: 'request-3',
+        },
+      );
+      const atLimit = liveUtilities.at(-1)!;
+      expect(new Set([bloated, healthy, atLimit]).size).toBe(3);
       resident.set(bloated, 1001);
       resident.set(healthy, 999);
+      resident.set(atLimit, 1000);
 
       await vi.advanceTimersByTimeAsync(5000);
 
       expect(bloated.kill).toHaveBeenCalledOnce();
       expect(healthy.kill).not.toHaveBeenCalled();
+      expect(atLimit.kill).not.toHaveBeenCalled();
       expect(onError).toHaveBeenCalledOnce();
       const [reported] = onError.mock.calls[0] as [Error];
       expect(reported.message).toMatch(/resident memory 1001 bytes exceeds 1000/u);

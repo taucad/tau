@@ -2,15 +2,6 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
-type ViewerWindow = typeof globalThis & {
-  __TAU_SECTION_VIEW_TEST__?: {
-    getModelComponents(): ReadonlyArray<{ id: string; name: string }>;
-    setCamera(camera: { position: readonly [number, number, number]; target: readonly [number, number, number] }): void;
-    projectWorldPoint(point: readonly [number, number, number]): { x: number; y: number; visible: boolean };
-    getModelHoverState(): { hoveredComponentId?: string };
-  };
-};
-
 const openCommand = async (name: string) => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
   await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), name);
@@ -52,8 +43,7 @@ const replaceMain = async (code: string) => {
     .toContain('constleft=');
 };
 
-const components = async () =>
-  target.evaluate(() => (globalThis as ViewerWindow).__TAU_SECTION_VIEW_TEST__?.getModelComponents() ?? []);
+const components = async () => target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__?.getModelComponents() ?? []);
 
 const checkParts = async (leftName: string, reordered: boolean) => {
   await openCommand('Open model tree');
@@ -63,7 +53,7 @@ const checkParts = async (leftName: string, reordered: boolean) => {
     .toEqual(names.map((name, index) => ({ id: `component:node-${index}`, name })));
   await target.expectGeometryFramed();
   await target.evaluate(() =>
-    (globalThis as ViewerWindow).__TAU_SECTION_VIEW_TEST__?.setCamera({ position: [0, 0, 0.15], target: [0, 0, 0] }),
+    globalThis.__TAU_SECTION_VIEW_TEST__?.setCamera({ position: [0, 0, 0.15], target: [0, 0, 0] }),
   );
   const list = selectors.getByRole('list', { name: 'Model components for main.ts' });
   // Reordering can retain a payload-local selection. Clear it before testing fresh canvas clicks.
@@ -79,7 +69,7 @@ const checkParts = async (leftName: string, reordered: boolean) => {
   ] as const) {
     // oxlint-disable-next-line no-await-in-loop -- one real hover and selection at a time
     let point = await target.evaluate(
-      (position) => (globalThis as ViewerWindow).__TAU_SECTION_VIEW_TEST__?.projectWorldPoint([position, 0, 0]),
+      (position) => globalThis.__TAU_SECTION_VIEW_TEST__?.projectWorldPoint([position, 0, 0]),
       x,
     );
     expect(point?.visible).toBe(true);
@@ -88,13 +78,11 @@ const checkParts = async (leftName: string, reordered: boolean) => {
       .poll(
         async () => {
           point = await target.evaluate(
-            (position) => (globalThis as ViewerWindow).__TAU_SECTION_VIEW_TEST__?.projectWorldPoint([position, 0, 0]),
+            (position) => globalThis.__TAU_SECTION_VIEW_TEST__?.projectWorldPoint([position, 0, 0]),
             x,
           );
           await target.mouseMove(point!.x, point!.y);
-          return target.evaluate(
-            () => (globalThis as ViewerWindow).__TAU_SECTION_VIEW_TEST__?.getModelHoverState().hoveredComponentId,
-          );
+          return target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__?.getModelHoverState().hoveredComponentId);
         },
         { timeout: 10_000 },
       )
@@ -142,7 +130,7 @@ test('should deliver authored names on hover, selection and lists through rename
   await replaceMain(source('Renamed / 蓋 🧩', true));
   await checkParts('Renamed / 蓋 🧩', true);
   const namedPoint = await target.evaluate(() =>
-    (globalThis as ViewerWindow).__TAU_SECTION_VIEW_TEST__?.projectWorldPoint([-0.02, 0, 0]),
+    globalThis.__TAU_SECTION_VIEW_TEST__?.projectWorldPoint([-0.02, 0, 0]),
   );
   await target.mouseMove(namedPoint!.x, namedPoint!.y);
   await target.mouseClick(namedPoint!.x, namedPoint!.y);

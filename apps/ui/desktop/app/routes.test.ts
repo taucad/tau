@@ -22,17 +22,23 @@ describe('desktop route manifest', () => {
     expect(manifest).toContain('auth.$');
     expect(manifest).toContain('home-surface.desktop.tsx');
     expect(manifest).not.toContain('"file":"../../app/routes/_index/route.tsx"');
-    expect(manifest).not.toContain('../../app/routes/usage/');
+  });
+
+  it('should carry /usage, which guards itself by the display mode (D8)', () => {
+    expect(JSON.stringify(routes)).toContain('../../app/routes/usage/');
   });
 
   /* The `tau://` contract main loads against (R4). `/i/*` is a server redirect,
-     so `tau://i/<repo>` lands on `/import/<repo>` instead; `/s/:slug` keeps its
-     path and swaps its module, because SPA mode admits no server `loader`. */
+     so `tau://i/<repo>` lands on `/import/<repo>` instead; `/s/:slug` and
+     `/invitations/:token` keep their paths and swap their modules, because SPA
+     mode admits no server `loader`. */
   it('should carry every page a tau:// content link resolves to', () => {
     const manifest = JSON.stringify(routes);
 
     expect(manifest).toContain('../../app/routes/import.$/route.tsx');
-    expect(manifest).toContain('../../app/routes/invitations.$token/route.tsx');
+    expect(manifest).toContain('../../app/routes/invitations.$token/desktop-route.tsx');
+    expect(manifest).toContain('../../app/routes/invitations._index/route.tsx');
+    expect(manifest).not.toContain('"file":"../../app/routes/invitations.$token/route.ts"');
     expect(manifest).toContain('../../app/routes/s.$slug/desktop-route.tsx');
     expect(manifest).not.toContain('../../app/routes/i.$/');
     expect(manifest).not.toContain('"file":"../../app/routes/s.$slug/route.tsx"');
@@ -58,7 +64,7 @@ describe('desktop route manifest', () => {
   /* Windows: `path.relative` answers with backslashes. `flatRoutes` normalised a file's relative path but not a
      folder's, and this manifest's out-of-tree root makes it `..\\..\\app\\routes\\<folder>`, which the default
      dot-file ignore matches, so a Windows build dropped every folder route and served a blank Home
-     (tools/pnpm/patches/@react-router__fs-routes@7.18.5.patch). */
+     (tools/pnpm/patches/@react-router__fs-routes@8.5.1.patch). */
   it('should keep every route when paths are resolved with Windows separators', async () => {
     const posixRelative = path.relative;
     const relative = vi

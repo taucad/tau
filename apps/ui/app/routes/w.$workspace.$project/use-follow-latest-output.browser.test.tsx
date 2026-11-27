@@ -4,6 +4,7 @@ import { forwardRef, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { afterEach, expect, it } from 'vitest';
+import { userEvent } from 'vitest/browser';
 import { useFollowLatestOutput } from '#routes/w.$workspace.$project/use-follow-latest-output.js';
 
 afterEach(cleanup);
@@ -21,6 +22,7 @@ const components = {
 // store subscription, so Virtuoso itself never re-renders while it streams.
 function StreamingTurn(): React.JSX.Element {
   const [lines, setLines] = useState(40);
+  const [isOpen, setIsOpen] = useState(false);
   appendLine = () => {
     setLines((count) => count + 5);
   };
@@ -29,6 +31,16 @@ function StreamingTurn(): React.JSX.Element {
       {Array.from({ length: lines }, (_, line) => (
         <p key={line}>streaming line {line}</p>
       ))}
+      <button
+        type='button'
+        aria-expanded={isOpen}
+        onClick={() => {
+          setIsOpen((open) => !open);
+        }}
+      >
+        Ran commands
+      </button>
+      {isOpen ? <div style={{ height: 240 }}>rows</div> : undefined}
     </div>
   );
 }
@@ -111,6 +123,38 @@ it('follows a last turn that grows in place only while pinned to the bottom', as
 
   scroller.scrollTop = scroller.scrollHeight;
   await nextFrames();
+  await grow();
+  await expect.poll(() => distanceFromBottom(scroller)).toBeLessThanOrEqual(4);
+});
+
+it('keeps a disclosure where the person clicked it and resumes following once it is closed', async () => {
+  render(<StreamingTranscript />);
+  const scroller = screen.getByTestId('scroller');
+  await expect.poll(() => scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+  await expect.poll(() => distanceFromBottom(scroller)).toBeLessThanOrEqual(4);
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 300);
+  });
+
+  const trigger = screen.getByRole('button', { name: 'Ran commands' });
+  const restingTop = trigger.getBoundingClientRect().top;
+  await userEvent.click(trigger);
+  await nextFrames();
+  // The rows open below the line; the line itself does not move, so the list is no longer at its bottom.
+  expect(trigger.getBoundingClientRect().top).toBe(restingTop);
+  expect(distanceFromBottom(scroller)).toBeGreaterThan(200);
+
+  // Output that arrives while the person inspects does not take the view either.
+  const inspectingPosition = scroller.scrollTop;
+  await grow();
+  expect(scroller.scrollTop).toBe(inspectingPosition);
+
+  // Closing returns the list to its bottom without a scroll event of the person's; following resumes.
+  scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight - 240;
+  await nextFrames();
+  await userEvent.click(trigger);
+  await nextFrames();
+  await expect.poll(() => distanceFromBottom(scroller)).toBeLessThanOrEqual(4);
   await grow();
   await expect.poll(() => distanceFromBottom(scroller)).toBeLessThanOrEqual(4);
 });

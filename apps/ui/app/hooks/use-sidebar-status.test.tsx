@@ -9,7 +9,7 @@ import type { Chat } from '@taucad/chat';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
 import * as questionTool from '@taucad/chat-ui/utils/question-tool';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
@@ -18,7 +18,7 @@ import type { SessionsActorRef, SessionsProjectStatus } from '#machines/sessions
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import { useSessions } from '#hooks/use-sessions.js';
 import {
   chatStatusLabel,
@@ -53,7 +53,7 @@ vi.mock('#hooks/use-sessions.js', () => ({
     policyRefusal: undefined,
   }),
 }));
-vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: vi.fn() }));
+vi.mock('@taucad/revisions-ui/services/revision-client-registry', () => ({ peekRevisionClient: vi.fn() }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: vi.fn() }));
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({
@@ -513,6 +513,27 @@ const agentStateRows: ReadonlyArray<{
     sentence: 'Failed · kernel crashed while meshing',
   },
   {
+    /* IS3: a coded refusal is named in the card's own words; the gateway's sentence never renders, not even sr-only. */
+    signal: 'run.lifecycle: failed on a paused model route',
+    target: 'chat',
+    events: [
+      {
+        type: 'runLifecycle',
+        phase: 'failed',
+        reason: JSON.stringify({
+          category: 'generic',
+          title: 'Error',
+          message: "This model route is paused by Tau's operators.",
+          code: 'MODEL_ROUTE_PAUSED',
+        }),
+      },
+    ],
+    state: 'failed',
+    label: 'Failed · This model is paused',
+    mark: 'failed',
+    sentence: 'Failed · This model is paused',
+  },
+  {
     signal: 'run.lifecycle: cancelled',
     target: 'chat',
     events: [{ type: 'runLifecycle', phase: 'cancelled' }],
@@ -814,7 +835,7 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
 
     liveProject('gearbox', { state: 'failed' });
     expect(rowOf('gearbox').glyph).toBe('failed');
-    expect(expanded('gearbox')).toEqual({ mark: 'failed', sentence: 'Failed to open' });
+    expect(expanded('gearbox')).toEqual({ mark: 'failed', sentence: 'Couldn’t open' });
   });
 
   it('says whether every project is live (D12)', () => {
@@ -1273,9 +1294,11 @@ const compiledHooks = await (async () => {
     react: await import('react'),
     'react/compiler-runtime': await import('react/compiler-runtime'),
     '@taucad/chat-ui/utils/question-tool': questionTool,
+    '@taucad/chat-ui/utils/error.utils': await import('@taucad/chat-ui/utils/error.utils'),
     '#machines/sessions.machine.js': await import('#machines/sessions.machine.js'),
     '#services/sessions-store.js': await import('#services/sessions-store.js'),
-    '#services/revision-client-registry.js': await import('#services/revision-client-registry.js'),
+    '@taucad/revisions-ui/services/revision-client-registry':
+      await import('@taucad/revisions-ui/services/revision-client-registry'),
     '#hooks/use-sessions.js': await import('#hooks/use-sessions.js'),
     '#hooks/chat-session-store-provider.js': await import('#hooks/chat-session-store-provider.js'),
     '@taucad/ui-core/lib/xstate.lib': await import('@taucad/ui-core/lib/xstate.lib'),

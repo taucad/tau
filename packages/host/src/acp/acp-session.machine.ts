@@ -26,6 +26,8 @@
 import { permissionReadbackCapability, supportsPermissionReadback } from '#acp/provider-permission.js';
 import type { GrokQuestionRequest, GrokQuestionResponse } from '#acp/grok-questions.js';
 import { withGrokModels } from '#acp/grok-models.js';
+import { modeDecisionOf, modeOptionOf, modeValuesOf, planModeId, withoutPlanModes } from '#acp/acp-modes.js';
+import type { ModeDecision } from '#acp/acp-modes.js';
 import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import type {
@@ -40,7 +42,7 @@ import type {
   Usage as AcpUsage,
 } from '@agentclientprotocol/sdk';
 
-import type { JsonObject } from '@taucad/agent-host';
+import type { JsonObject, JsonValue } from '@taucad/agent-host';
 import type { ExternalAgentStop } from '@taucad/agent-host/wire';
 
 import {
@@ -77,7 +79,6 @@ import {
   grokPermissionModeOf,
   grokPermissionNotification,
   grokPlanningConfigId,
-  grokPlanningModeOf,
   grokPlanningRequest,
 } from '#acp/grok-controls.js';
 import type { GrokNotification } from '#acp/grok-notifications.js';
@@ -103,6 +104,12 @@ export const acpKillGrace = 2000;
 export const acpTerminateBackstop = 5000;
 /** E22: milliseconds a cancelled turn waits for the vendor to settle its outstanding call. */
 export const acpCancelSettleTimeout = 2000;
+/**
+ * E42: milliseconds the host's own drain may take in `busy.flushing`, and again in `busy.recording`, before the turn
+ * ends from `closed`. With E22 before it and the close ladder after it (E13, E18), a stopped turn is answered within
+ * 29 s whatever the vendor or the host's storage does: inside the 30 s the agent host gives a Tau driver to stop.
+ */
+export const acpDrainTimeout = 10_000;
 
 /** The `AcpSessions.tla` action a transition refines (MC-R27). */
 export type AcpSessionsAction =
@@ -118,6 +125,7 @@ export type AcpSessionsAction =
   | 'CancelBinding'
   | 'CancelSettled'
   | 'CancelTimedOut'
+  | 'DrainTimedOut'
   | 'Dequeued'
   | 'CancelQueued'
   /** A step that leaves the spec's abstraction unchanged (the spec's `Stutter`). */
@@ -648,10 +656,45 @@ const withGrokControls = (
     ...(options ?? []).filter((option) => option.id !== grokPermissionConfigId && option.id !== grokPlanningConfigId),
     ...grokControlOptions({
       permission: grokPermissionModeOf(value(grokPermissionConfigId)) ?? 'ask',
-      planning: grokPlanningModeOf(value(grokPlanningConfigId)) ?? 'default',
       autoAvailable: context.grokAutoAvailable,
     }),
   ];
+};
+
+/* The options the menu shows: no plan values (PR5). */
+const presented = (options: readonly SessionConfigOption[] | undefined): JsonValue[] =>
+  withoutPlanModes(options ?? []).map((option) => asJson(option));
+
+/*
+ * The mode this turn runs in (PR5), from the session's mode option. Grok's
+ * `auto` is offered only once Grok reports it enabled. The mode Tau last chose
+ * by default comes from this child, else from the chat's record; a record
+ * without one (a chat from before PR5) holds the person's own mode.
+ */
+const modeDecision = (context: AcpSessionContext, lent: AcpLend): ModeDecision | undefined => {
+  const option = modeOptionOf(context.configOptions);
+  if (option === undefined) {
+    return undefined;
+  }
+  const values = modeValuesOf(option);
+  const grokAutoUnverified =
+    context.grokControls && option.id === grokPermissionConfigId && context.grokAutoAvailable !== true;
+  const recorded = lent.record?.['defaultModeId'];
+  /* A turn that names no mode keeps the person's pick (marker `null`) while it is offered. */
+  const owned = context.defaultModeId === undefined ? recorded === null : context.defaultModeId === null;
+  const named = lent.configuration?.[option.id];
+  return modeDecisionOf({
+    option,
+    offered: grokAutoUnverified ? values.filter((value) => value !== 'auto') : values,
+    requested: named === undefined && owned ? option.currentValue : named,
+    defaulted:
+      context.defaultModeId === undefined
+        ? typeof recorded === 'string'
+          ? recorded
+          : undefined
+        : (context.defaultModeId ?? undefined),
+    preference: context.adapter.defaultModePreference,
+  });
 };
 
 /* The session the restore ladder answered with, as context. */
@@ -669,9 +712,15 @@ const adopt = (context: AcpSessionContext, sessionId: string, answer: SessionAns
     presentation: {
       ...context.presentation,
       sessionId,
-      configOptions: (configOptions ?? []).map((option) => asJson(option)),
+      configOptions: presented(configOptions),
       ...(modeId === undefined ? {} : { modeId }),
-      ...(isPresent(answer.modes) ? { modes: answer.modes.availableModes.map((mode) => asJson(mode)) } : {}),
+      ...(isPresent(answer.modes)
+        ? {
+            modes: answer.modes.availableModes
+              .filter((mode) => mode.id !== planModeId || mode.id === modeId)
+              .map((mode) => asJson(mode)),
+          }
+        : {}),
     },
   };
 };
@@ -706,6 +755,14 @@ const usageState = (usage: AcpUsage): JsonObject => ({
  */
 export const sessionRecordOf = (context: AcpSessionContext, lent: AcpLend): JsonObject => {
   const prior = lent.record;
+  /* Until this child decides the mode, the chat's stored marker stands (an opening, cancelled or failed record keeps it). */
+  const priorDefault = prior?.['defaultModeId'];
+  const defaultModeId =
+    context.defaultModeId === undefined
+      ? typeof priorDefault === 'string' || priorDefault === null
+        ? priorDefault
+        : undefined
+      : context.defaultModeId;
   const model = modelChoice(context.configOptions)?.currentValue ?? lent.model;
   const title = context.presentation.title ?? stringField(prior, 'title');
   const { limit } = context;
@@ -715,6 +772,7 @@ export const sessionRecordOf = (context: AcpSessionContext, lent: AcpLend): Json
     acpPromptedRequestId: context.promptedRequestId ?? null,
     cwd: context.cwd,
     ...(context.mode === undefined ? {} : { mode: context.mode }),
+    ...(defaultModeId === undefined ? {} : { defaultModeId }),
     ...(model === undefined ? {} : { model }),
     config: confirmedConfiguration(context.configOptions),
     ...(context.priorUsage === undefined ? {} : { acpPriorUsage: usageState(context.priorUsage) }),
@@ -787,15 +845,26 @@ const promptOf = (context: AcpSessionContext, lent: AcpLend): readonly ContentBl
 
 type ConfigStep =
   | { readonly configId: string; readonly params: AgentRequestParamsByMethod['session/set_config_option'] }
-  | { readonly configId: string; readonly modeId: 'default' | 'plan' }
+  | { readonly configId: string; readonly modeId: 'default' }
   | { readonly failure: AcpFailure }
   | undefined;
+
+/* `session/set_config_option` for one select or boolean value. */
+const setParams = (
+  sessionId: string,
+  configId: string,
+  value: string | boolean,
+): AgentRequestParamsByMethod['session/set_config_option'] =>
+  typeof value === 'boolean' ? { sessionId, configId, type: 'boolean', value } : { sessionId, configId, value };
 
 /*
  * The next `session/set_config_option` this turn needs, a refusal, or none.
  * Refused, never ignored: the alternative is billing the person's account for a
- * model they did not choose. Each option is set at most once per turn.
+ * model they did not choose. Each option is set at most once per turn. The
+ * model goes first, because it decides which modes are offered; the mode is
+ * then `modeDecision`'s (PR5), and no option is left in a plan value.
  */
+// oxlint-disable-next-line eslint/complexity -- one ordered pass over model, configuration, mode and planning.
 const configStep = (context: AcpSessionContext, lent: AcpLend, configured: readonly string[]): ConfigStep => {
   const { model, configuration } = lent;
   const { adapter, configOptions } = context;
@@ -814,10 +883,13 @@ const configStep = (context: AcpSessionContext, lent: AcpLend, configured: reado
       return { configId: choice.configId, params: { sessionId, configId: choice.configId, value: model } };
     }
   }
+  const mode = modeDecision(context, lent);
   for (const [configId, value] of Object.entries(configuration ?? {})) {
-    if (context.grokControls && (configId === grokPermissionConfigId || configId === grokPlanningConfigId)) {
-      const valid = configId === grokPlanningConfigId ? grokPlanningModeOf(value) : grokPermissionModeOf(value);
-      if (valid === undefined || (valid === 'auto' && context.grokAutoAvailable !== true)) {
+    if (configId === mode?.configId || (context.grokControls && configId === grokPlanningConfigId)) {
+      continue;
+    }
+    if (context.grokControls && configId === grokPermissionConfigId) {
+      if (grokPermissionModeOf(value) === undefined) {
         return { failure: unavailable(`Grok does not currently offer ${configId}=${String(value)}.`) };
       }
       continue;
@@ -847,22 +919,37 @@ const configStep = (context: AcpSessionContext, lent: AcpLend, configured: reado
         },
       };
     }
-    if (option.currentValue !== value && !configured.includes(option.id)) {
-      return {
-        configId: option.id,
-        params:
-          typeof value === 'boolean'
-            ? { sessionId, configId: option.id, type: 'boolean', value }
-            : { sessionId, configId: option.id, value },
-      };
+    /* A plan value is off Tau's menu: a stale one is never applied. */
+    if (value !== planModeId && option.currentValue !== value && !configured.includes(option.id)) {
+      return { configId: option.id, params: setParams(sessionId, option.id, value) };
+    }
+  }
+  if (
+    mode !== undefined &&
+    !(context.grokControls && mode.configId === grokPermissionConfigId) &&
+    modeOptionOf(configOptions)?.currentValue !== mode.value &&
+    !configured.includes(mode.configId)
+  ) {
+    return { configId: mode.configId, params: setParams(sessionId, mode.configId, mode.value) };
+  }
+  /* Any other select left in a plan value (Codex's collaboration mode) moves to its first other value. */
+  for (const option of configOptions ?? []) {
+    if (
+      option.type === 'select' &&
+      option.category !== 'model' &&
+      option.id !== mode?.configId &&
+      option.id !== grokPlanningConfigId &&
+      option.currentValue === planModeId &&
+      !configured.includes(option.id)
+    ) {
+      const other = modeValuesOf(option).find((value) => value !== planModeId);
+      if (other !== undefined) {
+        return { configId: option.id, params: setParams(sessionId, option.id, other) };
+      }
     }
   }
   if (context.grokControls && !configured.includes(grokPlanningConfigId)) {
-    const modeId =
-      grokPlanningModeOf(configuration?.[grokPlanningConfigId]) ??
-      grokPlanningModeOf(configOptions?.find((option) => option.id === grokPlanningConfigId)?.currentValue) ??
-      'default';
-    return { configId: grokPlanningConfigId, modeId };
+    return { configId: grokPlanningConfigId, modeId: 'default' };
   }
   return undefined;
 };
@@ -872,12 +959,11 @@ const folded = (context: AcpSessionContext, update: SessionUpdate) => {
   const configOptions = withGrokControls(
     context,
     update.sessionUpdate === 'config_option_update' ? update.configOptions : context.configOptions,
-    update.sessionUpdate === 'current_mode_update' ? { [grokPlanningConfigId]: update.currentModeId } : {},
   );
   return {
     presentation: {
       ...presentationAfter(context.presentation, update),
-      ...(configOptions === undefined ? {} : { configOptions: configOptions.map((option) => asJson(option)) }),
+      ...(configOptions === undefined ? {} : { configOptions: presented(configOptions) }),
     },
     configOptions,
     ...(update.sessionUpdate === 'usage_update' ? { limit: claudeLimitReset(context.limit, update._meta) } : {}),
@@ -892,7 +978,7 @@ const grokSettingsAfter = (context: AcpSessionContext, params: JsonObject) => {
     configOptions,
     presentation: {
       ...context.presentation,
-      ...(configOptions === undefined ? {} : { configOptions: configOptions.map((option) => asJson(option)) }),
+      ...(configOptions === undefined ? {} : { configOptions: presented(configOptions) }),
     },
   };
 };
@@ -1051,6 +1137,27 @@ const ladder = (enq: Enqueue): void => {
   enq.raise({ type: 'killDue' }, { id: 'killDue', delay: acpKillGrace });
 };
 
+/*
+ * The host's own drain did not answer within acpDrainTimeout (E42): a flush or a session record waits on storage, a
+ * vendor file request or a tool dispatch that never settles. What the turn committed stays; the turn ends as a
+ * timed-out cancel does, from `closed` once the ladder has killed the group, so the chat is not left lent to a turn
+ * nothing will end. A turn the vendor completed is recorded failed, since its last rows may not be durable; a stopped
+ * or failed turn keeps its own outcome.
+ */
+const drainTimedOut = (context: AcpBusyContext, enq: Enqueue) => {
+  ladder(enq);
+  return endTurn(
+    { ...context, closeAfter: true, deferEnd: true },
+    enq,
+    context.outcome?.ok === true
+      ? failed({
+          code: 'EXTERNAL_AGENT_FAILED',
+          message: `Tau Host could not finish recording the ${context.adapter.displayName} turn within ${String(acpDrainTimeout / 1000)} seconds.`,
+        })
+      : (context.outcome ?? failed(cancelled)),
+  );
+};
+
 /* A cancel (or a close) while the vendor is working on the turn. */
 const cancelTurn = (context: AcpBusyContext, enq: Enqueue, closeAfter: boolean) => {
   enq.sendTo('connection', {
@@ -1099,20 +1206,15 @@ const configureOrPrompt = (context: AcpBusyContext, enq: Enqueue, patch: Partial
   if ('code' in blocks) {
     return flush(next, enq, { ...patch, outcome: failed(blocks) });
   }
+  /* PR5: Auto when Grok offers it, else the person's pick, else Ask; never an unverified Auto. */
+  const mode = modeDecision(next, next.lent);
   const selectedPermission =
-    grokPermissionModeOf(next.lent.configuration?.[grokPermissionConfigId]) ??
-    grokPermissionModeOf(next.configOptions?.find((option) => option.id === grokPermissionConfigId)?.currentValue) ??
-    'ask';
-  if (next.grokControls && selectedPermission === 'auto' && next.grokAutoAvailable !== true) {
-    return flush(next, enq, {
-      ...patch,
-      outcome: failed(unavailable('Grok Auto approval is not currently available.')),
-    });
-  }
+    (mode?.configId === grokPermissionConfigId ? grokPermissionModeOf(mode.value) : undefined) ?? 'ask';
+  const defaultModeId = mode === undefined ? next.defaultModeId : mode.defaulted ? mode.value : null;
   const configOptions = withGrokControls(next, next.configOptions, { [grokPermissionConfigId]: selectedPermission });
   const presentation = {
     ...next.presentation,
-    ...(configOptions === undefined ? {} : { configOptions: configOptions.map((option) => asJson(option)) }),
+    ...(configOptions === undefined ? {} : { configOptions: presented(configOptions) }),
   };
   if (next.grokControls) {
     /* Explicit every turn, including Ask: warm resume metadata cannot downgrade. */
@@ -1125,6 +1227,7 @@ const configureOrPrompt = (context: AcpBusyContext, enq: Enqueue, patch: Partial
       ...patch,
       configOptions,
       presentation,
+      defaultModeId,
       promptedRequestId: next.lent.requestId,
       ...ask(next, enq, {
         method: 'session/prompt',
@@ -1615,19 +1718,13 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
                 return flush(context, enq, { outcome: failed(failureOfCall(context, event.answer.error)) });
               }
               if (event.answer.method === 'session/set_mode') {
-                const mode =
-                  grokPlanningModeOf(context.lent.configuration?.[grokPlanningConfigId]) ??
-                  grokPlanningModeOf(
-                    context.configOptions?.find((option) => option.id === grokPlanningConfigId)?.currentValue,
-                  ) ??
-                  'default';
-                const configOptions = withGrokControls(context, context.configOptions, {
-                  [grokPlanningConfigId]: mode,
-                });
+                /* Tau only ever sends Grok's `default` (Build) planning mode (PR5). */
+                const mode = 'default';
+                const configOptions = withGrokControls(context, context.configOptions);
                 const presentation = {
                   ...context.presentation,
                   modeId: mode,
-                  configOptions: (configOptions ?? []).map((option) => asJson(option)),
+                  configOptions: presented(configOptions),
                 };
                 enq.sendTo('lentTurn', { type: 'sessionState', presentation });
                 return configureOrPrompt(context, enq, { configOptions, presentation, pending: undefined });
@@ -1638,7 +1735,7 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
               const configOptions = withGrokControls(context, event.answer.result.configOptions) ?? [];
               const presentation = {
                 ...context.presentation,
-                configOptions: configOptions.map((option) => asJson(option)),
+                configOptions: presented(configOptions),
               };
               enq.sendTo('lentTurn', { type: 'sessionState', presentation });
               return configureOrPrompt(context, enq, { configOptions, presentation, pending: undefined });
@@ -1750,7 +1847,12 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
             ),
           },
         },
+        /* E42: the host's own drain has acpDrainTimeout; see `drainTimedOut`. */
         flushing: {
+          timeout: acpDrainTimeout,
+          onTimeout: refines('DrainTimedOut', ({ context }: Held<AcpBusyContext>, enq: Enqueue) =>
+            drainTimedOut(context, enq),
+          ),
           on: {
             flushed: refines('Stutter', ({ context, event }: On<'flushed', AcpBusyContext>, enq: Enqueue) => {
               const outcome: AcpTurnResult =
@@ -1786,7 +1888,12 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
             })),
           },
         },
+        /* E42 again: the session record is one more write that may not answer. */
         recording: {
+          timeout: acpDrainTimeout,
+          onTimeout: refines('DrainTimedOut', ({ context }: Held<AcpBusyContext>, enq: Enqueue) =>
+            drainTimedOut(context, enq),
+          ),
           on: {
             close: refines('Stutter', (_args: unknown, enq: Enqueue) => {
               ladder(enq);
@@ -1908,7 +2015,7 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
                 pending: undefined,
                 probeRequestId: undefined,
                 configOptions,
-                presentation: { ...context.presentation, configOptions: configOptions.map((option) => asJson(option)) },
+                presentation: { ...context.presentation, configOptions: presented(configOptions) },
               };
               const next = context.queued === undefined ? undefined : lend(context.queued);
               return next === undefined

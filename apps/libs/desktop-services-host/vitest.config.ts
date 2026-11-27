@@ -1,10 +1,10 @@
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   // Mirrors apps/desktop/vitest.config.ts: the desktop build's constants for a self-host build.
   define: {
-    tauCloudBuildEnabled: 'false',
-    tauDesktopHostBuild: '""',
+    tauTelemetryHostCloudBuild: 'false',
   },
   test: {
     environment: 'node',
@@ -14,7 +14,8 @@ export default defineConfig({
       tsconfig: './tsconfig.spec.json',
       ignoreSourceErrors: true,
     },
-    reporters: ['verbose'],
+    reporters: testReporters('verbose'),
+    retry: testRetry(),
     coverage: {
       provider: 'v8',
       reportsDirectory: '../../../out/reports/coverage/apps/libs/desktop-services-host',

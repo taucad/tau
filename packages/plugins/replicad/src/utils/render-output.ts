@@ -5,23 +5,22 @@ import type { GeometrySvg, RuntimeSpanTracer, TessellationReport } from '@taucad
 import { resolveOcctTessellation } from '@taucad/occt-core';
 import type { OcctResolvedTessellation, OcctTessellation, OcctTessellationTolerances } from '@taucad/occt-core';
 import type { ShapeConfig } from '#model.js';
-import { addSurfaceCoordinates } from '#utils/surface-coordinates.js';
+import { addSurfaceCoordinates, needsSurfaceCoordinates } from '#utils/surface-coordinates.js';
 import { normalizeColor } from '#utils/normalize-color.js';
 import type { GeometryReplicad } from '#replicad.types.js';
+import type { MemoMesh, ReplicadMeshMemo } from '#utils/mesh-memo.js';
 import { resolveShapeName, uniqueShapeName } from '@taucad/geometry-core';
 import { getOC } from 'replicad';
 
 import {
-  extractInstanceEdgeIds,
-  extractInstanceFaceIds,
+  createReplicadOccurrenceReader,
   extractPrototypeEdges,
   extractPrototypeFaces,
-  inspectReplicadShapeIdentity,
   transformReplicadGeometryInstance,
 } from '#utils/tessellation-instancing.js';
 import type {
   Meshable,
-  ReplicadShapeIdentityInfo,
+  ReplicadShapeOccurrenceInfo,
   ReplicadTessellationInstance,
 } from '#utils/tessellation-instancing.js';
 
@@ -51,11 +50,14 @@ type RenderOptions = {
   collectBrepEdges?: boolean;
   openCascade?: OpenCascadeInstance;
   tessellationInstancing?: boolean;
+  /** Meshes kept across renders (compute reuse on); without it every shape is meshed. */
+  meshMemo?: ReplicadMeshMemo;
 } & RenderTelemetry;
 
 type RenderMeshOptions = {
   tessellation: Tessellation;
   collectBrepEdges: boolean;
+  meshMemo?: ReplicadMeshMemo;
 } & RenderTelemetry;
 
 type SpanOperation<T> = {
@@ -76,7 +78,7 @@ type SvgShapeConfiguration = NamedInputShape & { shape: Svgable };
 type MeshableConfiguration = NamedInputShape & { shape: Meshable };
 type MeshableInstance = {
   config: MeshableConfiguration;
-  info: ReplicadShapeIdentityInfo;
+  info: ReplicadShapeOccurrenceInfo;
 };
 
 type PrototypeGroup = {
@@ -320,7 +322,94 @@ function withSpan<T>({ tracer, name, attributes, operation }: SpanOperation<T>):
   }
 }
 
+const emptyEdges = (): GeometryReplicad['edges'] => ({ lines: new Float32Array(0), edgeGroups: [] });
+
+/**
+ * Memo key of a mesh beyond the partner: how it was made. Orientation and placement because a flat mesh is in world
+ * space, the exact tolerances, and the material because it decides the surface coordinates.
+ * @param input - How the mesh is made: flat or as an instance, the occurrence, the tolerances and the material.
+ * @param input.mode - Flat (world space) or an instance of a prototype.
+ * @param input.info - The occurrence's identity and placement.
+ * @param input.tessellation - The exact resolved tolerances.
+ * @param input.material - The authored material, which decides the surface coordinates.
+ * @returns The key.
+ */
+function meshMemoKey({
+  mode,
+  info,
+  tessellation,
+  material,
+}: {
+  mode: 'flat' | 'instanced';
+  info: ReplicadShapeOccurrenceInfo;
+  tessellation: Tessellation;
+  material: InputShape['material'];
+}): string {
+  return [
+    mode,
+    info.orientation,
+    info.locationMatrix.join(','),
+    tessellation.linearTolerance,
+    tessellation.angularTolerance,
+    material === undefined ? '' : JSON.stringify(material),
+  ].join('|');
+}
+
+/**
+ * A geometry from a kept mesh, with this render's names and appearance. The arrays are shared with the memo; nothing
+ * downstream writes to them (the glTF packer copies what it transforms).
+ * @param shapeConfig - The shape as this render names and colours it.
+ * @param mesh - The kept mesh.
+ * @param collectBrepEdges - Whether this render delivers edges.
+ * @returns The geometry.
+ */
+function geometryFromMemo(
+  shapeConfig: MeshableConfiguration,
+  mesh: MemoMesh,
+  collectBrepEdges: boolean,
+): GeometryReplicad {
+  const { name, color, opacity, metalness, roughness, material } = shapeConfig;
+  return {
+    format: 'replicad',
+    name,
+    color,
+    opacity,
+    metalness,
+    roughness,
+    material,
+    faces: mesh.faces,
+    edges: collectBrepEdges && mesh.edges ? mesh.edges : emptyEdges(),
+  };
+}
+
 function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptions) {
+  const { meshMemo } = options;
+  if (!meshMemo) {
+    return meshShape(shapeConfig, options);
+  }
+  const info = meshMemo.readOccurrence(shapeConfig.shape);
+  const key = meshMemoKey({
+    mode: 'flat',
+    info,
+    tessellation: options.tessellation,
+    material: shapeConfig.material,
+  });
+  // A kept mesh without edges cannot serve a render that collects them: that is a miss, meshed again.
+  const kept = meshMemo.lookup(info, key, {
+    usable: (mesh) => mesh.edges !== undefined || !options.collectBrepEdges,
+  });
+  if (kept) {
+    return geometryFromMemo(shapeConfig, kept, options.collectBrepEdges);
+  }
+  const geometry = meshShape(shapeConfig, options);
+  meshMemo.store(info, key, {
+    faces: geometry.faces,
+    ...(options.collectBrepEdges ? { edges: geometry.edges } : {}),
+  });
+  return geometry;
+}
+
+function meshShape(shapeConfig: MeshableConfiguration, options: RenderMeshOptions) {
   const { name, shape, color, opacity, metalness, roughness, material } = shapeConfig;
   const { tessellation, collectBrepEdges, tracer } = options;
   const geometry: GeometryReplicad = {
@@ -420,7 +509,7 @@ function instancingGroupKey(instance: MeshableInstance, tessellation: Tessellati
   ].join('|');
 }
 
-function isInstancingEligible(info: ReplicadShapeIdentityInfo): boolean {
+function isInstancingEligible(info: ReplicadShapeOccurrenceInfo): boolean {
   return info.canPrototypeMesh && info.partnerKey.length > 0 && Number.isFinite(info.determinant);
 }
 
@@ -431,13 +520,10 @@ function groupMeshableInstances(
 ): {
   groups: PrototypeGroup[];
   grouped: Set<MeshableConfiguration>;
-  missedContentHashGroups: number;
 } {
   const candidates = new Map<string, PrototypeGroup>();
-  const contentHashes = new Map<string, number>();
 
   for (const instance of instances) {
-    contentHashes.set(instance.info.prototypeHash, (contentHashes.get(instance.info.prototypeHash) ?? 0) + 1);
     if (!isInstancingEligible(instance.info)) {
       continue;
     }
@@ -451,7 +537,9 @@ function groupMeshableInstances(
     }
   }
 
-  const groups = [...candidates.values()].filter((group) => group.instances.length > 1);
+  // A partner-less shape is a group of one (catalogue N5): meshed unplaced like any prototype, with its placement
+  // applied afterwards, so moving it changes no mesh the memo keeps.
+  const groups = [...candidates.values()];
   const grouped = new Set<MeshableConfiguration>();
   for (const group of groups) {
     for (const instance of group.instances) {
@@ -459,15 +547,7 @@ function groupMeshableInstances(
     }
   }
 
-  let missedContentHashGroups = 0;
-  for (const count of contentHashes.values()) {
-    if (count > 1) {
-      missedContentHashGroups++;
-    }
-  }
-  missedContentHashGroups = Math.max(0, missedContentHashGroups - groups.length);
-
-  return { groups, grouped, missedContentHashGroups };
+  return { groups, grouped };
 }
 
 function detectInstancingGroups({
@@ -476,17 +556,18 @@ function detectInstancingGroups({
   tessellation,
   collectBrepEdges,
   tracer,
+  meshMemo,
 }: {
   configs: NamedInputShape[];
   openCascade: OpenCascadeInstance;
   tessellation: Tessellation;
   collectBrepEdges: boolean;
   tracer?: RuntimeSpanTracer;
+  meshMemo?: ReplicadMeshMemo;
 }): {
   instances: MeshableInstance[];
   groups: PrototypeGroup[];
   grouped: Set<MeshableConfiguration>;
-  missedContentHashGroups: number;
 } {
   const span = tracer?.startSpan('replicad.tessellation-instancing.detect', {
     shapeCount: configs.length,
@@ -496,6 +577,7 @@ function detectInstancingGroups({
   });
 
   try {
+    const readOccurrence = meshMemo?.readOccurrence ?? createReplicadOccurrenceReader(openCascade);
     const instances: MeshableInstance[] = [];
     for (const config of configs) {
       if (!hasMeshableShape(config)) {
@@ -504,7 +586,7 @@ function detectInstancingGroups({
 
       instances.push({
         config,
-        info: inspectReplicadShapeIdentity({ openCascade, shape: config.shape }),
+        info: readOccurrence(config.shape),
       });
     }
 
@@ -515,7 +597,6 @@ function detectInstancingGroups({
       prototypeCount: groupedResult.groups.length,
       instanceCount,
       eligibleInstanceCount: groupedResult.grouped.size,
-      missedContentHashGroups: groupedResult.missedContentHashGroups,
     });
 
     return {
@@ -528,17 +609,17 @@ function detectInstancingGroups({
   }
 }
 
-function instanceFromConfig({
-  config,
-  info,
-  faceIds,
-  edgeIds,
-}: {
-  config: MeshableConfiguration;
-  info: ReplicadShapeIdentityInfo;
-  faceIds: number[];
-  edgeIds: number[];
-}): ReplicadTessellationInstance {
+/**
+ * An instance's placement and appearance. No per-instance face or edge ids (catalogue N5): the glTF packer numbers
+ * face and edge groups by their index, so an instance keeps the prototype's labels and the GLB is the same.
+ * @param config - The instance's configuration.
+ * @param info - The instance's occurrence.
+ * @returns The instance.
+ */
+function instanceFromConfig(
+  config: MeshableConfiguration,
+  info: ReplicadShapeOccurrenceInfo,
+): ReplicadTessellationInstance {
   return {
     name: config.name,
     color: config.color,
@@ -548,29 +629,113 @@ function instanceFromConfig({
     material: config.material,
     locationMatrix: info.locationMatrix,
     determinant: info.determinant,
-    faceIds,
-    edgeIds,
   };
 }
 
-function renderPrototypeGroup({
-  group,
-  openCascade,
-  tessellation,
-  collectBrepEdges,
-  tracer,
-}: {
+type PrototypeGroupOptions = {
   group: PrototypeGroup;
   openCascade: OpenCascadeInstance;
   tessellation: Tessellation;
   collectBrepEdges: boolean;
   tracer?: RuntimeSpanTracer;
-}): Array<[MeshableConfiguration, GeometryReplicad]> {
+  meshMemo?: ReplicadMeshMemo;
+};
+
+/**
+ * Memo key of a group's prototype mesh beyond the partner: its orientation, the exact tolerances and, when an
+ * instance's material asks for surface coordinates, that it does and the prototype's placement (its tangent frames are
+ * brought back through the prototype's location). Placement otherwise plays no part: the prototype is meshed unplaced.
+ * The material's values play no part either: surface coordinates depend on geometry alone, and a kept mesh takes this
+ * render's appearance, so a material-only edit is answered from the memo.
+ * @param group - The group.
+ * @param tessellation - The exact resolved tolerances.
+ * @returns The key.
+ */
+function prototypeMemoKey(group: PrototypeGroup, tessellation: Tessellation): string {
+  const surface = group.instances.some((instance) => needsSurfaceCoordinates(instance.config.material));
+  return [
+    'prototype',
+    group.prototype.info.orientation,
+    tessellation.linearTolerance,
+    tessellation.angularTolerance,
+    surface ? 'surface' : '',
+    surface ? group.prototype.info.locationMatrix.join(',') : '',
+  ].join('|');
+}
+
+/**
+ * An instanced group, from the memo when every instance is where it was. Otherwise the prototype's unplaced mesh comes
+ * from the memo when it has one (a pose edit moves instances, not prototypes) and only the placement is applied again.
+ * The placed meshes are kept under a key naming each instance in group order, the prototype's under
+ * {@link prototypeMemoKey}.
+ * @param options - The group and how to mesh it.
+ * @returns Each instance's configuration and geometry.
+ */
+function renderPrototypeGroup(options: PrototypeGroupOptions): Array<[MeshableConfiguration, GeometryReplicad]> {
+  const { group, tessellation, collectBrepEdges, meshMemo } = options;
+  if (!meshMemo) {
+    return expandPrototypeGroup(options, meshPrototype(options));
+  }
+  const prototype = group.prototype.info;
+  const key = [
+    'group',
+    ...group.instances.map((instance) =>
+      meshMemoKey({ mode: 'instanced', info: instance.info, tessellation, material: instance.config.material }),
+    ),
+  ].join(';');
+  const kept = meshMemo.lookupGroup(prototype, key, {
+    instances: group.instances.length,
+    usable: (meshes) => !collectBrepEdges || meshes.every((mesh) => mesh.edges !== undefined),
+  });
+  if (kept) {
+    return group.instances.map((instance, index) => [
+      instance.config,
+      geometryFromMemo(instance.config, kept[index]!, collectBrepEdges),
+    ]);
+  }
+  const prototypeKey = prototypeMemoKey(group, tessellation);
+  // The group's parts count as reused when the prototype's unplaced mesh is kept: only the placement is applied again.
+  const keptPrototype = meshMemo.lookup(prototype, prototypeKey, {
+    usable: (mesh) => mesh.edges !== undefined || !collectBrepEdges,
+    parts: group.instances.length,
+  });
+  let prototypeGeometry: GeometryReplicad;
+  if (keptPrototype) {
+    prototypeGeometry = geometryFromMemo(group.prototype.config, keptPrototype, collectBrepEdges);
+  } else {
+    prototypeGeometry = meshPrototype(options);
+    meshMemo.store(prototype, prototypeKey, {
+      faces: prototypeGeometry.faces,
+      ...(collectBrepEdges ? { edges: prototypeGeometry.edges } : {}),
+    });
+  }
+  const rendered = expandPrototypeGroup(options, prototypeGeometry);
+  meshMemo.storeGroup(
+    prototype,
+    key,
+    rendered.map(([, geometry]) => ({ faces: geometry.faces, ...(collectBrepEdges ? { edges: geometry.edges } : {}) })),
+  );
+  return rendered;
+}
+
+/**
+ * A group's prototype, meshed unplaced, with the surface coordinates its instances' materials ask for.
+ * @param options - The group and how to mesh it.
+ * @returns The prototype's geometry.
+ */
+function meshPrototype({
+  group,
+  openCascade,
+  tessellation,
+  collectBrepEdges,
+  tracer,
+}: PrototypeGroupOptions): GeometryReplicad {
   const prototypeConfig = group.prototype.config;
   const prototypeGeometry = createEmptyReplicadGeometry(prototypeConfig);
   const shapeNames = group.instances.map((instance) => instance.config.name).join(',');
   const sharedAttributes = {
-    prototypeHash: group.prototype.info.prototypeHash,
+    // A group of one is a partner-less shape (N5): its spans name it as the flat path did.
+    ...(group.instances.length === 1 ? { shapeName: prototypeConfig.name } : {}),
     partnerKey: group.prototype.info.partnerKey,
     instanceCount: group.instances.length,
     shapeNames,
@@ -608,11 +773,23 @@ function renderPrototypeGroup({
     });
   }
 
+  return prototypeGeometry;
+}
+
+/**
+ * Each instance of a group: the prototype's mesh at the instance's placement, with its names and appearance.
+ * @param options - The group.
+ * @param prototypeGeometry - The prototype's unplaced geometry.
+ * @returns Each instance's configuration and geometry.
+ */
+function expandPrototypeGroup(
+  { group, tracer }: PrototypeGroupOptions,
+  prototypeGeometry: GeometryReplicad,
+): Array<[MeshableConfiguration, GeometryReplicad]> {
   return withSpan({
     tracer,
     name: 'replicad.tessellation-instancing.expand',
     attributes: {
-      prototypeHash: group.prototype.info.prototypeHash,
       partnerKey: group.prototype.info.partnerKey,
       instanceCount: group.instances.length,
       vertexCount: prototypeGeometry.faces.vertices.length / 3,
@@ -620,19 +797,13 @@ function renderPrototypeGroup({
       linePointCount: prototypeGeometry.edges.lines.length / 3,
     },
     operation: () =>
-      group.instances.map((instance) => {
-        const faceIds = extractInstanceFaceIds({ openCascade, shape: instance.config.shape, tessellation });
-        const edgeIds = collectBrepEdges
-          ? extractInstanceEdgeIds({ openCascade, shape: instance.config.shape, tessellation })
-          : [];
-        return [
-          instance.config,
-          transformReplicadGeometryInstance({
-            prototype: prototypeGeometry,
-            instance: instanceFromConfig({ config: instance.config, info: instance.info, faceIds, edgeIds }),
-          }),
-        ];
-      }),
+      group.instances.map((instance) => [
+        instance.config,
+        transformReplicadGeometryInstance({
+          prototype: prototypeGeometry,
+          instance: instanceFromConfig(instance.config, instance.info),
+        }),
+      ]),
   });
 }
 
@@ -643,11 +814,13 @@ function renderWithTessellationInstancing(
     tessellation,
     collectBrepEdges,
     tracer,
+    meshMemo,
   }: {
     openCascade: OpenCascadeInstance;
     tessellation: Tessellation;
     collectBrepEdges: boolean;
     tracer?: RuntimeSpanTracer;
+    meshMemo?: ReplicadMeshMemo;
   },
 ): { geometries: Array<GeometrySvg | GeometryReplicad>; renderMode: RenderMode } {
   const { svgConfigs, meshConfigs } = partitionRenderConfigs(configs);
@@ -657,11 +830,18 @@ function renderWithTessellationInstancing(
     tessellation,
     collectBrepEdges,
     tracer,
+    meshMemo,
   });
 
   if (detection.groups.length === 0) {
     return {
-      geometries: render(configs, { tessellation, collectBrepEdges, tracer, tessellationInstancing: false }),
+      geometries: render(configs, {
+        tessellation,
+        collectBrepEdges,
+        tracer,
+        tessellationInstancing: false,
+        meshMemo,
+      }),
       renderMode: 'flat',
     };
   }
@@ -674,6 +854,7 @@ function renderWithTessellationInstancing(
       tessellation,
       collectBrepEdges,
       tracer,
+      meshMemo,
     })) {
       groupedGeometries.set(config, geometry);
     }
@@ -689,7 +870,7 @@ function renderWithTessellationInstancing(
     }
 
     legacyMeshCount++;
-    geometries.push(renderMesh(shapeConfig, { tessellation, collectBrepEdges, tracer }));
+    geometries.push(renderMesh(shapeConfig, { tessellation, collectBrepEdges, tracer, meshMemo }));
   }
   geometries.push(...renderSvgArtifacts(svgConfigs));
 
@@ -705,6 +886,7 @@ function renderWithTessellationInstancing(
  * @param shapes - The shapes to render with optional color/name metadata
  * @param options - Tessellation, BRep edge, and telemetry options
  * @returns An array of SVG or Replicad geometry objects
+ * @throws When tessellation instancing is on and detection or prototype meshing fails; there is no flat fallback.
  */
 export function render(
   shapes: NamedInputShape[],
@@ -715,28 +897,27 @@ export function render(
     openCascade,
     tessellationInstancing = false,
     onRenderMode,
+    meshMemo,
   }: RenderOptions = {},
 ): Array<GeometrySvg | GeometryReplicad> {
   if (tessellationInstancing && openCascade) {
-    try {
-      const result = renderWithTessellationInstancing(shapes, {
-        openCascade,
-        tessellation,
-        collectBrepEdges,
-        tracer,
-      });
-      onRenderMode?.(result.renderMode);
-      return result.geometries;
-    } catch {
-      onRenderMode?.('flat');
-      return render(shapes, { tessellation, collectBrepEdges, tracer, tessellationInstancing: false });
-    }
+    // No flat fallback: flat meshing delivers different bytes, so a detection or instancing failure is a render error
+    // (the kernel reports it as a build issue) rather than a silent change of output.
+    const result = renderWithTessellationInstancing(shapes, {
+      openCascade,
+      tessellation,
+      collectBrepEdges,
+      tracer,
+      meshMemo,
+    });
+    onRenderMode?.(result.renderMode);
+    return result.geometries;
   }
 
   onRenderMode?.('flat');
   const { svgConfigs, meshConfigs } = partitionRenderConfigs(shapes);
   return [
-    ...meshConfigs.map((shapeConfig) => renderMesh(shapeConfig, { tessellation, collectBrepEdges, tracer })),
+    ...meshConfigs.map((shapeConfig) => renderMesh(shapeConfig, { tessellation, collectBrepEdges, tracer, meshMemo })),
     ...renderSvgArtifacts(svgConfigs),
   ];
 }
@@ -790,13 +971,22 @@ export function measureShapesDiagonal(shapes: readonly InputShape[]): number {
  *
  * @param shapes - Shapes about to be meshed.
  * @param request - The preset or explicit tolerances.
+ * @param reuse - Kept boxes, when the render uses them.
+ * @param reuse.meshMemo - Boxes kept across renders (N2); without it every shape is measured.
  * @returns Absolute tolerances and the requested form.
  */
 export function resolveReplicadTessellation(
   shapes: readonly InputShape[],
   request: ReplicadTessellationRequest,
+  { meshMemo }: { meshMemo?: ReplicadMeshMemo } = {},
 ): OcctResolvedTessellation {
-  return resolveOcctTessellation({ ...request, measureDiagonal: () => measureShapesDiagonal(shapes) });
+  return resolveOcctTessellation({
+    ...request,
+    measureDiagonal: () =>
+      meshMemo
+        ? meshMemo.diagonal(shapes.filter((config) => hasMeshableShape(config)).map(({ shape }) => shape as Meshable))
+        : measureShapesDiagonal(shapes),
+  });
 }
 
 /**
@@ -841,7 +1031,7 @@ export function renderTessellated(
 ): TessellatedRender {
   const { request, ...renderOptions } = options;
   const started = performance.now();
-  const requested = resolveReplicadTessellation(shapes, request);
+  const requested = resolveReplicadTessellation(shapes, request, { meshMemo: renderOptions.meshMemo });
   const geometries = render(shapes, { ...renderOptions, tessellation: requested });
   return {
     geometries,

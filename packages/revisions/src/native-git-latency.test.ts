@@ -28,7 +28,7 @@ import { readRevisionLog } from '#revision-verbs.js';
 import type { RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { recordedBy } from '#test/identity.js';
-import { shellPath, writeShellExecutable } from '#test/script-executable.js';
+import { shellWord, writeShellExecutable } from '#test/script-executable.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const roots: string[] = [];
@@ -53,10 +53,10 @@ const countedProject = async (
   roots.push(root);
   const log = join(root, 'children.log');
   const shim = await writeShellExecutable(join(root, 'git-counting'), [
-    `echo start >> ${shellPath(log)}`,
+    `echo start >> ${shellWord(log)}`,
     'git "$@"',
     'status=$?',
-    `echo end >> ${shellPath(log)}`,
+    `echo end >> ${shellWord(log)}`,
     'exit $status',
   ]);
   const repositoryPath = join(root, 'project');

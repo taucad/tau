@@ -48,7 +48,7 @@ import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesContent, generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { recordedBy } from '#test/identity.js';
-import { shellPath, writeShellExecutable } from '#test/script-executable.js';
+import { shellWord, writeShellExecutable } from '#test/script-executable.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -1305,7 +1305,7 @@ describe('log reads are bounded by the limit (review 4 R28)', () => {
           '    *) verb="$argument"; break ;;',
           '  esac',
           'done',
-          `echo "$verb	$*" >> ${shellPath(log)}`,
+          `echo "$verb	$*" >> ${shellWord(log)}`,
           'exec git "$@"',
         ]);
         const counted = createNativeGitRevisionPort({ repositoryPath, gitExecutable: wrapper });
@@ -2035,8 +2035,8 @@ describe.runIf(gitToolchainOnPath)('native remote credential transport', () => {
       try {
         await mkdir(repositoryPath, { recursive: true });
         const wrapper = await writeShellExecutable(join(root, 'git-credential-check'), [
-          `printf '%s\\n' "$@" > ${shellPath(argumentsLog)}`,
-          `printf '%s\n%s\n%s\n%s' "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0" "$GIT_CONFIG_KEY_1" "$GIT_CONFIG_VALUE_1" > ${shellPath(environmentLog)}`,
+          `printf '%s\\n' "$@" > ${shellWord(argumentsLog)}`,
+          `printf '%s\n%s\n%s\n%s' "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0" "$GIT_CONFIG_KEY_1" "$GIT_CONFIG_VALUE_1" > ${shellWord(environmentLog)}`,
           'exec git "$@"',
         ]);
         const port = createNativeGitRevisionPort({
@@ -2171,6 +2171,45 @@ describe.runIf(gitToolchainOnPath)('native remote refusals (N1)', () => {
         refusal: { paths: ['models/bracket.step'] },
       });
       expect(fixture.trail().some((entry) => entry.endsWith('/git-receive-pack'))).toBe(false);
+    } finally {
+      await fixture.close();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
+
+  /* Tier 2a (R-2): a server may put the quota marker in front of the batch's sentence; the desktop files it as storage and drops the marker. */
+  it('reads a storage refusal behind the quota marker as storage, without the marker', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-native-quota-marker-'));
+    const sentence = 'This push needs more room than your 1 GB plan has left, so it was not backed up.';
+    const fixture = await startGitHttpBackend({
+      root,
+      quotaRefusal: { message: `Tau: storage quota exceeded — ${sentence}`, shortfallBytes: 1, remainingBytes: 0 },
+    });
+    const repositoryPath = join(root, 'project');
+    const large = new Uint8Array(new ArrayBuffer(1024 * 1024 + 1));
+    for (let index = 0; index < large.length; index += 1) {
+      large[index] = (index * 17) % 256;
+    }
+    try {
+      await mkdir(repositoryPath, { recursive: true });
+      const port = createNativeGitRevisionPort({
+        repositoryPath,
+        tauCredential: () => ({ apiBaseUrl: fixture.url, authorization: 'Bearer session-token' }),
+      });
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([tauAttributes, ['models/bracket.step', large]]),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+
+      await expect(port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] })).rejects.toMatchObject({
+        name: 'LfsQuotaError',
+        refusal: { message: sentence, paths: ['models/bracket.step'] },
+      });
     } finally {
       await fixture.close();
       await rm(root, { force: true, recursive: true });

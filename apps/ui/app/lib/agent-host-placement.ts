@@ -206,7 +206,7 @@ export type AgentHostPlacementTarget = {
    * Set when this host is a cloud host (launcher 3) and names the project it was
    * provisioned for. A cloud host is a paired device in every other respect —
    * same rung, same offer, same agent channel — so this is presentation, not
-   * mechanism: it is how the selector knows to call the row "Tau Cloud" instead
+   * mechanism: it is how the selector knows to call the row "Cloud" instead
    * of naming a machine the user has never seen.
    */
   readonly cloudProjectId?: string | undefined;
@@ -1102,14 +1102,18 @@ const relayedAgentUrl = async (deviceId: string, options: OpenAgentHostChannelOp
     throw new AgentHostPlacementError(
       'HOST_OFFLINE',
       2,
-      `${device.label} is offline. Start \`tau serve\` on it and try again.`,
+      device.cloudProjectId
+        ? 'Couldn’t reach the cloud agent. Try again.'
+        : `${device.label} is offline. Start \`tau serve\` on it and try again.`,
     );
   }
   if (device && !device.agent) {
     throw new AgentHostPlacementError(
       'HOST_NO_AGENT_ROUTE',
       2,
-      `${device.label} is online but is not running an agent workspace. Restart it with \`tau serve --agentPort\`.`,
+      device.cloudProjectId
+        ? 'Couldn’t start the cloud agent. Try again.'
+        : `${device.label} is online but is not running an agent workspace. Restart it with \`tau serve --agentPort\`.`,
     );
   }
   let session: Awaited<ReturnType<typeof createRemoteHostSession>>;

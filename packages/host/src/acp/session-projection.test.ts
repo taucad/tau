@@ -16,11 +16,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import type { ExternalAgentLogEvent } from '@taucad/agent-host/launcher';
-import { reduceEventLog } from '@taucad/agent-host';
+import { providerMessageSchema, reduceEventLog } from '@taucad/agent-host';
 import type { AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 
 import { openAcpSession } from '#acp/acp-session.js';
@@ -194,6 +194,55 @@ it('should keep a Claude MCP failure’s Tau error code', async () => {
     toolName: 'evaluate_model',
     content: { errorCode: 'TOOL_NOT_ALLOWED', message: 'evaluate_model is not allowed in this run.' },
     isError: true,
+  });
+});
+
+it('should read a Claude screenshot’s structured result after its resource-link text', async () => {
+  /* Shaped as claude-agent-acp 0.70.0 forwards Tau's HTTP screenshot result:
+   * Claude Code turns each resource_link into a `[Resource link: …]` text block
+   * and appends `structuredContent` as JSON in the final text block. */
+  const sha256 = 'b'.repeat(64);
+  const image = {
+    view: 'isometric',
+    path: `attachments/${sha256}.webp`,
+    absolutePath: `/tmp/tau-capture/${sha256}.webp`,
+    mimeType: 'image/webp',
+    byteLength: 3,
+    sha256,
+  };
+  const rawOutput = [
+    { type: 'text', text: `[Resource link: isometric screenshot] file://${image.absolutePath}` },
+    { type: 'text', text: JSON.stringify({ images: [image] }) },
+  ];
+  const meta = { claudeCode: { toolName: 'mcp__tau__screenshot' } };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'claude-capture',
+        title: 'mcp__tau__screenshot',
+        rawInput: { targetFile: 'main.ts', mode: 'single' },
+        _meta: meta,
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'claude-capture',
+        status: 'completed',
+        rawOutput,
+        content: rawOutput.map((block) => ({ type: 'content', content: block })),
+        _meta: meta,
+      },
+    ] as SessionUpdate[],
+    'claude',
+    undefined,
+    'tau',
+  );
+
+  expect(messages[1]).toMatchObject({
+    role: 'tool-output',
+    toolName: 'screenshot',
+    content: { images: [image] },
+    isError: false,
   });
 });
 
@@ -2261,6 +2310,86 @@ it('should stop correlating readback when a provider reuses a permission call id
   ).toEqual([]);
 });
 
+it.each(['approve-then-reuse', 'reuse-then-approve', 'reuse-during-approval'])(
+  'should pair no settings readback with a call whose id another open call reuses (%s)',
+  async (order) => {
+    const rows: ExternalAgentLogEvent[] = [];
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    let asked: () => void = () => undefined;
+    const askedPerson = new Promise<void>((resolve) => {
+      asked = resolve;
+    });
+    const projection = createTurnProjection({
+      turn: {
+        ...stubTurn(rows),
+        approve: async () => {
+          if (order === 'reuse-during-approval') {
+            asked();
+            await answered;
+          }
+          return { interruptId: 'permission-interrupt', outcome: 'approved', optionId: 'allow_always' };
+        },
+      },
+      createId: randomUUID,
+      agentId: 'codex',
+      permissionReadback: true,
+    });
+    const open = (title: string) => {
+      projection.update({ sessionUpdate: 'tool_call', toolCallId: 'permission-call', title, status: 'pending' });
+    };
+    const approve = async () =>
+      projection.approve({
+        prompt: 'Allow?',
+        payload: {
+          toolCall: { toolCallId: 'permission-call' },
+          providerPermission: {
+            owner: 'provider',
+            persistence: 'unverified',
+            readback: 'config-layers',
+            options: [{ optionId: 'allow_always', requestedScope: 'persistent' }],
+          },
+        },
+      });
+    open('first');
+    if (order === 'approve-then-reuse') {
+      await approve();
+      open('second');
+    } else if (order === 'reuse-then-approve') {
+      open('second');
+      await approve();
+    } else {
+      const approval = approve();
+      /* The person is being asked before the id is reused, and answers only once the reuse is projected. */
+      await askedPerson;
+      open('second');
+      await vi.waitFor(() => {
+        expect(rows.filter((row) => row.type === 'message.appended' && row.message.role === 'tool-input')).toHaveLength(
+          2,
+        );
+      });
+      answer();
+      await approval;
+    }
+    projection.update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'permission-call',
+      status: 'completed',
+      _meta: { 'tau/permissionPersistence': permissionObservation },
+    });
+    await projection.flush();
+    expect(
+      rows.filter(
+        (row) =>
+          row.type === 'message.appended' &&
+          row.message.metadata?.tauInternal?.['kind'] === 'provider-permission-observation',
+      ),
+    ).toEqual([]);
+  },
+);
+
 it('should preserve the actual tool result when settings readback arrives before its ordinary completion', async () => {
   const rows: ExternalAgentLogEvent[] = [];
   const projection = createTurnProjection({
@@ -2478,3 +2607,107 @@ it.each(['denied', 'once', 'aborted', 'cancel-during-read', 'wrong-call', 'throw
     ).toEqual([{ actual: 'result' }]);
   },
 );
+
+it('should record a vendor call with empty names, ids and paths as rows the log accepts (E-3)', async () => {
+  const appended: ExternalAgentLogEvent[] = [];
+  const projection = createTurnProjection({ agentId: 'codex', createId: randomUUID, turn: stubTurn(appended) });
+
+  projection.update({
+    sessionUpdate: 'tool_call',
+    toolCallId: '',
+    title: '',
+    kind: 'execute',
+    status: 'pending',
+    locations: [{ path: '' }, { path: 'src/main.ts', line: 3 }],
+  } as SessionUpdate);
+  projection.update({
+    sessionUpdate: 'agent_message_chunk',
+    content: { type: 'text', text: 'after' },
+  } as SessionUpdate);
+  await projection.flush();
+
+  const messages = appended.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+  for (const message of messages) {
+    expect(providerMessageSchema.safeParse(message).success).toBe(true);
+  }
+  const input = messages.find((message): message is MessageOf<'tool-input'> => message.role === 'tool-input');
+  expect(input).toMatchObject({
+    toolName: 'execute',
+    call: { toolCallId: 'unnamed', locations: [{ path: 'src/main.ts', line: 3 }] },
+  });
+  expect(
+    messages.some((message) => message.role === 'assistant' && JSON.stringify(message.content).includes('after')),
+  ).toBe(true);
+});
+
+it('should give neither call a result when two open calls share an empty id (E-3)', async () => {
+  const appended: ExternalAgentLogEvent[] = [];
+  const projection = createTurnProjection({ agentId: 'codex', createId: randomUUID, turn: stubTurn(appended) });
+
+  for (const title of ['first', 'second']) {
+    projection.update({
+      sessionUpdate: 'tool_call',
+      toolCallId: '',
+      title,
+      kind: 'execute',
+      status: 'pending',
+    } as SessionUpdate);
+  }
+  /* Either call may have finished first: the updates cannot say which. */
+  for (const rawOutput of ['done', 'again']) {
+    projection.update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: '',
+      status: 'completed',
+      rawOutput,
+    } as SessionUpdate);
+  }
+  /* A third call that arrives finished carries its own result in the same notification. */
+  projection.update({
+    sessionUpdate: 'tool_call',
+    toolCallId: '',
+    title: 'third',
+    kind: 'execute',
+    status: 'completed',
+    rawOutput: 'own',
+  } as SessionUpdate);
+  await projection.flush();
+
+  const messages = appended.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+  const inputs = messages.filter((message): message is MessageOf<'tool-input'> => message.role === 'tool-input');
+  const outputs = messages.filter((message): message is MessageOf<'tool-output'> => message.role === 'tool-output');
+  expect(inputs.map((input) => input.toolName)).toEqual(['first', 'second', 'third']);
+  expect(outputs.map((output) => [output.toolCallId, output.content])).toEqual([[inputs[2]?.toolCallId, 'own']]);
+});
+
+it('should describe a permission request under a shared id by the request alone (E-3)', async () => {
+  const appended: ExternalAgentLogEvent[] = [];
+  const approvals: unknown[] = [];
+  const projection = createTurnProjection({
+    agentId: 'codex',
+    createId: randomUUID,
+    turn: {
+      ...stubTurn(appended),
+      approve: async (approval) => {
+        approvals.push(approval);
+        return { interruptId: 'interrupt', outcome: 'approved', optionId: 'allow_once' };
+      },
+    },
+  });
+
+  for (const command of ['ls', 'rm -rf build']) {
+    projection.update({
+      sessionUpdate: 'tool_call',
+      toolCallId: '',
+      title: 'Run',
+      kind: 'execute',
+      status: 'pending',
+      rawInput: { command },
+    } as SessionUpdate);
+  }
+  const request = { prompt: 'Allow Run?', payload: { toolCall: { toolCallId: '', title: 'Run' } } };
+  await projection.approve(request);
+  await projection.flush();
+
+  expect(approvals).toEqual([request]);
+});

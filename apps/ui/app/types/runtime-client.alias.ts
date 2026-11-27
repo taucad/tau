@@ -9,6 +9,7 @@
 import type { RuntimeClient, ComputeBinding } from '@taucad/runtime';
 import type { RuntimeClientOptionsWithTransport } from '@taucad/runtime/client';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import type { WorkerCodeLoadError } from '@taucad/ui-core/lib/worker-factory';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 
@@ -36,6 +37,12 @@ export type KernelOptionsFactory = (deps: {
   readonly fileSystem: RuntimeFileSystem;
   readonly runtimeConfig: UiRuntimeConfigInput;
   readonly compute?: ComputeBinding;
+  /**
+   * Hears a kernel worker's own code failing to load (its script or an import inside it), before its transport closes
+   * the channel: the CAD unit, the worker's owner, then replaces the worker (PL7 staging defects FP10). Kernels that
+   * run in no page worker never call it.
+   */
+  readonly onWorkerCodeLoadFailure?: (failure: WorkerCodeLoadError) => void;
 }) => RuntimeClientOptionsWithTransport<typeof runtime>;
 
 export type PageKernelOptionsFactory = (

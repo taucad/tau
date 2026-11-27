@@ -52,6 +52,9 @@ export const searchParameterName = {
   /* Diagnostics */
   // Per-page graphics backend override, e.g. `webgl` or `webgpu`.
   graphicsBackend: 'graphicsBackend',
+  // Test-only render tier override (`hardware` runs the hardware features on a software GPU); read only in an
+  // undeployed debug build.
+  renderTier: 'renderTier',
 
   /* Returns from an external flow */
   // Consume-once billing action id returned from Checkout.
@@ -60,6 +63,8 @@ export const searchParameterName = {
   billingReturn: 'billing_return',
   // Consume-once marker that the desktop app opened the import route.
   desktopOpen: 'desktop-open',
+  // Consume-once marker that the person came back from the sign-in a paused turn sent them to.
+  chatResume: 'chatResume',
 
   /* Import */
   // The git ref to import, defaulting to the repository's main branch.

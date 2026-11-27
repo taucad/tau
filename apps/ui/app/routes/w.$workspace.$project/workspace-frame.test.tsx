@@ -1,7 +1,11 @@
 import { act, render, screen } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { useContext } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { WaitClockProvider } from '@taucad/ui/hooks/use-wait-clock';
+import { openWaitContext } from '#hooks/use-wait-start.js';
+import type { OpenWait } from '#hooks/use-wait-start.js';
 import { handOffStore, resetHandOffStoreForTest } from '#components/hand-off/hand-off-store.js';
 import { frameTabAttribute, writePhoneFrameHint, writeWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
@@ -174,14 +178,86 @@ describe('WorkspaceFrame', () => {
     expect(document.querySelector('input[aria-label="Page input"]')).toBe(input);
   });
 
-  it('draws only frame: no skeleton, no animation, and the content over its lanes', () => {
+  /*
+   * Editor startup (Progressive Loading Policy rules 15 to 17 and 22): staging drew the chat lane alone for seconds,
+   * with the viewer and the workbench blank. Each lane keeps its frame and draws its content's shape from the 300 ms
+   * mark, on the open's clock; the viewer's status slot carries the open's one status, the pill, from 1,000 ms. Nothing
+   * in the frame is live or exposed, and nothing has an entrance animation beyond the ladder's.
+   */
+  it('draws each lane as its frame with its content’s shape from 300 ms, and the open’s one pill in the viewer', () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
     const frame = renderFrame('/w/home/one');
+    const lanes = frame.querySelector<HTMLElement>('[data-slot=workspace-frame-lanes]')!;
 
-    expect(frame.querySelector('[data-slot=skeleton]')).toBeNull();
-    expect(frame.innerHTML).not.toMatch(/animate-|fade-in/u);
-    expect(frame.querySelector('[data-slot=workspace-frame-lanes]')).toHaveAttribute('aria-hidden', 'true');
+    expect(lanes).toHaveAttribute('aria-hidden', 'true');
     expect(frame).toHaveTextContent('content');
     expect(frame.querySelectorAll('[data-slot=workspace-lane]')).toHaveLength(3);
+    for (const [name, shape] of [
+      ['chat', 'Chat'],
+      ['viewer', 'Viewer tabs'],
+      ['workbench', 'Workbench tabs'],
+      ['workbench', 'Workbench'],
+    ] as const) {
+      const region = lane(frame, name).querySelector<HTMLElement>(`[data-slot=project-wait][aria-label="${shape}"]`);
+      expect(region, shape).not.toBeNull();
+      expect(region, shape).toHaveAttribute('aria-busy', 'true');
+      const bars = region!.querySelector<HTMLElement>('[data-slot=project-wait-skeleton]')!;
+      expect(bars, shape).toHaveClass('wait-skeleton');
+      /* The open began at this render (the clock reads 0 in jsdom's first client render): bars at 300 ms. */
+      expect(bars.style.getPropertyValue('--wait-skeleton-delay'), shape).toMatch(/^-?\d+(?:\.\d+)?ms$/u);
+      expect(region!.textContent, shape).toBe('');
+    }
+    const pill = lane(frame, 'viewer').querySelector<HTMLElement>('[data-slot=wait-indicator]')!;
+    expect(pill).toHaveAttribute('data-state', 'waiting');
+    expect(pill).toHaveTextContent('Opening project…');
+    /* One status with words in the whole frame (rule 17): the pill. */
+    expect(lanes.querySelectorAll('[data-slot=wait-indicator]')).toHaveLength(1);
+    /* Not live: the route speaks for the open (rule 22). The composer box's own queue status is the hand-off's. */
+    const phone = frame.querySelector<HTMLElement>('[data-slot=workspace-frame-phone]')!;
+    for (const part of [lanes, phone]) {
+      expect(part.querySelectorAll('[role=status], [role=alert], [aria-live]')).toHaveLength(0);
+    }
+    expect(frame.innerHTML).not.toMatch(/fade-in|slide-in|animate-in/u);
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+    setTimeoutSpy.mockRestore();
+  });
+
+  it('times the frame’s bars and pill from navigation start on the server, before any script runs', () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(frameAt('/w/home/one'));
+    const bars = container.querySelector<HTMLElement>('[data-slot=project-wait-skeleton]')!;
+    const pill = container.querySelector<HTMLElement>('[data-slot=wait-indicator-body]')!;
+
+    expect(bars.style.getPropertyValue('--wait-skeleton-delay')).toBe('calc(300ms + var(--wait-offset, 0ms))');
+    expect(pill.style.getPropertyValue('--wait-reveal-delay')).toBe('calc(1000ms + var(--wait-offset, 0ms))');
+  });
+
+  it('gives the regions under it the open’s start, and restarts it for another project', () => {
+    const seen: Array<OpenWait | undefined> = [];
+    function Probe(): undefined {
+      seen.push(useContext(openWaitContext));
+      return undefined;
+    }
+    let now = 2000;
+    const clock = { now: (): number => now };
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    const tree = (pathname: string): React.JSX.Element => (
+      <WaitClockProvider clock={clock}>
+        <WorkspaceFrame pathname={pathname}>
+          <Probe />
+        </WorkspaceFrame>
+      </WaitClockProvider>
+    );
+    const view = render(tree('/w/home/one'));
+    expect(seen.at(-1)).toEqual({ startedAt: 2000, isRevealed: false });
+    now = 2600;
+    view.rerender(tree('/w/home/one'));
+    expect(seen.at(-1)?.startedAt).toBe(2000);
+    now = 9000;
+    globalThis.history.replaceState(null, '', '/w/home/two');
+    view.rerender(tree('/w/home/two'));
+    expect(seen.at(-1)?.startedAt).toBe(9000);
   });
 
   // ── PL6: the project composer's native input, in the frame's chat lane ──
@@ -323,7 +399,7 @@ describe('WorkspaceFrame', () => {
    * workspace's four parts, each a bare box: the top bar, the viewer's box, the sheet and the tab bar. Nothing in them is
    * a skeleton or animates in. The sheet's display and detent are the hint's variables, closed by default.
    */
-  it('C6: the first render draws the phone top bar, viewer box, sheet and tab bar, with no skeleton and no animation', () => {
+  it('C6: the first render draws the phone top bar, viewer box, sheet and tab bar, with the viewer’s pill and the remembered surface’s shape', () => {
     globalThis.history.replaceState(null, '', '/w/home/one');
     const container = document.createElement('div');
     container.innerHTML = renderToString(frameAt('/w/home/one'));
@@ -336,8 +412,16 @@ describe('WorkspaceFrame', () => {
       (part) => part.dataset['framePart'],
     );
     expect(parts).toEqual(['top-bar', 'viewer', 'sheet', 'tab-bar']);
-    expect(phone!.querySelector('[data-slot=skeleton]')).toBeNull();
-    expect(phone!.innerHTML).not.toMatch(/animate-|fade-in|slide-in/u);
+    /* The viewer's box carries the open's one status; the sheet the shape of each surface it can open on, one shown
+     * by the tab the pre-paint script selected. Nothing enters but on the ladder. */
+    const viewer = phone!.querySelector<HTMLElement>('[data-frame-part=viewer]')!;
+    expect(viewer.querySelector('[data-slot=wait-indicator]')).toHaveTextContent('Opening project…');
+    expect(phone!.querySelectorAll('[data-slot=wait-indicator]')).toHaveLength(1);
+    const shapes = [...phone!.querySelectorAll<HTMLElement>('[data-frame-part=sheet] [data-slot=project-wait]')];
+    expect(shapes.map((shape) => shape.getAttribute('aria-label'))).toEqual(['Chat', 'Parameters', 'Workbench']);
+    expect(shapes.map((shape) => shape.className.includes('hidden'))).toEqual([true, true, true]);
+    expect(shapes[0]!.className).toContain('[[data-frame-tab=chat]_&]:block');
+    expect(phone!.innerHTML).not.toMatch(/fade-in|slide-in|animate-in/u);
     const sheet = phone!.querySelector<HTMLElement>('[data-frame-part=sheet]')!;
     expect(sheet.className).toContain('[display:var(--frame-sheet-display,none)]');
     expect(sheet.className).toContain('top-[calc(100dvh_-_var(--frame-sheet-height,0px))]');

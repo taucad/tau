@@ -72,6 +72,14 @@ const grantsPath = (profile: string): string => join(profile, 'granted-roots.jso
 const readGrants = async (profile: string): Promise<readonly string[]> =>
   (await readJson<readonly string[]>(grantsPath(profile))) ?? [];
 
+/** The granted folders, without Home: main admits Home into the same file at every launch (`main.ts`). */
+const readFolderGrants = async (profile: string): Promise<readonly string[]> => {
+  const home = join(profile, 'home');
+  const homeSpellings = new Set([home, await realpath(home).catch(() => home)]);
+  const grants = await readGrants(profile);
+  return grants.filter((entry) => !homeSpellings.has(entry));
+};
+
 /** Whether the grant file names this folder, in either spelling (`/var/…` and `/private/var/…` on macOS). */
 const isGranted = async (profile: string, directory: string): Promise<boolean> => {
   const spellings = new Set([directory, await realpath(directory).catch(() => directory)]);
@@ -110,6 +118,64 @@ const snapshotTree = async (root: string): Promise<readonly string[]> => {
   return lines.toSorted();
 };
 
+type ChatRecordFile = Readonly<Record<string, unknown>> & {
+  readonly startupRequest?: { readonly messageId?: unknown };
+};
+
+/** Every chat's `chat.json` under `root`, by chat directory. */
+const readChatRecords = async (root: string): Promise<ReadonlyMap<string, ChatRecordFile | undefined>> => {
+  const ids = await readdir(root).catch(() => []);
+  const records = await Promise.all(
+    ids.map(async (id) => [id, await readJson<ChatRecordFile>(join(root, id, 'chat.json'))] as const),
+  );
+  return new Map(records);
+};
+
+/**
+ * The chats under `root` hold what they held before, with one write that opening a chat may make.
+ *
+ * A chat created from Home carries its first prompt as a one-shot start intent, `startupRequest`, until the host has
+ * durably accepted that Start. The producer clears it when the acceptance lands; when the session that dispatched it is
+ * gone by then, the next open of the chat finds the prompt's turn already in the log and clears the intent instead,
+ * without resending it (`ChatSessionStore.startPendingSeed`). That write drops only the accepted intent and moves
+ * `updatedAt`: the prompt itself is the log's turn, which must be unchanged. Every other file, the log included, is
+ * compared byte for byte and by modification time; every other field of every record must be equal.
+ */
+const expectChatHistoryKept = async (
+  root: string,
+  before: { readonly tree: readonly string[]; readonly records: ReadonlyMap<string, ChatRecordFile | undefined> },
+): Promise<void> => {
+  const pathOf = (line: string): string => line.split(' ')[0] ?? '';
+  const isRecordLine = (line: string): boolean => pathOf(line).endsWith('/chat.json');
+  const isOtherLine = (line: string): boolean => !isRecordLine(line);
+  const tree = await snapshotTree(root);
+  expect(tree.filter((line) => isOtherLine(line))).toEqual(before.tree.filter((line) => isOtherLine(line)));
+  expect(tree.filter((line) => isRecordLine(line)).map((line) => pathOf(line))).toEqual(
+    before.tree.filter((line) => isRecordLine(line)).map((line) => pathOf(line)),
+  );
+  const records = await readChatRecords(root);
+  const logs = new Map(
+    await Promise.all(
+      [...before.records.keys()].map(
+        async (id) => [id, await readFile(join(root, id, 'events.jsonl'), 'utf8').catch(() => '')] as const,
+      ),
+    ),
+  );
+  for (const [id, previous] of before.records) {
+    const current = records.get(id);
+    if (previous?.startupRequest === undefined || current?.startupRequest !== undefined) {
+      expect(current, `${id}/chat.json`).toEqual(previous);
+      continue;
+    }
+    const { startupRequest, updatedAt: _previousUpdatedAt, ...kept } = previous;
+    const { updatedAt: _currentUpdatedAt, ...now } = current ?? {};
+    expect(now, `${id}/chat.json without the accepted start intent`).toEqual(kept);
+    const { messageId } = startupRequest;
+    expect(typeof messageId).toBe('string');
+    expect(logs.get(id), `${id}'s log holds the cleared intent's turn`).toContain(String(messageId));
+  }
+};
+
 const createInTrigger = (page: Page): ReturnType<Page['getByRole']> =>
   page.getByRole('button', { name: /^Create in /u }).first();
 
@@ -130,6 +196,23 @@ const connectNextFolder = async (session: DesktopSession, directory: string): Pr
   await expect
     .poll(async () => createInTrigger(page).getAttribute('aria-label'), { timeout: 60_000 })
     .toBe('Create in tau-desktop-workspace');
+  /* The connect is finished when the picker closes and its request to focus the composer, queued for the next frame,
+   * has run. The grant lands before both and the label cannot tell one connect from the next, so without this the
+   * next connect opened the picker and the finishing one moved focus out of it, which closed it under the click and
+   * left no "Connect a folder…" to press. */
+  await expect
+    .poll(async () => page.getByRole('button', { name: /Connect a folder/u }).count(), { timeout: 60_000 })
+    .toBe(0);
+  await page.evaluate(
+    async () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      }),
+  );
 };
 
 /** Create a project in Home through the new-project page while Home is the creation location. */
@@ -263,14 +346,21 @@ const rehearse = async (label: string, producerDesktopRoot: string | undefined):
   cleanups.push(async () => removeDesktopRoot(profile));
   await createHomeProject(producer.page, homeProjectName);
   /* The surviving folder is connected first and holds the folder project and its chat; the folders connected after
-   * it are the ones deleted, and the last of them stays the composer's creation location, as in the incident. */
+   * it are the ones deleted, and the last of them stays the composer's creation location, as in the incident. The
+   * composer stores its location when a project is created there, not when a folder is connected, so the last folder
+   * gets a project too. */
   await connectNextFolder(producer, survivor);
   const survivorProject = await createFolderProjectWithChat(producer, survivor);
   for (const directory of doomed) {
     // oxlint-disable-next-line no-await-in-loop -- The dialog stub answers the folders in order.
     await connectNextFolder(producer, directory);
   }
-  expect(await readGrants(profile)).toHaveLength(grantedFolders);
+  const chosen = doomed.at(-1);
+  if (chosen === undefined) {
+    throw new Error('The rehearsal needs a folder to choose.');
+  }
+  await createFolderProjectWithChat(producer, chosen);
+  expect(await readFolderGrants(profile)).toHaveLength(grantedFolders);
   await closeSession(producer);
 
   /* 2. Break it: delete 28 folders, the composer's chosen one among them, and keep the grant file's bytes. */
@@ -314,7 +404,7 @@ const rehearse = async (label: string, producerDesktopRoot: string | undefined):
   /* 5. One optional click. */
   const survivorBefore = await snapshotTree(survivorProject);
   await page.getByRole('button', { name: 'Remove all', exact: true }).click();
-  await expect.poll(async () => readGrants(profile).then((grants) => grants.length), { timeout: 60_000 }).toBe(1);
+  await expect.poll(async () => readFolderGrants(profile).then((grants) => grants.length), { timeout: 60_000 }).toBe(1);
   expect(await isGranted(profile, survivor)).toBe(true);
   await expect.poll(async () => notFoundGroup.count(), { timeout: 60_000 }).toBe(0);
   expect(await snapshotTree(survivorProject)).toEqual(survivorBefore);
@@ -322,7 +412,7 @@ const rehearse = async (label: string, producerDesktopRoot: string | undefined):
 
 describe('desktop missing-folder recovery (the operator rehearsal)', () => {
   /* T-REH.1: the incident's profile, produced and opened by the candidate. */
-  it.fails(
+  it(
     'should start Home over 28 deleted folders with nothing forgotten automatically',
     async () => {
       await rehearse('rehearsal', undefined);
@@ -333,7 +423,7 @@ describe('desktop missing-folder recovery (the operator rehearsal)', () => {
   /* T-REH.2, the release gate: the profile is produced by the release's base commit and opened by the candidate.
    * It needs that build, which only the release-gate job provides (`desktop-e2e:test:e2e:rehearsal-gate` refuses to
    * run without it), so the PR lane reports it as skipped rather than passing it for the wrong reason. */
-  it.runIf(baseDesktopRoot !== undefined).fails(
+  it.runIf(baseDesktopRoot !== undefined)(
     "should open the base commit's broken profile in the candidate with nothing forgotten automatically",
     async () => {
       await rehearse('rehearsal-base', baseDesktopRoot);
@@ -342,7 +432,7 @@ describe('desktop missing-folder recovery (the operator rehearsal)', () => {
   );
 
   /* T-R3.2: removing a folder never touches its chats, and the Home notice is shown once. */
-  it.fails(
+  it(
     'should keep a removed folder chat history on disk and list it again when the folder is added back',
     async () => {
       const token = await seedAccount('rehearsal-remove');
@@ -364,6 +454,7 @@ describe('desktop missing-folder recovery (the operator rehearsal)', () => {
 
       const chats = join(project, '.tau', 'chats');
       const chatsBefore = await snapshotTree(chats);
+      const recordsBefore = await readChatRecords(chats);
       const manifest = await readJson<{ readonly name: string }>(join(project, 'tau.json'));
       if (manifest === undefined) {
         throw new Error('The folder project has no readable manifest.');
@@ -392,7 +483,8 @@ describe('desktop missing-folder recovery (the operator rehearsal)', () => {
       await second.page.goto('app://tau/projects');
       await second.page.getByRole('link', { name: `Open ${manifest.name}`, exact: true }).click();
       await expectVisible(second.page.getByText(folderPrompt).first(), homeReadyTimeout);
-      expect(await snapshotTree(chats)).toEqual(chatsBefore);
+      /* Removal and re-adding wrote nothing (above); opening the chat may clear its accepted start intent. */
+      await expectChatHistoryKept(chats, { tree: chatsBefore, records: recordsBefore });
       await closeSession(second);
 
       const third = track(await launchDesktopApp({ token, profileRoot: profile, preserveProfile: true }));

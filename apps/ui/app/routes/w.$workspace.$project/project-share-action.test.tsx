@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as XStateModule from 'xstate';
 import { useWorkbenchPanesHost } from '@taucad/workbench-panes/host/workbench-host';
 import type { ShareSource } from '@taucad/workbench-panes/share/share-source';
-import type { ProjectSharePanelProps } from '#components/publish/project-share-panel.js';
+import type { ProjectSharePanelProps } from '@taucad/publish-ui/components/publish/project-share-panel';
 import {
   parseProjectShareNavigationIntent,
   ProjectShareRouteIntent,
@@ -18,7 +18,6 @@ const projectSend = vi.hoisted(() => vi.fn());
 const fileClient = vi.hoisted(() => ({ readdir: vi.fn() }));
 const parameterService = vi.hoisted(() => ({ readSettled: vi.fn() }));
 let capturedPanelProperties: ProjectSharePanelProps | undefined;
-let projectActivity = 10;
 let sourceContent = new TextEncoder().encode('initial source');
 
 const project = createProjectFixture({
@@ -76,16 +75,15 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ recordFiles: fileClient }),
 }));
 
-vi.mock('#hooks/use-projects.js', () => ({
-  useProjects: () => ({
-    projects: [{ id: project.id, lastActivityAt: projectActivity }],
-  }),
-}));
-
 vi.mock('#components/publish/project-share-panel.js', () => ({
   ProjectSharePanel: (properties: ProjectSharePanelProps) => {
     capturedPanelProperties = properties;
-    return <div>Share panel fixture</div>;
+    return (
+      <div>
+        Share panel fixture
+        {properties.extraSections}
+      </div>
+    );
   },
 }));
 
@@ -93,17 +91,16 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
 }));
 
-/* C4: People with access renders under the share methods; its own rules are `revision-collaborators.test.tsx`'s. */
+/* C4: Collaborators is the pane's last section; its own rules are `revision-collaborators.test.tsx`'s. */
 vi.mock('#routes/w.$workspace.$project/revision-collaborators.js', () => ({
   ProjectPeopleWithAccess: ({ projectId }: { readonly projectId: string }) => (
-    <section aria-label='People with access'>{projectId}</section>
+    <section aria-label='Collaborators'>{projectId}</section>
   ),
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
   capturedPanelProperties = undefined;
-  projectActivity = 10;
   sourceContent = new TextEncoder().encode('initial source');
   fileClient.readdir.mockResolvedValue(['README.md', '.tau']);
   parameterService.readSettled.mockResolvedValue(
@@ -171,15 +168,17 @@ beforeEach(() => {
 });
 
 describe('ProjectShareWorkbenchPanel', () => {
-  it('lists People with access beside the share methods (C4)', () => {
+  it('hands Collaborators to the pane as its last section, inside its one scroll area (C4)', () => {
     render(
       <MemoryRouter initialEntries={['/w/home/share-fixture']}>
         <ProjectShareWorkbenchPanel />
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Share panel fixture')).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'People with access' })).toHaveTextContent(project.id);
+    const panel = screen.getByText(/Share panel fixture/u);
+    /* Rendered by the pane through `extraSections`, never stacked beside it as a second region. */
+    expect(panel).toContainElement(screen.getByRole('region', { name: 'Collaborators' }));
+    expect(screen.getByRole('region', { name: 'Collaborators' })).toHaveTextContent(project.id);
   });
 
   /* E1: the entry's CAD actor owns its operation timeout, so a unit this panel has to spawn for the
@@ -228,7 +227,6 @@ describe('ProjectShareWorkbenchPanel', () => {
 
     expect(snapshotSource).not.toHaveBeenCalled();
     expect(projectSend).not.toHaveBeenCalled();
-    expect(capturedPanelProperties?.projectUpdatedAt).toBe(10);
 
     sourceContent = new TextEncoder().encode('edited after opening Share');
     const snapshot = await capturedPanelProperties!.collectSnapshot!();
@@ -265,23 +263,6 @@ describe('ProjectShareWorkbenchPanel', () => {
         message: 'The runtime could not resolve missing.ts.',
       },
     ]);
-  });
-
-  it('updates publication freshness from the reactive project listing', () => {
-    const view = render(
-      <MemoryRouter>
-        <ProjectShareWorkbenchPanel />
-      </MemoryRouter>,
-    );
-    expect(capturedPanelProperties?.projectUpdatedAt).toBe(10);
-
-    projectActivity = 20;
-    view.rerender(
-      <MemoryRouter>
-        <ProjectShareWorkbenchPanel />
-      </MemoryRouter>,
-    );
-    expect(capturedPanelProperties?.projectUpdatedAt).toBe(20);
   });
 
   it('hands the shared pane the project host with its share source', () => {

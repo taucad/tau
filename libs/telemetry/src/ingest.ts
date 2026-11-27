@@ -7,8 +7,6 @@ import { llmGatewayProviders, promptCacheOutcomes } from '#llm-gateway-vocabular
  */
 /* eslint-disable @typescript-eslint/naming-convention -- OTEL constant enum uses UPPER_SNAKE_CASE */
 export const IngestEntryName = {
-  KERNEL_CREATE_GEOMETRY: 'observability.createGeometry',
-  KERNEL_EXPORT_GEOMETRY: 'observability.exportGeometry',
   AGENT_SESSION: 'agent.session',
   AGENT_TURN: 'agent.turn',
   SYNC_ATTEMPT: 'observability.syncAttempt',
@@ -20,27 +18,16 @@ export const IngestEntryName = {
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- end OTEL constants block */
 
-const kernelCreateGeometryEntrySchema = z.object({
-  name: z.literal(IngestEntryName.KERNEL_CREATE_GEOMETRY),
-  duration: z.number().nonnegative(),
-  /* Strict: the client keeps its error message locally and sends only `status`; free text is refused. */
-  detail: z
-    .strictObject({
-      status: z.string().optional(),
-    })
-    .optional(),
-});
+/**
+ * Entry names the API no longer records: the old kernel instruments' entries, superseded by `runtime.operation`. The
+ * ingest body still admits them by name, so a stale client's batch is not refused for one retired entry, and the API
+ * drops them unrecorded.
+ * @public
+ */
+export const retiredIngestEntryNames = ['observability.createGeometry', 'observability.exportGeometry'] as const;
 
-const kernelExportGeometryEntrySchema = z.object({
-  name: z.literal(IngestEntryName.KERNEL_EXPORT_GEOMETRY),
-  duration: z.number().nonnegative(),
-  detail: z
-    .strictObject({
-      status: z.string().optional(),
-      exportFormat: z.string().optional(),
-    })
-    .optional(),
-});
+/** A retired entry as the ingest body admits it: its name only; anything else it carries is stripped, never read. @public */
+export const retiredIngestEntrySchema = z.object({ name: z.enum(retiredIngestEntryNames) });
 
 /* Agent usage (W36-C). Every string is a bounded label: ids and codes are shape-checked, the rest are enums. */
 
@@ -56,6 +43,13 @@ export const knownAgentIds: ReadonlySet<string> = new Set(['tau', 'claude', 'cod
 
 /** Where an agent turn ran. @public */
 export const agentPlacements = ['browser', 'desktop', 'daemon', 'cloud'] as const;
+
+/**
+ * The phases of a turn's submit to admitted (B4, C3): `create` submit to the project existing, `page` to the context
+ * payload ready, `dispatch` to the command sent, `host` received to the `admitted` row appended, `delivery` appended
+ * to folded. @public
+ */
+export const admissionPhases = ['create', 'page', 'dispatch', 'host', 'delivery'] as const;
 
 /** ACP's `ToolKind` taxonomy; Tau's own tools are mapped onto it (`tauToolKinds`). @public */
 export const agentToolKinds = [
@@ -224,6 +218,12 @@ const clampedInt = (max: number) =>
 /** Milliseconds; a day bounds any one turn. */
 const agentDurationSchema = clamped(86_400_000);
 
+/** Seconds; a day bounds any one delay. */
+const agentDelaySchema = clamped(86_400);
+
+/** Tool results in one turn; the tool-call rows' own ceiling. */
+const toolResultCountSchema = clampedInt(10_000);
+
 /** Token counts are per turn; one turn never legitimately reports more than this. */
 const tokenCountSchema = clamped(100_000_000);
 
@@ -284,6 +284,34 @@ const agentTurnEntrySchema = z.object({
     errorCode: agentErrorCodeSchema.optional(),
     /** Admission to the first content update, in milliseconds. */
     timeToFirstUpdate: agentDurationSchema.optional(),
+    /*
+     * Tool-result delivery (B4): the three counts are the delay's denominators, so a stuck result is counted rather
+     * than dropped from a maximum (observability rule 7). Absent from a turn whose page reported none.
+     */
+    /** Results the admitting tab timed: a live run, the page visible, the host on this machine's clock. */
+    toolResults: toolResultCountSchema.optional(),
+    /** Results it could not time: a replayed run, a hidden page or a host on another clock. */
+    toolResultsExcluded: toolResultCountSchema.optional(),
+    /** Timed results folded but not shown settled when the turn ended. */
+    toolResultsUnsettled: toolResultCountSchema.optional(),
+    /** The slowest timed result, from its output row's host `recordedAt` to the first frame showing it settled. Seconds. */
+    toolResultDelayMax: agentDelaySchema.optional(),
+    /** Submit to admitted by phase (C3); a phase the page did not measure is absent. Seconds. */
+    admissionDelay: z
+      .strictObject({
+        create: agentDelaySchema.optional(),
+        page: agentDelaySchema.optional(),
+        dispatch: agentDelaySchema.optional(),
+        host: agentDelaySchema.optional(),
+        delivery: agentDelaySchema.optional(),
+      } satisfies Record<(typeof admissionPhases)[number], unknown>)
+      .optional(),
+    /** Whether the project host was composed for this turn (`cold`) or already open (`warm`). */
+    hostStart: z.enum(['cold', 'warm']).optional(),
+    /** Whether the chat was open or re-opened after its idle eviction. */
+    chatState: z.enum(['open', 'reopened']).optional(),
+    /** Whether the admission awaited a deployment-answer request instead of reading a fresh answer (C7). */
+    deploymentRefetched: z.boolean().optional(),
     toolCalls: z
       .array(
         z.object({
@@ -510,8 +538,6 @@ const kernelFirstOutcomeEntrySchema = z.object({
  * @public
  */
 export const clientMetricEntrySchema = z.discriminatedUnion('name', [
-  kernelCreateGeometryEntrySchema,
-  kernelExportGeometryEntrySchema,
   agentSessionEntrySchema,
   agentTurnEntrySchema,
   syncAttemptEntrySchema,

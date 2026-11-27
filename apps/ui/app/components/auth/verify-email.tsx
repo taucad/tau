@@ -130,7 +130,7 @@ export function VerifyEmail({ className }: VerifyEmailProps): React.JSX.Element 
 
         <CardDescription>
           {status === 'verified'
-            ? 'Your Tau account is ready. Taking you back now.'
+            ? 'Your account is ready. Taking you back now.'
             : status === 'verified-signed-out'
               ? 'Your email is confirmed. Sign in to continue.'
               : status === 'verifying'

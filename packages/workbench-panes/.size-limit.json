@@ -1,7 +1,7 @@
 [
   {
-    "name": "@taucad/workbench-panes runtime",
+    "name": "@taucad/workbench-panes runtime — measured 80.71 kB brotli on 2026-11-19 (the Share pane's one-scroll frame, SharePaneSection and ShareNotice)",
     "path": "dist/**/*.mjs",
-    "limit": "80 kB"
+    "limit": "82 kB"
   }
 ]

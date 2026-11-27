@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { DatabaseType } from '@taucad/api-database';
 import type { ObjectStorageService } from '@taucad/api-object-storage';
+import { servedBlobKeys } from '@taucad/api-object-storage/sha256';
 import { collectZeroCountBlobs, maxCollectedBlobsWithoutConfirmation } from '#maintenance/blob-collector.js';
 
 /**
@@ -47,6 +48,28 @@ describe('zero-count blob collector bound', () => {
     expect(result.refused).toBe(false);
     expect(result.collected).toHaveLength(5);
     expect(driver.deleteBlobs).toHaveBeenCalledTimes(2);
+  });
+
+  /* #2008: one digest is stored under a key per served type, and the row
+     counts the digest, so every one of those keys goes with it. */
+  it('should remove every served key of a collected digest, in both tiers', async () => {
+    const { database, driver, report } = fakeCollector(1, 10);
+    const [row] = zeroCountRows(1);
+
+    await collectZeroCountBlobs({ database, driver, report, batchSize: 10 });
+
+    const keys = servedBlobKeys(row?.sha256 ?? '');
+    expect(keys.length).toBeGreaterThan(1);
+    expect(driver.deleteBlobs).toHaveBeenCalledWith({
+      namespace: 'blobs',
+      keys,
+      tier: 'private',
+    });
+    expect(driver.deleteBlobs).toHaveBeenCalledWith({
+      namespace: 'blobs',
+      keys,
+      tier: 'public',
+    });
   });
 
   it('should delete nothing above the bound without confirmation', async () => {

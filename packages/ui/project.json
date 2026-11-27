@@ -6,18 +6,7 @@
   "tags": ["scope:shared", "type:package"],
   "targets": {
     "test": {
-      "inputs": [
-        "default",
-        "^production",
-        "{workspaceRoot}/apps/ui/app/**/*.tsx",
-        "{workspaceRoot}/apps/libs/ui-kit/src/**/*.tsx",
-        "{workspaceRoot}/apps/libs/chat-ui/src/**/*.tsx",
-        "{workspaceRoot}/apps/libs/project-workspace/src/**/*.tsx",
-        "{workspaceRoot}/apps/libs/files-ui/src/**/*.tsx",
-        "{workspaceRoot}/apps/libs/editor-ui/src/**/*.tsx",
-        "{workspaceRoot}/apps/libs/ui-core/src/**/*.tsx",
-        "reactEventLayer"
-      ]
+      "inputs": ["default", "^production", "reactEventLayer"]
     },
     "typecheck": {
       "inputs": ["default", "^production", "reactEventLayer"]

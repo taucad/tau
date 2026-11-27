@@ -68,7 +68,7 @@ vi.doMock('@taucad/ui-kit/icons/svg-icon', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   SvgIcon: () => <span className='size-4' />,
 }));
-vi.doMock('#components/files/file-link.js', () => ({
+vi.doMock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 
@@ -1134,6 +1134,29 @@ describe('a converting image holds its thumbnail slot', () => {
       expect(containerReference.current!.getBoundingClientRect().height).toBe(composerHeight);
     },
   );
+
+  it('should keep the composer height when the only pending image lands', async () => {
+    await page.viewport(600, 720);
+    const { containerReference, rerender } = renderComposer({ pendingImages: [{ isConverting: true }] });
+    const slot = screen.getByRole('status').getBoundingClientRect();
+    const composerHeight = containerReference.current!.getBoundingClientRect().height;
+
+    rerender(
+      <TooltipProvider>
+        <section aria-label='Composer' className='p-4'>
+          <ChatTextareaDesktop {...composerDefaults(containerReference)} attachments={[image]} />
+        </section>
+      </TooltipProvider>,
+    );
+
+    const thumbnail = screen.getByRole('button', { name: 'Open uploaded image 1' });
+    // An inline-level thumbnail sits on its wrapper's text line, and the line's descender space adds height under it
+    // that the skeleton tile does not have; with an <img> inside, that grew the composer when the image landed.
+    expect(getComputedStyle(thumbnail).display).toBe('block');
+    const item = thumbnail.parentElement!.getBoundingClientRect();
+    expect([item.height, item.top]).toEqual([slot.height, slot.top]);
+    expect(containerReference.current!.getBoundingClientRect().height).toBe(composerHeight);
+  });
 
   it('should hold the skeleton still under reduced motion', async () => {
     await commands.composerReducedMotion(true);

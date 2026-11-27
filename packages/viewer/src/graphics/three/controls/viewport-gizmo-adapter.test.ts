@@ -506,7 +506,7 @@ describe('view cube adapter', () => {
   it.each([
     { orbitStyle: undefined, roll: false },
     { orbitStyle: 'turntable', roll: false },
-    { orbitStyle: 'tumble', roll: 'free' },
+    { orbitStyle: 'free', roll: 'free' },
   ] as const)(
     'should roll $roll in the $orbitStyle orbit style, with the navigation buttons on and room for them',
     ({ orbitStyle, roll }) => {

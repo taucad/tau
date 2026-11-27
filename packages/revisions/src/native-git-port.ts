@@ -90,6 +90,7 @@ import { cleanLargeObjects, largeObjectBasisOf, lfsObjectPath, readLfsPointer } 
 import type { LargeObjectBasis } from '#lfs.js';
 import { digestHex } from '#object-hash.js';
 import { LfsQuotaError } from '#lfs-client.js';
+import { isStorageRefusal, withoutQuotaMarker } from '#refusal-markers.js';
 import {
   isHostLocalRef,
   isTauApiUrl,
@@ -228,44 +229,55 @@ const gitDirectoryName = '.git';
 const ignorePathspecBatch = 512;
 const liveCheckoutId = 'live';
 /**
- * A hooks path that is not a directory, so neither Git nor git-lfs can put a
- * hook there. git-lfs installs its hooks under `core.hooksPath` whenever its
- * filter runs (a `worktree add` over tracked large files), and joins a path
- * that is not absolute to the checkout: `/dev/null` has no drive on Windows,
- * so there it planted `dev/null/post-checkout` and three more inside the
- * checkout. The Win32 device namespace's `NUL` is absolute on Windows.
+ * The file, in the store's control area, that every command pins as
+ * `core.hooksPath`. It is an empty regular file, never a directory, so Git finds
+ * no hook under it (`<file>/post-checkout` is not a path) and git-lfs, which
+ * installs its four hooks under `core.hooksPath` whenever its filter runs (a
+ * `worktree add` over tracked large files, even with smudging skipped), cannot
+ * create one there. An empty directory would take them, and Git would then
+ * run them. Its absolute path is the same rule on every platform. `/dev/null`
+ * has no drive on Windows, and git-lfs joined it to the checkout, planting
+ * `dev/null/*` hooks in the project. Windows' device path `\\.\NUL` was
+ * the previous fix, and with it a turn on the packaged Windows build was
+ * admitted and never placed (L4 bisect runs 44036295222 and 44036299558,
+ * against 44036304364).
  */
-const disabledHooksPath = process.platform === 'win32' ? String.raw`\\.\NUL` : '/dev/null';
+const disabledHooksFileName = 'tau-hooks-disabled';
 
 /**
  * Configuration this port pins on every command, ahead of the subcommand.
  *
- * The environment scrub takes care of `GIT_*`; these three reach git from the
+ * The environment scrub takes care of `GIT_*`; these reach git from the
  * user's own `~/.gitconfig` instead, and each of them changes the bytes a
  * checkout or a new repository ends up holding (W3a review R43):
  *
  * - `core.autocrlf` rewrites line endings on checkout, so a tree recorded on one
  *   machine would materialize differently on another — and `treeId` is the
  *   identity every host compares (I4).
- * - `core.hooksPath` runs somebody else's scripts inside Tau's own plumbing. A
- *   path that is not a directory disables hooks on every platform.
+ * - `core.hooksPath` runs somebody else's scripts inside Tau's own plumbing. It
+ *   names the store's empty hooks file, a path that is not a directory, which
+ *   disables hooks on every platform.
  * - `init.templateDir` installs hooks and config into a repository this port
  *   creates. Empty is git's own "no template", and it is silent.
  * - `core.fsmonitor` names a program git runs on `status`, `diff` and every
  *   index refresh. A value in the store's own `config` is somebody else's
  *   program run by Tau's plumbing; `false` is git's own "no monitor"
  *   (linux-terminal-git-parity LP4, threat case 1).
+ *
+ * @param hooksFile - The store's empty hooks file.
+ * @returns The `-c` arguments.
  */
-const pinnedConfiguration: readonly string[] = Object.freeze([
-  '-c',
-  'core.autocrlf=false',
-  '-c',
-  `core.hooksPath=${disabledHooksPath}`,
-  '-c',
-  'core.fsmonitor=false',
-  '-c',
-  'init.templateDir=',
-]);
+const pinnedConfiguration = (hooksFile: string): readonly string[] =>
+  Object.freeze([
+    '-c',
+    'core.autocrlf=false',
+    '-c',
+    `core.hooksPath=${hooksFile}`,
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    'init.templateDir=',
+  ]);
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
@@ -297,6 +309,15 @@ const diffKind = (status: string): RevisionDiffEntry['kind'] | undefined => {
   }
 };
 
+/*
+ * One queue per repository for the whole process, never one per port (tau #1282). A host opens one project from more
+ * than one place and each place makes its own port: queued per port, two ports on the same repository each ran
+ * `git init` and `git lfs install --local` at once, and the loser failed with "could not lock config file". Keyed by
+ * the repository's canonical path, so a port opened through a symlink queues with one opened on the real path. Another
+ * process still races; git's own locks and the compare-and-swap ref writes answer that.
+ */
+const repositoryQueue = new ResourceQueue();
+
 /**
  * Create a `RevisionPort` over a native Git repository.
  *
@@ -317,7 +338,24 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   }
   const { repositoryPath, checkouts } = options;
   const gitExecutable = options.gitExecutable ?? 'git';
-  const refQueue = new ResourceQueue();
+  /* The repository's canonical path, read once: the key every port on this repository queues under. A path that cannot
+   * be resolved yet keys by its absolute spelling. */
+  let canonical: Promise<string> | undefined;
+  const resolveCanonical = async (): Promise<string> => {
+    try {
+      return await realpath(repositoryPath);
+    } catch {
+      return resolvePath(repositoryPath);
+    }
+  };
+  const canonicalPath = async (): Promise<string> => {
+    canonical ??= resolveCanonical();
+    return canonical;
+  };
+  const refQueue = {
+    queueFor: async <T>(name: string, operation: () => Promise<T>): Promise<T> =>
+      repositoryQueue.queueFor(`${await canonicalPath()}:${name}`, operation),
+  };
   let objectFormat: ObjectFormat | undefined;
 
   /**
@@ -339,6 +377,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
   /** The store this port owns: every checkout's common directory. */
   const storePath = join(repositoryPath, gitDirectoryName);
+  /** The empty file every command names as its hooks path; see {@link disabledHooksFileName}. */
+  const disabledHooksFile = join(storePath, disabledHooksFileName);
+  const pinnedArguments = pinnedConfiguration(disabledHooksFile);
 
   /**
    * The cleared environment, pinned to this project's own store as its common
@@ -468,7 +509,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       return await runGitCommand({
         gitExecutable,
         cwd: repositoryPath,
-        args: [...pinnedConfiguration, ...args],
+        args: [...pinnedArguments, ...args],
         env: options.env ?? gitEnvironment(),
         ...(options.input === undefined ? {} : { input: options.input }),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -860,10 +901,15 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @returns The error to throw.
    */
   const lfsTransferRefusal = (stderr: string, remote: string, paths: readonly string[]): Error => {
-    if (/\b413\b|GIT_LFS_QUOTA_EXCEEDED|entity too large|storage (?:quota|plan)/iu.test(stderr)) {
-      const said = /batch response:\s*(?<said>.+)/u.exec(stderr)?.groups?.['said']?.trim();
+    if (
+      /\b413\b|GIT_LFS_QUOTA_EXCEEDED|entity too large|storage (?:quota|plan)/iu.test(stderr) ||
+      isStorageRefusal(stderr)
+    ) {
+      /* The server's marker, when it puts one in front, is a key and not the sentence. */
+      const batch = /batch response:\s*(?<said>.+)/u.exec(stderr)?.groups?.['said'];
+      const said = batch === undefined ? undefined : withoutQuotaMarker(batch).trim();
       return new LfsQuotaError({
-        message: said === undefined || said === '' ? 'This project is over its storage plan.' : said,
+        message: said === undefined || said === '' ? 'This project doesn’t fit in its backup.' : said,
         oids: Object.freeze([]),
         /* Largest first and at most the server's ten (RV-W8 F11). */
         paths: Object.freeze(paths.slice(0, refusedFileLimit)),
@@ -2069,7 +2115,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @returns Once every matching worktree's index was refreshed or skipped.
    */
   const syncIndexes = async (moved: string | undefined, replaced?: ReplacedHead): Promise<void> =>
-    refQueue.queueFor(`${repositoryPath}:index`, async () => {
+    refQueue.queueFor('index', async () => {
       const listing = await run(['worktree', 'list', '--porcelain']);
       if (listing.exitCode !== 0) {
         return;
@@ -2372,6 +2418,22 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       opened = undefined;
       ignoreCase = undefined;
     }
+    /* The hooks file every command pins exists before anything can run a
+     * filter, in every store this port opens, adopted ones included. Git-lfs
+     * makes the hooks path a directory of hooks when nothing is there, so one
+     * left as a directory, by an older build or by hand, is replaced. */
+    const hooksEntry = await lstat(disabledHooksFile).catch(() => undefined);
+    if (hooksEntry?.isFile() !== true) {
+      if (hooksEntry !== undefined) {
+        await rm(disabledHooksFile, { recursive: true, force: true });
+      }
+      await writeFile(disabledHooksFile, '', { flag: 'wx' }).catch((error: unknown) => {
+        /* A concurrent open of the same store wrote it first. */
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+          throw error;
+        }
+      });
+    }
     /* Tau's derived-content ignores go where stock Git reads them and no
      * revision records them, in every store, so the records Tau keeps under
      * `.tau/` stay out of `git status` without a line in the person's ignore
@@ -2395,11 +2457,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * here still configures them.
      *
      * The filters only: `--skip-repo` installs no hooks. Tau's plumbing runs
-     * none (`core.hooksPath` is pinned off), and git-lfs writes its hooks
-     * under that pinned path: on Linux `/dev/null` refused them (exit 2, after
-     * the filters were set), and on Windows git-lfs read `/dev/null` against the
-     * checkout and planted `dev/null/pre-push` and three more inside the
-     * project, an untracked folder every cut then saw as unsaved work. */
+     * none (`core.hooksPath` names the store's empty hooks file). Without it,
+     * git-lfs installs its hooks under that path: the L4 bisect head with the
+     * flag reverted (run 44036304364) left `dev/null/pre-push` and three more
+     * in a Windows project under the old `/dev/null` pin. */
     if (!(await isAdopted())) {
       await run(['lfs', 'install', '--local', '--skip-repo']);
     }
@@ -2443,16 +2504,17 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * rewrite cannot repeat.
      */
     /*
-     * One `init` at a time per repository. A host opens its store from more
-     * than one place — the effects' `ensureStore`, which the large-object
-     * resume reaches on a timer as the root starts, and a caller's own
-     * `init` — and two runs at once each ran `git init` and `git lfs install
-     * --local`, which take `.git/config.lock`: the loser failed with
-     * "could not lock config file". Queued, the second run finds the store
-     * the first one made.
+     * One `init` at a time per repository, across every port on it (tau
+     * #1282). A host opens its store from more than one place — the effects'
+     * `ensureStore`, which the large-object resume reaches on a timer as the
+     * root starts, a caller's own `init`, and a second port on the same
+     * project — and two runs at once each ran `git init` and `git lfs install
+     * --local`, which take `.git/config.lock`: the loser failed with "could
+     * not lock config file". Queued, the second run finds the store the first
+     * one made.
      */
     init: async (input: InitRevisionStoreInput): Promise<void> =>
-      refQueue.queueFor(`${repositoryPath}:init`, async () => initStore(input)),
+      refQueue.queueFor('init', async () => initStore(input)),
 
     ignoredPaths: async (root?: string, paths?: readonly string[]): Promise<readonly string[] | undefined> => {
       /* Git's own answer, on every repository: the checkout's nested ignore
@@ -2665,11 +2727,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
        * Choosing the number and claiming its ref are one step (B6):
        * `update-ref` writes the ref only while it still holds what the choice
        * read — the zero id for a new number — so of two writers that chose
-       * the same number one wins and the other chooses again. Calls on this
-       * port also queue behind each other, so only another process ever makes
-       * one choose again.
+       * the same number one wins and the other chooses again. Calls on every
+       * port this process opened on the repository also queue behind each
+       * other, so only another process ever makes one choose again.
        */
-      return refQueue.queueFor(`${repositoryPath}:refs/tags/v*`, async () => {
+      return refQueue.queueFor('refs/tags/v*', async () => {
         const zero = await zeroObjectId();
         for (let attempt = 0; attempt < tagWriteAttempts; attempt += 1) {
           // oxlint-disable-next-line no-await-in-loop -- each attempt reads what the last one lost to.
@@ -2734,7 +2796,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      */
     updateRef: async (input: UpdateRevisionRefInput): Promise<UpdateRevisionRefResult> => {
       const ref = refOf(input.name);
-      const result = await refQueue.queueFor(`${repositoryPath}:${input.name}`, async () => {
+      const result = await refQueue.queueFor(input.name, async () => {
         const expected = input.expectedHead ?? (await zeroObjectId());
         const conflicted = async (): Promise<UpdateRevisionRefResult> => {
           const actual = await resolve(ref);
@@ -2797,7 +2859,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
     setHead: async (branch: string): Promise<void> => {
       /* The head the live worktree's index was read from, so staging into it survives the switch. */
-      const replaced = await refQueue.queueFor(`${repositoryPath}:HEAD`, async () => {
+      const replaced = await refQueue.queueFor('HEAD', async () => {
         const previous = await run(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
         await output(['symbolic-ref', 'HEAD', refOf(branch)]);
         return previous.exitCode === 0 ? textDecoder.decode(previous.stdout).trim() : undefined;

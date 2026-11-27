@@ -24,9 +24,10 @@ import type { Checkout, RevisionPort } from '#revision-port.js';
 import { createProjectRevisionsActor } from '#revision-effects.js';
 import type { ProjectRevisions, RevisionFileSystem } from '#revision-effects.js';
 import { createTurnPlacementPort } from '#turn-placement.js';
-import type { TurnPlacementAdapter } from '#turn-placement.js';
+import type { TurnAdmissionTiming, TurnPlacementAdapter } from '#turn-placement.js';
 import type { TurnAttemptKey } from '#turn.types.js';
 import { recordedBy, testIdentity } from '#test/identity.js';
+import { fileHeavyTimeout } from '#test/native-git-harness.js';
 
 const roots: string[] = [];
 const stops: Array<() => Promise<void>> = [];
@@ -75,7 +76,7 @@ const createProject = async (withAuthority = false): Promise<Project> => {
     });
     filesystem = service.createRootedFileSystem('/');
     stops.push(async () => {
-      service.dispose();
+      await service.close();
       await stop();
       port2.close();
     });
@@ -195,7 +196,7 @@ const withRemote = (opened: ProjectRevisions): ProjectRevisions => {
  */
 const remoteSettled = async (
   opened: ProjectRevisions,
-  state: 'none' | 'failed' = 'none',
+  state: 'none' | 'retrying' | 'failed' = 'none',
 ): Promise<ProjectRevisions> => {
   await waitFor(opened.actor, (snapshot) => snapshot.children.remote?.getSnapshot().value === state);
   return opened;
@@ -285,7 +286,9 @@ const firstLeaseHeld = async (placement: TurnPlacementAdapter<RevisionFileSystem
   throw new Error('The settlements listen ended with no leaseHeld fact.');
 };
 
-describe('createTurnPlacementPort (TS-S3)', () => {
+/* Every row commits and checks out on a real disk. On the hosted windows-2025 runner the same row took from 0.3 s
+ * to 6.8 s between two runs of one commit's suite (runs 44012123071 and 44028941814), so a 5 s default flaps there. */
+describe('createTurnPlacementPort (TS-S3)', { timeout: fileHeavyTimeout(5000) }, () => {
   it('should attest only an actual versioned change through the admitted tools', async () => {
     const project = await createProject(true);
     await project.filesystem.writeFile('main.ts', 'before');
@@ -493,6 +496,118 @@ describe('createTurnPlacementPort (TS-S3)', () => {
    * XD4: an id no checkout and no branch on this device answers to waits only while a remote may bring the branch;
    * a project with no remote can never receive it, so it is refused for good.
    */
+  /* W8 diagnostics: one report per answered admission, ids and milliseconds only, with the activity it waited on. */
+  it('should report one admission timing when it answers, with its phases and the activity it waited on', async () => {
+    const project = await createProject();
+    const { revisions } = project.open();
+    /* A stand-in meter: what the settle phase records, and a record before the admission that no window sees. */
+    const windows = new Set<{ count: number; totalMilliseconds: number; longestMilliseconds: number }>();
+    const git = {
+      record: (milliseconds: number): void => {
+        for (const totals of windows) {
+          totals.count += 1;
+          totals.totalMilliseconds += milliseconds;
+          totals.longestMilliseconds = Math.max(totals.longestMilliseconds, milliseconds);
+        }
+      },
+      open: () => {
+        const totals = { count: 0, totalMilliseconds: 0, longestMilliseconds: 0 };
+        windows.add(totals);
+        return {
+          close: () => {
+            windows.delete(totals);
+            return { ...totals };
+          },
+        };
+      },
+    };
+    const timings: TurnAdmissionTiming[] = [];
+    const placement = createTurnPlacementPort({
+      revisions,
+      openTools: ({ filesystem: view }) => view,
+      settle: async () => {
+        git.record(7);
+        git.record(30);
+      },
+      admissionTiming: { activity: { git }, report: (timing) => timings.push(timing) },
+    });
+    git.record(500);
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+    await placement.admit({ requestId: 'admit:run-1:1:again', key });
+    await placement.fence();
+
+    expect(answer.status).toBe('applied');
+    const checkoutId = answer.status === 'refused' ? undefined : answer.placement.checkoutId;
+    expect(timings).toHaveLength(2);
+    const [first] = timings;
+    expect(first).toMatchObject({
+      requestId: 'admit:run-1:1',
+      chatId: key.chatId,
+      turnId: key.turnId,
+      runId: key.runId,
+      attempt: key.attempt,
+      status: 'applied',
+      checkoutId,
+      activity: { git: { count: 2, totalMilliseconds: 37, longestMilliseconds: 30 } },
+      longest: { source: 'git', milliseconds: 30 },
+    });
+    expect(Object.keys(first!).toSorted()).toStrictEqual(
+      [
+        'activity',
+        'attempt',
+        'chatId',
+        'checkoutId',
+        'longest',
+        'phases',
+        'requestId',
+        'runId',
+        'status',
+        'totalMilliseconds',
+        'turnId',
+      ].toSorted(),
+    );
+    expect(Object.keys(first!.phases).toSorted()).toStrictEqual(
+      ['admitTurn', 'grant', 'heldElsewhere', 'placeIntent', 'recordedCheckout', 'settle'].toSorted(),
+    );
+    expect(Object.values(first!.phases).every((milliseconds) => typeof milliseconds === 'number')).toBe(true);
+    const phases = Object.values(timings[0]!.phases);
+    expect(phases.reduce((total, phase) => total + phase, 0)).toBeLessThanOrEqual(timings[0]!.totalMilliseconds);
+    /* A replay does no placement work, and nothing ran while it was answered. */
+    expect(timings[1]).toMatchObject({
+      requestId: 'admit:run-1:1:again',
+      status: 'replayed',
+      activity: { git: { count: 0, totalMilliseconds: 0, longestMilliseconds: 0 } },
+    });
+    expect(timings[1]).not.toHaveProperty('longest');
+    expect(Object.keys(timings[1]!.phases).toSorted()).toStrictEqual(['admitTurn', 'grant']);
+  });
+
+  it('should report a refused admission with its code, and keep the answer when the report throws', async () => {
+    const project = await createProject();
+    await writeChatRecord(project.filesystem, 'missing-checkout');
+    const { revisions } = project.open();
+    const timings: TurnAdmissionTiming[] = [];
+    const placement = createTurnPlacementPort({
+      revisions,
+      openTools: ({ filesystem: view }) => view,
+      admissionTiming: {
+        report: (timing) => {
+          timings.push(timing);
+          throw new Error('The diagnostics sink is gone.');
+        },
+      },
+    });
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(answer).toMatchObject({ status: 'refused', code: 'CHECKOUT_UNKNOWN' });
+    expect(timings).toStrictEqual([
+      expect.objectContaining({ status: 'refused', code: 'CHECKOUT_UNKNOWN', activity: {} }),
+    ]);
+    expect(timings[0]).not.toHaveProperty('checkoutId');
+  });
+
   it("should place an attempt on the chat record's checkout when the person named none", async () => {
     const project = await createProject();
     await writeChatRecord(project.filesystem, 'missing-checkout');
@@ -988,7 +1103,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
   /* XD3: another device sees a run before it settles; the host's heartbeats keep it current through `publish`. */
   it('should record the chats when an attempt is admitted and each time the host publishes, never on its own', async () => {
     const project = await createProject();
-    const { revisions, syncs } = observeSyncs(withRemote(project.open().revisions));
+    const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: () => 'device-1' }).revisions));
     const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
     const admitted = await placement.admit({ requestId: 'admit:run-1:1', key });
@@ -1019,6 +1134,23 @@ describe('createTurnPlacementPort (TS-S3)', () => {
   it('should refuse a publish CHAT_NOT_SHARED, and record nothing, where the project syncs with no remote', async () => {
     const project = await createProject();
     const { revisions, syncs } = observeSyncs(await remoteSettled(project.open().revisions));
+    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+    expect(await placement.publish({ requestId: 'publish:1', chatId: key.chatId })).toMatchObject({
+      status: 'refused',
+      code: 'CHAT_NOT_SHARED',
+    });
+    expect(syncs).toEqual([]);
+  });
+
+  /*
+   * Tau #1098, item 3: `publish` and `pull` answer one `sharesChats()`. With chat sync off a pull was refused but a
+   * publish applied, so the host kept writing a heartbeat row a minute, and recording the chats, that no device reads.
+   */
+  it('should refuse a publish CHAT_NOT_SHARED, and record nothing, where the project does not sync its chats', async () => {
+    const project = await createProject();
+    await project.filesystem.writeFile('tau.json', JSON.stringify({ syncChats: false }));
+    const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: () => 'device-1' }).revisions));
     const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
     expect(await placement.publish({ requestId: 'publish:1', chatId: key.chatId })).toMatchObject({
@@ -1082,6 +1214,27 @@ describe('createTurnPlacementPort (TS-S3)', () => {
       expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject(notShared);
       expect(syncs).toEqual([]);
     });
+
+    /*
+     * Tau #1098, item 1: a first connect that failed undoes its own config write and lands in `failed`, which nothing
+     * leaves on its own. The project still syncs with no remote, but `failed` counted as "may arrive", so the host
+     * waited on pulls that could never come and held the chat as "waiting on sync" until the project was reopened.
+     */
+    it('should refuse a pull CHAT_NOT_SHARED, and pull nothing, where a first connect failed', async () => {
+      const project = await createProject();
+      const revisionPort: RevisionPort = {
+        ...project.port,
+        setRemote: vi.fn(project.port.setRemote).mockRejectedValue(new Error('The config is read-only.')),
+      };
+      const opened = await remoteSettled(project.open({ deviceId: () => 'device-1', revisionPort }).revisions);
+      opened.actor.send({ type: 'remote', event: { type: 'connect', kind: 'git', url: 'https://example.com/p.git' } });
+      const { revisions, syncs } = observeSyncs(await remoteSettled(opened, 'failed'));
+      expect(revisions.actor.getSnapshot().children.remote?.getSnapshot().context.remote).toBeUndefined();
+      const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+      expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject(notShared);
+      expect(syncs).toEqual([]);
+    });
   });
 
   /*
@@ -1099,12 +1252,33 @@ describe('createTurnPlacementPort (TS-S3)', () => {
         listRemotes: vi.fn(project.port.listRemotes).mockRejectedValueOnce(new Error('The config is locked.')),
       };
       const { revisions, syncs } = observeSyncs(
-        await remoteSettled(project.open({ deviceId: () => 'device-1', revisionPort }).revisions, 'failed'),
+        await remoteSettled(project.open({ deviceId: () => 'device-1', revisionPort }).revisions, 'retrying'),
       );
       const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
       expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toEqual(pulled);
       expect(syncs).toEqual([{ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } }]);
+    });
+
+    /* Tau #1098, item 1: a failed remotes read is asked again, so a project with no remote stops waiting once it is. */
+    it('should refuse CHAT_NOT_SHARED once a failed remotes read is read again and finds no remote', async () => {
+      const project = await createProject();
+      const revisionPort: RevisionPort = {
+        ...project.port,
+        listRemotes: vi.fn(project.port.listRemotes).mockRejectedValueOnce(new Error('The config is locked.')),
+      };
+      const opened = await remoteSettled(
+        project.open({ deviceId: () => 'device-1', revisionPort }).revisions,
+        'retrying',
+      );
+      const { revisions, syncs } = observeSyncs(await remoteSettled(opened, 'none'));
+      const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+      expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject({
+        status: 'refused',
+        code: 'CHAT_NOT_SHARED',
+      });
+      expect(syncs).toEqual([]);
     });
 
     it('should pull, never refuse CHAT_NOT_SHARED, where the record devices could not be read', async () => {

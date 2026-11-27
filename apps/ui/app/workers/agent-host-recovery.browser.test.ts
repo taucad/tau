@@ -10,7 +10,10 @@ import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import type { TurnPlacementPort } from '@taucad/agent-host';
 import { WorkspaceFileService, MountTable, ProviderRegistry, ResourceQueue, ChangeEventBus } from '@taucad/filesystem';
 import { openBrowserProjectHost } from '#workers/agent-host.impl.js';
-import type { WorkerRevisionRequest, WorkerRevisionResponse } from '#machines/file-manager.worker.revisions.js';
+import type {
+  WorkerRevisionRequest,
+  WorkerRevisionResponse,
+} from '@taucad/revisions-ui/types/revision-worker-protocol';
 import type { BrowserProjectHost } from '#workers/agent-host.impl.js';
 import { disposeOpfsProject, opfsProject, opfsProvider } from '#workers/test/agent-host-resident.fixture.js';
 import { rootedProvider } from '@taucad/ui-core/workers/test/rooted-provider.fixture';

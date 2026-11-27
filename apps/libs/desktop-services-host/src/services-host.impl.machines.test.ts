@@ -15,8 +15,12 @@ import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import { connectMachineChannel } from '@taucad/runtime/machine';
 import type { MachineArtifactReference, MachineCandidate, MachineChannelClient } from '@taucad/runtime/machine';
 
+import { HostAdmissionRefusal } from '@taucad/runtime/host';
+import { machineAgentGrants } from '@taucad/host';
+
 import { createServicesHost } from '#services-host.impl.js';
 import type { ServicesHostOptions, UtilityMessage, UtilityPort } from '#services-host.impl.js';
+import { recordingTelemetryApi } from '#runtime-telemetry.fixture.js';
 
 /* The runtime the utility builds, kept so a case can call its artifact reader
  * directly: through a print, every read failure is the simulator's one
@@ -36,6 +40,16 @@ const quiescing = vi.hoisted(() => ({
   release: undefined as undefined | Promise<void>,
   isStartInFlight: false,
 }));
+/* Every machine host the utility opened, as the real factory built it (T19 reaches its admission directly). */
+const openedHosts = vi.hoisted(
+  () =>
+    [] as Array<
+      Readonly<{
+        host: RuntimeHostNode.NodeMachineHost;
+        admission: Parameters<typeof RuntimeHostNode.createNodeMachineHost>[0]['admission'];
+      }>
+    >,
+);
 
 vi.mock('@taucad/runtime/host/node', async (importOriginal) => {
   const actual = await importOriginal<typeof RuntimeHostNode>();
@@ -43,6 +57,7 @@ vi.mock('@taucad/runtime/host/node', async (importOriginal) => {
     ...actual,
     createNodeMachineHost: async (input: Parameters<typeof actual.createNodeMachineHost>[0]) => {
       const host = await actual.createNodeMachineHost(input);
+      openedHosts.push({ host, admission: input.admission });
       return {
         ...host,
         quiesce: async () => {
@@ -173,7 +188,7 @@ const writeProject = async (root: string, name: string, id: string): Promise<str
  *
  * @returns The host, its log, its ceremony answers and the seams to reach it.
  */
-const machinesHarness = async () => {
+const machinesHarness = async (overrides: Partial<ServicesHostOptions> = {}) => {
   const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-machines-')));
   const rootA = join(sandbox, 'workspace-a');
   const rootB = join(sandbox, 'workspace-b');
@@ -202,6 +217,7 @@ const machinesHarness = async () => {
     machinesStreaming: (requestId, machines) => {
       answer(requestId).resolve(machines);
     },
+    ...overrides,
   });
   host.handleMessage(frame({ type: 'allowRoots', roots: [rootA, rootB] }));
   const clients: MachineChannelClient[] = [];
@@ -303,6 +319,7 @@ describe('createServicesHost — machines', () => {
     vi.stubEnv('TAU_SECRET_VAULT', 'file');
     vi.stubEnv('TAU_MACHINES_ENABLED', 'true');
     runtimeOptions.length = 0;
+    openedHosts.length = 0;
   });
 
   afterEach(() => {
@@ -680,4 +697,141 @@ describe('createServicesHost — machines', () => {
       await machines.cleanup();
     }
   }, 30_000);
+
+  describe('T19: runtime telemetry', () => {
+    /**
+     * A harness whose utility reports to a recording API, signed in, with the store open and one agent session it
+     * issued and revoked: its next admission is refused `SESSION_REVOKED`.
+     */
+    const refusingHarness = async (
+      consent: string | undefined,
+      setup?: Readonly<{
+        env?: Readonly<Record<string, string>>;
+        cloudBuild?: boolean;
+        /** Main published the bearer before its `get-session` named the principal. */
+        withoutPrincipal?: boolean;
+      }>,
+    ) => {
+      const telemetrySandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-telemetry-'));
+      const api = recordingTelemetryApi(join(telemetrySandbox, 'config'));
+      const machines = await machinesHarness({
+        runtimeTelemetry: {
+          ...api.runtimeTelemetry,
+          ...(setup?.env === undefined ? {} : { env: setup.env }),
+          ...(setup?.cloudBuild === undefined ? {} : { cloudBuild: setup.cloudBuild }),
+        },
+      });
+      machines.host.handleMessage(
+        frame({
+          type: 'authToken',
+          token: 'bearer-1',
+          ...(setup?.withoutPrincipal === true ? {} : { principal: 'user_1' }),
+        }),
+      );
+      if (consent !== undefined) {
+        machines.host.handleMessage(frame({ type: 'telemetryConsent', consent }));
+      }
+      await expect(machines.connect().listProviders({})).resolves.not.toHaveLength(0);
+      const [opened] = openedHosts;
+      if (opened === undefined) {
+        throw new Error('The utility opened no machine host.');
+      }
+      const session = opened.host.issueSession({
+        actor: { kind: 'agent', id: 'agent-a' },
+        grants: machineAgentGrants,
+      });
+      opened.admission.revoke(session);
+      return {
+        ...api,
+        machines,
+        refuse: () => {
+          expect(() => opened.host.admitRoute({ session })).toThrow(new HostAdmissionRefusal('SESSION_REVOKED'));
+        },
+        cleanup: async () => {
+          await machines.cleanup();
+          await rm(telemetrySandbox, { recursive: true, force: true });
+        },
+      };
+    };
+
+    it("T19: should report a refused machine admission as one admit entry on route desktop under the renderer's granted consent", async () => {
+      const harness = await refusingHarness('granted');
+      try {
+        harness.refuse();
+        /* Quiesce flushes the reporter once the store is closed. */
+        await harness.machines.host.quiesce();
+
+        expect(harness.operations()).toEqual([
+          expect.objectContaining({
+            detail: expect.objectContaining({
+              operation: 'admit',
+              outcome: 'refused',
+              code: 'SESSION_REVOKED',
+              route: 'desktop',
+              caller: 'agent',
+              platform: 'electron',
+            }) as unknown,
+          }),
+        ]);
+        expect(JSON.stringify(harness.posts())).not.toMatch(/agent-a|user_1|bearer-1|machines/u);
+      } finally {
+        await harness.cleanup();
+      }
+    }, 20_000);
+
+    it.each([
+      ['denied', 'denied'],
+      ['unknown, as main has not relayed it', undefined],
+      ['unknown, for a value main cannot name', 'yes'],
+    ] as const)(
+      'T19: should send nothing while the renderer consent is %s',
+      async (_why, consent) => {
+        const harness = await refusingHarness(consent);
+        try {
+          /* The refusal is the authority's own either way. */
+          harness.refuse();
+          await harness.machines.host.quiesce();
+
+          expect(harness.posts()).toEqual([]);
+        } finally {
+          await harness.cleanup();
+        }
+      },
+      20_000,
+    );
+
+    it.each([
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      ['TAU_TELEMETRY=off', { TAU_TELEMETRY: 'off' }],
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      ['DO_NOT_TRACK=1', { DO_NOT_TRACK: '1' }],
+    ] as const)(
+      "T19: should send nothing under the environment opt-out %s, even with the renderer's consent granted",
+      async (_why, env) => {
+        const harness = await refusingHarness('granted', { env });
+        try {
+          harness.refuse();
+          await harness.machines.host.quiesce();
+
+          expect(harness.posts()).toEqual([]);
+        } finally {
+          await harness.cleanup();
+        }
+      },
+      20_000,
+    );
+
+    it("T19: should hold, not send as signed out, while main's bearer has no principal yet, even on a Cloud build", async () => {
+      /* A Cloud build reports signed out; a bearer whose `get-session` has not answered must not pass for that. */
+      const harness = await refusingHarness('granted', { cloudBuild: true, withoutPrincipal: true });
+      try {
+        harness.refuse();
+        await harness.machines.host.quiesce();
+
+        expect(harness.posts()).toEqual([]);
+      } finally {
+        await harness.cleanup();
+      }
+    }, 20_000);
+  });
 });

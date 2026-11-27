@@ -22,7 +22,7 @@ import type {
 import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
 import { mutatingRpcNames } from '@taucad/chat/constants';
 import type { LargeObjectsFacet } from '@taucad/revisions';
-import { guardLargeObjectFiles, guardLargeObjectKernel } from '@taucad/ui-core/lib/large-object-guard';
+import { guardLargeObjectFiles, guardLargeObjectKernel } from '@taucad/agent-host-ui/lib/large-object-guard';
 import { applyClientTextMutation, createExactReplacementPlan, createRpcDispatcher } from '@taucad/chat/rpc';
 import type {
   RpcDependencies,
@@ -79,6 +79,7 @@ import {
   captureFilesToDataUrls,
   omittedSectionCutsNotice,
 } from '#services/headless-capture.js';
+import { planarMultiAngleNotice } from '@taucad/agent-tools/capture';
 
 /** Source of file write operations */
 type FileWriteSource = 'editor' | 'user' | 'machine';
@@ -800,23 +801,28 @@ function createBrowserImageClient(
               includeEdges,
             },
           });
-          const views =
-            resolved.cadSnapshot.context.rendering?.success &&
-            asKnownArtifact(resolved.cadSnapshot.context.rendering.artifact)?.mimeType === 'image/svg+xml'
-              ? (['drawing'] as const)
-              : input.mode === 'single'
-                ? (['isometric'] as const)
-                : canonicalCaptureViews.map((view) => view.id);
+          const planar =
+            resolved.cadSnapshot.context.rendering?.success === true &&
+            asKnownArtifact(resolved.cadSnapshot.context.rendering.artifact)?.mimeType === 'image/svg+xml';
+          const views = planar
+            ? (['drawing'] as const)
+            : input.mode === 'single'
+              ? (['isometric'] as const)
+              : canonicalCaptureViews.map((view) => view.id);
           const dataUrls = captureFilesToDataUrls(files);
           const images = views.map((view, index) => ({
             view,
             dataUrl: dataUrls[index]!,
           }));
-          // One line, so the agent never describes a cut the images do not show.
+          // One line each, so the agent never describes a cut the images do not show or expects six drawings.
+          const notes = [
+            ...(planar && input.mode === 'multi_angle' ? [planarMultiAngleNotice('drawing')] : []),
+            ...(omittedSectionCutIds.length > 0 ? [omittedSectionCutsNotice] : []),
+          ];
           return {
             success: true,
             images,
-            ...(omittedSectionCutIds.length > 0 ? { message: omittedSectionCutsNotice } : {}),
+            ...(notes.length > 0 ? { message: notes.join(' ') } : {}),
           };
         } catch (error) {
           return {

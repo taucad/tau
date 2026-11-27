@@ -161,20 +161,7 @@ const captureBatch = async (): Promise<BenchmarkSample> => {
 
 const setCamera = async (alternate: boolean): Promise<void> => {
   await target.evaluate((useAlternate) => {
-    const bridge = (
-      globalThis as {
-        __TAU_SECTION_VIEW_TEST__?: {
-          setCamera(
-            camera: Readonly<{
-              position: readonly [number, number, number];
-              target: readonly [number, number, number];
-              fov: number;
-              zoom: number;
-            }>,
-          ): void;
-        };
-      }
-    ).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     bridge?.setCamera(
       useAlternate
         ? { position: [0.105, -0.125, 0.082], target: [0, 0, 0.006], fov: 47, zoom: 1.1 }
@@ -220,7 +207,7 @@ const takeLongTasks = async (): Promise<number[]> =>
   });
 
 test('records canonical GLB capture wall-time distributions', async () => {
-  const benchmarkEnvironment = (
+  const benchmarkEnvironment: Readonly<Record<string, string | undefined>> = (
     import.meta as ImportMeta & { readonly env: Readonly<Record<string, string | undefined>> }
   ).env;
   const source = benchmarkEnvironment['VITE_TAU_BENCH_SOURCE'] ?? 'candidate';

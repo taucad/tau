@@ -70,6 +70,14 @@ const closeServer = async (server: HttpServer): Promise<void> =>
     });
   });
 
+/** The deployment answer a self-host API publishes (`GET /v1/deployment`): runs take the unfunded transport. */
+const selfHostDeploymentAnswer = JSON.stringify({
+  version: 1,
+  edition: 'self-host',
+  billing: { funded: false },
+  maxAgeSeconds: 300,
+});
+
 /**
  * A two-turn Anthropic-wire gateway: a tool call, then a final text.
  *
@@ -92,6 +100,11 @@ const startStubGateway = async (): Promise<{
   let released = false;
   const toolArguments = JSON.stringify({ targetFile: tauServeProofFile, content: tauServeProofContent });
   const server = createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/v1/deployment') {
+      /* Answered at once: these tests drive the run channel, not billing, so the API says self-host. */
+      response.writeHead(200, { 'content-type': 'application/json' }).end(selfHostDeploymentAnswer);
+      return;
+    }
     // async-iife: bootstrap -- node's request listener is synchronous.
     void (async () => {
       for await (const _chunk of request) {

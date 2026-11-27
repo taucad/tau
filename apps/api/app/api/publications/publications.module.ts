@@ -3,7 +3,7 @@ import { DatabaseModule } from '@taucad/api-database';
 import { EmailDeliverabilityModule, EmailModule } from '@taucad/api-email';
 import { GitModule } from '#api/git/git.module.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import { ProjectShareController } from '@taucad/api-projects/publications/project-share.controller';
+import { ProjectShareController, SharesController } from '@taucad/api-projects/publications/project-share.controller';
 import { PublicationsController } from '@taucad/api-projects/publications/publications.controller';
 import { PublicationsService } from '@taucad/api-projects/publications/publications.service';
 import { publicationRepositoryLeasesKey } from '@taucad/api-projects/publications/repository-leases';
@@ -20,7 +20,7 @@ import { ViewerIdentityService } from '@taucad/api-projects/publications/viewer-
    * module binds to the git service, so `api-projects` never imports the app.
    */
   imports: [DatabaseModule, EmailModule, EmailDeliverabilityModule, GitModule],
-  controllers: [PublicationsController, ProjectShareController],
+  controllers: [PublicationsController, ProjectShareController, SharesController],
   providers: [
     PublicationsService,
     PublicationRateLimiterService,

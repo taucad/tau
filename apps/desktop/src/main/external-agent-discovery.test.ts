@@ -143,6 +143,19 @@ describe('createExternalAgentDiscovery', () => {
     expect(harness.configure).toHaveBeenCalledExactlyOnceWith([adapterFor('codex')]);
   });
 
+  it('should answer the discovered adapter by id for the sign-in tab, and nothing for a refused or unknown one', async () => {
+    const harness = createHarness();
+
+    expect(harness.discovery.adapterOf('codex')).toBeUndefined();
+    const listing = harness.discovery.list();
+    await harness.settle({ agents: [adapterFor('codex')], refused: [refusalOf('claude')] });
+    await listing;
+
+    expect(harness.discovery.adapterOf('codex')).toEqual(adapterFor('codex'));
+    expect(harness.discovery.adapterOf('claude')).toBeUndefined();
+    expect(harness.discovery.adapterOf('unknown')).toBeUndefined();
+  });
+
   it('should never probe a clean result again', async () => {
     const harness = createHarness();
     const initial = harness.discovery.list();

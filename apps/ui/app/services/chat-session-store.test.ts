@@ -10061,3 +10061,87 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
     store.release(session.chatId);
   });
 });
+
+describe('ChatSessionStore — a run this page did not start ends here too (audit A-1)', () => {
+  const openChat = async (chatId: string) => {
+    const store = createStore();
+    const session = store.acquire(chatId, `${chatId}_project`);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    return { store, session };
+  };
+
+  it('should leave observing when one read folds a run’s running and its end', async () => {
+    const { store, session } = await openChat('chat_a1_folded');
+    publishLogRows(store, 'chat_a1_folded', [lifecycleRow(0, 'admitted')]);
+    expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'observing' } })).toBe(true);
+
+    publishLogRows(store, 'chat_a1_folded', [lifecycleRow(1, 'running'), lifecycleRow(2, 'completed')], 1);
+
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'queued' })).toBe(false);
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'running' })).toBe(false);
+    store.release('chat_a1_folded');
+  });
+
+  it('should leave observing when an admitted run is cancelled before it runs', async () => {
+    const { store, session } = await openChat('chat_a1_cancelled');
+    publishLogRows(store, 'chat_a1_cancelled', [lifecycleRow(0, 'admitted')]);
+
+    publishLogRows(store, 'chat_a1_cancelled', [lifecycleRow(1, 'cancelled')], 1);
+
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'queued' })).toBe(false);
+    store.release('chat_a1_cancelled');
+  });
+
+  it('should stop running when one read ends the presented run and a whole later one', async () => {
+    const { store, session } = await openChat('chat_a1_later');
+    publishLogRows(store, 'chat_a1_later', [lifecycleRow(0, 'admitted', 'run_1'), lifecycleRow(1, 'running', 'run_1')]);
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'running' })).toBe(true);
+
+    publishLogRows(
+      store,
+      'chat_a1_later',
+      [
+        lifecycleRow(2, 'completed', 'run_1'),
+        lifecycleRow(3, 'admitted', 'run_2'),
+        lifecycleRow(4, 'running', 'run_2'),
+        lifecycleRow(5, 'completed', 'run_2'),
+      ],
+      2,
+    );
+
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'running' })).toBe(false);
+    store.release('chat_a1_later');
+  });
+
+  it('should admit a held gesture once the other tab’s run that interrupted its admission ends', async () => {
+    const { store, session } = await openChat('chat_a1_held');
+    const admitted = vi.fn();
+    const unpublish = publishChatTurnAdmission('chat_a1_held', async (gesture, signal) => {
+      admitted(gesture.kind);
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          reject(new Error('aborted'));
+        });
+      });
+    });
+    try {
+      void store.requestTurn('chat_a1_held', { kind: 'regenerate' });
+      await vi.waitFor(() => {
+        expect(admitted).toHaveBeenCalledOnce();
+      });
+      publishLogRows(store, 'chat_a1_held', [lifecycleRow(0, 'admitted', 'run_other')]);
+      expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'observing' } })).toBe(true);
+
+      publishLogRows(store, 'chat_a1_held', [lifecycleRow(1, 'cancelled', 'run_other')], 1);
+
+      await vi.waitFor(() => {
+        expect(admitted).toHaveBeenCalledTimes(2);
+      });
+    } finally {
+      unpublish();
+      store.release('chat_a1_held');
+    }
+  });
+});

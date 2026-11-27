@@ -163,6 +163,8 @@ describe.runIf(gitToolchainOnPath)('a Node host records the account it is handed
       },
     });
     await before?.(revisions);
+    /* Once open: a write before the registry answers is the spawn comparison's, not the watcher's (#2285). */
+    await expect.poll(() => revisions.status().checkoutId, { timeout: 20_000 }).toBeDefined();
     await writeFile(join(workspaceRoot, 'main.ts'), 'export const size = 1;\n');
     await expect.poll(() => liveCheckoutId, { timeout: 20_000 }).toBeDefined();
     /* The close flush: no turn, no lease, the same path a quit takes (S30 `close`). */
@@ -406,6 +408,8 @@ describe('the Node host observes its own workspace', () => {
     });
 
     try {
+      /* Once open: a write before the registry answers is the spawn comparison's, not the watcher's (#2285). */
+      await expect.poll(() => revisions.status().checkoutId, { timeout: 20_000 }).toBeDefined();
       await writeFile(join(workspaceRoot, 'main.ts'), 'export const size = 1;\n');
       /* Derived content can never start an idle window, so it must not arrive. */
       await mkdir(join(workspaceRoot, '.tau', 'cache'), { recursive: true });

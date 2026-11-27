@@ -14,11 +14,10 @@
 import { waitFor } from 'xstate';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, watch as watchDirectory } from 'node:fs';
-import type { FSWatcher } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
-import { join, sep } from 'node:path';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { resolveNodeProjectIdentity, openNodeProjectFileSystem } from '#project-identity.js';
 import type { ShellExecutionHolds } from '@taucad/shell-service';
@@ -28,6 +27,7 @@ import type { JsonValue } from '@taucad/agent-host';
 import type { AgentChannelRevisionEvent } from '@taucad/agent-host/wire';
 import type { FileMode } from '@taucad/filesystem';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';
 import type { ParameterRecordCodec } from '@taucad/revisions/algorithms';
@@ -463,6 +463,9 @@ const liveRoot = Symbol('live checkout');
 /** A watched checkout root: the live one, or a linked checkout by id. */
 type WatchKey = string | typeof liveRoot;
 
+/** One root's native watch: whether it was admitted, and how to end it. */
+type RootWatch = Readonly<{ admitted: Promise<boolean>; stop: () => void }>;
+
 /** What a caller allows each of the close flush's two answered waits: the live checkout, then the `close` cuts. */
 const closeFlushMilliseconds = closeCutMilliseconds;
 
@@ -693,8 +696,25 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     options.filesystem ??
     ((checkout: Parameters<NonNullable<ProjectRevisionsOptions['filesystem']>>[0]) =>
       new NodeFsProvider(checkout.kind === 'live' ? options.workspaceRoot : checkout.root));
+  /*
+   * The live root's watch is admitted asynchronously, so the store answers its
+   * first question only after it (#2285): the registry, and the live
+   * checkout's spawn comparison after it, then read the files as they were
+   * once the watch could see them. A write before that is in the comparison's
+   * capture; a write after it reaches `changed`. Nothing falls between.
+   */
+  const liveWatchAdmitted = Promise.withResolvers<void>();
+  const authoredPort = withCommitAuthor(port, (person) =>
+    person.id === session?.id ? sessionCommitAuthor : undefined,
+  );
   const tree = createProjectRevisionsActor({
-    port: withCommitAuthor(port, (person) => (person.id === session?.id ? sessionCommitAuthor : undefined)),
+    port: Object.freeze({
+      ...authoredPort,
+      describe: async () => {
+        await liveWatchAdmitted.promise;
+        return authoredPort.describe();
+      },
+    }),
     projectId,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
@@ -1074,9 +1094,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   /*
    * The project's own writes, coalesced into one `changed` per burst.
    *
-   * Recursive `fs.watch` is the platform's own source — a rename storm, an
-   * editor's atomic save, an agent's tool write all arrive here — and the burst
-   * is collapsed before it reaches the tree, because the checkout counts
+   * The platform's own source — a rename storm, an editor's atomic save, an
+   * agent's tool write all arrive here — and the burst is collapsed before it
+   * reaches the tree, because the checkout counts
    * *events*, not paths (A38, F9). Derived content is filtered by the path
    * registry rather than by a second ignore list, so `thumbnail.webp` and
    * `.tau/types/**` cannot start an idle window.
@@ -1086,8 +1106,16 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
    * live in this host's data directory, outside the workspace, so watching the
    * workspace alone left them never dirty — no idle revision, no write
    * generation guard, and a quit that could let their work go.
+   *
+   * The source is `NodeFsProvider.watch` (native `@parcel/watcher`), not
+   * Node's recursive `fs.watch`: on Linux, Node before 24.22 builds that one
+   * from a watch per file, and a file replaced by rename (every atomic write,
+   * the agent's included) keeps the old inode's watch, so each later in-place
+   * write to it is never reported (#2285). The provider watches directories,
+   * serializes the process's one native backend with the runtime filesystem's
+   * watches, and reports a lost stream as `reset`.
    */
-  const watchers = new Map<WatchKey, FSWatcher | undefined>();
+  const watchers = new Map<WatchKey, RootWatch | undefined>();
   const watchedRoots = new Map<WatchKey, string>();
   const pendingPaths = new Map<WatchKey, Set<string>>();
   /* The barriers waiting on a cookie, by the cookie's name. */
@@ -1155,7 +1183,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     await Promise.all(
       [...watchers].map(async ([key, watcher]) => {
         const root = watchedRoots.get(key);
-        if (watcher === undefined || root === undefined) {
+        if (watcher === undefined || root === undefined || !(await watcher.admitted)) {
           lose(key);
           return;
         }
@@ -1189,40 +1217,55 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   };
   const watchRoot = (key: WatchKey, root: string): void => {
     watchedRoots.set(key, root);
-    try {
-      const watcher = watchDirectory(root, { recursive: true, persistent: false }, (_event, filename) => {
-        if (filename === null) {
-          lose(key);
-          return;
-        }
-        const path = filename.toString().split(sep).join('/');
-        if (path.startsWith(watchCookiePrefix)) {
-          cookies.get(path)?.();
-          return;
-        }
-        const initializing = actor.getSnapshot().context.liveCheckoutId === undefined;
-        if (path === '' || !classify(path).versioned) {
-          return;
-        }
-        if (initializing && (path === generatedIgnorePath || path === generatedGitattributesPath)) {
-          return;
-        }
-        reportWrite(key, path);
-      });
-      watcher.on('error', () => {
+    const observe = (event: NodeFsWatchEvent): void => {
+      if (event.type === 'reset') {
         lose(key);
-        watcher.close();
-        watchers.set(key, undefined);
-      });
-      watchers.set(key, watcher);
-    } catch {
-      /* A platform or a filesystem with no recursive watch records revisions on
-       * every other trigger; it simply never mints an idle one on its own, and
-       * every cut on it reads the whole tree (`settleWatch`). The key is still
-       * recorded, so a root that cannot be watched is not retried on every
-       * transition. */
-      watchers.set(key, undefined);
-    }
+        return;
+      }
+      const { path } = event;
+      if (path.startsWith(watchCookiePrefix)) {
+        cookies.get(path)?.();
+        return;
+      }
+      const initializing = actor.getSnapshot().context.liveCheckoutId === undefined;
+      if (path === '' || !classify(path).versioned) {
+        return;
+      }
+      if (initializing && (path === generatedIgnorePath || path === generatedGitattributesPath)) {
+        return;
+      }
+      reportWrite(key, path);
+    };
+    const ending = new AbortController();
+    let unsubscribe: (() => void) | undefined;
+    /* A root that cannot be watched (no native watcher, a root that went away)
+     * records revisions on every other trigger; it simply never mints an idle
+     * one on its own, and every cut on it reads the whole tree (`settleWatch`).
+     * The key is still recorded, so it is not retried on every transition. */
+    const admitted = (async (): Promise<boolean> => {
+      try {
+        const stop = await new NodeFsProvider(root).watch({ paths: [''], recursive: true }, observe);
+        if (ending.signal.aborted) {
+          stop();
+          return false;
+        }
+        unsubscribe = stop;
+        return true;
+      } catch {
+        return false;
+      } finally {
+        if (key === liveRoot) {
+          liveWatchAdmitted.resolve();
+        }
+      }
+    })();
+    watchers.set(key, {
+      admitted,
+      stop: () => {
+        ending.abort();
+        unsubscribe?.();
+      },
+    });
   };
   /* Follow the registry: watch each linked checkout it adds, stop each it drops. */
   const watchLinkedCheckouts = (checkouts: readonly CheckoutRecord[]): void => {
@@ -1235,7 +1278,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     );
     for (const [key, watcher] of watchers) {
       if (key !== liveRoot && !linked.has(key)) {
-        watcher?.close();
+        watcher?.stop();
         watchers.delete(key);
         watchedRoots.delete(key);
         pendingPaths.delete(key);
@@ -1249,6 +1292,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   };
   const startWatching = (): void => {
     if (options.watchWorkspace === false) {
+      liveWatchAdmitted.resolve();
       return;
     }
     watchRoot(liveRoot, options.workspaceRoot);
@@ -1347,7 +1391,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       await flushClose();
       stopWatchingCheckouts();
       for (const watcher of watchers.values()) {
-        watcher?.close();
+        watcher?.stop();
       }
       watchers.clear();
       if (coalescing !== undefined) {

@@ -6,8 +6,7 @@
  * waits for the watcher first. A watcher that loses track makes the next save
  * read everything.
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import type * as nodeFs from 'node:fs';
+import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,25 +21,17 @@ import {
 } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
 
 import { createProjectRevisions } from '#revisions.js';
 import type { ProjectRevisions } from '#revisions.js';
 
-type WatchListener = nodeFs.WatchListener<string>;
-
-/* Every listener the host hands `fs.watch`, so a row can speak for the platform. */
-const watched = vi.hoisted((): WatchListener[] => []);
-
-vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof nodeFs>();
-  const recorded = (...arguments_: Parameters<typeof nodeFs.watch>): ReturnType<typeof nodeFs.watch> => {
-    const listener = arguments_.at(-1);
-    if (typeof listener === 'function') {
-      watched.push(listener as WatchListener);
-    }
-    return actual.watch(...arguments_);
-  };
-  return { ...actual, watch: recorded };
+/* Every handler the host hands the provider's watch, so a row can speak for the platform. */
+const watched: Array<(event: NodeFsWatchEvent) => void> = [];
+const providerWatch = NodeFsProvider.prototype.watch;
+vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(async function (this: NodeFsProvider, request, handler) {
+  watched.push(handler);
+  return providerWatch.call(this, request, handler);
 });
 
 const roots: string[] = [];
@@ -101,7 +92,7 @@ const open = async () => {
     const bytes = tree?.get(path);
     return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
   };
-  return { workspaceRoot, reads, save, contentAt };
+  return { workspaceRoot, reads, save, contentAt, revisions };
 };
 
 describe('the disk host’s change feed (E1)', () => {
@@ -122,15 +113,32 @@ describe('the disk host’s change feed (E1)', () => {
     const host = await open();
     await host.save();
 
-    /* The platform could not name the file it saw change. */
-    for (const listener of watched) {
-      // oxlint-disable-next-line typescript/no-restricted-types -- the platform's own "no file name" is `null`.
-      listener('rename', null);
+    /* The platform lost the stream and cannot name what changed. */
+    for (const handler of watched) {
+      handler({ type: 'reset' });
     }
     await writeFile(join(host.workspaceRoot, 'f7.txt'), 'edited\n');
     host.reads.length = 0;
     await host.save();
 
     expect(host.reads.length).toBeGreaterThanOrEqual(fileCount);
+  }, 60_000);
+
+  /* #2285: Node's recursive `fs.watch` on Linux (before 24.22, Electron 43's
+   * 24.21 among them) kept the replaced inode's watch after an atomic write,
+   * so the next in-place write to that file never made the checkout dirty. */
+  it('should call an in-place write dirty after the file was replaced by rename', async () => {
+    const host = await open();
+    await host.save();
+
+    const temporary = join(host.workspaceRoot, '.f7.txt.1.00000000-0000-4000-8000-000000000000.tmp');
+    await writeFile(temporary, 'replaced\n');
+    await rename(temporary, join(host.workspaceRoot, 'f7.txt'));
+    await host.save();
+    expect(host.revisions.status().dirty).toBe(false);
+
+    await writeFile(join(host.workspaceRoot, 'f7.txt'), 'edited in place\n');
+
+    await expect.poll(() => host.revisions.status().dirty, { timeout: 1000 }).toBe(true);
   }, 60_000);
 });

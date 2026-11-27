@@ -338,8 +338,10 @@ afterEach(() => {
   sandbox.initialize.mockClear();
   sandbox.reset.mockClear();
   vi.restoreAllMocks();
+  /* Windows releases an ended worker's handles on its folder a moment after the exit (EPERM, run 45922288926); a
+     worker still running keeps failing every retry. */
   for (const root of roots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

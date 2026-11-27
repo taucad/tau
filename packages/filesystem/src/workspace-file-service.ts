@@ -1189,9 +1189,14 @@ export class WorkspaceFileService {
    * Subscribe to filesystem changes matching the request.
    * Identical requests share one underlying subscription (ref-counted).
    *
+   * Each path is resolved as a mount prefix is (`resolveAuthorityPath`): `.`
+   * and `..` segments are resolved.
+   *
    * @param request - paths, recursive, includes/excludes, and filter
    * @param handler - callback for matching WatchEvents
    * @returns unsubscribe function
+   * @throws `VirtualPathError` (`@taucad/utils/path`) for an empty, relative, `//`-prefixed,
+   * backslash or control-character path, or one that escapes `/`.
    */
   public watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void {
     /* Spelled as mount prefixes are, so a path with `.` or `..` is reset by the routes it resolves into (FW5). */

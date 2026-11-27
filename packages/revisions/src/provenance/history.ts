@@ -11,11 +11,13 @@ import type { Refs } from '#provenance/types.js';
 
 const historyRef = /^refs\/(?:heads|tags)\//u;
 const zeroId = /^0+$/u;
+/* A SHA-1 or SHA-256 object id: anything else (a value starting with `-` would be read as an option) is dropped (M2 review m9). */
+const objectId = /^[\da-f]{40}(?:[\da-f]{24})?$/u;
 
 const historyTips = (references: Refs): Set<string> =>
   new Set(
     Object.entries(references)
-      .filter(([name, id]) => historyRef.test(name) && id !== '' && !zeroId.test(id))
+      .filter(([name, id]) => historyRef.test(name) && objectId.test(id) && !zeroId.test(id))
       .map(([, id]) => id),
   );
 

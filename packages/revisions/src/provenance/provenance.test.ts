@@ -671,25 +671,44 @@ describe('server half', () => {
 
 describe('historyNewArguments', () => {
   it('lists new branch and tag tips against every branch and tag tip before, ignoring record refs', () => {
+    const [c1, c2, t1, t2, r1, r2] = ['1', '2', '3', '4', '5', '6'].map((digit) => digit.repeat(40)) as [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ];
     expect(
       historyNewArguments(
         {
-          'refs/heads/main': 'c1',
-          'refs/tags/v2': 't1',
-          'refs/tau/ops/x': 'r1',
+          'refs/heads/main': c1,
+          'refs/tags/v2': t1,
+          'refs/tau/ops/x': r1,
         },
         {
-          'refs/heads/main': 'c2',
-          'refs/heads/b': 'c1',
-          'refs/tags/v2': 't1',
-          'refs/tags/v3': 't2',
-          'refs/tau/ops/y': 'r2',
+          'refs/heads/main': c2,
+          'refs/heads/b': c1,
+          'refs/tags/v2': t1,
+          'refs/tags/v3': t2,
+          'refs/tau/ops/y': r2,
         },
       ),
-    ).toEqual(['c2', 't2', '--not', 'c1', 't1']);
+    ).toEqual([c2, t2, '--not', c1, t1]);
+    expect(historyNewArguments({ 'refs/heads/main': c1 }, { 'refs/heads/main': c1, 'refs/tau/ops/y': r2 })).toEqual([]);
+    expect(historyNewArguments({}, { 'refs/heads/main': c1 })).toEqual([c1, '--not']);
+  });
+});
+
+describe('historyNewArguments ids (M2 review m9)', () => {
+  it('drops a tip that is not an object id, so nothing reaches git as an option', () => {
+    const tip = 'c'.repeat(40);
     expect(
-      historyNewArguments({ 'refs/heads/main': 'c1' }, { 'refs/heads/main': 'c1', 'refs/tau/ops/y': 'r2' }),
-    ).toEqual([]);
-    expect(historyNewArguments({}, { 'refs/heads/main': 'c1' })).toEqual(['c1', '--not']);
+      historyNewArguments(
+        {},
+        { 'refs/heads/main': tip, 'refs/heads/x': '--output=/tmp/x', 'refs/tags/y': 'C'.repeat(40) },
+      ),
+    ).toEqual([tip, '--not']);
+    expect(historyNewArguments({}, { 'refs/heads/main': 'd'.repeat(64) })).toEqual(['d'.repeat(64), '--not']);
   });
 });

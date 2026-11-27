@@ -13,17 +13,17 @@
  * @module
  */
 
+import { Topic } from '@taucad/events';
+
 /** Milliseconds after the hold at which the backup starts even if the first turn never streamed. */
 export const firstTurnBackupDeadline = 5000;
 
 type Hold = { readonly released: Promise<void>; readonly release: () => void };
 
 const holds = new Map<string, Hold>();
-const listeners = new Set<() => void>();
+const changes = new Topic<void>({ name: 'FirstTurnBackupGate.changes' });
 const notify = (): void => {
-  for (const listener of listeners) {
-    listener();
-  }
+  changes.emit();
 };
 
 /**
@@ -75,9 +75,4 @@ export const firstTurnBackupHold = (projectId: string): Promise<void> | undefine
  * @param listener - Called after any project's hold starts or ends.
  * @returns The unsubscribe.
  */
-export const subscribeFirstTurnBackupHolds = (listener: () => void): (() => void) => {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-};
+export const subscribeFirstTurnBackupHolds = (listener: () => void): (() => void) => changes.subscribe(listener);

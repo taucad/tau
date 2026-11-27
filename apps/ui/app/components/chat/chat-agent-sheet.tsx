@@ -1205,12 +1205,11 @@ function Sheet({
       return;
     }
     /* A choice can remove the row it was made from (the sole effort, once the agent takes it): the model row takes
-     * focus then, so this runs again when the effort row comes or goes. */
-    (
-      (({ agent: agentRowRef, model: modelRowRef, effort: effortRowRef, options: optionsRowRef }) as const)[
-        returnTo.current
-      ].current ?? modelRowRef.current
-    )?.focus();
+     * focus then. */
+    const row = returnTo.current === 'effort' && !isEffortRowShown ? 'model' : returnTo.current;
+    (({ agent: agentRowRef, model: modelRowRef, effort: effortRowRef, options: optionsRowRef }) as const)[
+      row
+    ].current?.focus();
   }, [hasNavigated, view, isEffortRowShown]);
   const go = (next: SheetView): void => {
     setHasNavigated(true);

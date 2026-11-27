@@ -21,8 +21,8 @@ export type NodeLeadershipDelays = Readonly<{ claimRetry?: number; claimRefusalR
  */
 export const createNodeLeadership = (host: LeadershipHost, delays?: NodeLeadershipDelays): LeadershipPort => {
   const { claimRetry = claimRetryMilliseconds, claimRefusalRetry = claimRefusalRetryMilliseconds } = delays ?? {};
-  /** The reconciliation under way per chat; `close` waits for each. */
-  const reconciling = new Map<string, Promise<void>>();
+  /** The chats with a reconciliation under way: one at a time per chat. */
+  const reconciling = new Set<string>();
   const closing = new AbortController();
 
   /* The pause before the next claim; ends early, and unref'd, so a closing process never waits on it. */
@@ -45,11 +45,13 @@ export const createNodeLeadership = (host: LeadershipHost, delays?: NodeLeadersh
    * the still-closing bound. Any other refusal, or the bound, ends it: the next reconciliation asks again.
    */
   const claimUntilOpen = async (chatId: string): Promise<void> => {
-    const started = Date.now();
+    /* The bound runs from the first refusal, as M2's does (review N2). */
+    let refusedAt: number | undefined;
     try {
       // oxlint-disable-next-line no-await-in-loop -- each claim waits for the one before it.
       while ((await host.claim(chatId)) === 'WRITER_LOCKED' && !closing.signal.aborted) {
-        if (Date.now() - started >= claimRefusalRetry) {
+        refusedAt ??= Date.now();
+        if (Date.now() - refusedAt >= claimRefusalRetry) {
           return; // Bound: claimRefusalRetryMilliseconds.
         }
         // oxlint-disable-next-line no-await-in-loop -- see above.
@@ -76,18 +78,23 @@ export const createNodeLeadership = (host: LeadershipHost, delays?: NodeLeadersh
       if (closing.signal.aborted || reconciling.has(chatId)) {
         return;
       }
-      const reconciled = (async (): Promise<void> => {
+      reconciling.add(chatId);
+      // async-iife: bootstrap -- owned by `reconciling` and ended by `close`; its own errors are logged inside.
+      void (async (): Promise<void> => {
         try {
           await claimUntilOpen(chatId);
         } finally {
           reconciling.delete(chatId);
         }
       })();
-      reconciling.set(chatId, reconciled);
     },
+    /*
+     * Review I3: close stops the retries and does not wait for a claim in flight. That claim can sit in the host's
+     * closing wait (10 s) and its incarnation's opening, past the close-cut bound; the host's own close, which follows
+     * this one, refuses it `HOST_CLOSED` and ends it.
+     */
     close: async () => {
       closing.abort();
-      await Promise.all(reconciling.values());
     },
   };
 };

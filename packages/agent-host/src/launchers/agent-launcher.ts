@@ -123,6 +123,12 @@ export type AgentLauncherOptions = Readonly<{
    * host's.
    */
   onChatQuiescent?: ((chatId: string, quiescent: boolean) => void) | undefined;
+  /**
+   * HA4 (HA0's `claim.refused`): told each time a claim after the leadership's grant is refused, with the code (a claim
+   * that threw is `HOST_FAULT`); a closing host's `HOST_CLOSED` is not reported. It runs synchronously in the host;
+   * what it throws is logged, never the host's.
+   */
+  onClaimRefused?: ((chatId: string, code: string) => void) | undefined;
 }>;
 
 /** A running launcher: one per project, in any process. @public */
@@ -865,9 +871,26 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     claim: async (chatId) => {
       const answer = host.claim(chatId);
       claiming.set(chatId, answer);
+      const refusedWith = (code: string, message: string): string => {
+        refusedClaims.add(chatId);
+        /* The binding retries a closing incarnation's refusal and lets the lock go on any other (HA4). */
+        if (code !== 'HOST_CLOSED') {
+          console.error('[agent-launcher] a claim was refused', chatId, code, message);
+          try {
+            options.onClaimRefused?.(chatId, code);
+          } catch (error) {
+            console.error('[agent-launcher] a claim refusal observer threw', chatId, error);
+          }
+        }
+        return code;
+      };
       let claim: Awaited<typeof answer>;
       try {
         claim = await answer;
+      } catch (error) {
+        /* Review N5: a claim that threw opened nothing either, so an attach reports no takeover of it. */
+        refusedWith('HOST_FAULT', error instanceof Error ? error.message : String(error));
+        throw error;
       } finally {
         if (claiming.get(chatId) === answer) {
           claiming.delete(chatId);
@@ -878,19 +901,9 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         return undefined;
       }
       const { refused: answered } = claim;
-      const code = answered.status === 'refused' ? answered.code : 'HOST_FAULT';
-      refusedClaims.add(chatId);
-      /* ponytail: `claim.refused` has no host report path (HA0's gap); the log line is the record. The binding retries a
-       * closing incarnation's refusal and lets the lock go on any other (HA4). */
-      if (code !== 'HOST_CLOSED') {
-        console.error(
-          '[agent-launcher] a claim was refused',
-          chatId,
-          code,
-          answered.status === 'refused' ? answered.message : '',
-        );
-      }
-      return code;
+      return answered.status === 'refused'
+        ? refusedWith(answered.code, answered.message)
+        : refusedWith('HOST_FAULT', 'The claim was refused without a code.');
     },
     relinquish: async (chatId) => {
       await host.relinquish(chatId);

@@ -99,20 +99,21 @@ describe('watch deliveries of one library mutation on the 386-directory profile'
     vi.restoreAllMocks();
   });
 
-  it('should reset only the workspace root connection on a create', async () => {
+  /* A connection rooted above a route sees no mount below its root (review m3), so a create reaches no connection. */
+  it('should reach no connection on a create', async () => {
     watchEveryProject(profile);
 
     const deliveries = await deliveriesOf(async () => create(profile));
 
-    expect(deliveries).toEqual({ 'watch.changeSets': 1, 'watch.pathEvents': 1 });
+    expect(deliveries).toEqual({ 'watch.changeSets': 0, 'watch.pathEvents': 0 });
   });
 
-  it("should reach only the deleted project's connection and the workspace root's on a delete", async () => {
+  it("should reach only the deleted project's connection on a delete", async () => {
     watchEveryProject(profile);
 
     const deliveries = await deliveriesOf(async () => remove(profile));
 
-    expect(deliveries).toEqual({ 'watch.changeSets': 2, 'watch.pathEvents': 2 });
+    expect(deliveries).toEqual({ 'watch.changeSets': 1, 'watch.pathEvents': 1 });
   });
 
   /* The baseline the two above are measured against: the reset every watch heard before FW5. */

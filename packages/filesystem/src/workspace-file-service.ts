@@ -1194,7 +1194,11 @@ export class WorkspaceFileService {
    * @returns unsubscribe function
    */
   public watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void {
-    return this._watchRegistry.watch(request, handler);
+    /* Spelled as mount prefixes are, so a path with `.` or `..` is reset by the routes it resolves into (FW5). */
+    return this._watchRegistry.watch(
+      { ...request, paths: request.paths.map((path) => resolveAuthorityPath(path)) },
+      handler,
+    );
   }
 
   /**

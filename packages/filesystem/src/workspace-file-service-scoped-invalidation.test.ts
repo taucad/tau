@@ -397,26 +397,24 @@ describe.each<Mode>(['scoped', 'global'])('a topology change with %s resets', (m
   });
 });
 
-describe('a permanent delete', () => {
-  const writeProject = async (provider: FileSystemProvider, directory: string, projectId: string): Promise<void> => {
-    await provider.mkdir(`${directory}/src`, { recursive: true });
-    const manifest = projectToManifest({
-      name: directory,
-      description: '',
-      tags: [],
-      assets: { main: { entryPath: 'main.ts' } },
-    });
-    await provider.writeFile(`${directory}/tau.json`, serializeProjectManifest(manifest));
-    await provider.writeFile(
-      `${directory}/${projectIdentityPath}`,
-      serializeProjectIdentity({ version: 1, projectId }),
-    );
-    await provider.writeFile(`${directory}/main.ts`, 'export default {};');
-    await provider.writeFile(`${directory}/src/part.ts`, 'export default {};');
-    await provider.mkdir(`.tau/checkouts/${directory}`, { recursive: true });
-    await provider.writeFile(`.tau/checkouts/${directory}/main.ts`, 'export default {};');
-  };
+/** A durable project directory, and a checkout of it at the storage root's checkout area. */
+const writeProject = async (provider: FileSystemProvider, directory: string, projectId: string): Promise<void> => {
+  await provider.mkdir(`${directory}/src`, { recursive: true });
+  const manifest = projectToManifest({
+    name: directory,
+    description: '',
+    tags: [],
+    assets: { main: { entryPath: 'main.ts' } },
+  });
+  await provider.writeFile(`${directory}/tau.json`, serializeProjectManifest(manifest));
+  await provider.writeFile(`${directory}/${projectIdentityPath}`, serializeProjectIdentity({ version: 1, projectId }));
+  await provider.writeFile(`${directory}/main.ts`, 'export default {};');
+  await provider.writeFile(`${directory}/src/part.ts`, 'export default {};');
+  await provider.mkdir(`.tau/checkouts/${directory}`, { recursive: true });
+  await provider.writeFile(`.tau/checkouts/${directory}/main.ts`, 'export default {};');
+};
 
+describe('a permanent delete', () => {
   it("should leave every other project's Project Index warm and forget each that read the removed bytes", async () => {
     const { service, rootProvider } = await createIdbWorkspaceFileService();
     services.push(service);
@@ -477,5 +475,144 @@ describe('a permanent delete', () => {
     }
     expect(indexes.get('/y/src')?.entry('part.ts')).toBeDefined();
     expect(yResets).toEqual([]);
+  });
+});
+
+/*
+ * Review M2: Home is mounted at `/` and its connection is rooted there, so a Home project directory `x` is seen at `/x`
+ * through the Home connection as well as at `/projects/<id>` through its route. A bound permanent delete must reach
+ * every watch of that alias once the directory is gone, scoped or not.
+ */
+describe.each<Mode>(['scoped', 'global'])('a bound permanent delete seen through the Home connection, %s', (mode) => {
+  it('should reach every watch of the removed directory on the Home connection after it is removed', async () => {
+    useMode(mode);
+    const { service, rootProvider } = await createIdbWorkspaceFileService();
+    services.push(service);
+    await writeProject(rootProvider, 'x', x);
+    await writeProject(rootProvider, 'y', y);
+    const durable = (projectId: string, directory: string): ProjectRootConfig => ({
+      projectId,
+      backend: 'indexeddb',
+      providerBasePath: directory,
+    });
+    await service.configureProjectRoots({
+      projects: [durable(x, 'x'), durable(y, 'y')],
+      roots: [{ backend: 'indexeddb' }],
+    });
+    const home = service.createRootedFileSystem('/');
+    let removed = false;
+    const forget = indexesOf(service).forgetRemovedDirectory.bind(indexesOf(service));
+    vi.spyOn(indexesOf(service), 'forgetRemovedDirectory').mockImplementation((directory) => {
+      removed = true;
+      forget(directory);
+    });
+    const heard = { listing: 0, directory: 0, sets: 0, listingSets: 0, sibling: 0 };
+    let listing = '';
+    let relisting: Promise<void> = Promise.resolve();
+    const relist = (): void => {
+      const previous = relisting;
+      relisting = (async () => {
+        await previous;
+        try {
+          const names = await home.readdir('');
+          listing = names.toSorted().join(',');
+        } catch {
+          /* A late event after the service's disposal: its view is stale, and the test has ended. */
+        }
+      })();
+    };
+    relist();
+    const after = (key: keyof typeof heard) => (): void => {
+      if (removed) {
+        heard[key] += 1;
+      }
+    };
+    home.watch({ paths: [''] }, () => {
+      after('listing')();
+      relist();
+    });
+    home.watch({ paths: ['x'], recursive: true }, after('directory'));
+    home.watch({ paths: ['y'], recursive: true }, after('sibling'));
+    home.watchChangeSets!({ paths: [''], recursive: true }, after('sets'));
+    home.watchChangeSets!({ paths: [''] }, after('listingSets'));
+
+    await expect(
+      service.permanentlyDeleteProjectDirectory({
+        projectId: x,
+        providerBasePath: 'x',
+        scope: { backend: 'indexeddb' },
+      }),
+    ).resolves.toMatchObject({ status: 'deleted' });
+    await vi.waitFor(() => {
+      for (const key of ['listing', 'directory', 'sets', 'listingSets'] as const) {
+        expect(heard[key], key).toBeGreaterThan(0);
+      }
+    });
+    await relisting;
+
+    const fresh = await home.readdir('');
+    expect(listing).toBe(fresh.toSorted().join(','));
+    expect(listing.split(',')).not.toContain('x');
+    if (mode === 'scoped') {
+      expect(heard.sibling).toBe(0);
+    }
+  });
+});
+
+/*
+ * Review m3: a rooted view reads through the one mount it captured, with no overlay of the mounts below it, so a route
+ * changed below a connection's root changes nothing that connection can see, and its watches of ancestors hear nothing.
+ */
+describe('a connection rooted above a changed route', () => {
+  it('should see no mount below its own root, before or after a route is added there', async () => {
+    const { service } = await memoryAuthority();
+    await service.configureProjectRoots({ projects: [route(x, 'dir-x')], roots: [] });
+    const home = service.createRootedFileSystem('/');
+    const before = await home.readdir('projects');
+
+    await service.configureProjectRoots({ projects: [route(x, 'dir-x'), route(y, 'dir-y')], roots: [] });
+
+    expect(before).toEqual([]);
+    await expect(home.readdir('projects')).resolves.toEqual([]);
+    await expect(home.exists(`projects/${y}`)).resolves.toBe(false);
+    await expect(service.readdir('/projects')).resolves.toEqual(expect.arrayContaining([x, y]));
+  });
+
+  it("should not reset the root connection's chat-metadata watch when a project is created elsewhere", async () => {
+    const { service } = await memoryAuthority();
+    await service.configureProjectRoots({ projects: [route(x, 'dir-x')], roots: [] });
+    const home = service.createRootedFileSystem('/');
+    const chatMetadata = {
+      paths: [''],
+      recursive: true,
+      includes: ['*', 'projects/*', 'projects/*/.tau', 'projects/*/.tau/chats', 'projects/*/.tau/chats/*'],
+    };
+    const sets: ChangeSet[] = [];
+    const events: WatchEvent[] = [];
+    home.watchChangeSets!(chatMetadata, (set) => sets.push(set));
+    home.watch(chatMetadata, (event) => events.push(event));
+    home.watch({ paths: ['projects'] }, (event) => events.push(event));
+
+    await service.configureProjectRoots({ projects: [route(x, 'dir-x'), route(y, 'dir-y')], roots: [] });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+
+    expect(sets).toEqual([]);
+    expect(events).toEqual([]);
+  });
+});
+
+/* Review nit: an unrooted watch spells its paths as mount prefixes are spelled, `.` and `..` resolved. */
+describe('an unrooted watch of a path with dot segments', () => {
+  it('should be reset by a change of the route its path resolves to', async () => {
+    const { service } = await memoryAuthority();
+    await service.configureProjectRoots({ projects: [route(x, 'dir-x'), route(y, 'dir-y')], roots: [] });
+    const events: WatchEvent[] = [];
+    service.watch({ paths: [`/projects/${x}/../${y}`], recursive: true }, (event) => events.push(event));
+
+    await service.configureProjectRoots({ projects: [route(x, 'dir-x'), route(y, 'dir-w')], roots: [] });
+
+    expect(events).toEqual([{ type: 'reset' }]);
   });
 });

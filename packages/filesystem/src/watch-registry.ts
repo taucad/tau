@@ -323,11 +323,18 @@ function getEventPaths(event: PathChangeEvent): string[] {
  * parent), since the parent's listing names the changed mount; otherwise
  * nothing. Both may hold for a watch of several paths: the parent covers both.
  *
+ * A watch captured by a rooted view hears no ancestor's reset: the view reads
+ * through the one mount it captured, with no overlay of the mounts below it,
+ * so a mount changed below its watched path changes nothing it can see. Its
+ * paths lie under its root, so a watched ancestor of `prefix` means its
+ * captured mount is an ancestor too, never the changed one.
+ *
  * @param prefix - A canonical mount prefix other than `/`.
  * @param request - The watch's snapshot request.
+ * @param captured - Whether a rooted view registered the watch under its captured mount.
  * @returns The prefix to reset, or `undefined` when the change cannot reach the watch.
  */
-const topologyResetPrefix = (prefix: string, request: WatchRequest): string | undefined => {
+const topologyResetPrefix = (prefix: string, request: WatchRequest, captured: boolean): string | undefined => {
   const recursive = request.recursive ?? false;
   const parent = parentDirectory(prefix);
   let reset: string | undefined;
@@ -336,7 +343,7 @@ const topologyResetPrefix = (prefix: string, request: WatchRequest): string | un
     let scoped: string | undefined;
     if (watched === prefix || watched.startsWith(`${prefix}/`)) {
       scoped = prefix;
-    } else if (recursive ? watched === '/' || prefix.startsWith(`${watched}/`) : watched === parent) {
+    } else if (!captured && (recursive ? watched === '/' || prefix.startsWith(`${watched}/`) : watched === parent)) {
       scoped = parent;
     }
     if (scoped !== undefined) {
@@ -603,8 +610,9 @@ export class WatchRegistry {
    * listing of `P`'s parent, which names `P`'s mount; nothing else. So a
    * subscription is reset when one of its paths is at or below `P` (reset of
    * `P`), or when it can hear `P` itself: a recursive watch on an ancestor, or
-   * a direct watch on `P`'s parent (reset of the parent). Every other
-   * subscription is left alone. A prefix of `/` resets every subscription, as
+   * a direct watch on `P`'s parent (reset of the parent), unless a rooted
+   * view captured it, since a rooted view sees no mount below its own. Every
+   * other subscription is left alone. A prefix of `/` resets every subscription, as
    * {@link WatchRegistry.emitResetAll} does.
    *
    * Includes and excludes are not consulted, as `emitResetAll` never consults
@@ -626,7 +634,7 @@ export class WatchRegistry {
       /* Recursive watches on any ancestor or `P`, direct watches on `P`'s parent or `P`, every watch below `P`. */
       this._trie.collect(prefix, true, candidates);
       for (const subscription of candidates) {
-        const scoped = topologyResetPrefix(prefix, subscription.request);
+        const scoped = topologyResetPrefix(prefix, subscription.request, subscription.authority !== undefined);
         if (scoped !== undefined) {
           resets.set(subscription, mergeResets(resets.get(subscription), { prefix: scoped, reason }));
         }

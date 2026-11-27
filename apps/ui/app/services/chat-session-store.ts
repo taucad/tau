@@ -848,13 +848,21 @@ const isLive = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>): boole
   (snapshot.matches({ run: 'stopped' }) && snapshot.context.turn !== undefined);
 
 /**
- * Whether a run's end is this chat's to show: the machine is still showing it live, as the run its turn placed or the
- * run it presents. An idle chat is shown no history, a turn is never ended by an earlier run's row (W0.2), and an end
- * is never shown twice, which would settle a turn twice.
+ * Whether the end of the log's current run is this chat's to show: the machine is still showing a run live, and its
+ * turn placed this run, it presents this run, or it holds no turn and is not admitting a gesture of its own. Such a
+ * machine only observes the log, so whatever run it shows, the log's current run having ended means none is open
+ * (A-1): a read can fold a run's `running` and its end together, end a run that never ran, or end a later run after
+ * the one the machine presents. While this page admits its own gesture, that admission's answer moves the machine.
+ * An idle chat is shown no history, a turn is never ended by an earlier run's row (W0.2), and an end is never shown
+ * twice, which would settle a turn twice.
  */
 const endsHere = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>, runId: string): boolean => {
   const { turn, activeRunId } = snapshot.context;
-  return isLive(snapshot) && (turn?.runId === runId || (activeRunId === runId && snapshot.matches({ run: 'running' })));
+  const observesOnly = turn === undefined && !snapshot.matches({ run: { queued: 'admitting' } });
+  return (
+    isLive(snapshot) &&
+    (observesOnly || turn?.runId === runId || (activeRunId === runId && snapshot.matches({ run: 'running' })))
+  );
 };
 
 /** The two phases that OPEN a run and keep its project busy (I24); every other phase settles one. */

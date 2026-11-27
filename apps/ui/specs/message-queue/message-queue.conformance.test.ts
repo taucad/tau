@@ -60,6 +60,7 @@ describe('MessageQueue.tla implementation correspondence', () => {
           'MessageQueue.release-stopped.cfg',
           'MessageQueue.late-terminal-capture.cfg',
           'MessageQueue.withdraw-releases-held.cfg',
+          'MessageQueue.refuse-accepted.cfg',
           'QueuePlacement.target.cfg',
           'QueuePlacement.cross-host-replay.cfg',
           'QueuePlacement.unscoped-rebase.cfg',

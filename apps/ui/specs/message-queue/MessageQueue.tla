@@ -326,6 +326,10 @@
 \* Send now spoken in flight (2026-11-27): the row the person sent with Send now keeps its live region while its
 \* durable steer is in flight, past `onSteer` settling, and an automatic send stays silent. Presentation only. No action
 \* or verdict changes.
+\* Queued send cancelled before it is queued (2026-11-27): `requestTurn` takes an abort signal. A send cancelled before
+\* its queue write is never written; one cancelled during the write is removed again under the queue's lock before the
+\* queue is woken, as an unsent entry's removal. The message never enters `Queue`, so it is the model's not-yet-sent
+\* composer text. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

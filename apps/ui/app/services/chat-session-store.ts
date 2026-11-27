@@ -2098,9 +2098,15 @@ export class ChatSessionStore {
    *
    * @param chatId - The chat the person acted on.
    * @param gesture - What they did.
+   * @param options - `signal` aborts a send until it is in the chat's queue: once aborted, it is not queued, or is
+   *   taken out again under the queue's lock before anything is woken to deliver it, and the draft is left as it is.
    * @public
    */
-  public async requestTurn(chatId: string, gesture: ChatTurnGesture): Promise<void> {
+  public async requestTurn(
+    chatId: string,
+    gesture: ChatTurnGesture,
+    options?: Readonly<{ signal?: AbortSignal }>,
+  ): Promise<void> {
     const session = this.#sessions.get(chatId);
     if (!session) {
       return;
@@ -2118,14 +2124,35 @@ export class ChatSessionStore {
       ...(afterTerminalRunId === undefined ? {} : { afterTerminalRunId }),
       ...(execution === undefined ? {} : { execution }),
     };
-    const record = await session.messageQueueStore.update((current) => {
+    /* Read anew at each step: the person can cancel while any of the awaits below is pending. */
+    const isCancelled = (): boolean => options?.signal?.aborted === true;
+    if (isCancelled()) {
+      return;
+    }
+    /* Set by the write when it queued this send (a holder: the write's callback runs inside the await). */
+    const queuedHere = { value: false };
+    let record = await session.messageQueueStore.update((current) => {
       if (this.#sessions.get(chatId) !== session || session.messageQueueRef.getSnapshot().status !== 'active') {
         throw new Error('This chat is no longer open. Your message has not been sent.');
       }
-      return current.items.some((entry) => entry.id === item.id)
-        ? current
-        : { ...current, items: [...current.items, item] };
+      /* Under the queue's lock: a send cancelled while it waited for the lock is never queued. */
+      if (isCancelled() || current.items.some((entry) => entry.id === item.id)) {
+        return current;
+      }
+      queuedHere.value = true;
+      return { ...current, items: [...current.items, item] };
     });
+    if (isCancelled()) {
+      /* Cancelled after its write and before the queue was woken: take it out again, as an unsent entry's removal. */
+      if (queuedHere.value) {
+        record = await session.messageQueueStore.update((current) => ({
+          ...current,
+          items: current.items.filter((entry) => entry.id !== item.id),
+        }));
+        this.#loadOutbox(session, record);
+      }
+      return;
+    }
     /* The thread or the strip shows it from the write on, even while a delivery elsewhere holds the outbox. */
     this.#loadOutbox(session, record);
     const draft = session.draftActorRef.getSnapshot().context;

@@ -303,6 +303,9 @@
 \* H-1 review (2026-11-27): `Deliver` may now be refused on any try, including a fresh key on an idle host, so `Refuse`
 \* is reached from the state the runtime meets. `RefuseOnlyUnapplied` gates `Refuse`'s `m \notin Accepted`; the
 \* `refuse-accepted` witness (pinned with the other tables) drops it and must violate `ComposerExclusive`.
+\* One voice during an open (2026-11-27): `chat-message-queue-view.tsx` makes a queued row's busy label a live region
+\* only for the person's own Send now or a failed send; an automatic send shows the same words without speaking.
+\* Presentation only. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

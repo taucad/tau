@@ -1274,6 +1274,35 @@ describe('live workbench record host', () => {
     host.unmount();
   });
 
+  it("announces neither the arrangement the project opens with nor this device's own write", async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    // The open's arrangement is no change the person hears about: the open speaks once, in its own region.
+    expect(screen.getByRole('status').textContent).toBe('');
+    act(() => {
+      host.controller.registerViewer(landAtOnce());
+      host.dockview.attach(landAtOnce());
+      host.intent('revisions');
+    });
+    await waitFor(
+      () => {
+        expect(host.writes).toHaveBeenCalledOnce();
+        expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest);
+      },
+      { timeout: 1600 },
+    );
+    // The echo of this device's own write is the person's own action, not news.
+    expect(screen.getByRole('status').textContent).toBe('');
+    await host.set(encoder.encode(workbenchRecords.layout.serialize(second())));
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(second());
+    });
+    expect(screen.getByRole('status').textContent).toBe('Workbench arrangement updated.');
+    host.unmount();
+  });
+
   it('should leave the viewer adapter untouched when only the workbench lane changes', async () => {
     const host = mount();
     await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));

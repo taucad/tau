@@ -279,6 +279,8 @@ Hover never reveals the only route to an action (DESIGN Composition and visible 
 | Textual navigation ("View all")                                  | `link`                           | `default`                                     |
 | Two to five mutually exclusive views, or a kernel shelf (Rule 3) | `ToggleGroup`                    | —                                             |
 
+At phone width, [Mobile UI Policy](./mobile-ui-policy.md) Rule 4 maps these roles to the surface (outlined circle on page chrome, filled on the composer and sheets, dark capsule for the primary action) and Rule 2 sets drawn sizes and the 44 px hit area; this table governs from `md` up.
+
 `sm` shares `default`'s 32 px height and only tightens padding and type; `xs` and `icon-xs` (24 px) are the smallest targets that ship. Never change a Button's height, padding, size or text colour through `className`; choose a size, or add a variant in `packages/ui`. The base already sizes icons to 16 px and spaces them with `gap-2`, so do not add `mr-2` or restate `size-4`. A trailing arrow means navigation or a flow that continues; a leading glyph names the object or state. Icon-only buttons carry `aria-label` and a tooltip with the same words.
 
 **Why**: 52 Buttons overrode their size through `className` (six in `/plugins`), the community Remix action rendered enabled text in `text-muted-foreground` and turned accent on hover, which DESIGN's "quiet buttons are still visible buttons" forbids, and 15 icon-only Buttons had no name.

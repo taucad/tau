@@ -19,7 +19,7 @@ import {
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
-import { ChatComposerSubmitContext } from '#hooks/chat-composer-submit.js';
+import { chatComposerSubmitContext } from '#hooks/chat-composer-submit.js';
 import { ChatCreditsNotice } from '#components/chat/chat-credits-notice.js';
 import { selectVisibleChatErrorEntry } from '#utils/run-auto-resume-plan.js';
 import { useProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
@@ -436,7 +436,7 @@ const ExpandedChatHistory = memo(function ({
 
   return (
     <ChatAttachmentDirectoriesContext.Provider value={attachmentDirectories}>
-      <ChatComposerSubmitContext.Provider value={submitComposer}>
+      <chatComposerSubmitContext.Provider value={submitComposer}>
         <ChatQuestionsProvider>
           <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
             <FloatingPanelContent
@@ -557,7 +557,7 @@ const ExpandedChatHistory = memo(function ({
             </FloatingPanelContent>
           </FloatingPanel>
         </ChatQuestionsProvider>
-      </ChatComposerSubmitContext.Provider>
+      </chatComposerSubmitContext.Provider>
     </ChatAttachmentDirectoriesContext.Provider>
   );
 });

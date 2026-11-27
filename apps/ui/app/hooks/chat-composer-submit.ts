@@ -6,7 +6,7 @@ import { createContext, useContext } from 'react';
  * such a card asks the person to press Send instead.
  * @public
  */
-export const ChatComposerSubmitContext = createContext<(() => Promise<void>) | undefined>(undefined);
+export const chatComposerSubmitContext = createContext<(() => Promise<void>) | undefined>(undefined);
 
 /**
  * The composer's Send, when this chat panel has one.
@@ -14,4 +14,4 @@ export const ChatComposerSubmitContext = createContext<(() => Promise<void>) | u
  * @returns The submit function, or `undefined`.
  * @public
  */
-export const useChatComposerSubmit = (): (() => Promise<void>) | undefined => useContext(ChatComposerSubmitContext);
+export const useChatComposerSubmit = (): (() => Promise<void>) | undefined => useContext(chatComposerSubmitContext);

@@ -11,7 +11,6 @@ import {
   chatComposerCollapsibleControlsClassName,
   chatComposerEditorAreaClassName,
   chatComposerEditorTextClassName,
-  chatComposerGhostPillClassName,
   chatComposerMainEditorAreaClassName,
   chatComposerModelTriggerClassName,
   chatComposerPlaceholder,
@@ -113,12 +112,12 @@ function ServedComposerBar(): React.JSX.Element {
         </Button>
         <div
           data-slot='composer-collapsible'
-          className={cn(chatComposerCollapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
+          className={cn(chatComposerCollapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-2')}
         >
           <span
             data-slot='mode-placeholder'
             aria-hidden='true'
-            className={cn(chatComposerGhostPillClassName, 'flex w-7 items-center justify-center px-0')}
+            className={cn(chatComposerAddTriggerClassName, 'flex items-center justify-center')}
           >
             <span className='size-4' />
           </span>
@@ -127,7 +126,7 @@ function ServedComposerBar(): React.JSX.Element {
       <div data-slot='composer-right' className={chatComposerBarRightClassName}>
         <div
           data-slot='composer-collapsible'
-          className={cn(chatComposerCollapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
+          className={cn(chatComposerCollapsibleControlsClassName, 'gap-1 pointer-coarse:gap-2')}
         >
           <span
             data-slot='agent-trigger-placeholder'

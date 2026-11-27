@@ -1,6 +1,6 @@
 import { arriveFirstMessage, departingFirstMessageOf } from '#lib/departing-first-message.js';
 import { readPhoneFrameHint } from '#lib/frame-hint.js';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { useImperativeHandle } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CadAgentExecution } from '@taucad/chat';
@@ -33,26 +33,8 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
   }: ChatTextareaProperties & { readonly ref?: React.Ref<Partial<ChatTextareaHandle>> }) => {
     useImperativeHandle(ref, () => ({ focus: mockFocus }));
     capturedTextarea = properties;
-    return (
-      <>
-        {properties.creationLocationControl}
-        <button type='button'>Submit draft</button>
-      </>
-    );
+    return <button type='button'>Submit draft</button>;
   },
-}));
-vi.mock('#components/filesystem/workspace-selector.js', () => ({
-  WorkspaceSelector: ({
-    variant,
-    'data-chat-textarea-focustrap': isInsideFocusTrap,
-  }: {
-    readonly variant: string;
-    readonly 'data-chat-textarea-focustrap'?: unknown;
-  }) => (
-    <div data-testid={`location-${variant}`} data-is-inside-focus-trap={String(Boolean(isInsideFocusTrap))}>
-      Location {variant}
-    </div>
-  ),
 }));
 const remembered = vi.hoisted(() => ({ preference: 'openscad' as string }));
 vi.mock('#hooks/use-kernel.js', () => ({
@@ -157,9 +139,8 @@ describe('NewProjectChatComposer', () => {
       { hash: 'b'.repeat(64), mediaType: 'application/pdf', byteLength: 9, filename: 'spec.pdf' },
     ];
     render(<NewProjectChatComposer />);
-    expect(capturedTextarea?.creationLocationControl).toBeDefined();
+    expect(capturedTextarea?.creationLocation).toBe(locationState);
     expect(capturedTextarea?.isSubmitDisabled).toBe(false);
-    expect(screen.getByTestId('location-toolbar')).toHaveAttribute('data-is-inside-focus-trap', 'true');
 
     await act(async () => {
       await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
@@ -333,7 +314,7 @@ describe('NewProjectChatComposer', () => {
     expect(mockConsumeDraft).not.toHaveBeenCalled();
   });
 
-  it('does not mount location controls and keeps Home ready without capability', () => {
+  it('offers no location and keeps Home ready without capability', () => {
     locationState = {
       phase: 'ready',
       hasWebAccessCapability: false,
@@ -343,7 +324,6 @@ describe('NewProjectChatComposer', () => {
       canCreate: true,
     };
     render(<NewProjectChatComposer />);
-    expect(capturedTextarea?.creationLocationControl).toBeUndefined();
-    expect(screen.queryByText(/Location/)).not.toBeInTheDocument();
+    expect(capturedTextarea?.creationLocation).toBeUndefined();
   });
 });

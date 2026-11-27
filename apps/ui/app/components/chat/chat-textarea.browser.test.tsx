@@ -1,3 +1,7 @@
+import {
+  chatComposerGhostPillClassName,
+  chatComposerModelTriggerClassName,
+} from '@taucad/chat-ui/components/chat-input-styles';
 import '#styles/global.css';
 import { createRef, useRef, useState } from 'react';
 import type { ComponentProps } from 'react';
@@ -52,17 +56,23 @@ vi.doMock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => undefined,
 }));
 vi.doMock('#components/chat/chat-agent-sheet.js', () => ({
-  ghostPillClass: 'h-7 rounded-full px-2.5 font-normal text-muted-foreground hover:text-foreground',
+  ghostPillClass: chatComposerGhostPillClassName,
   ChatAgentSheet: () => (
-    <Button variant='ghost' size='sm' className='h-7 min-w-0 shrink'>
+    <Button variant='ghost' size='sm' className={chatComposerModelTriggerClassName}>
       <span data-slot='trigger-model' className='truncate'>
         Haiku 5.5
       </span>
     </Button>
   ),
 }));
+/* The + menu's location actions navigate; the composer renders here without a router. */
+vi.doMock('react-router', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useNavigate: () => () => undefined,
+}));
 vi.doMock('#components/chat/chat-kernel-selector.js', () => ({
-  KernelPreferenceSelector: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
+  useKernelChoices: () => ({ groups: [], rows: [], choose: () => false }),
+  KernelRow: (): React.ReactNode => null,
 }));
 vi.doMock('@taucad/ui-kit/icons/svg-icon', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -329,7 +339,7 @@ describe('composer bar resize geometry', () => {
     }
   });
 
-  it('restores kernel text when widened and refits changed model text at the same width', async () => {
+  it('restores the labels when widened and refits changed model text at the same width', async () => {
     await page.viewport(320, 720);
     const { container } = renderComposer({ enableKernelSelector: true });
     const bar = container.querySelector<HTMLElement>('[data-slot=composer-bar]');
@@ -340,16 +350,15 @@ describe('composer bar resize geometry', () => {
     // This suite substitutes the model control; these are real CSS/layout assertions,
     // not acceptance of a product model/level selection gesture.
     model.textContent = 'A sufficiently long current model name';
-    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(true);
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideMode')).toBe(true);
     await page.viewport(800, 720);
-    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(false);
-    expect(Object.hasOwn(bar.dataset, 'hideMode')).toBe(false);
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideMode')).toBe(false);
     expect(Object.hasOwn(bar.dataset, 'hideLevel')).toBe(false);
     expect(model.scrollWidth).toBeLessThanOrEqual(model.clientWidth);
     await page.viewport(320, 720);
-    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(true);
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideMode')).toBe(true);
     model.textContent = 'Short';
-    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(false);
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideMode')).toBe(false);
     expect(model.scrollWidth).toBeLessThanOrEqual(model.clientWidth);
   });
 });
@@ -733,7 +742,7 @@ const reachableControls = (): string[] =>
     .map((button) => button.getAttribute('aria-label') ?? button.textContent.trim());
 
 /**
- * Every reachable control's hit area reaches 6px beyond each edge — a 28px control is a
+ * Every reachable control's hit area reaches 2px beyond each edge — a filled 36px control is a
  * 40px target — and a tap just inside that ring belongs to it alone (I3).
  */
 const expectTouchTargets = (): void => {
@@ -743,16 +752,16 @@ const expectTouchTargets = (): void => {
   expect(buttons.length).toBeGreaterThan(1);
   for (const button of buttons) {
     const box = button.getBoundingClientRect();
-    expect(box.height + 12).toBeGreaterThanOrEqual(40);
-    expect(box.width + 12).toBeGreaterThanOrEqual(40);
-    expect(getComputedStyle(button, '::after').inset).toBe('-6px');
+    expect(box.height + 4).toBeGreaterThanOrEqual(40);
+    expect(box.width + 4).toBeGreaterThanOrEqual(40);
+    expect(getComputedStyle(button, '::after').inset).toBe('-2px');
     const middle = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
     for (const [x, y] of [
       // Hit testing rounds to whole pixels, so probe 1px inside the ring's edge.
-      [box.left - 5, middle.y],
-      [box.right + 5, middle.y],
-      [middle.x, box.top - 5],
-      [middle.x, box.bottom + 5],
+      [box.left - 1, middle.y],
+      [box.right + 1, middle.y],
+      [middle.x, box.top - 1],
+      [middle.x, box.bottom + 1],
     ] as const) {
       expect(document.elementFromPoint(x, y)?.closest('button'), `${button.ariaLabel} at ${x},${y}`).toBe(button);
     }
@@ -761,7 +770,7 @@ const expectTouchTargets = (): void => {
   for (const row of rows.values()) {
     const boxes = row.map((button) => button.getBoundingClientRect()).toSorted((a, b) => a.left - b.left);
     for (const [index, box] of boxes.slice(1).entries()) {
-      expect(box.left - boxes[index]!.right).toBeGreaterThanOrEqual(12 - 0.5);
+      expect(box.left - boxes[index]!.right).toBeGreaterThanOrEqual(8 - 0.5);
     }
   }
 };
@@ -783,7 +792,8 @@ describe('phone composer (D14, D18)', () => {
 
     await expect.poll(reachableControls).toEqual(['Add', 'Dictate', 'Send']);
     const composer = document.querySelector<HTMLElement>('[data-collapsed]')!;
-    expect(composer.getBoundingClientRect().height).toBeLessThanOrEqual(48);
+    // 36px controls with 8px around them and the border: a 54px pill.
+    expect(composer.getBoundingClientRect().height).toBeLessThanOrEqual(54);
     expectTouchTargets();
     await page.screenshot({
       element: screen.getByRole('region', { name: 'Composer' }),
@@ -796,7 +806,7 @@ describe('phone composer (D14, D18)', () => {
     await screen.findByRole('button', { name: 'Dictate' });
 
     await page.getByRole('textbox').click();
-    await expect.poll(reachableControls).toEqual(['Add', 'Kernel: Manifold', 'Haiku 5.5', 'Dictate', 'Send']);
+    await expect.poll(reachableControls).toEqual(['Add', 'Haiku 5.5', 'Dictate', 'Send']);
     expect(document.querySelector('[data-collapsed]')).toBeNull();
     const [model, dictate, send] = ['Haiku 5.5', 'Dictate', 'Send'].map((name) =>
       screen.getByRole('button', { name }).getBoundingClientRect(),
@@ -835,7 +845,7 @@ describe('phone composer (D14, D18)', () => {
     render(<PhoneComposer />);
     await page.getByRole('button', { name: 'Add' }).click();
 
-    await expect.element(page.getByRole('menuitem', { name: 'Attach image or PDF' })).toBeVisible();
+    await expect.element(page.getByRole('option', { name: 'Attach image or PDF' })).toBeVisible();
   });
 
   it('swaps Send for Stop while a turn streams, and Stop ends the turn', async () => {

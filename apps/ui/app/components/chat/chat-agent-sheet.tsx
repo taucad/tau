@@ -1,3 +1,4 @@
+import { chatComposerGhostPillClassName } from '@taucad/chat-ui/components/chat-input-styles';
 /**
  * The composer's one agent control: who runs the next turn, on which model,
  * how hard it thinks, and where (D5, Direction 1).
@@ -18,7 +19,17 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Check, ChevronDown, ChevronRight, CircleAlert, Copy, Plus, Zap } from 'lucide-react';
+import {
+  AcpModelRows,
+  acpModelInUse,
+  acpModelName,
+  AgentGlyph,
+  ModelRow,
+  MoreModelsRow,
+  useAcpModelLineup,
+} from '#components/chat/chat-agent-models.js';
+import type { AcpSheetAgent, Refusal, SheetAgent } from '#components/chat/chat-agent-models.js';
+import { Check, ChevronDown, ChevronRight, CircleAlert, Copy, Plus, Zap } from 'lucide-react';
 import type { AcpAgentExecution, TauAgentHostId } from '@taucad/chat';
 import { reasoningLevels } from '@taucad/chat/constants';
 import type { ReasoningLevel } from '@taucad/chat/constants';
@@ -41,7 +52,7 @@ import {
   DrawerTrigger,
   useIsInsideDrawer,
 } from '@taucad/ui/components/drawer';
-import { menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { menuItemVariants, menuViewFooterClass, menuViewHeaderClass } from '@taucad/ui/components/menu.variants';
 import { stepBackOnEmptySearch, ViewStackBack, viewStackEnterClass } from '@taucad/ui/components/view-stack';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { SwitchRow } from '@taucad/ui/components/switch';
@@ -50,7 +61,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
-import type { IconId } from '@taucad/ui-kit/icons/svg-icon';
 import { Tau } from '@taucad/ui-kit/icons/tau';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { usePlatform } from '@taucad/ui/hooks/use-platform';
@@ -69,7 +79,8 @@ import { externalAgentRefusalReasons } from '@taucad/chat-ui/utils/external-agen
 import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { groupModels } from '@taucad/chat-ui/utils/model-groups';
-import { ModelPinButton } from '@taucad/chat-ui/components/model-pin-button';
+import { isDefaultChoice, lineupOf, recommendedChoice, withoutRecommended } from '@taucad/chat-ui/utils/model-lineup';
+import type { ModelLineup } from '@taucad/chat-ui/utils/model-lineup';
 import { tauModelReadiness, tauModelRefusal } from '@taucad/chat-ui/utils/new-chat-execution';
 import { modelReasoning, offeredReasoningLevels } from '#utils/model-reasoning.js';
 
@@ -86,7 +97,7 @@ export const reasoningLevelNames: Readonly<Record<ReasoningLevel, string>> = {
 export const openModelSelectorKeyCombination = { key: '/', modKey: true } satisfies KeyCombination;
 
 /** The ghost pill every composer control shares: h-7, round, no boundary at rest, muted until hover. @public */
-export const ghostPillClass = 'h-7 rounded-full px-2.5 font-normal text-muted-foreground hover:text-foreground';
+export const ghostPillClass = chatComposerGhostPillClassName;
 
 type Option = { readonly id: string; readonly name: string; readonly isDisabled?: boolean };
 
@@ -229,51 +240,7 @@ function SegmentedControl({
 // Who can run the chat
 // ---------------------------------------------------------------------------
 
-type Refusal = {
-  readonly reason: string;
-  readonly code: string;
-  readonly command: string | undefined;
-  readonly where: string;
-};
-
-type SheetAgent =
-  | { readonly kind: 'tau'; readonly key: 'tau'; readonly name: string }
-  | {
-      readonly kind: 'acp';
-      readonly key: string;
-      /** The agent's own name, with its host once more than one host offers agents. */
-      readonly name: string;
-      /** The agent's own name alone: the agent list's headings already say the host. */
-      readonly displayName: string;
-      readonly hostId: TauAgentHostId;
-      readonly agentId: string;
-      readonly where: string;
-      readonly models: ExternalAgentDescriptor['models'];
-      readonly defaultModel: string | undefined;
-      readonly refusal: Refusal | undefined;
-    };
-
-type AcpSheetAgent = Extract<SheetAgent, { readonly kind: 'acp' }>;
-
 const tauAgent: SheetAgent = { kind: 'tau', key: 'tau', name: 'Tau' };
-
-/** The brand an external agent runs as; an agent Tau has no sprite for falls back to a generic glyph. */
-const agentGlyphs: Readonly<Record<string, IconId>> = { claude: 'claude', codex: 'openai', grok: 'grok' };
-
-function AgentGlyph({
-  agentId,
-  className,
-}: {
-  readonly agentId: string;
-  readonly className?: string;
-}): React.JSX.Element {
-  const id = agentGlyphs[agentId];
-  return id === undefined ? (
-    <Bot className={className} aria-hidden='true' />
-  ) : (
-    <SvgIcon id={id} className={className} aria-hidden='true' />
-  );
-}
 
 /** An agent's mark where agents are chosen: Tau's own, or the external agent's. */
 function SheetAgentGlyph({
@@ -333,6 +300,7 @@ const acpAgent = (
     where,
     models: descriptor.models,
     defaultModel: descriptor.defaultModel,
+    thoughtLevel: descriptor.thoughtLevel,
     refusal,
   };
 };
@@ -395,9 +363,8 @@ type SheetModel = {
   readonly isNamePending: boolean;
   readonly levels: readonly Level[];
   readonly level: Level | undefined;
-  /** An agent's own "Default" effort means the agent decides, so the trigger does not print it. */
   readonly isLevelShown: boolean;
-  /** E4: the level the model runs at by default, badged Recommended; external agents name none. */
+  /** E4: the level the model runs at by default, badged Recommended. */
   readonly recommended: string | undefined;
   readonly setLevel: (id: string) => void;
   /** The agent's own switches and choices, one list, drawn under Settings. */
@@ -432,8 +399,6 @@ type Setting =
     };
 
 const isFastOption = (option: AgentConfigOption): boolean => /fast/i.test(`${option.id} ${option.name}`);
-
-const isDefaultValue = (option: Option): boolean => option.id === 'default' || /^default\b/i.test(option.name);
 
 /** A select of exactly Off and On, by value. */
 const onOffOf = (option: SelectOption): { readonly on: string; readonly off: string } | undefined => {
@@ -531,25 +496,50 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
     };
   }
   const selected = execution.kind === 'acp' ? execution.model : undefined;
-  const modelId = selected ?? current.defaultModel;
+  const modelId = acpModelInUse(current, selected);
   const thought = configOptionOf(agentConfig, 'thought_level');
-  const levels = thought
-    ? configValues(thought)
-        .map((value) => ({ id: value.value, name: value.name, description: value.description ?? undefined }))
-        .toSorted((left, right) => acpReasoningOrder.indexOf(left.id) - acpReasoningOrder.indexOf(right.id))
+  const values = thought
+    ? configValues(thought).map((value) => ({
+        id: value.value,
+        name: value.name,
+        description: value.description ?? undefined,
+      }))
     : [];
+  /* The badge follows what a fresh session runs, never the level the person chose since. */
+  const discovered = current.models.find((entry) => entry.id === modelId)?.thoughtLevel ?? current.thoughtLevel;
+  const discoveredValues = discovered ? configValues(discovered) : [];
+  const recommended = recommendedChoice(
+    discoveredValues.length > 0
+      ? discoveredValues.map((value) => ({ id: value.value, name: value.name, description: value.description }))
+      : values,
+    discovered?.currentValue,
+  );
+  /* An agent's own "Default" level is not a level: the level it stands for shows as in use, badged Recommended. */
+  const levels = values
+    .filter((value) => !isDefaultChoice(value))
+    .map((value) => ({
+      ...value,
+      name: withoutRecommended(value.name).text || value.name,
+      description: value.description === undefined ? undefined : withoutRecommended(value.description).text,
+    }))
+    .toSorted((left, right) => acpReasoningOrder.indexOf(left.id) - acpReasoningOrder.indexOf(right.id));
   const thoughtValue = thought ? agentConfig.valueOf(thought) : undefined;
-  const level = levels.find((entry) => entry.id === thoughtValue);
+  const level = levels.find(
+    (entry) =>
+      entry.id ===
+      (values.some((value) => value.id === thoughtValue && isDefaultChoice(value)) ? recommended : thoughtValue),
+  );
   const settings = settingsOf(agentConfig);
-  const name = current.models.find((entry) => entry.id === modelId)?.name ?? modelId ?? 'Default';
+  const listed = current.models.find((entry) => entry.id === modelId);
+  const name = listed ? acpModelName(listed) : (modelId ?? 'Default');
   return {
     glyph: <AgentGlyph agentId={current.agentId} className={glyphClass} />,
     name,
     isNamePending: false,
     levels,
     level,
-    isLevelShown: level !== undefined && !isDefaultValue(level),
-    recommended: undefined,
+    isLevelShown: level !== undefined,
+    recommended,
     setLevel: (id) => {
       if (thought) {
         agentConfig.select(thought.id, id);
@@ -712,7 +702,7 @@ const changedSettings = (settings: readonly Setting[]): string =>
         return setting.isOn ? [setting.name] : [];
       }
       const option = setting.options.find((entry) => entry.id === setting.value);
-      return option === undefined || option.id === setting.options[0]?.id || isDefaultValue(option)
+      return option === undefined || option.id === setting.options[0]?.id || isDefaultChoice(option)
         ? []
         : [option.name];
     })
@@ -874,8 +864,11 @@ function Unavailable({ agent }: { readonly agent: AcpSheetAgent & { readonly ref
 // The model list
 // ---------------------------------------------------------------------------
 
-/** Tau's catalog grouped as approach A — pinned, by maker, this computer — including the chat's model when the user hid it. */
-const useTauModelGroups = (selectedId: string): ReturnType<typeof groupModels<Model>> => {
+/**
+ * Tau's catalog grouped as approach A — pinned, by maker, this computer — including the chat's model when the user
+ * hid it, with older versions behind More models. Pinned and local models, and the model in use, stay on top.
+ */
+const useTauModelLineup = (selectedId: string): ModelLineup<Model> => {
   const { data: allModels = [], availableModels, pinnedIds } = useModels();
   return useMemo(() => {
     const current = allModels.find((entry) => entry.id === selectedId);
@@ -883,54 +876,13 @@ const useTauModelGroups = (selectedId: string): ReturnType<typeof groupModels<Mo
       current && !availableModels.some((entry) => entry.id === current.id)
         ? [...availableModels, current]
         : availableModels;
-    return groupModels(visible, pinnedIds);
+    return lineupOf(
+      groupModels(visible, pinnedIds),
+      (entry) => entry.name,
+      (entry) => entry.id === selectedId || pinnedIds.includes(entry.id) || entry.providerKind !== 'tau-hosted',
+    );
   }, [allModels, availableModels, selectedId, pinnedIds]);
 };
-
-function ModelRow({
-  glyph,
-  name,
-  isInUse,
-  level,
-  pinned,
-}: {
-  readonly glyph: React.ReactNode;
-  readonly name: string;
-  readonly isInUse: boolean;
-  readonly level: string | undefined;
-  /** F1: the row's pin button, when the list is pinnable. */
-  readonly pinned?: { readonly isOn: boolean; readonly toggle: () => void } | undefined;
-}): React.JSX.Element {
-  return (
-    <span className='flex w-full min-w-0 items-center justify-between gap-2'>
-      <span className='flex min-w-0 items-center gap-2'>
-        {glyph}
-        <span className='truncate'>{name}</span>
-      </span>
-      <span className='flex shrink-0 items-center gap-2'>
-        {isInUse ? (
-          <>
-            {level ? <span className='text-xs text-muted-foreground'>{level}</span> : null}
-            <Check aria-hidden='true' />
-          </>
-        ) : null}
-        {/* F1: pulled into the row's padding so the row stays as tall; shown on a pinned row, else while highlighted. */}
-        {pinned ? (
-          <ModelPinButton
-            name={name}
-            isOn={pinned.isOn}
-            tabIndex={-1}
-            className={cn(
-              '-my-1 -mr-1 pointer-coarse:size-9',
-              !pinned.isOn && 'opacity-0 group-data-[selected=true]/row:opacity-100 pointer-coarse:opacity-100',
-            )}
-            onToggle={pinned.toggle}
-          />
-        ) : null}
-      </span>
-    </span>
-  );
-}
 
 /**
  * One agent's models: Tau's catalog by tier, or an external agent's own list.
@@ -941,19 +893,23 @@ function ModelList({
   agent,
   current,
   sheetModel,
+  isMore = false,
+  onMore,
   onChoose,
   onBack,
 }: {
   readonly agent: SheetAgent;
   readonly current: SheetAgent;
   readonly sheetModel: SheetModel;
+  /** The page behind More models: the older versions only. */
+  readonly isMore?: boolean;
+  readonly onMore: () => void;
   /** `modelId` is absent only for an external agent that runs on its own default. */
   readonly onChoose: (agent: SheetAgent, modelId: string | undefined) => void;
   readonly onBack: () => void;
 }): React.JSX.Element {
   const {
     model: { modelId },
-    execution: { execution },
   } = useChatComposer();
   const { open: openSettings } = useSettingsDialog();
   const [query, setQuery] = useState('');
@@ -971,7 +927,7 @@ function ModelList({
     }
     setQuery(next);
   };
-  const tauGroups = useTauModelGroups(modelId);
+  const tauLineup = useTauModelLineup(modelId);
   /* F1: pinned models, read and written where the model overrides live (F2). */
   const { isPinningEnabled, pinnedIds, setPinned } = useModels();
   const pinOf = (entry: Model): { readonly isOn: boolean; readonly toggle: () => void } => ({
@@ -984,7 +940,7 @@ function ModelList({
   const onKeyDown = (event: React.KeyboardEvent): void => {
     if (isPinningEnabled && event.key === 'Enter' && event.shiftKey && agent.kind === 'tau') {
       const highlighted = event.currentTarget.querySelector<HTMLElement>('[cmdk-item][data-selected=true]');
-      const entry = tauGroups
+      const entry = tauLineup.all
         .flatMap((group) => group.items)
         .find((model) => model.id === highlighted?.dataset['value']);
       if (entry) {
@@ -995,15 +951,10 @@ function ModelList({
     }
     stepBackOnEmptySearch(query, onBack)(event);
   };
-  const selectedAcpModel = execution.kind === 'acp' ? execution.model : undefined;
-  const inUseValue =
-    current.key === agent.key
-      ? agent.kind === 'tau'
-        ? modelId
-        : agent.models.length === 0
-          ? 'default'
-          : (selectedAcpModel ?? agent.defaultModel)
-      : undefined;
+  const { acpLineup, acpInUse, inUseValue } = useAcpModelLineup(agent, current, modelId);
+  /* A search covers every model, as the kernel picker's does; otherwise this page's cut. */
+  const cut = query === '' ? (isMore ? 'more' : 'top') : 'all';
+  const hasMore = cut === 'top' && (acpLineup ?? tauLineup).more.length > 0;
 
   if (agent.kind === 'acp' && agent.refusal !== undefined) {
     return <Unavailable agent={{ ...agent, refusal: agent.refusal }} />;
@@ -1011,8 +962,8 @@ function ModelList({
   return (
     <Command
       className='min-h-0 flex-1 bg-transparent'
-      /* Open on the model in use, as the agent list opens on the agent in use. */
-      defaultValue={inUseValue}
+      /* Open on the model in use, as the agent list opens on the agent in use; More models opens on its first row. */
+      defaultValue={isMore ? undefined : inUseValue}
       onKeyDown={onKeyDown}
     >
       <CommandInput
@@ -1028,7 +979,7 @@ function ModelList({
       >
         <CommandEmpty className='mx-2'>No models match “{query}”.</CommandEmpty>
         {agent.kind === 'tau' ? (
-          tauGroups.map((group) => (
+          tauLineup[cut].map((group) => (
             <CommandGroup key={group.name} heading={group.name}>
               {group.items.map((entry) => {
                 const isInUse = current.kind === 'tau' && entry.id === modelId;
@@ -1038,7 +989,7 @@ function ModelList({
                     value={entry.id}
                     data-value={entry.id}
                     className='group/row'
-                    keywords={[entry.name, entry.provider.name, group.name]}
+                    keywords={[entry.name, entry.provider.name, group.name ?? '']}
                     onSelect={() => {
                       onChoose(agent, entry.id);
                     }}
@@ -1075,34 +1026,18 @@ function ModelList({
             </CommandItem>
           </CommandGroup>
         ) : (
-          /* The search field already names the agent; a heading is kept only to name a second host. */
-          <CommandGroup heading={agent.name === agent.displayName ? undefined : agent.name}>
-            {agent.models.map((entry) => {
-              const isInUse = current.key === agent.key && entry.id === (selectedAcpModel ?? agent.defaultModel);
-              return (
-                <CommandItem
-                  key={entry.id}
-                  value={entry.id}
-                  keywords={[entry.name, agent.name]}
-                  onSelect={() => {
-                    onChoose(agent, entry.id);
-                  }}
-                >
-                  {/* Agent-authored text: rendered as text, never resolved against Tau's catalog (VI3). */}
-                  <ModelRow
-                    glyph={<AgentGlyph agentId={agent.agentId} className='size-4' />}
-                    name={entry.name}
-                    isInUse={isInUse}
-                    level={isInUse && sheetModel.isLevelShown ? sheetModel.level?.name : undefined}
-                  />
-                </CommandItem>
-              );
-            })}
-          </CommandGroup>
+          <AcpModelRows
+            agent={agent}
+            groups={acpLineup![cut]}
+            inUse={acpInUse}
+            level={sheetModel.isLevelShown ? sheetModel.level?.name : undefined}
+            onChoose={onChoose}
+          />
         )}
+        {hasMore ? <MoreModelsRow onOpen={onMore} /> : null}
       </CommandList>
-      {agent.kind === 'tau' ? (
-        <div className='border-t p-1'>
+      {agent.kind === 'tau' && !isMore ? (
+        <div className={menuViewFooterClass}>
           <button
             type='button'
             className={cn(menuItemVariants({ highlight: 'selected' }), 'h-auto w-full')}
@@ -1212,7 +1147,17 @@ const focusOnOpen = (surface: HTMLElement | undefined): void => {
 };
 
 /** E2: effort is a page of its own, as the agents and the models are. */
-type SheetView = 'settings' | 'agents' | 'models' | 'effort' | 'options'; // E7: 'options' is the Settings page
+type SheetView = 'settings' | 'agents' | 'models' | 'more-models' | 'effort' | 'options'; // E7: 'options' is the Settings page
+
+/** Where a page's back row returns to. */
+const backLabels: Readonly<Record<SheetView, string>> = {
+  settings: 'settings',
+  agents: 'settings',
+  models: 'settings',
+  'more-models': 'models',
+  effort: 'settings',
+  options: 'settings',
+};
 
 function Sheet({
   agents,
@@ -1250,21 +1195,31 @@ function Sheet({
   const modelRowRef = useRef<HTMLButtonElement>(null);
   const effortRowRef = useRef<HTMLButtonElement>(null);
   const optionsRowRef = useRef<HTMLButtonElement>(null);
+  /* One level still shows when "Default" names none: it is then the only way to choose it. */
+  const isEffortRowShown =
+    sheetModel.levels.length > 1 || (sheetModel.levels.length === 1 && sheetModel.level === undefined);
   const hasChoice = canSelectExecution && agents.some((agent) => agent.key !== current.key);
   const browsed = agents.find((agent) => agent.key === browseKey) ?? current;
   useEffect(() => {
     if (!hasNavigated || view !== 'settings') {
       return;
     }
+    /* A choice can remove the row it was made from (the sole effort, once the agent takes it): the model row takes
+     * focus then. */
+    const row = returnTo.current === 'effort' && !isEffortRowShown ? 'model' : returnTo.current;
     (({ agent: agentRowRef, model: modelRowRef, effort: effortRowRef, options: optionsRowRef }) as const)[
-      returnTo.current
+      row
     ].current?.focus();
-  }, [hasNavigated, view]);
+  }, [hasNavigated, view, isEffortRowShown]);
   const go = (next: SheetView): void => {
     setHasNavigated(true);
     setView(next);
   };
   const back = (): void => {
+    if (view === 'more-models') {
+      go('models');
+      return;
+    }
     if (view === 'models' && isFromAgents) {
       setIsFromAgents(false);
       go('agents');
@@ -1362,7 +1317,7 @@ function Sheet({
               <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
             </button>
             {/* E1: Effort is a row like Model — label left, the level right — and drills into its page. */}
-            {sheetModel.levels.length > 1 ? (
+            {isEffortRowShown ? (
               <button
                 ref={effortRowRef}
                 type='button'
@@ -1385,7 +1340,7 @@ function Sheet({
           {runsOn.notice ? <Notice text={runsOn.notice} /> : null}
           {/* E7: Settings is a row like the others, naming what is not at its default, and opens its page. */}
           {settings.length > 0 ? (
-            <div className='flex flex-col border-t p-1'>
+            <div className={cn('flex flex-col', menuViewFooterClass)}>
               <button
                 ref={optionsRowRef}
                 type='button'
@@ -1413,8 +1368,11 @@ function Sheet({
           className={cn('flex max-h-[min(25rem,70vh)] flex-col', viewStackEnterClass('forward'))}
         >
           {/* A full-width back row as tall as the list rows below it. */}
-          <div className='flex shrink-0 border-b p-1'>
-            <ViewStackBack parentLabel={view === 'models' && isFromAgents ? 'agents' : 'settings'} onBack={back} />
+          <div className={cn('flex', menuViewHeaderClass)}>
+            <ViewStackBack
+              parentLabel={view === 'models' && isFromAgents ? 'agents' : backLabels[view]}
+              onBack={back}
+            />
           </div>
           {view === 'options' ? (
             <SettingsPage settings={settings} />
@@ -1442,10 +1400,14 @@ function Sheet({
             />
           ) : (
             <ModelList
-              key={browsed.key}
+              key={`${browsed.key}:${view}`}
               agent={browsed}
               current={current}
               sheetModel={sheetModel}
+              isMore={view === 'more-models'}
+              onMore={() => {
+                go('more-models');
+              }}
               onChoose={choose}
               onBack={back}
             />

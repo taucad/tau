@@ -127,7 +127,7 @@ export const ChatTextarea = memo(function ({
   className,
   enableContextActions = true,
   enableKernelSelector = true,
-  creationLocationControl,
+  creationLocation,
   isSubmitDisabled = false,
   mode = 'main',
   enableMobileCollapse = false,
@@ -552,7 +552,7 @@ export const ChatTextarea = memo(function ({
         enableAutoFocus={enableAutoFocus}
         enableContextActions={enableContextActions}
         enableKernelSelector={enableKernelSelector}
-        creationLocationControl={creationLocationControl}
+        {...(creationLocation === undefined ? {} : { creationLocation })}
         isSubmitDisabled={logic.isSubmitDisabled}
         mode={mode}
         enableMobileCollapse={enableMobileCollapse}

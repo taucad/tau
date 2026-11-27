@@ -538,6 +538,69 @@ describe('ChatAgentSheet', () => {
     expect(screen.getByRole('button', { name: 'Agent and model: Codex, GPT-5.6-Sol, Fast mode' })).toBeInTheDocument();
   });
 
+  it('keeps a sole level choosable while the agent’s “Default” names none', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    const select = vi.fn();
+    renderSheet(vi.fn(), {
+      options: [
+        {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          category: 'thought_level',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+      valueOf: (option) => option.currentValue,
+      select,
+    });
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model: Codex/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Effort for Codex.*not set/u }));
+    await userEvent.click(screen.getByRole('option', { name: 'High' }));
+    expect(select).toHaveBeenCalledWith('thought_level', 'high');
+  });
+
+  it('hands focus to the model row once the sole level is taken and its row goes', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    let current = 'default';
+    const config = (): AgentConfig => ({
+      options: [
+        {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          category: 'thought_level',
+          currentValue: current,
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+      valueOf: (option) => option.currentValue,
+      select: vi.fn(),
+    });
+    const { rerender } = renderSheet(vi.fn(), config());
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model: Codex/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Effort for Codex.*not set/u }));
+    await userEvent.click(screen.getByRole('option', { name: 'High' }));
+    /* The agent answers the choice after the sheet is back on its settings. */
+    current = 'high';
+    rerender(
+      <TooltipProvider>
+        <ChatAgentSheet agentConfig={config()} placements={state.placements} focusEditor={vi.fn()} />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByRole('button', { name: /^Effort for Codex/u })).toBeNull();
+    expect(screen.getByRole('button', { name: /^Model: .*\. Change$/u })).toHaveFocus();
+  });
+
   it('shows and changes a discovered ACP reasoning option before the first session', async () => {
     state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
     state.placements = [codex()];
@@ -607,13 +670,13 @@ describe('ChatAgentSheet', () => {
     expect(screen.getAllByRole('option').map((option) => option.getAttribute('aria-label'))).toEqual([
       'Low',
       'Medium',
-      'High, Thorough reasoning and quality. Recommended.',
+      'High, recommended, Thorough reasoning and quality.',
       'Extra High',
     ]);
     expect(screen.getByRole('option', { name: /^High/u })).toHaveAttribute('aria-selected', 'true');
-    /* The agent's own words are the description; Tau badges no default for an external agent. */
-    expect(screen.getByText('Thorough reasoning and quality. Recommended.')).toBeInTheDocument();
-    expect(screen.queryByText('Recommended')).toBeNull();
+    /* The agent's "Recommended." leaves its words and becomes the badge. */
+    expect(screen.getByText('Thorough reasoning and quality.')).toBeInTheDocument();
+    expect(screen.getByText('Recommended')).toHaveAttribute('data-slot', 'effort-recommended');
     await userEvent.click(screen.getByRole('option', { name: 'Extra High' }));
     expect(select).toHaveBeenCalledWith('reasoning_effort', 'xhigh');
   });
@@ -640,7 +703,7 @@ describe('ChatAgentSheet', () => {
             defaultModel: 'gpt-5.6-sol',
             models: [
               { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
-              { id: 'gpt-5.5', name: 'GPT-5.5' },
+              { id: 'gpt-5.5-sol', name: 'GPT-5.5-Sol' },
             ],
           },
         ],
@@ -662,14 +725,75 @@ describe('ChatAgentSheet', () => {
     });
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
     await userEvent.click(screen.getByRole('button', { name: /^Model: .*Change$/u }));
-    await userEvent.click(screen.getByRole('option', { name: 'GPT-5.5' }));
+    /* GPT-5.5-Sol is an older Sol: it sits behind More models. */
+    expect(screen.queryByRole('option', { name: 'GPT-5.5-Sol' })).toBeNull();
+    await userEvent.click(screen.getByRole('option', { name: 'More models' }));
+    await userEvent.click(screen.getByRole('option', { name: 'GPT-5.5-Sol' }));
 
     expect(setActiveExecution).toHaveBeenCalledWith({
       kind: 'acp',
       hostId: 'desktop',
       agentId: 'codex',
-      model: 'gpt-5.5',
+      model: 'gpt-5.5-sol',
     });
+  });
+
+  it('lines up Claude Code as its own picker does: the default resolved, older models under More, Medium recommended', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'claude' };
+    const effort: NonNullable<ExternalAgentDescriptor['thoughtLevel']> = {
+      type: 'select',
+      id: 'effort',
+      name: 'Effort',
+      category: 'thought_level',
+      currentValue: 'default',
+      options: [
+        { value: 'default', name: 'Default' },
+        { value: 'low', name: 'Low' },
+        { value: 'medium', name: 'Medium' },
+        { value: 'high', name: 'High' },
+      ],
+    };
+    state.placements = [
+      {
+        ...codex(),
+        externalAgents: [
+          {
+            id: 'claude',
+            displayName: 'Claude Code',
+            defaultModel: 'default',
+            thoughtLevel: effort,
+            models: [
+              { id: 'default', name: 'Default (recommended)', description: 'Opus 5.5' },
+              { id: 'opus', name: 'Opus 5.5' },
+              { id: 'sonnet', name: 'Sonnet 5.5' },
+              { id: 'claude-opus-5', name: 'Opus 5' },
+            ],
+          },
+        ],
+      },
+    ];
+    renderSheet(vi.fn(), { options: [effort], valueOf: (option) => option.currentValue, select: vi.fn() });
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Agent and model: Claude Code, Opus 5.5, effort Medium' }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: /^Model: .*Change$/u }));
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Opus 5.5Medium',
+      'Sonnet 5.5',
+      'More models',
+    ]);
+    await userEvent.click(screen.getByRole('option', { name: 'More models' }));
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['Opus 5']);
+    await userEvent.click(screen.getByRole('button', { name: 'Back to models' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Back to settings' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Effort for Claude Code/u }));
+    expect(screen.getAllByRole('option').map((option) => option.getAttribute('aria-label'))).toEqual([
+      'Low',
+      'Medium, recommended',
+      'High',
+    ]);
+    expect(screen.getByRole('option', { name: 'Medium, recommended' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('steps back one view on Escape, and closes only from the settings', async () => {

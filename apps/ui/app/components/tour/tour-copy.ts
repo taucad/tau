@@ -100,7 +100,7 @@ export const tourTipCopy = (step: TourStepId, input: TourCopyInput): TourTipCopy
       const fromHome = isGuided && input.arrival === 'prompt';
       const third = makesSeveralModels(input.goals)
         ? 'A board and its enclosure can live in one project; each model has its own kernel.'
-        : 'You can pick a kernel yourself from the Auto menu.';
+        : 'You can pick a kernel yourself from the + menu.';
       return fromHome
         ? {
             title: tourTipTitle('ask', input),

@@ -336,7 +336,7 @@ export const composerRail = (): Locator => selectors.getByCss(`[aria-label="Atta
  */
 export const chooseAttachment = async (file: FixtureFile): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Add', exact: true }).first());
-  await target.chooseFile(selectors.getByRole('menuitem', { name: 'Attach image or PDF' }), file);
+  await target.chooseFile(selectors.getByRole('option', { name: /^Attach image or PDF/u }), file);
 };
 
 /**

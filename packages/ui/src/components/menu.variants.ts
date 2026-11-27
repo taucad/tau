@@ -298,7 +298,7 @@ export const menuSwitchRowVariants = cva('justify-between', {
 export const menuSwitchRowDescriptionClass = 'text-xs font-medium text-muted-foreground/80';
 
 /**
- * The view-stack Back row: a full-width compact row, its ChevronLeft and "Back" muted.
+ * The view-stack Back row: a full-width row at the list's own size, its ChevronLeft and "Back" muted.
  *
  * @public
  *
@@ -309,12 +309,12 @@ export const menuSwitchRowDescriptionClass = 'text-xs font-medium text-muted-for
  * export const className = menuViewBackClass;
  * ```
  */
-export const menuViewBackClass = 'w-full gap-2 text-xs text-muted-foreground data-disabled:text-muted-foreground';
+export const menuViewBackClass = 'w-full gap-2 text-muted-foreground data-disabled:text-muted-foreground';
 
 /**
- * A combobox row that opens a sub-view of further choices ("More kernels"): quieter than the choices around it, small
- * and muted, so the list reads as its choices first. The `data-disabled:` twin outranks the command item's reset,
- * which cmdk triggers by setting `data-disabled="false"` on every item.
+ * A combobox row that opens a sub-view of further choices ("More kernels"): the size of the choices around it but
+ * muted, so the list reads as its choices first. The `data-disabled:` twin outranks the command item's reset, which
+ * cmdk triggers by setting `data-disabled="false"` on every item.
  *
  * @public
  *
@@ -325,7 +325,37 @@ export const menuViewBackClass = 'w-full gap-2 text-xs text-muted-foreground dat
  * export const className = comboboxViewTriggerClass;
  * ```
  */
-export const comboboxViewTriggerClass = 'text-xs text-muted-foreground data-disabled:text-muted-foreground';
+export const comboboxViewTriggerClass = 'text-muted-foreground data-disabled:text-muted-foreground';
+
+/**
+ * The band a picker's Back row sits in, above its list: the card's full width, a divider under it, and the row
+ * centred in it. One band for every picker, so a Back row is the same height and inset everywhere.
+ *
+ * @public
+ *
+ * @example <caption>Wrap a Back row</caption>
+ * ```typescript
+ * import { menuViewHeaderClass } from '@taucad/ui/components/menu.variants';
+ *
+ * export const className = menuViewHeaderClass;
+ * ```
+ */
+export const menuViewHeaderClass = 'shrink-0 border-b p-1';
+
+/**
+ * The band a picker's closing rows sit in, after its choices ("More kernels", "More models", "Add models"): the
+ * card's full width, a divider over it, and the row centred in it.
+ *
+ * @public
+ *
+ * @example <caption>Wrap a picker's closing row</caption>
+ * ```typescript
+ * import { menuViewFooterClass } from '@taucad/ui/components/menu.variants';
+ *
+ * export const className = menuViewFooterClass;
+ * ```
+ */
+export const menuViewFooterClass = 'shrink-0 border-t p-1';
 
 /**
  * The trailing ChevronRight of a row that opens a sub-view. A disclosure row's chevron points down instead. It takes

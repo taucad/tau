@@ -1,3 +1,4 @@
+import type { ProjectCreationLocationState } from '#hooks/use-project-creation-location.js';
 import type { CadReference } from '@taucad/chat/references';
 import type { MessageAnnotations } from '@taucad/chat/annotations';
 import {
@@ -193,8 +194,8 @@ export type ChatTextareaProperties = {
   readonly className?: string;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
-  /** Where a project created from this draft goes: Home's location control, in the bar. */
-  readonly creationLocationControl?: React.ReactNode;
+  /** Where a project created from this draft goes: Home's location, chosen in the + menu. */
+  readonly creationLocation?: ProjectCreationLocationState;
   /** Blocks every submit path while external prerequisites are unresolved. */
   readonly isSubmitDisabled?: boolean;
   readonly mode?: 'main' | 'edit';

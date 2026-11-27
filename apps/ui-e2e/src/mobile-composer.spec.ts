@@ -141,7 +141,7 @@ test('rests as + / microphone / Send and unfolds to the model selector → micro
 
 test('opens attachments from + with a tap', async () => {
   await target.click(composer().getByRole('button', { name: 'Add', exact: true }), { touch: true });
-  await target.expectVisible(selectors.getByRole('menuitem', { name: 'Attach image or PDF' }));
+  await target.expectVisible(selectors.getByRole('option', { name: /^Attach image or PDF/u }));
 });
 
 test('leaves a tap just inside the resting editor’s edges to the editor', async () => {
@@ -173,8 +173,9 @@ test('shows no keyboard hints on a touch screen (I7)', async () => {
   expect(tooltipHints.shown).toEqual([]);
 
   await target.click(composer().getByRole('button', { name: 'Add', exact: true }), { touch: true });
-  await target.expectVisible(selectors.getByRole('menuitem', { name: 'Add context' }));
-  const menuHints = await hintsMatching('[data-slot="dropdown-menu-shortcut"]');
+  await target.expectVisible(selectors.getByRole('option', { name: /^Add context/u }));
+  // The + menu's "@" hint is a key shortcut chip, like the tooltip's.
+  const menuHints = await hintsMatching('[role="listbox"] span[class*="tracking-"]');
   expect(menuHints.count).toBeGreaterThan(0);
   expect(menuHints.shown).toEqual([]);
 });

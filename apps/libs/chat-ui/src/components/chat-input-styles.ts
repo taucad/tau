@@ -40,35 +40,44 @@ export const chatComposerMainEditorAreaClassName = 'max-h-[min(12rem,30cqh)]';
 /** The editor's text box: one line plus its bottom inset, and 16px text under touch, since iOS zooms into anything smaller. */
 export const chatComposerEditorTextClassName = `w-full min-h-6 px-3 pb-3 ${chatInputTextClassName} pointer-coarse:text-base pointer-coarse:leading-6`;
 
-/** The ghost pill every composer control shares: h-7, round, no boundary at rest, muted until hover. */
-export const chatComposerGhostPillClassName =
-  'h-7 rounded-full px-2.5 font-normal text-muted-foreground hover:text-foreground';
+/**
+ * Touch (I3): with no hover to show where a ghost control begins, every bar control is a filled 36px shape with no
+ * outline, a muted surface for the choices and solid for Send, as phone composers draw them. Fine pointers keep the
+ * ghost row.
+ */
+export const chatComposerTouchFillClassName =
+  'pointer-coarse:h-9 pointer-coarse:bg-muted pointer-coarse:text-foreground pointer-coarse:hover:bg-muted pointer-coarse:active:bg-accent';
+
+/** A round touch control (+, dictation): the fill, 36px wide. */
+export const chatComposerTouchCircleClassName = `${chatComposerTouchFillClassName} pointer-coarse:w-9 pointer-coarse:px-0`;
+
+/** The ghost pill every composer control shares: h-7, round, no boundary at rest, muted until hover; filled under touch. */
+export const chatComposerGhostPillClassName = `h-7 rounded-full px-2.5 font-normal text-muted-foreground hover:text-foreground ${chatComposerTouchFillClassName} pointer-coarse:px-3.5 pointer-coarse:text-sm`;
 
 /** A collapsible composer animates these between its one-row rest and its full layout. */
 export const chatComposerCollapseTransitionClassName =
   'transition-[padding,margin,border-radius,corner-shape,opacity,visibility] duration-200 ease-out motion-reduce:transition-none';
 
 /**
- * Touch targets (I3). The bar keeps its 28px controls, so the composer keeps its geometry, but
- * under a coarse pointer each control's hit area reaches 40px and the controls sit 12px apart, so
- * neighbouring hit areas meet without overlapping.
+ * Touch targets (I3). Under a coarse pointer the controls are 36px and filled, they sit 8px apart, and each hit area
+ * reaches 40px, so neighbouring hit areas meet without overlapping.
  */
 const composerTouchTargetsClassName =
-  "pointer-coarse:gap-3 pointer-coarse:[&_button]:relative pointer-coarse:[&_button]:after:absolute pointer-coarse:[&_button]:after:-inset-1.5 pointer-coarse:[&_button]:after:content-['']";
+  "pointer-coarse:gap-2 pointer-coarse:[&_button]:relative pointer-coarse:[&_button]:after:absolute pointer-coarse:[&_button]:after:-inset-0.5 pointer-coarse:[&_button]:after:content-['']";
 
 /** The bar, risen onto the editor's line in a collapsed composer; taps between its controls reach the editor. */
-const collapsedBarClassName = `${chatComposerCollapseTransitionClassName} @max-[768px]/composer:group-data-[collapsed]/chat-textarea:-mt-6.5 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:pointer-events-none`;
+const collapsedBarClassName = `${chatComposerCollapseTransitionClassName} @max-[768px]/composer:group-data-[collapsed]/chat-textarea:-mt-6.5 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:-mt-7.5 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:pointer-events-none`;
 
 /** The composer's one bar (D6): two clusters, `justify-between`, so they can never overlap (F4). */
 export const chatComposerBarClassName = `group/bar flex items-center justify-between gap-2 px-2 ${composerTouchTargetsClassName} ${collapsedBarClassName}`;
 
 /** The bar's left cluster: +, then the controls a collapsed composer hides. */
 export const chatComposerBarLeftClassName =
-  'pointer-events-auto flex shrink-0 flex-row items-center gap-0.5 pointer-coarse:gap-3';
+  'pointer-events-auto flex shrink-0 flex-row items-center gap-0.5 pointer-coarse:gap-2';
 
 /** The bar's right cluster: the controls a collapsed composer hides, then dictation and Send. */
 export const chatComposerBarRightClassName =
-  'pointer-events-auto flex min-w-0 flex-row items-center gap-1 pointer-coarse:gap-3';
+  'pointer-events-auto flex min-w-0 flex-row items-center gap-1 pointer-coarse:gap-2';
 
 /** Controls a collapsed composer hides: every one but +, dictation and Send. */
 export const chatComposerCollapsibleControlsClassName = `${chatComposerCollapseTransitionClassName} flex min-w-0 flex-row items-center empty:hidden @max-[768px]/composer:group-data-[collapsed]/chat-textarea:invisible @max-[768px]/composer:group-data-[collapsed]/chat-textarea:opacity-0`;
@@ -77,4 +86,4 @@ export const chatComposerCollapsibleControlsClassName = `${chatComposerCollapseT
 export const chatComposerModelTriggerClassName = `${chatComposerGhostPillClassName} max-w-64 min-w-0 shrink gap-1 pr-2 text-foreground`;
 
 /** The + menu's trigger: a round 28px ghost button. */
-export const chatComposerAddTriggerClassName = `${chatComposerGhostPillClassName} w-7 shrink-0 px-0`;
+export const chatComposerAddTriggerClassName = `${chatComposerGhostPillClassName} w-7 shrink-0 px-0 ${chatComposerTouchCircleClassName}`;

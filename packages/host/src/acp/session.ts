@@ -1240,7 +1240,7 @@ export const modelChoice = (
   | {
       readonly configId: string;
       readonly currentValue: string | undefined;
-      readonly models: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+      readonly models: ReadonlyArray<{ readonly id: string; readonly name: string; readonly description?: string }>;
       readonly values: readonly string[];
     }
   | undefined => {
@@ -1249,11 +1249,16 @@ export const modelChoice = (
     return undefined;
   }
   const listed = option.options.flatMap((entry) =>
-    ('options' in entry ? entry.options : [entry]).map((value) => ({ id: value.value, name: value.name })),
+    ('options' in entry ? entry.options : [entry]).map((value) => ({
+      id: value.value,
+      name: value.name,
+      /* A default alias names its target here ("Opus 5.5"), which the picker resolves. */
+      ...(value.description ? { description: value.description.slice(0, 256) } : {}),
+    })),
   );
   const counts = Map.groupBy(listed, (model) => model.name);
   const models = listed.map((model) =>
-    (counts.get(model.name)?.length ?? 0) > 1 ? { id: model.id, name: distinctModelName(model) } : model,
+    (counts.get(model.name)?.length ?? 0) > 1 ? { ...model, name: distinctModelName(model) } : model,
   );
   return {
     configId: option.id,

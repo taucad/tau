@@ -3,12 +3,11 @@ import { departFirstMessage } from '#lib/departing-first-message.js';
 import { frameHintKey, writePhoneFrameHint } from '#lib/frame-hint.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { ChatTextareaHandle, ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
-import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useKernel } from '#hooks/use-kernel.js';
@@ -96,20 +95,6 @@ export function NewProjectChatComposer({
       globalThis.removeEventListener('focus', handleWindowFocus);
     };
   }, [enableAutoFocus, focusComposer]);
-
-  const creationLocationControl = useMemo(
-    () =>
-      location.shouldShowPicker ? (
-        <WorkspaceSelector
-          data-chat-textarea-focustrap
-          state={location}
-          variant='toolbar'
-          onSelectionComplete={focusComposer}
-          onRequestFocus={focusComposer}
-        />
-      ) : undefined,
-    [focusComposer, location],
-  );
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content }) => {
@@ -204,7 +189,7 @@ export function NewProjectChatComposer({
         ref={textareaRef}
         enableAutoFocus={enableAutoFocus}
         enableContextActions={false}
-        creationLocationControl={creationLocationControl}
+        {...(location.shouldShowPicker ? { creationLocation: location } : {})}
         isSubmitDisabled={!location.canCreate}
         className={className}
         onSubmit={onSubmit}

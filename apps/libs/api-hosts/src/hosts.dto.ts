@@ -116,6 +116,7 @@ export const hostCapabilitiesSchema = z.object({
                 z.strictObject({
                   id: z.string().min(1).max(128),
                   name: z.string().min(1).max(128),
+                  description: z.string().min(1).max(256).optional(),
                   thoughtLevel: acpThoughtLevelSchema.optional(),
                 }),
               )

@@ -91,9 +91,11 @@ measurements remain explicit.
 - **Narrow means rearranged.** Stack, wrap or provide a visibly labelled alternate
   view. Preserve orientation and access to the same capabilities. Tooltips do
   not recover information hidden from touch users.
-  The composer is one ghost row on every device: one + for attachments and
-  context, and one agent control beside Send that opens the model, its reasoning
-  level and the agent's own settings. As the row narrows, measured labels give
+  The composer is one row on every device: one + for attachments, context, the
+  kernel and the project's location, and one agent control beside Send that
+  opens the model, its reasoning level and the agent's own settings. Its
+  controls are ghost under a fine pointer and filled, outline-free shapes under
+  touch, where no hover shows where a control begins. As the row narrows, measured labels give
   way to their glyphs; the reasoning level stays. Readiness may be summarized in
   its accessible tooltip, never the sole approval or recovery surface. Verify
   actual fit with all controls enabled; do not hide capabilities or let controls

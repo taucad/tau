@@ -1,5 +1,4 @@
 import {
-  chatComposerAddTriggerClassName,
   chatComposerBarClassName,
   chatComposerBarLeftClassName,
   chatComposerBarRightClassName,
@@ -16,7 +15,7 @@ import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { queuedSendCancelledStatus } from '#components/hand-off/hand-off.js';
 import type { Editor, JSONContent } from '@tiptap/core';
 import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
-import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
+import { TriangleAlert } from 'lucide-react';
 import { useDictation } from '#components/dictation/use-dictation.js';
 import { DictationControl, DictationFeedback } from '#components/dictation/dictation-controls.js';
 import type { AcpSessionData, CadAgentExecution } from '@taucad/chat';
@@ -26,18 +25,10 @@ import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { ChatAgentSheet, ghostPillClass } from '#components/chat/chat-agent-sheet.js';
 import { ChatAgentModeControl } from '#components/chat/chat-mode-selector.js';
 import { useAgentConfig } from '#components/chat/use-agent-config.js';
-import { KernelPreferenceSelector } from '#components/chat/chat-kernel-selector.js';
-import { kernelPillFace } from '#components/chat/kernel-picker-layout.js';
-import { KernelPillContent, kernelPillStyles } from '#components/chat/kernel-pill.js';
+import { ChatAddMenu } from '#components/chat/chat-add-menu.js';
+import type { ProjectCreationLocationState } from '#hooks/use-project-creation-location.js';
 import { ChatKernelFallbackNotice } from '#components/chat/chat-kernel-fallback-notice.js';
 import { Button } from '@taucad/ui/components/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuShortcut,
-  DropdownMenuTrigger,
-} from '@taucad/ui/components/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatContextIndicator } from '#components/chat/chat-context-indicator.js';
@@ -99,7 +90,7 @@ type ChatTextareaDesktopProperties = {
   readonly enableAutoFocus?: boolean;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
-  readonly creationLocationControl?: React.ReactNode;
+  readonly creationLocation?: ProjectCreationLocationState;
   readonly isSubmitDisabled?: boolean;
   /** Which composer this is: the edit box speaks as one and owns shortcuts only while focused (F6, F19). */
   readonly mode?: 'main' | 'edit';
@@ -313,7 +304,7 @@ export const ChatTextareaDesktop = memo(function ({
   enableAutoFocus = true,
   enableContextActions = true,
   enableKernelSelector = true,
-  creationLocationControl,
+  creationLocation,
   isSubmitDisabled = false,
   mode = 'main',
   enableMobileCollapse,
@@ -1024,7 +1015,7 @@ export const ChatTextareaDesktop = memo(function ({
           containerReference={containerReference}
           enableContextActions={enableContextActions}
           enableKernelSelector={enableKernelSelector}
-          creationLocationControl={creationLocationControl}
+          {...(creationLocation === undefined ? {} : { creationLocation })}
           acpSessionData={acpSessionData}
           status={status}
           canStop={canStop}
@@ -1070,17 +1061,19 @@ const collapsibleClassNames = (
           chatComposerCollapseTransitionClassName,
           // Half the Send diameter + its inset + the border. A finite radius interpolates without pill clamping.
           '[corner-shape:superellipse(1.5)] @max-[768px]/composer:data-[collapsed]:rounded-[calc(var(--spacing)*5.5+1px)] @max-[768px]/composer:data-[collapsed]:[corner-shape:round] @max-[768px]/composer:data-[collapsed]:pt-2.5',
+          // Touch: 36px controls with 8px around them, so the row is a 52px pill.
+          'pointer-coarse:@max-[768px]/composer:data-[collapsed]:rounded-[calc(var(--spacing)*6.5+1px)] pointer-coarse:@max-[768px]/composer:data-[collapsed]:pt-3.5',
         ),
         editor: cn(
           chatComposerCollapseTransitionClassName,
-          // Under a coarse pointer the row also clears the controls' 6px touch rings, so a tap at the
+          // Under a coarse pointer the row clears the 36px controls and the gap after them, so a tap at the
           // editor's edge reaches the editor, not + or dictation (see `chatComposerBarClassName`).
-          '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-8.5',
+          '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-11',
           '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:max-h-6 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:overflow-hidden',
           hasDictation === true
-            ? // Touch also spaces dictation and Send 12px apart.
-              '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-15 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-18.5'
-            : '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-8.5',
+            ? // Touch: two 36px controls 8px apart.
+              '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-15 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-22'
+            : '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-11',
         ),
         editorContent: cn(
           chatComposerCollapseTransitionClassName,
@@ -1091,11 +1084,8 @@ const collapsibleClassNames = (
       }
     : {};
 
-/** Keyboard hints are for keyboards (I7). */
-const keyboardHintClassName = 'pointer-coarse:hidden';
-
 /** The labels that leave, in order, before the model's name is cut (D6). */
-const collapseSteps = ['data-hide-kernel', 'data-hide-mode', 'data-hide-level'] as const;
+const collapseSteps = ['data-hide-mode', 'data-hide-level'] as const;
 
 /** The model's name, or its pending placeholder, which is cut like the name. */
 const barNameSelector = '[data-slot=trigger-model], [data-slot=trigger-model-placeholder]';
@@ -1118,7 +1108,7 @@ const touchesFit = (record: MutationRecord): boolean => {
 
 /**
  * The measured collapse. Before paint, and on every resize or label change,
- * labels leave in a fixed order — the kernel's (or the location's), the mode's,
+ * labels leave in a fixed order — the mode's,
  * then the level — until the model's name is whole; only then is it cut.
  *
  * Measuring forces a layout per step, so it runs only when something that decides it changes: the bar's size, the
@@ -1195,8 +1185,8 @@ export function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): 
 
 /**
  * The composer's one bar (D6): `justify-between`, so the two clusters can
- * never overlap (F4). Left: +, the external agent's mode, the kernel (the
- * location on Home). Right: the context meter, the agent-and-model trigger,
+ * never overlap (F4). Left: + (which also holds the kernel and, on Home, the
+ * location) and the external agent's mode. Right: the context meter, the agent-and-model trigger,
  * Send. Every control is ghost; Send alone keeps its fill.
  *
  * Memo'd to isolate Radix `TooltipTrigger asChild` composeRefs loops: every
@@ -1212,7 +1202,7 @@ export const ChatTextareaBar = memo(function ({
   containerReference,
   enableContextActions,
   enableKernelSelector,
-  creationLocationControl,
+  creationLocation,
   acpSessionData,
   status,
   canStop = false,
@@ -1240,7 +1230,7 @@ export const ChatTextareaBar = memo(function ({
   readonly containerReference: React.RefObject<HTMLDivElement | null>;
   readonly enableContextActions: boolean;
   readonly enableKernelSelector: boolean;
-  readonly creationLocationControl?: React.ReactNode;
+  readonly creationLocation?: ProjectCreationLocationState;
   readonly acpSessionData?: AcpSessionData;
   readonly status: string;
   readonly canStop?: boolean;
@@ -1294,6 +1284,8 @@ export const ChatTextareaBar = memo(function ({
       <div data-slot='composer-left' className={chatComposerBarLeftClassName}>
         <ChatAddMenu
           enableContextActions={enableContextActions}
+          enableKernelSelector={enableKernelSelector}
+          {...(creationLocation === undefined ? {} : { creationLocation })}
           isAttachmentSupported={attachmentInputSupported}
           handleAtButtonClick={handleAtButtonClick}
           handleFileSelect={handleFileSelect}
@@ -1301,11 +1293,9 @@ export const ChatTextareaBar = memo(function ({
         />
         <div
           data-slot='composer-collapsible'
-          className={cn(chatComposerCollapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
+          className={cn(chatComposerCollapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-2')}
         >
           <ChatAgentModeControl agentConfig={agentConfig} focusEditor={focusEditor} enableShortcut={ownsShortcuts} />
-          {creationLocationControl}
-          {enableKernelSelector ? <ChatTextareaKernelControl focusEditor={focusEditor} /> : null}
         </div>
         <input
           ref={fileInputReference}
@@ -1319,7 +1309,7 @@ export const ChatTextareaBar = memo(function ({
       <div data-slot='composer-right' className={chatComposerBarRightClassName}>
         <div
           data-slot='composer-collapsible'
-          className={cn(chatComposerCollapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
+          className={cn(chatComposerCollapsibleControlsClassName, 'gap-1 pointer-coarse:gap-2')}
         >
           {skillsRecovery}
           <ChatContextIndicator />
@@ -1379,124 +1369,5 @@ function ChatSkillsRecovery({ onRetry }: { readonly onRetry: () => void }): Reac
         </TooltipContent>
       </Tooltip>
     </>
-  );
-}
-
-/**
- * The kernel pill, in the location pill's finish so the two read as one row of choices: glyph, name, chevron, and the
- * name is the first to leave when the bar needs the room. It opens the Auto-first selector (blueprint D8).
- */
-function ChatTextareaKernelControl({ focusEditor }: { readonly focusEditor: () => void }): React.JSX.Element {
-  const {
-    kernel: { preference, owner },
-  } = useChatComposer();
-  const face = kernelPillFace({ preference, ...(owner === undefined ? {} : { owner }) });
-  return (
-    <Tooltip>
-      <KernelPreferenceSelector
-        data-chat-textarea-focustrap
-        popoverProperties={{ align: 'start' }}
-        onSelect={focusEditor}
-        onClose={focusEditor}
-      >
-        <TooltipTrigger asChild>
-          <Button
-            type='button'
-            variant={kernelPillStyles.variant}
-            size='sm'
-            aria-label={face.label}
-            data-slot='kernel-pill'
-            className={cn('min-w-0', kernelPillStyles.button)}
-          >
-            <KernelPillContent face={face} />
-          </Button>
-        </TooltipTrigger>
-      </KernelPreferenceSelector>
-      <TooltipContent className='max-w-64'>{face.hint}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-/**
- * One + for everything a turn can carry (F10): attach a file, or — outside
- * Home — add context, which types @ and opens the shipped menu. A model that
- * cannot read files keeps the item, disabled, saying why (F14).
- */
-function ChatAddMenu({
-  enableContextActions,
-  isAttachmentSupported,
-  handleAtButtonClick,
-  handleFileSelect,
-  focusEditor,
-}: {
-  readonly enableContextActions: boolean;
-  readonly isAttachmentSupported: boolean;
-  readonly handleAtButtonClick: () => void;
-  readonly handleFileSelect: () => void;
-  readonly focusEditor: () => void;
-}): React.JSX.Element {
-  const choseItem = useRef(false);
-  return (
-    <DropdownMenu modal={false}>
-      <Tooltip>
-        <DropdownMenuTrigger asChild>
-          <TooltipTrigger asChild>
-            <Button
-              variant='ghost'
-              size='sm'
-              data-chat-textarea-focustrap
-              aria-label='Add'
-              className={chatComposerAddTriggerClassName}
-            >
-              <Plus className='size-4' aria-hidden='true' />
-            </Button>
-          </TooltipTrigger>
-        </DropdownMenuTrigger>
-        {/* The same word as its name (I6); the menu says what it adds. */}
-        <TooltipContent>Add</TooltipContent>
-      </Tooltip>
-      <DropdownMenuContent
-        align='start'
-        data-chat-textarea-focustrap
-        className='w-60'
-        onCloseAutoFocus={(event) => {
-          /* A chosen item moves focus itself: to the file picker, or to the editor at a typed @. */
-          event.preventDefault();
-          if (!choseItem.current) {
-            focusEditor();
-          }
-          choseItem.current = false;
-        }}
-      >
-        <DropdownMenuItem
-          disabled={!isAttachmentSupported}
-          className='h-auto items-start'
-          onSelect={() => {
-            choseItem.current = true;
-            handleFileSelect();
-          }}
-        >
-          <Paperclip aria-hidden='true' className='mt-0.5' />
-          <span className='flex flex-col'>
-            Attach image or PDF
-            {isAttachmentSupported ? null : (
-              <span className='text-xs text-muted-foreground'>This model can&apos;t read images or PDFs</span>
-            )}
-          </span>
-        </DropdownMenuItem>
-        {enableContextActions ? (
-          <DropdownMenuItem
-            onSelect={() => {
-              choseItem.current = true;
-              handleAtButtonClick();
-            }}
-          >
-            <AtSign aria-hidden='true' />
-            Add context
-            <DropdownMenuShortcut className={keyboardHintClassName}>@</DropdownMenuShortcut>
-          </DropdownMenuItem>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }

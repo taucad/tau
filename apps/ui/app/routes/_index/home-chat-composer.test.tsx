@@ -41,7 +41,8 @@ const composerModule = vi.hoisted(() => ({
   adopted: [] as EarlyChatInput[],
   requests: 0,
 }));
-vi.mock('#components/chat/new-project-chat-composer.js', async () => {
+/* The mocked rich composer's module, counted on every evaluation; JSX-free so it can be hoisted beside vi.mock. */
+const richComposerModule = vi.hoisted(() => async () => {
   composerModule.requests += 1;
   // The import the component under test awaits; held open so the pre-composer window is observable.
   await new Promise<void>((resolve) => {
@@ -50,10 +51,11 @@ vi.mock('#components/chat/new-project-chat-composer.js', async () => {
   return {
     NewProjectChatComposer: ({ adoptedEarlyInput }: { readonly adoptedEarlyInput: EarlyChatInput }) => {
       composerModule.adopted.push(adoptedEarlyInput);
-      return <div>Rich composer</div>;
+      return 'Rich composer';
     },
   };
 });
+vi.mock('#components/chat/new-project-chat-composer.js', richComposerModule);
 
 describe('Home chat composer', () => {
   beforeEach(() => {
@@ -64,6 +66,8 @@ describe('Home chat composer', () => {
   /* PL5: the rich composer's chunk is fetched when Home's module evaluates, beside hydration, not after it mounts. */
   it("should request the rich composer when Home's module evaluates in a browser, before anything mounts", async () => {
     vi.resetModules();
+    /* Registered again: once an earlier test has settled the held import, the mock's result outlives the reset. */
+    vi.doMock('#components/chat/new-project-chat-composer.js', richComposerModule);
     composerModule.requests = 0;
     await import('#routes/_index/home-chat-composer.js');
     await vi.waitFor(() => {
@@ -71,9 +75,9 @@ describe('Home chat composer', () => {
     });
   });
 
-  /* R2: the served composer has the rich one's shape — the box and its bar at rest, kernel pill included —
+  /* R2: the served composer has the rich one's shape — the box and its bar at rest —
    * so nothing below it moves when the rich composer arrives. R11: it asks for focus at first paint. */
-  it('should serve the composer bar at rest, with the Auto kernel pill, around an autofocusing input', () => {
+  it('should serve the composer bar at rest, with the kernel and location under +, around an autofocusing input', () => {
     const container = document.createElement('div');
     container.innerHTML = renderToString(
       <TooltipProvider>
@@ -84,8 +88,8 @@ describe('Home chat composer', () => {
     const bar = container.querySelector('[data-slot="composer-bar"]')!;
     expect(bar).toHaveAttribute('inert');
     expect(bar.querySelector('[aria-label="Add"]')).not.toBeNull();
-    expect(bar.querySelector('[aria-label="Create in Home"]')).not.toBeNull();
-    expect(bar.querySelector('[data-slot="kernel-pill"]')).toHaveAttribute('aria-label', 'Kernel: Auto');
+    expect(bar.querySelector('[aria-label="Create in Home"]')).toBeNull();
+    expect(bar.querySelector('[data-slot="kernel-pill"]')).toBeNull();
     expect(bar.querySelector('[data-slot="trigger-model"]')).toHaveTextContent('Haiku 5.5');
     expect(bar.querySelector('[aria-label="Send"]')).toHaveAttribute('aria-disabled', 'true');
   });
@@ -108,7 +112,6 @@ describe('Home chat composer', () => {
       container.querySelector('textarea')!,
       container.querySelector('[data-slot="composer-bar"]')!,
       container.querySelector('[data-slot="trigger-model"]')!,
-      container.querySelector('[data-slot="kernel-pill"]')!,
     ]) {
       expect(part.compareDocumentPosition(marker)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     }

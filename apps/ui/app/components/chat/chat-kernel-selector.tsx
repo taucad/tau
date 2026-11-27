@@ -1,19 +1,16 @@
 import { Heading } from '@taucad/ui/components/heading';
-import { memo, useCallback, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Check } from 'lucide-react';
-import type { KernelId, KernelPreference } from '@taucad/types/constants';
+import type { KernelId } from '@taucad/types/constants';
 import { Badge } from '@taucad/ui/components/badge';
-import type { ComboBoxSubView } from '@taucad/ui/components/combobox-responsive';
 import { toast } from '@taucad/ui/components/sonner';
 import { resolveKernel } from '@taucad/types/constants';
 import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { useFeature } from '#flags/use-feature.js';
 import { kernelPickerLayout } from '#components/chat/kernel-picker-layout.js';
-import type { KernelPickerRow } from '#components/chat/kernel-picker-layout.js';
+import type { KernelPickerGroup, KernelPickerRow } from '#components/chat/kernel-picker-layout.js';
 import { AutoKernelGlyph } from '#components/chat/kernel-pill.js';
 import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
-import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
@@ -97,103 +94,80 @@ function KernelRowCard({ row }: { readonly row: KernelPickerRow }): React.JSX.El
   );
 }
 
-type KernelPreferenceSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'onSelect'> & {
-  readonly onSelect?: (preference: KernelPreference) => void;
-  readonly onClose?: () => void;
-  readonly children: ReactNode;
-  readonly popoverProperties?: React.ComponentProps<typeof ComboBoxResponsive>['popoverProperties'];
+/** One kernel row with its hover card, as the + menu's kernel view draws it. */
+export function KernelRow({
+  row,
+  isSelected,
+}: {
+  readonly row: KernelPickerRow;
+  readonly isSelected: boolean;
+}): React.JSX.Element {
+  return (
+    <HoverCard openDelay={300}>
+      <HoverCardTrigger asChild>
+        <span className='flex w-full'>
+          <KernelRowBody row={row} isSelected={isSelected} />
+        </span>
+      </HoverCardTrigger>
+      <HoverCardContent side='right' align='start' sideOffset={12} alignOffset={-4} className='w-72 max-md:hidden'>
+        <KernelRowCard row={row} />
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+/** The kernel choices (automatic kernel selection blueprint D8) and how one is chosen. */
+export type KernelChoices = {
+  /** Auto and the D8 groups, then the rest, merged by heading. */
+  readonly groups: readonly KernelPickerGroup[];
+  readonly rows: readonly KernelPickerRow[];
+  /**
+   * Chooses a kernel for this chat. A kernel this host cannot run keeps its row and its reason: choosing it explains
+   * and selects nothing.
+   *
+   * @returns Whether the kernel was chosen.
+   */
+  readonly choose: (id: string) => boolean;
 };
 
 /**
- * The kernel selector (automatic kernel selection blueprint D8, approved canvas): Auto and
- * the D8 groups at the top level, the rest under More as an in-place view, and a search that lists every level. A
- * kernel this host cannot run keeps its row and its reason; choosing it explains and selects nothing.
+ * The kernels this host offers, Auto first.
+ *
+ * @returns The grouped rows and the chooser.
  */
-export const KernelPreferenceSelector = memo(function ({
-  onSelect,
-  onClose,
-  children,
-  ...properties
-}: KernelPreferenceSelectorProps): React.JSX.Element {
+export const useKernelChoices = (): KernelChoices => {
   const {
-    kernel: { preference, setActivePreference },
+    kernel: { setActivePreference },
   } = useChatComposer();
   const isSupplierOpen = useFeature('zooCloudDispatch');
-  const [search, setSearch] = useState('');
-  const { top, more } = useMemo(
-    () =>
-      kernelPickerLayout({
-        host: desktopBridge() === undefined ? 'web' : 'desktop',
-        withAuto: true,
-        available: new Set<KernelId>(availableKernelConfigurations().map(({ id }) => id)),
-        isSupplierOpen,
-      }),
-    [isSupplierOpen],
-  );
-  const rows = useMemo(() => [...top, ...more].flatMap(({ items }) => items), [top, more]);
-  const subViews = useMemo<ReadonlyArray<ComboBoxSubView<KernelPickerRow>>>(
-    () => [
-      {
-        id: 'more',
-        title: 'More kernels',
-        label: 'More kernels',
-        groupedItems: more.map((group) => ({ ...group, items: [...group.items] })),
-      },
-    ],
-    [more],
-  );
-  const handleSelect = useCallback(
-    (id: string) => {
+  const groups = useMemo(() => {
+    const { top, more } = kernelPickerLayout({
+      host: desktopBridge() === undefined ? 'web' : 'desktop',
+      withAuto: true,
+      available: new Set<KernelId>(availableKernelConfigurations().map(({ id }) => id)),
+      isSupplierOpen,
+    });
+    const merged = new Map<string, KernelPickerRow[]>();
+    for (const group of [...top, ...more]) {
+      merged.set(group.name, [...(merged.get(group.name) ?? []), ...group.items]);
+    }
+    return [...merged].map(([name, items]) => ({ name, items }));
+  }, [isSupplierOpen]);
+  const rows = useMemo(() => groups.flatMap(({ items }) => items), [groups]);
+  const choose = useCallback(
+    (id: string): boolean => {
       const row = rows.find((candidate) => candidate.id === id);
       if (row === undefined) {
-        return;
+        return false;
       }
       if (row.unavailable) {
         toast.info(`${row.name} is not available here`, { description: row.unavailable.reason });
-        return;
+        return false;
       }
       setActivePreference(row.id);
-      onSelect?.(row.id);
+      return true;
     },
-    [onSelect, rows, setActivePreference],
+    [rows, setActivePreference],
   );
-
-  return (
-    <ComboBoxResponsive<KernelPickerRow>
-      {...properties}
-      className="data-[slot='popover-content']:w-80"
-      popoverProperties={properties.popoverProperties}
-      title='Kernel'
-      description='Choose Auto or one kernel for this chat.'
-      searchPlaceHolder='Search kernels…'
-      emptyListMessage='No kernels found.'
-      groupedItems={top.map((group) => ({ ...group, items: [...group.items] }))}
-      subViews={subViews}
-      search={search}
-      onSearchChange={setSearch}
-      getValue={(row) => row.id}
-      getKeywords={(row) => [row.name, row.line]}
-      value={rows.find((row) => row.id === preference)}
-      shouldCloseOnSelect={(id) => rows.find((row) => row.id === id)?.unavailable === undefined}
-      renderLabel={(row, selected) => (
-        <HoverCard openDelay={300}>
-          <HoverCardTrigger asChild>
-            <span className='flex w-full'>
-              <KernelRowBody row={row} isSelected={selected?.id === row.id} />
-            </span>
-          </HoverCardTrigger>
-          <HoverCardContent side='right' align='start' sideOffset={12} alignOffset={-4} className='w-72 max-md:hidden'>
-            <KernelRowCard row={row} />
-          </HoverCardContent>
-        </HoverCard>
-      )}
-      onSelect={handleSelect}
-      onClose={() => {
-        setSearch('');
-        onClose?.();
-      }}
-    >
-      {children}
-    </ComboBoxResponsive>
-  );
-});
+  return { groups, rows, choose };
+};

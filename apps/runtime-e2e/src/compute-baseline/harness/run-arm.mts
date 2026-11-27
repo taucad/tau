@@ -3,9 +3,11 @@
  * Usage (from repo root):
  *   node --import @oxc-node/core/register --import ./spikes/compute-reuse/lane-b/hooks.mjs \
  *     spikes/compute-reuse/lane-b/run-arm.mts --model drone --arm durable --store /tmp/x --steps cold,warm,late --out out.json
- * Arms: bypass (semantic adapter + session stubbed; durable store idle), memory (full adapter over fromMemoryFs),
- * durable (full adapter over fromNodeFs store), poison (memory wiring with every lookup answered by a deliberately
- * WRONG cached BRep -- the W0 fault-injection arm; see `--poisonBrep`).
+ * Arms: bypass (the kernel's `computeReuse: false`: no live tier, no operation cache; durable store idle), memory
+ * (the Replicad live tier over fromMemoryFs), durable (the live tier over a node:sqlite compute store; Replicad
+ * builds made with the tier refuse a native snapshot, so the store keeps none of them), poison (memory wiring with
+ * every poisonable operation answered by a deliberately WRONG shape restored from captured BRep -- the W0
+ * fault-injection arm; see `--poisonBrep`).
  * Steps: cold|warm (base params), late, early, unrelated (source edit, base params), plus `late2` (late params again).
  */
 import { probe } from './probe.mts';
@@ -46,9 +48,9 @@ const { values } = parseArgs({
     // (runtime-client-core.ts:265) cannot supersede a benchmark render after the `unrelated` source edit; the runtime
     // then uses its watcherless freshness path (in-process.ts:299), which every arm pays equally.
     watch: { type: 'string', default: 'off' },
-    /** Write the first BRep the session records to this file (feeds `--poisonBrep`). */
+    /** Write the first shape an operation returns, as BRep, to this file (feeds `--poisonBrep`). */
     captureBrep: { type: 'string' },
-    /** Answer every session lookup with these BRep bytes: a deliberately wrong cache (arm `poison`). */
+    /** Answer every poisonable operation with a shape restored from these BRep bytes: a wrong cache (arm `poison`). */
     poisonBrep: { type: 'string' },
   },
 });
@@ -192,7 +194,6 @@ const arm = values.arm as 'bypass' | 'memory' | 'durable' | 'poison';
 if (!['bypass', 'memory', 'durable', 'poison'].includes(arm)) throw new Error(`Unknown arm ${arm}`);
 if (arm !== 'memory' && arm !== 'poison' && !values.store)
   throw new Error('--store is required for bypass/durable arms');
-probe.semanticDisabled = arm === 'bypass';
 if (values.captureBrep) probe.captureRecordedBrep = true;
 if (arm === 'poison') {
   if (!values.poisonBrep) throw new Error('arm `poison` requires --poisonBrep <file> (capture one with --captureBrep)');
@@ -370,6 +371,8 @@ const kernelFor = async () => {
         replicadKernel({
           wasm: values.wasm as 'multi' | 'single' | 'auto',
           libraryTracing: values.libraryTracing as 'off' | 'summary',
+          // The live tier follows the runtime's compute reuse unless switched off; the off baseline switches it off.
+          computeReuse: arm !== 'bypass',
         }),
       ],
     };
@@ -458,9 +461,12 @@ const main = async () => {
     transport: inProcessTransport({
       runtime,
       fileSystem,
+      // build123d's bypass arm runs with compute off, so its kernel takes its own off arm: no scope, no compute block.
       compute: computeEngine
         ? { mode: 'durable', store: fromSqlite({ store: computeEngine, workspace: store! }) }
-        : { mode: 'memory' },
+        : model.kernel === 'build123d' && arm === 'bypass'
+          ? { mode: 'off' }
+          : { mode: 'memory' },
     }),
   });
   let telemetry: any[] = [];
@@ -520,6 +526,15 @@ const main = async () => {
       };
       let result = await renderRequest();
       let wallMs = performance.now() - start;
+      // The probe measures only through the loader's module seams: a kernel that no longer imports through them would
+      // otherwise run unmeasured, its counters silently zero.
+      const seams = model.kernel === 'replicad' ? ['replicad', '@taucad/runtime/kernel'] : [];
+      const missing = seams.filter((seam) => !((globalThis as any).__laneBPatched ?? []).includes(seam));
+      if (missing.length > 0)
+        throw new Error(
+          `[lane-b hook] the ${model.kernel} kernel loaded without the module seams ${missing.join(', ')}: ` +
+            'it no longer imports them where apps/runtime-e2e/src/compute-baseline/harness/hook-impl.mjs expects.',
+        );
       let retried = false;
       if (values.failOnRetry) rejectSupersededTimingResult(result);
       if (result.superseded) {
@@ -555,8 +570,10 @@ const main = async () => {
           }
         }
       }
-      const snapshot = probe.snapshot();
       const mainSpan = telemetry.find((entry) => entry.name === 'replicad.run-main');
+      // The live tier's own counters (absent on a scene-table hit, which runs no user code, and with the tier off).
+      probe.noteTier(mainSpan?.detail);
+      const snapshot = probe.snapshot();
       const trace = identityTracer
         ?.take()
         .filter(
@@ -596,7 +613,7 @@ const main = async () => {
       });
       if (values.out) writeReport({ partial: true }); // persist after every step so an interrupted child still leaves its completed steps
       console.error(
-        `[lane-b] ${model.name} ${arm} ${step}: ${wallMs.toFixed(0)} ms (main ${spans['create.runOcMain']?.ms.toFixed(0) ?? '-'} ms, flush ${snapshot.counters['session.flush']?.ms.toFixed(0) ?? '-'} ms, hits ${snapshot.lookups.hit}/${snapshot.lookups.hit + snapshot.lookups.miss}, readdirStat ${snapshot.counters['fs.readdirStat']?.calls ?? 0}, writes ${snapshot.counters['fs.writeFile']?.calls ?? 0})`,
+        `[lane-b] ${model.name} ${arm} ${step}: ${wallMs.toFixed(0)} ms (main ${spans['create.runOcMain']?.ms.toFixed(0) ?? '-'} ms, tier hits ${snapshot.lookups.hit}/${snapshot.lookups.hit + snapshot.lookups.miss}, stored ${snapshot.records.staged}, native solves ${snapshot.counters['native.solve']?.calls ?? 0}, scene-table hit ${spans['replicad.scene-table-hit']?.count ?? 0})`,
       );
     }
     if (values.captureBrep && probe.capturedBrep) {

@@ -305,6 +305,14 @@ const pairDevice = async (
   return { deviceId, credential };
 };
 
+/** The deployment answer a self-host API publishes (`GET /v1/deployment`): runs take the unfunded transport. */
+const selfHostDeploymentAnswer = JSON.stringify({
+  version: 1,
+  edition: 'self-host',
+  billing: { funded: false },
+  maxAgeSeconds: 300,
+});
+
 /**
  * A gateway that answers `turns` tool-calling turns and then one final text.
  *
@@ -319,6 +327,11 @@ const pairDevice = async (
 const startStubGateway = async (turns: number, hold: number): Promise<URL> => {
   let requestIndex = 0;
   const server: HttpServer = createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/v1/deployment') {
+      /* Answered at once: these tests drive the run channel, not billing, so the API says self-host. */
+      response.writeHead(200, { 'content-type': 'application/json' }).end(selfHostDeploymentAnswer);
+      return;
+    }
     // async-iife: bootstrap -- node's request listener is synchronous.
     void (async () => {
       for await (const _chunk of request) {

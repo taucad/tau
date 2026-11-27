@@ -7,7 +7,7 @@ import { getEnvironment } from '#environment.config.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import { projectChatUrl } from '#utils/project-url.utils.js';
+import { projectChatUrl } from '@taucad/files-ui/utils/project-url.utils';
 
 /**
  * Seeds one project for the composer-record and attachment proofs

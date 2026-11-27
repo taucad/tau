@@ -36,6 +36,7 @@
   },
   "exports": {
     "./cad/cad-viewer": "./src/cad/cad-viewer.tsx",
+    "./cad/comment-pins": "./src/cad/comment-pins.tsx",
     "./cad/fit-view-control": "./src/cad/fit-view-control.tsx",
     "./cad/fullscreen-view-control": "./src/cad/fullscreen-view-control.tsx",
     "./cad/kernel-settings": "./src/cad/kernel-settings.tsx",
@@ -136,6 +137,11 @@
         "types": "./dist/cad/cad-viewer.d.mts",
         "import": "./dist/cad/cad-viewer.mjs",
         "default": "./dist/cad/cad-viewer.mjs"
+      },
+      "./cad/comment-pins": {
+        "types": "./dist/cad/comment-pins.d.mts",
+        "import": "./dist/cad/comment-pins.mjs",
+        "default": "./dist/cad/comment-pins.mjs"
       },
       "./cad/fit-view-control": {
         "types": "./dist/cad/fit-view-control.d.mts",
@@ -627,7 +633,7 @@
     "pluralize": "^8.0.0",
     "postprocessing": "catalog:",
     "three-mesh-bvh": "^0.9.10",
-    "three-viewport-gizmo": "npm:@taulabs/three-viewport-gizmo@3.0.0-beta.1"
+    "three-viewport-gizmo": "npm:@taulabs/three-viewport-gizmo@3.0.0-beta.6"
   },
   "peerDependencies": {
     "@react-three/fiber": "^9.0.0",

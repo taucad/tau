@@ -168,6 +168,9 @@ vi.mock('@taucad/viewer/hooks/use-graphics', async () => {
     useGraphics: () => actors.graphics,
     useGraphicsSelector: <T,>(selector: (state: SnapshotFrom<typeof graphicsLikeMachine>) => T): T =>
       useSelector(actors.graphics!, selector),
+    useOptionalGraphics: () => actors.graphics,
+    useOptionalGraphicsSelector: <T,>(selector: (state: SnapshotFrom<typeof graphicsLikeMachine>) => T): T =>
+      useSelector(actors.graphics!, selector),
     useModelInteractionSelector: <T,>(selector: (state: { context: Record<string, unknown> }) => T): T =>
       selector({ context: { unitsById: {} } }),
     useKinematicsSelector: <T,>(selector: (state: { context: Record<string, unknown> }) => T): T =>

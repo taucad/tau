@@ -3,7 +3,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PropsWithChildren } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import {
   assertCloudProjectActive,
   cloudProjectsQueryKeyFor,
@@ -90,7 +90,7 @@ describe('cloud project deletion', () => {
     const { result } = renderHook(useDeleteCloudProject, { wrapper });
     await act(async () => {
       await expect(result.current.mutateAsync({ ...project, canDeleteCloud: undefined })).rejects.toThrow(
-        'Cloud deletion is unavailable',
+        'You can’t delete this project’s cloud copy right now',
       );
     });
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
@@ -208,7 +208,10 @@ describe('cloud project deletion', () => {
     const { wrapper } = createWrapper();
     const view = renderHook(useDeleteCloudProject, { wrapper });
     await act(async () => {
-      await expect(view.result.current.mutateAsync(project)).rejects.toThrow('403');
+      await expect(view.result.current.mutateAsync(project)).rejects.toMatchObject({
+        message: 'Couldn’t delete this project’s cloud copy. Check your connection and try again.',
+        status: 403,
+      });
     });
     expect(getCloudDeletionState(project.id)).toBeUndefined();
     expect(canOpenCloudProject(project.id)).toBe(true);
@@ -242,7 +245,10 @@ describe('cloud project deletion', () => {
       });
       const view = renderHook(useDeleteCloudProject, { wrapper });
       await act(async () => {
-        await expect(view.result.current.mutateAsync(project)).rejects.toThrow(String(rejectionStatus));
+        await expect(view.result.current.mutateAsync(project)).rejects.toMatchObject({
+          message: 'Couldn’t delete this project’s cloud copy. Check your connection and try again.',
+          status: rejectionStatus,
+        });
       });
       expect(getCloudDeletionState(project.id)).toBeUndefined();
       expect(client.getQueryData(cloudProjectsQueryKeyFor('owner'))).toEqual([project]);
@@ -263,7 +269,10 @@ describe('cloud project deletion', () => {
     });
     const view = renderHook(useDeleteCloudProject, createWrapper());
     await act(async () => {
-      await expect(view.result.current.mutateAsync(project)).rejects.toThrow('403');
+      await expect(view.result.current.mutateAsync(project)).rejects.toMatchObject({
+        message: 'Couldn’t delete this project’s cloud copy. Check your connection and try again.',
+        status: 403,
+      });
     });
     expect(getCloudDeletionState(project.id)).toBe('deleting');
     expect(canOpenCloudProject(project.id)).toBe(false);

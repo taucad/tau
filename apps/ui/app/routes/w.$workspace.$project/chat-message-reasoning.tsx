@@ -7,11 +7,17 @@ import { normalizeLatexDelimiters } from '@taucad/agent-host';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
 import { ThoughtBubble } from '@taucad/ui-kit/icons/thought-bubble';
-import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
+import { MarkdownViewerChat } from '@taucad/chat-surfaces/components/markdown/markdown-viewer-chat';
+import {
+  activityChevronClassName,
+  activityContainerClassName,
+  useActivityRowDisclosure,
+} from '@taucad/chat-ui/components/chat-activity-group';
+import { cn } from '@taucad/ui/utils/cn';
 
 type ChatMessageReasoningProperties = {
   readonly parts: readonly ReasoningUIPart[];
-  readonly hasContent: boolean;
+  /** The thought is the turn's live tail: it names itself "Thinking…" and streams. */
   readonly isMessageActive: boolean;
 };
 
@@ -54,17 +60,22 @@ const thoughtLabel = (parts: readonly ReasoningUIPart[]): string => {
   return `Thought for ${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
 };
 
-/** One collapsible, chronological reasoning body shared by Tau and ACP agents. */
+/**
+ * One collapsible, chronological reasoning body shared by Tau and ACP agents.
+ *
+ * A thought rests closed whether it streams, ends a turn or was reloaded: only the reader opens it. It is a row
+ * inside an activity container, and one line with its own bordered detail anywhere else.
+ */
 export function ChatMessageReasoning({
   parts,
-  hasContent,
   isMessageActive,
 }: ChatMessageReasoningProperties): React.JSX.Element | undefined {
   'use no memo';
 
   const visibleParts = useMemo(() => parts.filter((part) => part.text.trim() !== ''), [parts]);
-  const [userOpen, setUserOpen] = useState<boolean | undefined>(undefined);
-  const isOpen = userOpen ?? (isMessageActive || !hasContent);
+  const [isOpen, setIsOpen] = useState(false);
+  const row = useActivityRowDisclosure(isOpen);
+  const isContained = row?.isSole === false;
   /* A streaming thought names itself; the duration only exists once it ends (R6). */
   const isThinking = isMessageActive && visibleParts.at(-1)?.state === 'streaming';
   const label = isThinking ? 'Thinking…' : thoughtLabel(visibleParts);
@@ -74,12 +85,12 @@ export function ChatMessageReasoning({
   }
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setUserOpen}>
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
         <Button
           variant='ghost'
           size='xs'
-          className='group/chat-tool-trigger -ml-2 flex w-full min-w-0 items-center justify-start gap-1.5 overflow-hidden font-normal text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent'
+          className='group/chat-tool-trigger -ml-2 flex w-full min-w-0 items-center justify-start gap-1.5 overflow-hidden font-normal text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent pointer-coarse:min-h-8'
         >
           {isThinking ? (
             <Loader className='size-3 shrink-0' />
@@ -89,7 +100,7 @@ export function ChatMessageReasoning({
           <span className='min-w-0 truncate'>{label}</span>
           <ChevronRight
             aria-hidden='true'
-            className='size-3 shrink-0 opacity-0 transition-[opacity,transform] duration-200 group-hover/chat-tool-trigger:opacity-100 group-focus-visible/chat-tool-trigger:opacity-100 group-data-[state=open]/chat-tool-trigger:rotate-90'
+            className={cn(activityChevronClassName, 'group-data-[state=open]/chat-tool-trigger:rotate-90')}
           />
         </Button>
       </CollapsibleTrigger>
@@ -97,7 +108,10 @@ export function ChatMessageReasoning({
         <div
           role='region'
           aria-label={`${label} details`}
-          className='reasoning-body relative pl-5 text-sm font-normal text-muted-foreground italic [&_*]:font-normal [&_*]:italic [&_h1]:text-inherit [&_h2]:text-inherit [&_h3]:text-inherit [&_h4]:text-inherit [&_h5]:text-inherit [&_h6]:text-inherit'
+          className={cn(
+            'reasoning-body relative text-sm font-normal text-muted-foreground italic [&_*]:font-normal [&_*]:italic [&_h1]:text-inherit [&_h2]:text-inherit [&_h3]:text-inherit [&_h4]:text-inherit [&_h5]:text-inherit [&_h6]:text-inherit',
+            isContained ? 'pb-1.5' : cn(activityContainerClassName, 'px-2.5 py-1.5'),
+          )}
         >
           {visibleParts.map((part, index) => (
             <MarkdownViewerChat

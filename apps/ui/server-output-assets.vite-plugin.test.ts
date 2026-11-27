@@ -77,16 +77,15 @@ describe('removeServerAssetCopy', () => {
 });
 
 describe('createServerOutputAssets', () => {
-  it('should apply to the server build only', () => {
+  it('should apply to the server environment of a build only', () => {
     const plugin = createServerOutputAssets({ clientDirectory: '/client' });
-    const apply = plugin.apply as unknown as (
-      config: Record<string, unknown>,
-      environment: Record<string, unknown>,
-    ) => boolean;
+    const applyToEnvironment = plugin.applyToEnvironment as unknown as (environment: {
+      config: { consumer: string };
+    }) => boolean;
 
-    expect(apply({}, { command: 'build', mode: 'production', isSsrBuild: true })).toBe(true);
-    expect(apply({}, { command: 'build', mode: 'production', isSsrBuild: false })).toBe(false);
-    expect(apply({}, { command: 'serve', mode: 'development', isSsrBuild: true })).toBe(false);
+    expect(plugin.apply).toBe('build');
+    expect(applyToEnvironment({ config: { consumer: 'server' } })).toBe(true);
+    expect(applyToEnvironment({ config: { consumer: 'client' } })).toBe(false);
   });
 
   it('should hand over emitted assets and leave chunks, source maps and the server manifest', () => {
@@ -95,32 +94,50 @@ describe('createServerOutputAssets', () => {
       'server/index.js.map': '{}',
       'server/.vite/manifest.json': '{}',
       'server/assets/a-1.webp': 'image',
+      'server/assets/kernel.worker-AbCdEf12.js': 'worker',
       'client/assets/a-1.webp': 'image',
+      'client/assets/kernel.worker-AbCdEf12.js': 'worker',
     });
     const plugin = createServerOutputAssets({ clientDirectory: build.client });
-    const configResolved = plugin.configResolved as (config: Record<string, unknown>) => void;
-    configResolved({
-      root: path.dirname(build.server),
-      build: { outDir: 'server' },
-      logger: { info: () => undefined },
-    });
     const writeBundle = plugin.writeBundle as unknown as {
-      handler: (options: Record<string, unknown>, bundle: Record<string, unknown>) => void;
+      handler: (
+        this: { environment: { logger: { info: (message: string) => void } } },
+        options: Record<string, unknown>,
+        bundle: Record<string, unknown>,
+      ) => void;
     };
+    const messages: string[] = [];
 
-    writeBundle.handler(
-      {},
+    writeBundle.handler.call(
+      { environment: { logger: { info: (message) => messages.push(message) } } },
+      { dir: build.server },
       {
         'index.js': { type: 'chunk', fileName: 'index.js' },
         'index.js.map': { type: 'asset', fileName: 'index.js.map' },
         '.vite/manifest.json': { type: 'asset', fileName: '.vite/manifest.json' },
         'assets/a-1.webp': { type: 'asset', fileName: 'assets/a-1.webp' },
+        // The worker bundles `vite:worker` emits into every environment of a shared-config build.
+        'assets/kernel.worker-AbCdEf12.js': { type: 'asset', fileName: 'assets/kernel.worker-AbCdEf12.js' },
       },
     );
 
-    expect(existsSync(path.join(build.server, 'assets/a-1.webp'))).toBe(false);
+    for (const removed of ['assets/a-1.webp', 'assets/kernel.worker-AbCdEf12.js']) {
+      expect(existsSync(path.join(build.server, removed)), removed).toBe(false);
+    }
     for (const kept of ['index.js', 'index.js.map', '.vite/manifest.json']) {
       expect(existsSync(path.join(build.server, kept)), kept).toBe(true);
     }
+    expect(messages).toEqual(['server output assets: 2 removed (also in the client output), 0 kept']);
+  });
+
+  it('should fail without an output directory', () => {
+    const plugin = createServerOutputAssets({ clientDirectory: '/client' });
+    const writeBundle = plugin.writeBundle as unknown as {
+      handler: (this: unknown, options: Record<string, unknown>, bundle: Record<string, unknown>) => void;
+    };
+
+    expect(() => {
+      writeBundle.handler.call({}, {}, {});
+    }).toThrow('the server build directory is unknown');
   });
 });

@@ -1,0 +1,48 @@
+diff --git a/dist/development/lib/dom/ssr/routeModules.js b/dist/development/lib/dom/ssr/routeModules.js
+--- a/dist/development/lib/dom/ssr/routeModules.js
++++ b/dist/development/lib/dom/ssr/routeModules.js
+@@ -23,7 +23,19 @@
+ 		console.error(`Error loading route module \`${route.module}\`, reloading page...`);
+ 		console.error(error);
+ 		if (window.__reactRouterContext && window.__reactRouterContext.isSpaMode && import.meta.hot) throw error;
+-		window.location.reload();
++		// tau patch (TAU-UI-S; kept locally, ruling RD4 of the React Router 8 migration blueprint).
++		// During a push navigation the URL still names the page being left, so
++		// reloading it drops the user back there: load the destination instead.
++		// Anything else (hydration, a non-GET submission) still reloads.
++		let tauRouter = window.__reactRouterDataRouter;
++		let tauNavigation = tauRouter && tauRouter.state.navigation;
++		let tauHref = tauNavigation && tauNavigation.location && (!tauNavigation.formMethod || tauNavigation.formMethod.toUpperCase() === "GET") ? tauRouter.createHref(tauNavigation.location) : void 0;
++		// A back/forward navigation has already moved the URL to the destination, so a reload is right there.
++		if (tauHref !== void 0 && tauHref !== window.location.pathname + window.location.search + window.location.hash) {
++			window.location.assign(tauHref);
++		} else {
++			window.location.reload();
++		}
+ 		return new Promise(() => {});
+ 	}
+ }
+diff --git a/dist/production/lib/dom/ssr/routeModules.js b/dist/production/lib/dom/ssr/routeModules.js
+--- a/dist/production/lib/dom/ssr/routeModules.js
++++ b/dist/production/lib/dom/ssr/routeModules.js
+@@ -23,7 +23,19 @@
+ 		console.error(`Error loading route module \`${route.module}\`, reloading page...`);
+ 		console.error(error);
+ 		if (window.__reactRouterContext && window.__reactRouterContext.isSpaMode && import.meta.hot) throw error;
+-		window.location.reload();
++		// tau patch (TAU-UI-S; kept locally, ruling RD4 of the React Router 8 migration blueprint).
++		// During a push navigation the URL still names the page being left, so
++		// reloading it drops the user back there: load the destination instead.
++		// Anything else (hydration, a non-GET submission) still reloads.
++		let tauRouter = window.__reactRouterDataRouter;
++		let tauNavigation = tauRouter && tauRouter.state.navigation;
++		let tauHref = tauNavigation && tauNavigation.location && (!tauNavigation.formMethod || tauNavigation.formMethod.toUpperCase() === "GET") ? tauRouter.createHref(tauNavigation.location) : void 0;
++		// A back/forward navigation has already moved the URL to the destination, so a reload is right there.
++		if (tauHref !== void 0 && tauHref !== window.location.pathname + window.location.search + window.location.hash) {
++			window.location.assign(tauHref);
++		} else {
++			window.location.reload();
++		}
+ 		return new Promise(() => {});
+ 	}
+ }

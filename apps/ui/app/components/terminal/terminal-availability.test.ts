@@ -46,7 +46,8 @@ describe('terminalAvailability', () => {
     });
     expect(browserStored).toEqual({
       status: 'unavailable',
-      message: 'This project is stored in Tau, not in a folder on this computer, so the Terminal has nowhere to run.',
+      message:
+        'This project is in browser storage, not in a folder on this computer, so the Terminal has nowhere to run.',
       recovery: 'Open a project from a folder on this computer to use the Terminal.',
     });
     expect(isTerminalOffered(browserStored)).toBe(true);

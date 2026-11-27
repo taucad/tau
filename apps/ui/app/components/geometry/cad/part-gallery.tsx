@@ -1,15 +1,33 @@
-import { createContext, lazy, Suspense, useCallback, useContext, useState } from 'react';
+import { createContext, Suspense, useCallback, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ModelComponentPreviewRequest } from '@taucad/workbench-panes/component-menu/component-actions';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 /** Which part to show first, and where focus returns when the gallery closes. */
 export type PartGalleryRequest = ModelComponentPreviewRequest;
 
 const PartGalleryContext = createContext<((request: PartGalleryRequest) => void) | undefined>(undefined);
-const ProjectPartGallery = lazy(async () => {
-  const module = await import('#components/geometry/cad/project-part-gallery.js');
-  return { default: module.ProjectPartGallery };
-});
+
+/** The gallery could not load in this page (optional code, PL7 staging verification 2026-11-21): it closes again. */
+function PartGalleryUnavailable({
+  onClose,
+}: {
+  readonly request: PartGalleryRequest;
+  readonly onClose: () => void;
+}): undefined {
+  useEffect(() => {
+    onClose();
+  }, [onClose]);
+  return undefined;
+}
+
+const ProjectPartGallery = lazyCode(
+  async () => {
+    const module = await import('#components/geometry/cad/project-part-gallery.js');
+    return { default: module.ProjectPartGallery };
+  },
+  { fallback: PartGalleryUnavailable },
+);
 
 /** Open the part gallery; `undefined` outside a project workspace. */
 export const useOpenPartGallery = (): ((request: PartGalleryRequest) => void) | undefined =>

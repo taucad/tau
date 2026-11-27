@@ -52,11 +52,16 @@ public sealed partial class WorkerTests
             backend.Add(placed, $"Bolt/{index}", 0);
             var after = TauGeometryCapture.Counters(library);
             Assert.Equal(1UL, after[0] - before[0]);
-            Assert.Equal(index == 0 ? 1UL : 0UL, after[1] - before[1]);
-            Assert.Equal(0UL, after[4]);
+            // The scene holds one immutable lease on the shared prototype and reads it back only when
+            // the scene is extracted.
+            Assert.Equal(0UL, after[1] - before[1]);
+            Assert.Equal(1UL, after[4]);
         }
         source.Dispose();
+        var copies = TauGeometryCapture.Counters(library)[1];
         var scene = backend.Extract();
+        Assert.Equal(1UL, TauGeometryCapture.Counters(library)[1] - copies);
+        Assert.Equal(0UL, TauGeometryCapture.Counters(library)[4]);
         Assert.Equal(count, scene.Components.Count);
         Assert.Equal(count, scene.Components.Select(component => component.Id).Distinct().Count());
         Assert.Equal(1, backend.GeometryCopies);

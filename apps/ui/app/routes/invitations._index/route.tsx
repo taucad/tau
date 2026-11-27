@@ -307,8 +307,8 @@ export default function AcceptInvitation(): React.JSX.Element {
   if (outcome?.kind === 'failed') {
     return page(
       <InvitationNotice
-        title='The invitation could not be accepted.'
-        detail='Tau Cloud did not answer. Open the link again in a moment.'
+        title='Couldn’t accept the invitation'
+        detail='Open the link again in a moment.'
         action={
           <Button asChild variant='outline'>
             <Link to='/projects'>Go to projects</Link>

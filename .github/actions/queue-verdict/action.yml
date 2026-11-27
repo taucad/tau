@@ -13,8 +13,8 @@ description: >-
 #
 # The proof is the gate's jobs, not the run's overall conclusion. GitHub merges as soon
 # as the required checks pass, so the queue run is often still `in_progress` when this
-# push starts, and `merge-queue-sweep.yml` then cancels it as a run of a deleted queue
-# branch. Until 2026-11-12 this lookup asked only for successful runs, found nothing,
+# push starts (its shadow rows run on; `merge-queue-sweep.yml` cancelled it as a run of a
+# deleted queue branch until 2026-11-26). Until 2026-11-12 this lookup asked only for successful runs, found nothing,
 # and 25 of 41 pushes reran every lane (Brain ci-audit 2026-11-12, F1). A run counts
 # only when `Run affected tasks` and `Validate workspace` both completed `success`.
 # `Run affected tasks` waits for every lane and fails on any selected lane that did not

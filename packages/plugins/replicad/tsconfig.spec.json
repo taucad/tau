@@ -11,6 +11,7 @@
   "include": [
     "vitest.config.ts",
     "vitest.setup.ts",
+    "vitest.global-setup.ts",
     "tsdown.config.ts",
     "scripts/**/*.mts",
     "src/**/*.test.ts",

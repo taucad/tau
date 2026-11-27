@@ -69,14 +69,18 @@
     },
     "test": {
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment"]
+      "inputs": ["default", "^production", "serviceEnvironment", "{projectRoot}/quarantine.json"],
+      "outputs": [
+        "{workspaceRoot}/out/reports/coverage/{projectRoot}",
+        "{workspaceRoot}/out/test-results/{projectName}/test.outcomes.jsonl"
+      ]
     },
     "build": {
       "inputs": ["production", "^production"]
     },
     "lint": {
       "options": {
-        "command": "oxlint --no-error-on-unmatched-pattern -c $NX_WORKSPACE_ROOT/.oxlintrc.json {args.files} && eslint {args.files}",
+        "command": "oxlint --no-error-on-unmatched-pattern {args.files} && eslint {args.files}",
         "forwardAllArgs": false
       },
       "inputs": [
@@ -145,12 +149,31 @@
       },
       "cache": false
     },
+    "formal:nightly:mutants": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/formal/src/cli.ts nightly --mutants-only {projectRoot}"
+      },
+      "cache": false
+    },
     "formal:nightly:check": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node tools/formal/src/cli.ts check --tier nightly {projectRoot}"
       },
-      "cache": false
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/specs/**/*",
+        "!{projectRoot}/specs/lean/**/*",
+        "{projectRoot}/src/**/*.json",
+        "{workspaceRoot}/tools/formal/src/**/*",
+        "{workspaceRoot}/tools/formal/toolchain.lock",
+        "{workspaceRoot}/tools/formal/run-seconds.json",
+        {
+          "runtime": "node tools/formal/src/cli.ts toolchain-id"
+        }
+      ],
+      "outputs": ["{workspaceRoot}/out/reports/formal/{projectRoot}/nightly"]
     },
     "formal:logs": {
       "executor": "nx:run-commands",
@@ -197,7 +220,8 @@
       "!{projectRoot}/vitest.config.*",
       "!{projectRoot}/**/*.md",
       "!{projectRoot}/specs/**/*",
-      "!{projectRoot}/**/react-event-layer.ceiling.json"
+      "!{projectRoot}/**/react-event-layer.ceiling.json",
+      "!{projectRoot}/quarantine.json"
     ]
   },
   "release": {

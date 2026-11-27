@@ -6,8 +6,8 @@ import { cn } from '@taucad/ui/utils/cn';
 import { focusTrapAttribute } from '@taucad/chat-ui/components/use-composer-exit';
 import { AttachmentFileChip, AttachmentImage } from '#components/chat/attachment-preview.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import type { DraftAttachment, PendingDraftImage } from '#hooks/draft.machine.js';
-import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import type { DraftAttachment, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
+import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { attachmentKind, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 
 type ChatTextareaAttachmentRailSize = 'desktop' | 'mobile';

@@ -1,4 +1,4 @@
-import { ExternalLink } from '#components/external-link.js';
+import { ExternalLink } from '@taucad/editor-ui/components/external-link';
 import { extractDomainFromUrl } from '@taucad/ui-core/utils/url.utils';
 import { WebFavicon } from '#routes/w.$workspace.$project/web-favicon.js';
 

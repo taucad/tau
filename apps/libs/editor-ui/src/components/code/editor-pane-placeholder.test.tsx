@@ -39,6 +39,8 @@ describe('EditorPanePlaceholder', () => {
     const { container } = render(<EditorPanePlaceholder label='Loading main.ts' />);
 
     expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(12);
+    /* The lines show from the wait ladder's 300 ms mark, by CSS, so a fast read draws none (rule 16). */
+    expect(screen.getByTestId('editor-pane-skeleton')).toHaveClass('wait-skeleton');
     const pane = screen.getByRole('group', { name: 'Loading main.ts' });
     expect(pane).toHaveAttribute('aria-busy', 'true');
     expect(pane.querySelector('[data-slot="editor-pane-text"]')).toBeNull();

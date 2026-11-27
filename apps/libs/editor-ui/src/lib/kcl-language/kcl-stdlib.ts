@@ -1,5 +1,6 @@
 import type { kclStdlibExport } from '@taucad/api-extractor/kcl-stdlib';
 import type { KclParameter } from '#lib/kcl-language/kcl-bindings.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 type KclStdlibExport = typeof kclStdlibExport;
 
@@ -128,7 +129,10 @@ let loading: Promise<KclStdlib> | undefined;
 export async function loadKclStdlib(): Promise<KclStdlib> {
   loading ??= (async (): Promise<KclStdlib> => {
     try {
-      const { kclStdlibExport } = await import('@taucad/api-extractor/kcl-stdlib');
+      const { kclStdlibExport } = await loadCode(async () => {
+        const { kclStdlibExport } = await import('@taucad/api-extractor/kcl-stdlib');
+        return { kclStdlibExport };
+      });
       return buildKclStdlib(kclStdlibExport);
     } catch (error) {
       // A failed chunk load is retried on the next request instead of being cached.

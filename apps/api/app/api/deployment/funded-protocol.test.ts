@@ -53,7 +53,7 @@ const relay = async (invocations: ModelInvocationService) => {
   const { reply, headers } = recordingReply();
   await new LlmGatewayService(invocations).relay({
     provider: 'openai-responses',
-    body: { model: 'openai-gpt-5.6-luna', input: 'fixture', stream: true, max_output_tokens: 16 },
+    body: { model: 'openai-gpt-6-luna', input: 'fixture', stream: true, max_output_tokens: 16 },
     principalId: 'user',
     attemptId: 'run_1:0:0',
     reply,

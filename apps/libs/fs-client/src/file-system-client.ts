@@ -13,6 +13,7 @@ import type {
   RootStatus,
   ProjectDiscoveryResult,
   ProjectRouteVerification,
+  ProjectAbsence,
   ResolvedProjectManifest,
   CommitPendingProjectDirectoryInput,
   CommitPendingProjectDirectoryResult,
@@ -84,6 +85,7 @@ export type WorkspaceAuthorityClient = Pick<
   | 'recheckRoots'
   | 'listProjectManifests'
   | 'verifyProjectRoute'
+  | 'verifyAbsent'
   | 'commitPendingProjectDirectory'
   | 'adoptProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
@@ -217,6 +219,8 @@ export type FileSystemClient = {
   listProjectManifests(): Promise<ProjectDiscoveryResult>;
   /** Verify the exact installed binding without discovery or repair. */
   verifyProjectRoute(input: { projectId: string }): Promise<ProjectRouteVerification>;
+  /** Prove from storage whether any configured root still carries an id; the discovery index is never asked. */
+  verifyAbsent(projectId: string): Promise<ProjectAbsence>;
   /** Commit one durable journal snapshot as an identity-safe manifest-last project directory. */
   commitPendingProjectDirectory(
     input: CommitPendingProjectDirectoryInput,

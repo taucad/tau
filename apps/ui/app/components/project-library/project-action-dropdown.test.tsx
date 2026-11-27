@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
 import type * as NativeFileManager from '#hooks/use-native-file-manager.js';
 
 let rowRuns = 0;
@@ -171,7 +171,7 @@ describe('ProjectActionDropdown', () => {
         />,
       );
       await user.click(screen.getByRole('button', { name: 'Actions for Readable Project' }));
-      expect(screen.getByRole('menuitem', { name: 'Delete from Tau Cloud…' })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Delete cloud copy…' })).toBeInTheDocument();
       expect(
         screen.getByRole('menuitem', { name: deletedAt === undefined ? 'Move to Trash' : 'Restore' }),
       ).toBeInTheDocument();

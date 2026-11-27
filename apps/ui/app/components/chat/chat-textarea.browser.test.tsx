@@ -68,7 +68,7 @@ vi.doMock('@taucad/ui-kit/icons/svg-icon', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   SvgIcon: () => <span className='size-4' />,
 }));
-vi.doMock('#components/files/file-link.js', () => ({
+vi.doMock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 

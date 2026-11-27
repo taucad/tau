@@ -144,6 +144,8 @@ describe('native-darwin row selection', () => {
     const queue = select('merge_group', ['head', 'cli,picogk']);
     expect(queue.status).toBe(0);
     expect(queue.outputs['projects']).toBe('cli,picogk');
+    // One darwin-arm64 job per project (ST-3).
+    expect(queue.outputs['rows']).toBe('["cli","picogk"]');
     expect(queue.calls).not.toContain('test:native-darwin');
     // The candidate gate passes no rows, only the benchmarks.
     const candidate = run(plan, [
@@ -153,7 +155,7 @@ describe('native-darwin row selection', () => {
       ['BENCHMARKS', 'true'],
       ['ALL', '["build123d","picogk"]'],
     ]);
-    expect(candidate.outputs).toMatchObject({ projects: '', benchmarks: 'build123d,picogk' });
+    expect(candidate.outputs).toMatchObject({ projects: '', rows: '[]', benchmarks: 'build123d,picogk' });
     expect(candidate.calls).toContain('nx show projects --with-target benchmark-native --json');
     expect(planStep.env?.['CALLED_REF']).toBe(expression('inputs.ref'));
     expect(planStep.env?.['CALLED_PROJECTS']).toBe(expression('inputs.projects'));
@@ -162,6 +164,7 @@ describe('native-darwin row selection', () => {
   it('should run every row on a dispatch', () => {
     const result = select('workflow_dispatch');
     expect(result.outputs['projects']).toBe('build123d,cli,picogk');
+    expect(result.outputs['rows']).toBe('["build123d","cli","picogk"]');
     expect(result.calls).not.toContain('--affected');
   });
 
@@ -227,7 +230,7 @@ describe('native-hosts row selection', () => {
       readonly jobs: Record<string, { readonly if?: string; readonly steps?: readonly Step[] }>;
     };
     expect(Object.keys(workflow.on).sort()).toEqual(['workflow_call', 'workflow_dispatch']);
-    expect(workflow.jobs['plan']?.if).toBe("inputs.intel == ''");
+    expect(workflow.jobs['plan']?.if).toBe("inputs.hosts == ''");
     expect(workflow.jobs['plan']?.steps?.some((candidate) => candidate.id === 'push-base')).toBe(false);
   });
 });

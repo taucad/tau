@@ -8,7 +8,10 @@ export const resolveTauTelemetryHostCloud = (value: string | undefined): boolean
 /**
  * The web build's release label: the short commit (12 hex) from Netlify's `COMMIT_REF`, else the GitHub Actions
  * `GITHUB_SHA` the deploy workflow builds at; `undefined` for a local build. The API admits it only from the
- * `/tau-release.json` the same build publishes, never from what a client posts.
+ * `/tau-release.json` the deploy publishes beside the build, never from what a client posts.
+ *
+ * The build itself never reads it, so `ui:build`'s cache key holds sources and configuration only:
+ * `scripts/stamp-build-release.mts` applies it to the finished build (ST-9).
  */
 export const resolveTauBuildRelease = (
   environment: Readonly<Record<string, string | undefined>>,
@@ -17,13 +20,63 @@ export const resolveTauBuildRelease = (
   return commit !== undefined && /^[\da-f]{12,40}$/u.test(commit) ? commit.slice(0, 12) : undefined;
 };
 
-/** Resolve the deployment mode before Vite constructs any client, worker or SSR graph. */
-export const resolveTauCloudBuildEnabled = (value: string | undefined): boolean => {
-  if (value === undefined || value === 'false') {
+/**
+ * What the server graph's `tauBuildRelease` holds until `scripts/stamp-build-release.mts` replaces it with the release.
+ * Twelve characters, like the label, so stamping keeps every byte offset and the server source maps stay valid; not a
+ * label, so an unstamped build reports none.
+ */
+export const unstampedBuildRelease = '@TAU_RELEASE';
+
+/**
+ * What the server graph's `tauRetainedBuildFloor` holds until `scripts/retain-previous-assets.mts` stamps the oldest
+ * build whose assets the deploy serves over it (FP2). Thirteen characters, like a build id (milliseconds since the
+ * epoch, until the year 2286), so stamping keeps every byte offset; not a build id, so an unstamped build reports no
+ * retained floor.
+ */
+export const unstampedRetainedBuildFloor = '@TAU_RETAINED';
+
+/** Whether a value is a stamped release label (12 hex, as {@link resolveTauBuildRelease} gives). */
+export const isStampedBuildRelease = (value: string): boolean => /^[\da-f]{12}$/u.test(value);
+
+/** The variable naming the web build's output directory under `apps/ui` (`build` by default). */
+export const uiBuildDirectoryVariable = 'TAU_UI_BUILD_DIRECTORY';
+
+/**
+ * The web build's output directory, relative to `apps/ui`: `build`, or the name `TAU_UI_BUILD_DIRECTORY` gives.
+ *
+ * @param value - The variable's value.
+ * @returns A directory name.
+ */
+export const resolveUiBuildDirectory = (value: string | undefined): string => {
+  if (value === undefined || value === '') {
+    return 'build';
+  }
+  if (!/^[\w-]+$/u.test(value)) {
+    throw new Error(`${uiBuildDirectoryVariable} must be one directory name under apps/ui.`);
+  }
+  return value;
+};
+
+/** The build variable that ships the service worker kill switch ({@link resolveServiceWorkerKillSwitch}). */
+export const serviceWorkerKillSwitchVariable = 'TAU_SERVICE_WORKER_KILL_SWITCH';
+
+/**
+ * The service worker kill switch (progressive loading PL7): `TAU_SERVICE_WORKER_KILL_SWITCH=true` at build time ships,
+ * at `/service-worker.js`, a worker that takes every open page, deletes the web app's worker's caches and unregisters
+ * (`app/offline/service-worker-retire.ts`) instead of the web app's worker, and pages that register nothing. One deploy
+ * with it set retires a bad worker from every browser that loads a page; one deploy without it restores the worker.
+ * Unset or `false` builds the web app's worker. Read by `react-router.config.ts` (which worker `buildEnd` writes),
+ * `vite.config.ts` (whether pages register) and `scripts/check-critical-budget.mts` (an empty precache list).
+ *
+ * @param value - The variable's value.
+ * @returns Whether the kill switch is on.
+ */
+export const resolveServiceWorkerKillSwitch = (value: string | undefined): boolean => {
+  if (value === undefined || value === '' || value === 'false') {
     return false;
   }
   if (value === 'true') {
     return true;
   }
-  throw new Error('TAU_CLOUD_ENABLED must be exactly true or false.');
+  throw new Error(`${serviceWorkerKillSwitchVariable} must be exactly true or false.`);
 };

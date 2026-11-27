@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { entitlementsFromTier } from '@taucad/billing';
 import { DataControlsSettings } from '#components/settings/data-controls-settings.js';
 import { DeploymentSettingsProvider } from '#components/settings/deployment-settings-provider.js';
-import { getAnonymousRevisions, setAnonymousRevisions } from '#lib/revision-actor.js';
+import { getAnonymousRevisions, setAnonymousRevisions } from '@taucad/revisions-ui/lib/revision-actor';
 import type * as TelemetrySwitchModule from '#hooks/use-telemetry-switch.js';
 
 const clientEnvironment = globalThis.window.ENV;

@@ -37,22 +37,16 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { useProject } from '#hooks/use-project.js';
 import { useTerminalAvailability } from '#components/terminal/terminal-availability.js';
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
-import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
+import type { TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 import { outputSlices } from '#components/terminal/terminal-output-text.js';
+import { highContrastQuery, readTerminalTheme, terminalTextRendering } from '#components/terminal/terminal-theme.js';
 import {
-  highContrastQuery,
-  highContrastRatio,
-  readTerminalTheme,
-  terminalTextRendering,
-} from '#components/terminal/terminal-theme.js';
-
-/** Loads the renderer; the default imports it lazily so no other surface pays for it. @public */
-export type TerminalRendererLoader = (options: TerminalRendererOptions) => Promise<TerminalRendererView>;
-
-const loadTerminalRenderer: TerminalRendererLoader = async (options) => {
-  const { createTerminalRenderer } = await import('#components/terminal/terminal-renderer.js');
-  return createTerminalRenderer(options);
-};
+  loadTerminalRenderer,
+  openTerminalLink,
+  readMinimumContrastRatio,
+  terminalViewOptions,
+} from '#components/terminal/terminal-view-options.js';
+import type { TerminalRendererLoader } from '#components/terminal/terminal-view-options.js';
 
 type AccessRequest = Readonly<{ requestId: string; access: TerminalAccess; expiresAt: string }>;
 
@@ -67,21 +61,6 @@ type PaneState =
     }>
   | Readonly<{ phase: 'refused'; refusal: TerminalRefusal }>;
 
-/* The code editor's font (`--font-mono`, 14px, line-height 1.5), so the Terminal and the editor set code the same way. */
-const fallbackFontFamily = "'Geist Mono', ui-monospace, monospace";
-const fontSize = 14;
-const lineHeight = fontSize * 1.5;
-/**
- * The editor's monospace family, read from the `--font-mono` token the code editor uses.
- *
- * @param element - An element inside the themed document.
- * @returns The font family list.
- */
-const readEditorFontFamily = (element: Element): string =>
-  getComputedStyle(element).getPropertyValue('--font-mono').trim() || fallbackFontFamily;
-const readMinimumContrastRatio = (): number =>
-  globalThis.matchMedia(highContrastQuery).matches ? highContrastRatio : 1;
-const scrollbackLines = 10_000;
 // Bound synchronous bridge startup separately from the host's ongoing backpressure window.
 const initialFrameLimit = 64;
 
@@ -91,6 +70,21 @@ const endedCopy: Record<TerminalExitReason, string> = {
   replaced: 'The Terminal restarted with new access.',
   'project-changed': 'The Terminal ended because the project changed.',
   'host-stopped': "The Terminal ended because Tau's shell service stopped.",
+};
+
+/**
+ * The action an ended or refused pane offers: Set up for a shell whose one-time setup has not run (on Windows, one
+ * administrator prompt), otherwise a plain restart.
+ */
+const restartAction = (
+  state: Extract<PaneState, { phase: 'ended' | 'refused' }>,
+): Readonly<{ label: string; setUp: boolean }> => {
+  if (state.phase === 'ended') {
+    return { label: 'Start a new Terminal', setUp: false };
+  }
+  return state.refusal.code === 'provisioning-required'
+    ? { label: 'Set up', setUp: true }
+    : { label: 'Try again', setUp: false };
 };
 
 /** Split a comma- or line-separated field into entries. */
@@ -266,6 +260,8 @@ export function TerminalPane({
   const menuActionRef = useRef(false);
   const actionInputRef = useRef<HTMLInputElement>(null);
   const restartRef = useRef(false);
+  /* Set by the Set up action: the next start asks the host to run the shell's one-time setup first. */
+  const setUpRef = useRef(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [screenReaderMode] = useCookie(cookieName.terminalScreenReader, true);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -365,6 +361,9 @@ export function TerminalPane({
   }, [state.phase]);
 
   const start = useCallback(async () => {
+    /* Read once: a start that cannot run leaves no setup request behind for a later one. */
+    const isSetUp = setUpRef.current;
+    setUpRef.current = false;
     const host = hostRef.current;
     if (!host || projectRoot === undefined || bridge === undefined) {
       return;
@@ -372,29 +371,22 @@ export function TerminalPane({
     teardown();
     targetRef.current = { projectRoot, bridge };
     const generation = generationRef.current;
+    /* Set until this start's shell opens or is refused: the setup notice then says how it went. */
+    let settingUp = isSetUp;
     setState({ phase: 'starting' });
     setIsRequestingAccess(false);
     setFindTerm(undefined);
     setAccessRequest(undefined);
-    setNotice(undefined);
-    const theme = readTerminalTheme(host);
+    setNotice(
+      settingUp
+        ? 'Setting up the shell sandbox. Approve the administrator prompt your computer shows; Tau asks only once.'
+        : undefined,
+    );
     let view: TerminalRendererView;
     try {
       view = await loadRenderer({
-        host,
-        fontFamily: readEditorFontFamily(host),
-        fontSize,
-        lineHeight,
-        theme,
-        ...terminalTextRendering(theme),
-        scrollback: scrollbackLines,
-        screenReaderMode: screenReaderModeRef.current,
-        minimumContrastRatio: readMinimumContrastRatio(),
-        reducedMotion: globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches,
-        onLinkActivate(uri) {
-          /* The desktop navigation policy sends http(s) to the person's browser and opens nothing in the app. */
-          globalThis.open(uri, '_blank', 'noopener,noreferrer');
-        },
+        ...terminalViewOptions(host, screenReaderModeRef.current),
+        onLinkActivate: openTerminalLink,
         onLeave() {
           chromeRef.current?.focus();
         },
@@ -435,6 +427,10 @@ export function TerminalPane({
       }
       switch (frame.type) {
         case 'opened': {
+          if (settingUp) {
+            settingUp = false;
+            setNotice('The shell sandbox is set up.');
+          }
           setState({ phase: 'running', projectLabel: frame.session.projectLabel, access: frame.session.access });
           view.focus();
           break;
@@ -483,6 +479,10 @@ export function TerminalPane({
           sessionRef.current = undefined;
           setAccessRequest(undefined);
           restartRef.current = false;
+          if (settingUp) {
+            settingUp = false;
+            setNotice(undefined);
+          }
           setState({ phase: 'refused', refusal: frame });
           break;
         }
@@ -504,7 +504,7 @@ export function TerminalPane({
     });
     try {
       // Attach input before launching; synchronous frames wait until their session can acknowledge paint.
-      session = bridge.open({ projectRoot, size }, (frame) => {
+      session = bridge.open({ projectRoot, size, ...(settingUp ? { setUp: true } : {}) }, (frame) => {
         if (hasFailed || startup.overflow || generation !== generationRef.current) {
           return;
         }
@@ -693,10 +693,11 @@ export function TerminalPane({
                 <Button
                   size='sm'
                   onClick={() => {
+                    setUpRef.current = restartAction(state).setUp;
                     void start();
                   }}
                 >
-                  {state.phase === 'ended' ? 'Start a new Terminal' : 'Try again'}
+                  {restartAction(state).label}
                 </Button>
               </div>
             ) : null}

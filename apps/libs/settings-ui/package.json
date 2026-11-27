@@ -25,11 +25,21 @@
     "node": ">=24.0.0"
   },
   "exports": {
+    "./components/auth/settings/security/active-session": "./src/components/auth/settings/security/active-session.tsx",
+    "./components/auth/settings/security/change-password": "./src/components/auth/settings/security/change-password.tsx",
+    "./components/auth/settings/security/linked-account": "./src/components/auth/settings/security/linked-account.tsx",
+    "./components/auth/settings/security/linked-accounts": "./src/components/auth/settings/security/linked-accounts.tsx",
+    "./components/settings/browser-storage-status": "./src/components/settings/browser-storage-status.tsx",
+    "./components/settings/person-settings": "./src/components/settings/person-settings.tsx",
     "./components/settings/settings-catalogue": "./src/components/settings/settings-catalogue.ts",
     "./components/settings/settings-item": "./src/components/settings/settings-item.tsx",
     "./components/settings/settings-section": "./src/components/settings/settings-section.ts",
     "./components/settings/setup-answers-copy": "./src/components/settings/setup-answers-copy.ts",
+    "./components/settings/setup-answers-row": "./src/components/settings/setup-answers-row.tsx",
+    "./components/settings/viewer/navigation-groups": "./src/components/settings/viewer/navigation-groups.tsx",
+    "./components/settings/viewer/view-defaults-group": "./src/components/settings/viewer/view-defaults-group.tsx",
     "./components/settings/viewer/viewer-person-properties": "./src/components/settings/viewer/viewer-person-properties.ts",
+    "./components/settings/viewer/viewer-settings": "./src/components/settings/viewer/viewer-settings.tsx",
     "./components/settings/viewer/viewer-settings-copy": "./src/components/settings/viewer/viewer-settings-copy.ts",
     "./package.json": "./package.json"
   },
@@ -39,14 +49,25 @@
   "devDependencies": {
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
+    "@testing-library/user-event": "^14.6.1",
     "react": "catalog:",
     "react-dom": "catalog:",
     "zod": "catalog:"
   },
   "dependencies": {
+    "@better-auth-ui/core": "catalog:",
+    "@better-auth-ui/react": "catalog:",
     "@taucad/preferences": "workspace:*",
     "@taucad/ui": "workspace:*",
-    "lucide-react": "catalog:"
+    "@taucad/ui-core": "workspace:*",
+    "@taucad/ui-kit": "workspace:*",
+    "@taucad/viewer": "workspace:*",
+    "@taucad/workbench": "workspace:*",
+    "better-auth": "catalog:",
+    "bowser": "catalog:",
+    "lucide-react": "catalog:",
+    "react-router": "catalog:",
+    "sonner": "catalog:"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",

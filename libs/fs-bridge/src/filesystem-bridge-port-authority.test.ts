@@ -320,13 +320,14 @@ describe('filesystem bridge authority over a Port pair (dialler = client, dialee
 
   it('should still reject an ordinary call with BRIDGE_CALL_TIMEOUT at the default deadline', async () => {
     const channel = new MessageChannel();
-    const exists = vi.fn(
+    /* An ordinary call: a read now waits under the filesystem's own bound, as a long call (D10, STO-25). */
+    const canDelete = vi.fn(
       async () =>
-        new Promise<boolean>(() => {
+        new Promise<true>(() => {
           void 0;
         }),
     );
-    const server = createBridgeServer({ exists }, messagePort(channel.port1, 'fs-bridge-ordinary-deadline-server'), {
+    const server = createBridgeServer({ canDelete }, messagePort(channel.port1, 'fs-bridge-ordinary-deadline-server'), {
       hello: createFileSystemBridgeHello({
         state: 'ready',
         capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
@@ -344,14 +345,14 @@ describe('filesystem bridge authority over a Port pair (dialler = client, dialee
     try {
       await proxy.ready;
       vi.useFakeTimers();
-      const pending = proxy.exists('target.txt');
+      const pending = proxy.canDelete('target.txt');
       const rejection = expect(pending).rejects.toMatchObject({
         code: 'BRIDGE_CALL_TIMEOUT',
-        message: "Bridge call 'exists' timed out after 30000ms",
+        message: "Bridge call 'canDelete' timed out after 30000ms",
       });
       await vi.advanceTimersByTimeAsync(30_000);
       await rejection;
-      expect(exists).toHaveBeenCalledOnce();
+      expect(canDelete).toHaveBeenCalledOnce();
     } finally {
       proxy.dispose();
       server.dispose();

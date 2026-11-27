@@ -1,6 +1,6 @@
 # Implicit Random
 
-Tau adapter for the PicoVoxel community example from [taucad/picovoxel](https://github.com/taucad/picovoxel/tree/11c51188a8f4cc754a25bde77e07c107523f7986) at commit `11c51188a8f4cc754a25bde77e07c107523f7986`.
+Tau adapter for the PicoVoxel community example from [taucad/picovoxel](https://github.com/taucad/picovoxel/tree/cacb49206a8f6f8f04d09a631ff12fe52b55de7f) at commit `cacb49206a8f6f8f04d09a631ff12fe52b55de7f`.
 
 - Upstream source: `examples/latticelibrary/ex-implicit-random.ts`
 - License: Apache-2.0; the copied source headers remain authoritative.

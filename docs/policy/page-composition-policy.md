@@ -3,7 +3,7 @@ title: 'Page Composition Policy'
 description: 'Page frame, title row, view controls, collection grid and pagination, card anatomy and states, button roles, busy and collection states, copy, view URL state, keyboard order and first-viewport budget for Tau product pages.'
 status: active
 created: '2026-09-28'
-updated: '2026-11-17'
+updated: '2026-11-25'
 related:
   - docs/policy/design-policy.md
   - docs/policy/ui-policy.md
@@ -264,7 +264,7 @@ Hover never reveals the only route to an action (DESIGN Composition and visible 
 
 **Why**: Color Policy §2 (2026-08-26) makes hover and ordinary selection structural neutrals; the card's `hover:border-primary/60` (2026-08-22) and the library's `ring-3 ring-primary` selection predate it, and at the audit 16 sites used `hover:border-primary*`, `hover:text-primary` or `hover:bg-primary*`.
 
-**Enforced by**: focus geometry: `packages/ui/src/styles/focus-outline.test.ts` with its regex extended over `apps/ui/app`; accent hover: `tau-lint/no-accent-hover`; motion: UI Policy §6 (review).
+**Enforced by**: focus geometry: `packages/ui/src/styles/focus-outline.test.ts` for the design system's components, and `apps/ui/app/styles/focus-outline.test.ts` with the same regex over `apps/ui/app` and the UI libraries it depends on; accent hover: `tau-lint/no-accent-hover`; motion: UI Policy §6 (review).
 
 ### 9. Choose button variants by role and sizes by variant
 
@@ -333,7 +333,7 @@ INCORRECT (the pre-refresh community route):
 
 | State    | When                                          | Presentation                                                                                                              | ARIA                                                                    |
 | -------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Loading  | Data is not yet known                         | Skeletons in the final geometry (same grid owner, same 4:3 media), after UI Policy §6's 150–300 ms delay                  | Container `role='status' aria-busy='true' aria-label='Loading <items>'` |
+| Loading  | Data is not yet known                         | Skeletons in the final geometry (same grid owner, same 4:3 media), timed by Progressive Loading Policy rule 16            | Container `role='status' aria-busy='true' aria-label='Loading <items>'` |
 | Results  | Items are shown                               | A results status beside the view controls: "20 examples", or "4 of 20 match" while filtered, with `Clear`                 | Polite `role='status'`                                                  |
 | Empty    | The collection has no items                   | `PanelEmptyState` (`components/ui/panel-empty-state.tsx`): icon tile, title, one sentence of orientation, one next action | None                                                                    |
 | No match | Items exist; the query or filters exclude all | `PanelEmptyState` "No examples match “gear”" with `Clear filters`; keep the view controls                                 | The results status carries "0 of M"                                     |
@@ -383,7 +383,7 @@ Serve web and desktop from the same route module unless `apps/ui/desktop/app/rou
 
 Use `lucide-react` icons for interface glyphs; they take the token stylesheet's 1.5 stroke and are `aria-hidden` by default. Use `SvgIcon` (`@taucad/ui-kit/icons/svg-icon`) for kernel, provider, format and brand identities, always beside the catalog name. Size icons through their owning component.
 
-**Enforced by**: `svg-icon.tsx` fails typecheck when a kernel or model family has no mark; otherwise default.
+**Enforced by**: `svg-icon.tsx` fails typecheck when a kernel has no mark, and `chat-ui`'s `model-family-icon.test-d.ts` when a model family has none; otherwise default.
 
 ## Enforcement
 

@@ -47,9 +47,16 @@ type UsageDimension = (typeof usageCoverage)[number]['dimension'];
 
 /**
  * Rows whose series lives on another dashboard and not on the product dashboard. The agent dashboards count tool calls
- * by agent and tool kind, but no panel there reads `tool_name`, so this row has no panel to map yet.
+ * by agent and tool kind, but no panel there reads `tool_name`, so this row has no panel to map yet. The B4 tool-result
+ * delivery and C3 admission-delay rows belong on the agent dashboards too; their panels are owed before launch
+ * (go-live checklist OBS-37).
  */
-const offProductDashboard = ['agent tools (existing instruments)'] as const satisfies readonly UsageDimension[];
+const offProductDashboard = [
+  'agent tools (existing instruments)',
+  'agent tool-result delivery: timed, excluded and unsettled results (B4)',
+  'agent tool-result delay, slowest timed result per turn (B4)',
+  'agent admission delay by phase, host start, chat state and deployment refetch (C3)',
+] as const satisfies readonly UsageDimension[];
 
 /**
  * Each usage row's product-dashboard panel, by exact title (operator ruling, 2026-11-04: "Map by panel title"). The

@@ -50,11 +50,11 @@ env:
   # Nx remote cache, read only (no environment, no `id-token: write`); the server is set only when a token is present.
   NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
-  # The e2e fixture both builds are made for, as ci.yml sets it workflow-wide; the target builds the cloud UI.
+  # The e2e fixture both builds are made for, as ci.yml sets it workflow-wide. Both desktop builds carry the one
+  # adaptive renderer (adaptive app deployment mode W12; the base release's may predate it).
   TAU_API_URL: http://localhost:4000
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000
-  TAU_CLOUD_ENABLED: 'true'
 
 jobs:
   rehearsal:
@@ -68,6 +68,16 @@ jobs:
           ref: ${{ inputs.ref || 'main' }}
           persist-credentials: false
           fetch-depth: 0
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
@@ -116,9 +126,11 @@ jobs:
 
       # The services utility renders under plain Node, and the runner has no GPU: lavapipe, as in e2e-nightly.yml.
       - name: Install a software Vulkan driver for native rendering
-        run: |
-          sudo apt-get install -y mesa-vulkan-drivers
-          echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          packages: mesa-vulkan-drivers
+      - name: Select the software Vulkan driver
+        run: echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
 
       # The rehearsal boots a real API, which reads this file for its `BILLING_*` development values.
       - name: Prepare API env file

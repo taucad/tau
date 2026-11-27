@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /** Purpose: Exercise Windows driver execution guards and real artifact-byte admission without granting installer authority. */
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { setTimeout as wait } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Native driver admission tests use actual fixture bytes. */
 import {
@@ -15,6 +15,7 @@ import {
   verifyWindowsQualificationArtifact,
   removeWindowsUninstallerRemainder,
   readWindowsConsumerResponse,
+  windowsQualificationInstallationPath,
 } from './qualification-windows.mjs';
 import { createQualificationReinstallGuard, QualificationUnavailable } from './qualification-platform-types.mjs';
 import {
@@ -24,6 +25,24 @@ import {
 } from './qualification-evidence.mjs';
 /* oxlint-enable no-restricted-imports */
 const main = async (): Promise<void> => {
+  {
+    /* Run 44537033055: the 52-character `tau-qualification-<uuid>` directory put sharp's addon at 278 characters, and
+     * its kernel host failed with ERR_DLOPEN_FAILED on the runner alone. */
+    const nonce = '989d781b-b4e9-4c7c-930f-aa671cc355e4';
+    const localAppData = String.raw`C:\Users\runneradmin\AppData\Local`;
+    const directory = windowsQualificationInstallationPath(localAppData, nonce);
+    assert.equal(directory, String.raw`C:\Users\runneradmin\AppData\Local\Programs\tau-q-989d781b`);
+    const sharp = String.raw`resources\app.asar.unpacked\node_modules\@gltf-transform\functions\node_modules\ndarray-pixels\node_modules\sharp\node_modules\@img\sharp-win32-x64\lib`;
+    /* No longer than the installer's default directory, so the runner meets MAX_PATH wherever a person's install does. */
+    assert.ok(win32.basename(directory).length <= 'Tau Staging'.length + 3);
+    for (const file of ['sharp-win32-x64-0.35.5.node', 'libvips-cpp-8.18.7.dll', 'libvips-42.dll']) {
+      assert.ok(win32.join(directory, sharp, file).length < 260, file);
+    }
+    assert.notEqual(windowsQualificationInstallationPath(localAppData, randomUUID()), directory);
+    assert.throws(() => windowsQualificationInstallationPath('AppData', nonce), /absolute LOCALAPPDATA/u);
+    assert.throws(() => windowsQualificationInstallationPath(localAppData, '../x'), /UUID nonce/u);
+    console.log('PASS the Windows install directory keeps shipped native addons within MAX_PATH');
+  }
   const consumer = {
     runner: 'stock-windows',
     identity: 'a'.repeat(64),

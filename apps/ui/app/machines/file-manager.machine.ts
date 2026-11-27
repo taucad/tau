@@ -52,6 +52,7 @@ import {
   isWorkerErrorEnvelope,
   toWorkerError,
 } from '@taucad/files-ui/machines/file-manager-worker-error';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 const fileCacheMaxEntries = 500;
 const fileCacheMaxTotalBytes = 128 * 1024 * 1024;
@@ -236,6 +237,16 @@ type FileManagerContext = {
 /** The start deadline over `connectingWorker` and `initializingServices` (B12). Milliseconds. @public */
 export const fileManagerStartDeadlineMilliseconds = 20_000;
 
+/** While the page is visible, roots that are not available are probed again this often (blueprint D1, B2). Milliseconds. */
+const rootRecheckIntervalMilliseconds = 30_000;
+
+/** The id of the pending timed re-check, so leaving `ready` cancels it. */
+const rootRecheckTimerId = 'rootRecheckTimer';
+
+/** Root states a probe can change by itself: the folder may come back, its access may return, or it may answer. */
+const isRecheckableRoot = (root: RootStatus): boolean =>
+  root.state === 'notFound' || root.state === 'permission' || root.state === 'unreachable';
+
 /** A start that missed its deadline. @public */
 export class FileServiceStartDeadlineError extends Error {
   public override readonly name = 'FileServiceStartDeadlineError';
@@ -334,7 +345,7 @@ const loadFileSystemBridge = async (): Promise<typeof FileSystemBridgeModule> =>
   /* A failed load is forgotten, so "Try again" fetches the chunk again instead of replaying the failure. */
   fileSystemBridgeModule ??= (async () => {
     try {
-      return await import('@taucad/fs-bridge');
+      return await loadCode(async () => import('@taucad/fs-bridge'));
     } catch (error) {
       fileSystemBridgeModule = undefined;
       throw error;
@@ -421,7 +432,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     if (!worker) {
       const homeBackend = await resolveHomeBackend();
       worker = reportWorkerFailures(
-        createFileManagerWorker({ name: fileManagerWorkerName(homeBackend) }),
+        createFileManagerWorker({ name: fileManagerWorkerName(homeBackend, { safeMode: context.safeMode }) }),
         'file-manager',
       );
       // A node-backed Home needs its provider host before the worker can mount
@@ -880,6 +891,20 @@ const watchRootStatusActor = createCallbackLogic<
   };
 });
 
+/** The root mount re-checks lost roots when the window regains focus (blueprint D1, R4); a probe only re-reads. */
+const recheckRootsOnFocusActor = createCallbackLogic<EventObject, { isRootMount: boolean }>(({ input, sendBack }) => {
+  if (!input.isRootMount || typeof globalThis.addEventListener !== 'function') {
+    return;
+  }
+  const onFocus = (): void => {
+    sendBack({ type: 'recheckRoots', source: 'focus' });
+  };
+  globalThis.addEventListener('focus', onFocus);
+  return () => {
+    globalThis.removeEventListener('focus', onFocus);
+  };
+});
+
 /** Keep the resident root projection observed without gating usable content services. */
 const observeRootDirectoryActor = createCallbackLogic<
   EventObject,
@@ -914,6 +939,7 @@ const fileManagerActors = {
   initializeServicesActor,
   watchProxyClosedActor,
   watchRootStatusActor,
+  recheckRootsOnFocusActor,
   observeRootDirectoryActor,
 } as const;
 
@@ -938,8 +964,11 @@ type FileManagerEventLifecycle =
   | { type: 'reloadWorkspace' }
   /** The worker published every root's status after a change (blueprint D1). */
   | { type: 'rootStatusChanged'; roots: readonly RootStatus[] }
-  /** Probe again the roots that are not available; all of them, or the keys named (blueprint D1). */
-  | { type: 'recheckRoots'; storageRootKeys?: readonly string[] };
+  /**
+   * Probe again the roots that are not available; all of them, or the keys named (blueprint D1). `focus` and `timer`
+   * are the automatic re-checks (R4): they probe only while a root can come back, and `timer` arms the next one.
+   */
+  | { type: 'recheckRoots'; storageRootKeys?: readonly string[]; source?: 'focus' | 'timer' };
 
 /** Events accepted by fileManagerMachine. @public */
 export type FileManagerEvent =
@@ -1448,6 +1477,12 @@ export const fileManagerMachine = setup({
     ready: {
       entry: ({ context, self }, enq) => {
         const { treeService, backendType, sharedWorker, onRootSkipped, safeMode } = context;
+        if (sharedWorker === undefined) {
+          enq.raise(
+            { type: 'recheckRoots', source: 'timer' },
+            { id: rootRecheckTimerId, delay: rootRecheckIntervalMilliseconds },
+          );
+        }
         enq(() => {
           if (backendType === 'webaccess') {
             treeService?.startPolling();
@@ -1480,6 +1515,7 @@ export const fileManagerMachine = setup({
       },
       exit: ({ context }, enq) => {
         stopPolling(context, enq);
+        enq.cancel(rootRecheckTimerId);
       },
       after: {
         restartWindow: () => ({ context: { restarted: false } }),
@@ -1512,6 +1548,10 @@ export const fileManagerMachine = setup({
           src: 'watchRootStatusActor',
           input: ({ context }) => ({ proxy: context.proxy, isRootMount: context.sharedWorker === undefined }),
         },
+        {
+          src: 'recheckRootsOnFocusActor',
+          input: ({ context }) => ({ isRootMount: context.sharedWorker === undefined }),
+        },
       ],
       on: {
         setRoot: changeRoot({ whenChanged: true, stopPolling: true }),
@@ -1523,6 +1563,18 @@ export const fileManagerMachine = setup({
         /* Probe the roots that are not available again; their new statuses arrive as `rootStatusChanged` too. */
         recheckRoots: ({ context, event, self }, enq) => {
           const { proxy } = context;
+          if (event.source === 'timer') {
+            enq.raise(
+              { type: 'recheckRoots', source: 'timer' },
+              { id: rootRecheckTimerId, delay: rootRecheckIntervalMilliseconds },
+            );
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+              return {};
+            }
+          }
+          if (event.source !== undefined && !context.rootStatuses.some(isRecheckableRoot)) {
+            return {};
+          }
           enq(() => {
             /* Outside `ready` the answer is ignored, as every `rootStatusChanged` there is. */
             void probeRootsAgain(proxy, event.storageRootKeys, (roots) => {

@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import {
   ChatHistoryGate,
   ChatInterfaceSessionGate,
   FocusedChatErrorPanel,
 } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { WaitClockProvider } from '@taucad/ui/hooks/use-wait-clock';
 
 type StateValue = string | { [key: string]: StateValue };
 
@@ -42,7 +43,8 @@ const buildState = ({
   readonly focusedChatId?: string;
   readonly focusedChatError?: Error;
 }): unknown => ({
-  context: { focusedChatId, focusedChatError },
+  /* The sessions' record shares this double: the open's wait start reads its availability. */
+  context: { focusedChatId, focusedChatError, status: {} },
   matches: (target: StateValue) => matchesValue(value, target),
 });
 
@@ -68,9 +70,11 @@ vi.mock('#hooks/use-revision-status.js', () => ({
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
+    projectId: 'p',
     editorRef: { send: mockEditorRefSend },
   }),
 }));
+vi.mock('#hooks/use-sessions.js', () => ({ useSessions: () => ({}) }));
 
 vi.mock('@xstate/react', () => ({
   useSelector: (_reference: unknown, selector: (state: unknown) => unknown) => selector(mockState.current),
@@ -79,6 +83,7 @@ vi.mock('@xstate/react', () => ({
 /* The chat's turn host owns the agent-host binding and the bodyless body
  * factory; it reaches the whole project subtree to compose them. This gate's
  * contract is only that exactly one of them is mounted inside the provider. */
+vi.mock('#routes/w.$workspace.$project/chat-sign-in-return.js', () => ({ ChatSignInReturn: () => null }));
 vi.mock('#chat-clients/chat-turn-host.js', () => ({
   ChatTurnHost: () => <div data-testid='chat-turn-host' />,
 }));
@@ -93,6 +98,17 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 
 /* A15b: the chat pane's skeleton became the chat lane's bare frame, which the workspace frame draws while the
  * workspace opens and the chat gate shows while the focused chat is ensured. */
+/* Every case starts from the same doubles: a case that leaves the chats waiting or failed must not decide what a later
+ * one sees, whatever order the cases run in. */
+beforeEach(() => {
+  chatSync.state = 'loading';
+  availability.whole = 'ready';
+  availability.chats = 'ready';
+  mockState.current = undefined;
+  syncNow.mockClear();
+  mockEditorRefSend.mockClear();
+});
+
 describe('ChatLaneFrame', () => {
   it("renders the workspace frame's chat lane with its testid and no busy state of its own", () => {
     render(<ChatLaneFrame />);
@@ -103,14 +119,17 @@ describe('ChatLaneFrame', () => {
     expect(placeholder.querySelector('[data-slot=skeleton]')).toBeNull();
   });
 
-  it('renders the ensuring wait with the matching aria-label', () => {
-    render(<ChatLaneFrame busyLabel='Preparing chat session…' />);
+  it('is never a live region of its own: a wait inside it is a busy group with the transcript’s shape', () => {
+    render(
+      <ChatLaneFrame>
+        <span data-testid='feed' />
+      </ChatLaneFrame>,
+    );
 
-    const placeholder = screen.getByTestId('chat-lane-frame');
-    expect(placeholder).toBeDefined();
-    expect(placeholder.getAttribute('aria-busy')).toBe('true');
-    expect(placeholder.getAttribute('aria-label')).toContain('Preparing');
-    expect(screen.getByRole('status', { name: /Preparing chat session/u })).toBe(placeholder);
+    const frame = screen.getByTestId('chat-lane-frame');
+    expect(frame.getAttribute('role')).toBeNull();
+    expect(frame.getAttribute('aria-live')).toBeNull();
+    expect(screen.getByTestId('feed')).toBeInTheDocument();
   });
 
   it('carries the floating-panel data-slot so it inherits chat-pane chrome', () => {
@@ -147,14 +166,6 @@ describe('FocusedChatErrorPanel', () => {
 });
 
 describe('ChatHistoryGate', () => {
-  beforeEach(() => {
-    chatSync.state = 'loading';
-    availability.whole = 'ready';
-    availability.chats = 'ready';
-    syncNow.mockClear();
-    mockEditorRefSend.mockClear();
-  });
-
   /* SP2h: a chat opens on its records while the apply still writes the files. */
   it('opens the focused chat on the chats surface, before the whole apply lands', () => {
     chatSync.state = 'ready';
@@ -177,6 +188,52 @@ describe('ChatHistoryGate', () => {
       </MemoryRouter>,
     );
     expect(screen.queryByTestId('chat-pane-child')).toBeNull();
+  });
+
+  /* Progressive Loading Policy rules 15 and 17 (cloud open loading states, Part 5): the lane keeps one frame from the
+   * first frame to the chats, its feed draws the transcript's shape from 300 ms, and it says nothing: the viewer
+   * speaks for the open. A failed open stops the bars and offers no action here. */
+  it('should keep one chat lane frame through the open, drawing the transcript’s shape from 300 ms with no words', () => {
+    mockState.current = buildState({ value: { ready: { operation: 'idle' } }, focusedChatId: 'chat-123' });
+    const clock = { now: (): number => 0 };
+    const gate = (): React.JSX.Element => (
+      <WaitClockProvider clock={clock}>
+        <MemoryRouter>
+          <ChatHistoryGate>
+            <div data-testid='chat-pane-child'>chat content</div>
+          </ChatHistoryGate>
+        </MemoryRouter>
+      </WaitClockProvider>
+    );
+    availability.chats = 'connecting';
+    const { rerender } = render(gate());
+    const frame = screen.getByTestId('chat-lane-frame');
+    const feed = screen.getByRole('group', { name: 'Chat' });
+    const bars = feed.querySelector<HTMLElement>('[data-slot=project-wait-skeleton]');
+    expect(frame).toContainElement(feed);
+    expect(feed).toHaveAttribute('aria-busy', 'true');
+    expect(bars).toHaveClass('wait-skeleton');
+    expect(bars?.style.getPropertyValue('--wait-skeleton-delay')).toBe('300ms');
+    expect(bars?.querySelectorAll('[data-slot=skeleton]').length).toBeGreaterThan(0);
+    expect(frame.textContent).toBe('');
+    expect(frame.querySelector('[data-slot=wait-indicator]')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByTestId('chat-lane-frame-composer')).toBeInTheDocument();
+
+    for (const step of ['downloading', 'preparing'] as const) {
+      availability.chats = step;
+      rerender(gate());
+      expect(screen.getByTestId('chat-lane-frame'), step).toBe(frame);
+      expect(feed.querySelector('[data-slot=project-wait-skeleton]'), step).toBe(bars);
+    }
+
+    availability.chats = 'failed';
+    rerender(gate());
+    expect(screen.getByTestId('chat-lane-frame')).toBe(frame);
+    expect(feed.querySelector('[data-slot=project-wait-skeleton]')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(frame.textContent).toBe('');
   });
 
   it('should retry failed chat discovery without hiding available project files', () => {
@@ -223,7 +280,13 @@ describe('ChatHistoryGate', () => {
       </ChatHistoryGate>,
     );
 
-    expect(screen.getByText('Loading chat history')).toBeDefined();
+    /* The lane keeps its frame and draws the transcript's shape: no sentence, no live region (rules 15 and 22). */
+    const lane = screen.getByTestId('chat-lane-frame');
+    expect(within(lane).getByRole('group', { name: 'Chat' })).toHaveAttribute('aria-busy', 'true');
+    expect(lane.querySelector('[data-slot=project-wait-skeleton]')).toHaveClass('wait-skeleton');
+    expect(lane.textContent).toBe('');
+    expect(lane.querySelector('[role=status], [role=alert], [aria-live]')).toBeNull();
+    expect(screen.queryByText(/Loading chat history|Preparing chat session/u)).toBeNull();
     expect(screen.queryByTestId('chat-pane-child')).toBeNull();
   });
 
@@ -239,7 +302,32 @@ describe('ChatHistoryGate', () => {
       </ChatHistoryGate>,
     );
 
-    expect(screen.getByText('Loading chat history')).toBeDefined();
+    /* The lane keeps its frame and draws the transcript's shape: no sentence, no live region (rules 15 and 22). */
+    const lane = screen.getByTestId('chat-lane-frame');
+    expect(within(lane).getByRole('group', { name: 'Chat' })).toHaveAttribute('aria-busy', 'true');
+    expect(lane.querySelector('[data-slot=project-wait-skeleton]')).toHaveClass('wait-skeleton');
+    expect(lane.textContent).toBe('');
+    expect(lane.querySelector('[role=status], [role=alert], [aria-live]')).toBeNull();
+    expect(screen.queryByText(/Loading chat history|Preparing chat session/u)).toBeNull();
+  });
+
+  it('keeps the lane frame and the transcript shape while a known focused chat is established again', () => {
+    mockState.current = buildState({
+      value: { ready: { operation: 'ensuringFocusedChat' } },
+      focusedChatId: 'chat-123',
+    });
+
+    render(
+      <ChatHistoryGate>
+        <div data-testid='chat-pane-child'>chat content</div>
+      </ChatHistoryGate>,
+    );
+
+    const lane = screen.getByTestId('chat-lane-frame');
+    expect(within(lane).getByRole('group', { name: 'Chat' })).toHaveAttribute('aria-busy', 'true');
+    expect(lane.textContent).toBe('');
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByTestId('chat-pane-child')).toBeNull();
   });
 
   it('renders children directly (no provider mount) when ready and not ensuring', () => {
@@ -275,7 +363,8 @@ describe('ChatInterfaceSessionGate', () => {
     );
     const { rerender } = render(content);
     expect(screen.getByTestId('model-pane')).toBeInTheDocument();
-    expect(screen.getByText('Loading chat history')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-lane-frame')).toBeInTheDocument();
+    expect(screen.queryByText('Loading chat history')).not.toBeInTheDocument();
     expect(screen.queryByTestId('active-chat-provider')).not.toBeInTheDocument();
     expect(screen.queryByTestId('session-gate-fallback')).not.toBeInTheDocument();
     mockState.current = buildState({ value: { ready: { operation: 'idle' } }, focusedChatId: 'discovered-chat' });
@@ -290,7 +379,7 @@ describe('ChatInterfaceSessionGate', () => {
     expect(screen.getByTestId('active-chat-provider').dataset['chatId']).toBe('discovered-chat');
     expect(screen.getByTestId('model-pane')).toBeInTheDocument();
     expect(screen.getByTestId('chat-pane-child')).toBeInTheDocument();
-    expect(screen.queryByText('Loading chat history')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-lane-frame')).not.toBeInTheDocument();
   });
 
   it('mounts <ActiveChatProvider> with the focused chat id when one is set', () => {

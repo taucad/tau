@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import type { MockProxy } from 'vitest-mock-extended';
 import type { OwnerLockTransaction } from '@taucad/api-database/owner-lock';
 import { ForbiddenException, HttpException, NotFoundException } from '@nestjs/common';
 import type { DatabaseService } from '@taucad/api-database';
@@ -7,6 +8,7 @@ import { projectCollaborator, projectInvitation, user } from '@taucad/api-databa
 import type { PublicationRateLimiterService } from '@taucad/api-redis';
 import { ProjectAccessService } from '#collaboration/project-access.service.js';
 import { CollaboratorsController, InvitationsController } from '#collaboration/collaboration.controller.js';
+import type { ProjectInviteEmailService } from '#collaboration/project-invite-email.service.js';
 
 /**
  * D27: the owner alone manages collaborators, an invitation is one row per
@@ -29,6 +31,7 @@ describe('CollaboratorsController', () => {
   let budget: () => Promise<{ allowed: boolean; count: number }>;
   let collaboratorsController: CollaboratorsController;
   let invitationsController: InvitationsController;
+  let inviteEmail: MockProxy<ProjectInviteEmailService>;
 
   const rowsFor = (table: unknown): Array<Record<string, unknown>> =>
     table === projectInvitation ? invitations : table === projectCollaborator ? collaborators : [];
@@ -129,7 +132,9 @@ describe('CollaboratorsController', () => {
     const rateLimiter = mock<PublicationRateLimiterService>({
       consumeDailyBudget: vi.fn(async () => budget()),
     });
-    collaboratorsController = new CollaboratorsController(access, rateLimiter);
+    inviteEmail = mock<ProjectInviteEmailService>();
+    inviteEmail.send.mockResolvedValue({ status: 'sent' });
+    collaboratorsController = new CollaboratorsController(access, rateLimiter, inviteEmail);
     invitationsController = new InvitationsController(access);
   });
 
@@ -150,6 +155,52 @@ describe('CollaboratorsController', () => {
     expect(invitations).toHaveLength(1);
     expect(invitations[0]).toMatchObject({ projectId, email: 'invitee@example.test', role: 'write' });
     expect(first.token).not.toBe(second.token);
+  });
+
+  it('should email the invitation once it is written and say so', async () => {
+    const result = await collaboratorsController.invite(
+      projectId,
+      { email: 'Invitee@Example.test', role: 'read' },
+      ownerId,
+    );
+
+    expect(result.emailDelivery).toStrictEqual({ status: 'sent' });
+    expect(inviteEmail.send).toHaveBeenCalledExactlyOnceWith({
+      projectId,
+      ownerId,
+      email: 'invitee@example.test',
+      role: 'read',
+      token: result.token,
+      expiresAt: result.expiresAt,
+    });
+    /* Written before it was emailed: the raw token exists only once the row does. */
+    expect(invitations).toHaveLength(1);
+  });
+
+  it('should still answer the invitation and its token when the email is skipped', async () => {
+    inviteEmail.send.mockResolvedValue({ status: 'skipped', reason: 'email_disabled' });
+
+    const result = await collaboratorsController.invite(
+      projectId,
+      { email: 'invitee@example.test', role: 'write' },
+      ownerId,
+    );
+
+    expect(result).toMatchObject({
+      email: 'invitee@example.test',
+      role: 'write',
+      emailDelivery: { status: 'skipped', reason: 'email_disabled' },
+    });
+    expect(result.token).toMatch(/^[\w-]{43}$/u);
+  });
+
+  it('should email nothing when the invite is refused', async () => {
+    budget = async () => ({ allowed: false, count: 10_000 });
+
+    await expect(
+      collaboratorsController.invite(projectId, { email: 'invitee@example.test', role: 'write' }, ownerId),
+    ).rejects.toThrow(HttpException);
+    expect(inviteEmail.send).not.toHaveBeenCalled();
   });
 
   it('should un-revoke a revoked address when the owner invites it again', async () => {

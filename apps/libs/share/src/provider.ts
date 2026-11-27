@@ -49,14 +49,17 @@ export type GithubGistTransport = {
   }) => Promise<Record<string, unknown>>;
 };
 
-/** Existing Tau publication transport injected without coupling providers to app APIs. @public */
+/**
+ * The cloud link transport, injected without coupling providers to app APIs. A cloud link is the project's one link,
+ * so its reference is the link id (`shr_…`), never a version's id. @public
+ */
 export type TauShareTransport = {
   readonly publish: (input: {
     readonly snapshot: ShareProjectSnapshot;
     readonly signal?: AbortSignal;
-  }) => Promise<{ readonly publicationId: string; readonly externalUrl?: string }>;
+  }) => Promise<{ readonly shareId: string; readonly externalUrl?: string }>;
   readonly resolve: (input: {
-    readonly publicationId: string;
+    readonly shareId: string;
     readonly signal?: AbortSignal;
   }) => Promise<ShareOpenedArtifact>;
 };

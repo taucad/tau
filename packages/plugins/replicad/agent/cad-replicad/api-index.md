@@ -1,6 +1,6 @@
 # replicad API index
 
-replicad 1.1.0-taulabs.1 · 804 symbols · extracted by TypeScript 5.9.3.
+replicad 1.2.1-beta.1 · 862 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
@@ -8,106 +8,109 @@ Every symbol appears here exactly once. The heading above each block names the f
 
 asDir (function) [lines 5-6]
 asPnt (function) [lines 8-9]
-complexExtrude (function) [lines 11-13]
+bypassOperationCache (function) [lines 11-13] — Runs `fn` as library-internal work
 createAssembly (function) [lines 15-16]
-deserializeDrawing (function) [lines 18-20] — Deserializes a drawing from a string
-deserializeShape (function) [lines 22-23]
-downcast (function) [lines 25-26]
-draw (function) [lines 28-30] — Creates a drawing pen to programatically draw in 2D
-drawCircle (function) [lines 32-35] — Creates the `Drawing` of a circle
-drawEllipse (function) [lines 37-40] — Creates the `Drawing` of an ellipse
-drawFaceOutline (function) [lines 42-44] — Creates the `Drawing` out of a face
-drawPolysides (function) [lines 46-49] — Creates the `Drawing` of an polygon in a defined plane
-drawProjection (function) [lines 51-57] — Creates the `Drawing` of a projection of a shape on…
-drawRoundedRectangle (function) [lines 59-65] — Creates the `Drawing` of a rectangle with (optional) rounded corners
-drawSingleCircle (function) [lines 67-70] — Creates the `Drawing` of a circle as one single curve
-drawSingleEllipse (function) [lines 72-75] — Creates the `Drawing` of an ellipse as one single curve
-drawText (function) [lines 77-84] — Creates the `Drawing` of a text, in a defined font…
-exportSTEP (function) [lines 86-90]
-genericSweep (function) [lines 92-94]
-getSingleFace (function) [lines 96-97]
-importSTEP (function) [lines 99-101] — Creates a new shapes from a STEP file (as a…
-importSTL (function) [lines 103-106] — Creates a new shapes from a STL file (as a…
-importSTLAsMesh (function) [lines 108-111] — Imports an STL file (as a Blob or a File)…
-intersect2D (function) [lines 113-114]
-isPoint (function) [lines 116-117]
-isProjectionPlane (function) [lines 119-120]
-isShape3D (function) [lines 122-123]
-isWire (function) [lines 125-126]
-iterTopo (function) [lines 128-129]
-loadFont (function) [lines 131-134] — Import a font in the text system
-lookFromPlane (function) [lines 136-137]
-makeDirVector (function) [lines 139-140]
-makePlane (function) [lines 142-146]
-makePln (function) [lines 148-149]
-makeProjectedEdges (function) [lines 151-155]
-makeSolid (function) [lines 157-160] — Welds faces and shells into a single shell and then…
-measureArea (function) [lines 162-164] — Measure the area of a shape
-measureDistanceBetween (function) [lines 166-168] — Measure the distance between two shapes
-measureLength (function) [lines 170-172] — Measure the length of a shape
-measureShapeLinearProperties (function) [lines 174-175]
-measureShapeSurfaceProperties (function) [lines 177-178]
-measureShapeVolumeProperties (function) [lines 180-181]
-measureVolume (function) [lines 183-185] — Measure the volume of a shape
-mirror (function) [lines 187-188]
-resolveDirection (function) [lines 190-191]
-rotate (function) [lines 193-194]
-scale (function) [lines 196-197]
-sketchText (function) [lines 199-209] — Creates the `Sketches` of a text, in a defined font…
-textBlueprints (function) [lines 211-218] — Creates the `Blueprints` of a text, in a defined font…
-translate (function) [lines 220-221]
-twistExtrude (function) [lines 223-225]
-weldShellsAndFaces (function) [lines 227-231] — Welds faces and shells into a single shell
-addHolesInFace (function) [lines 233-234]
-assembleWire (function) [lines 236-237]
-atShapeExtremum (function) [lines 239-251] — Creates a predicate for a finder's `when` method that selects…
-axis2d (function) [lines 253-254]
-backMost (function) [lines 256-261] — Creates a predicate selecting elements touching the shape's minimum Y…
-basicFaceExtrusion (function) [lines 263-264]
-bottomMost (function) [lines 266-270] — Creates a predicate selecting elements touching the shape's minimum Z…
-cast (function) [lines 272-273]
-combineFinderFilters (function) [lines 275-281] — Combine a set of finder filters (defined with radius) to…
-compoundShapes (function) [lines 283-284]
-createNamedPlane (function) [lines 286-287]
-cut2D (function) [lines 289-290]
-cutBlueprints (function) [lines 292-293]
-drawParametricFunction (function) [lines 295-303] — Creates the `Drawing` of parametric function
-drawPointsInterpolation (function) [lines 305-310] — Creates the `Drawing` by interpolating points as a curve
-drawRectangle (function) [lines 312-316]
-frontMost (function) [lines 318-323] — Creates a predicate selecting elements touching the shape's maximum Y…
-fuse2D (function) [lines 325-326]
-fuseBlueprints (function) [lines 328-329]
-GCWithObject (function) [lines 331-332]
-GCWithScope (function) [lines 334-335]
-getFont (function) [lines 337-338]
-getManifold (function) [lines 340-341]
-getOC (function) [lines 343-344]
-intersectBlueprints (function) [lines 346-347]
-leftMost (function) [lines 349-353] — Creates a predicate selecting elements touching the shape's minimum X…
-localGC (function) [lines 355-356]
-loft (function) [lines 358-359]
-makeAx1 (function) [lines 361-362]
-makeAx2 (function) [lines 364-365]
-makeAx3 (function) [lines 367-368]
-makeBaseBox (function) [lines 370-376] — Builds a rectangular box of the given lengths
-makeBezierCurve (function) [lines 378-379]
-makeBox (function) [lines 381-383] — Creates a box with the given corner points
-makeBSplineApproximation (function) [lines 385-386]
-makeCircle (function) [lines 388-389]
-makeCompound (function) [lines 391-392]
-makeCylinder (function) [lines 394-396] — Creates a cylinder with the given radius and height
-makeDirection (function) [lines 398-399]
-makeEllipse (function) [lines 401-402]
-makeEllipseArc (function) [lines 404-405]
-makeEllipsoid (function) [lines 407-409] — Creates an ellipsoid with the given lengths of the axes,…
-makeFace (function) [lines 411-412]
-makeHelix (function) [lines 414-415]
-makeLine (function) [lines 417-418]
-makeNewFaceWithinFace (function) [lines 420-421]
-makeNonPlanarFace (function) [lines 423-424]
-makeOffset (function) [lines 426-427]
-makePlaneFromFace (function) [lines 429-430]
-makePolygon (function) [lines 432-433]
+deserializeShape (function) [lines 18-19]
+downcast (function) [lines 21-22]
+elementOrdinals (function) [lines 24-26] — Positions of `elements` in the enumeration of `kind` sub shapes…
+exportSTEP (function) [lines 28-32]
+getOperationCache (function) [lines 34-36] — The installed operation cache, if any
+getSingleFace (function) [lines 38-39]
+importSTEP (function) [lines 41-43] — Creates a new shapes from a STEP file (as a…
+importSTL (function) [lines 45-48] — Creates a new shapes from a STL file (as a…
+importSTLAsMesh (function) [lines 50-53] — Imports an STL file (as a Blob or a File)…
+isPoint (function) [lines 55-56]
+isProjectionPlane (function) [lines 58-59]
+isShape3D (function) [lines 61-62]
+isWire (function) [lines 64-65]
+iterTopo (function) [lines 67-69] — Yields each distinct sub shape of `topo` kind once, in…
+loadFont (function) [lines 71-74] — Import a font in the text system
+lookFromPlane (function) [lines 76-77]
+makeDirVector (function) [lines 79-80]
+makePlane (function) [lines 82-86]
+makePln (function) [lines 88-89]
+measureArea (function) [lines 91-93] — Measure the area of a shape
+measureDistanceBetween (function) [lines 95-97] — Measure the distance between two shapes
+measureLength (function) [lines 99-101] — Measure the length of a shape
+measureShapeLinearProperties (function) [lines 103-104]
+measureShapeSurfaceProperties (function) [lines 106-107]
+measureShapeVolumeProperties (function) [lines 109-110]
+measureVolume (function) [lines 112-114] — Measure the volume of a shape
+mirror (function) [lines 116-117]
+ocScope (function) [lines 119-120]
+resolveDirection (function) [lines 122-123]
+rotate (function) [lines 125-126]
+scale (function) [lines 128-129]
+setOperationCache (function) [lines 131-134] — Installs an operation cache, or removes it with `undefined`, and…
+translate (function) [lines 136-137]
+withOcScope (function) [lines 139-141] — Runs `fn` with a fresh {@link ocScope} and disposes it…
+addHolesInFace (function) [lines 143-144]
+assembleWire (function) [lines 146-147]
+atShapeExtremum (function) [lines 149-161] — Creates a predicate for a finder's `when` method that selects…
+axis2d (function) [lines 163-164]
+backMost (function) [lines 166-171] — Creates a predicate selecting elements touching the shape's minimum Y…
+basicFaceExtrusion (function) [lines 173-174]
+bottomMost (function) [lines 176-180] — Creates a predicate selecting elements touching the shape's minimum Z…
+cast (function) [lines 182-183]
+combineFinderFilters (function) [lines 185-191] — Combine a set of finder filters (defined with radius) to…
+complexExtrude (function) [lines 193-195]
+compoundShapes (function) [lines 197-198]
+createNamedPlane (function) [lines 200-201]
+cut2D (function) [lines 203-204]
+cutBlueprints (function) [lines 206-207]
+deserializeDrawing (function) [lines 209-211] — Deserializes a drawing from a string
+draw (function) [lines 213-215] — Creates a drawing pen to programatically draw in 2D
+drawCircle (function) [lines 217-220] — Creates the `Drawing` of a circle
+drawEllipse (function) [lines 222-225] — Creates the `Drawing` of an ellipse
+drawFaceOutline (function) [lines 227-229] — Creates the `Drawing` out of a face
+drawParametricFunction (function) [lines 231-239] — Creates the `Drawing` of parametric function
+drawPointsInterpolation (function) [lines 241-246] — Creates the `Drawing` by interpolating points as a curve
+drawPolysides (function) [lines 248-251] — Creates the `Drawing` of an polygon in a defined plane
+drawProjection (function) [lines 253-259] — Creates the `Drawing` of a projection of a shape on…
+drawRectangle (function) [lines 261-265]
+drawRoundedRectangle (function) [lines 267-273] — Creates the `Drawing` of a rectangle with (optional) rounded corners
+drawSingleCircle (function) [lines 275-278] — Creates the `Drawing` of a circle as one single curve
+drawSingleEllipse (function) [lines 280-283] — Creates the `Drawing` of an ellipse as one single curve
+drawText (function) [lines 285-292] — Creates the `Drawing` of a text, in a defined font…
+extrudeFaceUntil (function) [lines 294-296] — Builds only the extrusion from explicit geometry and direction
+frontMost (function) [lines 298-303] — Creates a predicate selecting elements touching the shape's maximum Y…
+fuse2D (function) [lines 305-306]
+fuseBlueprints (function) [lines 308-309]
+GCWithObject (function) [lines 311-312]
+GCWithScope (function) [lines 314-316]
+genericSweep (function) [lines 318-320]
+getFont (function) [lines 322-323]
+getManifold (function) [lines 325-326]
+getOC (function) [lines 328-329]
+intersect2D (function) [lines 331-332]
+intersectBlueprints (function) [lines 334-335]
+leftMost (function) [lines 337-341] — Creates a predicate selecting elements touching the shape's minimum X…
+localGC (function) [lines 343-345]
+loft (function) [lines 347-348]
+makeAx1 (function) [lines 350-351]
+makeAx2 (function) [lines 353-354]
+makeAx3 (function) [lines 356-357]
+makeBaseBox (function) [lines 359-365] — Builds a rectangular box of the given lengths
+makeBezierCurve (function) [lines 367-368]
+makeBox (function) [lines 370-372] — Creates a box with the given corner points
+makeBSplineApproximation (function) [lines 374-375]
+makeCircle (function) [lines 377-378]
+makeCompound (function) [lines 380-381]
+makeCylinder (function) [lines 383-385] — Creates a cylinder with the given radius and height
+makeDirection (function) [lines 387-388]
+makeEllipse (function) [lines 390-391]
+makeEllipseArc (function) [lines 393-394]
+makeEllipsoid (function) [lines 396-398] — Creates an ellipsoid with the given lengths of the axes,…
+makeFace (function) [lines 400-401]
+makeHelix (function) [lines 403-404]
+makeLine (function) [lines 406-407]
+makeNewFaceWithinFace (function) [lines 409-410]
+makeNonPlanarFace (function) [lines 412-413]
+makeOffset (function) [lines 415-416]
+makePlaneFromFace (function) [lines 418-419]
+makePolygon (function) [lines 421-422]
+makeProjectedEdges (function) [lines 424-428]
+makeSolid (function) [lines 430-433] — Welds faces and shells into a single shell and then…
 makeSphere (function) [lines 435-437] — Creates a sphere with the given radius, centred on the…
 makeTangentArc (function) [lines 439-440]
 makeThreePointArc (function) [lines 442-443]
@@ -129,8 +132,12 @@ sketchParametricFunction (function) [lines 500-507] — Creates the `Sketch` of 
 sketchPolysides (function) [lines 509-512] — Creates the `Sketch` of an polygon in a defined plane
 sketchRectangle (function) [lines 514-516] — Creates the `Sketch` of a rectangle in a defined plane
 sketchRoundedRectangle (function) [lines 518-523] — Creates the `Sketch` of a rounded rectangle in a defined…
-supportExtrude (function) [lines 525-526]
-topMost (function) [lines 528-534] — Creates a predicate selecting elements touching the shape's maximum Z…
+sketchText (function) [lines 525-535] — Creates the `Sketches` of a text, in a defined font…
+supportExtrude (function) [lines 537-538]
+textBlueprints (function) [lines 540-547] — Creates the `Blueprints` of a text, in a defined font…
+topMost (function) [lines 549-555] — Creates a predicate selecting elements touching the shape's maximum Z…
+twistExtrude (function) [lines 557-559]
+weldShellsAndFaces (function) [lines 561-565] — Welds faces and shells into a single shell
 
 ## Classes — `api-classes.md`
 
@@ -148,10 +155,10 @@ _1DShape (class) [lines 5-34] [13 members]
   _1DShape.length (property)
   _1DShape.orientation (property)
   _1DShape.flipOrientation (method)
-_3DShape (class) [lines 36-93] [12 members]
+_3DShape (class) [lines 36-96] [12 members]
   _3DShape.fuse (method) — Builds a new shape out of the two, fused, shapes
   _3DShape.fuseAll (method) — Builds a new shape by fusing this shape with all…
-  _3DShape.cut (method) — Builds a new shape by removing the tool tape from…
+  _3DShape.cut (method) — Builds a new shape by removing the tool shape from…
   _3DShape.cutAll (method) — Builds a new shape by removing all provided tool shapes…
   _3DShape.intersect (method) — Builds a new shape by intersecting this shape and another
   _3DShape.intersectAll (method) — Builds a new shape by intersecting this shape with all…
@@ -161,8 +168,8 @@ _3DShape (class) [lines 36-93] [12 members]
   _3DShape.fillet (method) — Creates a new shapes with some edges filletted, as specified…
   _3DShape.chamfer (method) — Creates a new shapes with some edges chamfered, as specified…
   _3DShape.draft (method) — Applies a draft angle to selected faces of the shape
-AssemblyExporter (class) [lines 95-95]
-BaseSketcher2d (class) [lines 97-214] [39 members]
+AssemblyExporter (class) [lines 98-98]
+BaseSketcher2d (class) [lines 100-217] [39 members]
   BaseSketcher2d.pointer (property)
   BaseSketcher2d.firstPoint (property)
   BaseSketcher2d.pendingCurves (property)
@@ -202,11 +209,11 @@ BaseSketcher2d (class) [lines 97-214] [39 members]
   BaseSketcher2d.smoothSplineTo (method)
   BaseSketcher2d.smoothSpline (method)
   BaseSketcher2d.customCorner (method) — Changes the corner between the previous and next segments
-Blueprint (class) [lines 216-302] [26 members] — A Blueprint is an abstract Sketch, a 2D set of…
+Blueprint (class) [lines 219-306] [26 members] — A Blueprint is an abstract Sketch, a 2D set of…
   Blueprint.curves (property)
   Blueprint.constructor (constructor)
   Blueprint.delete (method)
-  Blueprint.clone (method)
+  Blueprint.clone (method) — A copy with its own curves
   Blueprint.repr (property)
   Blueprint.boundingBox (property)
   Blueprint.orientation (property)
@@ -229,11 +236,12 @@ Blueprint (class) [lines 216-302] [26 members] — A Blueprint is an abstract Sk
   Blueprint.isInside (method)
   Blueprint.isClosed (method)
   Blueprint.intersects (method)
-Blueprints (class) [lines 304-361] [16 members]
+Blueprints (class) [lines 308-369] [17 members]
   Blueprints.blueprints (property)
   Blueprints.constructor (constructor)
   Blueprints.repr (property)
-  Blueprints.clone (method)
+  Blueprints.clone (method) — A copy with its own curves
+  Blueprints.delete (method)
   Blueprints.boundingBox (property)
   Blueprints.stretch (method)
   Blueprints.rotate (method)
@@ -246,13 +254,13 @@ Blueprints (class) [lines 304-361] [16 members]
   Blueprints.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing
   Blueprints.toSVGPaths (method) — Formats the drawing as a list of SVG paths
   Blueprints.toSVG (method) — Formats the drawing as an SVG image
-BlueprintSketcher (class) [lines 363-382] [5 members]
+BlueprintSketcher (class) [lines 371-390] [5 members]
   BlueprintSketcher.constructor (constructor)
   BlueprintSketcher.done (method) — Stop drawing and returns the sketch
   BlueprintSketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding…
   BlueprintSketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring…
   BlueprintSketcher.closeWithCustomCorner (method) — Stop drawing, make sure the sketch is closed (by adding…
-BoundingBox (class) [lines 384-408] [10 members]
+BoundingBox (class) [lines 392-416] [10 members]
   BoundingBox.constructor (constructor)
   BoundingBox.fromBounds (method)
   BoundingBox.repr (property)
@@ -263,7 +271,7 @@ BoundingBox (class) [lines 384-408] [10 members]
   BoundingBox.depth (property)
   BoundingBox.add (method)
   BoundingBox.isOut (method)
-BoundingBox2d (class) [lines 410-435] [10 members]
+BoundingBox2d (class) [lines 418-443] [10 members]
   BoundingBox2d.constructor (constructor)
   BoundingBox2d.repr (property)
   BoundingBox2d.bounds (property)
@@ -274,11 +282,12 @@ BoundingBox2d (class) [lines 410-435] [10 members]
   BoundingBox2d.add (method)
   BoundingBox2d.isOut (method)
   BoundingBox2d.containsPoint (method)
-Compound (class) [lines 437-437]
-CompoundBlueprint (class) [lines 439-499] [17 members]
+Compound (class) [lines 445-445]
+CompoundBlueprint (class) [lines 447-511] [18 members]
   CompoundBlueprint.blueprints (property)
   CompoundBlueprint.constructor (constructor)
-  CompoundBlueprint.clone (method)
+  CompoundBlueprint.clone (method) — A copy with its own curves
+  CompoundBlueprint.delete (method)
   CompoundBlueprint.boundingBox (property)
   CompoundBlueprint.repr (property)
   CompoundBlueprint.stretch (method)
@@ -293,7 +302,7 @@ CompoundBlueprint (class) [lines 439-499] [17 members]
   CompoundBlueprint.toSVGPaths (method) — Formats the drawing as a list of SVG paths
   CompoundBlueprint.toSVGGroup (method)
   CompoundBlueprint.toSVG (method) — Formats the drawing as an SVG image
-CompoundSketch (class) [lines 501-543] [10 members] — A group of sketches that should correspond to a unique…
+CompoundSketch (class) [lines 513-559] [11 members] — A group of sketches that should correspond to a unique…
   CompoundSketch.sketches (property)
   CompoundSketch.constructor (constructor)
   CompoundSketch.delete (method)
@@ -301,11 +310,12 @@ CompoundSketch (class) [lines 501-543] [10 members] — A group of sketches that
   CompoundSketch.innerSketches (property)
   CompoundSketch.wires (property)
   CompoundSketch.face (method) — Transforms the lines into a face
+  CompoundSketch.extrudeUntil (method) — Extrudes this sketch up to a limiting face, returning only…
   CompoundSketch.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction…
   CompoundSketch.revolve (method) — Revolves the drawing on an axis (defined by its direction…
   CompoundSketch.loftWith (method) — Loft between this sketch and another sketch (or an array…
-CompSolid (class) [lines 545-545]
-CornerFinder (class) [lines 547-577] [8 members]
+CompSolid (class) [lines 561-561]
+CornerFinder (class) [lines 563-593] [8 members]
   CornerFinder.clone (method)
   CornerFinder.inList (method) — Filter to find corner that have their point are in…
   CornerFinder.atDistance (method) — Filter to find elements that are at a specified distance…
@@ -314,7 +324,7 @@ CornerFinder (class) [lines 547-577] [8 members]
   CornerFinder.ofAngle (method) — Filter to find corner that a certain angle between them…
   CornerFinder.shouldKeep (method) — Check if a particular element should be filtered or not…
   CornerFinder.applyFilter (method)
-Curve (class) [lines 579-599] [9 members]
+Curve (class) [lines 595-615] [9 members]
   Curve.repr (property)
   Curve.curveType (property)
   Curve.startPoint (property)
@@ -324,8 +334,9 @@ Curve (class) [lines 579-599] [9 members]
   Curve.isClosed (property)
   Curve.isPeriodic (property)
   Curve.period (property)
-Curve2D (class) [lines 601-650] [19 members]
+Curve2D (class) [lines 617-669] [20 members]
   Curve2D.constructor (constructor)
+  Curve2D.delete (method)
   Curve2D.boundingBox (property)
   Curve2D.repr (property)
   Curve2D.innerCurve (property)
@@ -344,15 +355,16 @@ Curve2D (class) [lines 601-650] [19 members]
   Curve2D.parameter (method)
   Curve2D.tangentAt (method)
   Curve2D.splitAt (method)
-DistanceQuery (class) [lines 652-658] [2 members]
+DistanceQuery (class) [lines 671-677] [2 members]
   DistanceQuery.constructor (constructor)
   DistanceQuery.distanceTo (method)
-DistanceTool (class) [lines 660-666] [2 members]
+DistanceTool (class) [lines 679-685] [2 members]
   DistanceTool.constructor (constructor)
   DistanceTool.distanceBetween (method)
-Drawing (class) [lines 668-755] [24 members]
+Drawing (class) [lines 687-778] [25 members]
   Drawing.constructor (constructor)
   Drawing.clone (method)
+  Drawing.delete (method) — Deletes the curves the drawing owns
   Drawing.serialize (method)
   Drawing.boundingBox (property)
   Drawing.stretch (method)
@@ -375,14 +387,14 @@ Drawing (class) [lines 668-755] [24 members]
   Drawing.offset (method)
   Drawing.approximate (method)
   Drawing.blueprint (property)
-DrawingPen (class) [lines 757-777] [5 members] — DrawingPen is a helper class to draw in 2D
+DrawingPen (class) [lines 780-800] [5 members] — DrawingPen is a helper class to draw in 2D
   DrawingPen.constructor (constructor)
   DrawingPen.done (method) — Stop drawing and returns the sketch
   DrawingPen.close (method) — Stop drawing, make sure the sketch is closed (by adding…
   DrawingPen.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring…
   DrawingPen.closeWithCustomCorner (method) — Stop drawing, make sure the sketch is closed (by adding…
-Edge (class) [lines 779-779]
-EdgeFinder (class) [lines 781-814] [8 members] — With an EdgeFinder you can apply a set of filters…
+Edge (class) [lines 802-802]
+EdgeFinder (class) [lines 804-837] [8 members] — With an EdgeFinder you can apply a set of filters…
   EdgeFinder.clone (method)
   EdgeFinder.inDirection (method) — Filter to find edges that are in a certain direction
   EdgeFinder.ofLength (method) — Filter to find edges of a certain length
@@ -391,7 +403,7 @@ EdgeFinder (class) [lines 781-814] [8 members] — With an EdgeFinder you can ap
   EdgeFinder.inPlane (method) — Filter to find edges that within a plane
   EdgeFinder.shouldKeep (method) — Check if a particular element should be filtered or not…
   EdgeFinder.applyFilter (method)
-Face (class) [lines 816-847] [12 members]
+Face (class) [lines 839-870] [12 members]
   Face.surface (property)
   Face.orientation (property)
   Face.flipOrientation (method)
@@ -404,14 +416,17 @@ Face (class) [lines 816-847] [12 members]
   Face.outerWire (method)
   Face.innerWires (method)
   Face.triangulation (method)
-FaceFinder (class) [lines 849-874] [6 members] — With a FaceFinder you can apply a set of filters…
+FaceFinder (class) [lines 872-897] [6 members] — With a FaceFinder you can apply a set of filters…
   FaceFinder.clone (method)
   FaceFinder.parallelTo (method) — Filter to find faces that are parallel to plane or…
   FaceFinder.ofSurfaceType (method) — Filter to find faces that are of a cetain surface…
   FaceFinder.inPlane (method) — Filter to find faces that are contained in a plane
   FaceFinder.shouldKeep (method) — Check if a particular element should be filtered or not…
   FaceFinder.applyFilter (method)
-FaceSketcher (class) [lines 876-902] [7 members] — The FaceSketcher allows you to sketch on a face that…
+
+## Classes (2) — `api-classes-2.md`
+
+FaceSketcher (class) [lines 5-31] [7 members] — The FaceSketcher allows you to sketch on a face that…
   FaceSketcher.face (property)
   FaceSketcher.constructor (constructor)
   FaceSketcher.buildWire (method)
@@ -419,12 +434,9 @@ FaceSketcher (class) [lines 876-902] [7 members] — The FaceSketcher allows you
   FaceSketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding…
   FaceSketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring…
   FaceSketcher.closeWithCustomCorner (method) — Stop drawing, make sure the sketch is closed (by adding…
-LinearPhysicalProperties (class) [lines 904-906] [1 members]
+LinearPhysicalProperties (class) [lines 33-35] [1 members]
   LinearPhysicalProperties.length (property)
-
-## Classes (2) — `api-classes-2.md`
-
-MeshShape (class) [lines 5-90] [27 members]
+MeshShape (class) [lines 37-122] [27 members]
   MeshShape.constructor (constructor)
   MeshShape.clone (method)
   MeshShape.fuse (method)
@@ -452,7 +464,7 @@ MeshShape (class) [lines 5-90] [27 members]
   MeshShape.numEdge (method)
   MeshShape.isEmpty (property)
   MeshShape.blobSTL (method) — Exports the mesh shape as an STL file Blob
-Plane (class) [lines 92-142] [18 members]
+Plane (class) [lines 124-175] [18 members]
   Plane.oc (property)
   Plane.xDir (property)
   Plane.yDir (property)
@@ -460,7 +472,7 @@ Plane (class) [lines 92-142] [18 members]
   Plane.constructor (constructor)
   Plane.delete (method)
   Plane.clone (method)
-  Plane.origin (property)
+  Plane.origin (property) — Takes ownership of `newOrigin`
   Plane.translateTo (method)
   Plane.translate (method)
   Plane.translateX (method)
@@ -471,7 +483,7 @@ Plane (class) [lines 92-142] [18 members]
   Plane.setOrigin2d (method)
   Plane.toLocalCoords (method)
   Plane.toWorldCoords (method)
-ProjectionCamera (class) [lines 144-172] [10 members]
+ProjectionCamera (class) [lines 177-205] [10 members]
   ProjectionCamera.constructor (constructor)
   ProjectionCamera.position (property)
   ProjectionCamera.direction (property)
@@ -482,7 +494,7 @@ ProjectionCamera (class) [lines 144-172] [10 members]
   ProjectionCamera.setXAxis (method)
   ProjectionCamera.setYAxis (method)
   ProjectionCamera.lookAt (method)
-Shape (class) [lines 174-263] [26 members]
+Shape (class) [lines 207-312] [30 members]
   Shape.constructor (constructor)
   Shape.clone (method)
   Shape.serialize (method)
@@ -502,6 +514,10 @@ Shape (class) [lines 174-263] [26 members]
   Shape.scale (method) — Returns a scaled version of the shape
   Shape.edges (property)
   Shape.faces (property)
+  Shape.findEdge (method) — Finds a unique edge using a finder function, which receives…
+  Shape.findEdges (method) — Finds all matching edges using a finder function, which receives…
+  Shape.findFace (method) — Finds a unique face using a finder function, which receives…
+  Shape.findFaces (method) — Finds all matching faces using a finder function, which receives…
   Shape.solids (property)
   Shape.wires (property)
   Shape.boundingBox (property)
@@ -509,29 +525,30 @@ Shape (class) [lines 174-263] [26 members]
   Shape.meshEdges (method) — Exports the current shape as a set of lines
   Shape.blobSTEP (method) — Exports the current shape as a STEP file as a…
   Shape.blobSTL (method) — Exports the current shape as a STL file as a…
-Shell (class) [lines 265-265]
-Sketch (class) [lines 267-326] [14 members] — A line drawing to be acted upon
+Shell (class) [lines 314-314]
+Sketch (class) [lines 316-382] [15 members] — A line drawing to be acted upon
   Sketch.wire (property)
   Sketch.constructor (constructor)
-  Sketch.baseFace (property)
+  Sketch.baseFace (property) — Keeps a copy of `newFace`
   Sketch.delete (method)
   Sketch.clone (method)
-  Sketch.defaultOrigin (property)
-  Sketch.defaultDirection (property)
+  Sketch.defaultOrigin (property) — Keeps a copy of `newOrigin`
+  Sketch.defaultDirection (property) — Keeps a copy of `newDirection`
   Sketch.face (method) — Transforms the lines into a face
   Sketch.wires (method)
   Sketch.faces (method)
   Sketch.revolve (method) — Revolves the drawing on an axis (defined by its direction…
+  Sketch.extrudeUntil (method) — Extrudes this sketch up to a limiting face, returning only…
   Sketch.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction…
   Sketch.sweepSketch (method) — Sweep along this sketch another sketch defined in the function…
   Sketch.loftWith (method) — Loft between this sketch and another sketch (or an array…
-Sketcher (class) [lines 328-491] [41 members] — The FaceSketcher allows you to sketch on a plane
+Sketcher (class) [lines 384-548] [41 members] — The FaceSketcher allows you to sketch on a plane
   Sketcher.plane (property)
   Sketcher.pointer (property)
   Sketcher.firstPoint (property)
   Sketcher.pendingEdges (property)
   Sketcher.constructor (constructor)
-  Sketcher.delete (method)
+  Sketcher.delete (method) — Deletes what the sketcher owns
   Sketcher.movePointerTo (method) — Changes the point to start your drawing from
   Sketcher.lineTo (method) — Draws a line from the current point to the point…
   Sketcher.line (method) — Draws a line at the horizontal distance xDist and the…
@@ -564,22 +581,23 @@ Sketcher (class) [lines 328-491] [41 members] — The FaceSketcher allows you to
   Sketcher.smoothSplineTo (method) — Draws a cubic bezier curve to the end point, attempting…
   Sketcher.smoothSpline (method) — Draws a cubic bezier curve to the end point, attempting…
   Sketcher.buildWire (method)
-  Sketcher.done (method) — Stop drawing and returns the sketch
+  Sketcher.done (method) — Builds the sketch
   Sketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding…
   Sketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring…
-Sketches (class) [lines 493-521] [6 members]
+Sketches (class) [lines 550-582] [7 members]
   Sketches.sketches (property)
   Sketches.constructor (constructor)
   Sketches.wires (method)
   Sketches.faces (method)
+  Sketches.extrudeUntil (method) — Extrudes each sketch up to the same limiting face, returning…
   Sketches.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction…
   Sketches.revolve (method) — Revolves the drawing on an axis (defined by its direction…
-Solid (class) [lines 523-523]
-Surface (class) [lines 525-527] [1 members]
+Solid (class) [lines 584-584]
+Surface (class) [lines 586-588] [1 members]
   Surface.surfaceType (property)
-SurfacePhysicalProperties (class) [lines 529-531] [1 members]
+SurfacePhysicalProperties (class) [lines 590-592] [1 members]
   SurfacePhysicalProperties.area (property)
-Transformation (class) [lines 533-567] [11 members]
+Transformation (class) [lines 594-628] [11 members]
   Transformation.constructor (constructor)
   Transformation.clone (method)
   Transformation.translate (method)
@@ -591,21 +609,23 @@ Transformation (class) [lines 533-567] [11 members]
   Transformation.coordSystemChange (method)
   Transformation.transformPoint (method)
   Transformation.transform (method)
-Vector (class) [lines 569-627] [21 members]
+Vector (class) [lines 630-700] [23 members] — A 3D vector
   Vector.constructor (constructor)
+  Vector.wrapped (property)
+  Vector.delete (method)
   Vector.repr (property)
   Vector.x (property)
   Vector.y (property)
   Vector.z (property)
-  Vector.Length (property)
+  Vector.Length (property) — As `gp_Vec::Magnitude`
   Vector.toTuple (method)
-  Vector.cross (method)
-  Vector.dot (method)
+  Vector.cross (method) — As `gp_Vec::Crossed`
+  Vector.dot (method) — As `gp_Vec::Dot`
   Vector.sub (method)
   Vector.add (method)
   Vector.multiply (method)
-  Vector.normalized (method)
-  Vector.normalize (method)
+  Vector.normalized (method) — As `gp_Vec::Normalized`
+  Vector.normalize (method) — As `gp_Vec::Normalize`
   Vector.getCenter (method)
   Vector.getAngle (method)
   Vector.projectToPlane (method)
@@ -613,13 +633,13 @@ Vector (class) [lines 569-627] [21 members]
   Vector.toPnt (method)
   Vector.toDir (method)
   Vector.rotate (method)
-Vertex (class) [lines 629-632] [1 members]
+Vertex (class) [lines 702-705] [1 members]
   Vertex.asTuple (method)
-VolumePhysicalProperties (class) [lines 634-636] [1 members]
+VolumePhysicalProperties (class) [lines 707-709] [1 members]
   VolumePhysicalProperties.volume (property)
-Wire (class) [lines 638-641] [1 members]
+Wire (class) [lines 711-714] [1 members]
   Wire.offset2D (method)
-WrappingObj (class) [lines 643-653] [4 members]
+WrappingObj (class) [lines 716-728] [4 members] — The base of every object that owns an OpenCascade value
   WrappingObj.oc (property)
   WrappingObj.constructor (constructor)
   WrappingObj.wrapped (property)
@@ -648,16 +668,17 @@ ManifoldBox (type) [lines 52-56] [2 members]
 ManifoldInstance (type) [lines 58-58]
 ManifoldMesh (type) [lines 60-60]
 ManifoldVec3 (type) [lines 62-62]
-PlaneName (type) [lines 64-64]
-PlaneSide (type) [lines 66-66]
-Point (type) [lines 68-71]
-Point2D (type) [lines 73-73]
-ProjectionPlane (type) [lines 75-75]
-RadiusConfig (type) [lines 77-83] — A generic way to define radii for fillet or chamfer…
-ScaleMode (type) [lines 85-85]
-Shape2D (type) [lines 87-87]
-Shape3D (type) [lines 89-89]
-ShapeConfig (type) [lines 91-119] [7 members]
+OperationEffect (type) [lines 64-66] — How an operation treats its receiver
+PlaneName (type) [lines 68-68]
+PlaneSide (type) [lines 70-70]
+Point (type) [lines 72-75]
+Point2D (type) [lines 77-77]
+ProjectionPlane (type) [lines 79-79]
+RadiusConfig (type) [lines 81-87] — A generic way to define radii for fillet or chamfer…
+ScaleMode (type) [lines 89-89]
+Shape2D (type) [lines 91-91]
+Shape3D (type) [lines 93-93]
+ShapeConfig (type) [lines 95-123] [7 members]
   ShapeConfig.shape (property)
   ShapeConfig.color (property)
   ShapeConfig.alpha (property)
@@ -665,30 +686,35 @@ ShapeConfig (type) [lines 91-119] [7 members]
   ShapeConfig.metalness (property) — PBR metalness factor (0 = dielectric, 1 = metal)
   ShapeConfig.roughness (property) — PBR roughness factor — threaded to GLTF only (not STEP
   ShapeConfig.density (property) — Material density in g/cm3, written as the shape's STEP material
-SimplePoint (type) [lines 121-121]
-SingleFace (type) [lines 123-123]
-SplineConfig (type) [lines 125-130]
-SupportedUnit (type) [lines 132-132]
-SurfaceType (type) [lines 134-134]
-TopoEntity (type) [lines 136-136]
+SimplePoint (type) [lines 125-125]
+SingleFace (type) [lines 127-127]
+SplineConfig (type) [lines 129-134]
+SupportedUnit (type) [lines 136-136]
+SurfaceType (type) [lines 138-138]
+TopoEntity (type) [lines 140-140]
 
 ## Constants — `api-constants.md`
 
 AXIS_NAMES (constant) [lines 5-5]
 DEG2RAD (constant) [lines 7-7]
-HASH_CODE_MAX (constant) [lines 9-9]
-RAD2DEG (constant) [lines 11-11]
+finderClauses (constant) [lines 9-20] [3 members] — Finder clauses by how their arguments describe them, for a…
+  finderClauses.value (property)
+  finderClauses.combinator (property)
+  finderClauses.predicate (property)
+HASH_CODE_MAX (constant) [lines 22-22]
+RAD2DEG (constant) [lines 24-24]
 
 ## Interfaces — `api-interfaces.md`
 
-BooleanOperationOptions (interface) [lines 5-7] [1 members]
+BooleanOperationOptions (interface) [lines 5-10] [2 members]
   BooleanOperationOptions.optimisation (property)
-BSplineApproximationConfig (interface) [lines 9-17] [4 members]
+  BooleanOperationOptions.simplify (property) — Merge same-domain faces and edges after the Boolean operation
+BSplineApproximationConfig (interface) [lines 12-20] [4 members]
   BSplineApproximationConfig.tolerance (property)
   BSplineApproximationConfig.degMax (property)
   BSplineApproximationConfig.degMin (property)
   BSplineApproximationConfig.smoothing (property)
-CurveLike (interface) [lines 19-46] [9 members]
+CurveLike (interface) [lines 22-49] [9 members]
   CurveLike.delete (method)
   CurveLike.Value (method)
   CurveLike.IsPeriodic (method)
@@ -698,10 +724,11 @@ CurveLike (interface) [lines 19-46] [9 members]
   CurveLike.LastParameter (method)
   CurveLike.GetType (method)
   CurveLike.D1 (method)
-Deletable (interface) [lines 48-50] [1 members]
+Deletable (interface) [lines 51-53] [1 members]
   Deletable.delete (property)
-DrawingInterface (interface) [lines 52-94] [11 members]
+DrawingInterface (interface) [lines 55-100] [12 members]
   DrawingInterface.clone (method)
+  DrawingInterface.delete (method)
   DrawingInterface.boundingBox (property)
   DrawingInterface.stretch (method)
   DrawingInterface.rotate (method)
@@ -712,19 +739,21 @@ DrawingInterface (interface) [lines 52-94] [11 members]
   DrawingInterface.toSVG (method) — Formats the drawing as an SVG image
   DrawingInterface.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing
   DrawingInterface.toSVGPaths (method) — Formats the drawing as a list of SVG paths
-ExtrusionProfile (interface) [lines 96-100] [2 members]
+ExtrudeUntilOptions (interface) [lines 102-105] [1 members]
+  ExtrudeUntilOptions.extrusionDirection (property) — Defaults to the sketch's direction
+ExtrusionProfile (interface) [lines 107-111] [2 members]
   ExtrusionProfile.profile (property)
   ExtrusionProfile.endFactor (property)
-FaceTriangulation (interface) [lines 102-108] [3 members]
+FaceTriangulation (interface) [lines 113-119] [3 members]
   FaceTriangulation.vertices (property)
   FaceTriangulation.trianglesIndexes (property)
   FaceTriangulation.verticesNormals (property)
-FaceUVBounds (interface) [lines 110-118] [4 members]
+FaceUVBounds (interface) [lines 121-129] [4 members]
   FaceUVBounds.uMin (property)
   FaceUVBounds.uMax (property)
   FaceUVBounds.vMin (property)
   FaceUVBounds.vMax (property)
-GenericSketcher (interface) [lines 120-265] [34 members] — Sketchers allow the user to draw a two dimentional shape…
+GenericSketcher (interface) [lines 131-276] [34 members] — Sketchers allow the user to draw a two dimentional shape…
   GenericSketcher.movePointerTo (method) — Changes the point to start your drawing from
   GenericSketcher.lineTo (method) — Draws a line from the current point to the point…
   GenericSketcher.line (method) — Draws a line at the horizontal distance xDist and the…
@@ -759,7 +788,7 @@ GenericSketcher (interface) [lines 120-265] [34 members] — Sketchers allow the
   GenericSketcher.done (method) — Stop drawing and returns the sketch
   GenericSketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding…
   GenericSketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring…
-GenericSweepConfig (interface) [lines 267-281] [7 members]
+GenericSweepConfig (interface) [lines 278-292] [7 members]
   GenericSweepConfig.frenet (property)
   GenericSweepConfig.auxiliarySpine (property)
   GenericSweepConfig.law (property)
@@ -767,27 +796,55 @@ GenericSweepConfig (interface) [lines 267-281] [7 members]
   GenericSweepConfig.withContact (property)
   GenericSweepConfig.support (property)
   GenericSweepConfig.forceProfileSpineOthogonality (property)
-LoftConfig (interface) [lines 283-289] [3 members]
+LoftConfig (interface) [lines 294-300] [3 members]
   LoftConfig.ruled (property)
   LoftConfig.startPoint (property)
   LoftConfig.endPoint (property)
-MeshOptions (interface) [lines 291-295] [2 members]
+MeshOptions (interface) [lines 302-306] [2 members]
   MeshOptions.tolerance (property)
   MeshOptions.angularTolerance (property)
-MeshShapeMesh (interface) [lines 297-307] [5 members]
+MeshShapeMesh (interface) [lines 308-318] [5 members]
   MeshShapeMesh.vertices (property)
   MeshShapeMesh.triangles (property)
   MeshShapeMesh.normals (property)
   MeshShapeMesh.vertProperties (property)
   MeshShapeMesh.numProp (property)
-PlaneFace (interface) [lines 309-315] [2 members]
+OcScope (interface) [lines 320-330] [2 members] — A deterministic ownership scope for OpenCascade values (and other objects…
+  OcScope.keep (method) — Releases a value from the scope
+  OcScope.dispose (method) — Deletes every value the scope still owns
+OperationCache (interface) [lines 332-344] [3 members] — A host cache
+  OperationCache.operation (method)
+  OperationCache.step (method)
+  OperationCache.elements (method) — Topological elements that user code took from `owner` (the `edges`,…
+OperationRequest (interface) [lines 346-379] [10 members] — One public operation, described lazily
+  OperationRequest.op (property) — `Class.method`, `set:Class.property` or the exported function name
+  OperationRequest.effect (property)
+  OperationRequest.receiver (property) — `this` of a method
+  OperationRequest.args (property) — The arguments as passed
+  OperationRequest.finderArgs (property) — Positions of finder arguments among `args`
+  OperationRequest.returnsBuilder (property) — The result is a mutable builder (a pen from `draw()`)
+  OperationRequest.deterministicErrors (property) — The operation's errors are a deterministic function of its inputs…
+  OperationRequest.freshState (property) — For a builder (pen, sketcher) the cache has not seen
+  OperationRequest.compute (method) — Runs the operation
+  OperationRequest.consume (method) — Deletes what the operation would have deleted
+OperationStep (interface) [lines 381-399] [6 members] — The part of an operation that depends on a callback…
+  OperationStep.op (property)
+  OperationStep.receiver (property)
+  OperationStep.deterministicErrors (property) — See {@link OperationRequest.deterministicErrors}
+  OperationStep.values (method) — The inputs known after the callback ran (selected element ordinals…
+  OperationStep.compute (method)
+  OperationStep.consume (method)
+PlaneConfig (interface) [lines 401-405] [2 members]
+  PlaneConfig.plane (property)
+  PlaneConfig.origin (property)
+PlaneFace (interface) [lines 407-413] [2 members]
   PlaneFace.pointOnSurface (method)
   PlaneFace.normalAt (method)
-PlaneSplitResult (interface) [lines 317-324] [3 members] — Pieces grouped by their position relative to an oriented plane
+PlaneSplitResult (interface) [lines 415-422] [3 members] — Pieces grouped by their position relative to an oriented plane
   PlaneSplitResult.positive (property)
   PlaneSplitResult.negative (property)
   PlaneSplitResult.on (property)
-Shape3DLike (interface) [lines 326-362] [12 members]
+Shape3DLike (interface) [lines 424-460] [12 members]
   Shape3DLike.fuse (method)
   Shape3DLike.cut (method)
   Shape3DLike.intersect (method)
@@ -800,22 +857,23 @@ Shape3DLike (interface) [lines 326-362] [12 members]
   Shape3DLike.mirror (method)
   Shape3DLike.mesh (method)
   Shape3DLike.boundingBox (property)
-ShapeEdgeMesh (interface) [lines 364-372] [2 members]
+ShapeEdgeMesh (interface) [lines 462-470] [2 members]
   ShapeEdgeMesh.lines (property)
   ShapeEdgeMesh.edgeGroups (property)
-ShapeMesh (interface) [lines 374-386] [4 members]
+ShapeMesh (interface) [lines 472-484] [4 members]
   ShapeMesh.triangles (property)
   ShapeMesh.vertices (property)
   ShapeMesh.normals (property)
   ShapeMesh.faceGroups (property)
-SketchInterface (interface) [lines 388-414] [4 members]
+SketchInterface (interface) [lines 486-516] [5 members]
   SketchInterface.face (method) — Transforms the lines into a face
   SketchInterface.revolve (method) — Revolves the drawing on an axis (defined by its direction…
+  SketchInterface.extrudeUntil (method) — Extrudes the sketch up to a limiting face, returning only…
   SketchInterface.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction…
   SketchInterface.loftWith (method) — Loft between this sketch and another sketch (or an array…
-STLExportOptions (interface) [lines 416-418] [1 members]
+STLExportOptions (interface) [lines 518-520] [1 members]
   STLExportOptions.binary (property)
-TopologyMap (interface) [lines 420-438] [9 members]
+TopologyMap (interface) [lines 522-540] [9 members]
   TopologyMap.vertex (property)
   TopologyMap.edge (property)
   TopologyMap.wire (property)

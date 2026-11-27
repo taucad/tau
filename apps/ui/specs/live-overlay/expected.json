@@ -21,6 +21,15 @@
       "kind": "defect",
       "ref": "After the rejected stream, later tool results are folded but never presented, so their calls spin until the step ends",
       "fixedBy": "fix(ui): Keep a live reasoning block open across durable tool results"
+    },
+    "LiveOverlay.today-OneLiveWakePerFrame.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "OneLiveWakePerFrame"
+      },
+      "kind": "defect",
+      "ref": "Without the frame clock the store wakes projection readers on every live event, so a burst of port messages queued behind a busy main thread wakes them several times in one frame",
+      "fixedBy": "perf(ui): Publish live chat changes once per animation frame (WP-06)"
     }
   }
 }

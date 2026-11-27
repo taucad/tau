@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { mock } from 'vitest-mock-extended';
 import { createActor, setup, waitFor } from 'xstate';
+import type { AnyActorRef } from 'xstate';
 import type { AnyRuntimeDefinition, Evaluation, KernelIssue, Rendering, RuntimeContentInput } from '@taucad/runtime';
 import { createRuntimeClient, defineRuntime } from '@taucad/runtime';
 import { defineKernel, createKernelSuccess } from '@taucad/runtime/kernel';
@@ -13,6 +15,8 @@ import { z } from 'zod';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import { defaultOperationTimeout } from '@taucad/ui-core/constants/editor.constants';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import { WorkerCodeLoadError } from '@taucad/ui-core/lib/worker-factory';
+import { noteWorkerCodeLoadFailure, resetWorkerRealmRecovery } from '#lib/worker-realm-recovery.js';
 import {
   cadMachine,
   disposeCadRuntime,
@@ -21,6 +25,13 @@ import {
 } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
 import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
+
+const recoverFromStaleBuild = vi.hoisted(() => vi.fn(async (): Promise<StaleBuildOutcome> => 'transient'));
+vi.mock(import('#lib/stale-build-recovery.js'), async (importOriginal) => ({
+  ...(await importOriginal()),
+  recoverFromStaleBuild,
+}));
 
 const kernelOptionsFactory: LazyKernelOptionsFactory = async () => () =>
   mock<ReturnType<KernelOptionsFactory>>({
@@ -874,6 +885,225 @@ describe('cadMachine heap recycle', () => {
     await waitFor(f.actor, (snapshot) => snapshot.value === 'idle');
     renderedAt(f, 4096 * mebibyte, 'second');
     await waitFor(f.actor, (snapshot) => snapshot.value === 'idle');
+    expect(f.client.terminate).not.toHaveBeenCalled();
+    f.actor.stop();
+  });
+});
+
+describe('cadMachine after a refused engine delivery', () => {
+  it('renders on the next initializeModel once the engine host answers, with no reload', async () => {
+    /* The host is down for the first evaluation and back for the next, as a kernel that fetches its engine
+     * on demand (cadmpeg) sees it; the refusal carries its issue the way `CadmpegEngineError` does. */
+    let hostReachable = false;
+    const evaluations = vi.fn();
+    const refusal: KernelIssue = {
+      message: 'cadmpeg could not load the sldprt engine from dependencies.taucad.dev: the host could not be reached.',
+      code: 'KERNEL_BINDING_FAILED',
+      type: 'kernel',
+      severity: 'error',
+      details: { producer: 'cadmpeg', engineFailure: 'unreachable', format: 'sldprt', host: 'dependencies.taucad.dev' },
+    };
+    const kernel = defineKernel({
+      id: 'engine-on-demand',
+      name: 'Engine on demand',
+      version: '1.0.0',
+      extensions: ['sldprt'],
+      views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({
+          parameters: {
+            schema: {
+              $schema: 'https://json-structure.org/meta/extended/v0/#',
+              $id: 'urn:taucad:test:engine-on-demand',
+              $uses: ['JSONSchemaUnits'],
+              name: 'EngineOnDemandParameters',
+              type: 'object',
+            },
+            defaults: {},
+          },
+        });
+      },
+      async evaluate() {
+        evaluations();
+        if (!hostReachable) {
+          throw Object.assign(new Error(refusal.message), { issues: [refusal] });
+        }
+        return { handle: {} };
+      },
+      async render() {
+        return {
+          content: writeGlb({
+            nodes: [
+              { primitives: [{ mode: 4, positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), material: {} }] },
+            ],
+          }),
+        };
+      },
+    })();
+    const runtime: AnyRuntimeDefinition = defineRuntime({ kernels: [kernel] });
+    const clients: AppRuntimeClient[] = [];
+    const actor = createActor(
+      cadMachine.provide({
+        actors: {
+          // Each connect is a fresh client, as a reconnect is a fresh worker in the app.
+          connectKernelActor: fromSafeAsync(
+            async (): Promise<{ type: 'kernelConnected'; client: AppRuntimeClient; cleanups: Array<() => void> }> => {
+              const client = createRuntimeClient({
+                transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs({ 'part.sldprt': 'native' }) }),
+              });
+              clients.push(client);
+              await client.connect();
+              return { type: 'kernelConnected', client, cleanups: [] };
+            },
+          ),
+        },
+      }),
+      {
+        input: { shouldInitializeKernelOnStart: false, fileSystemRoot: '', kernelOptionsFactory, operationTimeout: 0 },
+      },
+    );
+    actor.start();
+    try {
+      await waitFor(actor, (snapshot) => snapshot.value === 'idle');
+      actor.send({ type: 'initializeModel', entryPath: 'part.sldprt' });
+      const failed = await waitFor(actor, (snapshot) => snapshot.value === 'error');
+      expect(selectCadFailureIssues(failed)).toEqual([expect.objectContaining({ details: refusal.details })]);
+      expect(evaluations).toHaveBeenCalledOnce();
+
+      hostReachable = true;
+      actor.send({ type: 'initializeModel', entryPath: 'part.sldprt' });
+      const recovered = await waitFor(
+        actor,
+        (snapshot) => snapshot.value === 'idle' && snapshot.context.latestRenderingOutcome === 'success',
+      );
+      expect(recovered.context.rendering?.success).toBe(true);
+      expect(selectCadFailureIssues(recovered)).toBeUndefined();
+      expect(evaluations).toHaveBeenCalledTimes(2);
+      expect(clients).toHaveLength(2);
+    } finally {
+      actor.stop();
+    }
+  });
+});
+
+/*
+ * PL7 staging verification 2026-11-21 (row 5): the kernel's runtime worker failed to load its script, or replicad, its
+ * static import. The worker factory heard it, but the CAD unit, the worker's owner, met only a closed channel ("Channel
+ * closed") and started no new worker. A worker is its own realm, so only a new one can load the code (FP10).
+ */
+describe('cadMachine after its runtime worker’s code failed to load', () => {
+  afterEach(() => {
+    resetWorkerRealmRecovery();
+    recoverFromStaleBuild.mockClear();
+  });
+
+  const loadFailure = (): WorkerCodeLoadError =>
+    new WorkerCodeLoadError('runtime', new TypeError('Importing a module script failed.'));
+
+  /**
+   * Connects whose worker's code fails to load on the first `failing` attempts: the page hears it first (the factory's
+   * page handler), then the owner (the event), then the transport closes its channel.
+   */
+  function failingConnects(failing: number) {
+    const clients: AppRuntimeClient[] = [];
+    const actor = createActor(
+      cadMachine.provide({
+        actors: {
+          connectKernelActor: fromSafeAsync(
+            async ({
+              input,
+            }: {
+              readonly input: { readonly machineRef: AnyActorRef };
+            }): Promise<{ type: 'kernelConnected'; client: AppRuntimeClient; cleanups: Array<() => void> }> => {
+              const client: AppRuntimeClient = createMockRuntimeClient();
+              clients.push(client);
+              input.machineRef.send({ type: 'kernelAllocated', client, cleanups: [] });
+              if (clients.length <= failing) {
+                const failure = loadFailure();
+                noteWorkerCodeLoadFailure(failure);
+                input.machineRef.send({ type: 'kernelWorkerCodeLoadFailed', client, failure });
+                throw new Error('Channel closed');
+              }
+              return { type: 'kernelConnected', client, cleanups: [] };
+            },
+          ),
+        },
+      }),
+      { input: { shouldInitializeKernelOnStart: false, fileSystemRoot: '/projects/test', kernelOptionsFactory } },
+    );
+    actor.start();
+    return { actor, clients };
+  }
+
+  it('replaces the worker at once, with no reload, and connects on the new one', async () => {
+    const { actor, clients } = failingConnects(1);
+    try {
+      await waitFor(actor, (snapshot) => snapshot.value === 'idle', { timeout: 5000 });
+
+      expect(clients).toHaveLength(2);
+      expect(selectCadFailureIssues(actor.getSnapshot())).toBeUndefined();
+      expect(recoverFromStaleBuild).not.toHaveBeenCalled();
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('replaces it again after the backoff when the new worker fails too', async () => {
+    const { actor, clients } = failingConnects(2);
+    try {
+      await waitFor(actor, (snapshot) => snapshot.value === 'idle', { timeout: 5000 });
+
+      expect(clients).toHaveLength(3);
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('stops at the bound and shows the load failure, never only a closed channel, for the page to offer Reload', async () => {
+    const { actor, clients } = failingConnects(Number.POSITIVE_INFINITY);
+    try {
+      const failed = await waitFor(actor, (snapshot) => snapshot.value === 'error', { timeout: 5000 });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 1500);
+      });
+
+      expect(clients).toHaveLength(3);
+      expect(actor.getSnapshot().value).toBe('error');
+      const issues = selectCadFailureIssues(failed);
+      expect(issues).toHaveLength(1);
+      expect(issues?.[0]?.message).toMatch(/Importing a module script failed/u);
+      expect(recoverFromStaleBuild).toHaveBeenCalledExactlyOnceWith(expect.any(WorkerCodeLoadError), 'loader');
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('replaces a worker whose code failed after it connected, as a later import inside it can', async () => {
+    const f = fixture();
+    await connected(f);
+
+    f.actor.send({ type: 'kernelWorkerCodeLoadFailed', client: f.client, failure: loadFailure() });
+
+    await waitFor(f.actor, (snapshot) => snapshot.value === 'connecting' || snapshot.value === 'replacingWorker');
+    await waitFor(f.actor, (snapshot) => snapshot.value === 'idle');
+    expect(f.client.terminate).toHaveBeenCalled();
+    f.actor.stop();
+  });
+
+  it('ignores a failure from a worker it has already let go', async () => {
+    const f = fixture();
+    await connected(f);
+
+    f.actor.send({ type: 'kernelWorkerCodeLoadFailed', client: createMockRuntimeClient(), failure: loadFailure() });
+
+    expect(f.actor.getSnapshot().value).toBe('idle');
     expect(f.client.terminate).not.toHaveBeenCalled();
     f.actor.stop();
   });

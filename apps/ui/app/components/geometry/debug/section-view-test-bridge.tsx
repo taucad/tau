@@ -42,8 +42,14 @@ import { getModelComponentIdInHierarchy } from '@taucad/viewer/graphics/three/ut
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
 import { getControlsDistance } from '@taucad/viewer/graphics/three/utils/camera-controls-adapter';
 import { hasSceneTag, sceneTag } from '@taucad/viewer/graphics/three/utils/scene-tags';
-import { sectionCapStencilDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
-import type { SectionCapStencilDiagnostics } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
+import {
+  sectionCapOutlineDebugUserDataKey,
+  sectionCapStencilDebugUserDataKey,
+} from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
+import type {
+  SectionCapOutlineDebugControl,
+  SectionCapStencilDiagnostics,
+} from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
 import { selectGraphicsViewportGizmoLocked } from '@taucad/viewer/machines/graphics.machine';
 import { getSceneRenderRoots } from '@taucad/viewer/graphics/three/scene-overlay';
 import {
@@ -550,11 +556,13 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
             : undefined;
         let drawCalls = 0;
         let triangles = 0;
+        const warmup = options.warmup ?? 20;
+        const frames = warmup + (options.samples ?? 120);
         state.setFrameloop('never');
         renderer.info.autoReset = false;
         try {
           // oxlint-disable-next-line no-await-in-loop -- serialize frames so completion covers this frame alone.
-          for (let index = 0; index < 140; index++) {
+          for (let index = 0; index < frames; index++) {
             // Three advances its FRAME node cache on RAF; exclude pacing from the measured work.
             // oxlint-disable-next-line no-await-in-loop -- each sample must render a fresh scene pass.
             await new Promise<void>((resolve) => {
@@ -589,7 +597,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
             const completedAt = performance.now();
             // oxlint-disable-next-line no-await-in-loop -- resolve all passes from this frame before the next.
             const gpuDuration = await timer.resolve();
-            if (index >= 20) {
+            if (index >= warmup) {
               gpu.push(gpuDuration);
               submission.push(submittedAt - startedAt);
               completion.push(completedAt - startedAt);
@@ -996,6 +1004,18 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       },
       getSectionCapStencilDiagnostics() {
         return getSectionViewTestCapStencilDiagnostics(scene);
+      },
+      setSectionCapOutlinesVisible(visible) {
+        let found = false;
+        scene.traverse((child) => {
+          if (sectionCapStencilDebugUserDataKey in child.userData) {
+            const control: SectionCapOutlineDebugControl = { hidden: !visible };
+            child.userData[sectionCapOutlineDebugUserDataKey] = control;
+            found = true;
+          }
+        });
+        get().invalidate();
+        return found;
       },
     };
 

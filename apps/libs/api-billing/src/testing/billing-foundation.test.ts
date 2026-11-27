@@ -1029,6 +1029,9 @@ describe('funded LLM recovery worker under a mid-run database outage', () => {
         });
     const failures = (): Array<{ at: number; batch: Record<string, unknown> }> =>
       batches('stderr').filter(({ batch }) => batch['outcome'] === 'failed');
+    // A pass drains both capacity pools and logs their batches together, so backoff is measured within one pool.
+    const primaryFailures = (): Array<{ at: number; batch: Record<string, unknown> }> =>
+      failures().filter(({ batch }) => batch['pool'] === 'primary');
     const settle = async (
       label: string,
       predicate: () => Promise<boolean> | boolean,
@@ -1107,15 +1110,17 @@ describe('funded LLM recovery worker under a mid-run database outage', () => {
         'fixture',0,0,0,0,now())`;
 
       // The worker survives the outage, reports every failed batch and never hot-loops.
-      await settle('four failed recovery batches', () => {
+      await settle('four failed primary-pool recovery batches', () => {
         // A worker that died instead of backing off must fail this case immediately.
         expect(child.exitCode ?? child.signalCode).toBeNull();
-        return failures().length >= 4;
+        return primaryFailures().length >= 4;
       });
       const failed = failures();
       expect(failed[0]?.batch).toMatchObject({ event: 'billing.llm_recovery_batch', environment: 'prod-eu' });
       expect(failed.map(({ batch }) => batch['pool'])).toContain('primary');
-      expect(Number(failed.at(3)?.at) - Number(failed[0]?.at)).toBeGreaterThanOrEqual(100);
+      // Four primary failures span three 50 ms poll intervals (150 ms nominal); a hot loop would not.
+      const primary = primaryFailures();
+      expect(Number(primary.at(3)?.at) - Number(primary[0]?.at)).toBeGreaterThanOrEqual(100);
       expect(child.exitCode ?? child.signalCode).toBeNull();
       const duringOutage = await client`SELECT customer_state FROM billing.credit_operation WHERE id = ${operation}`;
       expect(duringOutage[0]?.['customer_state']).toBe('pending');

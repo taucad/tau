@@ -13,11 +13,12 @@ import { act, render, waitFor } from '@testing-library/react';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import {
   clearTurnOutcome,
+  isOrdinaryRelease,
   RevisionOutcomes,
   useTurnOutcomes,
 } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { revisionFailureCopy } from '@taucad/ui-core/lib/revision-failure-copy';
-import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
+import type { WorkerRevisionEvent } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
 const listeners = new Set<(event: WorkerRevisionEvent) => void>();
 const publish = (event: WorkerRevisionEvent): void => {
@@ -31,6 +32,36 @@ const publish = (event: WorkerRevisionEvent): void => {
 };
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
+
+type RunEntry = { lifecycle: string; failure?: { code: string }; changes?: Record<string, unknown> };
+/** The chat logs this page folds, when a test gives it some. */
+const chatLog: {
+  runs: Record<string, RunEntry>;
+  listeners: Set<() => void>;
+  set: (runId: string, entry: RunEntry) => void;
+} = {
+  runs: {},
+  listeners: new Set(),
+  set(runId, entry) {
+    chatLog.runs[runId] = entry;
+    for (const listener of chatLog.listeners) {
+      listener();
+    }
+  },
+};
+let sessionsStore: unknown;
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useOptionalChatSessionStore: () => sessionsStore,
+}));
+const withChatLog = (): void => {
+  sessionsStore = {
+    getProjection: () => ({ ledger: { runs: chatLog.runs } }),
+    subscribeProjection: (_chatId: string, listener: () => void) => {
+      chatLog.listeners.add(listener);
+      return () => chatLog.listeners.delete(listener);
+    },
+  };
+};
 
 vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
@@ -83,6 +114,9 @@ const renderTurnOutcomes = (): ReturnType<typeof render> =>
   );
 
 beforeEach(() => {
+  sessionsStore = undefined;
+  chatLog.runs = {};
+  chatLog.listeners.clear();
   revisionStatusHarness.reset();
   errors.length = 0;
   projectedChats = [];
@@ -117,6 +151,99 @@ describe('RevisionOutcomes', () => {
     expect(getByTestId('latest')).toHaveTextContent('failed:turn-1');
   });
 
+  /* Chat UX F2: the person's own Stop is an ordinary end, silent when the log shows it; anything else is said. */
+  it.each([
+    { code: 'TURN_RELEASED', stoppedByPerson: true, silent: true },
+    { code: 'TURN_RELEASED', stoppedByPerson: false, silent: false },
+    { code: 'BASE_CUT_FAILED', stoppedByPerson: true, silent: false },
+  ])(
+    'should treat $code as silent: $silent when the person stopped it: $stoppedByPerson',
+    ({ code, stoppedByPerson, silent }) => {
+      const event: WorkerRevisionEvent = {
+        type: 'turn.failed',
+        turnId: 'turn-stopped',
+        runId: 'run-stopped',
+        chatId: 'chat-1',
+        checkoutId: 'live',
+        reason: 'The turn ended before it recorded a revision.',
+        code,
+      };
+      const asked: string[] = [];
+      expect(
+        isOrdinaryRelease(event, (chatId, runId) => {
+          asked.push(`${chatId}:${runId}`);
+          return stoppedByPerson;
+        }),
+      ).toBe(silent);
+      expect(asked).toEqual(code === 'TURN_RELEASED' ? ['chat-1:run-stopped'] : []);
+    },
+  );
+
+  it('still says a release this page cannot place, with no chat log to read', () => {
+    const { getByTestId } = renderTurnOutcomes();
+
+    publish({
+      type: 'turn.failed',
+      turnId: 'turn-stopped',
+      runId: 'run-stopped',
+      chatId: 'chat-1',
+      checkoutId: 'live',
+      reason: 'The turn ended before it recorded a revision.',
+      code: 'TURN_RELEASED',
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(getByTestId('latest')).toHaveTextContent('failed:turn-stopped');
+  });
+
+  /* Round 3: a turn let go at the stop bound is released before its run's ending row reaches this page's log. */
+  describe('a release that arrives before its run has ended here', () => {
+    const released: WorkerRevisionEvent = {
+      type: 'turn.failed',
+      turnId: 'turn-stopped',
+      runId: 'run-stopped',
+      chatId: 'chat-1',
+      checkoutId: 'live',
+      reason: 'The turn ended before it recorded a revision.',
+      code: 'TURN_RELEASED',
+    };
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should stay silent once the log shows the person stopped it', async () => {
+      withChatLog();
+      chatLog.set('run-stopped', { lifecycle: 'running' });
+      const { getByTestId } = renderTurnOutcomes();
+
+      publish(released);
+      expect(errors).toHaveLength(0);
+      act(() => {
+        chatLog.set('run-stopped', { lifecycle: 'cancelled', failure: { code: 'USER_STOPPED' } });
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(errors).toHaveLength(0);
+      expect(getByTestId('latest')).toHaveTextContent('none');
+    });
+
+    it('should say so once the bound passes with no end in the log', async () => {
+      vi.useFakeTimers();
+      withChatLog();
+      chatLog.set('run-stopped', { lifecycle: 'running' });
+      renderTurnOutcomes();
+
+      publish(released);
+      expect(errors).toHaveLength(0);
+      await act(async () => vi.advanceTimersByTimeAsync(5000));
+
+      expect(errors).toHaveLength(1);
+    });
+  });
+
   /* P4, W4 §D: `turn.machine` authors `reason`, and two of its sentences name
    * a checkout — Rule 1's first banned word. The code is what crosses; the
    * table is what a person reads; the diagnostic goes to the console. */
@@ -137,7 +264,7 @@ describe('RevisionOutcomes', () => {
     expect(errors).toEqual([
       {
         title: 'Nothing was saved for that request',
-        description: 'Tau could not save this project’s earlier edits first. Try sending that again.',
+        description: 'Couldn’t save this project’s earlier edits first. Send that again.',
       },
     ]);
     expect(`${errors[0]?.title ?? ''} ${errors[0]?.description ?? ''}`).not.toMatch(/checkout/iu);

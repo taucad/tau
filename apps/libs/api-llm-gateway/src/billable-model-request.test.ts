@@ -21,7 +21,7 @@ const anthropicImage = (mediaType: string, data: string) => ({
   ],
 });
 const responsesImage = (url: string) => ({
-  model: 'gpt-5.6-luna',
+  model: 'gpt-6-luna',
   stream: true,
   max_output_tokens: 16,
   input: [
@@ -78,4 +78,53 @@ describe('billable-model-request image admission', () => {
       ).toBe(false);
     },
   );
+});
+
+/* Chat performance WP-14 step 6: the loop that replaced the regular expressions admits exactly what they did. */
+describe('billable-model-request base64 admission', () => {
+  const regexBase64 = (value: string): boolean => value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/u.test(value);
+  const regexImageUrl = (value: string): boolean => {
+    const match = /^data:(image\/[\w.+-]+);base64,(.*)$/u.exec(value);
+    return (
+      match !== null &&
+      (attachmentImageMediaTypes as readonly string[]).includes(match[1] ?? '') &&
+      regexBase64(match[2] ?? '')
+    );
+  };
+  const cases = [
+    '',
+    gifBase64,
+    'AAAA',
+    'AAA=',
+    'AA==',
+    'A===',
+    'AA=A',
+    '=AAA',
+    'AAAAA',
+    'AA\nA',
+    'AA-_',
+    'AA AA',
+    'ÀAAA',
+    'AAA=AAAA',
+    'R0lGODlhAQABAAAAADs==',
+  ];
+
+  it.each(cases)('should treat the base64 %j as the regular expression did on every wire', (data) => {
+    expect(safeParseBillableModelRequest(anthropicImage('image/gif', data), 'anthropic').success).toBe(
+      regexBase64(data),
+    );
+    for (const url of [
+      `data:image/gif;base64,${data}`,
+      `data:image/png;base64,${data}`,
+      `data:image/svg+xml;base64,${data}`,
+      `data:image/gif;foo;base64,${data}`,
+      `data:;base64,${data}`,
+      `xdata:image/gif;base64,${data}`,
+      `data:image/gif,${data}`,
+    ]) {
+      expect(safeParseBillableModelRequest(responsesImage(url), 'openai-responses').success, url).toBe(
+        regexImageUrl(url),
+      );
+    }
+  });
 });

@@ -10,12 +10,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
-import {
-  formatReceiptTotal,
-  sumReceiptCredits,
-  useReceiptCredits,
-} from '#routes/w.$workspace.$project/chat-message-data-usage.js';
-import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
+import { ReceiptCreditsSummary } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 
 const none = '—';
 
@@ -62,9 +57,7 @@ export function ChatOptionsMeta(): React.JSX.Element {
     return [...ids].sort().join(' ');
   });
   const operationIds = operationKey === '' ? [] : operationKey.split(' ');
-  const credits = useReceiptCredits(operationIds);
-  const total = sumReceiptCredits(operationIds, credits);
-  const hasCredits = tauCloudEnabled && showCredits && operationIds.length > 0;
+  const hasCredits = showCredits && operationIds.length > 0;
 
   const model = useMemo(
     () => (currentExecution?.kind === 'tau' ? resolveModel(currentExecution.model) : undefined),
@@ -90,11 +83,9 @@ export function ChatOptionsMeta(): React.JSX.Element {
             )}
           </dd>
           <dt>Credits</dt>
-          <dd
-            className='text-foreground'
-            aria-label={hasCredits ? `Tau credits: ${formatReceiptTotal(total)}` : undefined}
-          >
-            {hasCredits ? formatReceiptTotal(total) : none}
+          <dd className='text-foreground'>
+            {/* The total from the receipts where credits exist; a build or mode without them shows none (W5). */}
+            {hasCredits ? <ReceiptCreditsSummary operationIds={operationIds} fallback={none} /> : none}
           </dd>
         </dl>
       </DropdownMenuLabel>

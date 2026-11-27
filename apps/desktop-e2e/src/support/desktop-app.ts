@@ -509,6 +509,8 @@ export const launchDesktopApp = async (options: {
    * beside it, e.g. a second worktree built at a release's base commit (blueprint T-REH.2).
    */
   readonly desktopRoot?: string | undefined;
+  /** Extra command-line switches for the app, after the harness's own (for example `--safe-mode`). */
+  readonly args?: readonly string[] | undefined;
 }): Promise<DesktopSession> => {
   if (options.desktopRoot !== undefined && (desktopE2ECompletedArtifact || options.packaged === true)) {
     throw new Error('desktopRoot launches an unpackaged build; it cannot be combined with a packaged launch.');
@@ -660,6 +662,7 @@ export const launchDesktopApp = async (options: {
               `--use-file-for-fake-audio-capture=${options.fakeMicrophonePath}`,
             ]
           : []),
+        ...(options.args ?? []),
       ],
       cwd: packaged ? userData : desktopRoot,
       env: {

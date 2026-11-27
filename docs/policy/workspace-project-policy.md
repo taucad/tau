@@ -3,13 +3,14 @@ title: 'Workspace Project Policy'
 description: 'Placement, tagging, layering, generation, and dependency rules for Tau workspace projects and private application libraries.'
 status: active
 created: '2026-08-22'
-updated: '2026-11-09'
+updated: '2026-11-20'
 related:
   - docs/research/ui-feature-library-architecture-blueprint.md
   - docs/research/api-module-layout-blueprint.md
   - docs/research/workspace-license-boundary-migration.md
   - docs/research/package-library-policy-audit.md
   - docs/research/ci-decomposition-blueprint.md
+  - docs/research/ui-app-lib-layering-blueprint.md
   - docs/policy/library-api-policy.md
   - docs/policy/public-surface-policy.md
 ---
@@ -76,6 +77,10 @@ Layer dependencies flow in one direction:
 API server libraries (`apps/libs/api-<name>`) also carry exactly one `api:<name>` tag. Equal layers leave them unordered, so `eslint.config.mjs` gives each one the API libraries it may depend on, all pointing one way: `billing → llm-gateway → hosts → auth → {database, email, redis} → lifecycle → observability → core`. A library never depends on the `api` app; the app composes them and binds one library's port to another's implementation.
 
 **Enforced by**: `validate-project-tags` (tag and no library-to-app graph edge) and `@nx/enforce-module-boundaries` (`api:<name>` constraints).
+
+UI app libraries (`scope:ui type:app-lib`) also carry exactly one `ui:` tag: their own name when they are layered, `ui:infra` for the libraries every layer may use (the file-system client, the language servers, the consent banner) and `ui:unlayered` for libraries of another app, which no layered library may use. The layers are L0 foundation (`ui-core`, `ui-kit`), L1 features (the `*-ui` libraries), L2 composition (`project-workspace`) and L3 agent-host adapters, and `eslint.config.mjs` (`uiLibraryDependencies`) gives each layered library the UI libraries it may depend on. L1 libraries are unordered except two declared edges: `revisions-ui → editor-ui` and `billing-ui → settings-ui`. L0 never reaches a `protocol:agent` project (`chat`, `agent-host`, `agent-tools`, `agent-observability`, `skills`). Edges that break these rules today are listed as debt with the work item that removes them; the list only shrinks, and the change that removes an edge deletes its entry.
+
+**Enforced by**: `@nx/enforce-module-boundaries` (`ui:<name>` constraints and the L0 `protocol:agent` ban) and `scripts/src/ui-layering-graph.test.ts` (tags, graph edges, L0 package edges and closures, each against its debt list).
 
 ### 3. Keep App Libraries Source-Consumed
 
@@ -145,6 +150,7 @@ It counts source files and `it`/`test` call sites (a static approximation of the
 - [ ] Placement matches the audience router.
 - [ ] `scope:`, `type:`, and required `layer:` tags are present exactly once.
 - [ ] Dependency direction satisfies the layer table.
+- [ ] A new UI app library has a `ui:` tag and an entry in `uiLibraryDependencies` and `ui-layering-graph.test.ts`.
 - [ ] App-libs are source-consumed and private.
 - [ ] Cross-cutting app concerns are injected.
 - [ ] Every subpath has an audience note and exports-map test.

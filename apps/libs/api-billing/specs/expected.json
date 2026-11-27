@@ -11,7 +11,7 @@
         "violated": "NoLiveAbsorb"
       },
       "kind": "witness",
-      "ref": "CutSettles: a client cut absorbs a live step at once under the admitting generation (taucad/tau#851)"
+      "ref": "CutSettles: a client cut absorbs a live step at once under the admitting generation (taucad/tau#851; SupplierCutSettles FALSE isolates the cut)"
     },
     "GatewayInvocation.failure-message-ChargeAfterRecordedLoss-3.cfg": {
       "tier": "nightly",
@@ -94,13 +94,30 @@
       "ref": "A client cut stayed pending until recovery, so the chat's next step waited on it (agent-host StopSettlement)",
       "fixedBy": "taucad/tau#851"
     },
+    "GatewayInvocation.pending-supplier-cut-SupplierCutSettled.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SupplierCutSettled"
+      },
+      "kind": "defect",
+      "ref": "A step the supplier cut stayed pending until due_at plus the grace, so the host's retry, a Resume and the chat's next step waited on it (launch audit D-2)",
+      "fixedBy": "taucad/tau#2815"
+    },
     "GatewayInvocation.service-stop-NoLiveAbsorb.cfg": {
       "tier": "pr",
       "expect": {
         "violated": "NoLiveAbsorb"
       },
       "kind": "witness",
-      "ref": "API graceful-shutdown R10: a stopping API absorbs a live step at once under the admitting generation (CutSettles FALSE isolates the stop)"
+      "ref": "API graceful-shutdown R10: a stopping API absorbs a live step at once under the admitting generation (CutSettles and SupplierCutSettles FALSE isolate the stop)"
+    },
+    "GatewayInvocation.supplier-cut-absorbs-NoLiveAbsorb.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoLiveAbsorb"
+      },
+      "kind": "witness",
+      "ref": "SupplierCutSettles: finish() absorbs a step the supplier cut at once under the admitting generation (launch audit D-2; CutSettles FALSE isolates it)"
     },
     "GatewayInvocation.target-2workers-refunds.cfg": {
       "tier": "nightly",

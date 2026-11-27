@@ -252,32 +252,6 @@ const routes = [
     128_000,
     rates('.2', '.02', '.25', '.75', '30m'),
   ),
-  route(
-    'openai-gpt-5.6-sol',
-    'GPT-5.6 Sol',
-    'openai-responses',
-    1_050_000,
-    128_000,
-    rates('8', '.8', '10', '30', '30m'),
-    { validThrough: '2026-11-21T23:59:59.999Z' },
-  ),
-  route(
-    'openai-gpt-5.6-terra',
-    'GPT-5.6 Terra',
-    'openai-responses',
-    1_050_000,
-    128_000,
-    rates('4', '.4', '5', '18', '30m'),
-  ),
-  route(
-    'openai-gpt-5.6-luna',
-    'GPT-5.6 Luna',
-    'openai-responses',
-    1_050_000,
-    128_000,
-    rates('.4', '.04', '.5', '1.8', '30m'),
-  ),
-  route('openai-gpt-5.5', 'GPT-5.5', 'openai-responses', 1_050_000, 128_000, rates('10', '1', undefined, '45')),
   // https://cloud.google.com/blog/products/ai-machine-learning/gemini-4-argon-available-on-google-cloud
   route(
     'google-gemini-4-argon',
@@ -285,8 +259,10 @@ const routes = [
     'openai-completions',
     1_048_576,
     65_536,
-    rates('2', '.1', undefined, '10'),
-    { pricingRevision: '2026-10-14', validThrough: '2026-11-30T23:59:59.999Z' },
+    // Google's standard price, as the catalog row shows, not the introductory rate that ran
+    // through 2026-11-30 (operator decision 2026-11-26).
+    rates('4', '.2', undefined, '20'),
+    { pricingRevision: '2026-10-14' },
   ),
   // https://cloud.google.com/vertex-ai/generative-ai/pricing
   route(
@@ -295,10 +271,22 @@ const routes = [
     'openai-completions',
     1_048_576,
     65_536,
-    rates('2', '.1', undefined, '10'),
-    { pricingRevision: '2026-11-13', validThrough: '2026-11-30T23:59:59.999Z' },
+    // Google's standard price, as the catalog row shows, not the introductory rate that ran
+    // through 2026-11-30 (operator decision 2026-11-26).
+    rates('4', '.2', undefined, '20'),
+    { pricingRevision: '2026-11-13' },
   ),
   // https://cloud.google.com/vertex-ai/generative-ai/pricing (cache writes billed from 2027-01-12; not metered yet)
+  // https://aistudio.google.com/docs/pricing (Vertex global matches; implicit caching only)
+  route(
+    'google-gemini-4-neon',
+    'Gemini 4 Neon',
+    'openai-completions',
+    1_048_576,
+    65_536,
+    rates('3', '.15', undefined, '15'),
+    { pricingRevision: '2026-11-19' },
+  ),
   route(
     'google-gemini-4-hydrogen',
     'Gemini 4 Hydrogen',
@@ -391,10 +379,6 @@ const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly 
   ['openai-gpt-6-astra', { minimum: 272_001n, baseRates: rates('10', '1', '12.5', '50', '30m') }],
   ['openai-gpt-6-sol', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '10', '30m') }],
   ['openai-gpt-6-luna', { minimum: 272_001n, baseRates: rates('.1', '.01', '.125', '.5', '30m') }],
-  ['openai-gpt-5.6-sol', { minimum: 272_001n, baseRates: rates('4', '.4', '5', '20', '30m') }],
-  ['openai-gpt-5.6-terra', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '12', '30m') }],
-  ['openai-gpt-5.6-luna', { minimum: 272_001n, baseRates: rates('.2', '.02', '.25', '1.2', '30m') }],
-  ['openai-gpt-5.5', { minimum: 272_001n, baseRates: rates('5', '.5', undefined, '30') }],
   ['anthropic-claude-haiku-5.5', { minimum: 100_001n, baseRates: anthropicRates('.1', '.01', '.125', '.5') }],
   ['xai-grok-4.7', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
   ['xai-grok-4.6', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],

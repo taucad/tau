@@ -27,11 +27,11 @@ import { createActor, createAsyncLogic, waitFor as xstateWaitFor } from 'xstate'
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { attachmentImageBackground, attachmentImageLimits } from '@taucad/agent-host/wire';
 import type { AttachmentTranscodeInput } from '@taucad/agent-host/wire';
-import { draftMachine } from '#hooks/draft.machine.js';
+import { draftMachine } from '@taucad/chat-ui/hooks/draft.machine';
 import { createResizeImageActor } from '#hooks/attachment-image.actor.js';
 import type { StoredAttachment } from '@taucad/chat-ui/utils/attachment.utils';
-import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
-import { AttachmentRefusedError } from '#utils/attachment-refusal.js';
+import type { DraftAttachmentModel } from '@taucad/chat-ui/hooks/draft.machine';
+import { AttachmentRefusedError } from '@taucad/chat-ui/utils/attachment-refusal';
 
 /** A PNG header of the given size; the policy reads only headers. */
 const pngOf = (width: number, height: number): Uint8Array<ArrayBuffer> => {

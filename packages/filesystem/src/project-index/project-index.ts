@@ -1074,17 +1074,21 @@ export class ProjectIndex {
     return pending;
   }
 
-  /* An arriving entry lands: its bytes are at its path now, pending when they are its placeholder's. */
+  /*
+   * An arriving entry lands: its bytes are at its path now, pending when they are its placeholder's. Only bytes the
+   * tree's size could be land it: a failed step's move-back puts the old file there, which is not the tree (I7).
+   */
   private _land(path: string): void {
     const expected = this._arriving?.get(path);
     if (expected === undefined) {
       return;
     }
     const size = this._resolve(segmentsOf(path))?.size;
-    if (expected.pending === undefined || size === expected.pending.size) {
+    const { pending } = expected;
+    if (pending === undefined ? size === expected.size : size === pending.size) {
       this._arriving!.delete(path);
-    } else if (size === expected.size) {
-      this.markPending(path, expected.pending);
+    } else if (pending !== undefined && size === expected.size) {
+      this.markPending(path, pending);
     }
   }
 

@@ -3,7 +3,7 @@
  * part menu's gesture and keys, the hover label, the status and failure overlays and the bottom controls. A host keeps
  * its model source, its canvas element (through `renderCanvas`), its layout container and its app-only slot content.
  */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { AlertTriangle } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
@@ -40,6 +40,12 @@ export type ViewerStageStatus =
        * with the summary in full (no "Details" disclosure) and the action under it.
        */
       action?: React.ReactNode;
+      /**
+       * Whether the stage announces a failure with an action. `false` where another live region already says it, such
+       * as a route's announcement for a project open: the failure is then a group named by its summary, seen but not
+       * announced a second time. Defaults to `true`, an alert.
+       */
+      live?: boolean;
     }>;
 
 /**
@@ -66,8 +72,12 @@ export type ViewerStageCanvasProps = Readonly<{
  */
 export type ViewerStageProps = Readonly<
   Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'className'> & {
-    /** The viewer's graphics actor; the stage reads whether a model is drawn and which unit it is. */
-    graphicsRef: GraphicsRef;
+    /**
+     * The viewer's graphics actor; the stage reads whether a model is drawn and which unit it is. `undefined` while the
+     * host has none yet (such as a project still opening): the stage is laid out with its status and failure, draws no
+     * model, and keeps its identity when the actor arrives.
+     */
+    graphicsRef: GraphicsRef | undefined;
     /** The canvas region's element id, unique on the page; the view cube draws inside it. */
     regionId: string;
     /** The canvas region's accessible name. "CAD canvas" when absent. */
@@ -145,27 +155,35 @@ function StageStatus({
 
 /**
  * The stage's failure over the canvas region: the runtime error overlay, or, with an action the person can take, one
- * alert with what failed, what it means and the action, announced once (UI Policy § 5). Whatever the canvas still
- * draws stays under it.
+ * alert with what failed, what it means and the action, announced once (UI Policy § 5). Where another live region says
+ * the failure (`live: false`), it is a group named by its summary instead, so it is not announced twice. Whatever the canvas still
+ * draws stays under it. While no model is drawn the alert is centred where the status pill sits, so a wait that fails
+ * says so in the place the person was already looking.
  *
- * @param props - The failed status.
+ * @param props - The failed status and whether a model is drawn.
  * @returns The failure overlay.
  */
 function StageFailure({
   failure,
+  hasModel,
 }: Readonly<{
   failure: Extract<ViewerStageStatus, { kind: 'failed' }>;
+  hasModel: boolean;
 }>): React.JSX.Element {
+  const summaryId = useId();
   if (failure.action === undefined) {
     return <RuntimeErrorOverlay message={failure.message} summary={failure.summary} className={failureClasses} />;
   }
+  const isLive = failure.live !== false;
   return (
     <div
-      role='alert'
+      role={isLive ? 'alert' : 'group'}
+      aria-labelledby={isLive || failure.summary === undefined ? undefined : summaryId}
       data-slot='viewer-failure'
       className={cn(
         failureClasses,
         'flex max-w-[min(24rem,calc(100%-2rem))] flex-col items-center gap-2 p-3 text-center',
+        hasModel ? undefined : statusWithoutModelClasses,
       )}
     >
       <div className='flex items-start gap-2 text-left'>
@@ -174,7 +192,11 @@ function StageFailure({
           <AlertTriangle aria-hidden className='size-4 text-feature' strokeWidth={1.5} />
         </span>
         <div className='flex flex-col gap-1'>
-          {failure.summary === undefined ? null : <p className='text-sm font-medium'>{failure.summary}</p>}
+          {failure.summary === undefined ? null : (
+            <p id={summaryId} className='text-sm font-medium'>
+              {failure.summary}
+            </p>
+          )}
           <p className={failure.summary === undefined ? 'text-sm' : 'text-xs text-muted-foreground'}>
             {failure.message}
           </p>
@@ -243,14 +265,14 @@ export function ViewerStage({
   const ownRegionRef = useRef<HTMLElement | null>(null);
   const regionRef = partMenu?.regionProps.ref ?? ownRegionRef;
   const [isPointerOver, setIsPointerOver] = useState(false);
-  const hasArtifact = useSelector(graphicsRef, (state) => state.context.artifact !== undefined);
+  const hasArtifact = useSelector(graphicsRef, (state) => state?.context.artifact !== undefined);
   const hasModel = isModelShown ?? hasArtifact;
-  const unitId = useSelector(graphicsRef, (state) => state.context.modelInteractionUnitId);
+  const unitId = useSelector(graphicsRef, (state) => state?.context.modelInteractionUnitId);
   // A mounted Three canvas (or the placeholder holding its place during the WebGPU probe) attaches a canvas actor that
   // awaits its first frame on screen; until then the region is busy, so assistive technology and automation wait for a
   // drawn stage. On a software adapter that first frame can take seconds of pipeline compiling. Content that draws no
   // frames (an SVG) attaches no canvas, so it is never busy.
-  const canvasRef = useSelector(graphicsRef, (state) => state.context.canvas?.ref);
+  const canvasRef = useSelector(graphicsRef, (state) => state?.context.canvas?.ref);
   const isBusy = useSelector(canvasRef, selectCanvasAwaitingFrame);
 
   const handlePointerMove = useCallback(
@@ -308,14 +330,17 @@ export function ViewerStage({
         onPointerCancel={handlePointerLeave}
       >
         {canvas}
-        {failure === undefined ? null : <StageFailure failure={failure} />}
+        {failure === undefined ? null : <StageFailure failure={failure} hasModel={hasModel} />}
         {children}
       </section>
       {partMenu?.renderMenu(decoratePartMenu)}
-      <HoveredModelComponentBadge
-        unitId={unitId}
-        isSuppressed={!isPointerOver || !hasModel || partMenu?.isOpen === true}
-      />
+      {/* The hover label reads the view's model interaction, which comes with its graphics actor. */}
+      {graphicsRef === undefined ? null : (
+        <HoveredModelComponentBadge
+          unitId={unitId}
+          isSuppressed={!isPointerOver || !hasModel || partMenu?.isOpen === true}
+        />
+      )}
       {controls === undefined ? null : (
         /* The bar is centred on the last line and grows upward as tools start. */
         <div

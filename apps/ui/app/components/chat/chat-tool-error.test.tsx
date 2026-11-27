@@ -99,18 +99,41 @@ describe('ChatToolError parsed errors', () => {
     expect(description).toHaveClass('text-muted-foreground');
     expect(description.className).not.toContain('font-mono');
 
-    expect(labelWrapper?.textContent).toBe('Attempted web visit');
+    expect(labelWrapper?.textContent).toBe('Attempted web visit · Test error message');
   });
 
-  it('should put the error description inside the collapsible body, not the header', async () => {
+  it('names why a generic failure failed on the closed line, and holds the whole message in the body', async () => {
+    const message = `Cannot read file "main.scad" (IO_ERROR: HTTP 502)\n${'detail '.repeat(40)}`;
+    renderParsed(createError('TOOL_EXECUTION_ERROR', { message }));
+
+    const trigger = screen.getByRole('button');
+    expect(trigger).toHaveTextContent(
+      /^Attempted file read · Cannot read file "main\.scad" \(IO_ERROR: HTTP 502\) detail/u,
+    );
+    expect(trigger.textContent).toHaveLength('Attempted file read · '.length + 121);
+    expect(trigger.textContent.endsWith('…')).toBe(true);
+    expect(screen.queryByText(/detail detail$/u)).not.toBeInTheDocument();
+
+    await userEvent.click(trigger);
+
+    expect(screen.getByText(/detail detail$/u).tagName).toBe('P');
+  });
+
+  it('drops the reason from the header once the card is open, where the body holds it', () => {
     renderParsed(createError('TOOL_EXECUTION_ERROR'));
 
-    expect(screen.queryByText('Test error message')).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button'));
-
-    expect(screen.getByText('Test error message')).toBeInTheDocument();
+    expect(screen.getByText('· Test error message')).toHaveClass('group-data-[state=open]/chat-tool-trigger:hidden');
   });
+
+  it.each(['TOOL_EXECUTION_TIMEOUT', 'USER_INTERRUPTED', 'CLIENT_DISCONNECTED'] as const)(
+    'leaves the closed line of a %s failure to its verb',
+    (errorCode) => {
+      renderParsed(createError(errorCode));
+
+      expect(screen.getByRole('button').textContent).not.toContain('·');
+      expect(screen.getByRole('button').textContent).not.toContain('Test error message');
+    },
+  );
 
   it('should render the validation errors block inside the body when expanded', async () => {
     const error = createError('TOOL_INPUT_VALIDATION_FAILED', {
@@ -146,7 +169,7 @@ describe('ChatToolError unparseable fallback', () => {
     ['AUTHENTICATION_ERROR', 'authentication error'],
     ['IO_ERROR', 'io error'],
     ['MCP_TRANSPORT_ERROR', 'mcp transport error'],
-  ])('shows the preserved %s category on the tool row', (errorCode, label) => {
+  ])('shows the preserved %s category and its message on the tool row', (errorCode, label) => {
     render(
       <ChatToolError
         errorText={JSON.stringify({ errorCode, message: 'Failed.' })}
@@ -155,6 +178,7 @@ describe('ChatToolError unparseable fallback', () => {
       />,
     );
     expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.getByRole('button')).toHaveTextContent(`${label} screenshot · Failed.`);
   });
 
   it('should render Attempted with caller noun in the header', () => {
@@ -174,12 +198,21 @@ describe('ChatToolError unparseable fallback', () => {
     expect(icon?.getAttribute('class') ?? '').not.toContain('text-destructive');
   });
 
-  it('should render the fallback inside a collapsible (trigger present, raw text initially hidden)', () => {
+  it('should render the fallback inside a collapsible whose closed line carries the plain text', () => {
     render(<ChatToolError errorText='raw error blob' icon={TriangleAlert} noun='file read' />);
 
-    expect(screen.getByRole('button')).toBeInTheDocument();
+    expect(screen.getByRole('button')).toHaveTextContent(/^Attempted file read · raw error blob$/u);
     expect(screen.queryByText('raw error blob')).not.toBeInTheDocument();
   });
+
+  it.each(['{"detail":"not an envelope"}', '[{"type":"text","text":"x"}]', ''])(
+    'keeps structured or empty text %j off the closed line',
+    (errorText) => {
+      render(<ChatToolError errorText={errorText} icon={TriangleAlert} noun='file read' />);
+
+      expect(screen.getByRole('button')).toHaveTextContent(/^Attempted file read$/u);
+    },
+  );
 
   it('should reveal the raw errorText in the body after expanding the fallback', async () => {
     render(<ChatToolError errorText='raw error blob' icon={TriangleAlert} noun='file read' />);

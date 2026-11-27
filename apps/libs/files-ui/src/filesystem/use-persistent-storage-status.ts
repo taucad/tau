@@ -4,7 +4,7 @@ import {
   refreshPersistentStorageStatus,
   subscribePersistentStorageStatus,
 } from '#filesystem/handle-store.js';
-import type { PersistentStorageStatus } from '#filesystem/handle-store.js';
+import type { PersistentStorageStatus } from '@taucad/ui-core/types/persistent-storage.types';
 import { isDesktopTarget } from '@taucad/ui-core/lib/build-target';
 
 const statusOnServer = (): PersistentStorageStatus => 'unknown';

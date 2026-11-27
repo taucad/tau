@@ -4,7 +4,7 @@ import type { UseMutationResult } from '@tanstack/react-query';
 import { useSession } from '@better-auth-ui/react';
 import { authClient } from '#lib/auth-client.js';
 import { ENV } from '#environment.config.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 /** The agent-observability processing purposes, in the server's order. */
 export const telemetryPurposes = ['summary', 'feedback', 'content', 'diagnosis', 'reuse', 'training'] as const;
@@ -35,6 +35,9 @@ export type PurposeDecision = Readonly<{ purpose: TelemetryPurpose; granted: boo
 
 /** The query key root, so a sign-out can drop every subject's answer at once. */
 export const telemetryPurposesQueryKey = ['telemetry-purposes'] as const;
+
+/** How long one subject's answer is used without asking again. Milliseconds. @public */
+export const telemetryPurposesStaleTime = 5 * 60 * 1000;
 
 const subjectKey = (userId: string, projectId: string | undefined): readonly unknown[] => [
   ...telemetryPurposesQueryKey,
@@ -117,6 +120,10 @@ export function useTelemetryPurposes(options: Readonly<{ projectId?: string }> =
     queryFn: async () =>
       request(projectId === undefined ? '' : `?projectId=${encodeURIComponent(projectId)}`, { method: 'GET' }),
     enabled: userId !== undefined,
+    /* Every rating under every assistant message reads this answer: without a stale time each mount asked again,
+     * about 25 requests in 15 s of a turn (chat performance plan WP-02). A decision made here invalidates every subject
+     * of the account below, and the server checks consent again on every upload, so a cached answer only ever shows. */
+    staleTime: telemetryPurposesStaleTime,
     retry: 1,
     retryDelay: 1000,
   });
@@ -135,8 +142,9 @@ export function useTelemetryPurposes(options: Readonly<{ projectId?: string }> =
     },
     async onSettled() {
       // The PUT answers for the account alone, and a refusal (such as a stale notice) leaves the cached
-      // answer stale too; refetch either way so the key shows the server's current answer.
-      await queryClient.invalidateQueries({ queryKey });
+      // answer stale too; refetch either way so the key shows the server's current answer. An account decision also
+      // changes every project's effective answer, so every subject of this account is asked again.
+      await queryClient.invalidateQueries({ queryKey: [...telemetryPurposesQueryKey, userId ?? ''] });
     },
   });
 

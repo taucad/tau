@@ -10,9 +10,15 @@
     },
     "test:e2e": {
       "executor": "nx:noop",
-      "dependsOn": ["test:e2e:svg-viewer", "test:e2e:gltf-batches", "test:e2e:viewer-resize"],
+      "dependsOn": [
+        "test:e2e:svg-viewer",
+        "test:e2e:gltf-batches",
+        "test:e2e:viewer-resize",
+        "test:e2e:post-processing-antialias"
+      ],
       "metadata": {
-        "description": "Chromium suites for the viewer's SVG presentation, glTF batch pixels, section clipping and resize continuation. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium. Each Vitest Browser config is its own task (dependsOn): Nx runs every task that does not depend on a failed one, so one failing config no longer hides the others' results, and the target still fails when any config fails. The suites declare parallelism false, so they still run one at a time as before."
+        "description": "Chromium suites for the viewer's SVG presentation, glTF batch pixels, section clipping, resize continuation and post-processing antialiasing. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium. Each Vitest Browser config is its own task (dependsOn): Nx runs every task that does not depend on a failed one, so one failing config no longer hides the others' results, and the target still fails when any config fails. The suites declare parallelism false, so they still run one at a time as before. jobPerDependency: e2e-nightly.yml runs each dependsOn task as its own job with its own timeout, so a suite that times out (post-processing-antialias, #2279) cannot use up the others' budget.",
+        "jobPerDependency": true
       }
     },
     "test:e2e:svg-viewer": {
@@ -23,7 +29,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config src/graphics/svg/svg-viewer.vitest.browser.config.ts"
+        "command": "vitest run --config src/graphics/svg/svg-viewer.vitest.browser.config.ts"
       }
     },
     "test:e2e:gltf-batches": {
@@ -34,18 +40,41 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/utils/gltf-batches.vitest.browser.config.ts"
+        "command": "vitest run --config src/graphics/three/utils/gltf-batches.vitest.browser.config.ts"
       }
     },
     "test:e2e:viewer-resize": {
       "executor": "nx:run-commands",
       "parallelism": false,
       "metadata": {
-        "description": "The Three.js node frame, post-processing, section clipping and resize continuation suite (viewer-resize.vitest.browser.config.ts) under TAU_E2E_WEBGPU_PROFILE. One task of test:e2e."
+        "description": "The Three.js node frame, post-processing passes, camera controls, viewport gizmo and resize continuation suite (viewer-resize.vitest.browser.config.ts) under TAU_E2E_WEBGPU_PROFILE, without post-processing-antialias.browser.test.tsx (test:e2e:post-processing-antialias). One task of test:e2e."
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-resize.vitest.browser.config.ts"
+        "command": "vitest run --config src/graphics/three/viewer-resize.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:post-processing-antialias": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "metadata": {
+        "description": "The post-processing antialiasing suite (post-processing-antialias.vitest.browser.config.ts, the viewer-resize harness with only post-processing-antialias.browser.test.tsx) under TAU_E2E_WEBGPU_PROFILE. Its own task, so its software-profile timeouts (#2279, about 92 min a nightly run) have a nightly job of their own. One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run --config src/graphics/three/post-processing-antialias.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:webgpu": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "metadata": {
+        "description": "The viewer's real-GPU rows: e2e-gpu-smoke.yml runs this target with TAU_E2E_WEBGPU_PROFILE=hardware on a disposable GPU host, weekly and by dispatch, never as a merge gate. It holds the files whose rows make hardware claims (2560 px and 5K pixels, square-pixel coverage against the analytic oracle); on the software lane (test:e2e:viewer-resize) the same rows assert the work the viewer does instead. The config refuses any profile but hardware or software."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-resize.vitest.browser.config.ts src/graphics/three/node-frame-reference.browser.test.ts src/graphics/three/post-processing-antialias.browser.test.tsx",
+        "env": { "TAU_E2E_WEBGPU_PROFILE": "hardware" }
       }
     },
     "capture:viewer-parity": {
@@ -56,7 +85,7 @@
       "cache": false,
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-parity-capture.vitest.browser.config.ts"
+        "command": "vitest run --config src/graphics/three/viewer-parity-capture.vitest.browser.config.ts"
       }
     },
     "test": {

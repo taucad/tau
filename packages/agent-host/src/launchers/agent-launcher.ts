@@ -18,7 +18,9 @@ import type { ExternalAgentPort } from '#host/external-agent.js';
 import type { CreateTauAgentHostOptions, TauAgentHost } from '#host/tau-agent-host.js';
 import { externalTurnOf, latestTurnId } from '#host/run-history.js';
 import { createPortableId, transportFailureOfRun } from '#harness/session-record.js';
-import type { EventLogAppender } from '#log/event-log-appender.js';
+import { v1Batch } from '#log/event-log-appender.js';
+import type { EventLogAppender, EventLogBatch } from '#log/event-log-appender.js';
+import { EventLogError } from '#log/event-log-error.js';
 import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
 import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
@@ -36,6 +38,8 @@ import { catchUpRequestSchema } from '#wire/frames.schema.js';
 import type { CatchUpFrame, CatchUpInput, ReadAnswer, ReadInput } from '#wire/frames.schema.js';
 import type { RefusalCode } from '#wire/refusals.js';
 import { chatStoreBinding, requireChatPathSegment } from '#launchers/chat-store.js';
+import { createLiveConflater } from '#launchers/live-conflater.js';
+import type { LiveConflater } from '#launchers/live-conflater.js';
 import { createReplayView, isBytePrefix } from '#launchers/replay-view.js';
 import type { ReplayView } from '#launchers/replay-view.js';
 import type { ChatStore, ChatWriterOpen, LeadershipPort } from '#launchers/chat-store.js';
@@ -90,6 +94,12 @@ export type AgentLauncherOptions = Readonly<{
   turnPlacement?: CreateTauAgentHostOptions['placement'];
   /** The host's timers (M1's idle eviction and bounds); the defaults when absent. */
   delays?: CreateTauAgentHostOptions['delays'];
+  /**
+   * How long, in milliseconds, before this launcher asks again for the claim of a chat whose log still shows a run no
+   * driver holds; each further ask waits twice as long, up to {@link driverlessRetryCeiling} times this.
+   * {@link driverlessRetryMilliseconds} when absent.
+   */
+  driverlessRetry?: number | undefined;
   /** The clock every incarnation runs on; the process's timers when absent. */
   clock?: CreateTauAgentHostOptions['clock'];
   /**
@@ -123,6 +133,14 @@ export type AgentLauncher = {
   execute(command: HostCommand): Promise<CommandAnswer>;
   /** One long-poll read (SC-R14). It never creates a chat, takes no lock and assumes no leadership (RH-R1). */
   read(input: ReadInput): Promise<ReadAnswer>;
+  /**
+   * One bounded page of this device's own rows, answered at once: from this process's writer while it holds one, else
+   * from the log's bytes as they are. Like {@link AgentLauncher.read} it takes no lock and assumes no leadership
+   * (RH-R1), so it is how an observer reads a chat, whether or not a run of it is live.
+   */
+  readEvents(
+    input: Readonly<{ chatId: string; cursor: number; limit: number; maxBytes?: number | undefined }>,
+  ): Promise<EventLogBatch>;
   /** Immutable provisional catch-up pages followed by exact current-byte validation; cancellation releases the lease. */
   catchUp(input: CatchUpInput): AsyncIterable<CatchUpFrame>;
   /** Read the current leadership actor only; never requests a lock or sends a chat command. */
@@ -141,8 +159,9 @@ export type AgentLauncher = {
 };
 
 /**
- * Events a subscriber may leave unread before it is dropped (RH-A24). A subscriber this far behind has stopped
- * reading; it re-reads from its cursor, which is what the durable log is for.
+ * Unmergeable events a subscriber may leave unread before it is dropped (RH-A24). Deltas of one block merge (WP-08),
+ * so only boundaries count. A subscriber this far behind has stopped reading; it re-reads from its cursor, which is
+ * what the durable log is for.
  */
 const fanOutQueueLimit = 1024;
 
@@ -171,37 +190,39 @@ export const iterateStream = async function* <Chunk>(stream: ReadableStream<Chun
   }
 };
 
-/** A multi-subscriber fan-out of live deltas, one chat per subscriber, that never blocks the producer (SC-R15). */
-const createFanOut = <Event extends { readonly chatId: string }>(own: (chatId: string) => () => void) => {
-  const controllers = new Map<
+/**
+ * A multi-subscriber fan-out of live deltas, one chat per subscriber, that never blocks the producer (SC-R15). Each
+ * subscriber has its own conflation buffer (WP-08): a delta is merged into the one before it while that subscriber's
+ * window is open or it has not read its last event, so a slow reader costs merged text, not queued events.
+ */
+const createFanOut = <Event extends { readonly chatId: string; readonly type: string }>(
+  own: (chatId: string) => () => void,
+  now?: () => number,
+) => {
+  const subscribers = new Map<
     ReadableStreamDefaultController<Event>,
-    { chatId: string; close: (reason?: Error) => void }
+    { chatId: string; conflater: LiveConflater<Event>; close: (reason?: Error) => void }
   >();
   let closed = false;
   const drop = (controller: ReadableStreamDefaultController<Event>, reason?: Error): void => {
-    controllers.get(controller)?.close(reason);
+    subscribers.get(controller)?.close(reason);
   };
   return {
     publish: (event: Event): void => {
-      for (const [controller, { chatId }] of controllers) {
+      for (const [controller, { chatId, conflater }] of subscribers) {
         if (chatId !== event.chatId) {
           continue;
         }
-        /* An unbounded queue would grow this process's heap for every event of a run nobody consumes. */
-        if ((controller.desiredSize ?? 0) < -fanOutQueueLimit) {
+        conflater.push(event);
+        /* An unbounded buffer would grow this process's heap for every boundary of a run nobody consumes. */
+        if (conflater.size > fanOutQueueLimit) {
           drop(controller, new Error('This subscriber fell too far behind; reattach from its cursor.'));
-          continue;
-        }
-        /* A subscriber whose connection died throws on `enqueue`; it must never fail the run it only watched. */
-        try {
-          controller.enqueue(event);
-        } catch {
-          drop(controller);
         }
       }
     },
     subscribe: (signal: AbortSignal, chatId: string): AsyncIterable<Event> => {
       let cleanup = (): void => undefined;
+      let wake = (): void => undefined;
       const receive = async function* (): AsyncGenerator<Event> {
         const stream = new ReadableStream<Event>({
           start(controller) {
@@ -211,12 +232,30 @@ const createFanOut = <Event extends { readonly chatId: string }>(own: (chatId: s
             }
             const release = own(chatId);
             let active = true;
+            const conflater = createLiveConflater<Event>({
+              /* A subscriber whose connection died throws on `enqueue`; it must never fail the run it only watched. */
+              deliver: (event) => {
+                try {
+                  controller.enqueue(event);
+                } catch {
+                  drop(controller);
+                }
+              },
+              /* Only while the reader has taken what it was given; otherwise the buffer merges. */
+              canDeliver: () => active && (controller.desiredSize ?? 0) > 0,
+              ...(now === undefined ? {} : { now }),
+            });
             const close = (reason?: Error): void => {
               if (!active) {
                 return;
               }
+              /* A clean end hands over what is buffered first; a failure drops it with the stream. */
+              if (reason === undefined) {
+                conflater.flush();
+              }
               active = false;
-              controllers.delete(controller);
+              conflater.close();
+              subscribers.delete(controller);
               try {
                 if (reason === undefined) {
                   controller.close();
@@ -233,8 +272,14 @@ const createFanOut = <Event extends { readonly chatId: string }>(own: (chatId: s
               close();
             };
             cleanup = close;
-            controllers.set(controller, { chatId, close });
+            wake = () => {
+              conflater.ready();
+            };
+            subscribers.set(controller, { chatId, conflater, close });
             signal.addEventListener('abort', abort, { once: true });
+          },
+          pull: () => {
+            wake();
           },
           cancel: () => {
             cleanup();
@@ -256,12 +301,23 @@ const createFanOut = <Event extends { readonly chatId: string }>(own: (chatId: s
     },
     close: (): void => {
       closed = true;
-      for (const { close } of controllers.values()) {
+      for (const { close } of subscribers.values()) {
         close();
       }
     },
   };
 };
+
+/**
+ * How long the launcher waits before it asks again for the claim of a chat whose log still shows a run no driver
+ * holds, in milliseconds. The first ask is made at once.
+ *
+ * @internal
+ */
+export const driverlessRetryMilliseconds = 1000;
+
+/** The longest wait between two such asks, as a multiple of {@link driverlessRetryMilliseconds}. @internal */
+export const driverlessRetryCeiling = 32;
 
 const refused = (commandId: string, code: RefusalCode | string, message: string): CommandAnswer => ({
   commandId,
@@ -319,14 +375,16 @@ const runOf = async (chatId: string, view: ChatView): Promise<HostRunSnapshot | 
  * @example <caption>A Node launcher over one workspace</caption>
  * ```typescript
  * import { createGatewayModelTransport } from '@taucad/agent-host';
- * import type { ToolRegistry } from '@taucad/agent-host';
+ * import type { DeploymentModeAnswer, ToolRegistry } from '@taucad/agent-host';
  * import { createAgentLauncher } from '@taucad/agent-host/launcher';
  * import { createNodeChatStore } from '@taucad/agent-host/node';
  *
  * declare const toolRegistry: ToolRegistry;
+ * // The API's deployment answer for the gateway's origin (`GET /v1/deployment`), fetched and cached by the host.
+ * declare const deployment: (signal: AbortSignal) => Promise<DeploymentModeAnswer>;
  * const launcher = createAgentLauncher({
  *   chats: createNodeChatStore({ workspaceRoot: process.cwd() }),
- *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/' }),
+ *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/', billing: { deployment } }),
  *   credential: () => ({ mode: 'session' }),
  *   systemPrompt: 'You are Tau.',
  *   toolRegistry,
@@ -353,7 +411,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         retireOversized(chatId);
       }
     };
-  });
+  }, options.monotonicNow);
   /** Chats whose writer this process holds open: their reads are the host's long poll. */
   const writers = new Set<string>();
   const writerGenerations = new Map<string, string>();
@@ -379,13 +437,26 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
    * parking past it. An entry lives only while a pass does.
    */
   const passes = new Map<string, { count: number; wakes: number; sourceWakes: number }>();
-  /** Chats some verb has named: the first one checks for a run with no driver (RH-R1, RH-R15). */
-  const named = new Set<string>();
+  /**
+   * Chats whose log shows a run no driver here holds, whose claim this launcher has asked for (RH-R1, RH-R15): how
+   * often, and the wait before the next ask while one runs. A claim that cannot end the run leaves the log as it was
+   * (storage still refuses the row, another process holds the writer), so the ask is repeated for as long as something
+   * reads the chat, each time after twice the wait.
+   */
+  const driverless = new Map<string, { asks: number; waiting: ReturnType<typeof setTimeout> | undefined }>();
+  const driverlessRetry = options.driverlessRetry ?? driverlessRetryMilliseconds;
   const stopped = new AbortController();
   let closed = false;
   let closing: Promise<void> | undefined;
   /* Set once the leadership binding exists; the host's callbacks before then have no chat to report. */
   const leading: { port?: LeadershipPort } = {};
+  /** The leader's posts to other tabs, conflated as one more subscriber: at most one per block per window (WP-08). */
+  const broadcast = createLiveConflater<SourceLiveEvent>({
+    deliver: (event) => {
+      leading.port?.liveEvent(event);
+    },
+    ...(options.monotonicNow === undefined ? {} : { now: options.monotonicNow }),
+  });
 
   const wakeReads = (chatId: string, reason: 'writer' | 'reroute' | 'source' = 'writer'): void => {
     const pass = passes.get(chatId);
@@ -558,6 +629,15 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     requireChatPathSegment(chatId);
     const handed = views.get(chatId);
     views.delete(chatId);
+    if (handed === undefined && leading.port?.opensWriter(chatId) === false) {
+      /* RH-R1: only a claim opens the writer. Anything else that reads through the host once the chat was relinquished
+       * (an observer's page read, a read parked across the relinquish) is refused here, rather than taking the chat's
+       * exclusive handle where no relinquish closes it and every later claim is refused `WRITER_LOCKED`. */
+      throw new EventLogError(
+        'LOG_CLOSED',
+        `This process does not hold chat ${chatId}'s writer, which opens only under the chat's lock. Read the chat through the launcher.`,
+      );
+    }
     const log = await (handed ?? binding.openWriter(chatId, writerOpen));
     writers.add(chatId);
     writerGenerations.set(chatId, createPortableId());
@@ -565,15 +645,30 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     replay.delete(chatId);
     dropObservation(chatId);
     wakeReads(chatId);
+    /* The binding's durability class, stated on the run's admission (W3 §11). */
+    const stated = (candidate: AgentLogEvent): AgentLogEvent =>
+      candidate.type === 'run.lifecycle' && candidate.state === 'admitted'
+        ? { ...candidate, storageDurability: binding.durability }
+        : candidate;
     return {
+      ...(log.appendMany === undefined
+        ? {}
+        : {
+            appendMany: async (candidates: readonly AgentLogEvent[]) => {
+              const batch = await log.appendMany!(candidates.map((candidate) => stated(candidate)));
+              const last = batch.outcomes.findLast((outcome) => outcome.appended);
+              if (last !== undefined) {
+                leading.port?.appended(chatId, last.endCursor);
+              }
+              if ((batch.failure as { readonly code?: unknown } | undefined)?.code === 'LOG_FENCED') {
+                leading.port?.fenced(chatId);
+              }
+              return batch;
+            },
+          }),
       append: async (candidate: AgentLogEvent) => {
         try {
-          const outcome = await log.append(
-            /* The binding's durability class, stated on the run's admission (W3 §11). */
-            candidate.type === 'run.lifecycle' && candidate.state === 'admitted'
-              ? { ...candidate, storageDurability: binding.durability }
-              : candidate,
-          );
+          const outcome = await log.append(stated(candidate));
           if (outcome.appended) {
             leading.port?.appended(chatId, outcome.endCursor);
           }
@@ -634,7 +729,9 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       }
       const qualified = { ...event, sourceGeneration };
       live.publish(qualified);
-      leading.port?.liveEvent(qualified);
+      if (leading.port !== undefined) {
+        broadcast.push(qualified);
+      }
     },
     onChatQuiescent: (chatId, quiescent) => {
       leading.port?.quiescent(chatId, quiescent);
@@ -829,15 +926,43 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     })();
   }
 
-  /** RH-R1: the first verb naming a chat, and any attach, that finds a run no driver here holds asks for a claim. */
+  /** The chat's run has a driver, or has ended: nothing is owed an ask, and the next orphan starts its waits anew. */
+  const driven = (chatId: string): void => {
+    clearTimeout(driverless.get(chatId)?.waiting);
+    driverless.delete(chatId);
+  };
+
+  /**
+   * RH-R1: a verb that finds a run no driver here holds asks for the chat's claim, which abandons the run once it holds
+   * the chat's lock and writes nothing while another tab leads. Every pass over the bytes asks, not only the first to
+   * name the chat: a run that began after it loses its driver too, when its leader tab dies while this one watches, or
+   * when its log refuses a write for a reason that is not a fence and its incarnation closes. An ask the wait since the
+   * last one has not passed is skipped unless `always` (an attach); the wait's end wakes the chat's parked reads, whose
+   * next pass asks again.
+   */
   const checkDriver = (chatId: string, ledger: ChatLedger, always: boolean): boolean => {
-    const first = !named.has(chatId);
-    named.add(chatId);
-    if (!first && !always) {
-      return false;
-    }
     /* M1's own predicate (RH-R9): a paused external run and its pending interrupts are orphans too. */
     if (!isOrphaned(ledger) || writers.has(chatId)) {
+      driven(chatId);
+      return false;
+    }
+    const asked = driverless.get(chatId);
+    if (asked?.waiting === undefined && !closed) {
+      const entry: { asks: number; waiting: ReturnType<typeof setTimeout> | undefined } = {
+        asks: (asked?.asks ?? 0) + 1,
+        waiting: undefined,
+      };
+      entry.waiting = setTimeout(
+        () => {
+          entry.waiting = undefined;
+          wakeReads(chatId, 'source');
+        },
+        driverlessRetry * Math.min(2 ** (entry.asks - 1), driverlessRetryCeiling),
+      ); // Bound: driverlessRetryMilliseconds, doubled per ask up to driverlessRetryCeiling.
+      /* A wait never keeps a daemon's process open at shutdown (Node's timers). */
+      (entry.waiting as { unref?: () => void } | undefined)?.unref?.();
+      driverless.set(chatId, entry);
+    } else if (!always) {
       return false;
     }
     port.reconcile(chatId, { wait: true });
@@ -904,7 +1029,6 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         'This Tau host is not paired with your account, so it cannot start a Tau run. Pair it (the `tau serve` terminal shows a code), then send the message again. Reading chats and external agents keep working.',
       );
     }
-    named.add(chatId);
     return port.execute(chatId, command, async (epoch) => {
       if (typeof epoch === 'number') {
         host.assumeLeadership(chatId, epoch);
@@ -1319,6 +1443,26 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       requireChatPathSegment(input.chatId);
       return port.read(input, async () => readLocal(input));
     },
+    readEvents: async ({ chatId, cursor, limit, maxBytes }) => {
+      if (closed) {
+        throw Object.assign(new Error('The Tau agent launcher is closed.'), {
+          code: 'HOST_CLOSED' satisfies RefusalCode,
+        });
+      }
+      requireChatPathSegment(chatId);
+      if (writers.has(chatId)) {
+        try {
+          return await host.readEvents({ chatId, cursor, limit, maxBytes });
+        } catch (error) {
+          /* The writer closed under this read (the chat was relinquished): its rows are the bytes now. */
+          if ((error as { readonly code?: unknown }).code !== ('LOG_CLOSED' satisfies RefusalCode)) {
+            throw error;
+          }
+        }
+      }
+      const chat = await view(chatId);
+      return v1Batch(await chat.log.readBatch({ cursor, limit, maxBytes }));
+    },
     stoppability: (chatId) => port.stoppability(chatId),
     liveEvents: ({ chatId, signal }) => live.subscribe(signal, chatId),
     admittedRuns: async () => {
@@ -1340,6 +1484,10 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
           clearTimeout(timer);
         }
         retirements.clear();
+        for (const { waiting } of driverless.values()) {
+          clearTimeout(waiting);
+        }
+        driverless.clear();
         for (const observation of observations.values()) {
           observation.close();
         }
@@ -1358,6 +1506,8 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
             failures.push(error);
           }
         };
+        broadcast.flush();
+        broadcast.close();
         await settle(async () => port.close());
         await settle(async () => host.close());
         const unclaimed = [...views.values()];

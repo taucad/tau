@@ -102,6 +102,8 @@ vi.doMock('#routes/w.$workspace.$project/chat-message.js', () => ({
 }));
 vi.doMock('#routes/w.$workspace.$project/chat-revision-marker.js', () => ({ ChatRevisionMarker: () => null }));
 vi.doMock('#routes/w.$workspace.$project/chat-error.js', () => ({ ChatError: () => null }));
+// The zero-balance note has its own suite and reads the account's plan; the row measures the trays.
+vi.doMock('#components/chat/chat-credits-notice.js', () => ({ ChatCreditsNotice: () => null }));
 // A settled chat has no activity cue; the row measures the trays, not the activity line.
 vi.doMock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({ ChatMessagePlanning: () => null }));
 vi.doMock('#components/chat/chat-message-queue.js', () => ({ ChatMessageQueue: () => null }));

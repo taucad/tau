@@ -103,8 +103,10 @@ const MessageCommentList = lazyCode(async () => {
 
 /** A sent message's comments, under its pictures. */
 function SentComments({
+  messageId,
   annotations,
 }: {
+  readonly messageId: string;
   readonly annotations: MessageAnnotations | undefined;
 }): React.JSX.Element | undefined {
   if (!annotations || annotations.comments.length === 0) {
@@ -112,7 +114,7 @@ function SentComments({
   }
   return (
     <Suspense fallback={null}>
-      <MessageCommentList annotations={annotations} />
+      <MessageCommentList messageId={messageId} annotations={annotations} />
     </Suspense>
   );
 }
@@ -1167,7 +1169,9 @@ export const ChatMessage = memo(function ({
               {fileParts.length > 0 ? (
                 <ChatMessageFileAttachments parts={fileParts} directory={attachmentDirectories?.transcript} />
               ) : null}
-              {isUser ? <SentComments annotations={annotationsOf(displayMessage.metadata)} /> : null}
+              {isUser ? (
+                <SentComments messageId={messageId} annotations={annotationsOf(displayMessage.metadata)} />
+              ) : null}
               {isUser ? (
                 <div className={chatInputTextClassName}>
                   {collapsedUserRowsWithStableKeys.map(({ keyPrefix, row }) => (

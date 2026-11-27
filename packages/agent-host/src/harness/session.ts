@@ -746,6 +746,13 @@ export const createTransportStreamFunction =
       let terminalReason: StopReason | undefined;
       let transportMetadata: ProviderMessageMetadata | undefined;
       let invocationMetadata: ProviderMessageMetadata | undefined;
+      /*
+       * WP-10 step A item 3: the attempt's `model.invocation-bound` row, queued in order when the gateway answers and
+       * awaited before the attempt's message settles, not before the body's first read. The ledger needs only prepared
+       * before bound (`chat-ledger.ts`, `reducer.ts`); a crash before it lands leaves a prepared attempt, which the next
+       * generation step resolves by its deterministic key, as it resolves any attempt whose reply was lost.
+       */
+      let bound: Promise<Error | undefined> | undefined;
       let usageSettled = false;
       const reasoningTimings = new Map<number, { startedAtMs: number; endedAt?: number }>();
       output.push({ type: 'start', partial });
@@ -863,7 +870,8 @@ export const createTransportStreamFunction =
                   invocationMetadata = {
                     tauInternal: { kind: 'billing-invocation', attemptId, operationId: binding.operationId },
                   };
-                  await options.bindInvocation?.(attemptId, invocationMetadata);
+                  /* Its failure is read below, after the stream, so it never goes unhandled meanwhile. */
+                  bound = failureOf(options.bindInvocation?.(attemptId, invocationMetadata));
                 },
               }
             : {}),
@@ -1157,6 +1165,10 @@ export const createTransportStreamFunction =
           closeLegacyActive();
           terminalReason = event.stopReason;
         }
+        const unbound = await bound;
+        if (unbound !== undefined) {
+          throw unbound;
+        }
         if (terminalReason === undefined) {
           throw new Error('Model transport ended without a completed event.');
         }
@@ -1198,6 +1210,8 @@ export const createTransportStreamFunction =
         if (invocationMetadata) {
           transportMetadata = { ...transportMetadata, ...invocationMetadata };
         }
+        /* The bound row lands before the failed attempt's message does; the stream's own failure is the one told. */
+        await bound;
         closeLegacyActive();
         const reason = signal.aborted ? 'aborted' : 'error';
         const diagnostic = createTransportFailureDiagnostic(error, Date.now());
@@ -1225,6 +1239,21 @@ export const createTransportStreamFunction =
     void pump();
     return output;
   };
+
+/**
+ * What a pending write failed with, if it failed, as a promise that never rejects.
+ *
+ * @param pending - The write.
+ * @returns Its failure, or `undefined` once it landed.
+ */
+const failureOf = async (pending: Promise<void> | undefined): Promise<Error | undefined> => {
+  try {
+    await pending;
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+};
 
 const asMiddleware =
   (wrap: (base: StreamFn) => StreamFn): ModelCallMiddleware =>
@@ -1408,6 +1437,8 @@ export type CreateAgentSessionOptions = {
    * is correct only while it is the log's one writer.
    */
   readonly appendEvent?: ((event: SessionLogEvent) => Promise<void>) | undefined;
+  /** The owner's writer for rows that go together, with `appendEvent` (WP-10): one write and one flush. */
+  readonly appendEvents?: ((events: readonly SessionLogEvent[]) => Promise<void>) | undefined;
   readonly clientContext?: ClientContext | undefined;
   readonly recentSkills?: RecentSkillsPort | undefined;
   readonly substituteToolResult?: ToolResultSubstituter | undefined;
@@ -1587,6 +1618,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     createId,
     now: () => now().toISOString(),
     ...(options.appendEvent ? { append: options.appendEvent } : {}),
+    ...(options.appendEvents ? { appendAll: options.appendEvents } : {}),
     ...(writeChatAttachment === undefined
       ? {}
       : {
@@ -2016,12 +2048,6 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           tauInternal: { kind: 'stream-checkpoint', ...provider.metadata?.tauInternal, streamState: 'checkpoint' },
         },
       };
-      await record.append(
-        committedMessageIds.has(messageId)
-          ? { type: 'message.envelope-replaced', messageId, replacement: assistant }
-          : { type: 'message.appended', message: assistant },
-      );
-      committedMessageIds.add(messageId);
       const inputId = toolInputIds.get(toolCall.id) ?? createId();
       toolInputIds.set(toolCall.id, inputId);
       const inputMessage = toolInputToProvider({
@@ -2030,11 +2056,16 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         toolName: toolCall.name,
         input: normalizeToolInput(toolCall.name, input),
       });
-      await record.append(
+      /* The checkpoint and the tool's input are one batch: one write and one flush before the tool starts (HP-14). */
+      await record.appendAll([
+        committedMessageIds.has(messageId)
+          ? { type: 'message.envelope-replaced', messageId, replacement: assistant }
+          : { type: 'message.appended', message: assistant },
         committedMessageIds.has(inputId)
           ? { type: 'message.envelope-replaced', messageId: inputId, replacement: inputMessage }
           : { type: 'message.appended', message: inputMessage },
-      );
+      ]);
+      committedMessageIds.add(messageId);
       committedMessageIds.add(inputId);
       // async-iife: bootstrap -- eager dispatch must settle without an unhandled rejection before Pi awaits it.
       const result = (async (): Promise<PrestartedToolResult> => {

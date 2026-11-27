@@ -40,6 +40,8 @@ export type LeadershipHost = Readonly<{
    * with the refusal's code when the claim was refused, so the binding retries or lets go (HA4); `undefined` once open.
    */
   claim: (chatId: string) => Promise<string | undefined>;
+  /** A binding's claim retry for the chat ended without a relinquish (Node): its next refusal is reported again. */
+  claimEnded: (chatId: string) => void;
   /** Stop the chat's M1 and close its writer, which frees the binding's lock (RH-R8). */
   relinquish: (chatId: string) => Promise<void>;
   /** Run a command in this process at the epoch this worker leads (a claim's write, or another tab's forward). */

@@ -1,8 +1,8 @@
 [
   {
-    "name": "launcher modules (ESM JS; the doctor has its own entry) — measured 2.11 kB brotli on 2026-10-19 (2.07 kB before preflight split into nodeFailure and npmPreflight for the doctor; 1.99 kB before the bounded `tau --version` probe killed with SIGKILL, the guarded spawn, the probe deduplication, the cache probe's cleanup and the two exit-4 reasons; 1.26 kB before the version-matched installed CLI, the preflight and TAU_LAUNCH)",
+    "name": "launcher modules (ESM JS; the doctor has its own entry) — measured 2.62 kB brotli on 2026-11-27, after Windows .cmd/.bat shims started through an escaped ComSpec line and the stdin-close stop on Windows (2.11 kB on 2026-10-19; 2.07 kB before preflight split into nodeFailure and npmPreflight for the doctor; 1.99 kB before the bounded `tau --version` probe killed with SIGKILL, the guarded spawn, the probe deduplication, the cache probe's cleanup and the two exit-4 reasons; 1.26 kB before the version-matched installed CLI, the preflight and TAU_LAUNCH)",
     "path": ["dist/index.mjs", "dist/launch.mjs", "dist/preflight.mjs", "dist/resolve-tau-cli.mjs"],
-    "limit": "2.5 kB"
+    "limit": "2.75 kB"
   },
   {
     "name": "doctor (ESM JS: doctor.mjs and doctor-probe.mjs; it also loads the launcher modules above) — measured 3.30 kB brotli on 2026-10-19",

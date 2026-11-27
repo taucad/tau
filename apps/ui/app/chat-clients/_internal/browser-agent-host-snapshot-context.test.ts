@@ -154,11 +154,9 @@ describe('browser agent host snapshot context', () => {
     const withoutChip = contextOf(turnReferencesOf([buildUserMessage({ text })]));
     expect(withoutChip).not.toContain('Sun gear');
     expect(withoutChip).not.toContain('"componentKind":"part"');
-    /* With nothing to say about the workspace, the turn carries its state note alone. */
-    expect(
-      agentHostConfig({ agent, chatId: 'chat-1', runId: 'run-1', resolvedModel }).contextMessages?.map(
-        (message) => message.metadata?.tauInternal?.['kind'],
-      ),
-    ).toEqual(['chat-state']);
+    /* With nothing to say about the workspace, the turn carries its log path and its state note. */
+    const bare = agentHostConfig({ agent, chatId: 'chat-1', runId: 'run-1', resolvedModel }).contextMessages;
+    expect(bare?.map((message) => message.metadata?.tauInternal?.['kind'])).toEqual(['snapshot-context', 'chat-state']);
+    expect(bare?.[0]?.content).toBe('Your conversation log: `.tau/chats/chat-1/events.jsonl`');
   });
 });

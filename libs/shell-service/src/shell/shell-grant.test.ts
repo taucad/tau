@@ -121,7 +121,7 @@ describe('projectProtected for the Terminal, which reads the real git store', ()
     });
 
   beforeEach(async () => {
-    for (const directory of ['vendor/lib/.git', '.hg', '.svn', '.jj', '.tau-staging', 'vendor/other/.hg']) {
+    for (const directory of ['vendor/lib/.git', '.hg', '.svn', '.jj', '.tau/staging', 'vendor/other/.hg']) {
       // oxlint-disable-next-line no-await-in-loop -- fixture setup.
       await mkdir(join(checkout, ...directory.split('/')), { recursive: true });
     }
@@ -151,7 +151,7 @@ describe('projectProtected for the Terminal, which reads the real git store', ()
         join(checkout, '.hg'),
         join(checkout, '.svn'),
         join(checkout, '.jj'),
-        join(checkout, '.tau-staging'),
+        join(checkout, '.tau', 'staging'),
         join(checkout, '.tau', 'binding.json'),
         join(checkout, 'vendor', 'other', '.hg'),
       ]),
@@ -314,7 +314,7 @@ describe('projectProtected for the Terminal, which reads the real git store', ()
       expect.arrayContaining([
         join(checkout, '.hg'),
         join(checkout, '.tau', 'binding.json'),
-        join(checkout, '.tau-staging'),
+        join(checkout, '.tau', 'staging'),
       ]),
     );
 

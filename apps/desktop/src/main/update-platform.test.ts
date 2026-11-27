@@ -91,25 +91,35 @@ describe('platform update transport and launch', () => {
     expect(relaunchSwitches(['/usr/bin/tau', '--safe-mode', '--ozone-platform=x11'])).toEqual(['--ozone-platform=x11']);
   });
 
-  it('restarts with switches through the AppImage relauncher when APPIMAGE is set, and app.relaunch otherwise (T-R12.8)', async () => {
-    // oxlint-disable-next-line unicorn/prefer-event-target -- Node child_process delivers spawn/error through EventEmitter.
-    const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
-    mocks.spawn.mockReturnValue(child);
-    vi.stubEnv('APPIMAGE', '/home/tau/Tau.AppImage');
-    try {
-      const relaunched = relaunchSelf(['--safe-mode'], ['/tmp/.mount/tau', '--safe-mode', '--no-sandbox', 'file.step']);
-      child.emit('spawn');
-      await relaunched;
-    } finally {
-      vi.unstubAllEnvs();
-    }
-    expect(mocks.spawn).toHaveBeenCalledWith(
-      '/bin/bash',
-      ['-c', appImageRelaunchScript, 'tau-relaunch', '/home/tau/Tau.AppImage', '--no-sandbox', '--safe-mode'],
-      expect.anything(),
-    );
-    expect(mocks.relaunch).not.toHaveBeenCalled();
+  /* Off Windows by design, as the host bash waiter below: `relaunchAppImage` checks the host's real `/bin/bash` before
+   * it quits (ENOENT on windows-2025, run 45923570791). The app.relaunch half runs on every platform. */
+  it.skipIf(process.platform === 'win32')(
+    'restarts with switches through the AppImage relauncher when APPIMAGE is set (T-R12.8)',
+    async () => {
+      // oxlint-disable-next-line unicorn/prefer-event-target -- Node child_process delivers spawn/error through EventEmitter.
+      const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
+      mocks.spawn.mockReturnValue(child);
+      vi.stubEnv('APPIMAGE', '/home/tau/Tau.AppImage');
+      try {
+        const relaunched = relaunchSelf(
+          ['--safe-mode'],
+          ['/tmp/.mount/tau', '--safe-mode', '--no-sandbox', 'file.step'],
+        );
+        child.emit('spawn');
+        await relaunched;
+      } finally {
+        vi.unstubAllEnvs();
+      }
+      expect(mocks.spawn).toHaveBeenCalledWith(
+        '/bin/bash',
+        ['-c', appImageRelaunchScript, 'tau-relaunch', '/home/tau/Tau.AppImage', '--no-sandbox', '--safe-mode'],
+        expect.anything(),
+      );
+      expect(mocks.relaunch).not.toHaveBeenCalled();
+    },
+  );
 
+  it('restarts with switches through app.relaunch when APPIMAGE is not set (T-R12.8)', async () => {
     vi.stubEnv('APPIMAGE', undefined);
     try {
       await relaunchSelf([], ['/Applications/Tau.app/Contents/MacOS/Tau', '--safe-mode', '--enable-logging']);
@@ -146,9 +156,9 @@ describe('platform update transport and launch', () => {
         .spyOn(files, 'readFile')
         .mockImplementation(async (path) =>
           JSON.stringify(
-            path === '/app/package.json'
+            path === join('/app', 'package.json')
               ? { version: marker.version, tauDesktop: { sourceCommit: marker.sourceCommit } }
-              : typeof path === 'string' && path.startsWith('/opt/')
+              : typeof path === 'string' && path.startsWith(join('/opt', '/'))
                 ? { ...marker, tag: 'desktop@0.2.0', version: '0.2.0' }
                 : marker,
           ),
@@ -215,7 +225,7 @@ describe('platform update transport and launch', () => {
       .spyOn(files, 'readFile')
       .mockImplementation(async (path) =>
         JSON.stringify(
-          path === '/app/package.json'
+          path === join('/app', 'package.json')
             ? { version: marker.version, tauDesktop: { sourceCommit: marker.sourceCommit } }
             : marker,
         ),
@@ -372,7 +382,7 @@ describe('AppImage update from a launch that is not healthy (T-B22.1)', () => {
       .spyOn(files, 'readFile')
       .mockImplementation(async (path) =>
         JSON.stringify(
-          path === '/app/package.json'
+          path === join('/app', 'package.json')
             ? { version: marker.version, tauDesktop: { sourceCommit: marker.sourceCommit } }
             : marker,
         ),
@@ -458,32 +468,38 @@ describe('AppImage relaunch', () => {
     });
     /* eslint-enable @typescript-eslint/naming-convention -- End environment names. */
   });
-  it('starts a detached host bash waiter instead of Electron relaunch and waits until it exists', async () => {
-    // oxlint-disable-next-line unicorn/prefer-event-target -- Node child_process delivers spawn/error through EventEmitter.
-    const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
-    mocks.spawn.mockReturnValue(child);
-    vi.stubEnv('APPDIR', mount);
-    let relaunched: Promise<void>;
-    try {
-      relaunched = relaunchAppImage('/usr/bin/tau-staging-appimage', ['--ozone-platform=x11']);
-    } finally {
-      vi.unstubAllEnvs();
-    }
-    child.emit('spawn');
-    await expect(relaunched).resolves.toBeUndefined();
-    expect(mocks.spawn).toHaveBeenCalledWith(
-      '/bin/bash',
-      ['-c', appImageRelaunchScript, 'tau-relaunch', '/usr/bin/tau-staging-appimage', '--ozone-platform=x11'],
-      expect.objectContaining({ shell: false, detached: true, stdio: ['pipe', 'ignore', 'ignore'] }),
-    );
-    const options = (mocks.spawn.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }])[2];
-    expect(options.env['APPDIR']).toBeUndefined();
-    expect(child.unref).toHaveBeenCalled();
-    await expect(relaunchAppImage('tau-staging-appimage', [])).rejects.toThrow(/absolute/u);
-    const failure = relaunchAppImage('/usr/bin/tau-staging-appimage', []);
-    child.emit('error', new Error('spawn EAGAIN'));
-    await expect(failure).rejects.toThrow('spawn EAGAIN');
-  });
+  /* Off Windows by design: an AppImage is a Linux package, and `relaunchAppImage` checks the host's real
+   * `/bin/bash` before it quits (ENOENT on windows-2025, run 43999226627). Windows restarts through the NSIS
+   * installer instead, covered by 'waits for spawn and propagates asynchronous launch failure…' above. */
+  it.skipIf(process.platform === 'win32')(
+    'starts a detached host bash waiter instead of Electron relaunch and waits until it exists',
+    async () => {
+      // oxlint-disable-next-line unicorn/prefer-event-target -- Node child_process delivers spawn/error through EventEmitter.
+      const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
+      mocks.spawn.mockReturnValue(child);
+      vi.stubEnv('APPDIR', mount);
+      let relaunched: Promise<void>;
+      try {
+        relaunched = relaunchAppImage('/usr/bin/tau-staging-appimage', ['--ozone-platform=x11']);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+      child.emit('spawn');
+      await expect(relaunched).resolves.toBeUndefined();
+      expect(mocks.spawn).toHaveBeenCalledWith(
+        '/bin/bash',
+        ['-c', appImageRelaunchScript, 'tau-relaunch', '/usr/bin/tau-staging-appimage', '--ozone-platform=x11'],
+        expect.objectContaining({ shell: false, detached: true, stdio: ['pipe', 'ignore', 'ignore'] }),
+      );
+      const options = (mocks.spawn.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }])[2];
+      expect(options.env['APPDIR']).toBeUndefined();
+      expect(child.unref).toHaveBeenCalled();
+      await expect(relaunchAppImage('tau-staging-appimage', [])).rejects.toThrow(/absolute/u);
+      const failure = relaunchAppImage('/usr/bin/tau-staging-appimage', []);
+      child.emit('error', new Error('spawn EAGAIN'));
+      await expect(failure).rejects.toThrow('spawn EAGAIN');
+    },
+  );
   it.runIf(process.platform === 'linux')(
     'closes inherited descriptors and starts the target only after the parent end closes',
     async () => {

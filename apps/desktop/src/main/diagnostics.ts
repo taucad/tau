@@ -9,7 +9,7 @@
  * and, in development, on the console.
  */
 
-import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, renameSync, statSync } from 'node:fs';
+import { appendFileSync, closeSync, fstatSync, mkdirSync, mkdtempSync, openSync, renameSync, statSync } from 'node:fs';
 import { appendFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -136,7 +136,16 @@ export const createDiagnosticsLog = (options: DiagnosticsLogOptions): Diagnostic
   const directory = ((): string => {
     try {
       mkdirSync(options.directory, { recursive: true });
-      closeSync(openSync(join(options.directory, 'desktop.log'), 'a', logFileMode));
+      const descriptor = openSync(join(options.directory, 'desktop.log'), 'a', logFileMode);
+      try {
+        /* Windows opens a directory for append without an error (windows-2025, run 45923570791); every later append
+           would then fail, so a log path that is not a file falls back as an unopenable one does. */
+        if (!fstatSync(descriptor).isFile()) {
+          throw new Error('The log path is not a file');
+        }
+      } finally {
+        closeSync(descriptor);
+      }
       return options.directory;
     } catch {
       try {

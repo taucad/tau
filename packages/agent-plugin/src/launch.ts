@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { needsShell, preflight, versionOf } from '#preflight.js';
+import { notOnPath, preflight, startable, versionOf } from '#preflight.js';
 import { resolveTauCli } from '#resolve-tau-cli.js';
 import type { TauCliCommand } from '#resolve-tau-cli.js';
 
@@ -47,8 +47,6 @@ const launch = (): void => {
   }
 
   const { command, args, cliVersion, pluginVersion, ...launched } = cli;
-  /* Windows runs `.cmd` shims (npx.cmd, an npm-installed tau.cmd) only through a shell. */
-  const shell = needsShell(command);
   /* The viewer page ships in the plugin (blueprint D2); the environment, not a
    * flag, names it so a CLI that predates the viewer ignores it. */
   const viewerPage = fileURLToPath(new URL('../dist-app/app.html', import.meta.url));
@@ -71,17 +69,30 @@ const launch = (): void => {
     process.stderr.write(`tau: cannot start ${command}: ${error.message}\n`);
     process.exitCode = 1;
   };
+  /* Arguments after the launcher reach `tau mcp`: a Claude Desktop config names `--project` there. Windows starts
+   * a `.cmd` shim (npx.cmd, an npm-installed tau.cmd) through `cmd.exe`, each argument escaped for it. */
+  const start = startable(command, [...args, ...process.argv.slice(2)]);
+  if (start === undefined) {
+    cannotStart(notOnPath(command));
+    return;
+  }
   try {
-    /* Arguments after the launcher reach `tau mcp`: a Claude Desktop config names `--project` there. */
-    const child = spawn(shell ? `"${command}"` : command, [...args, ...process.argv.slice(2)], {
+    const child = spawn(start.file, start.args, {
       stdio: 'inherit',
-      shell,
+      windowsVerbatimArguments: start.windowsVerbatimArguments,
       env,
     });
 
+    /* Stopping is the CLI's to do; the launcher waits for it and exits with its code. POSIX hosts signal the
+     * launcher alone, so it passes the signal on. Windows delivers no SIGTERM a process can handle, and Ctrl+C
+     * reaches every process on the console, the CLI included; `child.kill` there would end only `cmd.exe` and
+     * orphan the CLI on the host's pipes. A Windows host stops the server by closing its stdin, which the CLI
+     * reads as the end of the session. */
     for (const signal of ['SIGINT', 'SIGTERM'] as const) {
       process.on(signal, () => {
-        child.kill(signal);
+        if (process.platform !== 'win32') {
+          child.kill(signal);
+        }
       });
     }
     child.once('error', cannotStart);

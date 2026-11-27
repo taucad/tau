@@ -16,6 +16,7 @@ import postgres from 'postgres';
 import * as schema from '@taucad/api-database/schema';
 import { staticAuthConfig } from '#config/auth-static.config.js';
 import { desktopClientId, desktopScopes } from '#config/desktop-oauth.js';
+import { revokeDesktopSignIns } from '#desktop-sign-ins.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -190,6 +191,23 @@ describe('Tau Desktop OAuth sign-in on PostgreSQL', () => {
       .from(schema.oauthAccessToken)
       .where(eq(schema.oauthAccessToken.token, stored(next.access_token)));
     expect(nextAccess?.sessionId).toBeNull();
+  });
+
+  it('should end every desktop sign-in of the account on a password change (revokeDesktopSignIns)', async () => {
+    const tokens = await signInDesktop(cookie);
+
+    await revokeDesktopSignIns(database, userId);
+
+    const refreshed = await call('/oauth2/token', {
+      method: 'POST',
+      form: { grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: desktopClientId },
+    });
+    const accessRows = await database
+      .select({ id: schema.oauthAccessToken.id })
+      .from(schema.oauthAccessToken)
+      .where(eq(schema.oauthAccessToken.userId, userId));
+    expect(refreshed.status).toBe(400);
+    expect(accessRows).toEqual([]);
   });
 
   it('should delete every token row with the account', async () => {

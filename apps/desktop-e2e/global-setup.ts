@@ -155,15 +155,14 @@ export const setup = async (): Promise<() => void> => {
    * used — its dependency chain reaches `runtime:build`, which is red on Node
    * 24 for a tsdown config-loader bug. */
   if (!desktopE2ECompletedArtifact) {
-    execFileSync(resolve(workspaceRoot, 'node_modules/.bin/vite'), ['build'], { cwd: apiRoot, stdio: 'ignore' });
-    execFileSync(
-      resolve(workspaceRoot, 'node_modules/.bin/vite'),
-      ['build', '--config', 'vite.storage-worker.config.ts'],
-      {
-        cwd: apiRoot,
-        stdio: 'ignore',
-      },
-    );
+    /* Vite's own entry under this Node, not the `.bin` shim: on Windows that shim is a shell script, which
+     * `execFileSync` cannot run. */
+    const vite = resolve(workspaceRoot, 'node_modules/vite/bin/vite.js');
+    execFileSync(process.execPath, [vite, 'build'], { cwd: apiRoot, stdio: 'ignore' });
+    execFileSync(process.execPath, [vite, 'build', '--config', 'vite.storage-worker.config.ts'], {
+      cwd: apiRoot,
+      stdio: 'ignore',
+    });
   }
 
   const environment = { ...process.env };

@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import type { captureDictation } from '#components/dictation/dictation-capture.js';
 import type { transcribeDictation } from '#components/dictation/dictation-client.js';
 import type { AcpSessionData } from '@taucad/chat';
+import type { CadReference } from '@taucad/chat/references';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { PaintedSendVerdict } from '#components/chat/chat-textarea-desktop.js';
 import { kernelConfigurations } from '@taucad/types/constants';
@@ -378,7 +379,11 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     acpSessionData: AcpSessionData,
     options: {
       canResume?: boolean;
-      handleSubmit?: (text?: string) => Promise<void>;
+      handleSubmit?: (
+        text?: string,
+        references?: readonly CadReference[],
+        options?: Readonly<{ signal?: AbortSignal }>,
+      ) => Promise<void>;
       useTauSkills?: boolean;
       status?: 'ready' | 'submitted' | 'streaming';
       isSubmitting?: boolean;
@@ -1170,6 +1175,37 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       editor!.commands.insertContent(' Twice');
     });
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
+  });
+
+  /* Staging re-check 5: the adopted queued send was replayed as the composer mounted, and its send waited about 2.5 s
+   * on the opening project; Escape found no queued send to cancel, and the send went out. The send the composer
+   * replays stays the person's to cancel until it has been handed to the chat. */
+  it('should cancel an adopted queued send whose replay is still on its way, keep the draft and say so', async () => {
+    const handed = Promise.withResolvers<void>();
+    const handleSubmit = vi.fn(
+      async (_text?: string, _references?: readonly CadReference[], _options?: Readonly<{ signal?: AbortSignal }>) =>
+        handed.promise,
+    );
+    const view = renderComposer('Make a bracket.', codexSession, { earlyInput: queuedEarlyInput, handleSubmit });
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalledOnce();
+    });
+    const box = view.container.querySelector('[data-queued-send]');
+    expect(box).not.toBeNull();
+
+    fireEvent.keyDown(box!, { key: 'Escape' });
+
+    expect(handleSubmit.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
+    expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Send cancelled.');
+    const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+    expect(editor!.getText()).toBe('Make a bracket.');
+    await act(async () => {
+      handed.resolve();
+      await handed.promise;
+    });
+    expect(handleSubmit).toHaveBeenCalledOnce();
+    expect(screen.getByRole('status')).toHaveTextContent('Send cancelled.');
   });
 
   it('should not send for an early input that queued none', async () => {

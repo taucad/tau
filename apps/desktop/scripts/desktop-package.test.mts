@@ -538,6 +538,10 @@ assert.ok(licenceGate < packageSource.indexOf('await packager('));
 assert.ok(licenceGate < packageSource.indexOf('desktopArchiveCommand(plan'));
 console.log('✓ the vendored-licence gate runs before packaging whenever an archive is written');
 
+/* Only an unpacked test package honours endpoint overrides; every distribution archive is locked. */
+assert.ok(packageSource.includes('environmentOverrides: !writesArchive,'));
+console.log('✓ a distribution archive locks endpoint overrides and only a test package honours them');
+
 /* TAU_DESKTOP_CHANNEL selects the channel main reads from the staged manifest. */
 assert.equal(desktopPackageChannel(undefined), 'production');
 assert.equal(desktopPackageChannel(' '), 'production');

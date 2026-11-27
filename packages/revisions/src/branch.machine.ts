@@ -240,8 +240,11 @@ export type BranchApplySwitchActorOutput = Readonly<{
  * @public
  */
 export type BranchMergeActorOutput =
-  /** `before`: `<current>`'s head before the merge, absent when it was unborn. */
-  | Readonly<{ status: 'merged'; revisionId: string; before?: string }>
+  /**
+   * `before`: `<current>`'s head before the merge, absent when it was unborn. `checkoutId`: the checkout the merge
+   * wrote and re-headed, absent when none moved.
+   */
+  | Readonly<{ status: 'merged'; revisionId: string; before?: string; checkoutId?: string }>
   /** The branch is already in `<current>`: nothing moved, so the toast never says *Merged* (M1). */
   | Readonly<{ status: 'upToDate'; revisionId: string }>
   | Readonly<{ status: 'conflicted'; paths: readonly string[] }>;
@@ -653,6 +656,16 @@ const branchMachineDefinition = setup({
                     'MERGE_UP_TO_DATE',
                   ),
                 };
+              }
+              /* RM-R5: the merge wrote the checkout and moved its head, so it re-reads now, before any cut asked
+               * after the verb is idle. The registry's re-read on `branchMerged` lags that, and a cut in between
+               * minted over the replaced head and lost its compare-and-swap (a close then refused). */
+              if (event.output.checkoutId !== undefined) {
+                reportMove(context, enq, {
+                  type: 'checkoutChanged',
+                  checkoutId: event.output.checkoutId,
+                  revisionId: event.output.revisionId,
+                });
               }
               const fact: BranchMachineEmitted = {
                 type: 'branchMerged',

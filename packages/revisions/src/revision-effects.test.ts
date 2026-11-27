@@ -5822,8 +5822,8 @@ for (const actorSet of actorSets) {
         into: 'main',
       });
 
-      /* `before` is the head the Merged toast's Undo returns `main` to (I11). */
-      expect(outcome).toStrictEqual({ status: 'merged', revisionId: theirs, before: base });
+      /* `before` is the head the Merged toast's Undo returns `main` to (I11); `checkoutId` is the checkout it moved. */
+      expect(outcome).toStrictEqual({ status: 'merged', revisionId: theirs, before: base, checkoutId: 'live' });
       expect(await port.readRef('main')).toBe(theirs);
       expect(new TextDecoder().decode(await filesystem.readFile('a.txt'))).toBe('theirs\n');
     }, 30_000);

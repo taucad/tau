@@ -21,6 +21,7 @@ import { PreparationError } from '#preparation/preparation-error.js';
 import {
   advanceGeneration,
   blobKey,
+  closureRoot,
   collectStoreGarbage,
   createStaging,
   linkEntry,
@@ -218,6 +219,38 @@ const runAll = async <T>(
   }
 };
 
+/** The longest path Windows loads a library from without long-path support: `MAX_PATH` less its terminator. */
+const windowsMaxPath = 259;
+
+/**
+ * The longest file path in a closure that would pass Windows' library-loading limit once sealed, if any. Windows loads a
+ * DLL or an extension module only from a path within `MAX_PATH`, whatever the process's long-path setting.
+ * @param root - The sealed closure root.
+ * @param files - The closure's file rows.
+ * @returns The longest such path, or `undefined` when every path fits.
+ */
+const windowsPathOverflow = (root: string, files: readonly InstalledFile[]): string | undefined => {
+  let longest: string | undefined;
+  for (const { path } of files) {
+    const absolute = `${root}\\${path.replaceAll('/', '\\')}`;
+    if (absolute.length > windowsMaxPath && (longest === undefined || absolute.length > longest.length)) {
+      longest = absolute;
+    }
+  }
+  return longest;
+};
+
+/**
+ * Without a containment answer from the sandbox, a Windows host runs no native worker: none runs unsandboxed.
+ * @param indicators - The host's indicators.
+ * @param packageName - The package whose native variant is asked for.
+ * @returns The refusal on Windows; `undefined` elsewhere.
+ */
+const defaultNativeContainment = (indicators: HostIndicators, packageName: string): string | undefined =>
+  indicators.os === 'win32'
+    ? `Native kernels do not run on Windows in this Tau: it has no Windows sandbox, and no native worker runs unsandboxed. Use macOS or Linux (glibc) for ${packageName}.`
+    : undefined;
+
 /**
  * Create the preparation host (API 4) for a Node host: `tau mcp`, `tau export`, `tau prepare`, the daemon parent
  * and the desktop main process compose one each, over one shared store.
@@ -245,9 +278,9 @@ const runAll = async <T>(
  * ```
  */
 export const createPreparationHost = (options: CreatePreparationHostOptions): PreparationHost => {
-  const layout = storeLayout(resolve(options.store));
-  const plugins = new Map(options.plugins.map((plugin) => [plugin.package, plugin]));
   const indicators = options.indicators ?? detectHostIndicators();
+  const layout = storeLayout(resolve(options.store), { compact: (indicators?.os ?? process.platform) === 'win32' });
+  const plugins = new Map(options.plugins.map((plugin) => [plugin.package, plugin]));
   const hostPath = resolve(options.hostPath ?? process.argv[1] ?? process.execPath);
   const tauVersion = options.tauVersion ?? packageVersion;
   const transport: typeof fetch = options.fetch ?? (async (input, init) => fetch(input, init));
@@ -329,13 +362,11 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       };
     }
     const variants = plugin.deployment.dependencies[dependency] ?? [];
-    if (indicators.os === 'win32' && variants.some(({ target }) => target.runtime === 'native')) {
-      return {
-        kind: 'blocked',
-        dependency,
-        message: `Native kernels do not run on Windows yet: Tau has no Windows sandbox, and no native worker runs unsandboxed. Use macOS or Linux (glibc) for ${plugin.package}.`,
-        detail: { axis: 'os' },
-      };
+    const uncontained = variants.some(({ target }) => target.runtime === 'native')
+      ? (options.nativeContainment ?? defaultNativeContainment)(indicators, plugin.package)
+      : undefined;
+    if (uncontained !== undefined) {
+      return { kind: 'blocked', dependency, message: uncontained, detail: { axis: 'os' } };
     }
     const selection = selectVariant(variants, indicators, options.selection ?? {});
     if (selection.status === 'unsupported') {
@@ -577,6 +608,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           dependency: receipt.dependency,
           target: receipt.target,
           root: receipt.root,
+          staging,
           files: receipt.files.filter((row) => row.dependencyFile !== undefined),
           signal,
         });
@@ -835,7 +867,11 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       await sweepStaging(layout, Date.now());
       const attemptStaging = await createStaging(layout, attemptId);
       staging = attemptStaging;
-      await Promise.all(work.map(async (item) => mkdir(join(attemptStaging, item.key), { recursive: true })));
+      // Each closure stages under a one-character name rather than its 64-character key, so a staged path is never
+      // longer than the sealed one (`closures/sha256/<key>`, or `c/<16 hex>` on Windows) and fits wherever the sealed closure does (Windows'
+      // 260-character limit on loading libraries).
+      const stagedRoots = new Map(work.map((item, index) => [item.key, join(attemptStaging, String(index))]));
+      await Promise.all([...stagedRoots.values()].map(async (root) => mkdir(root, { recursive: true })));
 
       const totalBytes = dependencyFiles.reduce((sum, { dependencyFile }) => sum + dependencyFile.byteLength, 0);
       const received = new Map<Integrity, number>();
@@ -902,7 +938,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
               const written = await unpackDependencyFile({
                 dependencyFile: use.dependencyFile,
                 bytes: acquired.bytes,
-                root: join(attemptStaging, use.item.key),
+                root: stagedRoots.get(use.item.key)!,
                 signal: laneSignal,
               });
               rows.get(use.item.key)?.set(use.dependencyFile.name, written);
@@ -924,7 +960,8 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           plugin,
           dependency: item.dependency,
           target: item.variant.target,
-          root: join(attemptStaging, item.key),
+          root: stagedRoots.get(item.key)!,
+          staging: attemptStaging,
           files: unpacked,
           signal,
         });
@@ -932,8 +969,18 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           const { reason, message, detail } = sealed.refusal;
           return finish({ status: 'blocked', attemptId, reason, message, ...(detail === undefined ? {} : { detail }) });
         }
-        const staged = join(attemptStaging, item.key);
+        const staged = stagedRoots.get(item.key)!;
         const built = [...unpacked, ...sealed.rows];
+        const overflow =
+          indicators!.os === 'win32' ? windowsPathOverflow(closureRoot(layout, item.key), built) : undefined;
+        if (overflow !== undefined) {
+          return finish({
+            status: 'blocked',
+            attemptId,
+            reason: 'unsupported-target',
+            message: `The ${plugin.package} closure would need a ${String(overflow.length)}-character path (${overflow}), past Windows' 259-character limit for loading libraries, so it cannot run from this dependency store. Set TAU_CONFIG_DIR to a shorter folder and prepare again. Nothing was sealed.`,
+          });
+        }
         // The launch index is written after the seal step and receipted like its files, so treeIntegrity covers it.
         // oxlint-disable-next-line no-await-in-loop -- ditto
         const index = await writeLaunchIndex(plugin, {
@@ -945,7 +992,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
         const files = (index === undefined ? built : [...built, index]).toSorted(byPath);
         // oxlint-disable-next-line no-await-in-loop -- ditto
         const treeIntegrity = await computeTreeIntegrity(files);
-        const root = join(layout.closures, item.key);
+        const root = closureRoot(layout, item.key);
         // `tauVersion` comes first, so a launch reads the stamp from the receipt's head (readLaunch).
         const receipt: ClosureReceipt = {
           tauVersion,

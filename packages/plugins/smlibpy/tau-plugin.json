@@ -579,6 +579,150 @@
             "destination": "tau-worker/tau_kernel"
           }
         ]
+      },
+      {
+        "target": {
+          "runtime": "native",
+          "os": "win32",
+          "arch": "x64",
+          "minimumOsVersion": "10.0"
+        },
+        "files": [
+          {
+            "name": "python",
+            "integrity": "sha256-Y9JjqwFi80okGlbcWyg8ItbhMfVRYRfmqSE1DGm6fU8=",
+            "byteLength": 21936514,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+              ]
+            },
+            "destination": "python",
+            "stripComponents": 1,
+            "unpackedByteLength": 62669961
+          },
+          {
+            "name": "coverage",
+            "integrity": "sha256-ysD9yhewNq84ganScpqFC3ZVPz9xbMsDYK1NvAazuEM=",
+            "byteLength": 221541,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/b1/b1/a75fd25df44eab52d1931e89980d1ada46824c7a3210be0d3c88a44aaa99/coverage-7.10.7-cp313-cp313-win_amd64.whl"
+              ]
+            },
+            "destination": "python/Lib/site-packages",
+            "unpackedByteLength": 734304
+          },
+          {
+            "name": "numpy",
+            "integrity": "sha256-harMskGCwl34ka0OwzNYWWfhFSadXxsX8smuAFvJZlc=",
+            "byteLength": 12460532,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/15/20/f3489f86d81ea460b2bcdceaed094142ca6579f6be0ec527b781d39afe68/numpy-2.5.2-cp313-cp313-win_amd64.whl"
+              ]
+            },
+            "destination": "python/Lib/site-packages",
+            "unpackedByteLength": 41694462
+          },
+          {
+            "name": "smlibpy",
+            "integrity": "sha256-lDpiMHAdJ8pMnbHdwDXOcpApLl4tQR40ch/prStfOcA=",
+            "byteLength": 9190571,
+            "format": "wheel",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://files.pythonhosted.org/packages/b0/ce/243e0eab2f490ccba0866a120935446578eb79f8edcbb00bf4c98bd13b84/smlibpy-0.6.2-cp313-cp313-win_amd64.whl"
+              ]
+            },
+            "destination": "python/Lib/site-packages",
+            "unpackedByteLength": 23886601
+          },
+          {
+            "name": "worker.py",
+            "integrity": "sha256-vGUpp2p519juNYrXEdV5R7x8cbnkwKwHcHzNzZNnAaA=",
+            "byteLength": 40847,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/worker.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "smlibpy_materials.py",
+            "integrity": "sha256-4jMswH2V2CPn5oEnDDsJrQWFkXTNRfYCfiVSmvlL958=",
+            "byteLength": 6083,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/smlibpy_materials.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "smlibpy_mechanisms.py",
+            "integrity": "sha256-vcQ7wmVav3VTw4EThtVdl35jULPAwdeOtZdcRBCDJSg=",
+            "byteLength": 1387,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/smlibpy_mechanisms.py"
+            },
+            "destination": "tau-worker"
+          },
+          {
+            "name": "analyzer.py",
+            "integrity": "sha256-cKIQwhSabt5waGNfsHHbF1Svj3VfTN0zC0kPdDVYZZo=",
+            "byteLength": 25276,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/tau_kernel/analyzer.py"
+            },
+            "destination": "tau-worker/tau_kernel"
+          },
+          {
+            "name": "glb.py",
+            "integrity": "sha256-0JTKuMOO0qgzULwBB8uwc1KfAeK5e2Q31lJp3EoBuCs=",
+            "byteLength": 13561,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/tau_kernel/glb.py"
+            },
+            "destination": "tau-worker/tau_kernel"
+          },
+          {
+            "name": "model.py",
+            "integrity": "sha256-7MLKCwDx/eZw7b+kcOhECKDHyemy0nU+t+m6yRf/s5w=",
+            "byteLength": 6996,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/tau_kernel/model.py"
+            },
+            "destination": "tau-worker/tau_kernel"
+          },
+          {
+            "name": "protocol.py",
+            "integrity": "sha256-mhcrOGRMwqK+EtDVTkn53c8Xk9zqKZh5OksbU+4LSQc=",
+            "byteLength": 11492,
+            "format": "raw",
+            "origin": {
+              "kind": "packagePath",
+              "path": "python/tau_kernel/protocol.py"
+            },
+            "destination": "tau-worker/tau_kernel"
+          }
+        ]
       }
     ]
   },

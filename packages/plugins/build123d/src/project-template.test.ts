@@ -35,8 +35,11 @@ describe('the build123d project template', () => {
 
   it('locks in uv.lock exactly the versions of the closure, coverage aside', async () => {
     const closure = new Map<string, string>();
-    for (const key of ['darwin-arm64', 'darwin-x64', 'linux-arm64-glibc', 'linux-x64-glibc']) {
-      // oxlint-disable-next-line no-await-in-loop -- four small files, read in order.
+    const interpreter = JSON.parse(await read('python/interpreter.json', coreRoot)) as {
+      readonly targets: ReadonlyArray<{ readonly key: string }>;
+    };
+    for (const { key } of interpreter.targets) {
+      // oxlint-disable-next-line no-await-in-loop -- one small file per target, read in order.
       for (const { name, version } of parseTargetPylock(await read(`python/pylock.${key}.toml`)).packages) {
         closure.set(name, version);
       }

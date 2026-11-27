@@ -272,6 +272,12 @@ export type SealClosureInput = {
    * never there while the step runs.
    */
   readonly root: string;
+  /**
+   * An empty directory for the step's own temporary files, such as a sandboxed command's working folder. The host
+   * creates it in the store's staging area, never inside `root` or the system temporary folder, and removes it once
+   * the step settles.
+   */
+  readonly scratch: string;
   /** Rows of the files unpacked from the dependency files, sorted by path. */
   readonly files: readonly InstalledFile[];
   readonly signal: AbortSignal;
@@ -357,6 +363,12 @@ export type CreatePreparationHostOptions = {
   readonly seed?: string;
   /** Version recorded in receipts; a receipt from another version is re-verified before use. Default the runtime's. */
   readonly tauVersion?: string;
+  /**
+   * Why this host cannot contain a native worker for a package, or `undefined` when it can; a native variant is
+   * refused before anything downloads. The sandbox library answers it (`nativeSandboxRefusal`). Default: Windows
+   * cannot, because no native worker runs unsandboxed and this host names no Windows sandbox; every other OS can.
+   */
+  readonly nativeContainment?: (indicators: HostIndicators, packageName: string) => string | undefined;
 };
 
 /**

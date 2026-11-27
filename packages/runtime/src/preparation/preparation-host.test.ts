@@ -1,10 +1,11 @@
 // Tier-2 scenarios of the preparation host (W2 oracle, T1): a real store on disk, in-test archives and a hermetic
 // registry `fetch`. The global `fetch` is replaced by a tripwire, so no scenario can reach the network.
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { createServer, get } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { join, relative, sep } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 
 import { measureCapacityDomain } from '@taucad/filesystem';
 import type * as Filesystem from '@taucad/filesystem';
@@ -290,6 +291,28 @@ describe('createPreparationHost', () => {
       expect(seen[0]?.root.startsWith(join(store, 'tmp'))).toBe(true);
       expect(seen[0]?.files).toEqual(receipt.files.filter(({ path }) => path !== bytecode).map(({ path }) => path));
       expect(events.some(({ state }) => state.status === 'preparing' && state.phase === 'sealing')).toBe(true);
+    });
+
+    it("should hand the seal step an empty scratch directory in the store's staging area, outside the closure, and remove it", async () => {
+      const seen: Array<{ readonly root: string; readonly scratch: string; readonly empty: boolean }> = [];
+      const { store, host } = await scenario({
+        seal: async ({ root, scratch }) => {
+          const entries = await readdir(scratch);
+          seen.push({ root, scratch, empty: entries.length === 0 });
+          await writeFile(join(scratch, 'work.txt'), 'temporary');
+          return undefined;
+        },
+      });
+
+      const receipt = readyReceipt(await prepare(host));
+
+      expect(seen).toHaveLength(1);
+      const [{ root, scratch, empty }] = seen as [(typeof seen)[number]];
+      expect(empty).toBe(true);
+      expect(scratch.startsWith(join(store, 'tmp'))).toBe(true);
+      expect(relative(root, scratch).startsWith('..')).toBe(true);
+      expect(existsSync(scratch)).toBe(false);
+      expect(receipt.files.some(({ path }) => path.endsWith('work.txt'))).toBe(false);
     });
 
     it("should end blocked with the seal step's refusal, seal nothing and keep the verified blobs", async () => {
@@ -1120,9 +1143,91 @@ describe('createPreparationHost', () => {
         detail: { axis: 'os', nearest: linuxTarget },
       });
       expect(refused).toMatchObject({ status: 'blocked', reason: 'unsupported-target', detail: { axis: 'os' } });
-      expect(refused.status === 'blocked' && refused.message).toContain('Native kernels do not run on Windows yet');
+      expect(refused.status === 'blocked' && refused.message).toContain(
+        'Native kernels do not run on Windows in this Tau: it has no Windows sandbox',
+      );
       expect(darwin.registry.calls).toEqual([]);
       await expect(darwin.host.describe()).resolves.toMatchObject([{ state: 'unsupported' }]);
+    });
+
+    it('should ask the host whether it contains native workers, and refuse with its answer before downloading', async () => {
+      const windows = {
+        os: 'win32',
+        arch: 'x64',
+        osVersion: '10.0.26100',
+        translated: false,
+        wasm: { threads: false },
+      } as const;
+      const asked: Array<readonly [string, string]> = [];
+      const contained = await scenario({
+        host: {
+          indicators: windows,
+          nativeContainment: (indicators, name) => {
+            asked.push([indicators.os, name]);
+            return undefined;
+          },
+        },
+      });
+      const uncontained = await scenario({
+        host: { indicators: windows, nativeContainment: () => 'The Windows sandbox is not set up.' },
+      });
+
+      const passed = await prepare(contained.host);
+      const refused = await prepare(uncontained.host);
+
+      /* A Windows host that contains native workers reaches variant selection; this fixture declares Linux only. */
+      expect(passed).toMatchObject({ status: 'blocked', reason: 'unsupported-target', detail: { axis: 'os' } });
+      expect(passed.status === 'blocked' && passed.message).toContain('declares no');
+      expect(asked).toEqual([['win32', packageName]]);
+      expect(refused).toMatchObject({ status: 'blocked', message: 'The Windows sandbox is not set up.' });
+      expect(uncontained.registry.calls).toEqual([]);
+    });
+
+    it("should refuse on Windows a closure whose sealed paths pass Windows' library-loading limit, and seal nothing", async () => {
+      const windows = {
+        os: 'win32',
+        arch: 'x64',
+        osVersion: '10.0.26100',
+        translated: false,
+        wasm: { threads: false },
+      } as const;
+      const windowsTarget = { runtime: 'native', os: 'win32', arch: 'x64' } as const;
+      const deep = ['python', 'Lib', 'site-packages', 'x'.repeat(120), `${'y'.repeat(120)}.dll`];
+      const writeDeep =
+        (parts: readonly string[]): NonNullable<PreparationPlugin['seal']> =>
+        async ({ root }) => {
+          await mkdir(join(root, ...parts.slice(0, -1)), { recursive: true });
+          await writeFile(join(root, ...parts), 'library');
+          return undefined;
+        };
+      const tooDeep = await scenario({
+        variants: (dependencyFiles) => [{ target: windowsTarget, files: dependencyFiles }],
+        host: { indicators: windows, nativeContainment: () => undefined },
+        seal: writeDeep(deep),
+      });
+      const fits = await scenario({
+        variants: (dependencyFiles) => [{ target: windowsTarget, files: dependencyFiles }],
+        host: { indicators: windows, nativeContainment: () => undefined },
+        seal: writeDeep(['python', 'Lib', 'site-packages', 'short.dll']),
+      });
+
+      const refused = await prepare(tooDeep.host);
+      const ready = await prepare(fits.host);
+
+      expect(refused).toMatchObject({ status: 'blocked', reason: 'unsupported-target' });
+      expect(refused.status === 'blocked' && refused.message).toContain("past Windows' 259-character limit");
+      expect(refused.status === 'blocked' && refused.message).toContain('y'.repeat(120));
+      await expect(readdir(join(tooDeep.store, 'c'))).rejects.toThrow();
+      /* A Windows store is compact: the closure is published under 16 hex of its key, and GC still knows it. */
+      const receipt = readyReceipt(ready);
+      expect(dirname(receipt.root)).toBe(join(fits.store, 'c'));
+      expect(basename(receipt.root)).toMatch(/^[\da-f]{16}$/u);
+      await expect(fits.host.collectGarbage({ dryRun: true })).resolves.toMatchObject({ closures: [] });
+      // A compact closure with no readable receipt is damage: GC names it by its directory and removes it.
+      await mkdir(join(fits.store, 'c', '0123456789abcdef'), { recursive: true });
+      await expect(fits.host.collectGarbage()).resolves.toMatchObject({ closures: ['0123456789abcdef'] });
+      await expect(readdir(join(fits.store, 'c'))).resolves.toEqual([basename(receipt.root)]);
+      await expect(fits.reopen().describe()).resolves.toMatchObject([{ state: 'ready' }]);
     });
 
     it('should record the host snapshot, the candidates and the emulation flag in every receipt', async () => {

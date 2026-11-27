@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -6,7 +15,13 @@ import type { NativeSandboxCommand, NativeSandboxCommandResult } from '@taucad/n
 import type { ClosureReceipt, InstalledFile, SealClosureInput } from '@taucad/runtime/preparation/node';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createPythonSeal, pythonLaunchSet, pythonOptionsFromClosure } from '#python-closure.js';
+import {
+  createPythonSeal,
+  pythonInterpreterPath,
+  pythonLaunchSet,
+  pythonOptionsFromClosure,
+  shippedBytecodeExclusion,
+} from '#python-closure.js';
 import { pythonKernelOptionsSchema } from '#python-kernel.js';
 import type { PythonKernelWorker } from '#python-kernel.js';
 
@@ -116,11 +131,14 @@ describe('createPythonSeal', () => {
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, 'x');
     }
+    const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'tau-python-seal-scratch-')));
+    roots.push(scratch);
     return {
       package: '@taucad/example',
       dependency: 'engine',
       target,
       root: directory,
+      scratch,
       files: paths.map((path) => row(path, 'e')),
       signal: new AbortController().signal,
     };
@@ -157,10 +175,11 @@ describe('createPythonSeal', () => {
       return exited(0);
     };
 
-  const seal = (run: ReturnType<typeof runner>['run'], compileall?: boolean) =>
+  const seal = (run: ReturnType<typeof runner>['run'], compileall?: boolean, platform: NodeJS.Platform = 'linux') =>
     createPythonSeal(
       { worker, selfTestImports: ['example', 'numpy'], ...(compileall === undefined ? {} : { compileall }) },
       run,
+      platform,
     );
 
   it('should compile once in the sandbox, skip shipped bytecode and prove the closure imports', async () => {
@@ -176,6 +195,7 @@ describe('createPythonSeal', () => {
     const python = join(input.root, 'python', 'bin', 'python3');
     expect(compile).toMatchObject({
       executablePath: python,
+      executableSha256: hex('e'),
       readablePaths: [input.root],
       writablePath: input.root,
       workingDirectory: input.root,
@@ -200,19 +220,76 @@ describe('createPythonSeal', () => {
       '-e',
       input.root,
       '-x',
-      `(?:${`${input.root}/python/lib/python3.13/encodings/aliases.py`.replaceAll('.', String.raw`\.`)})$`,
+      shippedBytecodeExclusion(input.root, ['python/lib/python3.13/encodings/aliases.py']),
       input.root,
     ]);
     expect(selfTest).toMatchObject({
       executablePath: python,
+      executableSha256: hex('e'),
       arguments: ['-I', '-B', '-c', 'import example, numpy'],
       readablePaths: [input.root],
       commandId: 'Example self-test#engine',
     });
     expect(selfTest!.writablePath).not.toBe(input.root);
     expect(selfTest!.writablePath).toContain('tau-example-seal-');
+    expect(dirname(selfTest!.writablePath)).toBe(input.scratch);
     expect(selfTest!.workingDirectory).toBe(selfTest!.writablePath);
     expect(existsSync(selfTest!.writablePath)).toBe(false);
+  });
+
+  it('should compile on Windows with a staged copy of the interpreter outside the closure it writes', async () => {
+    const input = closure([
+      'python/python.exe',
+      'python/python313.dll',
+      'python/vcruntime140.dll',
+      'python/Lib/os.py',
+      'python/DLLs/_socket.pyd',
+    ]);
+    let staged: { readonly names: readonly string[]; readonly pth: string } | undefined;
+    const { commands, run } = runner([
+      (command) => {
+        const directory = dirname(command.executablePath);
+        staged = {
+          names: readdirSync(directory).toSorted(),
+          pth: readFileSync(join(directory, 'python._pth'), 'utf8'),
+        };
+        return compileInto(input.root, 'python/Lib/__pycache__/os.cpython-313.pyc')(command);
+      },
+      () => exited(0),
+    ]);
+
+    await expect(seal(run, undefined, 'win32')(input)).resolves.toBeUndefined();
+
+    const [compile, selfTest] = commands;
+    const compiler = dirname(compile!.executablePath);
+    expect(compiler).toContain('tau-example-compile-');
+    expect(dirname(compiler)).toBe(input.scratch);
+    expect(compile).toMatchObject({
+      executableSha256: hex('e'),
+      readablePaths: [compiler],
+      writablePath: input.root,
+    });
+    expect(compile!.arguments.at(-2)).toBe(shippedBytecodeExclusion(input.root, [], ['python/tcl']));
+    expect(staged).toEqual({
+      names: ['python._pth', 'python.exe', 'python313.dll', 'vcruntime140.dll'],
+      pth: `${join(input.root, 'python', 'Lib')}\r\n${join(input.root, 'python', 'DLLs')}\r\n`,
+    });
+    expect(existsSync(compiler)).toBe(false);
+    expect(selfTest).toMatchObject({
+      executablePath: join(input.root, 'python', 'python.exe'),
+      executableSha256: hex('e'),
+      readablePaths: [input.root],
+    });
+  });
+
+  it('should refuse a closure without its interpreter before running anything', async () => {
+    const input = closure(['python/lib/python3.13/os.py']);
+    const { commands, run } = runner([]);
+
+    await expect(seal(run)(input)).rejects.toThrow(
+      'The @taucad/example closure has no python/bin/python3, so it cannot be sealed. Nothing was sealed.',
+    );
+    expect(commands).toEqual([]);
   });
 
   it('should pass no exclusion when no dependency file ships bytecode', async () => {
@@ -293,5 +370,72 @@ describe('createPythonSeal', () => {
       code: 'EXTRACTION_REFUSED',
       message: expect.stringMatching(message) as string,
     });
+  });
+});
+
+describe('pythonInterpreterPath', () => {
+  it('should name python-build-standalone bin/python3 on macOS and Linux and python.exe at the prefix on Windows', () => {
+    expect(pythonInterpreterPath('darwin')).toBe('python/bin/python3');
+    expect(pythonInterpreterPath('linux')).toBe('python/bin/python3');
+    expect(pythonInterpreterPath('win32')).toBe('python/python.exe');
+  });
+});
+
+describe('shippedBytecodeExclusion', () => {
+  // The compileall module searches each path it visits with `re.search`; these patterns use only syntax JavaScript reads alike.
+  const matches = (pattern: string, path: string): boolean => new RegExp(pattern, 'u').test(path);
+
+  it('should match exactly the shipped sources under the root, by either separator', () => {
+    const pattern = shippedBytecodeExclusion(String.raw`C:\Users\RUNNER~1\store\c+1`, [
+      'python/Lib/os.py',
+      'python/Lib/encodings/aliases.py',
+      'python/Lib/encodings/utf_8.py',
+    ]);
+
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\os.py`)).toBe(true);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\encodings\utf_8.py`)).toBe(true);
+    expect(matches(pattern, 'C:/Users/RUNNER~1/store/c+1/python/Lib/encodings/aliases.py')).toBe(true);
+    // Not shipped, a prefix of a shipped name, another directory, another root, or not the source itself.
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\encodings\idna.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\o.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\encodings\os.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c11\python\Lib\os.py`)).toBe(false);
+    expect(matches(pattern, String.raw`D:\x\C:\Users\RUNNER~1\store\c+1\python\Lib\os.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\os.pyc`)).toBe(false);
+  });
+
+  it('should skip every file under a data tree, and only under it', () => {
+    const root = String.raw`C:\Users\RUNNER~1\store\c+1`;
+    const pattern = shippedBytecodeExclusion(root, ['python/Lib/os.py'], ['python/tcl']);
+
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\tcl\tix8.4.3\pref\WmDefault.py`)).toBe(true);
+    expect(matches(pattern, 'C:/Users/RUNNER~1/store/c+1/python/tcl/tix8.4.3/pref/WmDefault.py')).toBe(true);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\os.py`)).toBe(true);
+    // A sibling whose name starts with the tree's, the tree's name deeper down, or the module beside the data.
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\tclx\a.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\tkinter\tcl\a.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\tkinter\tix.py`)).toBe(false);
+    expect(
+      matches(
+        shippedBytecodeExclusion(root, [], ['python/tcl']),
+        String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\os.py`,
+      ),
+    ).toBe(false);
+  });
+
+  it("should stay far under Windows' 32,767-character command line for the interpreter's 566 shipped sources", () => {
+    const sources = Array.from(
+      { length: 566 },
+      (_, index) => `python/Lib/site-packages/pip/_vendor/package_${String(index % 40)}/module_${String(index)}.py`,
+    );
+    const pattern = shippedBytecodeExclusion(String.raw`C:\Users\someone\AppData\Roaming\Tau\store\closure`, sources);
+
+    expect(pattern.length).toBeLessThan(16_000);
+    expect(
+      matches(
+        pattern,
+        `${String.raw`C:\Users\someone\AppData\Roaming\Tau\store\closure`}\\${sources[7]!.replaceAll('/', '\\')}`,
+      ),
+    ).toBe(true);
   });
 });

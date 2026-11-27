@@ -41,6 +41,8 @@
     "./native-store": "./src/native-store.ts",
     "./project-roots": "./src/project-roots.ts",
     "./services-host": "./src/services-host.ts",
+    "./windows-native-sandbox": "./src/windows-native-sandbox.ts",
+    "./windows-native-sandbox-main": "./src/windows-native-sandbox-main.ts",
     "./package.json": "./package.json"
   },
   "imports": {

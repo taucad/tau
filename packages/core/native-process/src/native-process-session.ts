@@ -11,6 +11,7 @@ import type { RuntimeLogger } from '@taucad/runtime/kernel';
 
 import {
   acquireNativeSandbox,
+  isWindowsSandboxedChild,
   launchInNativeSandbox,
   releaseNativeSandbox,
   sampleLinuxResident,
@@ -197,6 +198,12 @@ export const processEnvironment = (artifactPath: string): NodeJS.ProcessEnv => {
   environment['TEMP'] = artifactPath;
   environment['TMP'] = artifactPath;
   if (process.platform === 'win32') {
+    // Windows programs find the home and per-user folders through these, not HOME: Python's `Path.home()` reads
+    // USERPROFILE and fails without it (ezdxf resolves its config folder at import). Point them all at the artifact
+    // folder, as HOME is, so a worker never looks for the person's own profile, which its AppContainer cannot read.
+    environment['USERPROFILE'] = artifactPath;
+    environment['APPDATA'] = artifactPath;
+    environment['LOCALAPPDATA'] = artifactPath;
     if (process.env['SystemRoot']) {
       environment['SystemRoot'] = process.env['SystemRoot'];
     }
@@ -210,6 +217,20 @@ export const processEnvironment = (artifactPath: string): NodeJS.ProcessEnv => {
 /** Gracefully terminate a native process group, then hard-kill it after a short bound. @public */
 export const terminateProcessTree = async (child: ChildProcessWithoutNullStreams): Promise<void> => {
   if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) {
+    return;
+  }
+  if (process.platform === 'win32' && isWindowsSandboxedChild(child)) {
+    // The sandbox helper ends its job on `terminate` and restores folder permissions before it reports the exit; a
+    // process-tree kill of the helper would leave them for the next start's recovery.
+    await new Promise<void>((resolve) => {
+      child.once('exit', () => {
+        resolve();
+      });
+      child.once('error', () => {
+        resolve();
+      });
+      child.kill();
+    });
     return;
   }
   if (process.platform === 'win32') {
@@ -478,6 +499,7 @@ const spawnContained = async (launch: NativeWorkerLaunch): Promise<NativeWorkerP
     writablePath: launch.sandboxRoot ?? launch.artifactPath,
     workingDirectory: launch.workspacePath,
     commandId: launch.commandId,
+    executableSha256: launch.executableSha256,
   });
   const child = spawnInNativeSandbox(vector, {
     cwd: launch.workspacePath,
@@ -499,7 +521,7 @@ const spawnContained = async (launch: NativeWorkerLaunch): Promise<NativeWorkerP
     stderr: child.stderr,
     ended,
     terminate: async () => terminateProcessTree(child),
-    /* Linux only. macOS has no reader until it is verified on a macOS runner; no native runtime starts on Windows. The
+    /* Linux only. macOS has no reader until it is verified on a macOS runner; Windows has none yet. The
      * wrapper leads its own process group (`detached`), so the tree's root and group are both its pid. */
     ...(process.platform === 'linux' && pid !== undefined
       ? {

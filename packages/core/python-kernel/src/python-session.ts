@@ -21,8 +21,9 @@ import type { PythonArtifact, PythonIssue } from '#python-protocol.js';
 /**
  * Host-owned paths, integrity evidence and limits for one Python session.
  *
- * The interpreter lives at `<runtime>/bin/python3`; that runtime root, or the closure root a sealed closure names as
- * `runtimePath`, is the only host path the sandbox lets the worker read besides its workspace mirror.
+ * The interpreter lives at `<runtime>/bin/python3` (`<runtime>\python.exe` on Windows); that runtime root, or the
+ * closure root a sealed closure names as `runtimePath`, is the only host path the sandbox lets the worker read besides
+ * its workspace mirror.
  * @public
  */
 export type PythonSessionOptions = {
@@ -30,7 +31,7 @@ export type PythonSessionOptions = {
   readonly worker: PythonKernelWorker;
   readonly pythonExecutable: string;
   readonly workerPath: string;
-  /** The root the sandbox may read; defaults to the interpreter's prefix (`<runtime>/bin/python3`). */
+  /** The root the sandbox may read; defaults to the interpreter's prefix (`<runtime>/bin/python3`, Windows `<runtime>\python.exe`). */
   readonly runtimePath?: string;
   readonly workspacePath: string;
   readonly artifactPath: string;
@@ -116,6 +117,10 @@ const parseResponse = (value: unknown): NativeProtocolResponse<PythonIssue> => {
     : { requestId: response.requestId, result: response.result };
 };
 
+/** The interpreter's prefix: `<prefix>/bin/python3` on macOS and Linux, `<prefix>\python.exe` on Windows. */
+const interpreterPrefix = (executable: string): string =>
+  process.platform === 'win32' ? dirname(executable) : resolve(dirname(executable), '..');
+
 /** What `release` answers. */
 const emptySchema = z.object({});
 /** What `shutdown` answers. */
@@ -155,7 +160,7 @@ export const createPythonSession = (options: PythonSessionOptions): PythonSessio
       '--parent-pid',
       String(process.pid),
     ],
-    runtimePath: options.runtimePath ?? resolve(dirname(options.pythonExecutable), '..'),
+    runtimePath: options.runtimePath ?? interpreterPrefix(options.pythonExecutable),
     workspacePath: options.workspacePath,
     artifactPath: options.artifactPath,
     resources: [

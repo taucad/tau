@@ -119,14 +119,14 @@ category: testing
     );
   });
 
-  it('should parse stable catalog fields from frontmatter', () => {
+  it("should read Tau's catalog fields from the specification's metadata mapping", () => {
     const content = `---
 name: catalog-fields
 description: Has catalog fields
-source: tau-store
-version: 2.1.0
-when_to_use: Use when catalog fields matter
-enabled: false
+metadata:
+  source: tau-store
+  version: "2.1.0"
+  enabled: "false"
 ---
 `;
     const result = parseSkillFrontmatter(content, '.agents/skills/catalog-fields/SKILL.md');
@@ -136,10 +136,10 @@ enabled: false
         name: 'catalog-fields',
         source: 'tau-store',
         version: '2.1.0',
-        whenToUse: 'Use when catalog fields matter',
         enabled: false,
       }),
     );
+    expect(result?.diagnostics).toBeUndefined();
   });
 });
 

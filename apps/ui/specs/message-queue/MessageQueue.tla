@@ -282,6 +282,12 @@
 \* still `unknown`, an applied answer with no durable row, or a connection lost past the bound) to Sentry, and arms a
 \* report-only timer for a read that stays lost. A wait-class refusal still holds for its host. What is thrown, held and
 \* acknowledged is unchanged. No action or verdict changes.
+\* Connecting attachment placement (2026-11-27, #2297): `chat-session-store.ts` no longer reads an attachment still
+\* connecting as observing another host. A placement change waits for that connect's answer and rebinds the log
+\* reader only when the answered placement differs, which is the `Observe` guard of `QueuePlacement.tla`
+\* (`s.observed # s.selected`); before, it restarted a reader already on the selected host and dropped the live text
+\* of the run under way. The grant, the prepared-command marking and delivery are unchanged. No action or verdict
+\* changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

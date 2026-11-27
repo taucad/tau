@@ -57,6 +57,7 @@ const on = vi.fn((_event: string, listener: (event: RenderEvent) => void) => {
 });
 
 vi.mock('#hooks/use-project.js', () => ({
+  useMainGraphics: () => undefined,
   useProject: () => ({
     geometryUnits: new Map([['src/main.ts', { getSnapshot, on, subscribe }]]),
     mainEntryPath: 'src/main.ts',

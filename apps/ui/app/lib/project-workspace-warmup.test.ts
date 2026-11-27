@@ -1,16 +1,29 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { loadWorkspace } = vi.hoisted(() => ({
-  loadWorkspace: vi.fn(),
-}));
-
-vi.mock('#routes/w.$workspace.$project/project-live-sessions.js', () => {
-  loadWorkspace();
-  const liveProjectSessions = () => null;
+const { loadWorkspace, standInWorkspace } = vi.hoisted(() => {
+  const load = vi.fn();
   return {
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock the React component's exported name.
-    LiveProjectSessions: liveProjectSessions,
+    loadWorkspace: load,
+    /** The workspace module's stand-in, which counts its loads. A row that mocks it differently puts this one back. */
+    standInWorkspace: () => {
+      load();
+      const liveProjectSessions = () => null;
+      return {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock the React component's exported name.
+        LiveProjectSessions: liveProjectSessions,
+      };
+    },
   };
+});
+
+vi.mock('#routes/w.$workspace.$project/project-live-sessions.js', () => standInWorkspace());
+
+beforeEach(() => {
+  /* Each row starts with no workspace import: the module holds the one shared import. */
+  vi.resetModules();
+  /* A fresh factory too: a mock module's result outlives `resetModules`, and the stand-in counts its own loads. */
+  vi.doMock('#routes/w.$workspace.$project/project-live-sessions.js', () => standInWorkspace());
+  loadWorkspace.mockClear();
 });
 
 describe('warmProjectWorkspace', () => {

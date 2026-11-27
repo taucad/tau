@@ -215,7 +215,8 @@ describe('sidebar search trigger', () => {
       expect(within(header).queryByRole('button', { name: 'Search' })).not.toBeInTheDocument();
       expect(row).toHaveTextContent('Search');
       expect(row).toHaveClass('max-md:hidden');
-      expect(within(row).getByText('Ctrl+K')).toHaveClass('pointer-coarse:hidden');
+      /* The chip carries both platforms' labels; the label is its child (`KeyShortcut`'s `combination`). */
+      expect(within(row).getByText('Ctrl+K').parentElement).toHaveClass('pointer-coarse:hidden');
 
       await userEvent.click(row);
 

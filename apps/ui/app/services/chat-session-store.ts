@@ -943,6 +943,11 @@ type ObservedChat = {
   placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
   /** That live connection's client, which commands borrow while it is attached (WP-12 step 6, HP-06). */
   client?: ConnectedHostClient;
+  /**
+   * Settles once that attachment's connect has answered, or the attachment is stopped first (#2297). Until then its
+   * placement is unknown, not different: a placement change waits for it before it moves the reader.
+   */
+  connecting?: Readonly<{ settled: Promise<void>; settle: () => void }>;
   status: 'unknown' | 'attached' | 'lost' | 'refused';
   retry?: ReturnType<typeof setTimeout>;
   /** Armed by a loss that is not a leadership handoff; reports it if it outlasts {@link chatReadLossBoundMilliseconds}. */
@@ -953,6 +958,25 @@ type ObservedChat = {
    * stays failed for the page's life, so the chat shows it whenever its session can ({@link ChatSessionStore}).
    */
   hostLoadFailure?: unknown;
+};
+
+/**
+ * Wait until the chat's log attachment knows where it is connected, or has none (#2297). A connect that answers or
+ * fails, or an attachment stopped first, settles the wait, and a later attachment is waited for in turn.
+ *
+ * @param current - Reads the chat's observation now; it may be replaced while this waits.
+ * @param signal - Abandons the wait once the attachment it waits for settles.
+ * @returns Once no attachment is still connecting.
+ */
+const waitForAttachmentPlacement = async (
+  current: () => ObservedChat | undefined,
+  signal: AbortSignal,
+): Promise<void> => {
+  for (let observed = current(); observed?.connecting !== undefined; observed = current()) {
+    // oxlint-disable-next-line no-await-in-loop -- each wait is for the attachment current after the one before it.
+    await observed.connecting.settled;
+    signal.throwIfAborted();
+  }
 };
 
 /** The run IDs a Close prompt can truthfully promise to stop, and the work it cannot. @public */
@@ -3871,6 +3895,8 @@ export class ChatSessionStore {
     observed.attachment = undefined;
     observed.placement = undefined;
     observed.client = undefined;
+    observed.connecting?.settle();
+    observed.connecting = undefined;
     observed.status = 'unknown';
   }
 
@@ -3971,16 +3997,28 @@ export class ChatSessionStore {
     if (connector === undefined) {
       return;
     }
+    let settle = (): void => undefined;
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const connecting = { settled, settle };
     const attachment = createActor(hostAttachment, {
       input: {
         chatId,
         connect: async () => {
-          const client = await connector.connect(chatId);
-          if (observed.attachment === attachment) {
-            observed.placement = client.placement;
-            observed.client = client;
+          try {
+            const client = await connector.connect(chatId);
+            if (observed.attachment === attachment) {
+              observed.placement = client.placement;
+              observed.client = client;
+            }
+            return client;
+          } finally {
+            if (observed.connecting === connecting) {
+              observed.connecting = undefined;
+            }
+            settle();
           }
-          return client;
         },
         projection: {
           getSnapshot: () => this.#projectionOf(chatId).getSnapshot(),
@@ -4085,6 +4123,7 @@ export class ChatSessionStore {
       ...this.#rootOptions,
     });
     observed.attachment = attachment;
+    observed.connecting = connecting;
     attachment.start();
     this.startPendingSeed(chatId);
   }
@@ -5668,6 +5707,14 @@ export class ChatSessionStore {
               }
               // Commands resolve the persisted placement for each turn. Its
               // long-lived log subscription must follow the same host change.
+              // An attachment still connecting has an unknown placement, not a
+              // different one: restarting it would drop the live text its
+              // connection already carries for a run under way (#2297), so the
+              // move waits for its answer and compares then.
+              await waitForAttachmentPlacement(() => this.#observed.get(input.chatId), signal);
+              if (this.#sessions.get(input.chatId) !== session) {
+                return;
+              }
               const observed = this.#observed.get(input.chatId);
               if (
                 observed?.placement !== undefined &&

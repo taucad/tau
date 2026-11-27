@@ -27,6 +27,7 @@ const liveProvidersEnabled = process.env['TAU_E2E_LIVE_GEMINI'] === 'true';
 const hostSpecs = [
   'src/browser-agent-host.spec.ts',
   'src/chat-isolated-workspace.spec.ts',
+  'src/chat-reattach.spec.ts',
   'src/chat-questions.spec.ts',
   'src/chat-todo-list.spec.ts',
   'src/daemon-agent-host.spec.ts',

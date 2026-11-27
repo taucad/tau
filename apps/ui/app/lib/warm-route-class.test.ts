@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { warmRouteClass } from '#lib/warm-route-class.js';
+import { warmRouteClass, warmSendTier } from '#lib/warm-route-class.js';
 import type { WarmTarget } from '#lib/warm-route-class.js';
 import { warmManifestPath } from '#lib/warm-manifest.js';
 
@@ -82,6 +82,50 @@ describe('warmRouteClass', () => {
   ])('should warm nothing for %s', async (_label, respond) => {
     const { host } = hostWith(respond);
     await expect(warmRouteClass({ target: 'project', loaded: 'home', host })).resolves.toEqual([]);
+    expect(prefetchLinks()).toEqual([]);
+  });
+});
+
+describe('warmSendTier (WP-12 step 2)', () => {
+  afterEach(() => {
+    document.head.replaceChildren();
+  });
+
+  it('should prefetch the send tier, heavy and worker-imported code included, never a worker entry or wasm', async () => {
+    const send = [
+      '/assets/three.module-g.js',
+      '/assets/agent-host.impl-h.js',
+      '/assets/agent-host.worker-i.js',
+      '/assets/replicad_single-e.wasm',
+      '/assets/cad-viewer-j.css',
+    ];
+    const { host } = hostWith(async () => ({ ok: true, json: async () => ({ ...manifest, send: { project: send } }) }));
+    const script = document.createElement('script');
+    script.src = '/assets/three.module-g.js';
+    script.setAttribute('src', '/assets/three.module-g.js');
+    document.head.append(script);
+    expect(await warmSendTier({ target: 'project', host })).toEqual([
+      '/assets/agent-host.impl-h.js',
+      '/assets/cad-viewer-j.css',
+    ]);
+    expect(prefetchLinks()).toEqual(['/assets/agent-host.impl-h.js', '/assets/cad-viewer-j.css']);
+  });
+
+  it('should warm nothing for a manifest without a send tier, or one that cannot be read', async () => {
+    expect(
+      await warmSendTier({
+        target: 'project',
+        host: hostWith(async () => ({ ok: true, json: async () => manifest })).host,
+      }),
+    ).toEqual([]);
+    expect(
+      await warmSendTier({
+        target: 'project',
+        host: hostWith(async () => {
+          throw new Error('offline');
+        }).host,
+      }),
+    ).toEqual([]);
     expect(prefetchLinks()).toEqual([]);
   });
 });

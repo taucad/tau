@@ -497,6 +497,31 @@ describe('host connector', () => {
     expect(guard.take()).toEqual([]);
   });
 
+  it('should say where connect would dial without dialling, so a command can ride the attachment (WP-12 step 6)', async () => {
+    const guard = guardActors();
+    const chat = createChatStore(
+      new Map([
+        ['daemon-chat', { activeExecution: daemonExecution }],
+        ['acp-chat', { activeExecution: { kind: 'acp', agentId: 'claude-code' } as unknown as CadAgentExecution }],
+      ]),
+    );
+    const fileManager = createFileManager(readyContext());
+    const session = createSession(
+      { store: chat.store, choices: () => baseChoices, fileManagerRef: fileManager.ref },
+      guard,
+    );
+    session.start();
+    const extras = chat.published.at(-1)?.[2];
+
+    expect(await extras?.placement?.('browser-chat')).toEqual({ hostId: undefined });
+    expect(await extras?.placement?.('daemon-chat')).toEqual({ hostId: 'hst_daemon' });
+    expect(await extras?.placement?.('acp-chat')).toBeUndefined();
+    expect(agentHost.dialed).toEqual([]);
+    expect(agentHost.browserOptions).toEqual([]);
+    session.stop();
+    expect(guard.take()).toEqual([]);
+  });
+
   it('should answer stoppability, presentation and rating by placement', async () => {
     const guard = guardActors();
     const chat = createChatStore(new Map([['daemon-chat', { activeExecution: daemonExecution }]]));

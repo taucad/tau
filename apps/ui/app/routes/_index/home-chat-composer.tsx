@@ -1,6 +1,7 @@
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
 import { ChatComposerStaticBar } from '#components/chat/chat-composer-static-bar.js';
 import { prefetchNewProjectComposer, useNewProjectComposer } from '#components/chat/use-new-project-composer.js';
+import { warmSendOnIntent } from '#lib/warm-next-step.js';
 
 /*
  * In a browser, the rich composer's chunk is requested as soon as Home's module evaluates, which is before hydration:
@@ -49,7 +50,14 @@ export function HomeChatComposer({
        * region ends at the composer, not the page, so the project list still streams in after first paint. A
        * browser without `rel=expect` ignores it. */}
       <link rel='expect' href={`#${homeComposerEndId}`} blocking='render' />
-      <div className='space-y-4'>
+      {/* WP-12 step 2: the first keystroke is the intent to send (the input takes focus at first paint, so focus is
+       * not), and the send's code, viewer and agent host included, is prefetched from here, once per page. */}
+      <div
+        className='space-y-4'
+        onInputCapture={() => {
+          warmSendOnIntent('project');
+        }}
+      >
         <ChatEarlyInput
           isHostReady={Composer !== undefined}
           enableAutoFocus={enableAutoFocus}

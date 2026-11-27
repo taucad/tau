@@ -1,3 +1,4 @@
+import { holdFirstTurnBackup, releaseFirstTurnBackup } from '#lib/first-turn-backup-gate.js';
 import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { mock } from 'vitest-mock-extended';
 // @vitest-environment jsdom
@@ -384,6 +385,60 @@ describe('useTauCloudIntentConnection', () => {
     expect(connectRemote).toHaveBeenCalledOnce();
     expect(connectRemote).toHaveBeenCalledWith('tau');
     expect(tauCloudIntent.get(projectId)).toBe('connected');
+  });
+
+  it("should hold a Home-created project's first backup until its first turn streams (WP-12 step 5)", async () => {
+    holdFirstTurnBackup(projectId);
+    tauCloudIntent.set(projectId, 'noticed');
+    const { rerender } = renderConnection(undefined);
+    rerender({ head: 'rev-1' });
+    /* Still owed while held, so the connector stays mounted for as long as the project is open. */
+    expect(tauCloudIntent.get(projectId)).toBe('noticed');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(connectRemote).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseFirstTurnBackup(projectId);
+      await Promise.resolve();
+    });
+    expect(connectRemote).toHaveBeenCalledOnce();
+    expect(connectRemote).toHaveBeenCalledWith('tau');
+    expect(tauCloudIntent.get(projectId)).toBe('connected');
+  });
+
+  it('should leave a held first backup to the account signed in when the hold ends, connecting once', async () => {
+    holdFirstTurnBackup(projectId);
+    tauCloudIntent.set(projectId, 'noticed');
+    const { rerender } = renderConnection(undefined);
+    rerender({ head: 'rev-1' });
+    expect(tauCloudIntent.get(projectId)).toBe('noticed');
+
+    setRevisionSessionUser({ id: 'account-b', name: 'B' });
+    await act(async () => {
+      releaseFirstTurnBackup(projectId);
+      await Promise.resolve();
+    });
+    /* The connect step runs again for the account signed in when the hold ends, and connects once. */
+    expect(connectRemote).toHaveBeenCalledOnce();
+    expect(tauCloudIntent.get(projectId)).toBe('connected');
+  });
+
+  it('should queue no held first backup on a session that closed before the hold ended', async () => {
+    holdFirstTurnBackup(projectId);
+    tauCloudIntent.set(projectId, 'noticed');
+    const { rerender, unmount } = renderConnection(undefined);
+    rerender({ head: 'rev-1' });
+
+    unmount();
+    await act(async () => {
+      releaseFirstTurnBackup(projectId);
+      await Promise.resolve();
+    });
+    /* The closed client would queue it for whoever opens the project next; the next session connects it instead. */
+    expect(connectRemote).not.toHaveBeenCalled();
+    expect(tauCloudIntent.get(projectId)).toBe('noticed');
   });
 
   it('should not repeat a step another tab already took', () => {

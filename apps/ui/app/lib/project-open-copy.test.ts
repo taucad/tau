@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { announcementOf, projectFilesCopy, projectOpenCopy } from '#lib/project-open-copy.js';
+import { announcementOf, projectFilesCopy, projectOpenCopy, projectSessionFailedCopy } from '#lib/project-open-copy.js';
 
 describe('projectOpenCopy', () => {
   it('should say one label for the whole open, and the slow words only for a stalled one', () => {
@@ -23,6 +23,14 @@ describe('projectFilesCopy', () => {
     for (const state of ['connecting', 'downloading', 'preparing', 'failed', 'account'] as const) {
       expect(projectFilesCopy(state, undefined).join(' '), state).not.toContain('device');
     }
+  });
+});
+
+describe('projectSessionFailedCopy', () => {
+  it('should say a session that did not come up failed to open, naming no download or transport', () => {
+    expect(projectSessionFailedCopy[0]).toBe(projectFilesCopy('failed', undefined)[0]);
+    expect(projectSessionFailedCopy.join(' ')).not.toMatch(/download|device|network|connection|sync/iu);
+    expect(announcementOf(projectSessionFailedCopy)).toBe('Couldn’t open this project. Try again.');
   });
 });
 

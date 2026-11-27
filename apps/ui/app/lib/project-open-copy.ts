@@ -38,12 +38,23 @@ export type ProjectOpenState = ProjectOpenStep | 'offline' | 'failed' | 'account
 /** A running step's words: the one label and no sentence. */
 const running = [withEllipsis(projectOpenCopy.label), ''] as const;
 
+/** What every failed open says first: the request that did not happen. */
+const openFailedTitle = 'Couldn’t open this project';
+
+/**
+ * What an open whose project session did not come up says: a startup region failed or passed its start bound
+ * (`projectSessionStartBoundMilliseconds`), or its code did not load. None of that is a download, for a project kept on
+ * the device or in Tau Cloud (the open's pull is the files' own wait, said by {@link projectFilesCopy}), so it names no
+ * transport.
+ */
+export const projectSessionFailedCopy: readonly [string, string] = [openFailedTitle, 'Try again.'];
+
 const messages = {
   connecting: running,
   downloading: running,
   preparing: running,
   offline: ['You’re offline', 'This project isn’t on this device yet. Go online, then try again.'],
-  failed: ['Couldn’t open this project', 'The download didn’t finish. Try again.'],
+  failed: [openFailedTitle, 'The download didn’t finish. Try again.'],
   account: ['Sign in to continue', cloudOpenAccountReason],
   ready: ['Project files ready', ''],
 } satisfies Record<ProjectOpenState, readonly [string, string]>;

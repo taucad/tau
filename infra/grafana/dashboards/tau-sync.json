@@ -1573,10 +1573,48 @@
       "id": 94
     },
     {
-      "title": "Logs",
+      "title": "Backup admission (cloud backup admission blueprint WP2a)",
       "type": "row",
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 259 },
+      "panels": [],
+      "id": 101
+    },
+    {
+      "title": "Hook refusals by code",
+      "type": "timeseries",
+      "description": "Pushes the pre-receive hook or git's receive refused, once per distinct code (tau_sync_hook_refusals_total). HTTP refusals stay on tau_sync_refusals_total. The four authorship codes are retired: any value is a rollback below WP2a (backup-retired-code).",
+      "targets": [
+        {
+          "expr": "sum by (tau_sync_refusal_code) (increase(tau_sync_hook_refusals_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{tau_sync_refusal_code}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 260 },
+      "id": 102
+    },
+    {
+      "title": "Refusals by first backup and client rules",
+      "type": "timeseries",
+      "description": "first_backup=true: the push's manifest held no branch or tag (backup-first-refused pages on it). client_rules=none: a build released before WP6 sent no Tau-Client-Rules header.",
+      "targets": [
+        {
+          "expr": "sum by (tau_sync_first_backup, tau_sync_client_rules) (increase(tau_sync_hook_refusals_total{app=~\"$app\",service_name=~\"$service\",tau_sync_refusal_code!~\"GIT_PUSH_NOT_FAST_FORWARD|GIT_PUSH_VERSION_NUMBER_TAKEN\"}[5m]))",
+          "legendFormat": "first {{tau_sync_first_backup}} · rules {{tau_sync_client_rules}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 260 },
+      "id": 103
+    },
+    {
+      "title": "Logs",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 268 },
       "panels": [],
       "id": 95
     },
@@ -1591,7 +1629,7 @@
         }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 260 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 269 },
       "id": 96
     },
     {
@@ -1600,7 +1638,7 @@
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [{ "expr": "{service_name=~\"$service\"} |= \"git.hot_projects\"", "refId": "A" }],
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 260 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 269 },
       "id": 97
     }
   ]

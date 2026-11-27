@@ -3,7 +3,7 @@ title: 'Testing Policy'
 description: 'Writing high-quality tests across the Tau monorepo. Assert observable behavior, error assertions, resource cleanup, mock factories, and async patterns. Covers Vitest, kernel tests, and API tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-11-25'
+updated: '2026-11-27'
 related:
   - docs/policy/react-testing-policy.md
   - docs/policy/typescript-policy.md
@@ -481,6 +481,71 @@ A flake fix never skips or disables a test (`skip`, `todo`, `fails`, a false `ru
 
 Release is mechanical, by the ledger job: 100 consecutive executions without a failure after a linked fix lands, over at least two days, or 300 without a fix. A failure during verification returns the test to quarantine.
 
+## 17. Tests Pass Alone and in Any Order
+
+Every test passes when it runs alone and when its file runs in any order. Never let a test depend on state another test created, changed or left behind, or on another test's cleanup.
+
+**Why**: Burn-in runs a changed test file ten times in shuffled order with no retry (§ 16.2), so a test that needs its neighbours fails the next pull request that touches its file.
+
+| State                                                                                | Rule                                                                                                                                              |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A `beforeAll` fixture                                                                | Read-only to its tests. Build there only what no test changes: a loaded kernel, a server that tests only query, a template                        |
+| Anything a test mutates: a store, refs, tags, a remote, files, module state, globals | Create it per test: in `beforeEach`, in the test, or as a per-test copy of a template built once in `beforeAll`                                   |
+| Shared state a test must write and cannot own, such as a process-wide singleton      | Reset it per test (`vi.resetModules()` and a fresh import), or use names unique to the test and assert relative to the state it found             |
+| Order                                                                                | Never pin it: no `{ shuffle: false }` on a suite or test, no `sequence.shuffle: false` or fixed `sequence.seed` in a Vitest config or test target |
+
+Pinning the order or raising `retry` is never the fix for an order dependence: it switches off the check that found the fault. Fix a dependence that burn-in exposes at the fixture, in that pull request or in a linked one that lands before it merges. That it also fails on `main` does not defer the fix.
+
+**Enforced by**: `tau-lint/no-pinned-test-order` (error) flags a literal `shuffle: false` in the options of `describe`, `suite`, `it` and `test`. Its `.oxlintrc.json` override lists the suites that predate the rule as debt; never add a file to it.
+
+INCORRECT:
+
+```typescript
+// One store for the suite: every test reads what the tests before it left.
+describe('RevisionPort conformance', { shuffle: false }, () => {
+  let port: RevisionPort;
+  beforeAll(async () => {
+    port = await createStore();
+  });
+
+  it('should number the first version after Start 2', async () => {
+    const created = await port.tag({ name: 'Ready for print', revisionId });
+    expect(created.number).toBe(2); // 3 once any other test has tagged this store
+    expect(await port.listTags()).toStrictEqual([created]); // holds only while every other test deletes its tags
+  });
+});
+```
+
+CORRECT:
+
+```typescript
+describe('RevisionPort conformance', () => {
+  let template: StoreTemplate; // built once, never mutated
+  let port: RevisionPort;
+  beforeAll(async () => {
+    template = await buildStoreTemplate();
+  });
+  beforeEach(async () => {
+    port = await template.copy(); // each test owns the store it mutates
+  });
+
+  it('should number the first version after Start 2', async () => {
+    const created = await port.tag({ name: 'Ready for print', revisionId });
+    expect(created.number).toBe(2);
+    expect(await port.listTags()).toStrictEqual([created]);
+  });
+});
+
+// A remote too costly to copy: a name unique to the test, asserted against the state the test found.
+it('should add one tag to the remote', async () => {
+  const before = await remote.listTags();
+  const created = await remote.tag({ name: `release-${crypto.randomUUID()}`, revisionId });
+  expect(await remote.listTags()).toStrictEqual([...before, created]);
+});
+```
+
+**Incident (2026-11)**: `packages/revisions/src/revision-port.conformance.test.ts` built one store per adapter in `beforeAll`, and the transport suite one git `http-backend` remote; every test read and mutated that store's tags, refs and checkouts. "The first version after Start is V2" and `listTags()` equalling only the test's own tag held because earlier tests ran first and cleaned up. Under burn-in's `--sequence.shuffle --retry=0`, 17 tests failed, on `main` as well (seeds 892449537, 895142114, 898532911). It surfaced only because taucad/tau#2909 touched the file. The suites were first pinned with `{ shuffle: false }`, which masked the symptom; the repair replaces the shared fixture with per-test isolation.
+
 ## Summary Checklist
 
 Before merging a test:
@@ -494,4 +559,5 @@ Before merging a test:
 - [ ] Mock factories are shared, not duplicated per test file
 - [ ] Test names follow `should <verb> <outcome>` pattern
 - [ ] Structured data assertions check shape, not just existence
+- [ ] Every test passes alone and in shuffled order; a `beforeAll` fixture is read-only and nothing pins the order (§ 17)
 - [ ] A flaky test is fixed at its cause, not skipped, slept on or given more retries, and any longer timeout carries a measured `Timeout-budget:`

@@ -1,5 +1,6 @@
 import type { CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import type { AgentHostClient } from '#services/agent-host-client.js';
+import { markChatTiming } from '#chat-clients/_internal/chat-timing.js';
 
 type CommandOptions = Readonly<{
   retryDelay?: (milliseconds: number) => Promise<void>;
@@ -93,11 +94,14 @@ export const sendHostCommand = async (
     let failure: unknown;
     try {
       const client = await connect();
+      markChatTiming('host-command-connected', { type: command.type });
       try {
         if (options.signal?.aborted) {
           throw interrupted();
         }
+        markChatTiming('host-command-sent', { type: command.type });
         answer = await client.hostCommand(command);
+        markChatTiming('host-command-answered', { type: command.type, status: answer.status });
       } finally {
         await client.close();
       }

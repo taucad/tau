@@ -34,6 +34,7 @@ import {
   installNativeWorkerLauncher,
   launchInNativeSandbox,
   NativeProcessSession,
+  NativeRuntimeUnavailableError,
   nativeSandboxPolicy,
   runInNativeSandbox,
   startNativeWorker,
@@ -65,9 +66,14 @@ const emittedWriteVerdict = (profile: string, path: string): 'allow' | 'deny' | 
   return verdict;
 };
 
-const sandboxAvailable =
-  (process.platform === 'darwin' || process.platform === 'linux') &&
-  SandboxManager.checkDependencies().errors.length === 0;
+/*
+ * Whether Tau ships a native sandbox backend for this platform. It has none for Windows yet (lane R7 owns it): there
+ * the product refuses every launch with a typed `NativeRuntimeUnavailableError` by design, which the Windows case at the
+ * end asserts. Measured on the Windows unit lane (run 43996958515): each of this suite's cases failed with exactly that
+ * refusal. R7 adds `win32` here when its backend lands.
+ */
+const sandboxShips = process.platform === 'darwin' || process.platform === 'linux';
+const sandboxAvailable = sandboxShips && SandboxManager.checkDependencies().errors.length === 0;
 
 type Outcomes = Record<
   | 'home_read'
@@ -141,8 +147,9 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
 setInterval(() => {}, 1000);
 `;
 
-// A runner that claims to be CI must actually have the sandbox; skipping there would hide a broken boundary.
-describe.skipIf(!sandboxAvailable && process.env['CI'] === undefined)('native sandbox seam', () => {
+// A runner that claims to be CI must actually have the sandbox where Tau ships one; skipping there would hide a broken
+// boundary.
+describe.skipIf(!sandboxAvailable && (process.env['CI'] === undefined || !sandboxShips))('native sandbox seam', () => {
   /* The daemon brokers its runtime children's launches through `startNativeWorker` (D37, North Star S2): a worker it
    * starts must be contained exactly as one a session spawns itself. */
   it.each([
@@ -471,4 +478,65 @@ describe.skipIf(!sandboxAvailable && process.env['CI'] === undefined)('native sa
     },
     60_000,
   );
+});
+
+describe.runIf(!sandboxShips)('native sandbox without a backend', () => {
+  it('should refuse every launch with the typed unavailable error and start nothing', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-refusal-')));
+    const workspacePath = join(root, 'workspace');
+    const artifactPath = join(root, 'artifacts');
+    mkdirSync(workspacePath);
+    mkdirSync(artifactPath);
+    const marker = join(artifactPath, 'started');
+    const workerPath = join(workspacePath, 'worker.cjs');
+    writeFileSync(workerPath, `require('node:fs').writeFileSync(${JSON.stringify(marker)}, '');`);
+    const session = new NativeProcessSession<{ readonly message: string }>({
+      executablePath: process.execPath,
+      executableSha256: createHash('sha256').update(readFileSync(process.execPath)).digest('hex'),
+      arguments: [workerPath],
+      runtimePath: dirname(process.execPath),
+      workspacePath,
+      artifactPath,
+      resources: [],
+      protocolVersion: 1,
+      parseReady: () => undefined,
+      parseResponse: (value) => value as { readonly requestId: string; readonly result: unknown },
+      requestTimeout: 30_000,
+      maxArtifactBytes: 1024,
+      logger: createMockLogger(),
+      sessionName: 'Sandbox refusal',
+      executableName: 'node',
+    });
+    try {
+      const refusals = [
+        async () =>
+          session.request({
+            method: 'probe',
+            params: {},
+            parseResult: (value) => value,
+            signal: new AbortController().signal,
+          }),
+        async () =>
+          runInNativeSandbox({
+            executablePath: process.execPath,
+            arguments: [workerPath],
+            readablePaths: [dirname(process.execPath)],
+            writablePath: artifactPath,
+            workingDirectory: workspacePath,
+            commandId: 'refusal#1',
+          }),
+      ];
+      for (const launch of refusals) {
+        const refusal = launch();
+        // oxlint-disable-next-line no-await-in-loop -- each refusal is asserted in turn.
+        await expect(refusal).rejects.toBeInstanceOf(NativeRuntimeUnavailableError);
+        // oxlint-disable-next-line no-await-in-loop -- each refusal is asserted in turn.
+        await expect(refusal).rejects.toMatchObject({ code: 'NATIVE_RUNTIME_UNAVAILABLE' });
+      }
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      await session.cleanup();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
 });

@@ -152,13 +152,15 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
     capturedTextarea.onSubmit = properties.onSubmit;
     capturedTextarea.handOff = properties.handOff;
     capturedTextarea.className = properties.className;
-    useImperativeHandle(properties.ref, () => ({ focus: capturedTextarea.focus }), []);
+    useImperativeHandle(properties.ref, () => ({ focus: capturedTextarea.focus, submit: async () => undefined }), []);
     return <div data-testid='chat-textarea' data-collapsible={properties.enableMobileCollapse === true} />;
   },
 }));
 
 // Queue behavior is covered by its view and session-store suites; this leaf fixture owns history composition.
 vi.mock('#components/chat/chat-message-queue.js', () => ({ ChatMessageQueue: () => null }));
+// The credits note reads the Cloud plan; its own suite covers it.
+vi.mock('#components/chat/chat-credits-notice.js', () => ({ ChatCreditsNotice: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({
   ChatMessagePlanning: () => (
     <div role='status' aria-label='Current activity'>

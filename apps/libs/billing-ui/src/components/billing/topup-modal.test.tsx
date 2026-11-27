@@ -568,6 +568,31 @@ describe('TopupModal', () => {
     );
   });
 
+  /* N-4: paying leaves the chat for Stripe's page, so the chat's top-up says the message waits there. */
+  it('adds the caller’s return note only when payment leaves the page', async () => {
+    entitlements.current = { isResolved: true, paymentCollectionAvailable: true };
+    const { unmount } = render(
+      <TestHost>
+        <TopupModal isOpen onOpenChange={vi.fn()} returnNote='Your message will be here when you’re back.' />
+      </TestHost>,
+    );
+    expect(await screen.findByText('Your message will be here when you’re back.')).toBeInTheDocument();
+    unmount();
+
+    entitlements.current = {
+      isResolved: true,
+      paymentCollectionAvailable: true,
+      paymentMethod: { brand: 'visa', last4: '4242' },
+    };
+    render(
+      <TestHost>
+        <TopupModal isOpen onOpenChange={vi.fn()} returnNote='Your message will be here when you’re back.' />
+      </TestHost>,
+    );
+    expect(await screen.findByText('Visa •••• 4242')).toBeInTheDocument();
+    expect(screen.queryByText('Your message will be here when you’re back.')).toBeNull();
+  });
+
   it('labels the custom amount, states the allowed range and explains an amount outside it', async () => {
     renderModal();
     await userEvent.click(await screen.findByRole('button', { name: 'Other' }));

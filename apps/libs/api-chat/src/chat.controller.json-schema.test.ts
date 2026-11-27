@@ -150,6 +150,12 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "description": {
                         "type": "string",
                       },
+                      "diagnostics": {
+                        "items": {
+                          "type": "string",
+                        },
+                        "type": "array",
+                      },
                       "enabled": {
                         "type": "boolean",
                       },

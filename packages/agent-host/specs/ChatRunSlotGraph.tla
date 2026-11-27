@@ -14,7 +14,7 @@ CONSTANTS
     SingleDecider, DurablePause, LazyClaim, SettlePerAttempt, StopFence,
     CloseBarrier, ResolveFirst, OrphanCoded
 VARIABLES
-    log, res, drivers, steerQ, ending, waiters, tools, pc, answered, alive, crashes,
+    log, durable, res, drivers, steerQ, ending, waiters, tools, pc, answered, alive, crashes,
     epoch, readLen, claimed, opened, ghost, revoked, lease, started, completes, acked,
     lockFree, gw, call, callState, lostCount, hostState, closeAt,
     act
@@ -64,6 +64,8 @@ GraphNext ==
     \/ S!acknowledge /\ A("acknowledge", "")
     \/ S!quiescent /\ A("quiescent", "")
     \/ S!modelCall /\ A("modelCall", "")
+    \/ S!dispatch /\ A("dispatch", "")
+    \/ S!sync /\ A("sync", "")
     \/ S!gatewaySettles /\ A("gatewaySettles", "")
     \/ S!replyShown /\ A("replyShown", "")
     \/ S!replyLost /\ A("replyLost", "")

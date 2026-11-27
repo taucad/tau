@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -82,6 +82,14 @@ const expectations = {
     primaryAction: 'Reopen project',
     live: undefined,
   },
+  /* A session that failed was not closed: its notice says the open failed, once, with one action. Offline is its own
+   * row below. */
+  'session-failed': {
+    state: { kind: 'session-failed', projectId, project },
+    title: 'Couldn’t open this project',
+    primaryAction: 'Try again',
+    live: 'alert',
+  },
   trashed: {
     state: { kind: 'trashed', projectId, project },
     title: 'Project is in Trash',
@@ -154,6 +162,7 @@ const recoveryFailures: ReadonlyArray<readonly [PendingProjectRecoveryReason, st
 ];
 
 beforeEach(() => {
+  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
   /* A non-prerelease desktop release exists, so the native-kernel notice offers it (Q56); the hidden case is its own test. */
   vi.stubEnv('TAU_DESKTOP_RELEASED', 'true');
   navigate.mockClear();
@@ -164,6 +173,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('ProjectRouteNotice', () => {
@@ -234,6 +245,47 @@ describe('ProjectRouteNotice', () => {
     expect(screen.getByRole('heading', { level: 3, name: title })).toBeInTheDocument();
     expect(screen.getAllByRole('button')[0]).toHaveAccessibleName(primaryAction);
     expect(screen.getByRole('alert')).toBeInTheDocument();
+  });
+
+  /* QA: offline right after Create, the open failed and read "Project closed", which the person did not do, and nothing
+   * announced it. Offline it is the open's offline notice, said once, with one action (Progressive Loading Policy rules
+   * 19, 21 and 22). */
+  it('should say a failed open is offline while the page reads offline, once, with one action', async () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...globalThis.location, reload });
+    render(<ProjectRouteNotice state={{ kind: 'session-failed', projectId, project }} />);
+
+    const alert = screen.getByRole('alert');
+    expect(within(alert).getByRole('heading', { level: 3, name: 'You’re offline' })).toBeInTheDocument();
+    expect(screen.queryByText('Project closed')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+
+    /* Code that failed to load stays failed for the page's life: the one action that can finish the open reloads. */
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(reload).toHaveBeenCalledOnce();
+    expect(focusSend).not.toHaveBeenCalled();
+  });
+
+  /* Back online the same failed open keeps its words and its one action, never "Project closed" and a reopen that
+   * cannot load the code that failed. */
+  it('should say a failed open failed once the page reads online, with the same one action', async () => {
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...globalThis.location, reload });
+    render(<ProjectRouteNotice state={{ kind: 'session-failed', projectId, project }} />);
+
+    expect(screen.queryByText('Project closed')).toBeNull();
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('should keep a closed project closed while the page reads offline', () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project, reason: 'user' }} />);
+
+    expect(screen.getByRole('heading', { level: 3, name: 'Project closed' })).toBeInTheDocument();
   });
 
   it('should name the project in the pane header, and the address when it is missing', () => {

@@ -15,10 +15,12 @@ const run: ProjectedRun = {
   ending: { source: { chatId: 'chat-1', leaderEpoch: 'term-1', sequence: 3 }, at: endedAt },
 };
 
+// oxlint-disable-next-line eslint/max-params -- test setup with optional trailing defaults.
 const setup = (
   purposes: () => Response,
   principal: () => string | undefined = () => 'user-1',
   feedbackStore: ReturnType<typeof memoryPendingStore> | undefined = undefined,
+  now: (() => number) | undefined = undefined,
 ) => {
   const submitted: Array<Readonly<{ url: string; authorization: string | undefined }>> = [];
   const planes: string[] = [];
@@ -50,6 +52,7 @@ const setup = (
     fetch: withBearer,
     store,
     ...(feedbackStore === undefined ? {} : { feedbackStore }),
+    ...(now === undefined ? {} : { now }),
     observe: async () => ({ runs: [run], ownsEpoch: () => true }),
   });
   return { evidence, submitted, planes, facts, store };
@@ -211,8 +214,9 @@ describe('createHostEvidence', () => {
     );
   });
 
-  it('should read the purposes once for both reporters when a run starts (WP-02)', async () => {
+  it('should read the purposes once for both reporters and the moments of one turn (WP-02)', async () => {
     let reads = 0;
+    let clock = 1000;
     const { evidence } = setup(
       () => {
         reads += 1;
@@ -220,6 +224,7 @@ describe('createHostEvidence', () => {
       },
       () => 'user-1',
       memoryPendingStore(),
+      () => clock,
     );
     /* The host's first reads, at composition, are one request for both purposes. */
     await vi.waitFor(() => {
@@ -227,12 +232,47 @@ describe('createHostEvidence', () => {
     });
     expect(reads).toBe(1);
 
-    /* A run's start reads again, once for both. */
+    /* A run's start and its quiescence soon after reuse that answer. */
+    clock = 3000;
     evidence.onChatQuiescent('chat-1', false);
     await Promise.all([evidence.reporter.refresh(), evidence.feedback?.refresh()]);
+    clock = 6000;
+    await evidence.reporter.refresh();
+    expect(reads).toBe(1);
 
-    /* Both run-start reads shared one request; the two refreshes queued after them shared the next. */
-    expect(reads).toBe(3);
+    /* Past the window, the next moment asks again, once for both. */
+    clock = 11_000;
+    await Promise.all([evidence.reporter.refresh(), evidence.feedback?.refresh()]);
+    expect(reads).toBe(2);
+  });
+
+  it('should ask again for an answer that granted nothing, and for another account', async () => {
+    let reads = 0;
+    let allowed: readonly string[] = [];
+    let account = 'user-1';
+    const { evidence } = setup(
+      () => {
+        reads += 1;
+        return allowing(allowed)();
+      },
+      () => account,
+      undefined,
+      () => 1000,
+    );
+    /* The host's read at composition granted nothing; each later moment asks again. */
+    await evidence.reporter.refresh();
+    const opened = reads;
+    await evidence.reporter.refresh();
+    expect(reads).toBe(opened + 1);
+
+    allowed = ['summary'];
+    await evidence.reporter.refresh();
+    await evidence.reporter.refresh();
+    expect(reads).toBe(opened + 2);
+
+    account = 'user-2';
+    await evidence.reporter.refresh();
+    expect(reads).toBe(opened + 3);
   });
 
   it('should bind a grant given after the host opened when a run starts, and report that run', async () => {

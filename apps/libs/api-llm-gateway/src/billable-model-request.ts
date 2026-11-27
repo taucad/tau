@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- provider wire keys use native snake_case. */
+import { createHash } from 'node:crypto';
 import { attachmentImageMediaTypes } from '@taucad/agent-host/wire';
 import { z } from 'zod';
 import type { ModelProviderWire } from '#model-invocation.types.js';
@@ -21,9 +22,39 @@ const cacheControlSchema = z.object({ type: z.literal('ephemeral'), ttl: z.enum(
 /* Routes a conversation to one supplier server so its prefix cache is found again. The caller
  * sends a hash, never a Tau identifier (I4). OpenAI documents at most 64 characters. */
 const promptCacheKeySchema = z.string().min(1).max(64);
-/* Linear on purpose: a backtracking group per quadruple overflows V8's regexp stack
- * on a multi-megabyte attachment. Length and padding position are checked apart. */
-const isBase64 = (value: string): boolean => value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/u.test(value);
+/**
+ * Whether `value` from `start` on is padded base64: a length and alphabet loop over the string in place (chat
+ * performance WP-14 step 6), with no regular expression and no substring of a multi-megabyte attachment.
+ *
+ * @param value - The string.
+ * @param start - Where the base64 begins (after a data URL's prefix).
+ * @returns True for padded standard base64, the empty string included.
+ */
+const isBase64From = (value: string, start = 0): boolean => {
+  if ((value.length - start) % 4 !== 0) {
+    return false;
+  }
+  let padding = 0;
+  for (let index = start; index < value.length; index += 1) {
+    const code = value.codePointAt(index) ?? 0;
+    if (code === 0x3d) {
+      padding += 1;
+    } else if (
+      padding > 0 ||
+      !(
+        (code >= 0x41 && code <= 0x5a) ||
+        (code >= 0x61 && code <= 0x7a) ||
+        (code >= 0x30 && code <= 0x39) ||
+        code === 0x2b ||
+        code === 0x2f
+      )
+    ) {
+      return false;
+    }
+  }
+  return padding <= 2;
+};
+const isBase64 = (value: string): boolean => isBase64From(value);
 /* Base64 spends four characters on every three bytes, with the final group padded out. */
 const base64Length = (bytes: number): number => 4 * Math.ceil(bytes / 3);
 /* D17: an image is capped at 4 MiB of raw bytes, captures included. */
@@ -31,14 +62,22 @@ const maximumImageBase64Length = base64Length(4 * 1024 * 1024);
 const base64Schema = z.string().max(maximumImageBase64Length).refine(isBase64, 'Invalid base64 image data');
 /* The stored image types (`attachmentMedia`, I2): GIF stays so that chats which already hold one still send. */
 const imageMediaTypeSchema = z.enum(attachmentImageMediaTypes);
+const base64Marker = ';base64,';
 const dataImageUrlPrefixLength = Math.max(...attachmentImageMediaTypes.map((type) => `data:${type};base64,`.length));
 const dataImageUrlSchema = z
   .string()
   .max(dataImageUrlPrefixLength + maximumImageBase64Length)
   .refine((value) => {
-    const match = /^data:(image\/[\w.+-]+);base64,(.*)$/u.exec(value);
+    /* The media type is one of the stored image types, so its end is found within the longest prefix. */
+    const marker = value.startsWith('data:') ? value.slice(0, dataImageUrlPrefixLength).indexOf(base64Marker, 5) : -1;
+    if (marker === -1 || marker + base64Marker.length > dataImageUrlPrefixLength) {
+      return false;
+    }
+    const start = marker + base64Marker.length;
     return (
-      match !== null && imageMediaTypeSchema.safeParse(match[1]).success && base64Schema.safeParse(match[2]).success
+      imageMediaTypeSchema.safeParse(value.slice(5, marker)).success &&
+      value.length - start <= maximumImageBase64Length &&
+      isBase64From(value, start)
     );
   }, 'Invalid image data URL');
 /* D24 (amended R1): a PDF attachment is capped at 16 MiB of raw bytes. */
@@ -51,10 +90,13 @@ const documentBase64Schema = z
 const pdfDataUrlSchema = z
   .string()
   .max(pdfDataUrlPrefix.length + maximumDocumentBase64Length)
-  .refine((value) => {
-    const match = /^data:application\/pdf;base64,(.*)$/u.exec(value);
-    return match !== null && documentBase64Schema.safeParse(match[1]).success;
-  }, 'Invalid PDF data URL');
+  .refine(
+    (value) =>
+      value.startsWith(pdfDataUrlPrefix) &&
+      value.length - pdfDataUrlPrefix.length <= maximumDocumentBase64Length &&
+      isBase64From(value, pdfDataUrlPrefix.length),
+    'Invalid PDF data URL',
+  );
 const documentNameSchema = z.string().min(1).max(256);
 
 const textSchema = z
@@ -715,22 +757,12 @@ const conversationLength = (body: BillableModelRequest): bigint => {
 };
 
 /**
- * Upper bound on the input tokens a qualified request can be billed for.
+ * The image count and bytes inside `value`, or `undefined` when an element has no documented token bound.
  *
- * Every tokenizer these routes use — byte-level BPE, SentencePiece and unigram —
- * has a vocabulary of non-empty byte sequences, so a token never spans fewer than
- * one byte of the text it encodes. The serialized request is therefore a hard
- * bound on its own text tokens, and it is the exact payload the gateway forwards,
- * so JSON punctuation, member names and tool schemas are all inside the bound.
- * Image bytes are not a bound on image tokens, so each image element is removed
- * from the byte total and replaced by its documented per-image maximum. Chat
- * template and provider-injected system tokens are covered by the per-message and
- * per-route constants ratified in Q1.
- *
- * @param body - The parsed native provider request.
- * @returns The bound in tokens, or `undefined` when an element carries no documented bound.
+ * @param value - A whole request or part of one.
+ * @returns What the byte bound subtracts and adds back for images.
  */
-export const billableModelInputBound = (body: BillableModelRequest): bigint | undefined => {
+const elementBound = (value: unknown): { readonly images: bigint; readonly imageBytes: bigint } | undefined => {
   let images = 0n;
   let imageBytes = 0n;
   const unbounded: string[] = [];
@@ -761,17 +793,132 @@ export const billableModelInputBound = (body: BillableModelRequest): bigint | un
       }
     }
   };
-  visit(body);
-  if (unbounded.length > 0) {
+  visit(value);
+  return unbounded.length > 0 ? undefined : { images, imageBytes };
+};
+
+/** The text bytes of `value` with its images replaced by their per-image maximum. */
+const textAndImageBound = (value: unknown): bigint | undefined => {
+  const bound = elementBound(value);
+  if (bound === undefined) {
     return undefined;
   }
-  const textBytes = utf8Bytes(JSON.stringify(body)) - imageBytes;
-  return (
-    (textBytes < 0n ? 0n : textBytes) +
-    conversationLength(body) * perMessageTokens +
-    perRouteTokens +
-    images * perImageTokens
+  const textBytes = utf8Bytes(JSON.stringify(value)) - bound.imageBytes;
+  return (textBytes < 0n ? 0n : textBytes) + bound.images * perImageTokens;
+};
+
+/**
+ * Upper bound on the input tokens a qualified request can be billed for.
+ *
+ * Every tokenizer these routes use — byte-level BPE, SentencePiece and unigram —
+ * has a vocabulary of non-empty byte sequences, so a token never spans fewer than
+ * one byte of the text it encodes. The serialized request is therefore a hard
+ * bound on its own text tokens, and it is the exact payload the gateway forwards,
+ * so JSON punctuation, member names and tool schemas are all inside the bound.
+ * Image bytes are not a bound on image tokens, so each image element is removed
+ * from the byte total and replaced by its documented per-image maximum. Chat
+ * template and provider-injected system tokens are covered by the per-message and
+ * per-route constants ratified in Q1.
+ *
+ * @param body - The parsed native provider request.
+ * @returns The bound in tokens, or `undefined` when an element carries no documented bound.
+ */
+export const billableModelInputBound = (body: BillableModelRequest): bigint | undefined => {
+  const bound = textAndImageBound(body);
+  return bound === undefined ? undefined : bound + conversationLength(body) * perMessageTokens + perRouteTokens;
+};
+
+/**
+ * A request's conversation prefix, stored with its operation so that the next step of the same conversation can
+ * be held from the input tokens the supplier reported for it (chat performance WP-15 step 6, ruling O-6).
+ */
+export type BillableInputPrefix = {
+  readonly version: 'input-prefix-v1';
+  /** `sha256:` over the request without its output maximum and its conversation, then each conversation item. */
+  readonly digest: string;
+  /** How many conversation items the digest covers. */
+  readonly items: number;
+};
+
+/* The output maximum changes nothing the supplier counts as input, and the conversation is digested per item. */
+const nonInputMembers = new Set(['max_output_tokens', 'max_completion_tokens', 'max_tokens']);
+
+const canonicalJson = (value: unknown): string =>
+  JSON.stringify(value, (_key, member: unknown) =>
+    member !== null && typeof member === 'object' && !Array.isArray(member)
+      ? Object.fromEntries(Object.entries(member).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : member,
   );
+
+/** The conversation array a wire carries: `input` (Responses) or `messages` (Messages, Chat Completions). */
+const conversationOf = (
+  body: BillableModelRequest,
+): { readonly key: 'input' | 'messages'; readonly items: readonly unknown[] } | undefined =>
+  Array.isArray(body.input)
+    ? { key: 'input', items: body.input }
+    : Array.isArray(body.messages) && body.input === undefined
+      ? { key: 'messages', items: body.messages }
+      : undefined;
+
+/**
+ * Per-prefix digests: one hash over everything that is not the conversation, chained over each item, so that the
+ * digest of every prefix is read in one pass over the body.
+ */
+const prefixDigests = (body: BillableModelRequest, key: 'input' | 'messages', items: readonly unknown[]): string[] => {
+  const rest = Object.fromEntries(
+    Object.entries(body).filter(([member]) => member !== key && !nonInputMembers.has(member)),
+  );
+  let chain = createHash('sha256')
+    .update(`input-prefix-v1:${key}:${canonicalJson(rest)}`)
+    .digest('hex');
+  const digests = [`sha256:${chain}`];
+  for (const item of items) {
+    chain = createHash('sha256').update(chain).update(canonicalJson(item)).digest('hex');
+    digests.push(`sha256:${chain}`);
+  }
+  return digests;
+};
+
+/**
+ * The prefix this request offers the next step, and the hold bound it earns from the step before it.
+ *
+ * The bound is `undefined` unless `previous` covers a strict prefix of this conversation with every other member
+ * equal. Then it is the supplier-reported input tokens of that step plus, for the items after it, one token per
+ * serialized byte with each image at its per-image maximum and the per-message template constant. Every item of the
+ * prefix was counted by the supplier in that step; appending items can only drop earlier reasoning, never count the
+ * prefix again larger, so the sum stays an upper bound (`tau_billing_funded_operation_above_hold_settlements_total` watches it).
+ *
+ * @param body - The parsed native provider request.
+ * @param previous - The prefix and reported input tokens of the conversation's previous settled step, if any.
+ * @returns This request's own prefix and, when the previous one matches, the bound it earns.
+ */
+export const billableModelInputPrefix = (
+  body: BillableModelRequest,
+  previous?: { readonly prefix: BillableInputPrefix; readonly inputTokens: bigint },
+): { readonly prefix: BillableInputPrefix; readonly bound?: bigint } | undefined => {
+  const conversation = conversationOf(body);
+  if (conversation === undefined || conversation.items.length === 0) {
+    return undefined;
+  }
+  const digests = prefixDigests(body, conversation.key, conversation.items);
+  const prefix: BillableInputPrefix = {
+    version: 'input-prefix-v1',
+    digest: digests.at(-1)!,
+    items: conversation.items.length,
+  };
+  if (
+    previous === undefined ||
+    previous.prefix.items < 1 ||
+    previous.prefix.items >= conversation.items.length ||
+    digests[previous.prefix.items] !== previous.prefix.digest
+  ) {
+    return { prefix };
+  }
+  const added = conversation.items.slice(previous.prefix.items);
+  const addedBound = textAndImageBound(added);
+  return addedBound === undefined
+    ? { prefix }
+    : { prefix, bound: previous.inputTokens + addedBound + BigInt(added.length) * perMessageTokens };
 };
 
 /** Whether a qualified native request carries an image. */

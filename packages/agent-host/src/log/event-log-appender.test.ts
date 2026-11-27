@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogStorage } from '#log/event-log-appender.js';
 import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
@@ -275,5 +275,105 @@ describe('appendMany (WP-10 step A, group commit)', () => {
         await expect(reopened.read()).resolves.toEqual(intended.slice(0, read.length + 1));
       }
     }
+  });
+});
+
+describe('appendOrdered and durable (WP-10 step B, the durability barrier)', () => {
+  /** A synced port whose flushes wait for `release`, one at a time. */
+  const heldSync = (failSync = false) => {
+    const file = syncedStorage({ failSync });
+    const sync = file.storage.sync!;
+    const gates: Array<PromiseWithResolvers<void>> = [];
+    const storage: EventLogStorage = {
+      ...file.storage,
+      sync: async () => {
+        const gate = Promise.withResolvers<void>();
+        gates.push(gate);
+        await gate.promise;
+        await sync();
+      },
+    };
+    return { file, storage, gates };
+  };
+
+  it('should answer once the rows are ordered, and make them durable at durable()', async () => {
+    const file = syncedStorage();
+    const log = await createEventLogAppender(file.storage);
+
+    const batch = await log.appendOrdered!([row(0), message(1, 'hello')]);
+
+    expect(batch).toEqual({
+      outcomes: [
+        { appended: true, endCursor: 1 },
+        { appended: true, endCursor: 2 },
+      ],
+      known: true,
+    });
+    await expect(log.read()).resolves.toEqual([row(0), message(1, 'hello')]);
+    expect(file.durable()).toBe(0);
+    await log.durable!();
+    expect(file.durable()).toBe(file.bytes().byteLength);
+    expect(file.counts.syncs).toBe(1);
+  });
+
+  it('should share one flush among its waiters, and flush again for rows written while it ran', async () => {
+    const { file, storage, gates } = heldSync();
+    const log = await createEventLogAppender(storage);
+    await log.appendOrdered!([row(0)]);
+    const first = log.durable!();
+    const alsoFirst = log.durable!();
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(1);
+    });
+    /* Written while the first flush runs: that flush need not cover it. */
+    await log.appendOrdered!([row(1)]);
+    const second = log.durable!();
+    gates[0]!.resolve();
+    await Promise.all([first, alsoFirst]);
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(2);
+    });
+    gates[1]!.resolve();
+    await second;
+    expect(file.durable()).toBe(file.bytes().byteLength);
+    expect(file.counts.syncs).toBe(2);
+  });
+
+  it('should refuse every waiter LOG_POISONED after a failed flush, and write nothing more', async () => {
+    const file = syncedStorage({ failSync: true });
+    const log = await createEventLogAppender(file.storage);
+    await log.appendOrdered!([row(0)]);
+
+    await expect(Promise.all([log.durable!(), log.durable!()])).rejects.toMatchObject({ code: 'LOG_POISONED' });
+    await expect(log.durable!()).rejects.toMatchObject({ code: 'LOG_POISONED' });
+    await expect(log.append(row(1))).rejects.toMatchObject({ code: 'LOG_POISONED' });
+    expect(file.counts.syncs).toBe(1);
+  });
+
+  it('should flush the rows written since the last flush before it closes', async () => {
+    const file = syncedStorage();
+    const log = await createEventLogAppender(file.storage);
+    await log.appendOrdered!([row(0), row(1)]);
+
+    await log.close();
+
+    expect(file.durable()).toBe(file.bytes().byteLength);
+  });
+
+  it('should group-commit concurrent durable batches into fewer flushes than batches', async () => {
+    const { file, storage, gates } = heldSync();
+    const log = await createEventLogAppender(storage);
+    const batches = [0, 1, 2, 3].map(async (sequence) => log.appendMany!([row(sequence)]));
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(1);
+    });
+    gates[0]!.resolve();
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(2);
+    });
+    gates[1]!.resolve();
+    await expect(Promise.all(batches)).resolves.toHaveLength(4);
+    expect(file.counts.syncs).toBe(2);
+    await expect(log.read()).resolves.toEqual([row(0), row(1), row(2), row(3)]);
   });
 });

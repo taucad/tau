@@ -1,7 +1,13 @@
+import { gzipSync } from 'node:zlib';
 import fastify from 'fastify';
 import type { HttpAdapterHost } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
-import { gatewayWireOf, LlmGatewayBodyTiming, requestEncodingOf } from '#llm-gateway-body-timing.js';
+import {
+  gatewayAcceptEncodingHeader,
+  gatewayWireOf,
+  LlmGatewayBodyTiming,
+  requestEncodingOf,
+} from '#llm-gateway-body-timing.js';
 import type { MetricsService } from '@taucad/api-observability/metrics';
 
 const fakeMetrics = () => {
@@ -101,10 +107,89 @@ describe('LlmGatewayBodyTiming', () => {
     await app.close();
   });
 
-  it('should register nothing without metrics', () => {
-    const addHook = vi.fn();
-    const adapterHost = { httpAdapter: { getInstance: () => ({ addHook }) } } as unknown as HttpAdapterHost;
-    new LlmGatewayBodyTiming(adapterHost).onModuleInit();
-    expect(addHook).not.toHaveBeenCalled();
+  it('should register the decoding hooks without metrics and record nothing', async () => {
+    const app = fastify();
+    app.post('/v1/llm/openai/v1/responses', async (request: { body: unknown }) => ({ echoed: request.body }));
+    new LlmGatewayBodyTiming({} as HttpAdapterHost).register(app);
+    await app.ready();
+    const answer = await app.inject({
+      method: 'POST',
+      url: '/v1/llm/openai/v1/responses',
+      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+      payload: gzipSync(JSON.stringify({ input: 'hi' })),
+    });
+    expect(answer.json()).toEqual({ echoed: { input: 'hi' } });
+    await app.close();
+  });
+});
+
+/* Chat performance WP-15 step 2 (ruling O-3, gzip only). */
+describe('gzip gateway bodies', () => {
+  const serve = async (bodyLimit?: number) => {
+    const { size, metrics } = fakeMetrics();
+    const app = fastify(bodyLimit === undefined ? {} : { bodyLimit });
+    const handler = vi.fn(async (request: { body: unknown }) => ({ echoed: request.body }));
+    app.post('/v1/llm/openai/v1/responses', handler);
+    app.post('/v1/other', handler);
+    new LlmGatewayBodyTiming({} as HttpAdapterHost, metrics).register(app);
+    await app.ready();
+    return { app, size, handler };
+  };
+  const post = async (
+    app: Awaited<ReturnType<typeof serve>>['app'],
+    payload: Uint8Array<ArrayBuffer> | string,
+    { encoding, url = '/v1/llm/openai/v1/responses' }: { readonly encoding?: string; readonly url?: string } = {},
+  ) =>
+    app.inject({
+      method: 'POST',
+      url,
+      headers: {
+        'content-type': 'application/json',
+        ...(encoding === undefined ? {} : { 'content-encoding': encoding }),
+      },
+      payload: typeof payload === 'string' ? payload : Buffer.from(payload),
+    });
+  const gzip = (text: string): Uint8Array<ArrayBuffer> => new Uint8Array(gzipSync(text));
+
+  it('should inflate a gzip body, count its wire bytes and advertise gzip', async () => {
+    const { app, size } = await serve();
+    const body = JSON.stringify({ input: 'z'.repeat(20_000) });
+    const wire = gzip(body);
+    const answer = await post(app, wire, { encoding: 'gzip' });
+
+    expect(answer.statusCode).toBe(200);
+    expect(answer.json()).toEqual({ echoed: JSON.parse(body) as unknown });
+    expect(answer.headers[gatewayAcceptEncodingHeader]).toBe('gzip');
+    expect(size).toHaveBeenCalledWith(wire.byteLength, {
+      'tau.llm.wire': 'openai-responses',
+      'http.request.encoding': 'gzip',
+    });
+    const other = await post(app, '{}', { url: '/v1/other' });
+    expect(other.headers[gatewayAcceptEncodingHeader]).toBeUndefined();
+    await app.close();
+  });
+
+  it('should refuse a small gzip body that inflates past the limit while inflating', async () => {
+    const { app, handler } = await serve(4096);
+    const bomb = gzip(JSON.stringify({ input: 'a'.repeat(4_000_000) }));
+    expect(bomb.byteLength).toBeLessThan(4096);
+
+    const answer = await post(app, bomb, { encoding: 'gzip' });
+
+    expect(answer.statusCode).toBe(413);
+    expect(handler).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('should refuse a body that is not gzip and a coding other than gzip', async () => {
+    const { app, handler } = await serve();
+
+    const notGzip = await post(app, '{"input":"hi"}', { encoding: 'gzip' });
+    const brotli = await post(app, gzip('{}'), { encoding: 'br' });
+
+    expect(notGzip.statusCode).toBe(400);
+    expect(brotli.statusCode).toBe(415);
+    expect(handler).not.toHaveBeenCalled();
+    await app.close();
   });
 });

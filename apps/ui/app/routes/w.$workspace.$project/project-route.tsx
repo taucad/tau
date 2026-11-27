@@ -1,4 +1,4 @@
-import { createContext, Suspense, use, useCallback, useContext, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, Suspense, useCallback, useContext, useLayoutEffect, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { Handle } from '#types/matches.types.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
@@ -20,7 +20,7 @@ import { selectFocusTarget, selectProjectRouteState } from '#machines/focus.rout
 import type { CommittedProjectRoute, FocusRegistryView } from '#machines/focus.route-state.js';
 import type { FocusRouteCommand } from '#machines/focus.machine.js';
 import type { SessionsMachineContext } from '#machines/sessions.machine.js';
-import { loadProjectWorkspace } from '#lib/project-workspace-warmup.js';
+import { useProjectWorkspace } from '#lib/project-workspace-warmup.js';
 import { projectOpenCopy } from '#lib/project-open-copy.js';
 
 /*
@@ -28,11 +28,17 @@ import { projectOpenCopy } from '#lib/project-open-copy.js';
  * needs — three.js and the chat surface — is behind this boundary, which mounts only once a
  * project is live. Project links warm it on navigation intent.
  */
-function LiveProjectSessions(props: React.ComponentProps<typeof LiveProjectSessionsComponent>): React.JSX.Element {
+function LiveProjectSessions(props: React.ComponentProps<typeof LiveProjectSessionsComponent>): React.ReactNode {
   /* `use`, not `lazy`: a chunk that already arrived (warmed by the route below or by a project link)
    * renders in this pass. `lazy` suspends on its first render however settled its import is, and the
    * fallback it commits holds the reveal for React's 300 ms fallback throttle. */
-  const { LiveProjectSessions: Sessions } = use(loadProjectWorkspace());
+  const workspace = useProjectWorkspace();
+  /* A failed import draws nothing and is not imported again by a render: the route shows the open's failure, whose
+   * action reloads (staging QA 2026-11-27). */
+  if (workspace === undefined) {
+    return null;
+  }
+  const { LiveProjectSessions: Sessions } = workspace;
   return <Sessions {...props} />;
 }
 

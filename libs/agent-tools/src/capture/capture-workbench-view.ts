@@ -9,6 +9,7 @@
 import type { CaptureWorkbenchView } from '@taucad/chat/rpc';
 
 import { canonicalCaptureViews } from '#capture/capture-views.js';
+import { createIsometricCaptureCamera } from '#capture/viewer-capture-options.js';
 
 type Vector = readonly [number, number, number];
 
@@ -35,7 +36,7 @@ export type WorkbenchCaptureCamera =
 export type WorkbenchCapturePlane = Readonly<{ point: Vector; normal: Vector }>;
 
 /** Camera direction of the isometric preset, from the subject toward the camera. */
-const isometricDirection: Vector = [0.6123724357, -0.6123724357, 0.5];
+const isometricDirection: Vector = createIsometricCaptureCamera().direction;
 const upAxes = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } as const satisfies Record<string, Vector>;
 const planeAxes = { xy: 2, xz: 1, yz: 0 } as const;
 const axisNames = ['x', 'y', 'z'] as const;

@@ -8,6 +8,7 @@ import { createEventLogReducer } from '#log/reducer.js';
 import { projectLogRow } from '#log/projection-facts.js';
 import type { ProjectionBatch, ProjectionFact, ProjectionSourceHealth } from '#log/projection-facts.js';
 import { parseReplayEventLogBytes } from '#log/serialization.js';
+import type { LogFileDictionary } from '#log/compact-rows.js';
 
 /** Immutable published view over a privately maintained tolerant replay. @internal */
 export type ReplayView = Readonly<{
@@ -72,11 +73,14 @@ export const createReplayView = (bytes: Uint8Array<ArrayBuffer>, generation: str
   let factBytes: readonly number[] = [];
   const encoder = new TextEncoder();
   let offset = 0;
+  /* What the lines read so far wrote that a later line may name (WP-17). */
+  let dictionary: LogFileDictionary | undefined;
   let quarantined = false;
   let unterminated = false;
 
   const extend = (current: Uint8Array<ArrayBuffer>): ReplayView => {
-    const parsed = parseReplayEventLogBytes(current.subarray(offset));
+    const parsed = parseReplayEventLogBytes(current.subarray(offset), dictionary);
+    dictionary = parsed.dictionary;
     for (const row of parsed.rows) {
       if (row.opaque) {
         opaque.add(row.event);

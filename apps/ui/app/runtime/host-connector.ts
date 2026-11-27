@@ -211,6 +211,14 @@ export const hostConnectorCallback =
         return { ...hostClient, placement: { hostId: daemonHostId } };
       };
       const unpublish = chatSessions.publishProjectHostConnector(projectId, connect, {
+        /* Where `connect` would dial now, read as `connect` reads it, so a command can ride the chat's attachment when
+         * that attachment is on the same host (WP-12 step 6); `undefined` when `connect` would refuse. */
+        placement: async (chatId) => {
+          const stored = await chatSessions.getChatHostSettings(chatId);
+          const execution = stored?.activeExecution ?? ports.choices().defaultExecution;
+          const daemonHostId = daemonPlacementOf(execution);
+          return daemonHostId === undefined && execution.kind !== 'tau' ? undefined : { hostId: daemonHostId };
+        },
         stoppability: async (chatId) => {
           const stored = await chatSessions.getChatHostSettings(chatId);
           const execution = stored?.activeExecution ?? ports.choices().defaultExecution;

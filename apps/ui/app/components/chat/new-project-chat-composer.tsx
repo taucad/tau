@@ -1,3 +1,8 @@
+import { holdFirstTurnBackup } from '#lib/first-turn-backup-gate.js';
+import { departFirstMessage } from '#lib/departing-first-message.js';
+import { frameHintKey, writePhoneFrameHint } from '#lib/frame-hint.js';
+import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 import { useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
@@ -20,6 +25,16 @@ type NewProjectChatComposerProperties = {
   /** An early edit the route already adopted, when the route owns the native input. */
   readonly adoptedEarlyInput?: EarlyChatInput;
   readonly className?: string;
+};
+
+/** Loads the agent-host client with the first send's chunks, off Home's own graph, and boots its worker. */
+const prewarmAgentHost = async (): Promise<void> => {
+  try {
+    const { prewarmBrowserAgentHost } = await loadCode(async () => import('#services/agent-host-client.js'));
+    await prewarmBrowserAgentHost();
+  } catch {
+    /* `loadCode` handed a failed load to the page's recovery; the turn's own load reports it. */
+  }
 };
 
 /** Shared direct-create composer rendered inside an existing chat provider. */
@@ -91,9 +106,14 @@ export function NewProjectChatComposer({
       const attachments = draftActorRef
         .getSnapshot()
         .context.draftAttachments.map(({ byteLength: _byteLength, ...stored }) => stored);
+      /* WP-12 step 3: a turn this browser hosts boots its agent-host worker while the project is created and its route
+       * opens, not after the route mounts. Another host's turn needs no worker here. */
+      if (execution.kind === 'tau' && daemonPlacementOf(execution) === undefined) {
+        void prewarmAgentHost();
+      }
       try {
-        /* C1: a name asked for while the prompt was written, unawaited so the create's setup overlaps it; without one,
-         * the create asks and overlaps the wait itself. */
+        /* C1, WP-12 step 1: the latest name generated while the prompt was written, or one from its first words; the
+         * create never waits on naming. */
         const projectName = nameAhead.take({ text: content, attachments });
         const created = await projectManager.createProject({
           kernel: creationKernel,
@@ -112,8 +132,27 @@ export function NewProjectChatComposer({
           },
           location: location.value,
         });
-        await consumeDraft();
-        await navigate(projectUrl(created.slugs));
+        /* WP-12 step 5: the first cloud backup waits for the first turn to stream, or 5 s. */
+        holdFirstTurnBackup(created.id);
+        /* WP-12 with WP-07 step 5: the project's chat lane draws the message at its first row's place from the frame's
+         * first paint until the transcript draws it, so Enter never blanks the person's words. A message with images
+         * waits for its row: a text-only stand-in would grow when they arrive. */
+        if (attachments.length === 0) {
+          departFirstMessage(`${created.slugs.workspaceSlug}/${created.slugs.projectSlug}`, content);
+        }
+        /* The draft is consumed before the project route reads anything, and the navigation starts in the same task,
+         * so Home's composer clears as the frame is drawn ahead of the route, not a beat before. */
+        const url = projectUrl(created.slugs);
+        /* The project opens on its chat (`mobileActiveTab`); a phone's frame draws that sheet, and the message in it,
+         * from its first paint rather than the default model tab with the sheet closed. */
+        const hintKey = frameHintKey(url);
+        if (hintKey !== undefined) {
+          writePhoneFrameHint(hintKey, 'chat');
+        }
+        const consumed = consumeDraft();
+        const navigation = navigate(url);
+        await consumed;
+        await navigation;
       } catch (error) {
         if (presentLocationError(error)) {
           if (location.hasWebAccessCapability) {

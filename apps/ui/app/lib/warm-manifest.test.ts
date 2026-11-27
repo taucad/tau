@@ -1,6 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { isWarmableHref, parseWarmManifest, warmHrefs, warmManifestFile } from '#lib/warm-manifest.js';
+import {
+  isSendWarmableHref,
+  isWarmableHref,
+  parseWarmManifest,
+  sendHrefs,
+  warmHrefs,
+  warmManifestFile,
+} from '#lib/warm-manifest.js';
 import type { WarmManifest } from '#lib/warm-manifest.js';
 
 const manifest: WarmManifest = {
@@ -72,5 +79,27 @@ describe('warmHrefs', () => {
 
   it('should list nothing for an unknown class', () => {
     expect(warmHrefs(manifest, 'publication', 'home')).toEqual([]);
+  });
+});
+
+describe('the send tier (WP-12 step 2)', () => {
+  it('should accept worker-imported code but never a worker entry, wasm or a foreign URL', () => {
+    expect(isSendWarmableHref('/assets/agent-host.impl-a.js')).toBe(true);
+    expect(isSendWarmableHref('/assets/three.module-b.js')).toBe(true);
+    expect(isSendWarmableHref('/assets/agent-host.worker-c.js')).toBe(false);
+    expect(isSendWarmableHref('/assets/replicad-d.wasm')).toBe(false);
+    expect(isSendWarmableHref('https://cdn.example/assets/e.js')).toBe(false);
+  });
+
+  it('should read a send tier, drop an unreadable one alone, and list only send-warmable URLs', () => {
+    const parsed = parseWarmManifest({
+      version: 1,
+      classes: { project: ['/assets/a.js'] },
+      send: { project: ['/assets/agent-host.impl-a.js', '/assets/k.worker-b.js'], broken: [1] },
+    });
+    expect(parsed?.classes).toEqual({ project: ['/assets/a.js'] });
+    expect(parsed?.send).toEqual({ project: ['/assets/agent-host.impl-a.js', '/assets/k.worker-b.js'] });
+    expect(parsed === undefined ? [] : sendHrefs(parsed, 'project')).toEqual(['/assets/agent-host.impl-a.js']);
+    expect(parseWarmManifest({ version: 1, classes: {} })?.send).toBeUndefined();
   });
 });

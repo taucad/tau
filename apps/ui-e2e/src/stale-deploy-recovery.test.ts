@@ -392,8 +392,9 @@ describe('a code load that fails once on the build the server still runs (FP9, F
   };
 
   /**
-   * Start a chat from Home's composer, as the production report did (`/w/home/new-project?chat=…`): the chat panel
-   * mounts its activity row, whose spinner loads its own chunk.
+   * Start a chat from Home's composer, as the production report did (`/w/home/<project>?chat=…`): the chat panel
+   * mounts its activity row, whose spinner loads its own chunk. The project takes the prompt's words when no generated
+   * name has arrived by Enter (owner ruling O-1), so the slug is not fixed.
    */
   const startChatFromHome = async (page: Page, origin: string): Promise<void> => {
     await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
@@ -405,7 +406,7 @@ describe('a code load that fails once on the build the server still runs (FP9, F
     await composer.click();
     await page.keyboard.type('Make a cube');
     await page.keyboard.press('Enter');
-    await page.waitForURL(/\/w\/home\/new-project\?chat=/u, { timeout: 30_000 });
+    await page.waitForURL(/\/w\/home\/[^/?]+\?chat=/u, { timeout: 30_000 });
   };
 
   it('should keep the chat panel usable when its decorative spinner fails to load once', async () => {
@@ -447,7 +448,9 @@ describe('a code load that fails once on the build the server still runs (FP9, F
   it('should replace the agent host worker whose implementation failed to load once, with no reload', async () => {
     const { page, live, failures } = await open();
     await routeTurnAdmission(live.origin);
-    const failed = live.failNext(implementation, { answer: 'not-found' });
+    /* The worker's own import: Home's send tier prefetches the implementation (`empty`) at the first keystroke
+     * (WP-12 step 2), and that request must not take the fault. */
+    const failed = live.failNext(implementation, { answer: 'not-found', dest: 'script' });
 
     await startChatFromHome(page, live.origin);
     await failed;
@@ -469,7 +472,7 @@ describe('a code load that fails once on the build the server still runs (FP9, F
   it('should offer Reload, never Try again, once new workers could not load the agent host either', async () => {
     const { page, live } = await open();
     await routeTurnAdmission(live.origin);
-    void live.failNext(implementation, { answer: 'not-found', count: 3 });
+    void live.failNext(implementation, { answer: 'not-found', count: 3, dest: 'script' });
 
     await startChatFromHome(page, live.origin);
 

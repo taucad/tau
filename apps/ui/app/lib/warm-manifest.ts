@@ -28,6 +28,13 @@ export type WarmManifest = Readonly<{
   version: typeof warmManifestVersion;
   /** Each guarded class's warmable interactive files, as root-relative URLs, by class id. */
   classes: Readonly<Record<string, readonly string[]>>;
+  /**
+   * Each class's send tier (WP-12 step 2): what the first send from a composer that opens the class fetches after
+   * Enter, less the class's interactive files. Home prefetches it when its composer is first typed in, an explicit
+   * intent, so unlike `classes` it may hold heavy families and the agent host worker's code; never wasm, and never a
+   * worker's own entry file.
+   */
+  send?: Readonly<Record<string, readonly string[]>>;
 }>;
 
 /**
@@ -40,6 +47,19 @@ export type WarmManifest = Readonly<{
  */
 export const isWarmableHref = (href: string): boolean =>
   /^\/assets\/[\w.~-]+\.(?:js|css)$/u.test(href) && !/worker/iu.test(href);
+
+/**
+ * Whether a URL may be prefetched for a send: a hashed script or stylesheet of the build's own `assets` directory, on
+ * this origin, that is not a worker's entry file. Code a worker imports is a plain module and may be.
+ *
+ * @param href - A URL from the manifest's send tier.
+ * @returns `true` when the reader may prefetch it.
+ */
+export const isSendWarmableHref = (href: string): boolean =>
+  /^\/assets\/[\w.~-]+\.(?:js|css)$/u.test(href) && !/\.worker-/iu.test(href);
+
+const isStringList = (files: unknown): files is string[] =>
+  Array.isArray(files) && files.every((file): file is string => typeof file === 'string');
 
 /**
  * Read a fetched manifest.
@@ -57,13 +77,33 @@ export const parseWarmManifest = (value: unknown): WarmManifest | undefined => {
   }
   const parsed: Record<string, readonly string[]> = {};
   for (const [id, files] of Object.entries(classes)) {
-    if (!Array.isArray(files) || !files.every((file): file is string => typeof file === 'string')) {
+    if (!isStringList(files)) {
       return undefined;
     }
     parsed[id] = files;
   }
-  return { version, classes: parsed };
+  const send: Record<string, readonly string[]> = {};
+  const sendValue: unknown = 'send' in value ? value.send : undefined;
+  if (typeof sendValue === 'object' && sendValue !== null) {
+    for (const [id, files] of Object.entries(sendValue)) {
+      /* An unreadable send tier is dropped alone: the idle tier still warms. */
+      if (isStringList(files)) {
+        send[id] = files;
+      }
+    }
+  }
+  return { version, classes: parsed, ...(Object.keys(send).length === 0 ? {} : { send }) };
 };
+
+/**
+ * The files to prefetch for a send that opens a class: its send tier, each one send-warmable.
+ *
+ * @param manifest - The manifest.
+ * @param target - The class the send opens.
+ * @returns The URLs, in manifest order.
+ */
+export const sendHrefs = (manifest: WarmManifest, target: string): string[] =>
+  (manifest.send?.[target] ?? []).filter((href) => isSendWarmableHref(href));
 
 /**
  * The files to prefetch for a class: its interactive files, less those of the class the page already loaded, each one

@@ -903,11 +903,14 @@ describe('createProjectHost', () => {
     });
     const files = seams.parameterFiles.at(-1) as ParameterFiles;
     const events: string[] = [];
+    console.error('[DIAG] test watch start');
     const watch = files.watchReady({ paths: ['main.parameters.json'] }, (event) => {
+      console.error('[DIAG] test event', JSON.stringify(event));
       events.push(event.type);
     });
     await watch.ready;
 
+    console.error('[DIAG] test ready; closing channel');
     seams.channel?.close();
 
     expect(watch.closed).toBeInstanceOf(Promise);

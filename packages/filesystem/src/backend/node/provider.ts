@@ -1120,6 +1120,10 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
           }
           const { rootedPath } = event;
           if (kind === 'absent') {
+            console.error(
+              '[DIAG] emit-delete',
+              JSON.stringify({ rootedPath, absolute: event.absolute, deleted: event.deleted }),
+            );
             emit({ type: 'delete', path: rootedPath });
           } else if (kind === 'file' || kind === 'dir') {
             emit({ type: 'change', path: rootedPath, kind });
@@ -1155,6 +1159,16 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       const subscription = await native.subscribe(
         directory,
         (error, reported) => {
+          console.error(
+            '[DIAG] native',
+            JSON.stringify({
+              target: entry.target,
+              dir: entry.directory,
+              error: String(error ?? ''),
+              reported,
+              unsubscribed,
+            }),
+          );
           let events = reported;
           if (probe !== undefined && error) {
             /* A stream that failed is never going to report the probe; admission answers the failure. */
@@ -1182,6 +1196,16 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
           }
           const current = desiredDirectory(entry);
           if (current.directory !== entry.directory || current.targetIsDirectory !== entry.targetIsDirectory) {
+            console.error(
+              '[DIAG] rearm',
+              JSON.stringify({
+                target: entry.target,
+                from: entry.directory,
+                to: current.directory,
+                fromDir: entry.targetIsDirectory,
+                toDir: current.targetIsDirectory,
+              }),
+            );
             /* After any reconciliation the rearm classified, in order. */
             entry.rearming ??= open(entry)
               .then(
@@ -1247,6 +1271,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         await open(entry);
         classify(['reset']);
       } else if (previous && !entry.targetIsDirectory) {
+        console.error('[DIAG] reconcile-previous', JSON.stringify({ target: entry.target, directory }));
         // The ancestor stream may miss leaf events before this directory is
         // observed. Reconcile the exact target once its replacement is ready.
         classify([{ rootedPath: entry.rootedPath, absolute: entry.target, deleted: false }]);

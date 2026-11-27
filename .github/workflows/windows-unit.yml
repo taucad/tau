@@ -103,7 +103,7 @@ jobs:
         run: |
           set -o pipefail
           case "$GITHUB_EVENT_NAME" in
-            workflow_dispatch) projects=$(pnpm nx show projects --projects 'tag:ci:windows-unit' --json | tail -1) ;;
+            workflow_dispatch) projects='["host"]' ;;
             *) projects=$(pnpm nx show projects --affected --projects 'tag:ci:windows-unit' --json | tail -1) ;;
           esac
           echo "Windows unit rows: $projects"
@@ -148,4 +148,4 @@ jobs:
         shell: bash
         env:
           PROJECT: ${{ matrix.project }}
-        run: pnpm nx run "$PROJECT:test" --outputStyle=static -- --maxWorkers=2 --testTimeout=15000 --hookTimeout=30000
+        run: pnpm nx run "$PROJECT:test" --outputStyle=static -- --maxWorkers=2 --testTimeout=15000 --hookTimeout=30000 src/project-host.test.ts -t "close, not reset"

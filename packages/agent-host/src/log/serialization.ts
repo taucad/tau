@@ -1,5 +1,7 @@
-import { classifyLogJson, parseLogEvent } from '#log/event-schema.js';
+import { classifyLogJson, classifyLogValue, parseLogEvent } from '#log/event-schema.js';
 import { canonicalJson } from '#log/canonical-json.js';
+import { LogFileDictionary, restoreLogRow } from '#log/compact-rows.js';
+import type { ClassifiedRow } from '#log/event-schema.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 const encoder = new TextEncoder();
@@ -49,6 +51,8 @@ type ParsedEventLog<Row extends ReadRow = ReadRow> = {
   readonly validByteLength: number;
   readonly needsSeparator: boolean;
   readonly discardedTail: boolean;
+  /** What the parsed lines wrote that a later line may name (WP-17): pass it on to parse bytes appended after them. */
+  readonly dictionary: LogFileDictionary;
 };
 
 type ByteLine = { readonly start: number; readonly end: number; readonly terminated: boolean };
@@ -75,25 +79,58 @@ const textOf = (bytes: Uint8Array<ArrayBuffer>, line: ByteLine): string | undefi
   }
 };
 
+/** A line's row, restored from the lines before it (WP-17); a compact line naming nothing they wrote is quarantined. */
+const classifyLine = (
+  text: string | undefined,
+  dictionary: LogFileDictionary,
+): { readonly classified: ClassifiedRow; readonly restoredText?: string } => {
+  if (text === undefined) {
+    return { classified: { class: 'quarantined' } };
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    return { classified: { class: 'quarantined' } };
+  }
+  const restored = restoreLogRow(value, dictionary);
+  if (restored.status === 'unresolved') {
+    return { classified: { class: 'quarantined' } };
+  }
+  /* The restored value is the row the writer appended; the dictionary keeps the classified row's values. */
+  const restoredText = restored.status === 'restored' ? JSON.stringify(restored.value) : undefined;
+  const classified = classifyLogValue(restored.value);
+  if (classified.class !== 'quarantined') {
+    dictionary.note(value, classified.event);
+  }
+  return restoredText === undefined ? { classified } : { classified, restoredText };
+};
+
 /**
  * Read a log tolerantly (D16): opening never fails because of a row's content. A torn final line (no newline, not a
  * row) is left beyond `validByteLength` for the writer's first guarded append to repair; any other line without a row
- * envelope is quarantined.
+ * envelope is quarantined. Compact lines are restored from the file's earlier lines (WP-17): `from` is what the lines
+ * before `bytes` wrote, when `bytes` continue a file already parsed.
  *
  * @internal
  */
-function parseBytes(bytes: Uint8Array<ArrayBuffer>, replay: true): ParsedEventLog<ReplayReadRow>;
-function parseBytes(bytes: Uint8Array<ArrayBuffer>, replay: false): ParsedEventLog;
-function parseBytes(bytes: Uint8Array<ArrayBuffer>, replay: boolean): ParsedEventLog {
+function parseBytes(
+  bytes: Uint8Array<ArrayBuffer>,
+  replay: true,
+  from?: LogFileDictionary,
+): ParsedEventLog<ReplayReadRow>;
+function parseBytes(bytes: Uint8Array<ArrayBuffer>, replay: false, from?: LogFileDictionary): ParsedEventLog;
+function parseBytes(bytes: Uint8Array<ArrayBuffer>, replay: boolean, from?: LogFileDictionary): ParsedEventLog {
   const lines = splitByteLines(bytes);
   const rows: ReadRow[] = [];
   const quarantined: number[] = [];
+  const dictionary = from === undefined ? LogFileDictionary.empty() : from.fork();
   let validByteLength = 0;
   let needsSeparator = false;
 
   for (const line of lines) {
     const text = textOf(bytes, line);
-    const classified = text === undefined ? ({ class: 'quarantined' } as const) : classifyLogJson(text);
+    const { classified, restoredText } = classifyLine(text, dictionary);
     if (classified.class === 'quarantined') {
       if (!line.terminated) {
         return {
@@ -103,16 +140,18 @@ function parseBytes(bytes: Uint8Array<ArrayBuffer>, replay: boolean): ParsedEven
           validByteLength,
           needsSeparator: false,
           discardedTail: true,
+          dictionary,
         };
       }
       quarantined.push(line.start);
     } else {
       const row = { event: classified.event, opaque: classified.class === 'opaque' };
       if (replay) {
-        if (text === undefined) {
+        const source = restoredText ?? text;
+        if (source === undefined) {
           throw new Error('A classified replay row has no decoded source text.');
         }
-        const owned: ReplayReadRow = { ...row, identity: new ParsedReplayIdentity(text) };
+        const owned: ReplayReadRow = { ...row, identity: new ParsedReplayIdentity(source) };
         rows.push(owned);
       } else {
         rows.push(row);
@@ -129,6 +168,7 @@ function parseBytes(bytes: Uint8Array<ArrayBuffer>, replay: boolean): ParsedEven
     validByteLength,
     needsSeparator,
     discardedTail: false,
+    dictionary,
   };
 }
 
@@ -136,18 +176,23 @@ function parseBytes(bytes: Uint8Array<ArrayBuffer>, replay: boolean): ParsedEven
  * Parse ordinary kept rows without retaining private replay identities.
  * @internal
  * @param bytes - Captured log bytes.
+ * @param from - The dictionary of the file's lines before `bytes`, when they continue an earlier parse.
  * @returns The tolerant physical rows and byte boundary.
  */
-export const parseEventLogBytes = (bytes: Uint8Array<ArrayBuffer>): ParsedEventLog => parseBytes(bytes, false);
+export const parseEventLogBytes = (bytes: Uint8Array<ArrayBuffer>, from?: LogFileDictionary): ParsedEventLog =>
+  parseBytes(bytes, false, from);
 
 /**
  * Parse kept rows with immutable source identities for the private captured replay owner.
  * @internal
  * @param bytes - Captured log bytes consumed synchronously before row exposure.
+ * @param from - The dictionary of the file's lines before `bytes`, when they continue an earlier parse.
  * @returns Tolerant physical rows carrying their original identity witnesses.
  */
-export const parseReplayEventLogBytes = (bytes: Uint8Array<ArrayBuffer>): ParsedEventLog<ReplayReadRow> =>
-  parseBytes(bytes, true);
+export const parseReplayEventLogBytes = (
+  bytes: Uint8Array<ArrayBuffer>,
+  from?: LogFileDictionary,
+): ParsedEventLog<ReplayReadRow> => parseBytes(bytes, true, from);
 
 /**
  * Serialize one validated event as exactly one newline-terminated JSON object.
@@ -160,6 +205,53 @@ export const serializeLogEvent = (event: AgentLogEvent): string => `${JSON.strin
 
 export const serializeLogEventBytes = (event: AgentLogEvent, needsSeparator = false): Uint8Array<ArrayBuffer> =>
   encoder.encode(`${needsSeparator ? '\n' : ''}${serializeLogEvent(event)}`);
+
+/* A row's line length without a separator, kept once counted; rows are immutable once in a log. */
+const lineSizes = new WeakMap<AgentLogEvent, number>();
+
+/**
+ * The bytes of a row {@link parseLogEvent} returned, without parsing it again (WP-10 step A item 5): the appender
+ * parses each row once at its boundary. The line's size is kept for {@link serializedLogEventSize}.
+ *
+ * @internal
+ * @param event - A row exactly as `parseLogEvent` returned it.
+ * @param needsSeparator - Whether the file's last line lacks its newline.
+ * @returns One JSONL line, after a separator when one is needed.
+ */
+export const serializeParsedLogEventBytes = (event: AgentLogEvent, needsSeparator = false): Uint8Array<ArrayBuffer> => {
+  const bytes = encoder.encode(`${needsSeparator ? '\n' : ''}${JSON.stringify(event)}\n`);
+  lineSizes.set(event, bytes.byteLength - (needsSeparator ? 1 : 0));
+  return bytes;
+};
+
+/**
+ * The bytes of a row's compact line (WP-17), as `compactLogRow` gave it. The row's own size stays what
+ * {@link serializedLogEventSize} counts: a reader receives the row, not the line.
+ *
+ * @internal
+ * @param line - The compact line's value.
+ * @param needsSeparator - Whether the file's last line lacks its newline.
+ * @returns One JSONL line, after a separator when one is needed.
+ */
+export const serializeCompactLogEventBytes = (line: unknown, needsSeparator = false): Uint8Array<ArrayBuffer> =>
+  encoder.encode(`${needsSeparator ? '\n' : ''}${JSON.stringify(line)}\n`);
+
+/**
+ * The byte length of a known row's line as {@link serializeLogEventBytes} writes it, counted once per row (HP-12).
+ *
+ * @internal
+ * @param event - A known row.
+ * @returns Its line's bytes, newline included.
+ */
+export const serializedLogEventSize = (event: AgentLogEvent): number => {
+  const known = lineSizes.get(event);
+  if (known !== undefined) {
+    return known;
+  }
+  const size = serializeLogEventBytes(event).byteLength;
+  lineSizes.set(event, size);
+  return size;
+};
 
 /**
  * Parse a JSONL session log tolerantly: a malformed final line is a torn append and is dropped, any other line

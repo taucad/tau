@@ -138,7 +138,7 @@ describe('MetalMorphSpinner', () => {
   it('should register its canvas with the shared service and release it on unmount', async () => {
     const { MetalMorphSpinner } = await import('#components/geometry/loader/metal-morph-spinner.js');
 
-    const view = render(<MetalMorphSpinner className='size-4' />);
+    const view = render(<MetalMorphSpinner className='size-4' fallback={null} />);
 
     expect(hoisted.service.subscribe).toHaveBeenCalledTimes(1);
     expect(lastTarget().canvas).toBeInstanceOf(HTMLCanvasElement);
@@ -151,7 +151,7 @@ describe('MetalMorphSpinner', () => {
   it('should report its own visibility to the service rather than holding the loop open offscreen', async () => {
     const { MetalMorphSpinner } = await import('#components/geometry/loader/metal-morph-spinner.js');
 
-    render(<MetalMorphSpinner className='size-4' />);
+    render(<MetalMorphSpinner className='size-4' fallback={null} />);
     const target = lastTarget();
     expect(target.isIntersecting()).toBe(false);
 
@@ -167,7 +167,7 @@ describe('MetalMorphSpinner', () => {
     hoisted.reducedMotion = true;
     const { MetalMorphSpinner } = await import('#components/geometry/loader/metal-morph-spinner.js');
 
-    render(<MetalMorphSpinner className='size-4' />);
+    render(<MetalMorphSpinner className='size-4' fallback={null} />);
 
     expect(hoisted.service.setTheme).toHaveBeenCalledWith('dark');
     expect(hoisted.service.setMotionAllowed).toHaveBeenCalledWith(false);
@@ -178,10 +178,43 @@ describe('MetalMorphSpinner', () => {
     vi.stubGlobal('devicePixelRatio', 3);
     const { MetalMorphSpinner } = await import('#components/geometry/loader/metal-morph-spinner.js');
 
-    render(<MetalMorphSpinner className='size-4' />);
+    render(<MetalMorphSpinner className='size-4' fallback={null} />);
 
     // The box jsdom reports is zero-sized, which the spinner floors at one CSS pixel; the ratio is what
     // matters here, and it is capped so a 3× display does not ask for a nine-times-larger source.
     expect(lastTarget().getSize()).toMatchObject({ pixelRatio: 2 });
+  });
+
+  it('should answer its size from the resize observer, never from a layout read while the service paints', async () => {
+    const resizeCallbacks: ResizeObserverCallback[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        public observe = vi.fn();
+
+        public disconnect = vi.fn();
+
+        public constructor(callback: ResizeObserverCallback) {
+          resizeCallbacks.push(callback);
+        }
+      },
+    );
+    const { MetalMorphSpinner } = await import('#components/geometry/loader/metal-morph-spinner.js');
+    render(<MetalMorphSpinner className='size-4' fallback={null} />);
+    const target = lastTarget();
+    const layoutRead = vi.spyOn(target.canvas, 'getBoundingClientRect');
+
+    act(() => {
+      for (const callback of resizeCallbacks) {
+        callback(
+          [mock<ResizeObserverEntry>({ contentRect: mock<DOMRectReadOnly>({ width: 28, height: 28 }) })],
+          mock<ResizeObserver>(),
+        );
+      }
+    });
+
+    expect(target.getSize()).toMatchObject({ width: 28, height: 28 });
+    expect(target.getSize()).toMatchObject({ width: 28, height: 28 });
+    expect(layoutRead).not.toHaveBeenCalled();
   });
 });

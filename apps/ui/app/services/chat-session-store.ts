@@ -121,6 +121,7 @@ import type {
 } from '#machines/chat-projection.logic.js';
 import { chatPulledAtFileName, pulledQuietOf, runHeartbeatMilliseconds, segmentDeviceIdOf } from '@taucad/agent-host';
 import type { AgentLiveEvent, RowKey } from '@taucad/agent-host';
+import { refusalOf } from '@taucad/agent-host/wire';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import {
@@ -846,13 +847,21 @@ const isLive = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>): boole
   (snapshot.matches({ run: 'stopped' }) && snapshot.context.turn !== undefined);
 
 /**
- * Whether a run's end is this chat's to show: the machine is still showing it live, as the run its turn placed or the
- * run it presents. An idle chat is shown no history, a turn is never ended by an earlier run's row (W0.2), and an end
- * is never shown twice, which would settle a turn twice.
+ * Whether the end of the log's current run is this chat's to show: the machine is still showing a run live, and its
+ * turn placed this run, it presents this run, or it holds no turn and is not admitting a gesture of its own. Such a
+ * machine only observes the log, so whatever run it shows, the log's current run having ended means none is open
+ * (A-1): a read can fold a run's `running` and its end together, end a run that never ran, or end a later run after
+ * the one the machine presents. While this page admits its own gesture, that admission's answer moves the machine.
+ * An idle chat is shown no history, a turn is never ended by an earlier run's row (W0.2), and an end is never shown
+ * twice, which would settle a turn twice.
  */
 const endsHere = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>, runId: string): boolean => {
   const { turn, activeRunId } = snapshot.context;
-  return isLive(snapshot) && (turn?.runId === runId || (activeRunId === runId && snapshot.matches({ run: 'running' })));
+  const observesOnly = turn === undefined && !snapshot.matches({ run: { queued: 'admitting' } });
+  return (
+    isLive(snapshot) &&
+    (observesOnly || turn?.runId === runId || (activeRunId === runId && snapshot.matches({ run: 'running' })))
+  );
 };
 
 /** The two phases that OPEN a run and keep its project busy (I24); every other phase settles one. */
@@ -2885,6 +2894,11 @@ export class ChatSessionStore {
       if (session.hostWait?.queueId === item.id) {
         return this.#holdQueue(session, after.items, 'host-wait');
       }
+      const unpinned = after.items.find((entry) => entry.id === item.id);
+      if (unpinned !== undefined && unpinned.command === undefined) {
+        /* The host refused it and applied nothing (H-1): a refused send, as an admission refusal is. */
+        return this.#refuseQueuedSend(session, unpinned);
+      }
       return after.items.some((entry) => entry.id === item.id)
         ? {
             items: after.items,
@@ -3075,6 +3089,27 @@ export class ChatSessionStore {
       status: 'blocked',
       error: reason === undefined ? 'This message wasn’t sent. Try again.' : `This message wasn’t sent: ${reason}`,
     };
+  }
+
+  /**
+   * Drop the command a refused send was pinned to (H-1). Only that command: an entry that has since been prepared again
+   * or delivered is left as it is. A failed write leaves the pin, which the outbox shows as undelivered, as before.
+   */
+  async #unpinRefusedSend(session: InternalSession, queueId: string, commandId: string): Promise<void> {
+    try {
+      await session.messageQueueStore.update((record) =>
+        record.items.some((item) => item.id === queueId && item.command?.commandId === commandId)
+          ? {
+              ...record,
+              items: record.items.map((item) =>
+                item.id === queueId && item.command?.commandId === commandId ? unprepared(item) : item,
+              ),
+            }
+          : record,
+      );
+    } catch (error) {
+      console.warn('[ChatSessionStore] a refused send could not be unpinned', session.chatId, error);
+    }
   }
 
   #currentDispatch(session: InternalSession): Promise<void> | undefined {
@@ -4518,8 +4553,11 @@ export class ChatSessionStore {
         abort.signal.throwIfAborted();
       }
       let acceptingPlacement: string | undefined;
+      /* Each connection is one try of the command; after a single try, a `not-applied` refusal proves it wrote nothing. */
+      let tries = 0;
       const answer = await sendHostCommand(
         async () => {
+          tries += 1;
           const client =
             request.queueId === undefined
               ? await connector.connect(session.chatId)
@@ -4545,6 +4583,18 @@ export class ChatSessionStore {
         return;
       }
       if (answer.status === 'refused') {
+        if (
+          request.queueId !== undefined &&
+          command.type === 'start' &&
+          answer.effect === 'not-applied' &&
+          tries === 1 &&
+          refusalOf(answer.code).retry !== 'wait'
+        ) {
+          /* H-1: the host's one answer says it applied nothing and will not take this command as it is, so the send is
+           * no longer pinned to it and the outbox treats it as a refused send (`#refuseQueuedSend`), which the person can
+           * edit, delete or send again. A `wait` refusal keeps its key: the same command is sent again once it clears. */
+          await this.#unpinRefusedSend(session, request.queueId, command.commandId);
+        }
         throw new Error(`Host ${command.type} refused ${answer.code}: ${answer.message}`);
       }
       if (answer.effect !== 'durable' || this.#sessions.get(session.chatId) !== session) {

@@ -31,6 +31,18 @@ const reducerEvent = (candidate: AgentLogEvent): ReducerRow => {
   return row;
 };
 
+/**
+ * Note a row `parseLogEvent` just returned as known, so the folds do not classify it again (WP-10 step A item 5).
+ *
+ * @internal
+ * @param event - A row exactly as `parseLogEvent` returned it, of a known type.
+ */
+export const admitParsedLogEvent = (event: AgentLogEvent): void => {
+  if (!parsedEvents.has(event)) {
+    parsedEvents.set(event, { event, opaque: false });
+  }
+};
+
 const failHistory = (message: string): never => {
   throw new EventLogError('HISTORY_INVALID', message);
 };

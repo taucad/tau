@@ -25,12 +25,14 @@ export type {
 export { runInNativeSandbox } from '#native-command.js';
 export type { NativeSandboxCommand, NativeSandboxCommandResult } from '#native-command.js';
 export {
+  configureWindowsNativeSandbox,
   launchInNativeSandbox,
   nativeSandboxBwrapVariable,
   nativeSandboxPolicy,
+  nativeSandboxRefusal,
   NativeRuntimeUnavailableError,
   spawnInNativeSandbox,
 } from '@taucad/sandbox';
-export type { NativeSandboxLaunch, NativeSandboxProfile } from '@taucad/sandbox';
+export type { NativeSandboxLaunch, NativeSandboxProfile, WindowsNativeSandboxOptions } from '@taucad/sandbox';
 export { createWorkspaceMirror } from '#workspace-mirror.js';
 export type { WorkspaceMirror, WorkspaceMirrorOptions } from '#workspace-mirror.js';

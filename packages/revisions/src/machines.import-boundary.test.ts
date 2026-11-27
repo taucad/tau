@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 /*
@@ -9,7 +10,8 @@ import { describe, expect, it } from 'vitest';
  * host's side of the seam.
  */
 
-const sourceDirectory = new URL('.', import.meta.url).pathname;
+/* A path, not a URL's pathname: on Windows that is `/D:/…`, which `join` makes `D:\D:\…`. */
+const sourceDirectory = fileURLToPath(new URL('.', import.meta.url));
 
 const machineFiles = (): readonly string[] =>
   readdirSync(sourceDirectory)

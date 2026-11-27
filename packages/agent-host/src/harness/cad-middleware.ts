@@ -474,6 +474,12 @@ const withModelContent = (message: ToolResultMessage, content: ToolResultMessage
 /** What a model that takes no image input reads in place of a capture. */
 const imageOmittedText = '[screenshot image omitted: this model takes no image input]';
 
+/*
+ * WP-11 item 2: a text result's trim, by message. A step sends the whole history, so each result was parsed again on
+ * every step; history messages are not mutated once recorded, so the trim is taken once in the result's life.
+ */
+const trimmedResults = new WeakMap<AgentMessage, AgentMessage>();
+
 /**
  * Apply Tau's CAD-specific historical tool-result reductions to a provider view.
  *
@@ -510,11 +516,16 @@ export function trimToolResultContext(
           )
         : message;
     }
+    const known = trimmedResults.get(message);
+    if (known !== undefined) {
+      return known;
+    }
     const structured = toolJson(message);
     const trimmed = trimStructuredResult(message.toolName, structured);
-    return trimmed === structured
-      ? message
-      : withModelContent(message, [{ type: 'text', text: JSON.stringify(trimmed) }]);
+    const sent =
+      trimmed === structured ? message : withModelContent(message, [{ type: 'text', text: JSON.stringify(trimmed) }]);
+    trimmedResults.set(message, sent);
+    return sent;
   });
 }
 

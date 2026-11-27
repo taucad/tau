@@ -1,13 +1,19 @@
 import { EventLogError } from '#log/event-log-error.js';
 import { hostTimingNow, recordHostTiming } from '#timing.js';
-import { parseLogEvent } from '#log/event-schema.js';
-import { createEventLogReducer } from '#log/reducer.js';
+import { parseLogRow } from '#log/event-schema.js';
+import { admitParsedLogEvent, createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
 import { parseSegmentFrom, unsettledParsedRuns } from '#log/foreign-runs.js';
 import type { ForeignRun, SegmentParse } from '#log/foreign-runs.js';
 import { foreignClockAheadMilliseconds, mergeSegmentsUpTo, segmentRefreshMilliseconds } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
-import { parseEventLogBytes, serializeLogEventBytes } from '#log/serialization.js';
+import {
+  parseEventLogBytes,
+  serializeCompactLogEventBytes,
+  serializeParsedLogEventBytes,
+  serializedLogEventSize,
+} from '#log/serialization.js';
+import { compactLogRow } from '#log/compact-rows.js';
 import type { AgentLogEvent, ProviderMessage, RowKey } from '#log/event-types.js';
 import { isAbandonedTurn } from '#log/event-types.js';
 
@@ -197,6 +203,13 @@ export type EventLogAppender = {
   historyUnknown?(): Promise<boolean>;
   /** What the open kept but could not use: quarantined lines, broken term rules, conflicting copies, history. */
   anomalies(): Promise<readonly EventLogAnomaly[]>;
+  /**
+   * Mark this writer alive on its lock marker (HA-I10): the Node binding refreshes the marker's modification time
+   * through the handle it holds, so only its own marker's inode, never a successor's; the provider binding rewrites
+   * its marker only while the text there is still its own. Not queued behind appends, so a held chain never delays it.
+   * Absent where the writer keeps no marker (OPFS).
+   */
+  touch?(): Promise<void>;
   /** Flush pending operations and release the underlying file handle. */
   close(): Promise<void>;
 };
@@ -265,6 +278,8 @@ export type EventLogStorage = {
    * the staleness bound comes back empty with `unreadable` set; one that may still hold a live run rejects the read.
    */
   segments?(): Promise<readonly ChatLogSegment[]>;
+  /** Refresh the writer's lock marker modification time ({@link EventLogAppender.touch}); absent without a marker. */
+  touch?(): Promise<void>;
 };
 
 /** Options for {@link createEventLogAppender}. @internal */
@@ -369,7 +384,7 @@ const byteBounded = (
   for (const event of window) {
     total += opaque.has(event)
       ? encoder.encode(`${JSON.stringify(event)}\n`).byteLength
-      : serializeLogEventBytes(event).byteLength;
+      : serializedLogEventSize(event);
     if (total > maxBytes && taken.length > 0) {
       break;
     }
@@ -907,6 +922,8 @@ export const createEventLogAppender = async (
   };
 
   const events = [...parsed.events];
+  /* What this file holds that a row appended to it may name instead of repeating (WP-17). */
+  const { dictionary } = parsed;
   let { needsSeparator } = parsed;
   /** The bytes this appender's view covers: the log as it read it. */
   let byteLength = parsed.validByteLength;
@@ -1026,7 +1043,11 @@ export const createEventLogAppender = async (
     if (fenced) {
       throw fencedError();
     }
-    const event = parseLogEvent(candidate);
+    /* Parsed once here, at the boundary: the folds and the serializer take the parsed row as it is (HP-05). */
+    const { event, known } = parseLogRow(candidate);
+    if (known) {
+      admitParsedLogEvent(event);
+    }
     /* The term rules first, on this device's rows: a duplicate is answered before any history rule runs. */
     const term = terms.prepare(event);
     if (term.duplicate) {
@@ -1037,13 +1058,19 @@ export const createEventLogAppender = async (
     if (transition.duplicate) {
       return { appended: false, endCursor: events.length };
     }
-    const bytes = serializeLogEventBytes(event, needsSeparator);
+    /* WP-17: a known row names what this file already holds; the folds and the view keep the row itself. */
+    const line = known ? compactLogRow(event, dictionary) : event;
+    const bytes =
+      line === event
+        ? serializeParsedLogEventBytes(event, needsSeparator)
+        : serializeCompactLogEventBytes(line, needsSeparator);
     /* WP-00: one row's fenced write; for a single append it includes the flush, in a batch the flush is measured once. */
     const writeStarted = hostTimingNow();
     await write(bytes);
     if (writeStarted !== undefined) {
       recordHostTiming('log-write', writeStarted, { type: event.type, bytes: bytes.byteLength });
     }
+    dictionary.note(line, event);
     term.commit();
     transition.commit();
     /* Rebuilt from the log when next needed, with this row. */
@@ -1295,6 +1322,8 @@ export const createEventLogAppender = async (
               return foreignUnsettled.filter((run) => !ownRunIds.has(run.runId));
             }),
         }),
+    /* Outside the chain on purpose (HA-I10): a liveness mark never waits behind a held append. */
+    ...(storage.touch === undefined ? {} : { touch: storage.touch }),
     close: async () =>
       enqueue(async () => {
         if (closed) {

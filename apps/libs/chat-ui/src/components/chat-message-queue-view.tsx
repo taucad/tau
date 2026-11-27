@@ -84,6 +84,11 @@ export function ChatMessageQueueView({
           const busyLabel = pending?.id === item.id ? pending.label : 'Sending…';
           const statusLabel =
             item.steer !== undefined && error !== undefined ? 'Send failed' : busy ? busyLabel : undefined;
+          /*
+           * Only the person's own action, and a failed send, speak: an automatic send (`sendingId`, or a durable steer
+           * still in flight) shows its words without a live region, so a queued row adds no voice to the chat's.
+           */
+          const spoken = pending?.id === item.id || (item.steer !== undefined && error !== undefined);
           const locked = busy || pending !== undefined || item.command !== undefined || item.steer !== undefined;
           return (
             <li
@@ -260,8 +265,10 @@ export function ChatMessageQueueView({
                         <CornerDownRight aria-hidden='true' className='size-3.5' />
                         Send now
                       </>
-                    ) : (
+                    ) : spoken ? (
                       <span role='status'>{statusLabel}</span>
+                    ) : (
+                      <span>{statusLabel}</span>
                     )}
                   </Button>
                   <Button

@@ -16,7 +16,6 @@ import {
   wireCorrectionReceiptSchema,
   wireCreditBalanceSchema,
   wireMeterItemSchema,
-  wireOpenHoldsSchema,
   wireOperationReceiptSchema,
   wireTokenSummarySchema,
   wireUsageQuerySchema,
@@ -543,7 +542,7 @@ describe('supplier model id wires', () => {
     expect(supplierModelIdSchema.safeParse(id).success).toBe(false);
   });
 
-  it('should carry a Together model id through a receipt, an open hold, a usage filter and a model group', () => {
+  it('should carry a Together model id through a receipt, a usage filter and a model group', () => {
     const receipt = { ...baseReceipt, model: together };
     const togetherQuery = { ...query, models: [together.id] };
     const snapshot = {
@@ -567,26 +566,8 @@ describe('supplier model id wires', () => {
         complete: true,
       },
     };
-    const holds = {
-      environment: 'development',
-      ownerId: 'owner-1',
-      holds: [
-        {
-          operationId: 'operation-1',
-          model: together,
-          heldCreditAtoms: '1',
-          admittedAt: '2026-09-05T00:00:00.000Z',
-          dueAt: '2026-09-05T00:00:30.000Z',
-          releaseAfter: '2026-09-05T00:01:30.000Z',
-          dispatchState: 'accepted',
-          customerState: 'pending',
-        },
-      ],
-    };
-
     expect(wireBaseReceiptSchema.parse(receipt)).toEqual(receipt);
     expect(wireUsageQuerySchema.parse(togetherQuery)).toEqual(togetherQuery);
     expect(wireUsageSnapshotSchema.parse(snapshot)).toEqual(snapshot);
-    expect(wireOpenHoldsSchema.parse(holds)).toEqual(holds);
   });
 });

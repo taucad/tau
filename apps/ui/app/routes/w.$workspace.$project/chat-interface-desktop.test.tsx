@@ -10,7 +10,12 @@ const setWorkbenchOpen = vi.hoisted(() => vi.fn());
 const sidebar = vi.hoisted(() => ({ open: true }));
 const renderViewer = vi.hoisted(() => vi.fn());
 /* Whether the mocked split view reports its first layout, as the native one does once it has measured. */
-const splitView = vi.hoisted(() => ({ laysOut: false }));
+const splitView = vi.hoisted(() => ({
+  laysOut: false,
+  /* The panes' widths after the first layout, as the native split view's views measure. */
+  sizes: undefined as readonly number[] | undefined,
+  resize: vi.fn<(sizes: number[]) => void>(),
+}));
 const desktopLayout = {
   chatOpen: true,
   workbenchOpen: true,
@@ -82,7 +87,7 @@ vi.mock('@taucad/chat-ui/components/chat-context-insertion', () => ({
   ChatContextInsertionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('allotment', async () => {
-  const { useLayoutEffect } = await import('react');
+  const { Children, useImperativeHandle, useLayoutEffect } = await import('react');
   const Pane = ({
     children,
     visible = true,
@@ -97,18 +102,29 @@ vi.mock('allotment', async () => {
       children,
       className,
       onChange,
+      ref,
     }: React.PropsWithChildren<{
       readonly className?: string;
       readonly onChange?: (sizes: number[]) => void;
+      readonly ref?: React.Ref<{ resize: (sizes: number[]) => void; reset: () => void }>;
     }>) => {
+      useImperativeHandle(ref, () => ({ resize: splitView.resize, reset: () => undefined }));
       useLayoutEffect(() => {
         if (splitView.laysOut) {
-          onChange?.([320, 500, 420]);
+          onChange?.([...(splitView.sizes ?? [320, 500, 420])]);
         }
       }, [onChange]);
       return (
         <div data-testid='allotment' className={className}>
-          {children}
+          {splitView.sizes === undefined ? (
+            children
+          ) : (
+            <div className='split-view-container'>
+              {Children.map(children, (child, index) => (
+                <div data-view-width={splitView.sizes?.[index]}>{child}</div>
+              ))}
+            </div>
+          )}
         </div>
       );
     },
@@ -185,6 +201,7 @@ describe('ChatInterfaceDesktop', () => {
     desktopLayout.compactAuxiliary = 'chat';
     editorState.isReady = true;
     splitView.laysOut = false;
+    splitView.sizes = undefined;
     sidebar.open = true;
     vi.clearAllMocks();
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
@@ -333,6 +350,28 @@ describe('ChatInterfaceDesktop', () => {
     expect(frame?.className).toContain(
       '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
     );
+  });
+
+  /* Staging QA 2026-11-27: at 1280 px a new project opens compact on the Workbench lane, which the native split view's
+   * first layout leaves at its 360 px minimum (the hidden chat lane took its preferred width first) while the frame
+   * drew it at 420 px, so its edge moved 60 px at the hand-over. The first layout gives each shown lane its width. */
+  it('gives the shown Workbench lane its preferred width back after the first layout, from the viewer', async () => {
+    desktopLayout.compactAuxiliary = 'workbench';
+    splitView.laysOut = true;
+    splitView.sizes = [0, 696, panelMinSizeWorkbench];
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const width = this.dataset['viewWidth'];
+      return DOMRect.fromRect({ width: width === undefined ? 1056 : Number(width) });
+    });
+    renderDesktop();
+    await screen.findByTestId('allotment');
+
+    expect(panelMinSizeWorkbench).toBeLessThan(desktopLayout.workbenchWidth);
+    expect(splitView.resize).toHaveBeenCalledExactlyOnceWith([
+      0,
+      696 - (desktopLayout.workbenchWidth - panelMinSizeWorkbench),
+      desktopLayout.workbenchWidth,
+    ]);
   });
 
   /* PL6: the composer mounts in the unrendered panes, so it adopts the frame's native input only in the commit that

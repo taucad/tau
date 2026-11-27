@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { idleFallbackDelay, scheduleNextStepWarm, whenIdleAfterLoad } from '#lib/warm-next-step.js';
+import { idleFallbackDelay, scheduleNextStepWarm, warmSendOnIntent, whenIdleAfterLoad } from '#lib/warm-next-step.js';
 import type { IdleHost, WarmingClass } from '#lib/warm-next-step.js';
 import { routeClasses } from '#lib/route-classes.js';
 
@@ -206,5 +206,27 @@ describe('the registry warm-ups (PL8)', () => {
         expect(routeClass.interactive).toBeDefined();
       }
     }
+  });
+});
+
+describe('warmSendOnIntent (WP-12 step 2)', () => {
+  it('should warm a target once per document, and never under Save-Data', async () => {
+    const warm = vi.fn(async (_target: string) => undefined);
+    warmSendOnIntent('send-test-a', { warm, navigator: { connection: { saveData: true } } });
+    expect(warm).not.toHaveBeenCalled();
+    warmSendOnIntent('send-test-a', { warm, navigator: {} });
+    warmSendOnIntent('send-test-a', { warm, navigator: {} });
+    expect(warm).toHaveBeenCalledExactlyOnceWith('send-test-a');
+  });
+
+  it('should swallow a failed warm-up', async () => {
+    const warm = vi.fn(async () => {
+      throw new Error('gone');
+    });
+    expect(() => {
+      warmSendOnIntent('send-test-b', { warm, navigator: {} });
+    }).not.toThrow();
+    await Promise.resolve();
+    expect(warm).toHaveBeenCalledOnce();
   });
 });

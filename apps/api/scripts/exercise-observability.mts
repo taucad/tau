@@ -234,7 +234,7 @@ COMMIT;
   phase.notes.push(`credit balance ${balance} atoms`);
   const entitlements = await json<Record<string, unknown>>('GET', '/v1/billing/entitlements');
   check(JSON.stringify(entitlements).includes('"canSyncFiles":true'), 'Pro entitlements (canSyncFiles)');
-  for (const path of ['/v1/billing/credits', '/v1/billing/holds', '/v1/models', '/v1/projects']) {
+  for (const path of ['/v1/billing/credits', '/v1/billing/model-estimates', '/v1/models', '/v1/projects']) {
     check(succeeded(await status('GET', path)), `GET ${path}`);
   }
   check((await status('GET', '/v1/does-not-exist')) === 404, 'unknown route 404');

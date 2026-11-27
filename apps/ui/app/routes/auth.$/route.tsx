@@ -1,5 +1,6 @@
 import { Heading } from '@taucad/ui/components/heading';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { onlineManager } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { MetaFunction } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
@@ -14,8 +15,16 @@ import type { Handle } from '#types/matches.types.js';
 import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import type { ShellAuthHandoff } from '#providers/auth-provider.js';
-import { authLocalization, callDesktopShell, useShellAuthHandoff } from '#providers/auth-provider.js';
+import { desktopContinuationPath, readDesktopAuthorization } from '#lib/desktop-oauth.js';
+import type { DesktopSignInOutcome, ShellAuthHandoff } from '#providers/auth-provider.js';
+import {
+  authLocalization,
+  callDesktopShell,
+  startDesktopSignIn,
+  useDesktopSignInOutcome,
+  useDesktopSignInStatus,
+  useShellAuthHandoff,
+} from '#providers/auth-provider.js';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 
@@ -67,26 +76,153 @@ function ShellHandoff({ handoff }: { readonly handoff: ShellAuthHandoff }): Reac
     return undefined;
   }
 
+  return <DesktopSignInPanel />;
+}
+
+/** What each ended attempt says, and whether it offers another account. */
+const endedAttemptCopy: Readonly<
+  Record<Exclude<DesktopSignInOutcome, 'signed-in'>, { readonly title: string; readonly detail: string }>
+> = {
+  canceled: {
+    title: 'Sign-in canceled',
+    detail: 'Tau Desktop was not signed in.',
+  },
+  expired: {
+    title: 'Sign-in timed out',
+    detail: 'The browser did not finish signing in within ten minutes.',
+  },
+  error: {
+    title: "Couldn't sign in",
+    detail: 'Something went wrong while signing in. Try again.',
+  },
+};
+
+/**
+ * The desktop window's side of a sign-in (DSI-4): waiting for the browser (Copy link, Open browser again, Cancel
+ * sign-in), finishing, signed in, ended (canceled, timed out, failed) and offline.
+ *
+ * @returns The panel.
+ */
+function DesktopSignInPanel(): React.JSX.Element {
+  const status = useDesktopSignInStatus();
+  const outcome = useDesktopSignInOutcome();
+  const isOnline = useSyncExternalStore(
+    (listener) => onlineManager.subscribe(listener),
+    () => onlineManager.isOnline(),
+    () => true,
+  );
+  const attempt = status?.attempt;
+  const retry = (
+    <div className='mt-6 flex flex-wrap justify-center gap-2'>
+      <Button
+        onClick={() => {
+          void startDesktopSignIn('consent');
+        }}
+      >
+        Sign in
+      </Button>
+      <Button
+        variant='outline'
+        onClick={() => {
+          void startDesktopSignIn('different-account');
+        }}
+      >
+        Use a different account
+      </Button>
+    </div>
+  );
+
+  if (outcome === 'signed-in') {
+    return (
+      <div className='w-full max-w-md text-center'>
+        <Heading level={1} variant='title'>
+          Signed in
+        </Heading>
+        {status?.email === undefined ? undefined : (
+          <p className='mt-2 text-sm text-muted-foreground'>Tau Desktop is signed in as {status.email}.</p>
+        )}
+      </div>
+    );
+  }
+
+  if (attempt?.phase === 'finishing') {
+    return (
+      <div className='w-full max-w-md text-center' role='status'>
+        <Heading level={1} variant='title'>
+          Finishing sign-in…
+        </Heading>
+      </div>
+    );
+  }
+
+  if (!isOnline) {
+    return (
+      <div className='w-full max-w-md text-center'>
+        <Heading level={1} variant='title'>
+          You&apos;re offline
+        </Heading>
+        <p className='mt-2 text-sm text-muted-foreground'>Connect to the internet, then sign in.</p>
+        {attempt === undefined ? retry : undefined}
+      </div>
+    );
+  }
+
+  if (outcome !== undefined && attempt === undefined) {
+    const copy = endedAttemptCopy[outcome];
+    return (
+      <div className='w-full max-w-md text-center'>
+        <Heading level={1} variant='title'>
+          {copy.title}
+        </Heading>
+        <p className='mt-2 text-sm text-muted-foreground'>{copy.detail}</p>
+        {retry}
+      </div>
+    );
+  }
+
   return (
     <div className='w-full max-w-md text-center'>
       <Heading level={1} variant='title'>
         Continue in your browser
       </Heading>
       <p className='mt-2 text-sm text-muted-foreground'>
-        Tau signs you in through your browser, then hands the session back to this window.
+        {attempt?.browserFailed
+          ? "Tau couldn't open your browser. Copy the link and open it in a browser on this computer."
+          : 'Tau signs you in through your browser, then hands the sign-in back to this window.'}
       </p>
-      <Button
-        className='mt-6'
-        variant='outline'
-        onClick={() => {
-          const bridge = globalThis.window.tauAuth;
-          if (bridge) {
-            void callDesktopShell(bridge.signIn);
-          }
-        }}
-      >
-        Open my browser again
-      </Button>
+      <div className='mt-6 flex flex-wrap justify-center gap-2'>
+        <Button
+          variant='outline'
+          disabled={attempt === undefined}
+          onClick={() => {
+            if (attempt !== undefined) {
+              void navigator.clipboard.writeText(attempt.url);
+            }
+          }}
+        >
+          Copy link
+        </Button>
+        <Button
+          variant='outline'
+          onClick={() => {
+            void startDesktopSignIn('consent');
+          }}
+        >
+          Open browser again
+        </Button>
+        <Button
+          variant='ghost'
+          disabled={attempt === undefined}
+          onClick={() => {
+            const bridge = globalThis.window.tauAuth;
+            if (bridge) {
+              void callDesktopShell(bridge.cancelSignIn);
+            }
+          }}
+        >
+          Cancel sign-in
+        </Button>
+      </div>
     </div>
   );
 }
@@ -101,15 +237,42 @@ export default function AuthPage(): React.JSX.Element {
   const { data: session, isSuccess, isFetching, isError, refetch } = useSession(authClient);
   const [hasWaitExpired, setHasWaitExpired] = useState(false);
   const [shouldShowForm, setShouldShowForm] = useState(false);
-  const [searchParameters] = useSearchParams();
+  const [searchParameters, setSearchParameters] = useSearchParams();
+  const search = searchParameters.toString();
   const navigate = useNavigate();
+  /* Tau Desktop's OAuth sign-in (DSI-3): the provider sends the browser here with a signed request when no one is
+     signed in, or when "Use a different account" asked for `prompt=login`. The form shows even over a session, and
+     every sign-in (password, an emailed link, a provider round trip) returns through `redirectTo` to the consent page,
+     which asks the provider again with the same signed request. */
+  const desktopAuthorization = useMemo(() => readDesktopAuthorization(search), [search]);
+  const desktopContinuation =
+    desktopAuthorization === undefined ? undefined : desktopContinuationPath(desktopAuthorization);
+  useEffect(() => {
+    if (desktopContinuation !== undefined && searchParameters.get('redirectTo') !== desktopContinuation) {
+      setSearchParameters(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.set('redirectTo', desktopContinuation);
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [desktopContinuation, searchParameters, setSearchParameters]);
   const requestedDestination = sanitizeVerifyEmailRedirectTo(searchParameters.get('redirectTo') ?? undefined);
   const destinationPath = requestedDestination.split(/[?#]/u)[0]?.replace(/\/+$/u, '');
   const redirectTo =
     destinationPath === '/auth/sign-in' || destinationPath === '/auth/sign-up' ? '/' : requestedDestination;
   const isSignInPage =
     shellHandoff === undefined ? segment === 'sign-in' || segment === 'sign-up' : shellHandoff.action === 'signIn';
-  const isSignedIn = isSignInPage && Boolean(session);
+  /* A desktop request asking for `login` wants a fresh sign-in: a session older than the request is not one. */
+  const isStaleForDesktop =
+    desktopAuthorization?.prompts.includes('login') === true &&
+    session !== undefined &&
+    session !== null &&
+    (desktopAuthorization.issuedAt === undefined ||
+      new Date(session.session.createdAt).getTime() < desktopAuthorization.issuedAt);
+  const isSignedIn = isSignInPage && Boolean(session) && !isStaleForDesktop;
   useEffect(() => {
     // Preserve explicit app intent before OAuth leaves this origin or a magic
     // link finishes. An older website choice must not intercept its callback.
@@ -126,10 +289,10 @@ export default function AuthPage(): React.JSX.Element {
     }
   }, [desktopTarget, isSignedIn, navigate, redirectTo]);
   useEffect(() => {
-    if (isSuccess && !isFetching && !session) {
+    if (isSuccess && !isFetching && (!session || isStaleForDesktop)) {
       setShouldShowForm(true);
     }
-  }, [isSuccess, isFetching, session]);
+  }, [isSuccess, isFetching, session, isStaleForDesktop]);
   useEffect(() => {
     if (!isSignInPage || shouldShowForm || hasWaitExpired || shellHandoff !== undefined) {
       return;

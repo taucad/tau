@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
@@ -22,14 +22,27 @@ const selectReadRevision = (snapshot: WorkbenchLayoutView): number | undefined =
   return latest === undefined || latest.refused || latest.layout === undefined ? undefined : latest.revision;
 };
 
+/** Whether the latest publication is the echo of this device's own write. */
+const selectOwnPublication = (snapshot: WorkbenchLayoutView): boolean => snapshot.context.latest?.origin === 'own';
+
 /** The runtime's layout; it is spawned with the runtime and never replaced, so one read is enough. */
 const selectRuntimeLayout = (runtime: ProjectRuntime): WorkbenchLayoutRef | undefined =>
   selectWorkbenchLayoutRef(runtime.actor.getSnapshot());
 
-/** The arrangements read from the record, announced once each. */
+/**
+ * The arrangements another device or the agent published, announced once each. The first arrangement this host reads
+ * is the one the project opens with (the open speaks once, in `ProjectSyncAnnouncement`, progressive-loading rule 22),
+ * and a publication of this device's own write is the person's own action: neither is announced.
+ */
 function ArrangementAnnouncement({ layout }: { readonly layout: WorkbenchLayoutRef }): React.ReactNode {
   const revision = useSelector(layout, selectReadRevision);
-  return revision === undefined ? null : (
+  const own = useSelector(layout, selectOwnPublication);
+  /* The first revision read is the baseline, recorded during render (no effect, no timer). */
+  const [baseline, setBaseline] = useState(revision);
+  if (baseline === undefined && revision !== undefined) {
+    setBaseline(revision);
+  }
+  return revision === undefined || baseline === undefined || revision <= baseline || own ? null : (
     <span key={`arranged-${String(revision)}`}>Workbench arrangement updated.</span>
   );
 }

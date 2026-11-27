@@ -261,6 +261,63 @@ const revisionsRetireBound = 30_000;
  */
 const agentRuntimeIdleTimeout = 120_000;
 
+/**
+ * The agent's runtime client for one project host. A machines-enabled host keeps its runtime resident, since a machine
+ * connection is a stateful session. Otherwise the runtime, a second full copy of the editor's kernels, lives only while
+ * agent tools use it (B-07), except that it starts when a composer takes focus or a turn is admitted, and a started one
+ * stays while the tab, and so the project's chat, is visible (WP-12 step 7, HP-15).
+ *
+ * @param options - Whether the runtime is resident, its factory, and the worker's page facts.
+ * @returns The client, the resident runtime when there is one, a warm-up for an admitted turn, and the stop that ends
+ *   them.
+ */
+const agentRuntimeClientFor = (options: {
+  readonly isResident: boolean;
+  readonly create: () => AppRuntimeClient;
+  readonly worker: Pick<ResidentWorkerContext, 'visibility' | 'composerFocus'>;
+}): Readonly<{
+  client: IdleRuntimeClient | AppRuntimeClient;
+  /** The resident runtime, whose machines the tools reach; none for an idle one. */
+  resident?: AppRuntimeClient;
+  warm: () => void;
+  stop: () => void;
+}> => {
+  const { create, worker } = options;
+  if (options.isResident) {
+    const client = create();
+    return {
+      client,
+      resident: client,
+      warm: () => undefined,
+      stop: () => {
+        client.terminate();
+      },
+    };
+  }
+  const client = createIdleRuntimeClient({
+    create,
+    idleTimeout: agentRuntimeIdleTimeout,
+    visible: worker.visibility.visible(),
+  });
+  const stopVisible = worker.visibility.subscribe((visible) => {
+    client.setVisible(visible);
+  });
+  const stopFocus = worker.composerFocus?.subscribe(() => {
+    client.warm();
+  });
+  return {
+    client,
+    warm: () => {
+      client.warm();
+    },
+    stop: () => {
+      stopVisible();
+      stopFocus?.();
+      client.terminate();
+    },
+  };
+};
+
 const createProjectFileSystemProxy = async (port: MessagePort): Promise<ProjectFileSystemBridge> => {
   const { createTransferredFileSystemBridgeProxy } = await loadCode(async () => {
     const { createTransferredFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
@@ -849,14 +906,17 @@ const composeProjectHost = async (
     }
     return created;
   };
-  /* A machine connection is a stateful session, so a machines-enabled host keeps its runtime resident. Otherwise
-   * the runtime, a second full copy of the editor's kernels, lives only while agent tools use it (B-07). */
-  const residentRuntime = provide.machinesEnabled === true ? createAgentRuntime() : undefined;
-  const runtimeClient: IdleRuntimeClient | AppRuntimeClient =
-    residentRuntime ?? createIdleRuntimeClient({ create: createAgentRuntime, idleTimeout: agentRuntimeIdleTimeout });
-  opened(() => {
-    runtimeClient.terminate();
+  const {
+    client: runtimeClient,
+    resident: residentRuntime,
+    warm: warmRuntime,
+    stop: stopRuntime,
+  } = agentRuntimeClientFor({
+    isResident: provide.machinesEnabled === true,
+    create: createAgentRuntime,
+    worker,
   });
+  opened(stopRuntime);
   // Lazy: the headless-image graph eagerly resolves the resvg wasm URL at
   // module load, which only the full app build serves.
   const headlessImageModule = await loadCode(async () => import('#services/headless-image.service.js'));
@@ -1082,7 +1142,13 @@ const composeProjectHost = async (
   /* T10: agent-observability summaries, composed once the launcher whose rows it reads exists. */
   let evidence: HostEvidence | undefined;
   const launcher: AgentLauncher = createAgentLauncher({
-    admitting: () => !draining,
+    admitting: () => {
+      /* A turn being admitted warms the runtime its first tool call uses (WP-12 step 7). */
+      if (!draining) {
+        warmRuntime();
+      }
+      return !draining;
+    },
     onChatQuiescent: (chatId, quiescent) => {
       evidence?.onChatQuiescent(chatId, quiescent);
     },
@@ -1294,7 +1360,8 @@ const composeProjectHost = async (
       imageService.dispose();
       revisionsSlot?.close();
       placement.close();
-      runtimeClient.terminate();
+      /* Its visibility and composer-focus subscriptions too, not only the runtime. */
+      stopRuntime();
       computeConnection?.dispose();
       fileSystemSlot.close();
       projectRootSlot.close();

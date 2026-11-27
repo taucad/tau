@@ -34,7 +34,7 @@ import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
 import { remoteTrackingRef } from '#remotes.js';
 import type { Checkout, ConflictRecord, RemoteRef, RevisionPort, RevisionPushInput } from '#revision-port.js';
-import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
+import { fileHeavyTimeout, gitToolchainOnPath, nativeHarness, removalRetries } from '#test/native-git-harness.js';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
@@ -91,7 +91,7 @@ const settles: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   await Promise.all(settles.splice(0).map(async (settle) => settle()));
-  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true, ...removalRetries })));
 });
 
 const createRevisionActors: typeof createRevisionActorsUntracked = (options) => {
@@ -312,9 +312,15 @@ describe('close cancels background transfers', () => {
     });
     actor.start();
     try {
-      await vi.waitFor(() => {
-        expect(fetching).toBe(true);
-      });
+      /* The first transfer starts once the actor has opened the store on a real disk. These rows took 0.7-1.0 s on
+       * the hosted windows-2025 runner in runs 44012123071 and 44028941814 and 1.5-4.8 s in run 44033552647, where
+       * this wait outran `vi.waitFor`'s 1 s default. */
+      await vi.waitFor(
+        () => {
+          expect(fetching).toBe(true);
+        },
+        { timeout: fileHeavyTimeout(1000) },
+      );
       let settled = false;
       const quiesce = (async () => {
         await awaitSyncSettled(actor, persistence === 'stalled' ? 100 : 2100);
@@ -826,9 +832,18 @@ describe('the tree a cut hashes', () => {
     await filesystem.writeFile('vendor/lib/.git/config', '[remote "origin"]\n');
     /* G0-3: `classify` answered with the first matching row, so a store under an
      * authored `.tau` control was that row's — authored and *versioned*. The
-     * skill beside it still arrives, so an empty subtree cannot pass this. */
+     * parameter file beside it still arrives, so an empty subtree cannot pass this. */
+    await filesystem.writeFile('.tau/parameters/main.ts.json', '{}\n');
+    await filesystem.writeFile('.tau/parameters/.git/config', '[remote "origin"]\n');
+    /* The project's agent files are its own, at the paths every agent reads; a
+     * skill cloned into place brings a `.git` that stays out like any other. */
+    await filesystem.writeFile('AGENTS.md', 'Dimensions in millimetres.\n');
+    await filesystem.writeFile('.agents/skills/cad/SKILL.md', '---\nname: cad\ndescription: CAD help.\n---\n');
+    await filesystem.writeFile('.agents/skills/cad/.git/config', '[remote "origin"]\n');
+    /* Their retired `.tau` paths have no row: what a project still keeps there
+     * is a reserved `.tau` member, left out of every cut. */
+    await filesystem.writeFile('.tau/AGENTS.md', 'Old instructions.\n');
     await filesystem.writeFile('.tau/skills/cad/SKILL.md', '---\nname: cad\n---\n');
-    await filesystem.writeFile('.tau/skills/cad/.git/config', '[remote "origin"]\n');
     /* G0b-9: a case alias of a reserved path wedged this cut. `classify` called it
      * authored and versioned, so the capture carried it — and `portable-tree`
      * refused the whole tree at commit, with no way out but deleting the file by
@@ -855,7 +870,14 @@ describe('the tree a cut hashes', () => {
         ?.entries()
         .map(({ path }) => path)
         .toSorted(),
-    ).toEqual(['.gitattributes', '.gitignore', '.tau/skills/cad/SKILL.md', 'main.ts']);
+    ).toEqual([
+      '.agents/skills/cad/SKILL.md',
+      '.gitattributes',
+      '.gitignore',
+      '.tau/parameters/main.ts.json',
+      'AGENTS.md',
+      'main.ts',
+    ]);
   }, 30_000);
 
   it('refuses a capture whose paths differ only by case', async () => {
@@ -2242,11 +2264,25 @@ describe('restore, through the machine that owns it', () => {
           });
         }
       };
+      /*
+       * A check that throws arms its next step only after it has released what it held, a real disk write, so the
+       * clock waits for that: moved on first, the step would be armed late (a retried pass on the Node 24 floor, CI
+       * run 45982997323). `before` is the timers waiting before the check started.
+       */
+      const rearmed = async (before: number): Promise<void> => {
+        for (let turn = 0; turn < 200 && control.failReads > 0 && vi.getTimerCount() < before; turn += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- until the throwing check has armed its next step.
+          await settle();
+        }
+      };
       const advance = async (milliseconds: number): Promise<void> => {
         for (let elapsed = 0; elapsed < milliseconds; elapsed += 50) {
+          const waiting = vi.getTimerCount();
           vi.advanceTimersByTime(50);
           // oxlint-disable-next-line no-await-in-loop -- each step's checks finish before the next is due.
           await settle();
+          // oxlint-disable-next-line no-await-in-loop -- and a throwing one has armed its next step.
+          await rearmed(waiting);
         }
       };
       const press = async (): Promise<void> => {
@@ -2257,6 +2293,7 @@ describe('restore, through the machine that owns it', () => {
           await settle();
         }
         expect(control.failed).toBe(failed + 1);
+        await rearmed(1);
       };
       control.failReads = Number.POSITIVE_INFINITY;
       /* Three Try agains, 100 ms apart, each check throwing: each arms the first backoff step. */
@@ -7403,7 +7440,8 @@ describe("a cut honours the checkout's own Git ignore rules on both legs", () =>
           ['models/local.step', 'solid local\n'],
           ['models/deep/local.step', 'solid deep\n'],
           ['Upper.LOG', 'ignored only where case folds\n'],
-          ['Build/case.stl', 'solid\n'],
+          /* Beside no `build/` of its own: on a case-insensitive disk (Windows, macOS) `Build/` would be `build/`. */
+          ['models/Build/case.stl', 'solid\n'],
         ] as const) {
           // oxlint-disable-next-line no-await-in-loop -- parents first, one file at a time.
           await filesystem.writeFile(path, content);
@@ -7422,11 +7460,11 @@ describe("a cut honours the checkout's own Git ignore rules on both legs", () =>
       expect(legs[0]![1]).toStrictEqual([
         '.gitattributes',
         '.gitignore',
-        ...(ignoreCase ? [] : ['Build/case.stl']),
         ...(ignoreCase ? [] : ['Upper.LOG']),
         'keep.secret',
         'main.scad',
         'models/.gitignore',
+        ...(ignoreCase ? [] : ['models/Build/case.stl']),
         'models/deep/local.step',
         'notes.log',
       ]);

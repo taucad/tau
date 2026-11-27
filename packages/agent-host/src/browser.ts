@@ -6,6 +6,7 @@ import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.
 import { parseEventLogBytes } from '#log/serialization.js';
 import type { AgentLogEvent, StorageDurabilityClass } from '#log/event-types.js';
 import type { ChatLogSegment } from '#log/segments.js';
+import { isMarkerFresh, isProviderMarker, newestRowAt } from '#log/writer-marker.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
 import type { HostClock } from '#harness/session.js';
@@ -300,10 +301,27 @@ const openProviderWriter = async (
   if (await fileSystem.exists(lockPath)) {
     throw new EventLogError('WRITER_LOCKED', `Event log "${filePath}" already has an active provider writer.`);
   }
-  await appendFile.call(fileSystem, lockPath, `${Date.now()}\n`);
+  const marker = `${Date.now()}\n`;
+  await appendFile.call(fileSystem, lockPath, marker);
 
+  /* Whether the marker at the path is still this writer's: a `tau serve` that took a stale one over (HA-I10) wrote its
+   * own there, which this writer must neither refresh nor remove.
+   * ponytail: read-compare-then-unlink (or write) leaves a window between the read and the change, since a provider
+   * has no compare-and-delete. A Node takeover landing inside it loses its marker to this unlink, or has it rewritten;
+   * Node's verify-after-settle inode check then stands down on an unlink within its settle. Closing it needs a
+   * provider compare-and-swap, or a kernel lock the browser can see. */
+  const ownsMarker = async (): Promise<boolean> => {
+    const held = await fileSystem.readFile(lockPath).catch(() => undefined);
+    return held !== undefined && new TextDecoder().decode(held) === marker;
+  };
+  let closed = false;
+  /* Read through a call: the close can land across the touch's await, which narrowing cannot see. */
+  const isClosed = (): boolean => closed;
   const releaseWriterLock = async (): Promise<void> => {
-    await fileSystem.unlink(lockPath).catch(() => undefined);
+    closed = true;
+    if (await ownsMarker()) {
+      await fileSystem.unlink(lockPath).catch(() => undefined);
+    }
   };
   /*
    * WP-10 step B: with a fencing authority, rows are held here until `sync` sends them as one fenced append, so the
@@ -380,6 +398,13 @@ const openProviderWriter = async (
     read: async () => {
       await settled();
       return joined(await readBytes(), held);
+    },
+    /* HA-I10: a live provider writer keeps its marker fresh for a `tau serve` sharing the folder, which cannot see the
+     * Web Lock. Only its own marker, and never once it closes: a touch racing the close must not write it back. */
+    touch: async () => {
+      if (!isClosed() && (await ownsMarker()) && !isClosed()) {
+        await fileSystem.writeFile(lockPath, new TextEncoder().encode(marker));
+      }
     },
     append: async (bytes, expectedLength) =>
       appendFileFenced === undefined || expectedLength === undefined
@@ -763,9 +788,7 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
     },
     openWriter: async (chatId, open) => {
       const filePath = logPath(chatId);
-      /* This open runs under the chat's Web Lock (M2), so a surviving marker is a dead or stolen holder's; the
-       * per-append fence refuses that holder's appends whatever the marker says (EQ2, RH-R12). */
-      await fileSystem.unlink(`${filePath}.lock`).catch(() => undefined);
+      await takeOverWriterMarker(fileSystem, filePath);
       const { readdir, stat } = fileSystem;
       const directory = segmentsPath(chatId);
       return openProviderWriter(
@@ -799,6 +822,41 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
     /* The provider leg fences each append, so a steal from a silent holder can serve (RH-R12). */
     leadership: leadershipOf(options, true),
   });
+};
+
+/**
+ * Clear a writer marker a provider open may take over (HA-I10, H51). A provider marker is always taken: this open runs
+ * under the chat's Web Lock, so it is a dead or stolen holder's, and the per-append fence refuses that holder (EQ2,
+ * RH-R12). A Node writer's marker on a folder shared with `tau serve` is honoured while it is fresh: the newer of the
+ * log's newest row and the marker's modification time (the live Node writer touches it every heartbeat tick) is
+ * within the XD3 bound (`isMarkerFresh`). Past that bound the Node writer is gone or paused past its hold, and the
+ * marker is taken over as another device's stale run is (XD3).
+ *
+ * @param fileSystem - The provider.
+ * @param filePath - The log.
+ * @param now - The wall clock, in epoch milliseconds.
+ */
+const takeOverWriterMarker = async (
+  fileSystem: Pick<ProviderEventLogOptions['fileSystem'], 'readFile' | 'unlink' | 'stat'>,
+  filePath: string,
+  now: number = Date.now(),
+): Promise<void> => {
+  const lockPath = `${filePath}.lock`;
+  const marker = await fileSystem.readFile(lockPath).catch(() => undefined);
+  if (marker !== undefined && !isProviderMarker(new TextDecoder().decode(marker))) {
+    const touchedAt = await fileSystem.stat?.(lockPath).then(
+      ({ mtimeMs }) => mtimeMs,
+      () => undefined,
+    );
+    const rowAt = newestRowAt(await fileSystem.readFile(filePath).catch(() => undefined));
+    if (isMarkerFresh(now, touchedAt, rowAt)) {
+      throw new EventLogError(
+        'WRITER_LOCKED',
+        `Event log "${filePath}" has a live Node writer. Wait until it closes the log, then open it again.`,
+      );
+    }
+  }
+  await fileSystem.unlink(lockPath).catch(() => undefined);
 };
 
 const leadershipOf = (

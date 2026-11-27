@@ -13,6 +13,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OPFSProvider } from '@taucad/filesystem/backend';
+import { parseEventLog } from '@taucad/agent-host';
 import type { AgentLogEvent, ChannelServerHandle } from '@taucad/agent-host';
 import { createAgentChannelClient, serveAgentWorkerChannel } from '@taucad/agent-host/channel-client';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
@@ -331,10 +332,8 @@ const harness = async (): Promise<Harness> => {
     },
     rows: async () => {
       const log = await fileSystemProvider.readFile(`${providerBasePath}/.tau/chats/${chatId}/events.jsonl`, 'utf8');
-      return log
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as AgentLogEvent);
+      /* Through the reader: a log is written compactly (WP-17), so its lines are not its rows. */
+      return parseEventLog(log);
     },
   };
   disposers.push(async () => {

@@ -159,7 +159,7 @@ describe('formal nightly check shards and cache', () => {
   });
 
   it('should check only modules under specs/ that read no seed, environment or file in a nightly check', () => {
-    const owners = ['apps', 'libs', 'packages'].flatMap((base) =>
+    const owners = ['apps', 'apps/libs', 'libs', 'packages'].flatMap((base) =>
       readdirSync(resolve(root, base), { withFileTypes: true })
         .map((entry) => resolve(root, base, entry.name))
         .filter((project) => existsSync(resolve(project, 'project.json')))
@@ -170,7 +170,10 @@ describe('formal nightly check shards and cache', () => {
           return 'formal:nightly:check' in targets;
         }),
     );
-    expect(owners.map((owner) => owner.slice(root.length + 1))).toEqual(['packages/agent-host']);
+    expect(owners.map((owner) => owner.slice(root.length + 1))).toEqual([
+      'apps/libs/api-billing',
+      'packages/agent-host',
+    ]);
     // The standard and community modules ship in the pinned jars, which `toolchain-id` names.
     const shipped = ['FiniteSets', 'FiniteSetsExt', 'Integers', 'Naturals', 'Sequences', 'SequencesExt', 'TLC'];
     const reads =

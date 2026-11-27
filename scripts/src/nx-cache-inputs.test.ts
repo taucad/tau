@@ -279,7 +279,11 @@ describe('nx cache inputs', () => {
    */
   it('should give the API image build every tracked file CI hashes for the API and its workspace dependencies', () => {
     const rules = dockerIgnoreRules('apps/api/Dockerfile.dockerignore');
-    const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' })
+    const tracked = execFileSync('git', ['ls-files', '-z'], {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    })
       .split('\0')
       .filter((file) => file !== '');
     const closure = apiWorkspaceClosure(tracked);

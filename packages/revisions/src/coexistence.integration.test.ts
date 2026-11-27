@@ -23,14 +23,14 @@ import { selectRevisionStatus } from '#project-revisions.machine.js';
 import type { RevisionUserActor } from '#revision-authority.js';
 import { createProjectRevisionsActor } from '#revision-effects.js';
 import type { RevisionPort } from '#revision-port.js';
-import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { gitToolchainOnPath, removalRetries } from '#test/native-git-harness.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 const ada: RevisionUserActor = { kind: 'user', id: 'user-ada', name: 'Ada' };
 const roots: string[] = [];
 
 afterAll(async () => {
-  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true, ...removalRetries })));
 });
 
 /* The person's Git: their own identity, none of the caller's `GIT_*`. */

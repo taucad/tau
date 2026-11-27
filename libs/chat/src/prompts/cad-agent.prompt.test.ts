@@ -1,7 +1,7 @@
 import type { KernelProvider } from '@taucad/runtime';
 import { kernelProviders } from '@taucad/types/constants';
 import { describe, expect, it } from 'vitest';
-import { getCadSystemPrompt, getChatStateNote } from '#prompts/cad-agent.prompt.js';
+import { getCadSystemPrompt, getChatStateNote, getConversationLogNote } from '#prompts/cad-agent.prompt.js';
 import { kernelChoiceCondition, renderKernelGuidance } from '#prompts/kernel-routing.js';
 import type { KernelGuidanceInput } from '#prompts/kernel-routing.js';
 import { renderPersonBlock } from '#prompts/person-block.js';
@@ -273,13 +273,23 @@ describe('chat state note', () => {
   });
 });
 
+describe('transcript_path', () => {
+  it('should name the log only when a chat id is given, so a prompt without one is the same for every chat', () => {
+    expect(getCadSystemPrompt('replicad', 'agent', true, { chatId: 'chat_1' }).dynamic).toContain(
+      getConversationLogNote('chat_1'),
+    );
+    expect(getCadSystemPrompt('replicad', 'agent', true, {}).dynamic).not.toContain('Your conversation log:');
+  });
+});
+
 describe('kernel_skill states (automatic kernel selection D2)', () => {
   const profile = { available: ['openscad', 'replicad'] } as const;
-  /* The kernel_skill section sits between the workbench section and the transcript path in the dynamic block. */
+  /* The kernel_skill section sits after the workbench section, before the transcript path when a chat id is given and
+   * before the project instructions otherwise. */
   const kernelSkill = (prompt: { dynamic: string }): string =>
     prompt.dynamic
       .slice(prompt.dynamic.indexOf('</workbench>') + '</workbench>'.length)
-      .split('Your conversation log:')[0]
+      .split(/Your conversation log:|<project_instructions>/u)[0]
       ?.trim() ?? '';
 
   it('should keep Block 1 byte-identical for Auto and every manual preference', () => {

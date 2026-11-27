@@ -27,6 +27,7 @@ import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
 import { followChat } from '#log/follow-chat.js';
+import { parseEventLog } from '#log/serialization.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 import type { HostCommand } from '#wire/commands.schema.js';
 import type { ToolRegistry } from '#waist/ports.js';
@@ -166,10 +167,7 @@ const harness = async (): Promise<Harness> => {
     },
     rows: async () => {
       const text = await readFile(join(root, '.tau', 'chats', chatId, 'events.jsonl'), 'utf8');
-      return text
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as AgentLogEvent);
+      return parseEventLog(text);
     },
   };
 

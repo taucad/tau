@@ -76,6 +76,7 @@ import { tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMime, idPref
 import { FileSelector } from '@taucad/files-ui/components/files/file-selector';
 import { useProject } from '#hooks/use-project.js';
 import { Dockview } from '#components/panes/dockview.js';
+import { changeQuietly } from '#components/panes/dockview-announcements.js';
 import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js';
 import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 import { DockviewSplitAction } from '#components/panes/dockview-split-action.js';
@@ -1129,11 +1130,14 @@ export function seedFreshWorkbench({
   if (api.panels.length > 0) {
     return;
   }
-  if (profile === 'shared') {
-    api.addPanel(workbenchPanels.parameters);
-    return;
-  }
-  createWorkbenchNewTab({ api, group: api.activeGroup ?? api.groups[0] });
+  // A fresh dock's seed is the app's, not the person's: Dockview does not announce it ("New tab opened").
+  changeQuietly(api, () => {
+    if (profile === 'shared') {
+      api.addPanel(workbenchPanels.parameters);
+      return;
+    }
+    createWorkbenchNewTab({ api, group: api.activeGroup ?? api.groups[0] });
+  });
 }
 
 export function restoreWorkbenchLayout({

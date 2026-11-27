@@ -8,6 +8,8 @@ export type {
   ProjectionBatch,
 } from '#log/projection-facts.js';
 export { foldProjectionFacts } from '#log/chat-ledger.js';
+export { createReplayFacts, isBytePrefix } from '#launchers/replay-view.js';
+export type { ReplayFacts } from '#launchers/replay-view.js';
 export type { FoldProjectionFactsInput } from '#log/chat-ledger.js';
 export { EventLogError } from '#log/event-log-error.js';
 export { parseEventLog, serializeLogEvent } from '#log/serialization.js';

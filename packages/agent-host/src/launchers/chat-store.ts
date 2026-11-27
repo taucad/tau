@@ -35,8 +35,13 @@ export type LeadershipHost = Readonly<{
   dropView: (chatId: string) => Promise<void>;
   /** Name the epoch the chat's next incarnation claims at (D5). */
   assume: (chatId: string, epoch: number) => void;
-  /** Open the chat's M1 incarnation, which abandons a driverless run and reconciles before it serves (RH-R9). */
-  claim: (chatId: string) => Promise<void>;
+  /**
+   * Open the chat's M1 incarnation, which abandons a driverless run and reconciles before it serves (RH-R9). Resolves
+   * with the refusal's code when the claim was refused, so the binding retries or lets go (HA4); `undefined` once open.
+   */
+  claim: (chatId: string) => Promise<string | undefined>;
+  /** A binding's claim retry for the chat ended without a relinquish (Node): its next refusal is reported again. */
+  claimEnded: (chatId: string) => void;
   /** Stop the chat's M1 and close its writer, which frees the binding's lock (RH-R8). */
   relinquish: (chatId: string) => Promise<void>;
   /** Run a command in this process at the epoch this worker leads (a claim's write, or another tab's forward). */

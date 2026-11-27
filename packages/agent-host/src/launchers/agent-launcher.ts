@@ -123,6 +123,12 @@ export type AgentLauncherOptions = Readonly<{
    * host's.
    */
   onChatQuiescent?: ((chatId: string, quiescent: boolean) => void) | undefined;
+  /**
+   * HA4 (HA0's `claim.refused`): told each time a claim after the leadership's grant is refused, with the code (a claim
+   * that threw is `HOST_FAULT`); a closing host's `HOST_CLOSED` is not reported. It runs synchronously in the host;
+   * what it throws is logged, never the host's.
+   */
+  onClaimRefused?: ((chatId: string, code: string) => void) | undefined;
 }>;
 
 /** A running launcher: one per project, in any process. @public */
@@ -770,6 +776,12 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     },
   });
 
+  /** HA4 (H32): each chat's claim under way. An attach that asked for it answers `takeover` from its outcome. */
+  const claiming = new Map<string, ReturnType<TauAgentHost['claim']>>();
+  /** HA4 (H32): the chats whose last claim here was refused; a claim that opens clears it. */
+  const refusedClaims = new Set<string>();
+  /* Review round 2: a refused term retries its claim each second; only its first refusal is reported. */
+  const reportedRefusals = new Set<string>();
   /** The runs this launcher admitted, by chat (T3). ponytail: kept for the launcher's life; a drain re-reads them. */
   const admitted = new Map<string, Set<string>>();
   /** The counted admissions not yet answered, which `admittedRuns` waits for (W6.r1 round 5). */
@@ -859,12 +871,49 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       host.assumeLeadership(chatId, epoch);
     },
     claim: async (chatId) => {
-      const claim = await host.claim(chatId);
-      if ('refused' in claim && claim.refused.status === 'refused' && claim.refused.code !== 'HOST_CLOSED') {
-        console.error('[agent-launcher] a claim was refused', chatId, claim.refused.code, claim.refused.message);
+      const answer = host.claim(chatId);
+      claiming.set(chatId, answer);
+      const refusedWith = (code: string, message: string): string => {
+        refusedClaims.add(chatId);
+        /* The binding retries a closing incarnation's refusal and lets the lock go on any other (HA4). */
+        if (code !== 'HOST_CLOSED' && !reportedRefusals.has(chatId)) {
+          reportedRefusals.add(chatId);
+          console.error('[agent-launcher] a claim was refused', chatId, code, message);
+          try {
+            options.onClaimRefused?.(chatId, code);
+          } catch (error) {
+            console.error('[agent-launcher] a claim refusal observer threw', chatId, error);
+          }
+        }
+        return code;
+      };
+      let claim: Awaited<typeof answer>;
+      try {
+        claim = await answer;
+      } catch (error) {
+        /* Review N5: a claim that threw opened nothing either, so an attach reports no takeover of it. */
+        refusedWith('HOST_FAULT', error instanceof Error ? error.message : String(error));
+        throw error;
+      } finally {
+        if (claiming.get(chatId) === answer) {
+          claiming.delete(chatId);
+        }
       }
+      if (!('refused' in claim)) {
+        refusedClaims.delete(chatId);
+        reportedRefusals.delete(chatId);
+        return undefined;
+      }
+      const { refused: answered } = claim;
+      return answered.status === 'refused'
+        ? refusedWith(answered.code, answered.message)
+        : refusedWith('HOST_FAULT', 'The claim was refused without a code.');
+    },
+    claimEnded: (chatId) => {
+      reportedRefusals.delete(chatId);
     },
     relinquish: async (chatId) => {
+      reportedRefusals.delete(chatId);
       await host.relinquish(chatId);
       wakeReads(chatId, 'reroute');
     },
@@ -997,14 +1046,24 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
   };
 
   /**
-   * RH-R1: `attach` is a read. Its answer is the chat as the log holds it and this process's role. `takeover` says only
+   * RH-R1: `attach` is a read. Its answer is the chat as the log holds it and this process's role. `takeover` says
    * that the log shows a run no driver here holds, so this attach asked M2 for the chat's claim; that claim, not the
    * attach, writes the run's outcome (`RUN_ABANDONED`) once it wins the chat's lock, and writes nothing while another
-   * tab leads. A caller that sees it keeps watching the chat for that outcome.
+   * tab leads. A caller that sees it keeps watching the chat for that outcome. H32 (HA4): where a claim is under way,
+   * `takeover` is that claim's own answer, and none is reported while the chat's last claim here was refused, so a
+   * second process refused by the writer that drives the run never reports a takeover of it.
    */
   const attach = async (commandId: string, chatId: string): Promise<CommandAnswer> => {
     const chat = await view(chatId);
-    const driverless = checkDriver(chatId, chat.ledger, true);
+    const asked = checkDriver(chatId, chat.ledger, true);
+    const claim = asked ? claiming.get(chatId) : undefined;
+    const driverless =
+      claim === undefined
+        ? asked && !refusedClaims.has(chatId)
+        : await claim.then(
+            (answer) => 'takeover' in answer && answer.takeover,
+            () => false,
+          );
     const run = await runOf(chatId, chat);
     return {
       commandId,

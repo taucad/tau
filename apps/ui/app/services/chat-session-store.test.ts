@@ -5402,7 +5402,8 @@ describe('ChatSessionStore', () => {
       }
     });
 
-    it('should retain a prepared message when retry has no durable host decision', async () => {
+    /* HA-I4 (HA4): applied with nothing to do is the host's decision, so the item ends and is never sent again. */
+    it('should end a prepared message the host applied with nothing to do', async () => {
       const chatId = 'queue_no_decision';
       const { store, session, hostCommand, unpublish } = await open(chatId, 'queue_project');
       const unadmit = queueAdmission(chatId);
@@ -5426,8 +5427,56 @@ describe('ChatSessionStore', () => {
           expect(hostCommand).toHaveBeenCalledTimes(2);
         });
         await settle();
-        expect(session.messageQueueRef.getSnapshot().context.items[0]?.command).toEqual(original);
-        expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+        expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+        expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(false);
+        expect(hostCommand).toHaveBeenCalledTimes(2);
+      } finally {
+        unadmit();
+        unpublish();
+        store.release(chatId);
+      }
+    });
+
+    /* Review N1: an applied not-applied answer naming the run live keeps a Stop pressed meanwhile for that run. */
+    it('should keep a Stop for a run the host answers live with nothing to do', async () => {
+      const chatId = 'queue_no_decision_live';
+      const { store, session, hostCommand, unpublish } = await open(chatId, 'queue_project');
+      const unadmit = queueAdmission(chatId);
+      const answer = Promise.withResolvers<Awaited<ReturnType<AgentHostClient['hostCommand']>>>();
+      hostCommand.mockRejectedValueOnce(new Error('Lost acknowledgement'));
+      try {
+        publishLogRows(store, chatId, []);
+        await store.requestTurn(chatId, queuedGesture('live'));
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+        });
+        const original = hostCommand.mock.calls[0]![0] as Extract<HostCommand, { type: 'start' }>;
+        hostCommand.mockImplementationOnce(async () => answer.promise);
+        store.retryMessageQueue(chatId);
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledTimes(2);
+        });
+        /* A Stop pressed while the replay is out, aimed at its run, as `stopRun` aims one at a prepared send. The
+         * store's internal session holds it; the test sets it directly. */
+        (session as unknown as { stop: unknown }).stop = {
+          origin: 'stop-button',
+          withdrawing: undefined,
+          target: original.payload.runId,
+          sent: undefined,
+          cancelId: undefined,
+        };
+        answer.resolve({
+          commandId: original.commandId,
+          generation: 1,
+          status: 'applied',
+          effect: 'not-applied',
+          details: { state: 'running', runId: original.payload.runId },
+        });
+        await vi.waitFor(() => {
+          expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+        });
+        await settle();
+        expect(store.isStopping(chatId)).toBe(true);
       } finally {
         unadmit();
         unpublish();

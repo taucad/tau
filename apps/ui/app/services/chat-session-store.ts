@@ -3125,16 +3125,27 @@ export class ChatSessionStore {
             this.#holdForHost(session, { queueId: item.id, command: item.command, refusal: wait });
             return this.#holdQueue(session, record.items, 'host-wait');
           }
-          /* `never`, `resume` and `reauth` end the item with the code's card. ponytail: an applied answer that applied
-           * nothing still keeps the item, as MessageQueue's `Acknowledge` requires durable acceptance; HA4 ends it with
-           * the queue store and the `QueuePlacement` target. */
+          /* `never`, `resume` and `reauth` end the item with the code's card. */
           if (answer.status === 'refused') {
             throw new Error(`Delivery could not be confirmed: ${answer.message}`);
           }
           if (answer.effect !== 'durable') {
-            /* U20: applied, but not as a durable row. */
-            unknownEffect({ reason: 'not-durable', code: answer.status });
-            throw new Error('Message saved. The host has not confirmed durable acceptance.');
+            /* HA-I4 (HA4, `QueuePlacement`'s `AnswerNoop`): applied with nothing to do. The item ends with no receipt and
+             * no run, so it is never sent again and nothing waits on it. Review N1: when the answer names the run live
+             * (`details.state`), a Stop pressed meanwhile is that run's to end, so it is sent rather than let go. */
+            const { runId } = item.command.payload;
+            if (session.stop?.target === runId) {
+              const { state } = answer.details;
+              if (state === 'admitted' || state === 'running') {
+                void this.#cancelSessionRun(session, runId);
+              } else {
+                this.#releaseStop(session);
+              }
+            }
+            this.#endHostWait(session);
+            const after = await session.messageQueueStore.end(item.id, commandId);
+            this.#loadOutbox(session, after, false);
+            return { items: after.items, status: 'changed' };
           }
         } catch (error) {
           /* No run started, so a Stop waiting for this replay's run has nothing to wait for. */

@@ -32,6 +32,10 @@
     "leadership.read": "Unmodelled",
     "leadership.visibility": "Unmodelled",
     "leadership.xstate.error.*": "Unmodelled",
+    "leading.claimRefusalBound": "ReleaseRefused",
+    "leading.claimRefused": "RefuseClaim",
+    "leading.claimRetry": "Unmodelled",
+    "leading.claimed": "OpenClaim",
     "leading.command": "Send",
     "leading.executed": "Release",
     "leading.fenced": "Refused",
@@ -49,6 +53,10 @@
   },
   "alphabet": [
     "appended",
+    "claimRefusalBound",
+    "claimRefused",
+    "claimRetry",
+    "claimed",
     "close",
     "closedHostBound",
     "command",
@@ -69,11 +77,11 @@
     "visibility"
   ],
   "specs": {
-    "LogLeadership.tla": "f02d463d43f210b738a284edb790879af2ee165730d2a0870951e163ab92679a",
-    "LogLeadershipGraph.tla": "71b3b9d59989ad09e28f25b3db2797c5671a0caf98c6d2e7fc598a18d3cbad3a"
+    "LogLeadership.tla": "336b31da03309db79d4de070e839b5e2f654c4175b68da802a07c66ed408e048",
+    "LogLeadershipGraph.tla": "428db7fa847a15b63f2d76eea75137f9e90bf93520c208435ea65f6e13441d26"
   },
   "tables": {},
   "versions": {
-    "leadership": "2"
+    "leadership": "3"
   }
 }

@@ -18,6 +18,7 @@ import type {
 } from '@taucad/agent-host/wire';
 import { randomUuid } from '@taucad/utils/id';
 import { readBuildRelease } from '#lib/build-identity.js';
+import { reportForwardedClaimRefusal } from '#lib/chat-read-reporting.js';
 import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type {
@@ -664,7 +665,10 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     };
     /* Runtime telemetry (FR-14): the host's and the GeoSpec runner's entries, recorded by this page's one reporter. */
     channel.onNotify('telemetry', ({ entry }) => {
-      pageTelemetry()?.recordForwarded(entry);
+      /* HA4: a refused claim is a chat-read report, not a runtime entry. */
+      if (!reportForwardedClaimRefusal(entry)) {
+        pageTelemetry()?.recordForwarded(entry);
+      }
     });
     /* `arrange_workbench` set leaves in a view: the device's exceptions live in this page's storage (BD7). */
     channel.onNotify('viewFieldsSet', (set) => {

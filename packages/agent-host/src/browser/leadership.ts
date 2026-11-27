@@ -12,7 +12,12 @@ import type { HostClock } from '#harness/session.js';
 import type { LeadershipHost, LeadershipPort } from '#launchers/chat-store.js';
 import { parseLeadershipFrame } from '#launchers/leadership/frames.js';
 import type { LeadershipFrame } from '#launchers/leadership/frames.js';
-import { firedLate, leadershipMachine } from '#launchers/leadership/leadership.machine.js';
+import {
+  claimRefusalRetryMilliseconds,
+  claimRetryMilliseconds,
+  firedLate,
+  leadershipMachine,
+} from '#launchers/leadership/leadership.machine.js';
 import type { LeadershipEffectArgs, LockMode } from '#launchers/leadership/leadership.machine.js';
 import { chatLeadershipNames } from '#launchers/leadership/names.js';
 import type { SourceLiveEvent } from '#waist/ports.js';
@@ -38,6 +43,9 @@ export type LeadershipDelays = Readonly<{
   queuedWriteBound: number;
   /** C11: a forwarded admission a draining holder refused waits this long for its release or a successor. */
   closedHostBound: number;
+  /** HA4: a claim refused `WRITER_LOCKED` is retried this long, each `claimRetry`, before the lock goes. */
+  claimRefusalRetry: number;
+  claimRetry: number;
 }>;
 
 const defaultDelays: LeadershipDelays = {
@@ -47,6 +55,8 @@ const defaultDelays: LeadershipDelays = {
   claimBound: 10_000,
   queuedWriteBound: 10_000,
   closedHostBound: 10_000,
+  claimRefusalRetry: claimRefusalRetryMilliseconds,
+  claimRetry: claimRetryMilliseconds,
 };
 
 /** What one worker's leadership needs. @internal */
@@ -279,10 +289,24 @@ export const createBrowserLeadership =
             }
           });
         },
-        claim: ({ epoch }) => {
+        claim: ({ corr, epoch }) => {
           serial(async () => {
             host.assume(chatId, epoch);
-            await host.claim(chatId);
+            /* HA4 (RC3): M2 hears how the claim ended, so a refused one is retried or lets the lock go.
+             * ponytail (review N3): the bound's relinquish runs on this chain, so it waits behind a claim that hangs
+             * in its incarnation's opening (`served` has no bound); the ceiling is that opening, as for `claimBound`'s
+             * relinquish. Bound `served` if a hung opening is seen. */
+            let code: string | undefined;
+            try {
+              code = await host.claim(chatId);
+            } catch (error) {
+              /* A claim that threw opened no writer either: M2 lets the lock go, as for any refusal but a closing one. */
+              console.error('[agent-host leadership] a claim failed', chatId, error);
+              code = 'HOST_FAULT';
+            }
+            deliver(
+              code === undefined ? { type: 'claimed', corr, epoch } : { type: 'claimRefused', corr, epoch, code },
+            );
           });
         },
         runLocal: ({ corr, command, epoch }) => {
@@ -374,7 +398,7 @@ export const createBrowserLeadership =
         },
       };
 
-      const { closedHostBound, ...machineDelays } = delays;
+      const { closedHostBound, claimRefusalRetry, claimRetry, ...machineDelays } = delays;
       const machine = leadershipMachine.provide({ actions: effects, delays: machineDelays });
       const actor: Actor = createActor(machine, {
         input: {
@@ -385,6 +409,8 @@ export const createBrowserLeadership =
           canSteal: options.canSteal,
           visible: options.visibility?.visible() ?? true,
           closedHostBound,
+          claimRefusalRetry,
+          claimRetry,
         },
         ...(options.clock === undefined ? {} : { clock: options.clock }),
       });

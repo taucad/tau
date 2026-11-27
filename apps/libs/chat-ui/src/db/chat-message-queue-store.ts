@@ -129,6 +129,11 @@ export type ChatMessageQueueStore = {
   ): Promise<ChatMessageQueueRecord>;
   move(id: string, beforeId: string | undefined): Promise<ChatMessageQueueRecord>;
   acknowledge(id: string, commandId: string, placement?: string): Promise<ChatMessageQueueRecord>;
+  /**
+   * HA-I4 (HA4): the host answered the item's command applied with nothing to do (`not-applied`), so it ends without a
+   * receipt: no run started, and the next item's terminal barrier stays where it was.
+   */
+  end(id: string, commandId: string): Promise<ChatMessageQueueRecord>;
   remove(): Promise<void>;
 };
 export const createChatMessageQueueStore = (
@@ -217,6 +222,12 @@ export const createChatMessageQueueStore = (
             }
           : record;
       }),
+    end: async (id: string, commandId: string): Promise<ChatMessageQueueRecord> =>
+      update((record) =>
+        record.items.some((entry) => entry.id === id && entry.command?.commandId === commandId)
+          ? { ...record, items: record.items.filter((entry) => entry.id !== id) }
+          : record,
+      ),
     remove: async (): Promise<void> =>
       lock(path, async () => {
         try {

@@ -15,7 +15,7 @@ CONSTANTS Workers, Keys, MaxEpoch, MaxCrashes, MaxSends, Steal, Fence, IdemKeys,
 VARIABLES
     lock, lockEpoch, epochs, alive, lead, claimed, view, vlen, mine, pending, fence, handle, log, lockNotFence,
     frames, done, status, latest, refused, heard, tries, crashes, sends,
-    frozen, freezes, reading, noticeDue, queued, nqueues, want, wants, drives, run, nruns, zombie,
+    frozen, freezes, reading, noticeDue, queued, nqueues, want, wants, drives, run, nruns, zombie, refusal,
     act, m2
 
 L == INSTANCE LogLeadership
@@ -53,6 +53,10 @@ Steps ==
         \/ L!GrantQueued(w) /\ A("GrantQueued", w)
         \/ L!Freeze(w) /\ A("Freeze", w)
         \/ L!Thaw(w) /\ A("Thaw", w)
+        \* HA4: enabled only with ClaimRefusal # "none", which the committed export leaves at "none".
+        \/ L!RefuseClaim(w) /\ A("RefuseClaim", w)
+        \/ L!OpenClaim(w) /\ A("OpenClaim", w)
+        \/ L!ReleaseRefused(w) /\ A("ReleaseRefused", w)
 GraphNext == Steps /\ m2' = M2View'
 
 GraphSpec == GraphInit /\ [][GraphNext]_<<L!vars, act, m2>>

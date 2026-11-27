@@ -1081,6 +1081,7 @@ export class ProjectDirectories {
         let completed = false;
         let present = true;
         let version: IndexVersion | undefined;
+        let existsError: unknown;
         try {
           await this._deleteProjectDirectory({ provider, directoryPath: path, ...removal });
           completed = true;
@@ -1090,8 +1091,9 @@ export class ProjectDirectories {
             version = this._index.version(storageRootKey, path);
             try {
               present = await provider.exists(path);
-            } catch {
-              /* Unknown is not gone. */
+            } catch (error) {
+              /* Unknown is not gone; the caller still learns why (a lapsed permission stays workspace-unavailable). */
+              existsError = error;
             }
           }
           /* Only what the removal did, and only to the indexes that read or hold the directory: every other project's
@@ -1108,6 +1110,9 @@ export class ProjectDirectories {
             { type: 'directory-change', path: authorityParent, authority: parentAuthority },
             namedDirectoryFact(storageRootKey, path),
           ]);
+        }
+        if (existsError instanceof Error) {
+          throw existsError;
         }
         if (present || version === undefined) {
           throw new Error(`Permanent delete did not remove ${path}`);

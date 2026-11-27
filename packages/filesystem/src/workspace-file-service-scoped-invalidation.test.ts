@@ -678,6 +678,41 @@ describe.each(['bound', 'unbound'] as const)('a permanent delete whose removal f
   });
 });
 
+/* FW5 re-verification minor: a closing existence check that throws rejects the delete with that error, so the
+ * library keeps its classification (a lapsed folder permission stays workspace-unavailable), not a generic one. */
+describe('a permanent delete whose closing existence check throws', () => {
+  it("should reject with the check's own error", async () => {
+    const { service, rootProvider } = await createIdbWorkspaceFileService();
+    services.push(service);
+    await writeProject(rootProvider, 'x', x);
+    await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+    const lapsed = new Error('NotAllowedError: simulated lapsed permission');
+    const exists = rootProvider.exists.bind(rootProvider);
+    let removed = false;
+    const rmdir = rootProvider.rmdir.bind(rootProvider);
+    vi.spyOn(rootProvider, 'rmdir').mockImplementation(async (path: string) => {
+      await rmdir(path);
+      if (path === 'x') {
+        removed = true;
+      }
+    });
+    vi.spyOn(rootProvider, 'exists').mockImplementation(async (path: string) => {
+      if (removed && path === 'x') {
+        throw lapsed;
+      }
+      return exists(path);
+    });
+
+    await expect(
+      service.permanentlyDeleteProjectDirectory({
+        projectId: x,
+        providerBasePath: 'x',
+        scope: { backend: 'indexeddb' },
+      }),
+    ).rejects.toBe(lapsed);
+  });
+});
+
 /* FW5 re-verification nit: a removed directory whose Home alias a deeper mount shadows is still published, as the
  * ingest publishes it: the Home connection, which reads it through its own mount, hears it go; an unrooted watch, which
  * sees the deeper mount there, does not. */

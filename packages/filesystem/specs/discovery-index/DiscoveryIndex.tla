@@ -124,6 +124,8 @@
 \* its notices instead of after them, and publishes it as deleted only then; a removal that threw or left the
 \* directory records no removal, and its views hear it changed. The version is still taken before the check and the
 \* install is unchanged, and the publication takes one object argument: every action and verdict is unchanged.
+\* FW5 re-verification (2026-11-27): a permanent delete whose closing check throws rejects with that error, so a
+\* lapsed permission stays workspace-unavailable. Error reporting only: every action and verdict is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

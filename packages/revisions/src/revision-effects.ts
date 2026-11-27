@@ -6106,7 +6106,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         BranchMergeActorOutput,
         Readonly<{ projectId: string; branch: string; into: string }>
       >(async ({ input }) => {
-        /* The registry is re-read on `branchMerged`, so the moved checkout stays this module's. */
+        /* The moved checkout is named so its actor re-heads at once; the registry is re-read on `branchMerged`. */
         const outcome = await mergeBranches({ ...input, undone: 'refuse' });
         if (outcome.status === 'conflicted') {
           return { status: 'conflicted', paths: outcome.paths };
@@ -6117,6 +6117,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               status: 'merged',
               revisionId: outcome.revisionId,
               ...(outcome.before === undefined ? {} : { before: outcome.before }),
+              ...(outcome.checkoutId === undefined ? {} : { checkoutId: outcome.checkoutId }),
             };
       }),
       /* A rename is two ref writes, in the order that cannot lose the head: the

@@ -304,11 +304,14 @@ const noSubscription = (): (() => void) => () => undefined;
  * @param target - The surface and scope to adopt, or undefined for a mount that adopts nothing.
  * @param onAdopted - Called once with the snapshot, before the rich surface renders it; it moves the text into its
  *   owner.
+ * @param canAdopt - Whether the owner can take the text now. While it cannot (its owner was disposed and a live one is
+ *   on its way), a served input stays the one to type in and the state stays `waiting`, as behind a hidden host.
  * @returns The adoption state.
  */
 export function useHandOffAdoption(
   target: HandOffTarget | undefined,
   onAdopted: (snapshot: HandOffSnapshot) => void,
+  canAdopt = true,
 ): HandOffAdoptionState {
   const surface = target?.surface;
   const scope = target?.scope;
@@ -337,7 +340,7 @@ export function useHandOffAdoption(
       surface === undefined ||
       scope === undefined ||
       (lastAttempt.current?.scope === scope && lastAttempt.current.version === version) ||
-      (!isShown && handOffStore.holds({ surface, scope }))
+      ((!isShown || !canAdopt) && handOffStore.holds({ surface, scope }))
     ) {
       return;
     }
@@ -354,6 +357,6 @@ export function useHandOffAdoption(
       scope,
       state: { kind: 'done', snapshot: adoption.kind === 'adopted' ? adoption.snapshot : undefined },
     });
-  }, [isWaiting, isShown, surface, scope, version, onAdopted]);
+  }, [isWaiting, isShown, canAdopt, surface, scope, version, onAdopted]);
   return state;
 }

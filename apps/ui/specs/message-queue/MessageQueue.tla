@@ -344,6 +344,9 @@
 \* held as a fact beside it; the queue's delivery and persistence seam is unchanged. No action or verdict changes.
 \* HA3 review (2026-11-27): R6 is a revocation (4003) or a computer no longer paired; a 1008 is transient. Comments
 \* only in the store. No action or verdict changes.
+\* Phone composer box (2026-11-27): the composer adopts a served input only into a live draft actor, waiting a render
+\* when its session was disposed under a suspended boundary. The text reaches the draft before any send; presentation
+\* only. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

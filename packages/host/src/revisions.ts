@@ -14,13 +14,14 @@
 import { waitFor } from 'xstate';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, watch as watchDirectory } from 'node:fs';
-import type { FSWatcher } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
-import { join, sep } from 'node:path';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { resolveNodeProjectIdentity, openNodeProjectFileSystem } from '#project-identity.js';
+import { watchTree } from '#watch-tree.js';
+import type { TreeWatcher } from '#watch-tree.js';
 import type { ShellExecutionHolds } from '@taucad/shell-service';
 
 import { jsonValueSchema } from '@taucad/agent-host';
@@ -1087,7 +1088,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
    * workspace alone left them never dirty — no idle revision, no write
    * generation guard, and a quit that could let their work go.
    */
-  const watchers = new Map<WatchKey, FSWatcher | undefined>();
+  const watchers = new Map<WatchKey, TreeWatcher | undefined>();
   const watchedRoots = new Map<WatchKey, string>();
   const pendingPaths = new Map<WatchKey, Set<string>>();
   /* The barriers waiting on a cookie, by the cookie's name. */
@@ -1190,29 +1191,29 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const watchRoot = (key: WatchKey, root: string): void => {
     watchedRoots.set(key, root);
     try {
-      const watcher = watchDirectory(root, { recursive: true, persistent: false }, (_event, filename) => {
-        if (filename === null) {
+      const watcher = watchTree(root, {
+        change: (path) => {
+          if (path === undefined) {
+            lose(key);
+            return;
+          }
+          if (path.startsWith(watchCookiePrefix)) {
+            cookies.get(path)?.();
+            return;
+          }
+          const initializing = actor.getSnapshot().context.liveCheckoutId === undefined;
+          if (path === '' || !classify(path).versioned) {
+            return;
+          }
+          if (initializing && (path === generatedIgnorePath || path === generatedGitattributesPath)) {
+            return;
+          }
+          reportWrite(key, path);
+        },
+        error: () => {
           lose(key);
-          return;
-        }
-        const path = filename.toString().split(sep).join('/');
-        if (path.startsWith(watchCookiePrefix)) {
-          cookies.get(path)?.();
-          return;
-        }
-        const initializing = actor.getSnapshot().context.liveCheckoutId === undefined;
-        if (path === '' || !classify(path).versioned) {
-          return;
-        }
-        if (initializing && (path === generatedIgnorePath || path === generatedGitattributesPath)) {
-          return;
-        }
-        reportWrite(key, path);
-      });
-      watcher.on('error', () => {
-        lose(key);
-        watcher.close();
-        watchers.set(key, undefined);
+          watchers.set(key, undefined);
+        },
       });
       watchers.set(key, watcher);
     } catch {

@@ -793,6 +793,39 @@ describe('remote read loop (HA3)', () => {
     }
   });
 
+  it('should keep an unrelated saved error when a remote read attaches', async () => {
+    const host = closableHost();
+    const chat = open(createStore(createDisk({})), host.connect);
+    const session = chat.store.acquire(chatId, projectId);
+    const refusedSend = {
+      category: 'generic',
+      title: 'Your message wasn’t sent.',
+      message: 'Your message wasn’t sent.',
+      code: 'WIRE_VERSION_UNSUPPORTED',
+      requestId: 'cmd_send',
+    } as const;
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+      session.persistenceActorRef.send({ type: 'setPersistedError', error: refusedSend });
+      const dials = host.connect.mock.calls.length;
+
+      host.closeWith({ code: 1008, reason: 'route peer did not connect' });
+
+      await vi.waitFor(() => {
+        expect(host.connect.mock.calls.length).toBe(dials + 1);
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+      expect(session.persistenceActorRef.getSnapshot().context.persistedError).toMatchObject({
+        code: refusedSend.code,
+      });
+    } finally {
+      chat.store.release(chatId);
+      chat.close();
+    }
+  });
+
   it('should keep the peerless reap transient: no R6', async () => {
     const host = closableHost();
     const chat = open(createStore(createDisk({})), host.connect);

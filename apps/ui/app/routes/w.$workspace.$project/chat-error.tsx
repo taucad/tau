@@ -723,16 +723,19 @@ function ChatErrorBody({
         icon={CircleAlert}
         title={parsedError.message || parsedError.title || 'Unable to send the message.'}
         actions={
-          <Button
-            variant='outline'
-            size='xs'
-            onClick={() => {
-              regenerate();
-            }}
-          >
-            <RefreshCcw className='size-3.5' />
-            Try again
-          </Button>
+          /* A refused Stop: the composer offers Stop again, and Try again would rerun the turn. */
+          parsedError.details?.['commandType'] === 'cancel' ? undefined : (
+            <Button
+              variant='outline'
+              size='xs'
+              onClick={() => {
+                regenerate();
+              }}
+            >
+              <RefreshCcw className='size-3.5' />
+              Try again
+            </Button>
+          )
         }
       >
         <ChatErrorDetails>

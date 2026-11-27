@@ -1164,6 +1164,22 @@ describe('ChatError', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
+  it('should offer nothing for an uncoded failure that refused a Stop', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'Chat chat_1 has no live host connector.',
+      requestId: 'cmd_cancel',
+      details: { runId: 'req_1', commandType: 'cancel' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Chat chat_1 has no live host connector.');
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
   it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {
     const quota: ChatErrorPayload = {
       category: errorCategory.rateLimit,

@@ -141,4 +141,94 @@ describe('ProjectIndexes.forgetRemovedDirectory', () => {
     expect(await writingX).toBe('skipped');
     expect(snapshotWrites('x')).toBe(0);
   });
+
+  /* Review M1: one root's writes at two directories, the route re-pointed between them ("Use this folder"). */
+  it('should stop the earlier write of a root re-pointed since, when the directory it writes into is removed', async () => {
+    const provider = await durableProvider(['d1', 'd2']);
+    const table: Table = new Map([['/projects/x', at(provider, 'd1', true)]]);
+    const indexes = indexesOver(table);
+    await indexes.ready('/projects/x');
+    indexes.addFile('/projects/x/b.ts', { size: 1 });
+    const gate = Promise.withResolvers<void>();
+    const reached = Promise.withResolvers<void>();
+    const mkdir = provider.mkdir.bind(provider);
+    vi.spyOn(provider, 'mkdir').mockImplementation(async (path, options) => {
+      if (path.startsWith('d1/.tau/index')) {
+        reached.resolve();
+        await gate.promise;
+      }
+      return mkdir(path, options);
+    });
+    const writeFile = vi.spyOn(provider, 'writeFile');
+    const first = indexes.persist('/projects/x');
+    await reached.promise;
+    table.set('/projects/x', at(provider, 'd2', true));
+    indexes.evict('/projects/x');
+    await indexes.ready('/projects/x');
+    indexes.addFile('/projects/x/c.ts', { size: 1 });
+    expect(await indexes.persist('/projects/x')).toBe('written');
+
+    indexes.forgetRemovedDirectory({ provider, path: 'd1' });
+    gate.resolve();
+
+    expect(await first).toBe('skipped');
+    expect(writeFile.mock.calls.filter(([path]) => String(path).startsWith('d1/.tau/index'))).toEqual([]);
+  });
+
+  /* Review m4: two folders another program edits may overlap (a picked folder and its subfolder, nested Node roots),
+   * and nothing here can prove they do not: an index over another such provider reads bytes that may be gone. */
+  it('should drop the roots of another externally edited provider, which may overlap the removed directory', async () => {
+    const editedBy = async (directories: readonly string[]): Promise<MemoryProvider> => {
+      const provider = await durableProvider(directories);
+      Object.defineProperty(provider, 'capabilities', {
+        value: { ...provider.capabilities, externallyEdited: true },
+      });
+      return provider;
+    };
+    const folder = await editedBy(['sub/x', 'y']);
+    const subfolder = await editedBy(['x']);
+    const private_ = await durableProvider(['x']);
+    const table: Table = new Map([
+      ['/projects/y', at(folder, 'y')],
+      ['/projects/sub-x', at(subfolder, 'x')],
+      ['/projects/private-x', at(private_, 'x')],
+    ]);
+    const indexes = indexesOver(table);
+    for (const root of table.keys()) {
+      // oxlint-disable-next-line no-await-in-loop -- Each root opens in turn.
+      await indexes.ready(root);
+    }
+
+    indexes.forgetRemovedDirectory({ provider: folder, path: 'sub/x' });
+
+    expect(indexes.get('/projects/sub-x')).toBeUndefined();
+    expect(indexes.get('/projects/y')).toBeDefined();
+    expect(indexes.get('/projects/private-x')).toBeDefined();
+  });
+
+  /* Review nit: the removed directory's logical path under the holder is itself a mount prefix (a preview over it). */
+  it('should record the removal in a holder whose logical path for it is a mount prefix', async () => {
+    const provider = await durableProvider(['x', 'y']);
+    const table: Table = new Map([['/home', at(provider, '')]]);
+    const indexes = new ProjectIndexes({
+      resolve: (root) => {
+        const resolution = table.get(root);
+        if (resolution === undefined) {
+          throw new Error(`No mount resolves ${root}`);
+        }
+        return resolution();
+      },
+      mountPrefixes: () => ['/home', '/home/x'],
+      policy: tauPathPolicy,
+      tab: () => ({ tabId: 'tab-a', seq: 0 }),
+      persistDelayMilliseconds: 60_000,
+    });
+    await indexes.ready('/home');
+    expect(indexes.get('/home')?.entry('x/main.ts')).toBeDefined();
+
+    indexes.forgetRemovedDirectory({ provider, path: 'x' });
+
+    expect(indexes.get('/home')?.entry('x')).toBeUndefined();
+    expect(indexes.get('/home')?.entry('y/main.ts')).toBeDefined();
+  });
 });

@@ -162,6 +162,39 @@ const providerRelative = (directory: string, path: string): string | undefined =
   return path.startsWith(`${directory}/`) ? path.slice(directory.length + 1) : undefined;
 };
 
+/**
+ * How a root's bytes relate to a removed directory: `'reads'` when the root reads the directory or a directory inside
+ * it, `{ inside }` when the root holds it at `inside`, `undefined` when they are disjoint. On one provider, by path.
+ * Across providers only where neither is another program's: two folders another program edits (a picked folder and
+ * its subfolder, nested Node roots) may overlap, and nothing here can prove they do not, so such a root counts as
+ * reading the removed bytes. Disjoint storage roots of Tau's own (OPFS, IndexedDB, memory) never overlap another.
+ *
+ * @param removed - The removed directory's provider and provider path.
+ * @param at - Where the root reads.
+ * @returns The relation.
+ */
+const mayOverlap = (
+  removed: Readonly<{ provider: FileSystemProvider; path: string }>,
+  at: Readonly<{ provider: FileSystemProvider; path: string }>,
+): 'reads' | Readonly<{ inside: string }> | undefined => {
+  if (at.provider !== removed.provider) {
+    return at.provider.capabilities.externallyEdited === true && removed.provider.capabilities.externallyEdited === true
+      ? 'reads'
+      : undefined;
+  }
+  if (providerRelative(removed.path, at.path) !== undefined) {
+    return 'reads';
+  }
+  const inside = providerRelative(at.path, removed.path);
+  return inside === undefined ? undefined : { inside };
+};
+
+/** One snapshot write in flight: its abort, and the provider directory it writes into once resolved. */
+type WriteRecord = {
+  readonly controller: AbortController;
+  at?: Readonly<{ provider: FileSystemProvider; path: string }>;
+};
+
 /** `relative` of `absolute` under `root`, or `undefined` when outside it. */
 const relativeTo = (root: string, absolute: string): string | undefined => {
   if (absolute === root) {
@@ -356,13 +389,11 @@ export class ProjectIndexes {
   /* Aborted by every clear: a write begun before it stores nothing after it. */
   private _cleared = new AbortController();
   /*
-   * Per root, its snapshot writes' abort and where the latest one writes: aborted when a removal takes that directory,
-   * so a write begun before stores nothing after it.
+   * One record per snapshot write in flight: its abort, and where it writes once it has resolved its root. A removal
+   * aborts each write into the removed directory, so a write begun before stores nothing after it, wherever its root
+   * resolves now. Each write removes its own record when it ends.
    */
-  private readonly _writeAborts = new Map<
-    string,
-    { readonly controller: AbortController; at?: Readonly<{ provider: FileSystemProvider; path: string }> }
-  >();
+  private readonly _writes = new Set<WriteRecord>();
   /* Set once by `dispose` or `close`: no snapshot write starts after it. */
   private _closed = false;
 
@@ -625,18 +656,19 @@ export class ProjectIndexes {
     if (this._closed) {
       return 'skipped';
     }
-    const key = normalizePath(root);
-    let removed = this._writeAborts.get(key);
-    if (removed === undefined) {
-      removed = { controller: new AbortController() };
-      this._writeAborts.set(key, removed);
-    }
-    const writing = this._persist(key, AbortSignal.any([this._cleared.signal, removed.controller.signal]));
+    const record: WriteRecord = { controller: new AbortController() };
+    this._writes.add(record);
+    const writing = this._persist(
+      normalizePath(root),
+      AbortSignal.any([this._cleared.signal, record.controller.signal]),
+      record,
+    );
     this._persisting.add(writing);
     try {
       return await writing;
     } finally {
       this._persisting.delete(writing);
+      this._writes.delete(record);
     }
   }
 
@@ -1300,8 +1332,10 @@ export class ProjectIndexes {
    * directory inside it, is evicted with nothing carried, and a snapshot write
    * it began stops at its next await before the disk. An index whose root holds
    * the removed directory records it removed. A root this set cannot resolve is
-   * evicted, as it cannot be shown to read other bytes. Every other root, which
-   * reads none of the removed bytes, stays warm.
+   * evicted, as it cannot be shown to read other bytes, and so is a root on
+   * another provider when both are folders another program edits, which may
+   * overlap (see `mayOverlap`). Every other root, which reads none of the
+   * removed bytes, stays warm.
    *
    * @param removed - The provider and provider path of the removed directory.
    */
@@ -1318,7 +1352,7 @@ export class ProjectIndexes {
       ...this._importFactsPending,
     ]);
     const reading: string[] = [];
-    const holding: string[] = [];
+    const holding: Array<Readonly<{ root: string; inside: string }>> = [];
     for (const root of roots) {
       let at: Readonly<{ provider: FileSystemProvider; path: string }> | undefined = this._states.get(root)?.opened;
       if (at === undefined) {
@@ -1329,35 +1363,37 @@ export class ProjectIndexes {
           continue;
         }
       }
-      if (at.provider !== removed.provider) {
-        continue;
-      }
-      if (providerRelative(removed.path, at.path) !== undefined) {
+      const overlap = mayOverlap(removed, at);
+      if (overlap === 'reads') {
         reading.push(root);
-        continue;
+      } else if (overlap !== undefined) {
+        holding.push({ root, inside: overlap.inside });
       }
-      const inside = providerRelative(at.path, removed.path);
-      if (inside !== undefined) {
-        holding.push(root === '/' ? `/${inside}` : `${root}/${inside}`);
-      }
-    }
-    for (const path of holding) {
-      this._forget(path);
-      this.removeDirectory(path);
     }
     for (const root of reading) {
       this._evict(root, false);
       this._importFactsPending.delete(root);
       this._importSeeded.delete(root);
     }
-    /* A write goes where it resolved when it began, whatever the root resolves to now (a revoked route falls through). */
-    for (const [root, { controller, at }] of this._writeAborts) {
-      if (
-        at === undefined ||
-        (at.provider === removed.provider && providerRelative(removed.path, at.path) !== undefined)
-      ) {
+    /* A holder the evictions above dropped has nothing left to record into. One that remains records the removal in its
+     * own index directly, even where the removed directory's logical path is itself a mount prefix, which `removeDirectory`
+     * would leave to the mount's own index. */
+    for (const { root, inside } of holding) {
+      const path = root === '/' ? `/${inside}` : `${root}/${inside}`;
+      this._forget(path);
+      this._removed(path);
+      const state = this._states.get(root);
+      if (state !== undefined && !this._excluded(inside)) {
+        state.index.remove(inside);
+        this._schedulePersist(root);
+      }
+    }
+    this._noteLanding();
+    /* A write goes where it resolved when it began, whatever its root resolves to now (a revoked or re-pointed route);
+     * one that has not resolved yet may still resolve there. */
+    for (const { controller, at } of this._writes) {
+      if (at === undefined || mayOverlap(removed, at) === 'reads') {
         controller.abort();
-        this._writeAborts.delete(root);
       }
     }
   }
@@ -1366,7 +1402,6 @@ export class ProjectIndexes {
   public clear(): void {
     this._cleared.abort();
     this._cleared = new AbortController();
-    this._writeAborts.clear();
     this._readFacts.clear();
     this._importFactsPending.clear();
     this._importSeeded.clear();
@@ -2035,7 +2070,11 @@ export class ProjectIndexes {
     return resolve(root);
   }
 
-  private async _persist(key: string, cleared: AbortSignal): Promise<'written' | 'stale' | 'skipped' | 'busy'> {
+  private async _persist(
+    key: string,
+    cleared: AbortSignal,
+    record: WriteRecord,
+  ): Promise<'written' | 'stale' | 'skipped' | 'busy'> {
     const state = this._states.get(key);
     if (state === undefined || !state.index.isComplete) {
       return 'skipped';
@@ -2046,10 +2085,7 @@ export class ProjectIndexes {
     if (resolution.persist === undefined) {
       return 'skipped';
     }
-    const aborts = this._writeAborts.get(key);
-    if (aborts !== undefined) {
-      aborts.at = { provider: resolution.provider, path: resolution.path };
-    }
+    record.at = { provider: resolution.provider, path: resolution.path };
     /* A snapshot claims every notice its vector names: re-observe what those
      * notices left unknown first, so it never stores a view older than its vector.
      * A pending entry still waiting for its mtime is observed too, so the stored

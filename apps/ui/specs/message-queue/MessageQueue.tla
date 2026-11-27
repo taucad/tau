@@ -344,6 +344,10 @@
 \* held as a fact beside it; the queue's delivery and persistence seam is unchanged. No action or verdict changes.
 \* HA3 review (2026-11-27): R6 is a revocation (4003) or a computer no longer paired; a 1008 is transient. Comments
 \* only in the store. No action or verdict changes.
+\* Queued send cancelled before it is queued (2026-11-27): `requestTurn` takes an abort signal. A send cancelled before
+\* its queue write is never written; one cancelled during the write is removed again under the queue's lock before the
+\* queue is woken, as an unsent entry's removal. The message never enters `Queue`, so it is the model's not-yet-sent
+\* composer text. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

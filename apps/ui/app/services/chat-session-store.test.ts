@@ -8486,6 +8486,35 @@ describe('ChatSessionStore — composer records (W7)', () => {
     store.release(chatId);
   });
 
+  /* Staging re-check 5: a queued send the composer replays during an open can wait seconds for the queue; Escape
+   * cancels it until it is queued, and then nothing is queued and the draft stays. */
+  it('queues nothing and keeps the draft for a send cancelled before it reached the queue', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    session.draftActorRef.send({ type: 'setDraftText', text: 'model the bracket' });
+    const cancel = new AbortController();
+
+    const requested = store.requestTurn(
+      chatId,
+      { kind: 'send', message: buildUserMessage({ text: 'model the bracket' }) },
+      { signal: cancel.signal },
+    );
+    cancel.abort();
+    await requested;
+
+    expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+    expect(session.draftActorRef.getSnapshot().context.draftText).toBe('model the bracket');
+    store.release(chatId);
+    const reopened = openStore(client).store;
+    const restored = reopened.acquire(chatId, projectId);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    expect(restored.messageQueueRef.getSnapshot().context.items).toEqual([]);
+    reopened.release(chatId);
+  });
+
   it('keeps text typed after a send was composed, though it differs only past the sent text', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);

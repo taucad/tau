@@ -1,5 +1,5 @@
 import { act, render } from '@testing-library/react';
-import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { ContextSuggestionItem } from '@taucad/chat-ui/components/tiptap/suggestion-types';
 import { toast } from '@taucad/ui/components/sonner';
 import { captureCadImages } from '#services/headless-capture.js';
@@ -541,6 +541,10 @@ describe('ChatTextarea while a Tau Cloud open writes the files', () => {
 describe('ChatTextarea external agent prewarm (WP-18)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  /* The other suites read a native execution with no chat: leave them that, in any order. */
+  afterEach(() => {
     mocks.activeChatId = undefined;
     mocks.execution = undefined;
   });

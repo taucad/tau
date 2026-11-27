@@ -106,9 +106,9 @@ export default function AuthPage(): React.JSX.Element {
   const search = searchParameters.toString();
   const navigate = useNavigate();
   /* Tau Desktop's OAuth sign-in (DSI-3): the provider sends the browser here with a signed request when no one is
-     signed in, or when "Use a different account" asked for `prompt=login`. The form shows even over a session, a
-     sign-in carries the request (`oauthProviderClient`), and whatever lands back here afterwards (an emailed link, a
-     provider round trip) continues on the consent page. */
+     signed in, or when "Use a different account" asked for `prompt=login`. The form shows even over a session, and
+     every sign-in (password, an emailed link, a provider round trip) returns through `redirectTo` to the consent page,
+     which asks the provider again with the same signed request. */
   const desktopAuthorization = useMemo(() => readDesktopAuthorization(search), [search]);
   const desktopContinuation =
     desktopAuthorization === undefined ? undefined : desktopContinuationPath(desktopAuthorization);

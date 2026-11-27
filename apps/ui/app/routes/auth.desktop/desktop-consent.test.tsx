@@ -106,6 +106,29 @@ describe('readDesktopSignInResult', () => {
   });
 });
 
+/**
+ * Ends the CSS-held delay of the given length, as the browser does when its animation delay passes. jsdom runs no
+ * animations, so the test reports the end the component listens for.
+ *
+ * @param milliseconds - The delay, as the component wrote it into `--wait-hide-delay`.
+ */
+const elapseHeldDelay = (milliseconds: number): void => {
+  const heldDelay = [...document.querySelectorAll<HTMLElement>('[data-slot="desktop-consent-delay"]')].find(
+    (element) => element.style.getPropertyValue('--wait-hide-delay') === `${String(milliseconds)}ms`,
+  );
+  expect(heldDelay, `a held delay of ${String(milliseconds)} ms`).toBeDefined();
+  const end = (animationName: string): void => {
+    // The test DOM has no AnimationEvent; React reads `animationName` from the native event.
+    const event = Object.assign(new Event('animationend', { bubbles: true }), { animationName });
+    act(() => {
+      heldDelay!.dispatchEvent(event);
+    });
+  };
+  end('wait-held');
+  expect(heldDelay!.isConnected).toBe(true);
+  end('wait-conceal');
+};
+
 describe('DesktopConsent', () => {
   const assign = vi.fn();
   const replace = vi.fn();
@@ -147,9 +170,8 @@ describe('DesktopConsent', () => {
     const continueButton = await screen.findByRole('button', { name: 'Continue as person@example.test' });
     expect(continueButton).toBeDisabled();
 
-    await waitFor(() => {
-      expect(continueButton).toBeEnabled();
-    });
+    elapseHeldDelay(500);
+    expect(continueButton).toBeEnabled();
     await userEvent.click(continueButton);
 
     await waitFor(() => {
@@ -192,9 +214,7 @@ describe('DesktopConsent', () => {
     mocks.authFetch.mockResolvedValue({ data: null, error: { status: 500 } });
     render(<DesktopConsent authorization={authorizationOf(signedQuery())} />);
     const continueButton = await screen.findByRole('button', { name: 'Continue as person@example.test' });
-    await waitFor(() => {
-      expect(continueButton).toBeEnabled();
-    });
+    elapseHeldDelay(500);
 
     await userEvent.click(continueButton);
 
@@ -245,15 +265,12 @@ describe('DesktopConsent', () => {
     expect(new URL(assign.mock.calls[0]?.[0] as string).searchParams.get('prompt')).toBe('consent');
   });
 
-  it('should stop showing progress after ten seconds when the session never answers', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it('should stop showing progress after ten seconds when the session never answers', () => {
     mocks.session = { data: undefined, isPending: true, isError: false, refetch: vi.fn() };
     render(<DesktopConsent authorization={authorizationOf(signedQuery())} />);
     expect(screen.getByRole('heading', { name: 'Checking this sign-in' })).toBeInTheDocument();
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_001);
-    });
+    elapseHeldDelay(10_000);
 
     expect(screen.getByRole('heading', { name: 'Couldn’t check this sign-in' })).toBeInTheDocument();
   });

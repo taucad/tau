@@ -132,7 +132,7 @@ describe('AuthPage', () => {
         exp: '9999999999',
         ba_iat: String(issuedAt),
       });
-      /* eslint-enable @typescript-eslint/naming-convention */
+      /* eslint-enable @typescript-eslint/naming-convention -- end of the wire parameters */
       for (const name of ['ba_iat', 'ba_param', 'client_id', 'exp', 'prompt']) {
         parameters.append('ba_param', name);
       }
@@ -389,6 +389,11 @@ describe('Auth page naming', () => {
 });
 
 describe('Cached session and safe continuation', () => {
+  beforeEach(() => {
+    // Another describe may leave a Tau Desktop request in the query; these rows read none.
+    routeMocks.search = '';
+  });
+
   it('should not expose a stale anonymous form during session refresh', () => {
     routeMocks.segment = 'sign-in';
     routeMocks.session = undefined;

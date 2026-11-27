@@ -1,6 +1,6 @@
 import { useSession } from '@better-auth-ui/react';
 import { CircleAlert, MonitorSmartphone } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
@@ -54,6 +54,44 @@ const answerConsent = async (authorization: DesktopAuthorization, accept: boolea
 };
 
 /**
+ * Focus an element when React attaches it.
+ *
+ * @param element - The attached element, or `null` when React detaches it.
+ */
+const focusOnAttach: React.RefCallback<HTMLElement> = (element) => {
+  element?.focus();
+};
+
+/**
+ * Calls back once a delay has passed, kept by a CSS animation delay rather than a script timer (the wait ladder's
+ * `wait-hold`, UI Policy § 6). Reduced motion shortens animations, never their delays.
+ *
+ * @param props - The delay and what to do when it ends.
+ * @returns An empty element out of the flow.
+ */
+function HeldDelay({
+  milliseconds,
+  onElapsed,
+}: {
+  readonly milliseconds: number;
+  readonly onElapsed: () => void;
+}): React.JSX.Element {
+  return (
+    <span
+      aria-hidden
+      data-slot='desktop-consent-delay'
+      className='absolute size-0 wait-hold'
+      style={{ '--wait-hide-delay': `${String(milliseconds)}ms` } as React.CSSProperties}
+      onAnimationEnd={(event) => {
+        if (event.animationName === 'wait-conceal') {
+          onElapsed();
+        }
+      }}
+    />
+  );
+}
+
+/**
  * The consent page for Tau Desktop's OAuth sign-in (desktop sign-in execution plan DSI-3; audit R5; blueprint
  * revision 6 for the copy). The API's provider sends a signed-in browser here with `prompt=consent` on every sign-in.
  * It names the account, offers a different one, and answers the provider; the provider then sends the browser to the
@@ -71,7 +109,6 @@ export function DesktopConsent({ authorization }: { readonly authorization: Desk
   const [hasCheckTimedOut, setHasCheckTimedOut] = useState(false);
   const [action, setAction] = useState<ActionState | undefined>();
   const [isArmed, setIsArmed] = useState(false);
-  const titleRef = useRef<HTMLDivElement>(null);
   const { isContinuation } = authorization;
 
   const baseState: ConsentState =
@@ -90,42 +127,12 @@ export function DesktopConsent({ authorization }: { readonly authorization: Desk
             : 'signed-out';
   const state: ConsentState = action ?? baseState;
 
-  // The session read gives up after the progress limit rather than spinning.
-  useEffect(() => {
-    if (!isPending) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      setHasCheckTimedOut(true);
-    }, progressLimit);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [isPending]);
-
   // Signed in after "Use a different account" or an emailed link: ask the provider again, for consent only.
   useEffect(() => {
     if (baseState === 'continuing') {
       globalThis.location.replace(desktopAuthorizeUrl(authorization, 'consent'));
     }
   }, [authorization, baseState]);
-
-  useEffect(() => {
-    if (state !== 'consent') {
-      return;
-    }
-    const timer = setTimeout(() => {
-      setIsArmed(true);
-    }, continueArming);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [state]);
-
-  // Every change of state moves focus to the title, so a screen reader announces it.
-  useEffect(() => {
-    titleRef.current?.focus();
-  }, [state]);
 
   const send = useCallback(
     async (accept: boolean): Promise<void> => {
@@ -160,6 +167,24 @@ export function DesktopConsent({ authorization }: { readonly authorization: Desk
 
   return (
     <div className='flex min-h-svh items-center justify-center p-6'>
+      {/* The session read gives up after the progress limit rather than spinning. */}
+      {isPending && !hasCheckTimedOut ? (
+        <HeldDelay
+          milliseconds={progressLimit}
+          onElapsed={() => {
+            setHasCheckTimedOut(true);
+          }}
+        />
+      ) : null}
+      {/* Continue arms half a second after the consent card shows. */}
+      {state === 'consent' && !isArmed ? (
+        <HeldDelay
+          milliseconds={continueArming}
+          onElapsed={() => {
+            setIsArmed(true);
+          }}
+        />
+      ) : null}
       <Card
         className='w-full max-w-sm'
         role={busy ? 'status' : isAlert ? 'alert' : undefined}
@@ -173,7 +198,8 @@ export function DesktopConsent({ authorization }: { readonly authorization: Desk
               <MonitorSmartphone className='size-5' aria-hidden='true' />
             )}
           </div>
-          <CardTitle variant='title' level={1} ref={titleRef} tabIndex={-1} className='outline-none'>
+          {/* Every change of state draws a new title, which takes focus, so a screen reader announces it. */}
+          <CardTitle key={state} variant='title' level={1} ref={focusOnAttach} tabIndex={-1} className='outline-none'>
             {copy.title}
           </CardTitle>
           <CardDescription>{copy.body}</CardDescription>

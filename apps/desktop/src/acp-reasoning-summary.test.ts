@@ -3,7 +3,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { expect, it } from 'vitest';
 import { isRecord } from '@taucad/utils/schema';
 import { acpAgentProfiles, spawnAcpAdapter } from '@taucad/host';
@@ -18,7 +17,7 @@ it('should preserve Codex summary identity through the shipped ACP adapter witho
    * an executable stub every platform can start. */
   const codexPath = await writeExecutableStub(
     join(home, 'bin', 'codex'),
-    `import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, 'fixtures', 'codex-summary-server.ts')).href)});`,
+    `import(${JSON.stringify(new URL('fixtures/codex-summary-server.ts', import.meta.url).href)});`,
   );
   const profile = acpAgentProfiles.find((entry) => entry.id === 'codex');
   if (profile?.package === undefined) {

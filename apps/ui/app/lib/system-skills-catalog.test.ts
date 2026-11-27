@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { kernelConfigurations } from '@taucad/types/constants';
+import { readSkillFrontmatter, validateSkillFrontmatter } from '@taucad/agent-tools/skills';
 import { parseSkillFrontmatter } from '#hooks/use-context-payload.utils.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
@@ -29,7 +30,6 @@ describe('systemSkillsCatalog', () => {
     }
 
     expect(createSkill.skillMarkdown).toContain('name: create-skill');
-    expect(createSkill.skillMarkdown).toContain('source: system');
     expect(createSkill.skillMarkdown).toContain('.agents/skills/<skill-name>/SKILL.md');
     expect(createSkill.source).toBe('system');
 
@@ -45,12 +45,25 @@ describe('systemSkillsCatalog', () => {
       expect.objectContaining({
         name: 'create-skill',
         source: 'system',
-        version: '1.0.0',
+        version: '1.1.0',
         enabled: true,
       }),
     );
     expect(metadata.description).toContain('Create or update Tau agent skills');
   });
+
+  /* Ruling U7: every skill Tau ships follows the Agent Skills specification to the word — only its six top-level
+   * fields, a conforming name equal to the directory, and Tau's own keys under `metadata`. */
+  it.each(systemSkillsCatalog.map((skill) => [skill.slug, skill] as const))(
+    'should ship %s with frontmatter the Agent Skills specification accepts as written',
+    (slug, skill) => {
+      const frontmatter = readSkillFrontmatter(skill.skillMarkdown);
+
+      expect(frontmatter).toBeDefined();
+      expect(frontmatter!['name']).toBe(slug);
+      expect(validateSkillFrontmatter(frontmatter!, slug)).toEqual([]);
+    },
+  );
 
   it('should resolve every progressive-disclosure skill from priority tier 60', async () => {
     const resolver = createSkillResolver({

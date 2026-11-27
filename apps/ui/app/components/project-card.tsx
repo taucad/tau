@@ -182,9 +182,6 @@ export function ProjectCardMedia({
   );
 }
 
-/** The field of view a project card's preview opens with; its `CadPreviewProvider` seeds it. */
-export const projectCardVerticalFieldOfView = 45;
-
 export function ProjectCardCadPreview(): React.JSX.Element {
   return (
     <Suspense fallback={<Skeleton role='status' aria-label='Loading preview' className='size-full rounded-none' />}>

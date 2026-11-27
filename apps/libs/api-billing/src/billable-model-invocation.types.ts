@@ -5,6 +5,7 @@ import type {
   SupplierValuation,
   JointInputMaximum,
   InputCountEvidence,
+  InputPrefix,
 } from '@taucad/api-database/schema/billing.types';
 import type {
   ModelInvocationIntent,
@@ -38,7 +39,23 @@ export type InvocationMetadata = {
   supplierValuation?: SupplierValuation;
   jointInputMaximum?: JointInputMaximum;
   inputCount?: InputCountEvidence;
+  /** This request's conversation prefix, offered to the conversation's next step. */
+  inputPrefix?: InputPrefix;
+  /** What the input maximum was taken from (`tau.billing.hold_basis`). */
+  holdBasis?: InputHoldBasis;
 };
+
+/** The conversation's previous settled step on the same model, read before qualification (WP-15 step 6). */
+export type PreviousSettledInput = {
+  readonly modelId: string;
+  readonly providerId: string;
+  readonly prefix: InputPrefix;
+  /** Every input token the supplier reported for it: uncached, cache reads and cache writes. */
+  readonly inputTokens: bigint;
+};
+
+/** What the hold's input maximum was taken from. */
+export type InputHoldBasis = 'prefix' | 'bytes' | 'context' | 'count';
 
 export type QualifiedBillableInvocation = {
   surface: BillableInvocationSurface;
@@ -60,10 +77,18 @@ export type QualifiedBillableInvocation = {
   adapter: BillableModelProviderAdapter;
   /** Presence selects exact counting; an absent capability refuses rather than falling back. */
   inputCount?: { capability: InputCountCapability | undefined };
+  /**
+   * The same qualification held at a smaller input maximum, with the tariff pinned again from it: the long-context
+   * sibling is pinned only when the smaller maximum still reaches the threshold.
+   */
+  withInputMaximum(maximumInput: bigint): QualifiedBillableInvocation;
 };
 
 export type BillableModelQualificationResolver = {
-  resolve(intent: Omit<BillableInvocationIntent, 'authUserId' | 'signal'>): QualifiedBillableInvocation;
+  resolve(
+    intent: Omit<BillableInvocationIntent, 'authUserId' | 'signal'>,
+    previous?: PreviousSettledInput,
+  ): QualifiedBillableInvocation;
 };
 
 export type BillableInvocationEvidenceCollector = {

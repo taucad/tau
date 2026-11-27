@@ -34,11 +34,11 @@
     "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": "8f4cd4a05b209cf4e70336a2b449141788d0e2224a6c8516136976e656c81c58",
     "apps/ui/app/routes/w.$workspace.$project/project-route-intent.tsx": "df4e117b9f073ac4acff56939fd591e8a741368128f3f77102fd227a7b17d19b",
     "apps/ui/app/routes/w.$workspace.$project/project-route-state.ts": "9c260884f35da10b0ed3b6855cb6ac64aa5426bb858d8a37d74330fc4a8965bb",
-    "apps/ui/app/routes/w.$workspace.$project/project-route.tsx": "9efd51d5950b92f8874a21d532fd5f64096f0c5c032c094de12a51ae754d79a5",
+    "apps/ui/app/routes/w.$workspace.$project/project-route.tsx": "cea59c1c24147991e99d991c358afaf9d1d77da03a9cd4187271ca4c79f0f035",
     "apps/ui/app/runtime/app-runtime-focus.ts": "b8a28e1fc22ece997867123b1adcc22df03eb031be6426d8a48f3c8d0ad138d5"
   },
   "specs": {
-    "ProjectFocus.tla": "e3f9de70fc062f80425a1f625e3f28c5565b059efe4bc163aabfab65bf2886f1"
+    "ProjectFocus.tla": "7cc01b4ae420feab6f1fb43828868ff5b08fe11defae88228344bfd889ef8b76"
   },
   "tables": {
     "ProjectFocus.export.cfg": "0d395ff068d3d9f32ef207c69e40a50e8bb2eb4e9e6f053cf58e274b0103903f",

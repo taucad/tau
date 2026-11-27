@@ -1,4 +1,8 @@
-import { initializeHostDownload, initializeInstallerCatalog } from '#www/download-catalog.client.js';
+import {
+  initializeBetaDownloads,
+  initializeHostDownload,
+  initializeInstallerCatalog,
+} from '#www/download-catalog.client.js';
 import { scheduleAppWarm } from '#www/app-warm.client.js';
 import type * as Live from '#www/live.js';
 import { readStoryProgress } from '#www/story-progress.js';
@@ -15,6 +19,8 @@ export function initializePage(signal: AbortSignal): () => void {
     link.setAttribute('href', environmentHref(link.getAttribute('href') ?? '', location.hostname));
   }
   initializeHostDownload(location.hostname);
+  // async-iife: bootstrap -- The page signal owns the bounded Intel beta file probe.
+  void initializeBetaDownloads(signal);
 
   // async-iife: bootstrap -- The page signal owns the bounded optional catalog enhancement.
   void initializeInstallerCatalog(signal);

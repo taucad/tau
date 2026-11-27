@@ -9,6 +9,8 @@ import { MetricsService } from '@taucad/api-observability/metrics';
 import type { AuthSessionResolutionAttributes } from '@taucad/api-observability/metrics';
 import { authInstanceKey } from '#auth.constant.js';
 import type { AuthSession, AuthUser } from '#auth.type.js';
+import { DesktopGrantVerifier, isOpaqueBearer } from '#desktop-grant.js';
+import type { AuthClientKind } from '#desktop-grant.js';
 import { sessionDataNameOf, stripSessionSnapshot } from '#session-snapshot.js';
 
 /** One request's credentials, as the resolver sees them. */
@@ -35,6 +37,8 @@ export type SessionResolution = Readonly<{
   setCookies: readonly string[];
   mode: SessionReadMode;
   coalesced: boolean;
+  /** `desktop` when the credential is Tau Desktop's OAuth access token; `web` otherwise, signed in or not. */
+  client: AuthClientKind;
 }>;
 
 /** The one definition of "has Authorization", used by the resolver, the cookie policy and forwardToAuth. */
@@ -59,6 +63,12 @@ const sharable = (lookup: SessionLookup): boolean =>
   lookup.authoritative !== true &&
   safe(lookup.method) &&
   (lookup.headers.cookie !== undefined || lookup.headers.authorization !== undefined);
+
+/** The value of `Authorization: Bearer <value>`, if the request carries one. */
+const bearerOf = (headers: IncomingHttpHeaders): string | undefined => {
+  const { authorization } = headers;
+  return authorization?.startsWith('Bearer ') === true ? authorization.slice('Bearer '.length).trim() : undefined;
+};
 
 /** SHA-256 of a length-prefixed tuple, so the raw credential is never a map key. */
 const flightKey = (mode: SessionReadMode, cookie: string | undefined, authorization: string | undefined): string => {
@@ -105,11 +115,14 @@ const joinWindow = 250;
 export class SessionResolver {
   private readonly flights = new Map<string, Flight>();
   private snapshotName: Promise<string> | undefined;
+  private readonly desktopGrants: DesktopGrantVerifier;
 
   public constructor(
     @Inject(authInstanceKey) private readonly auth: Auth,
     @Optional() @Inject(MetricsService) private readonly metrics: MetricsService = new MetricsService(),
-  ) {}
+  ) {
+    this.desktopGrants = new DesktopGrantVerifier(auth);
+  }
 
   /**
    * Resolves the session a request presents.
@@ -173,6 +186,22 @@ export class SessionResolver {
   }
 
   private async lookup(l: SessionLookup, mode: SessionReadMode): Promise<SessionResolution> {
+    /* Tau Desktop's opaque OAuth access token. Better Auth never accepts it (its bearer plugin takes only signed
+     * session tokens), so it is verified here, for every Tau route, gateway and the git transport alike. A bearer
+     * that is not a live desktop token falls through to Better Auth unchanged, which ignores it and reads any cookie,
+     * as it always has (case 21 of the session cookie blueprint). */
+    const bearer = bearerOf(l.headers);
+    const grant = bearer !== undefined && isOpaqueBearer(bearer) ? await this.desktopGrants.verify(bearer) : undefined;
+    if (grant !== undefined) {
+      return freezeResolution({
+        session: grant.session,
+        user: grant.user,
+        setCookies: [],
+        mode,
+        coalesced: false,
+        client: 'desktop',
+      });
+    }
     try {
       const headers = fromNodeHeaders(l.headers);
       // Authoritative means both: the bypass query and no snapshot in what Better Auth reads.
@@ -190,11 +219,12 @@ export class SessionResolver {
         setCookies: responseHeaders.getSetCookie(),
         mode,
         coalesced: false,
+        client: 'web',
       });
     } catch (error) {
       // A concurrent delete during the 24 h refresh: unauthenticated, not a failure.
       if (error instanceof APIError && error.status === 'UNAUTHORIZED') {
-        return freezeResolution({ session: null, user: null, setCookies: [], mode, coalesced: false });
+        return freezeResolution({ session: null, user: null, setCookies: [], mode, coalesced: false, client: 'web' });
       }
       throw error;
     }

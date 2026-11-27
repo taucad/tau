@@ -233,7 +233,21 @@ describe('ClientContext', () => {
     expect(context.systemPrompt).toContain('**How to Use Skills (Progressive Disclosure):**');
     expect(context.initialMessages[0]?.role).toBe('user');
     expect(JSON.stringify(context.initialMessages)).toContain('Use millimetres.');
-    expect(JSON.stringify(context.initialMessages)).toContain('<memory_guidelines>');
+    expect(JSON.stringify(context.initialMessages)).toContain(String.raw`<agent_memory>\nAGENTS.md\nUse millimetres.`);
+  });
+
+  /* Operator ruling U4: the reminder describes the file; when to update it is the agent's judgement. */
+  it('describes the instruction file without telling the agent when to write to it', async () => {
+    const context = await createTurnContextSnapshot({
+      chatId: 'chat-1',
+      systemPrompt: 'static',
+      clientContext: { memory: { 'AGENTS.md': 'Use millimetres.' } },
+    });
+
+    const reminder = JSON.stringify(context.initialMessages);
+    expect(reminder).toContain("the project's instruction file as it reads now");
+    expect(reminder).not.toContain('<memory_guidelines>');
+    expect(reminder).not.toMatch(/\bmust\b|IMMEDIATE|MAIN PRIORIT/u);
   });
 });
 

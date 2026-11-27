@@ -30,6 +30,7 @@ const sectionMaxBytes = new Map([
   ['geometry_fidelity', 3000],
   ['research_capabilities', 800],
   ['transcript_search', 1600],
+  ['project_instructions', 600],
   ['task_tracking', 800],
   ['workbench', 800],
   ['plan_mode', 1800],
@@ -79,6 +80,7 @@ const expectedSectionNames = (options: { mode: 'agent' | 'plan'; supportsImageIn
   ...(options.mode === 'plan' ? ['plan_mode'] : []),
   'kernel_skill',
   'transcript_path',
+  'project_instructions',
   'environment',
   'dynamic_behavior',
 ];

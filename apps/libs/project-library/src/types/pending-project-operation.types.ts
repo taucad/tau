@@ -1,3 +1,4 @@
+import type { ProjectLocator } from '@taucad/filesystem';
 import type { Chat } from '@taucad/chat';
 import type { FileSystemBackend, ProjectManifest } from '@taucad/types';
 import type { EditorState } from '@taucad/ui-core/types/editor.types';
@@ -92,6 +93,24 @@ export type PendingProjectRecoveryReason =
   | 'identity-conflict'
   | 'filesystem-error'
   | 'local-state-error';
+
+/**
+ * A permanent delete the authority cancelled (fast-path FW3, the operator's ruling "cancel and say so"): the journal
+ * waived the Trash for another copy, and under the lock of the removal no other copy held the id, or the one that would
+ * could not be read. Nothing was removed and the journal row is complete; the project stays as it was, and the person is
+ * told why and offered the Trash.
+ */
+export type SoleCopyCancellation = {
+  readonly operationId: string;
+  readonly projectId: string;
+  /**
+   * `absent`: no other copy holds the id now. `unknown`: one could not be read or counted (an unavailable folder, a
+   * permission not granted after a restart), so the authority could not tell (review N1).
+   */
+  readonly reason: 'absent' | 'unknown';
+  /** The locations of another copy that could not be read, when the authority could name one. */
+  readonly unavailable: readonly ProjectLocator[];
+};
 
 type PendingProjectRecoveryBase = {
   readonly operationId: string;

@@ -89,6 +89,13 @@ const presentedLimit = 256;
 /** How far ahead of the host's clock the UI's may be; anything later is not a time this device saw. */
 const clockSlackMilliseconds = 5000;
 
+/**
+ * How long an answer that granted something serves later reads by the same account (chat performance plan WP-02).
+ * Long enough to cover one turn's start and end; short enough that a withdrawal purges what is held soon after.
+ * Milliseconds.
+ */
+const grantReuseMilliseconds = 10_000;
+
 /** The server's answer for this account and project, dated on this host's clock; `undefined` when signed out. */
 type PurposesRead = Readonly<{ answer: EffectivePurposesAnswer; principal: string; receivedAt: number }> | undefined;
 
@@ -154,15 +161,36 @@ const grantOf = (
 export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence => {
   const now = options.now ?? Date.now;
   const transport = { fetch: options.fetch, baseUrl: options.apiBaseUrl };
-  /* One answer serves both purposes: the summary and feedback reporters read the grant at the same moments (a run's
-   * start, each quiescence), and asked the same question twice, two requests per moment (chat performance plan WP-02).
-   * A read joins the request in flight; the next read after it settles asks again, so a withdrawal is seen as soon as
-   * before. */
+  /* One answer serves both purposes and every moment close together (chat performance plan WP-02). The summary and
+   * feedback reporters read the grant at the same moments (a run's start, each quiescence, a rating), and one turn
+   * brings several such moments within a second or two: each asked again, about six requests per turn. A read joins
+   * the request in flight, and an answer that granted something is reused for `grantReuseMilliseconds` by the same
+   * account. An answer that granted nothing is never reused, so a grant given after the host opened binds at the next
+   * moment. A withdrawal purges what this host holds within that window; the server refuses evidence under a withheld
+   * purpose or a stale policy epoch meanwhile, so nothing withdrawn is admitted. */
   let reading: Promise<PurposesRead> | undefined;
+  let reusable: PurposesRead;
   const readShared = async (): Promise<PurposesRead> => {
+    if (
+      reusable !== undefined &&
+      reusable.principal === options.principal() &&
+      now() - reusable.receivedAt < grantReuseMilliseconds
+    ) {
+      return reusable;
+    }
     reading ??= (async () => {
       try {
-        return await readPurposes(options);
+        const read = await readPurposes(options);
+        reusable =
+          read !== undefined &&
+          Array.isArray(read.answer.purposes) &&
+          read.answer.purposes.some((state) => state.allowed)
+            ? read
+            : undefined;
+        return read;
+      } catch (error) {
+        reusable = undefined;
+        throw error;
       } finally {
         reading = undefined;
       }

@@ -305,14 +305,95 @@ const openProviderWriter = async (
   const releaseWriterLock = async (): Promise<void> => {
     await fileSystem.unlink(lockPath).catch(() => undefined);
   };
+  /*
+   * WP-10 step B: with a fencing authority, rows are held here until `sync` sends them as one fenced append, so the
+   * rows of several steps cost one round trip, and an effect waits for it (`durable`). `held` is in order after the
+   * authority's `heldAt` bytes; a sync in flight sends a prefix of it, and every read waits for that sync to land.
+   */
+  const { appendFileFenced } = fileSystem;
+  let held = new Uint8Array(0);
+  let heldAt = 0;
+  let sending: Promise<void> | undefined;
+  const settled = async (): Promise<void> => {
+    await sending?.catch(() => undefined);
+  };
+  const authoritySize = async (): Promise<number> => {
+    if (fileSystem.stat) {
+      try {
+        const stat = await fileSystem.stat(filePath);
+        return stat.size;
+      } catch (error) {
+        if (
+          error &&
+          typeof error === 'object' &&
+          'code' in error &&
+          (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+        ) {
+          return 0;
+        }
+        throw error;
+      }
+    }
+    const bytes = await readBytes();
+    return bytes.byteLength;
+  };
+  const joined = (head: Uint8Array<ArrayBuffer>, tail: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => {
+    if (tail.byteLength === 0) {
+      return head;
+    }
+    const all = new Uint8Array(head.byteLength + tail.byteLength);
+    all.set(head);
+    all.set(tail, head.byteLength);
+    return all;
+  };
+  const holding: Pick<EventLogStorage, 'write' | 'sync'> =
+    appendFileFenced === undefined
+      ? {}
+      : {
+          /* The appender's fence check (`size`) ran in this section before its first write, and set `heldAt`. */
+          write: async (bytes) => {
+            held = joined(held, bytes);
+          },
+          sync: async () => {
+            await settled();
+            if (held.byteLength === 0) {
+              return;
+            }
+            const sent = held;
+            const at = heldAt;
+            const send = (async () => {
+              await appendFileFenced.call(fileSystem, filePath, sent, { expectedLength: at });
+              held = held.slice(sent.byteLength);
+              heldAt = at + sent.byteLength;
+            })();
+            sending = send;
+            try {
+              await send;
+            } finally {
+              if (sending === send) {
+                sending = undefined;
+              }
+            }
+          },
+        };
   const storage: EventLogStorage = {
-    read: readBytes,
+    read: async () => {
+      await settled();
+      return joined(await readBytes(), held);
+    },
     append: async (bytes, expectedLength) =>
-      fileSystem.appendFileFenced === undefined || expectedLength === undefined
+      appendFileFenced === undefined || expectedLength === undefined
         ? appendFile.call(fileSystem, filePath, bytes)
-        : fileSystem.appendFileFenced(filePath, bytes, { expectedLength }),
-    fencesAppends: fileSystem.appendFileFenced !== undefined,
+        : appendFileFenced.call(fileSystem, filePath, bytes, { expectedLength }),
+    fencesAppends: appendFileFenced !== undefined,
+    ...holding,
     truncate: async (size) => {
+      /* A rollback of held bytes: the authority never saw them. */
+      if (held.byteLength > 0 && size >= heldAt) {
+        held = held.slice(0, size - heldAt);
+        return;
+      }
+      await settled();
       if (!(await fileSystem.exists(filePath))) {
         if (size === 0) {
           return;
@@ -322,25 +403,17 @@ const openProviderWriter = async (
       const bytes = await fileSystem.readFile(filePath);
       await fileSystem.writeFile(filePath, bytes.slice(0, size));
     },
+    /* With rows held, the authority's length is the one the last fence check or sync saw: a sync fences them there. */
     size: async () => {
-      if (fileSystem.stat) {
-        try {
-          const stat = await fileSystem.stat(filePath);
-          return stat.size;
-        } catch (error) {
-          if (
-            error &&
-            typeof error === 'object' &&
-            'code' in error &&
-            (error.code === 'ENOENT' || error.code === 'ENOTDIR')
-          ) {
-            return 0;
-          }
-          throw error;
-        }
+      if (held.byteLength > 0) {
+        return heldAt + held.byteLength;
       }
-      const bytes = await readBytes();
-      return bytes.byteLength;
+      await settled();
+      if (held.byteLength > 0) {
+        return heldAt + held.byteLength;
+      }
+      heldAt = await authoritySize();
+      return heldAt;
     },
     exclusive: async (section) => navigator.locks.request(lockName, { mode: 'exclusive' }, section),
     ...(segments === undefined ? {} : { segments }),

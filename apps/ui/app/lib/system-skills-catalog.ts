@@ -52,17 +52,15 @@ export const systemSkillsCatalog: readonly SystemSkill[] = [
     slug: 'create-skill',
     name: 'Create Skill',
     description: 'Create or update Tau agent skills',
-    version: '1.0.0',
+    version: '1.1.0',
     source: 'system',
     priority: 60,
     whenToUse: 'Use when creating, updating, reviewing, or explaining Tau agent skills or SKILL.md structure.',
     skillMarkdown: `---
 name: create-skill
 description: Create or update Tau agent skills. Use when creating, updating, reviewing, or explaining Tau agent skills or SKILL.md structure.
-source: system
-version: 1.0.0
-when_to_use: Use when creating, updating, reviewing, or explaining Tau agent skills or SKILL.md structure.
-enabled: true
+metadata:
+  version: "1.1.0"
 ---
 
 # Create Skill
@@ -71,8 +69,9 @@ Use this skill to create or update Tau agent skills that teach the agent a speci
 
 ## Tau storage model
 
-- Canonical workspace skills live at \`.agents/skills/<skill-name>/SKILL.md\`.
-- Installed and system skills can be shadowed by a user-authored skill with the same name in \`.agents/skills\`.
+- Tau skills follow the Agent Skills specification (agentskills.io), so a skill written here works in any agent that reads it.
+- Project skills live at \`.agents/skills/<skill-name>/SKILL.md\`, the directory other agents read too.
+- Installed and system skills can be shadowed by a project skill with the same name in \`.agents/skills\`.
 - Before applying an existing skill, the agent should call \`use_skill({ skillName: "<name>" })\` so skill usage is visible.
 
 ## Discovery
@@ -96,32 +95,49 @@ skill-name/
 |-- SKILL.md
 |-- references/
 |   \`-- detailed-topic.md
-\`-- scripts/
-    \`-- helper.sh
+|-- scripts/
+|   \`-- helper.sh
+\`-- assets/
+    \`-- template.md
 \`\`\`
 
 Keep optional resources only when they directly support the skill. Avoid README, changelog, installation guide, and other auxiliary files.
 
 ## Frontmatter
 
-Use flat YAML frontmatter:
+\`SKILL.md\` starts with YAML frontmatter. Two fields are required:
 
 \`\`\`markdown
 ---
 name: skill-name
-description: Specific third-person description. Include what the skill does and when to use it.
-source: user
-version: 1.0.0
-when_to_use: Use when the user asks for the target workflow or domain.
-enabled: true
+description: What the skill does and when to use it, in the third person, with the words a matching request would use.
 ---
 \`\`\`
 
 Rules:
 
-- \`name\`: lowercase letters, digits, and hyphens only; max 64 characters.
-- \`description\`: third person, concrete, non-empty, and trigger-rich.
+- \`name\`: 1-64 characters; lowercase letters, digits, and hyphens only; no leading, trailing, or consecutive hyphens. It must equal the directory name.
+- \`description\`: 1-1024 characters. Say both what the skill does and when to use it; it is the only text the agent sees before activating the skill.
 - Prefer short verb-led names such as \`create-policy\`, \`review-pr\`, or \`design-for-sheet-metal\`.
+
+Optional fields, and no others at the top level:
+
+- \`license\`: a licence name, or the name of a bundled licence file.
+- \`compatibility\`: up to 500 characters, only when the skill needs a particular product, system package, or network access.
+- \`metadata\`: a map of string keys to string values for anything else.
+- \`allowed-tools\`: a space-separated list of pre-approved tools (experimental; support varies by agent).
+
+\`\`\`markdown
+---
+name: skill-name
+description: What the skill does and when to use it.
+license: MIT
+metadata:
+  version: "1.0.0"
+---
+\`\`\`
+
+Tau reads two \`metadata\` keys: \`version\` is shown beside the skill, and \`enabled: "false"\` keeps the skill out of the catalog without deleting it.
 
 ## Writing guidance
 

@@ -407,7 +407,7 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
         providerBasePath: directory,
         scope: { backend: 'indexeddb' },
       }),
-    ).resolves.toEqual({ status: 'deleted' });
+    ).resolves.toMatchObject({ status: 'deleted' });
 
     await vi.waitFor(() => {
       expect(watchEvents).toContainEqual({ type: 'reset' });

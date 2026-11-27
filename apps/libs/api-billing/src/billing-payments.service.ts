@@ -645,6 +645,24 @@ export class BillingPaymentsService {
     return this.getAction(userId, actionId);
   }
 
+  /**
+   * Whether an action id names one of the account's reload consents (whose confirm and recover run its card setup).
+   *
+   * @param userId - The signed-in account.
+   * @param actionId - The id a confirm or recover was called with.
+   * @returns `true` for the account's own reload consent; `false` otherwise, including for an account with no owner.
+   */
+  public async isReloadConsentAction(userId: string, actionId: string): Promise<boolean> {
+    const owner = await this.findOwner(userId);
+    if (owner === undefined) return false;
+    const rows = await this.databaseService.database
+      .select({ id: billingReloadConsent.id })
+      .from(billingReloadConsent)
+      .where(and(eq(billingReloadConsent.id, actionId), eq(billingReloadConsent.accountId, owner.accountId)))
+      .limit(1);
+    return rows[0] !== undefined;
+  }
+
   public async getReloadConsent(userId: string): Promise<WireAutoReloadConsent | undefined> {
     // An account that never bought anything has no consent to show, not a missing owner.
     const owner = await this.findOwner(userId);

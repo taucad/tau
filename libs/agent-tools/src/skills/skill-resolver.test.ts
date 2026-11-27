@@ -6,7 +6,7 @@ import type { SkillResolverDependencies, SkillResolverDirectoryEntry } from '#sk
 const encoder = new TextEncoder();
 
 const skillMarkdown = (name: string, description: string): string =>
-  `---\nname: ${name}\ndescription: ${description}\nversion: 1.0.0\nenabled: true\n---\n\n# ${name}\n`;
+  `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  version: "1.0.0"\n---\n\n# ${name}\n`;
 
 const resolverOver = (
   files: Record<string, string>,

@@ -897,6 +897,21 @@ export const TauMetrics = {
     }),
   }),
 
+  /* WP-15 step 6 (O-6): a settlement priced above its hold, or an input above its joint maximum. Must stay 0. */
+  billingFundedOperationAboveHold: defineCounter({
+    name: 'tau.billing.funded_operation.above_hold_settlements',
+    unit: '{operation}',
+    description:
+      'Funded LLM settlements whose reported usage exceeded the hold, by what the input maximum was taken from',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'tau.billing.hold_basis': z.enum(['prefix', 'bytes', 'context', 'count', 'unknown']),
+      'tau.billing.above_hold.kind': z.enum(['customer_bound', 'input_bound']),
+      /** The pinned route sku: one of the catalog's funded routes or its `:long-context` sibling. */
+      'tau.billing.sku': z.string(),
+    }),
+  }),
+
   billingFundedOperationCurrent: defineGauge({
     name: 'tau.billing.funded_operation.current',
     unit: '{operation}',

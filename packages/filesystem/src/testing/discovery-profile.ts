@@ -18,7 +18,7 @@ import { serializeProjectManifest, projectToManifest } from '@taucad/types';
 import { projectIdentityPath, serializeProjectIdentity } from '@taucad/project-core/identity';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { MountTable } from '#mount-table.js';
-import type { ProjectRootConfig, ProjectRootConfiguration } from '#mount-table.js';
+import type { ProjectRootConfig, ProjectRootConfiguration, StorageRootConfig } from '#mount-table.js';
 import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
@@ -82,6 +82,8 @@ export type DiscoveryProfile = Readonly<{
   removeBehind: (root: 'home' | 'workspace', path: string) => Promise<void>;
   /** The providers the authority reads each root through, for a test that injects a fault. */
   providers: Readonly<{ home: FileSystemProvider; workspace: FileSystemProvider }>;
+  /** The folder's scope, as a delete of one of its directories names it. */
+  workspaceScope: StorageRootConfig;
   shape: DiscoveryProfileShape;
   /** Run `operation` and report what it cost, counted from a clean window. */
   measure: <Result>(operation: () => Promise<Result>) => Promise<Readonly<{ result: Result; cost: DiscoveryCost }>>;
@@ -283,6 +285,7 @@ export async function createDiscoveryProfile(
       await directory.removeEntry(name, { recursive: true });
     },
     providers: { home: homeInstance, workspace: workspaceInstance },
+    workspaceScope,
     shape,
     measure,
     dispose: () => {

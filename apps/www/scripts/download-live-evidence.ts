@@ -296,7 +296,23 @@ try {
     .catch(() => undefined);
   await page.screenshot({ path: join(output, 'download-page.png'), fullPage: true });
   const buttons = await readMacButtons(page);
-  const pageText = (await page.locator('body').textContent()) ?? '';
+  // The Intel beta line is published outside the catalog and stands apart from the qualified Mac buttons.
+  const betaLinks = await page.locator('a[data-download-beta]').evaluateAll((links) =>
+    links.map((link) => ({
+      text: link.textContent.trim(),
+      href: (link as HTMLAnchorElement).href,
+      visible: link.checkVisibility(),
+      underAppleSilicon: link.closest('[data-beta-route]')?.previousElementSibling?.matches('[data-mac-route="mac"]'),
+    })),
+  );
+  // Page text outside the beta line, so the archive baseline still proves no qualified Mac DMG is claimed.
+  const pageText = await page.locator('body').evaluate((body) => {
+    const copy = body.cloneNode(true) as HTMLElement;
+    for (const beta of copy.querySelectorAll('[data-beta-route]')) {
+      beta.remove();
+    }
+    return copy.textContent;
+  });
   const instructions = await page.locator('[data-install-instructions]').textContent();
   const note = await page.locator('[data-platform-note]').textContent();
   const details = await page.locator('[data-download-detail]').evaluateAll((elements) =>
@@ -351,6 +367,21 @@ try {
   for (const button of buttons) {
     if (/DMG/u.test(button.text)) {
       check(new URL(button.href).pathname.endsWith('.dmg'), `${button.role} says DMG over ${button.href}`);
+    }
+  }
+  // Until a catalog qualifies Intel, Intel is one quiet beta line under the Apple silicon entry, naming the file it
+  // serves: the channel's Intel DMG, or its Intel update ZIP where the channel has not published the DMG.
+  check(betaLinks.length === 1, `Expected one Intel beta line, found ${betaLinks.length}`);
+  for (const beta of betaLinks) {
+    const path = new URL(beta.href).pathname;
+    check(
+      (beta.text === 'Download the Intel beta DMG' && path === '/latest/Tau-macos-x64.dmg') ||
+        (beta.text === 'Download the Intel beta ZIP' && path === '/latest/Tau-macos-x64.zip'),
+      `Intel beta line reads "${beta.text}" over ${beta.href}`,
+    );
+    check(new URL(beta.href).origin === downloadsOrigin, `Intel beta line leaves the channel: ${beta.href}`);
+    if (!macPlatforms.includes('macIntel')) {
+      check(beta.visible && beta.underAppleSilicon === true, 'The Intel beta line is not shown under Apple silicon');
     }
   }
   if (expected === 'dmg') {
@@ -541,6 +572,7 @@ try {
       mobileOverflow,
     },
     buttons,
+    betaLinks,
     downloads,
     zipAlternatives,
     updaterFeeds,

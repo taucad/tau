@@ -21,8 +21,7 @@ function skillMarkdown(options: {
   return `---
 name: ${options.name}
 description: ${options.description}
-${options.source ? `source: ${options.source}\n` : ''}enabled: true
----
+${options.source ? `metadata:\n  source: ${options.source}\n` : ''}---
 
 ${options.body ?? `# ${options.name}`}`;
 }
@@ -133,7 +132,7 @@ describe('createSkillResolver', () => {
       expect.objectContaining({ source: 'system', resourceUri: 'system:skills/create-skill/SKILL.md' }),
     ]);
     expect(createSkill).toHaveProperty('version', undefined);
-    expect(createSkill).toHaveProperty('whenToUse', undefined);
+    expect(createSkill?.whenToUse).toBeUndefined();
 
     const resolved = await resolver.resolveSkill('create-skill');
     expect(resolved).toEqual(

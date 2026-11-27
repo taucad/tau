@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   createDesktopDownloadCatalog,
@@ -322,6 +323,142 @@ describe('composed per-platform desktop download catalog', () => {
       composed([{ lane: 'linux', catalog: linux(), extra: true }]),
     ]) {
       expect(() => select(document)).toThrow();
+    }
+  });
+});
+
+// The live composed catalogs, captured 2026-11-27 from downloads.taucad.dev and downloads.tau.new latest/installers.json.
+describe('live composed desktop download catalogs', () => {
+  type Live = {
+    schemaVersion: 2;
+    channel: 'staging' | 'production';
+    promoted: true;
+    platforms: Array<{
+      lane: string;
+      catalog: {
+        tag: string;
+        version: string;
+        routes: Array<{
+          route: string;
+          target: string;
+          artifacts: Array<{ kind: string; name: string; sha256: string; size: number }>;
+        }>;
+      };
+    }>;
+  };
+  const live = (channel: 'staging' | 'production'): Live =>
+    JSON.parse(readFileSync(new URL(`fixtures/installers-${channel}.json`, import.meta.url), 'utf8')) as Live;
+  const admit = (document: Live) =>
+    createDesktopDownloadCatalog({ enabled: true, channel: document.channel, qualification: document });
+  const lane = (document: Live, name: string) => document.platforms.find((platform) => platform.lane === name)!;
+  const appImage = (document: Live) =>
+    lane(document, 'linux').catalog.routes.find((route) => route.route === 'linux-appimage')!;
+
+  it.each([
+    ['staging', 'https://downloads.taucad.dev/releases/desktop-staging%400.2.0-staging.1180', 'tau-staging'],
+    ['production', 'https://downloads.tau.new/releases/desktop%400.4.0', 'tau'],
+  ] as const)('admits every lane of the live %s catalog with the Apple silicon DMG first', (channel, macBase, deb) => {
+    const document = live(channel);
+    const catalog = admit(document)!;
+    expect(catalog.map(({ platform }) => platform)).toEqual(['mac', 'linux', 'linuxPortable']);
+    const dmg = lane(document, 'macos').catalog.routes[0]!.artifacts.find(({ kind }) => kind === 'macos-dmg')!;
+    expect(catalog[0]).toMatchObject({
+      href: `${macBase}/Tau-macos-arm64.dmg`,
+      primaryKind: 'macos-dmg',
+      cleanHost: 'pending',
+      sha256: dmg.sha256,
+      size: dmg.size,
+    });
+    // The managed AppImage's APT packages carry the channel's names, as the desktop release contract names them.
+    const { version } = lane(document, 'linux').catalog;
+    expect(catalog[2]?.href).toMatch(/\/Tau-linux-x64\.AppImage$/u);
+    expect(catalog[2]?.alternatives.map(({ name }) => name).sort()).toEqual(
+      [
+        'Tau-linux-x64.tar.gz',
+        `${deb}-appimage-runtime-${version}_${version}_amd64.deb`,
+        `${deb}-appimage_${version}_amd64.deb`,
+      ].sort(),
+    );
+  });
+
+  it.each(['staging', 'production'] as const)(
+    'keeps every AppImage artifact check strict on the live %s catalog',
+    (channel) => {
+      const other = channel === 'staging' ? 'tau-' : 'tau-staging-';
+      const mutations: Array<(route: ReturnType<typeof appImage>) => void> = [
+        // The route as it was before the 2026-11-16 Linux promotions: image and tar only.
+        (route) => {
+          route.artifacts = route.artifacts.filter(({ kind }) => kind === 'linux-appimage' || kind === 'linux-tar');
+        },
+        (route) => {
+          route.artifacts = route.artifacts.filter(({ kind }) => kind !== 'linux-appimage-deb-selector');
+        },
+        // The other channel's package name.
+        (route) => {
+          const selector = route.artifacts.find(({ kind }) => kind === 'linux-appimage-deb-selector')!;
+          selector.name = selector.name.replace(/^tau(?:-staging)?-/u, other);
+        },
+        // A version that disagrees with the lane's catalog.
+        (route) => {
+          const runtime = route.artifacts.find(({ kind }) => kind === 'linux-appimage-deb-runtime')!;
+          runtime.name = runtime.name.replace(/_amd64\.deb$/u, '.1_amd64.deb');
+        },
+        // The APT route's package kind in place of the AppImage's.
+        (route) => {
+          const runtime = route.artifacts.find(({ kind }) => kind === 'linux-appimage-deb-runtime')!;
+          runtime.kind = 'linux-deb-runtime';
+        },
+        (route) => {
+          route.artifacts.push({ ...route.artifacts[0]! });
+        },
+      ];
+      for (const mutate of mutations) {
+        const document = live(channel);
+        mutate(appImage(document));
+        // Only the failing Linux lane is dropped; the Apple silicon DMG stays offered.
+        expect(admit(document)!.map(({ platform }) => platform)).toEqual(['mac']);
+        expect(() =>
+          admit({ ...document, platforms: document.platforms.filter((platform) => platform.lane === 'linux') }),
+        ).toThrow(/no qualified platform/u);
+      }
+    },
+  );
+
+  it('drops only the lane that fails admission and keeps every other lane', () => {
+    const incompleteMac = live('staging');
+    lane(incompleteMac, 'macos').catalog.routes[0]!.artifacts.pop();
+    expect(admit(incompleteMac)!.map(({ platform }) => platform)).toEqual(['linux', 'linuxPortable']);
+
+    const otherChannelMac = live('staging');
+    lane(otherChannelMac, 'macos').catalog = lane(live('production'), 'macos').catalog;
+    expect(admit(otherChannelMac)!.map(({ platform }) => platform)).toEqual(['linux', 'linuxPortable']);
+
+    const unknownLane = live('production');
+    unknownLane.platforms.push({ lane: 'beos', catalog: lane(unknownLane, 'macos').catalog });
+    expect(admit(unknownLane)!.map(({ platform }) => platform)).toEqual(['mac', 'linux', 'linuxPortable']);
+
+    // A lane named twice is ambiguous: every copy is dropped, and the other lanes stay.
+    const duplicated = live('production');
+    duplicated.platforms.push(lane(duplicated, 'linux'));
+    expect(admit(duplicated)!.map(({ platform }) => platform)).toEqual(['mac']);
+
+    // A lane carrying another platform's routes is dropped.
+    const misfiled = live('production');
+    misfiled.platforms = [
+      { lane: 'windows', catalog: lane(misfiled, 'linux').catalog },
+      ...misfiled.platforms.filter((platform) => platform.lane === 'macos'),
+    ];
+    expect(admit(misfiled)!.map(({ platform }) => platform)).toEqual(['mac']);
+
+    // Document-level faults still reject the whole catalog.
+    for (const change of [{ channel: 'staging' }, { promoted: false }, { platforms: [] }, { extra: true }]) {
+      expect(() =>
+        createDesktopDownloadCatalog({
+          enabled: true,
+          channel: 'production',
+          qualification: { ...live('production'), ...change },
+        }),
+      ).toThrow();
     }
   });
 });

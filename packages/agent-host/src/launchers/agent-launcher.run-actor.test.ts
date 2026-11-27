@@ -57,10 +57,13 @@ type Gateway = Readonly<{
 const gateway = (stall: boolean): Gateway => {
   const models: string[] = [];
   const waiting: Array<() => void> = [];
+  /* A release before its request arrives is kept: the request waits for its rows to be durable first (WP-10 step B). */
+  let early = 0;
   const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
     const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as { model?: string }) : {};
     models.push(body.model ?? '');
-    if (!stall) {
+    if (!stall || early > 0) {
+      early = Math.max(0, early - 1);
       return sse(authoritativeGatewayWireFixtures.browserTurn);
     }
     return new Promise<Response>((resolve, reject) => {
@@ -76,7 +79,12 @@ const gateway = (stall: boolean): Gateway => {
     fetch,
     models,
     release: () => {
-      waiting.shift()?.();
+      const next = waiting.shift();
+      if (next === undefined) {
+        early += 1;
+      } else {
+        next();
+      }
     },
   };
 };

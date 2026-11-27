@@ -134,6 +134,14 @@
       },
       "kind": "witness",
       "ref": "Index-contract review F3, A4: with the audit off, nothing this tab does reads a change no evidence reported, so the catalog never lists it; the audit is load-bearing. It replaces the blueprint's earlier unheard-no-evidence limit. unheard-liveness's bounds."
+    },
+    "LibraryCatalog.cancel-holds.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CancelLeavesProjectReachable"
+      },
+      "kind": "witness",
+      "ref": "FW3 sole-copy cancel: with CancelHolds a delete the authority cancelled (no other copy holds the id, or none could be read) is held failed, as a terminal failure is, so a route question about the whole project is answered recovery-failed. The target clears the row instead. 1 question about 2 projects resting on 2 reads, 1 re-ask or cancel, 1 invalidation, 1 delete mutation; no row at start, no crash."
     }
   },
   "graphs": {

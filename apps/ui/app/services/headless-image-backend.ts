@@ -5,10 +5,23 @@ import type { imageRuntime } from '#runtime/image-runtime.definition.js';
 import type { HeadlessImageBackend } from '#services/headless-image.service.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
 import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
+import { parseRenderTierQueryOverride, renderTierOverrideAllowed } from '#components/geometry/render-tier-override.js';
 
 type GpuAdapterProbe = { requestAdapter(): Promise<unknown> };
 
+/**
+ * Automatic previews are a hardware-tier feature, like the viewer's costly passes, so the test-only render tier
+ * override that runs those passes on a software GPU admits them too (and `software` defers them on any GPU). The
+ * override reaches only an undeployed debug build; anywhere else the adapter decides.
+ */
 const automaticAdapterAvailable = async (): Promise<boolean> => {
+  const override = parseRenderTierQueryOverride(
+    (globalThis as { location?: Location }).location?.search ?? '',
+    renderTierOverrideAllowed,
+  );
+  if (override) {
+    return override.features === 'hardware';
+  }
   const gpu = (globalThis.navigator as (Navigator & { gpu?: GpuAdapterProbe }) | undefined)?.gpu;
   if (!gpu) {
     return false;

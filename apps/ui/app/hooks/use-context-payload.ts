@@ -5,8 +5,10 @@ import { contextMemoryMaxBytes, contextMemoryMaxLines } from '@taucad/chat/schem
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 
-const agentsMdPath = '.tau/AGENTS.md';
+/** The project's instruction file, at its root, as the AGENTS.md convention places it. */
+const agentsMdPath = 'AGENTS.md';
 const decoder = new TextDecoder();
+const noSkills: NonNullable<ContextPayload['skills']> = [];
 
 /**
  * The settled context payload, published for dispatch.
@@ -82,42 +84,24 @@ export function truncateMemoryHead(text: string): string {
 }
 
 /**
- * Hook that assembles a context payload from workspace agent metadata.
- * Skill discovery is delegated to the shared `.agents/skills` catalog hook;
- * AGENTS.md memory remains under `.tau/AGENTS.md` for the existing memory
- * contract.
+ * Hook that assembles a context payload from the project's agent files.
+ *
+ * Both follow the cross-agent conventions: skills come from the shared
+ * `.agents/skills` catalog hook, and project instructions from `AGENTS.md` at
+ * the project root. That file is the person's own; Tau reads it and never
+ * generates into it. It is re-read whenever it changes, so a turn carries what
+ * the file says now, including an edit the agent made on the turn before.
  *
  * @returns ContextPayload to attach to message metadata, or undefined if nothing to send
  */
 export function useContextPayload(): ContextPayload | undefined {
-  const { readFile, treeService } = useFileManager();
-  const [hasAgentsMd, setHasAgentsMd] = useState(false);
+  const { readFile, treeService, contentService } = useFileManager();
   const [memory, setMemory] = useState<Record<string, string> | undefined>();
   const catalog = useSkillsCatalogState();
+  /* A failed catalog (its watch closed or errored) offers no skill, as the composer shows it: the turn says so with an
+   * empty listing, because an absent one lets the host read the skills itself, past the failure. */
+  const isCatalogUnavailable = catalog.status === 'closed' || catalog.status === 'error';
   const skills = catalog.status === 'ready' ? catalog.prompt : undefined;
-
-  useEffect(() => {
-    if (!treeService) {
-      return;
-    }
-    const ts = treeService;
-    let cancelled = false;
-
-    async function discover(): Promise<void> {
-      const agentsEntry = await ts.getEntry(agentsMdPath);
-
-      if (cancelled) {
-        return;
-      }
-
-      setHasAgentsMd(agentsEntry?.type === 'file');
-    }
-
-    void discover();
-    return () => {
-      cancelled = true;
-    };
-  }, [treeService]);
 
   const readFileRef = useRef(readFile);
   useEffect(() => {
@@ -125,34 +109,44 @@ export function useContextPayload(): ContextPayload | undefined {
   }, [readFile]);
 
   useEffect(() => {
+    if (!treeService || !contentService) {
+      return;
+    }
     let cancelled = false;
+    let latest = 0;
 
-    async function loadMemory(): Promise<void> {
-      if (!hasAgentsMd) {
-        setMemory(undefined);
-        return;
-      }
-
+    async function load(tree: NonNullable<typeof treeService>): Promise<void> {
+      latest += 1;
+      const read = latest;
+      let next: Record<string, string> | undefined;
       try {
-        const bytes = await readFileRef.current(agentsMdPath);
-        const text = decoder.decode(bytes);
-        if (!cancelled) {
-          setMemory({ [agentsMdPath]: truncateMemoryHead(text) });
+        const entry = await tree.getEntry(agentsMdPath);
+        if (entry?.type === 'file') {
+          next = { [agentsMdPath]: truncateMemoryHead(decoder.decode(await readFileRef.current(agentsMdPath))) };
         }
       } catch {
-        if (!cancelled) {
-          setMemory(undefined);
-        }
+        next = undefined;
+      }
+      /* A later read supersedes this one: the file changed again while it was in flight. */
+      if (!cancelled && read === latest) {
+        setMemory((previous) => (previous?.[agentsMdPath] === next?.[agentsMdPath] ? previous : next));
       }
     }
 
-    void loadMemory();
+    void load(treeService);
+    const watch = contentService.watchReady({ paths: [agentsMdPath] }, () => {
+      void load(treeService);
+    });
     return () => {
       cancelled = true;
+      watch.dispose();
     };
-  }, [hasAgentsMd]);
+  }, [treeService, contentService]);
 
   const payload = useMemo((): ContextPayload | undefined => {
+    if (isCatalogUnavailable) {
+      return { skills: noSkills, memory };
+    }
     if ((!skills || skills.length === 0) && !memory) {
       return undefined;
     }
@@ -161,7 +155,7 @@ export function useContextPayload(): ContextPayload | undefined {
       skills: skills && skills.length > 0 ? skills : undefined,
       memory,
     };
-  }, [skills, memory]);
+  }, [isCatalogUnavailable, skills, memory]);
 
   /* `registering` and `pending` are the catalog still being read; every other status is its answer. */
   const catalogSettled = catalog.status !== 'registering' && catalog.status !== 'pending';

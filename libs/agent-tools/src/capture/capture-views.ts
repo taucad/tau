@@ -15,7 +15,7 @@ import { cameraPresetOrientations } from '@taucad/workbench';
 import type { cameraPresets } from '@taucad/workbench';
 
 import type { WorkbenchCaptureCamera, WorkbenchCapturePlane } from '#capture/capture-workbench-view.js';
-import { buildViewerCaptureImageOptions } from '#capture/viewer-capture-options.js';
+import { buildViewerCaptureImageOptions, createIsometricCaptureCamera } from '#capture/viewer-capture-options.js';
 
 type OrthographicPreset = Exclude<(typeof cameraPresets)[number], 'isometric'>;
 
@@ -71,8 +71,7 @@ export type CaptureExportOptionsInput = {
     | undefined;
 };
 
-/** Camera direction of the single isometric capture, from the subject toward the camera. */
-const isometricDirection = [0.6123724357, -0.6123724357, 0.5] as const;
+const isometricDirection: readonly [number, number, number] = createIsometricCaptureCamera().direction;
 
 const sectionAxes = { xy: 2, xz: 1, yz: 0 } as const;
 const axisNames = ['x', 'y', 'z'] as const;
@@ -173,13 +172,7 @@ const buildOptions = (options: CaptureExportOptionsInput) => {
     : ({
         ...common,
         mode: 'single',
-        camera: {
-          framing: 'bounds',
-          direction: isometricDirection,
-          up: [0, 0, 1],
-          margin: 0.1,
-          projection: { kind: 'perspective', verticalFieldOfView: 45 },
-        },
+        camera: createIsometricCaptureCamera(),
         quality: 1,
       } as const);
 };

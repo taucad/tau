@@ -2,7 +2,7 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 import { useWaitClock } from '@taucad/ui/hooks/use-wait-clock';
 import { cn } from '@taucad/ui/utils/cn';
 import type { ModelAvailability } from '#hooks/use-project-availability.js';
-import { useContext, useMemo } from 'react';
+import { Fragment, useContext, useMemo } from 'react';
 import { openWaitContext, useOpenWaitStart } from '#hooks/use-wait-start.js';
 
 /**
@@ -22,23 +22,34 @@ export type ProjectWaitShape = 'transcript' | 'fields' | 'tree' | 'list' | 'code
 const isRunning = (state: Exclude<ModelAvailability, 'ready'>): boolean =>
   state !== 'failed' && state !== 'offline' && state !== 'account' && state !== 'filesFailed';
 
+/* The reply lines' widths per turn: the first line full, the last two thirds, those between nearly full. */
+const transcriptTurns = [
+  ['w-full', 'w-11/12', 'w-2/3'],
+  ['w-full', 'w-2/3'],
+] as const;
+
+/*
+ * The feed's bars as one column in the feed's own box. A bar that does not fit whole wraps to a second column, which the
+ * box clips, so a short feed (the phone sheet at half) draws fewer bars rather than one cut at its foot or behind the
+ * composer below it. The margins give the turns' spacing: 16 px between a request and its reply, 8 px between lines.
+ */
 function TranscriptShape(): React.JSX.Element {
   return (
-    <div className='mx-auto flex w-[calc(100%_-_1rem)] max-w-xl flex-col gap-3 px-3 py-4'>
-      {[3, 2].map((lines) => (
-        <div key={lines} className='flex flex-col gap-3'>
-          <Skeleton className='h-10 w-full rounded-lg' />
-          <div className='flex flex-col'>
-            {Array.from({ length: lines }, (_, line) => (
+    <div className='mx-auto h-full w-[calc(100%_-_1rem)] max-w-xl px-3 py-4'>
+      <div data-slot='transcript-shape' className='flex h-full flex-col flex-wrap content-start overflow-hidden'>
+        {transcriptTurns.map((lines, turn) => (
+          <Fragment key={lines.join(' ')}>
+            <Skeleton className={cn('h-10 w-full shrink-0 rounded-lg', turn > 0 && 'mt-4')} />
+            {lines.map((width, line) => (
               <Skeleton
                 // oxlint-disable-next-line react/no-array-index-key -- static decorative lines
                 key={line}
-                className={cn('my-1 h-3', line === lines - 1 ? 'w-2/3' : line === 0 ? 'w-full' : 'w-11/12')}
+                className={cn('h-3 shrink-0', line === 0 ? 'mt-4' : 'mt-2', width)}
               />
             ))}
-          </div>
-        </div>
-      ))}
+          </Fragment>
+        ))}
+      </div>
     </div>
   );
 }
@@ -195,7 +206,7 @@ export function WaitSkeleton({
           key={wait}
           aria-hidden='true'
           data-slot='project-wait-skeleton'
-          className='wait-skeleton'
+          className='h-full wait-skeleton'
           style={{ '--wait-skeleton-delay': timing.skeletonDelay } satisfies SkeletonDelayStyle}
         >
           <Shape />

@@ -49,6 +49,7 @@ import { isWorkerCodeLoadFailure } from '@taucad/ui-core/lib/worker-factory';
 import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import { waitUnlessGone } from '@taucad/ui-core/lib/xstate.lib';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { chatReadReporter } from '#lib/chat-read-reporting.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type {
   ChatRequest,
@@ -427,6 +428,43 @@ const inactiveProjectionLimit = 4;
 const inactiveProjectionWeightLimit = 16 * 1024 * 1024;
 /** Milliseconds between chat message notifications while a stream writes (D-UI-10). */
 const chatMessagesThrottle = 50;
+/** How long a hidden document waits to publish live-only changes, which no animation frame would publish. */
+const hiddenLiveInterval = 1000;
+/** One frame's wait where there are no animation frames at all (a test document, a server render). */
+const frameInterval = 16;
+
+/** The next animation frame while the document is visible; a timer while it is hidden or has no frames. */
+const nextFrame = (callback: () => void): (() => void) => {
+  const hidden = (globalThis.document as Document | undefined)?.visibilityState === 'hidden';
+  if (hidden || typeof requestAnimationFrame === 'undefined') {
+    const timer = setTimeout(callback, hidden ? hiddenLiveInterval : frameInterval);
+    return () => {
+      clearTimeout(timer);
+    };
+  }
+  const handle = requestAnimationFrame(callback);
+  return () => {
+    cancelAnimationFrame(handle);
+  };
+};
+
+/** Whether a projection snapshot differs from the last published one only in its live preview. */
+const changesOnlyLive = (previous: ChatProjection, next: ChatProjection): boolean => {
+  if (previous.live === next.live) {
+    return false;
+  }
+  for (const key of Object.keys(next) as Array<keyof ChatProjection>) {
+    if (key !== 'live' && previous[key] !== next[key]) {
+      return false;
+    }
+  }
+  for (const key of Object.keys(previous) as Array<keyof ChatProjection>) {
+    if (key !== 'live' && !(key in next)) {
+      return false;
+    }
+  }
+  return true;
+};
 /** How often, and from how long a first wait, a taken-back request asks the outbox again before the person is told. */
 const takeBackRetries = 3;
 const takeBackRetryDelay = 250;
@@ -819,6 +857,12 @@ const endsHere = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>, runI
 
 /** The two phases that OPEN a run and keep its project busy (I24); every other phase settles one. */
 const opensRun = (phase: ProjectedRunPhase): boolean => phase === 'admitted' || phase === 'running';
+
+/** How long a lost or refused host read may last before HA0 reports what it leaves the person with. Milliseconds. */
+export const chatReadLossBoundMilliseconds = 10_000;
+
+/** The connection failures `sendHostCommand` retries; one thrown past its bound leaves a command's effect unknown. */
+const peerLossCodes: ReadonlySet<string> = new Set(['PEER_UNRESPONSIVE', 'PEER_GONE', 'PEER_CLOSED', 'CHANNEL_CLOSED']);
 const retainsLiveRun = (phase: ProjectedRunPhase): boolean => opensRun(phase) || phase === 'paused';
 
 /* The `revision` region's three facts, as the project's route last reported them. */
@@ -839,6 +883,11 @@ const sendRevisionFacts = (ref: ChatSessionActorRef, facts: ChatRevisionFacts): 
 export type ChatSessionStoreOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> &
   Readonly<{
     chatSession?: typeof chatSessionMachine;
+    /**
+     * Schedules the frame that publishes live-only projection changes (WP-06 frame clock, `LiveOverlay.tla`
+     * `FrameClock`); returns a cancel. Defaults to the next animation frame, or a 1 s timer while the document is hidden.
+     */
+    frame?: (callback: () => void) => () => void;
     /**
      * The closures the store calls, given at construction (A2): the app runtime passes the project library's ports.
      * Without them the store's defaults throw until `setDependencies`.
@@ -891,14 +940,40 @@ type ObservedChat = {
   attachment?: Actor<typeof hostAttachment>;
   /** Placement of that live connection, not the chat's desired execution. */
   placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
+  /**
+   * Settles once that attachment's connect has answered, or the attachment is stopped first (#2297). Until then its
+   * placement is unknown, not different: a placement change waits for it before it moves the reader.
+   */
+  connecting?: Readonly<{ settled: Promise<void>; settle: () => void }>;
   status: 'unknown' | 'attached' | 'lost' | 'refused';
   retry?: ReturnType<typeof setTimeout>;
+  /** Armed by a loss that is not a leadership handoff; reports it if it outlasts {@link chatReadLossBoundMilliseconds}. */
+  lossReport?: ReturnType<typeof setTimeout>;
   attempts: number;
   /**
    * The agent host's code failed to load past the page's worker bound when this chat's read last met it (FP10). It
    * stays failed for the page's life, so the chat shows it whenever its session can ({@link ChatSessionStore}).
    */
   hostLoadFailure?: unknown;
+};
+
+/**
+ * Wait until the chat's log attachment knows where it is connected, or has none (#2297). A connect that answers or
+ * fails, or an attachment stopped first, settles the wait, and a later attachment is waited for in turn.
+ *
+ * @param current - Reads the chat's observation now; it may be replaced while this waits.
+ * @param signal - Abandons the wait once the attachment it waits for settles.
+ * @returns Once no attachment is still connecting.
+ */
+const waitForAttachmentPlacement = async (
+  current: () => ObservedChat | undefined,
+  signal: AbortSignal,
+): Promise<void> => {
+  for (let observed = current(); observed?.connecting !== undefined; observed = current()) {
+    // oxlint-disable-next-line no-await-in-loop -- each wait is for the attachment current after the one before it.
+    await observed.connecting.settled;
+    signal.throwIfAborted();
+  }
 };
 
 /** The run IDs a Close prompt can truthfully promise to stop, and the work it cannot. @public */
@@ -1032,6 +1107,9 @@ export class ChatSessionStore {
   readonly #composerDrains = new Map<string, Promise<void>>();
   /** Live owners pin projections; a bounded inactive cache preserves recent warm navigation. */
   readonly #projections = new Map<string, Actor<typeof chatProjectionLogic>>();
+  /** The pending frame of each chat whose projection holds a live-only change not yet published (WP-06). */
+  readonly #projectionFrames = new Map<string, () => void>();
+  readonly #frame: (callback: () => void) => () => void;
   readonly #inactiveProjections = new Map<
     string,
     { projectId: string; actor: Actor<typeof chatProjectionLogic>; weight: number }
@@ -1106,7 +1184,8 @@ export class ChatSessionStore {
   };
 
   public constructor(options: ChatSessionStoreOptions = {}) {
-    const { chatSession, dependencies, files, focusedProject, projectSessions, ...rootOptions } = options;
+    const { chatSession, dependencies, files, focusedProject, frame, projectSessions, ...rootOptions } = options;
+    this.#frame = frame ?? nextFrame;
     if (dependencies !== undefined) {
       this.#deps = { ...this.#deps, ...dependencies };
     }
@@ -1873,7 +1952,7 @@ export class ChatSessionStore {
         this.#releaseRefusedRun(session);
       }
     }
-    this.#projectionOf(chatId).send({ type: 'batch', answer });
+    this.#foldHostAnswer(chatId, answer);
     this.#latchIfForeignScanLost(chatId);
     // A verified empty batch can leave the reducer unchanged while establishing read authority.
     if (answer.status === 'batch' && answer.events.length === 0) {
@@ -2701,20 +2780,42 @@ export class ChatSessionStore {
         session.queueHold = undefined;
         session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
         let acceptingPlacement: string | undefined;
+        const { commandId } = item.command;
+        const unknownEffect = (tags: Readonly<Record<string, string>>): void => {
+          chatReadReporter.report('outbox.unknown-effect', { chatId: session.chatId, occurrence: commandId, tags });
+        };
         try {
-          const answer = await sendHostCommand(
-            async () => {
-              const client = await this.#connectQueuedCommand(session, connector, { queueId: item.id, signal });
-              acceptingPlacement = connectionPlacement(client.placement);
-              return client;
-            },
-            item.command,
-            { signal },
-          );
+          let answer: Awaited<ReturnType<typeof sendHostCommand>>;
+          try {
+            answer = await sendHostCommand(
+              async () => {
+                const client = await this.#connectQueuedCommand(session, connector, { queueId: item.id, signal });
+                acceptingPlacement = connectionPlacement(client.placement);
+                return client;
+              },
+              item.command,
+              { signal },
+            );
+          } catch (error) {
+            /* U21: the connection kept failing past the command's bound, so whether it was applied is unknown. */
+            const code = getErrno(error);
+            if (code !== undefined && peerLossCodes.has(code)) {
+              unknownEffect({ reason: 'peer-lost', code });
+            }
+            throw error;
+          }
           const wait = ownerWaitOf(answer);
           if (wait !== undefined) {
+            /* A wait-class refusal holds the item for its host; its effect is not unknown. */
             this.#holdForHost(session, { queueId: item.id, command: item.command, refusal: wait });
             return this.#holdQueue(session, record.items, 'host-wait');
+          }
+          if (answer.effect === 'unknown') {
+            /* U8: the bounded re-send ran out with the effect still unknown. */
+            unknownEffect({ reason: 'unknown-effect', code: answer.code });
+          } else if (answer.status !== 'refused' && answer.effect !== 'durable') {
+            /* U20: applied, but not as a durable row. */
+            unknownEffect({ reason: 'not-durable', code: answer.status });
           }
           if (answer.status === 'refused') {
             throw new Error(`Delivery could not be confirmed: ${answer.message}`);
@@ -3700,6 +3801,8 @@ export class ChatSessionStore {
   }
 
   #stopObservedAttachment(chatId: string, observed: ObservedChat): void {
+    clearTimeout(observed.lossReport);
+    observed.lossReport = undefined;
     this.#answeredLogReads.delete(chatId);
     const session = this.#sessions.get(chatId);
     if (session !== undefined) {
@@ -3713,7 +3816,75 @@ export class ChatSessionStore {
     observed.attachment?.stop();
     observed.attachment = undefined;
     observed.placement = undefined;
+    observed.connecting?.settle();
+    observed.connecting = undefined;
     observed.status = 'unknown';
+  }
+
+  /**
+   * Fold one host read answer, reporting `own.rewrite` when the fold resets the own projection (HA0): the host said
+   * the reader is ahead or of another identity, or a version-1 host clamped. Every host read answer reaches the
+   * projection here (facts pages fold inside the attachment's capture, which keeps the reset version); a reset the
+   * store sends itself does not pass here, so it is not reported.
+   *
+   * @param chatId - The chat the answer is for.
+   * @param answer - The host's read answer.
+   */
+  #foldHostAnswer(chatId: string, answer: ChatProjectionReadAnswer): void {
+    const before = this.#projectionContext(chatId);
+    this.#projectionOf(chatId).send({ type: 'batch', answer });
+    const after = this.#projectionContext(chatId);
+    if (before === undefined || after === undefined || after.resetVersion === before.resetVersion) {
+      return;
+    }
+    const reason =
+      answer.status === 'refused'
+        ? answer.reason
+        : before.ledger.position.sourceGeneration !== undefined &&
+            'sourceGeneration' in answer &&
+            answer.sourceGeneration !== before.ledger.position.sourceGeneration
+          ? 'identity-mismatch'
+          : 'clamped';
+    chatReadReporter.report('own.rewrite', {
+      chatId,
+      occurrence: `${chatId}:${String(after.resetVersion)}`,
+      tags: { reason },
+    });
+  }
+
+  /**
+   * HA0: report what a lost or refused host read leaves the person with, once the loss has lasted
+   * {@link chatReadLossBoundMilliseconds}; the caller passes no leadership handoff (`owner-fenced`). A session that never
+   * displayed its own segment is a cold, hidden transcript (once per session); a caught-up own run still open is an
+   * unsettled orphan candidate (once per run). Reporting only: nothing here changes what the store does.
+   *
+   * @param chatId - The chat whose host read was lost or refused.
+   * @param observed - Its observation, whose attachment met the loss.
+   * @param reason - Why the read ended, as a bounded tag.
+   */
+  #armLossReport(chatId: string, observed: ObservedChat, reason: string): void {
+    if (observed.lossReport !== undefined) {
+      return;
+    }
+    const tags = { reason };
+    observed.lossReport = setTimeout(() => {
+      observed.lossReport = undefined;
+      if (this.#observed.get(chatId) !== observed || (observed.status !== 'lost' && observed.status !== 'refused')) {
+        return;
+      }
+      const session = this.#sessions.get(chatId);
+      if (session !== undefined && session.displayedOwn === undefined) {
+        chatReadReporter.report('chat.read.cold-hidden', { chatId, occurrence: session, tags });
+      }
+      const projection = this.#projectionContext(chatId);
+      const run =
+        projection !== undefined && selectCaughtUp(projection) && opensRun(selectRunPhase(projection))
+          ? selectCurrentRun(projection)
+          : undefined;
+      if (run !== undefined) {
+        chatReadReporter.report('run.unsettled.own', { chatId, occurrence: run.runId, tags });
+      }
+    }, chatReadLossBoundMilliseconds); // Bound: chatReadLossBoundMilliseconds.
   }
 
   /**
@@ -3747,15 +3918,27 @@ export class ChatSessionStore {
     if (connector === undefined) {
       return;
     }
+    let settle = (): void => undefined;
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const connecting = { settled, settle };
     const attachment = createActor(hostAttachment, {
       input: {
         chatId,
         connect: async () => {
-          const client = await connector.connect(chatId);
-          if (observed.attachment === attachment) {
-            observed.placement = client.placement;
+          try {
+            const client = await connector.connect(chatId);
+            if (observed.attachment === attachment) {
+              observed.placement = client.placement;
+            }
+            return client;
+          } finally {
+            if (observed.connecting === connecting) {
+              observed.connecting = undefined;
+            }
+            settle();
           }
-          return client;
         },
         projection: {
           getSnapshot: () => this.#projectionOf(chatId).getSnapshot(),
@@ -3786,12 +3969,22 @@ export class ChatSessionStore {
           }
           this.#projectionTopics.get(chatId)?.emit();
           if (event.type === 'attachment.attached') {
+            clearTimeout(observed.lossReport);
+            observed.lossReport = undefined;
             observed.attempts = 0;
             observed.hostLoadFailure = undefined;
             this.#syncProjection(chatId, 'none');
             return;
           }
           const session = this.#sessions.get(chatId);
+          if (event.reason !== 'owner-fenced') {
+            /* A bounded tag: a refusal's reason, a failure's code, or a fixed sentence; never an error's message. */
+            const reason =
+              event.type === 'attachment.refused'
+                ? `refused:${event.reason ?? 'unknown'}`
+                : (getErrno(event.error) ?? (event.error === undefined ? (event.reason ?? 'lost') : 'error'));
+            this.#armLossReport(chatId, observed, reason);
+          }
           if (event.type === 'attachment.lost' && isWorkerCodeLoadFailure(event.error)) {
             observed.hostLoadFailure = event.error;
             if (session !== undefined) {
@@ -3844,6 +4037,7 @@ export class ChatSessionStore {
       ...this.#rootOptions,
     });
     observed.attachment = attachment;
+    observed.connecting = connecting;
     attachment.start();
     this.startPendingSeed(chatId);
   }
@@ -4480,7 +4674,15 @@ export class ChatSessionStore {
     let presentedAttempt: Readonly<{ runId: string; attempt: number }> | undefined;
     let attention: RowKey | undefined;
     let published: ChatProjection | undefined;
-    projection.subscribe(({ context }) => {
+    /* The frame clock (WP-06, `LiveOverlay.tla` `FrameClock`): a snapshot that changes only the live preview is
+     * published from the next frame, so a burst of port messages handled behind a busy main thread wakes readers once.
+     * Any other change publishes at once, with whatever live change was waiting (`DurableAtOnce`, `FrameAtomic`). */
+    const publish = (context: ChatProjection): void => {
+      const pendingFrame = this.#projectionFrames.get(chatId);
+      if (pendingFrame !== undefined) {
+        pendingFrame();
+        this.#projectionFrames.delete(chatId);
+      }
       if (published === context) {
         return;
       }
@@ -4515,6 +4717,27 @@ export class ChatSessionStore {
       presentedAttempt = run === undefined ? presentedAttempt : { runId: run.runId, attempt: run.attempt };
       this.#syncProjection(chatId, reopened ? 'reopened' : moved ? 'moved' : 'none');
       this.#projectionTopics.get(chatId)?.emit();
+    };
+    projection.subscribe(({ context }) => {
+      if (published === undefined || !changesOnlyLive(published, context)) {
+        publish(context);
+        return;
+      }
+      if (this.#projectionFrames.has(chatId)) {
+        return;
+      }
+      /* A scheduler may run the callback before it returns (tests publish at once); nothing is left to cancel then. */
+      const frame = { ran: false };
+      const cancel = this.#frame(() => {
+        frame.ran = true;
+        this.#projectionFrames.delete(chatId);
+        if (this.#projections.get(chatId) === projection) {
+          publish(projection.getSnapshot().context);
+        }
+      });
+      if (!frame.ran) {
+        this.#projectionFrames.set(chatId, cancel);
+      }
     });
     projection.start();
     return projection;
@@ -5398,6 +5621,14 @@ export class ChatSessionStore {
               }
               // Commands resolve the persisted placement for each turn. Its
               // long-lived log subscription must follow the same host change.
+              // An attachment still connecting has an unknown placement, not a
+              // different one: restarting it would drop the live text its
+              // connection already carries for a run under way (#2297), so the
+              // move waits for its answer and compares then.
+              await waitForAttachmentPlacement(() => this.#observed.get(input.chatId), signal);
+              if (this.#sessions.get(input.chatId) !== session) {
+                return;
+              }
               const observed = this.#observed.get(input.chatId);
               if (
                 observed?.placement !== undefined &&
@@ -5805,6 +6036,8 @@ export class ChatSessionStore {
     }
     this.#inactiveProjections.delete(chatId);
     actor.stop();
+    this.#projectionFrames.get(chatId)?.();
+    this.#projectionFrames.delete(chatId);
     this.#projections.delete(chatId);
     this.#answeredLogReads.delete(chatId);
     this.#validatedDisplays.delete(actor);

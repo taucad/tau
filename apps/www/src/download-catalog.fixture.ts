@@ -45,7 +45,13 @@ const createProjection = () => ({
       route: 'linux-appimage',
       target: 'linux-x64',
       qualification: qualified(),
-      artifacts: [artifact('linux-appimage', 'Tau-linux-x64.AppImage'), artifact('linux-tar', 'Tau-linux-x64.tar.gz')],
+      // The publisher's exact AppImage route: the image, the shared tar and the managed AppImage's two APT packages.
+      artifacts: [
+        artifact('linux-appimage', 'Tau-linux-x64.AppImage'),
+        artifact('linux-tar', 'Tau-linux-x64.tar.gz'),
+        artifact('linux-appimage-deb-runtime', 'tau-appimage-runtime-0.2.0_0.2.0_amd64.deb'),
+        artifact('linux-appimage-deb-selector', 'tau-appimage_0.2.0_amd64.deb'),
+      ],
     },
   ],
 });

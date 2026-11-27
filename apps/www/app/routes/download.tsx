@@ -4,7 +4,6 @@ import { Badge } from '@taucad/ui/components/badge';
 import {
   archiveDownloads,
   betaDownloadHref,
-  betaDownloadLabel,
   betaDownloads,
   desktopDownloadHref,
   desktopDownloadLabel,
@@ -34,6 +33,26 @@ const downloadLabel = (platform: keyof typeof archiveDownloads): { __html: strin
 const macPlaceholderLabel = (platform: 'mac' | 'macIntel'): { __html: string } => ({
   __html: desktopDownloadLabel(platform),
 });
+
+/**
+ * Mac entries are unlisted until a qualified catalog publishes that architecture's DMG.
+ * @param platform - A Mac architecture.
+ * @returns The hidden entry the catalog reveals.
+ */
+const macRoute = (platform: 'mac' | 'macIntel'): React.JSX.Element => (
+  <div data-mac-route={platform} hidden>
+    <SiteLink
+      className='text-link'
+      href='#downloads'
+      data-download-platform={platform}
+      data-event='download'
+      data-placement='download'
+      // oxlint-disable-next-line react/no-danger -- Only checked-in brand SVGs and product constants form this markup.
+      dangerouslySetInnerHTML={macPlaceholderLabel(platform)}
+    />
+    <p className='fine' data-download-detail={platform} />
+  </div>
+);
 
 export const content = (): React.JSX.Element => (
   <section className='band'>
@@ -92,37 +111,24 @@ export const content = (): React.JSX.Element => (
             Not sure which Mac you have? Open Apple menu → About This Mac and check the Chip or Processor line.
           </p>
           <div className='actions'>
-            {(['mac', 'macIntel'] as const).map((platform) => (
-              // Mac entries are unlisted until a qualified catalog publishes that architecture's DMG.
-              <div key={platform} data-mac-route={platform} hidden>
-                <SiteLink
-                  className='text-link'
-                  href='#downloads'
-                  data-download-platform={platform}
-                  data-event='download'
-                  data-placement='download'
-                  // oxlint-disable-next-line react/no-danger -- Only checked-in brand SVGs and product constants form this markup.
-                  dangerouslySetInnerHTML={macPlaceholderLabel(platform)}
-                />
-                <p className='fine' data-download-detail={platform} />
-              </div>
-            ))}
-            {/* The Intel Mac beta archive leaves the list once the catalog admits a qualified Intel DMG. */}
-            <div data-beta-route='macIntel'>
-              <div className='download-title'>
+            <div>
+              {macRoute('mac')}
+              {/* Intel is one quiet beta line under the Apple silicon entry, until the catalog admits an Intel DMG. */}
+              <p className='fine download-variant' data-beta-route='macIntel'>
+                {betaDownloads.macIntel.prompt}{' '}
                 <SiteLink
                   className='text-link'
                   href={betaDownloadHref('macIntel')}
                   data-download-beta='macIntel'
                   data-event='download'
                   data-placement='download'
-                  // oxlint-disable-next-line react/no-danger -- Only checked-in brand SVGs and product constants form this markup.
-                  dangerouslySetInnerHTML={{ __html: betaDownloadLabel('macIntel') }}
-                />
+                >
+                  {betaDownloads.macIntel.label}
+                </SiteLink>{' '}
                 <Badge variant='secondary'>Beta</Badge>
-              </div>
-              <p className='fine'>{betaDownloads.macIntel.detail}</p>
+              </p>
             </div>
+            {macRoute('macIntel')}
             {(['windows', 'linux'] as const).map((platform) => (
               <div key={platform}>
                 <div className='download-title'>

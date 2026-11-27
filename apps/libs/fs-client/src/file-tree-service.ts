@@ -35,6 +35,11 @@ const watchIntervalBlurred = 10_000;
 const watchIntervalNativeSafetyNet = 60_000;
 /** Milliseconds. */
 const pollingTelemetryWindow = 60_000;
+/**
+ * After a discovery-wide walk, the next poll waits at least this many times the walk's duration after it ended, so a
+ * large folder is not walked without rest (project-library fast-path blueprint, index-contract review A3).
+ */
+const pollRestFactor = 5;
 // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
 // ponytail: 5-tick global reconcile (10 s visible / 50 s hidden); tune from poll telemetry.
 const globalReconcileTickInterval = 5;
@@ -935,16 +940,21 @@ export class FileTreeService {
     };
     this.pollingTelemetry = telemetry;
     let completedTicks = 0;
+    /** How long the last tick's discovery-wide walk took, or 0 when the tick made none. Milliseconds. */
+    let lastWalkDuration = 0;
 
     const poll = (): void => {
       if (epoch !== this.pollingEpoch) {
         return;
       }
-      const pollInterval = this.nativelyObserved
-        ? watchIntervalNativeSafetyNet
-        : this.visibility.isVisible()
-          ? watchIntervalFocused
-          : watchIntervalBlurred;
+      const pollInterval = Math.max(
+        pollRestFactor * lastWalkDuration,
+        this.nativelyObserved
+          ? watchIntervalNativeSafetyNet
+          : this.visibility.isVisible()
+            ? watchIntervalFocused
+            : watchIntervalBlurred,
+      );
       this.pollingTimer = setTimeout(async () => {
         this.pollingTimer = undefined;
         const visible = this.visibility.isVisible();
@@ -954,8 +964,11 @@ export class FileTreeService {
         try {
           this.nativelyObserved = await this.proxy.pollExternalChanges(this.paths.toAbsoluteWorkspacePath(''));
           completedTicks++;
+          lastWalkDuration = 0;
           if (completedTicks % globalReconcileTickInterval === 0) {
+            const walkStartedAt = performance.now();
             await this.proxy.pollExternalChanges();
+            lastWalkDuration = performance.now() - walkStartedAt;
           }
           success = true;
         } catch (error) {

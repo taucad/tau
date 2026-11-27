@@ -60,6 +60,7 @@ const commandsOver = (facade: WorkspaceCommandsHost['facade'] = notCalled) => {
   });
   const commands = new WorkspaceCommands({
     workspaceConnection,
+    failedDeletes: () => new Set(),
     facade,
     readiedWorker: notCalled,
     whenDiscoveryReady: notCalled,

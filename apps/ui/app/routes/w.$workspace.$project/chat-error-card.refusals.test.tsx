@@ -10,7 +10,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createActor } from 'xstate';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as ChatErrorPayload, ErrorCategory } from '@taucad/types';
-import { externalAgentStopCodes, refusalOf, refusals } from '@taucad/agent-host/wire';
+import { refusalOf, refusals } from '@taucad/agent-host/wire';
 import type { RefusalCode, RetryClass } from '@taucad/agent-host/wire';
 import { cardOf } from '@taucad/chat-ui/utils/chat-error-card';
 import type { CombinedChatState } from '#hooks/use-chat.js';
@@ -18,6 +18,7 @@ import { useChatSelector } from '#hooks/use-chat.js';
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import { chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
+import { refusalOfGesture } from '#utils/run-auto-resume-plan.js';
 
 vi.mock('#cloud/use-deployment-mode.js', async () => {
   const fixture = await import('#cloud/funded-cloud.fixture.js');
@@ -63,12 +64,10 @@ vi.mock('#routes/w.$workspace.$project/use-open-new-chat.js', () => ({
 const sentinel = 'not-in-the-card-map' as ErrorCategory;
 const hasCard = (code: string): boolean => cardOf(code, sentinel).category !== sentinel;
 
-const ownerCodes = (...owners: readonly string[]): RefusalCode[] =>
-  (Object.keys(refusals) as RefusalCode[]).filter((code) => owners.includes(refusalOf(code).owner));
-
 /**
- * Codes the chat gives no card of its own, each with why. Everything else in the registry must have one in the page's
- * code-to-card map, and its action must match its class.
+ * Codes the chat gives no card of its own, each named, with why. Everything else in the registry must have one in the
+ * page's code-to-card map, and its action must match its class. No owner is excluded wholesale: a new code of any owner
+ * fails until it gets a card or a line here.
  */
 const notPersonFacing: ReadonlyMap<string, string> = new Map<string, string>([
   ...(
@@ -95,18 +94,76 @@ const notPersonFacing: ReadonlyMap<string, string> = new Map<string, string>([
   ),
   ['PARAMETER_RESOLUTION_FAILED', 'a tool’s own failure: its tool card words it'],
   ['HOST_MODEL_UNAVAILABLE', 'refused before admission: the model picker words a model the host lacks'],
-  ...ownerCodes('revisions')
-    .filter((code) => refusalOf(code).retry !== 'wait')
-    .map((code) => [code, 'a revision refusal: the history surface words it (revisions policy)'] as const),
-  ...ownerCodes('external')
-    .filter((code) => (externalAgentStopCodes as readonly string[]).includes(code) && !hasCard(code))
-    .map((code) => [code, 'an external agent’s stop: its stop card words it from the stop’s details'] as const),
-  ...ownerCodes('external', 'gateway', 'transport')
-    .filter((code) => !(externalAgentStopCodes as readonly string[]).includes(code) && !hasCard(code))
-    .map(
-      (code) =>
-        [code, 'an agent, gateway or transport sentence written for people: the generic card shows it'] as const,
-    ),
+  ...(
+    [
+      'BRANCH_NEEDS_REVISION',
+      'BRANCH_NAME_RESERVED',
+      'BRANCH_RENAME_LINKED',
+      'BRANCH_RENAME_PUSHED',
+      'CHECKOUT_CONFLICT',
+      'ENGINE_FAILED',
+      'ENGINE_UNAVAILABLE',
+      'INVALID_REPOSITORY',
+      'INVALID_TRANSPORT',
+      'FETCH_LIMIT_EXCEEDED',
+      'LFS_REMOTE_UNSUPPORTED',
+      'MISSING_LARGE_OBJECT',
+      'REMOTE_DAMAGED',
+      'REMOTE_FORBIDDEN',
+      'REMOTE_NOT_ENTITLED',
+      'REMOTE_NOT_FOUND',
+      'REMOTE_MOVED',
+      'REMOTE_QUOTA_EXCEEDED',
+      'REMOTE_REAUTHORIZATION_REQUIRED',
+      'REMOTE_REF_CONFLICT',
+      'REMOTE_REJECTED',
+      'REMOTE_SAFE_MODE',
+      'REMOTE_UNAUTHORIZED',
+      'REMOTE_UNAVAILABLE',
+      'UNKNOWN_REVISION',
+      'UNSUPPORTED_OPERATION',
+      'BASE_CUT_FAILED',
+      'LEASE_UNAVAILABLE',
+      'CHECKOUT_UNKNOWN',
+      'MERGE_UP_TO_DATE',
+      'MERGE_UNDONE',
+      'PLACEMENT_REFUSED',
+      'TURN_UNKNOWN',
+      'PROJECT_MISMATCH',
+      'SESSION_FENCED',
+      'TOOL_PORT_REVOKED',
+      'TURN_RELEASED',
+    ] as const
+  ).map((code) => [code, 'a revision refusal: the history surface words it (revisions policy)'] as const),
+  ...(['EXTERNAL_AGENT_LIMIT_REACHED', 'EXTERNAL_AGENT_FAILED'] as const).map(
+    (code) => [code, 'an external agent’s stop: its stop card words it from the stop’s details'] as const,
+  ),
+  ...(
+    [
+      'FUNDED_HELPER_LIMIT',
+      'MODEL_NOT_IN_CATALOG',
+      'ORIGIN_NOT_ALLOWED',
+      'ATTEMPT_VOIDED',
+      'BILLING_ACCOUNT_CLOSED',
+      'MODEL_PROVIDER_UNSUPPORTED',
+      'UNKNOWN_GATEWAY_ERROR',
+      'EXTERNAL_AGENT_AUTH_REQUIRED',
+      'EXTERNAL_AGENT_UNAVAILABLE',
+      'EXTERNAL_AGENT_CONTENT_UNSUPPORTED',
+      'EXTERNAL_AGENT_UNSUPPORTED',
+      'EXTERNAL_AGENT_CONFIG_UNAVAILABLE',
+      'EXTERNAL_AGENT_INVALID_SESSION',
+      'EXTERNAL_AGENT_CANCELLED',
+      'CLI_TOO_OLD',
+      'CLI_NOT_FOUND',
+      'ADAPTER_NOT_INSTALLED',
+      'ADAPTER_NO_BIN',
+      'MCP_RUN_INACTIVE',
+      'TOOL_NOT_ALLOWED',
+    ] as const
+  ).map(
+    (code) => [code, 'an agent, gateway or transport sentence written for people: the generic card shows it'] as const,
+  ),
 ]);
 
 const rawMessageOf = (code: string): string => `raw ${code} sentence`;
@@ -144,12 +201,35 @@ const showFailedRun = (code: string): void => {
   vi.mocked(useChatSelector).mockImplementation((selector) => selector(state as unknown as CombinedChatState));
 };
 
+/** A gesture (a send, a Resume) the host refused with the code, on a caught-up chat with no run of its own. */
+const showRefusedGesture = (code: string): void => {
+  const projection = createActor(chatProjectionLogic).start();
+  projection.send({ type: 'batch', answer: { status: 'batch', cursor: 0, nextCursor: 0, endCursor: 0, events: [] } });
+  const { context } = projection.getSnapshot();
+  projection.stop();
+  const error = refusalOfGesture(
+    {
+      code,
+      title: 'Something went wrong',
+      message: rawMessageOf(code),
+      category: errorCategory.generic,
+      requestId: `req_${code}`,
+    },
+    { kind: 'send', projection: context, createId: () => code },
+  );
+  const state = { persistedError: error, projection: context, attachmentStatus: 'attached' };
+  vi.mocked(useChatSelector).mockImplementation((selector) => selector(state as unknown as CombinedChatState));
+};
+
 /** Buttons that end or resume a send; anything else (Reload, New chat, Pair, Switch model, a link) recovers otherwise. */
 const resending: ReadonlySet<string> = new Set(['Try again', 'Resume']);
 
-/** Whether the rendered actions are the retry class's (AR3-3). */
-const actionMatches = (retry: RetryClass, actions: readonly string[]): boolean => {
-  switch (retry) {
+/**
+ * Whether the rendered actions are the retry class's (AR3-3). A refused gesture has no run of its own, so a `resume`
+ * code there offers no Resume: what it can offer is everything but one.
+ */
+const actionMatches = (retry: RetryClass, actions: readonly string[], gesture: boolean): boolean => {
+  switch (gesture && retry === 'resume' ? 'never' : retry) {
     case 'wait': {
       /* Queued: the send goes by itself, so the chat offers nothing that would send it again. */
       return actions.every((action) => !resending.has(action));
@@ -179,25 +259,39 @@ describe('the refusal gate (HA5, AR3-3)', () => {
     });
   });
 
-  it.each(codes.filter((code) => !notPersonFacing.has(code)))(
-    'should offer for %s the action its retry class names',
-    (code) => {
-      showFailedRun(code);
-      const { container } = render(
-        <MemoryRouter>
-          <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-            <ChatError />
-          </QueryClientProvider>
-        </MemoryRouter>,
-      );
-      const actions = [...screen.queryAllByRole('button'), ...screen.queryAllByRole('link')].map((element) =>
-        element.textContent.trim(),
-      );
-      const { retry } = refusalOf(code);
-      expect({ code, retry, actions, matches: actionMatches(retry, actions) }).toMatchObject({ matches: true });
-      /* A send that ends is told why, except one a Stop superseded, which ends quietly. */
-      const quiet = cardOf(code, errorCategory.generic).category === 'quiet';
-      expect(container.querySelector('[data-slot="chat-error-card"]') === null).toBe(quiet);
-    },
-  );
+  /* No owner is waved through: a code the registry gains later has neither a card nor a line until someone writes one. */
+  it('should fail a new code of any owner until it has a card or a reason', () => {
+    expect({ card: hasCard('ZZ_NEW_TRANSPORT'), excluded: notPersonFacing.has('ZZ_NEW_TRANSPORT') }).toEqual({
+      card: false,
+      excluded: false,
+    });
+  });
+
+  it.each(
+    codes.flatMap((code) =>
+      notPersonFacing.has(code)
+        ? []
+        : [
+            { code, as: 'a failed run', show: showFailedRun, gesture: false },
+            { code, as: 'a refused gesture', show: showRefusedGesture, gesture: true },
+          ],
+    ),
+  )('should offer for $code as $as the action its retry class names', ({ code, show, gesture }) => {
+    show(code);
+    const { container } = render(
+      <MemoryRouter>
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <ChatError />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    const actions = [...screen.queryAllByRole('button'), ...screen.queryAllByRole('link')].map((element) =>
+      element.textContent.trim(),
+    );
+    const { retry } = refusalOf(code);
+    expect({ code, retry, actions, matches: actionMatches(retry, actions, gesture) }).toMatchObject({ matches: true });
+    /* A send that ends is told why, except one a Stop superseded, which ends quietly. */
+    const quiet = cardOf(code, errorCategory.generic).category === 'quiet';
+    expect(container.querySelector('[data-slot="chat-error-card"]') === null).toBe(quiet);
+  });
 });

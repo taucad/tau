@@ -32,12 +32,12 @@
     "apps/ui/app/components/chat/chat-textarea.tsx": "8f684f3dc647ab0182bffd90ef3c163adde71ef24f06a33ada6807870c25a309",
     "apps/ui/app/hooks/use-chat.tsx": "31b598f35717dca5c2be31a7540e37af62ac920600c4a78f7679fd6fe059a814",
     "apps/ui/app/machines/chat-session.machine.ts": "2076bc41cb203f45c0049297df17be9a4a4eed966d704f34423e3a2aa3f733cf",
-    "apps/ui/app/services/chat-session-store.ts": "f9e7f9d50d820fbe4227845015f1a3a184028ea92d705b17f061226922499e70",
+    "apps/ui/app/services/chat-session-store.ts": "b1f6215f0b52a8d45eadd0e7e6e304b13420dc433cf65efcec93767be0cbd37d",
     "apps/ui/app/services/outbox-gate.ts": "c9d5a33f02c06d6bb45657f76e30a6c3a28b31bf6403d7dc0e9d3c840c4e357e"
   },
   "specs": {
     "MessageQueue.tla": "ce49b824ae87c7c677fd108a790a10fcf1299b99f0ee2f9d6db16c290bc14db5",
-    "QueuePlacement.tla": "9b48032a2e40c1264f79b76a34aef4198c18b35e28329a703a6296ff31a37796"
+    "QueuePlacement.tla": "1d129b0f6610e952885b7e422769770fbce79455dec7aadc4c5ec74e122383b2"
   },
   "tables": {
     "MessageQueue.duplicate.cfg": "279034898f7a14736303bd4a3714d500d3950b43784ad3977fdcc860eedb319a",

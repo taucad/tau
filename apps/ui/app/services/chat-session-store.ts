@@ -3131,9 +3131,16 @@ export class ChatSessionStore {
           }
           if (answer.effect !== 'durable') {
             /* HA-I4 (HA4, `QueuePlacement`'s `AnswerNoop`): applied with nothing to do. The item ends with no receipt and
-             * no run, so it is never sent again and nothing waits on it. */
-            if (session.stop?.target === item.command.payload.runId) {
-              this.#releaseStop(session);
+             * no run, so it is never sent again and nothing waits on it. Review N1: when the answer names the run live
+             * (`details.state`), a Stop pressed meanwhile is that run's to end, so it is sent rather than let go. */
+            const { runId } = item.command.payload;
+            if (session.stop?.target === runId) {
+              const { state } = answer.details;
+              if (state === 'admitted' || state === 'running') {
+                void this.#cancelSessionRun(session, runId);
+              } else {
+                this.#releaseStop(session);
+              }
             }
             this.#endHostWait(session);
             const after = await session.messageQueueStore.end(item.id, commandId);

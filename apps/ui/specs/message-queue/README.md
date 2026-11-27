@@ -70,6 +70,8 @@ A queued command's outcome follows its code's retry class (HA2, 2026-11-27, HA-I
 
 An answer applied with nothing to do now ends the item (HA4, 2026-11-27, HA-I4): the store's `end` removes it by its key with no receipt, so the next item's terminal barrier stays where it was, and it is never sent again. `QueuePlacement.tla` gains the `unanswered` case, a prepared command pinned to A that no host has accepted, and `End`, which ends it on a `never` or an applied not-applied answer from the pinned host. A `wait` is `Retry` by the same key. The target adds `NoDrop` (a sent item leaves only with a receipt or its answer's outcome) and `NoDuplicate` (an ended item was accepted nowhere and is not sent again). The witnesses keep their cases and still fail on their own invariants. TLC was not run for this note; the drift is re-pinned.
 
+The HA4 review (2026-11-27) re-pins the drift after `chat-session-store.ts` began cancelling, rather than letting go, a Stop aimed at a run that an applied not-applied answer names live (`details.state` admitted or running). The item still ends as `End(noop)`; the Stop is outside this slice, so no action changes.
+
 ## Final runtime guard reconciliation
 
 `Acknowledge` requires membership in `Accepted`, which represents durable acceptance. The service now explicitly checks `answer.effect === 'durable'` on both initial dispatch and prepared replay before deleting an item. An `applied` answer with `not-applied` effect retains the original prepared command; it corresponds to stuttering, not `Acknowledge`. Reconciliation from `ledger.applied` uses the authoritative durable log. The model does not equate a successful transport response with acceptance.

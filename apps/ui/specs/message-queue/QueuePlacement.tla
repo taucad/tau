@@ -69,6 +69,8 @@ Retry == /\ s.prepared /\ s.pendingGrant = None /\ s.selected = s.observed
          /\ s' = [s EXCEPT !.accepted = @ \cup {s.selected}]
 \* HA4: the selected host answered a command it never accepted: `never` (its card) or applied with nothing to do
 \* (`noop`). The item ends without a receipt and is never sent again. A `wait` is `Retry` again, by the same key.
+\* HA4 review (2026-11-27, N1): a `noop` that names the run live (`details.state` admitted or running) leaves a Stop
+\* pressed meanwhile aimed at that run, so the store cancels it rather than letting the Stop go; the item ends alike.
 End(o) == /\ s.prepared /\ s.pendingGrant = None /\ s.selected = s.observed
           /\ (~PinCommands \/ s.pin = s.selected) /\ s.selected \notin s.accepted
           /\ s' = [s EXCEPT !.prepared = FALSE, !.pin = None, !.ended = o]

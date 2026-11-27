@@ -181,6 +181,25 @@ describe('readCommit', () => {
     expect(reading.claimable).toBe(shaped ? undefined : id);
   });
 
+  it('B1: reads a hostile trailer-shaped message in linear time', () => {
+    const blankRun = `Co-Authored-By:${' '.repeat(1024 * 1024)}x`;
+    const tokenRun = `Co-Authored-By: ${'a'.repeat(1024 * 1024)} <`;
+    const manyLines = Array.from({ length: 20_000 }, () => `Key:${' '.repeat(1000)}<`).join('\n');
+    for (const message of [blankRun, tokenRun, manyLines]) {
+      const started = performance.now();
+      const reading = readCommit(commit({ author: 'A <a@example.com>', message }));
+      expect(performance.now() - started).toBeLessThan(250);
+      expect(reading.addressClass.trailers).toBe('none');
+    }
+  });
+
+  it('B1: still reads a trailer whose name has blanks and an address in angle brackets', () => {
+    const reading = readCommit(
+      commit({ author: 'A <a@example.com>', message: 'Work\n\nCo-Authored-By:  Claude  <noreply@anthropic.com>\t' }),
+    );
+    expect(reading.agent).toEqual({ id: 'claude-code', by: 'trailer' });
+  });
+
   it('matches recognised agents exactly and ignores look-alikes', () => {
     const trailer = readCommit(
       commit({

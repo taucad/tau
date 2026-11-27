@@ -26,7 +26,10 @@ const tauCommitterEmail = 'noreply@tau.new';
 const pseudonymPrefix = 'anon:';
 const versionIdPattern = /^[\da-f]{32}$/u;
 const forgeAddress = /^(?:\d+\+)?[A-Za-z\d](?:[A-Za-z\d-]*[A-Za-z\d])?@users\.noreply\.github\.com$/u;
-const trailerLine = /^([A-Za-z][A-Za-z\d-]*):[ \t]*(.*?)[ \t]*<([^<>\n]*)>[ \t]*$/u;
+const trailerKey = /^[A-Za-z][A-Za-z\d-]*$/u;
+/* Longer lines are never read as trailers, and only the message's tail is scanned for them (M2 review B1). */
+const maxTrailerLineLength = 1024;
+const maxTrailerScanLength = 64 * 1024;
 const coAuthoredBy = 'co-authored-by';
 const maxClaimableLength = 128;
 
@@ -296,20 +299,56 @@ const widestClass = (classes: readonly AddressClass[]): AddressClass => {
 /** One trailer that names a git identity, such as `Co-Authored-By: Name <address>`. */
 type IdentityTrailer = Readonly<{ key: string; name: string; email: string }>;
 
+/* Spaces and tabs at either end, the only padding git's trailer syntax allows. */
+const trimBlanks = (text: string): string => {
+  let start = 0;
+  let end = text.length;
+  while (start < end && (text[start] === ' ' || text[start] === '\t')) {
+    start += 1;
+  }
+  while (end > start && (text[end - 1] === ' ' || text[end - 1] === '\t')) {
+    end -= 1;
+  }
+  return text.slice(start, end);
+};
+
+/*
+ * `Key: Name <address>`, parsed by position in linear time (M2 review B1: the
+ * regex this replaces backtracked cubically on a long blank run). The address
+ * is the last `<…>` on the line, nothing but blanks may follow it, and the
+ * name holds no line terminator.
+ */
+const trailerOf = (line: string): IdentityTrailer | undefined => {
+  if (line.length > maxTrailerLineLength || line.startsWith('Tau-')) {
+    return undefined;
+  }
+  const colon = line.indexOf(':');
+  const key = colon === -1 ? '' : line.slice(0, colon);
+  if (!trailerKey.test(key)) {
+    return undefined;
+  }
+  const value = line.slice(colon + 1);
+  const close = value.lastIndexOf('>');
+  const open = close === -1 ? -1 : value.lastIndexOf('<', close);
+  if (open === -1 || trimBlanks(value.slice(close + 1)) !== '') {
+    return undefined;
+  }
+  const email = value.slice(open + 1, close);
+  const name = trimBlanks(value.slice(0, open));
+  if (/[\r\u2028\u2029]/u.test(name)) {
+    return undefined;
+  }
+  return { key: key.toLowerCase(), name, email: normalAddress(email) };
+};
+
 const identityTrailers = (message: string): IdentityTrailer[] =>
-  message.split('\n').flatMap((line) => {
-    const match = trailerLine.exec(line);
-    if (match === null || line.startsWith('Tau-')) {
-      return [];
-    }
-    return [
-      {
-        key: (match[1] ?? '').toLowerCase(),
-        name: match[2] ?? '',
-        email: normalAddress(match[3] ?? ''),
-      },
-    ];
-  });
+  message
+    .slice(-maxTrailerScanLength)
+    .split('\n')
+    .flatMap((line) => {
+      const trailer = trailerOf(line);
+      return trailer === undefined ? [] : [trailer];
+    });
 
 const validClaimable = (identity: string | undefined): string | undefined =>
   identity === undefined || identity === '' || identity.length > maxClaimableLength || /[<>\n\0]/u.test(identity)

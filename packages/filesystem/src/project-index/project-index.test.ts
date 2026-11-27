@@ -8,7 +8,7 @@ import { directoryConcurrency } from '#concurrency.js';
 import { lineCountByteCap } from '#content-metadata.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import type { ProviderRegistry } from '#provider-registry.js';
-import type { FileSystemProvider } from '#types.js';
+import type { DirectoryStatRow, FileSystemProvider } from '#types.js';
 import { createWorkspaceFileService } from '#testing/workspace-service-harness.js';
 import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
 import type { ObservedRow } from '#project-index/project-index.js';
@@ -786,6 +786,36 @@ describe('ProjectIndexes', () => {
 
     expect(tauListings).not.toHaveBeenCalled();
     expect(pickedListings).toHaveBeenCalled();
+  });
+
+  /* Fast path FW4: nobody waits on a poll's compare call by call, so it lists through the root's background view. */
+  it('should list a poll’s compare through the background view, and a cut’s through the provider', async () => {
+    const { provider } = await durableRoot();
+    Object.defineProperty(provider, 'capabilities', { value: { ...provider.capabilities, externallyEdited: true } });
+    const backgroundListings: string[] = [];
+    const listInBackground = async (path: string): Promise<DirectoryStatRow[]> => {
+      backgroundListings.push(path);
+      return provider.readdirWithStats(path);
+    };
+    const background = new Proxy(provider, {
+      get: (target, property) =>
+        property === 'readdirWithStats' ? listInBackground : (Reflect.get(target, property) as unknown),
+    });
+    const indexes = new ProjectIndexes({
+      resolve: () => ({ provider, background: () => background, path: 'project' }),
+      persistDelayMilliseconds: 60_000,
+    });
+    await indexes.ready('/picked');
+    const interactiveListings = vi.spyOn(provider, 'readdirWithStats');
+
+    await indexes.compareExternallyEdited();
+    expect(backgroundListings).toEqual(['project']);
+    expect(interactiveListings).toHaveBeenCalledTimes(1);
+
+    interactiveListings.mockClear();
+    await indexes.compare('/picked');
+    expect(backgroundListings).toEqual(['project']);
+    expect(interactiveListings).toHaveBeenCalledTimes(1);
   });
 
   /* W3 a3: no caller waits behind a snapshot write another holder has started. */

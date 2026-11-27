@@ -14,13 +14,14 @@
 import { waitFor } from 'xstate';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync, watch as watchDirectory } from 'node:fs';
-import type { FSWatcher } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
-import { join, sep } from 'node:path';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { resolveNodeProjectIdentity, openNodeProjectFileSystem } from '#project-identity.js';
+import { watchTree } from '#watch-tree.js';
+import type { TreeWatcher } from '#watch-tree.js';
 import type { ShellExecutionHolds } from '@taucad/shell-service';
 
 import { jsonValueSchema } from '@taucad/agent-host';
@@ -1105,7 +1106,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
    * workspace alone left them never dirty — no idle revision, no write
    * generation guard, and a quit that could let their work go.
    */
-  const watchers = new Map<WatchKey, FSWatcher | undefined>();
+  const watchers = new Map<WatchKey, TreeWatcher | undefined>();
   const watchedRoots = new Map<WatchKey, string>();
   const pendingPaths = new Map<WatchKey, Set<string>>();
   /* The barriers waiting on a cookie, by the cookie's name. */
@@ -1211,30 +1212,29 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       /* Windows: libuv aborts the whole process (`Assertion failed: !_wcsnicmp(filename, dir, dirlen)`, fs-event.c)
        * on the first event under a root spelled with an 8.3 short name, such as a `%TEMP%` of `C:\Users\RUNNER~1`,
        * because it compares the event's long path with the root as given. The native real path is the long one. */
-      const watched = process.platform === 'win32' ? realpathSync.native(root) : root;
-      const watcher = watchDirectory(watched, { recursive: true, persistent: false }, (_event, filename) => {
-        if (filename === null) {
+      const watcher = watchTree(process.platform === 'win32' ? realpathSync.native(root) : root, {
+        change: (path) => {
+          if (path === undefined) {
+            lose(key);
+            return;
+          }
+          if (path.startsWith(watchCookiePrefix)) {
+            cookies.get(path)?.();
+            return;
+          }
+          const initializing = actor.getSnapshot().context.liveCheckoutId === undefined;
+          if (path === '' || !classify(path).versioned) {
+            return;
+          }
+          if (initializing && (path === generatedIgnorePath || path === generatedGitattributesPath)) {
+            return;
+          }
+          reportWrite(key, path);
+        },
+        error: () => {
           lose(key);
-          return;
-        }
-        const path = filename.toString().split(sep).join('/');
-        if (path.startsWith(watchCookiePrefix)) {
-          cookies.get(path)?.();
-          return;
-        }
-        const initializing = actor.getSnapshot().context.liveCheckoutId === undefined;
-        if (path === '' || !classify(path).versioned) {
-          return;
-        }
-        if (initializing && (path === generatedIgnorePath || path === generatedGitattributesPath)) {
-          return;
-        }
-        reportWrite(key, path);
-      });
-      watcher.on('error', () => {
-        lose(key);
-        watcher.close();
-        watchers.set(key, undefined);
+          watchers.set(key, undefined);
+        },
       });
       watchers.set(key, watcher);
     } catch {
@@ -1364,21 +1364,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   let stopped = false;
   const release = async (): Promise<void> => {
     if (!stopped) {
-      /* A refused close keeps the tree: the caller's next close re-attempts
+      /* A refused close keeps everything: the caller's next close re-attempts
        * the cut, so nothing below runs until one succeeds. */
-      try {
-        await flushClose();
-      } catch (error) {
-        /* But not the watchers. An open recursive watch holds its root on
-         * Windows, so a project whose close cannot record would stay locked
-         * against deletion or a rename until Tau quits. Each root is kept
-         * unwatched instead, which the next cut reads in full (`settleWatch`). */
-        for (const [key, watcher] of watchers) {
-          watcher?.close();
-          watchers.set(key, undefined);
-        }
-        throw error;
-      }
+      await flushClose();
       stopWatchingCheckouts();
       for (const watcher of watchers.values()) {
         watcher?.close();

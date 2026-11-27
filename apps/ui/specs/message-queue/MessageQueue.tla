@@ -10,6 +10,10 @@
 \* dropping outside the queue and unsaved inline edits further restrict Reorder.
 \* Failed steering retains its durable cancel identity; a removed item's view-only
 \* action error cannot offer a retry. Admission bridge hashing fences Prepare inputs.
+\* Letting a new project's first cloud backup go on its first live frame (WP-12
+\* step 5) reads the frame only; delivery, admission and persistence are unchanged.
+\* A command that borrows the chat's attached client goes through the same answer
+\* wrapper as a dialled one, so a cursor wake is the only effect; delivery is unchanged.
 \* The executable queue event alphabet comes from its schemas; removing an unused
 \* duplicate TypeScript event union does not change these transitions or guards.
 \* Grok config discovery and host-owned session selection affect composer controls;
@@ -317,6 +321,9 @@
 \* dependencies. No action or verdict changes.
 \* HA1 review round 4 (2026-11-27): overlapping picks start one own source, the newest; while it decides, a chat whose
 \* own run was unsettled keeps deferring picks; an older start stands down. No action or verdict changes.
+\* Send now spoken in flight (2026-11-27): the row the person sent with Send now keeps its live region while its
+\* durable steer is in flight, past `onSteer` settling, and an automatic send stays silent. Presentation only. No action
+\* or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

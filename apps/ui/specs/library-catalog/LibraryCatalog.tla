@@ -227,6 +227,10 @@
 \* FW3 re-review (2026-11-27): a cancel carries whether no other copy holds the id or none could be counted (N1); a row
 \* this tab saw fail is not left out of a delete's proof (N2); only the probe's not-served refusal degrades (N3). Every
 \* change sits before `MutationJournaled` or inside the authority's answer; no action or correspondence changes.
+\* Fast-path FW4 (2026-11-27, I/O lanes): `project-library.ts` asks for the orphan sweep's `verifyAbsent` in the
+\* background lane, and hands the chat store and the listing's library-row recovery the record client whose connections
+\* declared that lane. A lane orders the authority's provider calls and is an untimed step here: no action or
+\* correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

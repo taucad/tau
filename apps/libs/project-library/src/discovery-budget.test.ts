@@ -1075,3 +1075,55 @@ describe('a permanent delete across a reload after each row of the crash table (
     );
   });
 });
+
+/*
+ * Fast path FW4: what nobody waits on one by one runs in the background lane. The library asks for it by name: the
+ * orphan sweep's identity sweep, and the recovery reads of library rows over connections that declared the lane.
+ */
+describe('the background lane in the library (FW4)', () => {
+  it('should ask the authority for the orphan sweep in the background lane', async () => {
+    const profile = createLibraryProfile();
+    const orphanId = 'proj_orphan00000000000000';
+    profile.routes.set(orphanId, { projectId: orphanId, backend: 'opfs', providerBasePath: 'gone' });
+    const verifyAbsent = vi.spyOn(profile.rootFiles.get().client, 'verifyAbsent');
+
+    await startLibrary(profile);
+
+    expect(verifyAbsent).toHaveBeenCalledWith(orphanId, { lane: 'background' });
+    expect(profile.routes.has(orphanId)).toBe(false);
+  });
+
+  it('should recover missing library rows through the background record client', async () => {
+    const profile = createLibraryProfile();
+    const facade = profile.rootFiles.get();
+    const backgroundReads: string[] = [];
+    const interactiveReads: string[] = [];
+    const read = facade.recordFiles.readFile;
+    vi.spyOn(facade.recordFiles, 'readFile').mockImplementation((async (path: string, encoding?: 'utf8') => {
+      interactiveReads.push(path);
+      return encoding === undefined ? read(path) : read(path, encoding);
+    }) as typeof read);
+    profile.rootFiles.replace({
+      ...facade,
+      backgroundRecordFiles: {
+        ...facade.recordFiles,
+        readFile: (async (path: string, encoding?: 'utf8') => {
+          backgroundReads.push(path);
+          return encoding === undefined ? read(path) : read(path, encoding);
+        }) as typeof read,
+      },
+    });
+    const recovered = homeId(5);
+    const getStates = profile.worker.getProjectLibraryStates.bind(profile.worker);
+    vi.spyOn(profile.worker, 'getProjectLibraryStates').mockImplementation(async (projectIds) => {
+      const states = await getStates(projectIds);
+      return states.filter((state) => state.projectId !== recovered);
+    });
+
+    const harness = await startLibrary(profile);
+
+    expect(listedProjectIds(harness)).toContain(recovered);
+    expect(backgroundReads).toContain(`/projects/${recovered}/.tau/library.json`);
+    expect(interactiveReads.filter((path) => path.startsWith(`/projects/${recovered}/`))).toEqual([]);
+  });
+});

@@ -57,7 +57,11 @@ export type ProjectLibraryFacade = Pick<
   | 'workerChangeChannel'
   | 'watchRecordFile'
   | 'readDuplicateProjectFiles'
->;
+> &
+  Readonly<{
+    /** The record client over connections that declared the background lane (FW4): reads nobody waits on one by one. */
+    backgroundRecordFiles?: ReturnType<typeof useFileManager>['recordFiles'];
+  }>;
 
 /** A file manager's content and tree services. @public */
 export type FileManagerServices = Readonly<{ contentService: FileContentService; treeService: FileTreeService }>;
@@ -581,14 +585,14 @@ export function createRootFileFacade({ fileManagerRef, files, telemetry }: RootF
   };
   const getReadiedProxy = async (): Promise<FileManagerProxy> => proxyAt('ready');
   /* Read the opener when a connection opens, after the services wait: an early read must not keep the undefined one. */
-  const fallback: RecordBridgeOpener = (root, consumer) => {
+  const fallback: RecordBridgeOpener = (root, consumer, options) => {
     const opener = selectBridgeOpener(fileManagerRef);
     if (!opener) {
       throw new FileManagerNotReadyError('proxy-timeout', {
         cause: new Error('File Manager filesystem bridge is not ready.'),
       });
     }
-    return opener(root, consumer);
+    return options === undefined ? opener(root, consumer) : opener(root, consumer, options);
   };
   const connections = recordConnectionsOf(fileManagerRef, fallback, whenServicesReady);
   const lifecycle = createWorkspaceFacade({
@@ -614,6 +618,7 @@ export function createRootFileFacade({ fileManagerRef, files, telemetry }: RootF
   const build = (): ProjectLibraryFacade => ({
     ...fixed,
     recordFiles: owner.files('working-copy'),
+    backgroundRecordFiles: owner.files('working-copy', { lane: 'background' }),
     watchRecordFile,
     workerChangeChannel: fileManagerRef.getSnapshot().context.workerChangeChannel,
   });

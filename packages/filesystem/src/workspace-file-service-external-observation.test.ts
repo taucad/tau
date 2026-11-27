@@ -10,6 +10,7 @@ import type { ProjectRootConfiguration } from '#mount-table.js';
 import type { ExternalChangeFact, FileSystemProvider, WatchEvent } from '#types.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import { racyTimestampMilliseconds } from '#external-change-ingest.js';
+import { backgroundIoConcurrency } from '#io-scheduler.js';
 
 type ObserverRecord = {
   readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
@@ -269,7 +270,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
     expect(service.createRootedFileSystem(`/projects/${alphaProjectId}`).hashFiles).toBeUndefined();
   });
 
-  it('reads external snapshot file metadata with bounded concurrency', async () => {
+  it('reads external snapshot file metadata through the background lane (FW4)', async () => {
     let inFlight = 0;
     let maxInFlight = 0;
     const instrumentedFile = (name: string): FileSystemFileHandle =>
@@ -302,7 +303,8 @@ describe('WorkspaceFileService external webaccess observation', () => {
     });
     await service.pollExternalChanges(`/projects/${alphaProjectId}`);
 
-    expect(maxInFlight).toBe(16);
+    /* A snapshot poll is background work: the lane admits four of its browser calls at once, where sixteen ran before. */
+    expect(maxInFlight).toBe(backgroundIoConcurrency);
   });
 
   it('retains one observer and provider across wrappers for the same directory entry', async () => {

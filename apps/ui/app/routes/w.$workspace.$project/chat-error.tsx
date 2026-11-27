@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useLayoutEffect, useState } from 'react';
 import type React from 'react';
 import { Bot, CircleAlert, MonitorSmartphone, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
@@ -18,7 +18,7 @@ import {
 import { selectVisibleChatErrorEntry, selectVisibleFailureResumable } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan, AutoResumeTarget } from '#utils/run-auto-resume-plan.js';
 import { useChatAutoResume } from '#hooks/active-chat-provider.js';
-import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
+import { ChatErrorCard, chatErrorAnnouncedContext } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-details.js';
 import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
@@ -553,16 +553,55 @@ const countdownOf = (
  * The run's failure, a decision the phone sheet never folds away (I5, `chat-interface-mobile.tsx`): the marker renders
  * only while a card does.
  */
+/** The failures a mounted `ChatError` shows, by decision: a second place that mounts one shows it without saying it. */
+const shownFailures = new Map<string, number>();
+
+/**
+ * Whether this place says the failure: not when another place shows the same one as this mounts (a refused send's turn
+ * leaves the transcript and the failure moves under the empty one, in one commit). Decided when the failure first
+ * shows here, so this place keeps its role while the failure stays.
+ *
+ * @param decisionId - The failure's identity, or undefined for none.
+ * @returns Whether to announce it.
+ */
+function useAnnouncesFailure(decisionId: string | undefined): boolean {
+  const [decided, setDecided] = useState(() => ({
+    decisionId,
+    announces: decisionId === undefined || !shownFailures.has(decisionId),
+  }));
+  if (decided.decisionId !== decisionId) {
+    setDecided({ decisionId, announces: decisionId === undefined || !shownFailures.has(decisionId) });
+  }
+  useLayoutEffect(() => {
+    if (decisionId === undefined) {
+      return undefined;
+    }
+    shownFailures.set(decisionId, (shownFailures.get(decisionId) ?? 0) + 1);
+    return () => {
+      const count = (shownFailures.get(decisionId) ?? 1) - 1;
+      if (count === 0) {
+        shownFailures.delete(decisionId);
+      } else {
+        shownFailures.set(decisionId, count);
+      }
+    };
+  }, [decisionId]);
+  return decided.decisionId === decisionId ? decided.announces : true;
+}
+
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector(selectVisibleChatError);
   const decisionId = useChatSelector(selectVisibleChatErrorId);
+  const announces = useAnnouncesFailure(parsedError ? decisionId : undefined);
   if (!parsedError) {
     return null;
   }
   return (
     <div data-decision='run-error' data-decision-id={decisionId} className='shrink-0'>
-      <ChatErrorBody parsedError={parsedError} className={className} />
+      <chatErrorAnnouncedContext.Provider value={announces}>
+        <ChatErrorBody parsedError={parsedError} className={className} />
+      </chatErrorAnnouncedContext.Provider>
     </div>
   );
 });

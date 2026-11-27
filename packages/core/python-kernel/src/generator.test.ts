@@ -32,6 +32,14 @@ const linuxArm64: TargetConfig = {
   interpreter: { asset: 'cpython-linux.tar.gz', sha256: digest('0'), byteLength: 1 },
 };
 
+const win32X64: TargetConfig = {
+  key: 'win32-x64',
+  os: 'win32',
+  arch: 'x64',
+  interpreterFloor: '10.0',
+  interpreter: { asset: 'cpython-windows.tar.gz', sha256: digest('0'), byteLength: 1 },
+};
+
 const file = (filename: string, sha256: string, yanked = false): IndexFile => ({
   filename,
   url: `https://files.example/${filename}`,
@@ -43,11 +51,16 @@ const file = (filename: string, sha256: string, yanked = false): IndexFile => ({
 const lock = `numpy==2.3.0 ; python_version >= '3.11' \\
     --hash=sha256:${digest('a')} \\
     --hash=sha256:${digest('b')} \\
-    --hash=sha256:${digest('c')}
+    --hash=sha256:${digest('c')} \\
+    --hash=sha256:${digest('9')}
 lib3mf==2.5.0 ; platform_machine != 'aarch64' or sys_platform != 'linux' \\
     --hash=sha256:${digest('d')}
 py-lib3mf==2.5.0 ; platform_machine == 'aarch64' and sys_platform == 'linux' \\
     --hash=sha256:${digest('e')}
+colorama==0.4.6 ; sys_platform == 'win32' \\
+    --hash=sha256:${digest('7')}
+pexpect==4.9.0 ; sys_platform != 'emscripten' and sys_platform != 'win32' \\
+    --hash=sha256:${digest('8')}
 `;
 
 const index = new Map<string, IndexFile[]>([
@@ -57,11 +70,14 @@ const index = new Map<string, IndexFile[]>([
       file('numpy-2.3.0-cp313-cp313-macosx_14_0_arm64.whl', digest('a')),
       file('numpy-2.3.0-cp313-cp313-macosx_11_0_arm64.whl', digest('b')),
       file('numpy-2.3.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl', digest('c')),
+      file('numpy-2.3.0-cp313-cp313-win_amd64.whl', digest('9')),
       file('numpy-2.3.0.tar.gz', digest('f')),
     ],
   ],
   ['lib3mf==2.5.0', [file('lib3mf-2.5.0-py3-none-any.whl', digest('d'))]],
   ['py-lib3mf==2.5.0', [file('py_lib3mf-2.5.0-py3-none-manylinux_2_17_aarch64.whl', digest('e'))]],
+  ['colorama==0.4.6', [file('colorama-0.4.6-py2.py3-none-any.whl', digest('7'))]],
+  ['pexpect==4.9.0', [file('pexpect-4.9.0-py2.py3-none-any.whl', digest('8'))]],
 ]);
 
 describe('the Python kernel lock compactor', () => {
@@ -87,6 +103,7 @@ describe('the Python kernel lock compactor', () => {
       // The macOS 14 wheel needs more than the 12.0 deployment target allows.
       { filename: 'numpy-2.3.0-cp313-cp313-macosx_11_0_arm64.whl', floor: '11.0' },
       { filename: 'lib3mf-2.5.0-py3-none-any.whl', floor: undefined },
+      { filename: 'pexpect-4.9.0-py2.py3-none-any.whl', floor: undefined },
     ]);
     expect(variantFloor(darwinArm64, darwin)).toBe('11.0');
 
@@ -94,8 +111,44 @@ describe('the Python kernel lock compactor', () => {
     expect(linux.map(({ file: { filename }, floor }) => ({ filename, floor }))).toEqual([
       { filename: 'numpy-2.3.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl', floor: '2.27' },
       { filename: 'py_lib3mf-2.5.0-py3-none-manylinux_2_17_aarch64.whl', floor: '2.17' },
+      { filename: 'pexpect-4.9.0-py2.py3-none-any.whl', floor: undefined },
     ]);
     expect(variantFloor(linuxArm64, linux)).toBe('2.27');
+  });
+
+  it('should compact for Windows x64 by its own markers and its one platform tag, with no wheel floor', () => {
+    expect(markerEnvironment(win32X64)).toMatchObject({
+      /* eslint-disable @typescript-eslint/naming-convention -- PEP 508 fixes the marker variable names. */
+      os_name: 'nt',
+      sys_platform: 'win32',
+      platform_system: 'Windows',
+      platform_machine: 'AMD64',
+      /* eslint-enable @typescript-eslint/naming-convention -- Back to camelCase after the PEP 508 names. */
+    });
+    const windows = compactLock(parseRequirementsLock(lock), index, win32X64);
+
+    expect(windows.map(({ file: { filename }, floor }) => ({ filename, floor }))).toEqual([
+      { filename: 'numpy-2.3.0-cp313-cp313-win_amd64.whl', floor: undefined },
+      { filename: 'lib3mf-2.5.0-py3-none-any.whl', floor: undefined },
+      { filename: 'colorama-0.4.6-py2.py3-none-any.whl', floor: undefined },
+    ]);
+    // Windows wheel tags name no OS version, so the interpreter's own floor is the variant's.
+    expect(variantFloor(win32X64, windows)).toBe('10.0');
+    expect(renderPylock(win32X64, windows, { packageName: '@taucad/example', project: 'example' })).toContain(
+      `environments = ["sys_platform == 'win32' and platform_machine == 'AMD64' and implementation_name == 'cpython'"]`,
+    );
+  });
+
+  it('should keep POSIX-only pins and POSIX wheels off Windows', () => {
+    const windows = compactLock(parseRequirementsLock(lock), index, win32X64);
+    const darwin = compactLock(parseRequirementsLock(lock), index, darwinArm64);
+
+    expect(windows.some(({ pin }) => pin.name === 'pexpect')).toBe(false);
+    expect(darwin.map(({ pin }) => pin.name)).toEqual(['numpy', 'lib3mf', 'pexpect']);
+    const [numpy] = parseRequirementsLock(lock);
+    expect(() =>
+      selectWheel(numpy!, [file('numpy-2.3.0-cp313-cp313-macosx_11_0_arm64.whl', digest('b'))], win32X64),
+    ).toThrow(/no pinned wheel for win32-x64 \(accepted platforms start cp313-cp313-win_amd64\)/u);
   });
 
   it('should refuse a yanked pinned wheel and a pin with no wheel for the target', () => {

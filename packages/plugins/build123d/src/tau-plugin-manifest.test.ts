@@ -150,12 +150,13 @@ const answer = (host: HostIndicators, options?: SelectVariantOptions): string =>
 describe('Build123d targets (charter D15–D18, W14)', () => {
   const natives = variants.map(({ target }) => target as NativeTarget);
 
-  it('should declare darwin arm64 and x64 and glibc Linux arm64 and x64, each with a floor', () => {
+  it('should declare darwin arm64 and x64, glibc Linux arm64 and x64 and Windows x64, each with a floor', () => {
     expect(natives.map((target) => targetKey(target)).toSorted()).toEqual([
       'darwin-arm64',
       'darwin-x64',
       'linux-arm64-glibc',
       'linux-x64-glibc',
+      'win32-x64',
     ]);
     for (const target of natives) {
       expect(target.os === 'linux' ? target.minimumLibcVersion : target.minimumOsVersion, targetKey(target)).toMatch(
@@ -217,13 +218,9 @@ describe('Build123d targets (charter D15–D18, W14)', () => {
     },
     { name: 'musl (alpine)', host: linux('x64', 'musl'), expected: 'unsupported libc, nearest linux-x64-glibc' },
     { name: 'musl on arm64', host: linux('arm64', 'musl'), expected: 'unsupported libc, nearest linux-arm64-glibc' },
-    // The preparation host refuses every Windows native kernel before selection (D18); selection agrees.
-    { name: 'win32-x64', host: other('win32', 'x64', '10.0.26100'), expected: 'unsupported os, nearest darwin-arm64' },
-    {
-      name: 'win32-arm64',
-      host: other('win32', 'arm64', '10.0.26100'),
-      expected: 'unsupported os, nearest darwin-arm64',
-    },
+    { name: 'win32-x64', host: other('win32', 'x64', '10.0.26100'), expected: 'win32-x64' },
+    // The OCP wheel (cadquery-ocp-novtk) has no win_arm64 build, so Windows on Arm runs the x64 closure emulated.
+    { name: 'win32-arm64', host: other('win32', 'arm64', '10.0.26100'), expected: 'win32-x64 (emulated)' },
     {
       name: 'macOS forced to the declared linux-x64-glibc',
       host: other('darwin', 'arm64', '26.0'),

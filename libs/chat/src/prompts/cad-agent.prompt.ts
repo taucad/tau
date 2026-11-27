@@ -176,6 +176,25 @@ ${sections.join('\n\n')}
 }
 
 /**
+ * The line naming one chat's conversation log. Tau's turns send it in the turn's context message rather than in the
+ * system prompt, so the system prompt, and the prefix a supplier caches, is the same for every chat.
+ *
+ * @param chatId - The chat whose log it names.
+ * @returns The note.
+ *
+ * @public
+ *
+ * @example <caption>The note for one chat</caption>
+ * ```typescript
+ * import { getConversationLogNote } from '@taucad/chat/prompts';
+ *
+ * getConversationLogNote('chat_1'); // 'Your conversation log: `.tau/chats/chat_1/events.jsonl`'
+ * ```
+ */
+export const getConversationLogNote = (chatId: string): string =>
+  `Your conversation log: \`.tau/chats/${chatId}/events.jsonl\``;
+
+/**
  * Generates the CAD system prompt for the specified kernel and mode.
  * Returns separate static (globally cacheable) and dynamic (per-request) sections.
  *
@@ -489,10 +508,13 @@ For work with three or more steps, keep the person's task list at \`.tau/chats/<
     compute: () => renderPersonBlock(options.person),
   });
 
+  /* Only a caller that passes `chatId` (an external agent's embedded context) gets the path here. Tau's own turns carry
+   * it in the turn's context message (`getConversationLogNote`), because OpenAI renders the tools after the system
+   * text: one per-chat line there stops every new chat sharing the cached prefix (WP-15, measured 0 of 10). */
   registry.register({
     name: 'transcript_path',
     cacheBreak: true,
-    compute: () => `Your conversation log: \`.tau/chats/${options.chatId ?? '{chatId}'}/events.jsonl\``,
+    compute: () => (options.chatId === undefined ? '' : getConversationLogNote(options.chatId)),
   });
 
   /* Per-request block, like `workbench`: the behavioural core has no room for it, and it describes the project, not the

@@ -537,6 +537,17 @@ export const classifyLogJson = (text: string): ClassifiedRow => {
   } catch {
     return { class: 'quarantined' };
   }
+  return classifyLogValue(value);
+};
+
+/**
+ * Classify a value a line's JSON just produced (or that the parser restored from it, WP-17), as {@link classifyLogJson}
+ * does.
+ * @param value - A fresh JSON value no caller holds.
+ * @returns The tolerant row class.
+ * @internal
+ */
+export const classifyLogValue = (value: unknown): ClassifiedRow => {
   const envelope = rowEnvelopeSchema.safeParse(value);
   if (!envelope.success) {
     return { class: 'quarantined' };

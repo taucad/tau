@@ -23,9 +23,12 @@
 (*                                                                         *)
 (* Compact rows (WP-17): a turn context is written once per distinct value *)
 (* in a file, with `contextDigest`; a later row of the same value carries  *)
-(* the digest alone. A metadata-only rewrite sets `contentKept` and omits  *)
-(* its content. The parser restores both from earlier rows of the same     *)
-(* file, so the two rules below are what makes a compact file readable.    *)
+(* the digest alone. Inside a context, the system prompt blocks are        *)
+(* written once per distinct value with `systemPromptBlocksDigest` and     *)
+(* named by it after that. A metadata-only rewrite writes                  *)
+(* `replacement.contentKept` in place of its content. The parser restores  *)
+(* all three from earlier rows of the same file, so the three rules below  *)
+(* are what makes a compact file readable.                                 *)
 (***************************************************************************)
 EXTENDS Integers, Sequences, FiniteSets, Json, IOUtils, TLC
 
@@ -64,10 +67,11 @@ VARIABLES
   open,      \* run id -> its last prepared attempt id until shown or settled ("" when none): `openInvocation`
   opened,    \* command ids that opened an effect
   digests,   \* context digests a row of this file wrote with their context (WP-17)
+  prompts,   \* prompt block digests a row of this file wrote with their blocks (WP-17)
   messages   \* message ids a row of this file wrote with content (WP-17)
 
 vars == <<i, epoch, seq, closed, maxEpoch, termEpoch, lifecycle, att, code, settled, current, pending, resolved, inv, open,
-          opened, digests, messages>>
+          opened, digests, prompts, messages>>
 
 Has(r, f) == f \in DOMAIN r
 Known(e) ==
@@ -134,7 +138,13 @@ ContextHolder(e) ==
   ELSE [none |-> TRUE]
 NamesContext(e) == LET h == ContextHolder(e) IN Has(h, "contextDigest") /\ ~Has(h, "context")
 CarriesContext(e) == LET h == ContextHolder(e) IN Has(h, "contextDigest") /\ Has(h, "context")
-KeepsContent(e) == Known(e) /\ e.type = "message.envelope-replaced" /\ Has(e, "contentKept") /\ e.contentKept = TRUE
+\* The context a row writes inline, and whether it names its prompt blocks by digest or carries them.
+InlineContext(e) == IF CarriesContext(e) THEN ContextHolder(e).context ELSE [none |-> TRUE]
+NamesPrompt(e) == LET c == InlineContext(e) IN Has(c, "systemPromptBlocksDigest") /\ ~Has(c, "systemPromptBlocks")
+CarriesPrompt(e) == LET c == InlineContext(e) IN Has(c, "systemPromptBlocksDigest") /\ Has(c, "systemPromptBlocks")
+KeepsContent(e) ==
+  /\ Known(e) /\ e.type = "message.envelope-replaced"
+  /\ Has(e.replacement, "contentKept") /\ e.replacement.contentKept = TRUE
 \* A row that writes a message's content: an append, or a rewrite that carries its content.
 WritesContent(e) ==
   /\ Known(e)
@@ -169,12 +179,13 @@ Holds(rule, e) ==
                                         ELSE ~\E id \in DOMAIN inv : Unresolved(id) /\ inv[id].run = e.runId  \* EQ1: any,
                                                                      /\ inv[id].purpose = "generation"   \* not the last
     [] rule = "ContextResolves"    -> NamesContext(e) => ContextHolder(e).contextDigest \in digests     \* WP-17
+    [] rule = "PromptResolves"     -> NamesPrompt(e) => InlineContext(e).systemPromptBlocksDigest \in prompts  \* WP-17
     [] rule = "ContentKeptResolves" -> KeepsContent(e) => e.messageId \in messages                     \* WP-17
 
 Rules == {"SequenceContiguous", "EpochNotReopened", "EpochStartsAtZero", "EpochsIncrease", "AdmittedOnce",
           "OneRunAtATime", "ReopenOnlyByRunning", "SettlementNeedsRun", "SettledOnce", "InterruptResolvedOnce", "RowsNeedRun",
           "InvocationSettledOnce", "CommandOpensOnce", "PrepareOnlyWhenResolved", "ContextResolves",
-          "ContentKeptResolves"}
+          "PromptResolves", "ContentKeptResolves"}
 
 \* Evaluated as a value: in an action TLC branches on both sides of a disjunction, and some rules
 \* read a map only where a left disjunct fails (`lifecycle[current]`, `e.attempt`).
@@ -187,7 +198,7 @@ Init ==
   /\ i = 0 /\ epoch = "" /\ seq = -1 /\ closed = {} /\ maxEpoch = 0 /\ termEpoch = 0
   /\ lifecycle = [r \in {} |-> "none"] /\ att = [r \in {} |-> 0] /\ code = [r \in {} |-> ""]
   /\ settled = {} /\ current = "" /\ pending = {} /\ resolved = {} /\ inv = [a \in {} |-> {}] /\ open = [r \in {} |-> ""]
-  /\ opened = {} /\ digests = {} /\ messages = {}
+  /\ opened = {} /\ digests = {} /\ prompts = {} /\ messages = {}
 
 NextInv(e) ==
   CASE Known(e) /\ e.type = "model.invocation-prepared" /\ e.attemptId \notin DOMAIN inv ->
@@ -240,6 +251,7 @@ Write(e) ==
   /\ open' = NextOpen(e)
   /\ opened' = IF OpensEffect(e) /\ Has(e, "commandId") THEN opened \cup {e.commandId} ELSE opened
   /\ digests' = IF CarriesContext(e) THEN digests \cup {ContextHolder(e).contextDigest} ELSE digests
+  /\ prompts' = IF CarriesPrompt(e) THEN prompts \cup {InlineContext(e).systemPromptBlocksDigest} ELSE prompts
   /\ messages' = IF WritesContent(e) THEN messages \cup {ContentId(e)} ELSE messages
 
 Done == i = Len(Log) /\ UNCHANGED vars

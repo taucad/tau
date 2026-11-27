@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyLogRow, parseLogRow } from '#log/event-schema.js';
+import { LogFileDictionary } from '#log/compact-rows.js';
 import {
   parseEventLogBytes,
   parseReplayEventLogBytes,
@@ -47,7 +48,8 @@ describe('byte log line boundaries', () => {
   });
 
   it('does not read a newline outside an empty view', () => {
-    const parsed = parseEventLogBytes(new Uint8Array([10, 10]).subarray(1, 1));
+    const { dictionary, ...parsed } = parseEventLogBytes(new Uint8Array([10, 10]).subarray(1, 1));
+    expect(dictionary).toBeInstanceOf(LogFileDictionary);
     expect(parsed).toEqual({
       rows: [],
       events: [],

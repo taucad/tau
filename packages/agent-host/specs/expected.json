@@ -1427,7 +1427,7 @@
       "ChatLog/seeded/compact-rows.jsonl": {
         "tier": "pr",
         "expect": "pass",
-        "ref": "WP-17: a context written once and named by digest, and a metadata-only rewrite, resolve in the same file"
+        "ref": "WP-17: a context written once and named by digest, and a metadata-only rewrite (replacement.contentKept), resolve in the same file"
       },
       "ChatLog/seeded/context-unresolved.jsonl": {
         "tier": "pr",
@@ -1450,6 +1450,22 @@
         },
         "kind": "witness",
         "ref": "ContentKeptResolves: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/prompt-unresolved.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 3,
+            "rules": ["PromptResolves"]
+          }
+        },
+        "kind": "witness",
+        "ref": "PromptResolves: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/seeded/compact-in-project-ping-pong-turn.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "WP-17: the recorded in-project-ping-pong-turn log as the writer encodes it (compactLogRow); compact-rows.test.ts restores it to the recorded rows"
       }
     },
     "SeamDeliveryTrace": {

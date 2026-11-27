@@ -6,7 +6,13 @@ import { parseSegmentFrom, unsettledParsedRuns } from '#log/foreign-runs.js';
 import type { ForeignRun, SegmentParse } from '#log/foreign-runs.js';
 import { foreignClockAheadMilliseconds, mergeSegmentsUpTo, segmentRefreshMilliseconds } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
-import { parseEventLogBytes, serializeParsedLogEventBytes, serializedLogEventSize } from '#log/serialization.js';
+import {
+  parseEventLogBytes,
+  serializeCompactLogEventBytes,
+  serializeParsedLogEventBytes,
+  serializedLogEventSize,
+} from '#log/serialization.js';
+import { compactLogRow } from '#log/compact-rows.js';
 import type { AgentLogEvent, ProviderMessage, RowKey } from '#log/event-types.js';
 import { isAbandonedTurn } from '#log/event-types.js';
 
@@ -906,6 +912,8 @@ export const createEventLogAppender = async (
   };
 
   const events = [...parsed.events];
+  /* What this file holds that a row appended to it may name instead of repeating (WP-17). */
+  const { dictionary } = parsed;
   let { needsSeparator } = parsed;
   /** The bytes this appender's view covers: the log as it read it. */
   let byteLength = parsed.validByteLength;
@@ -1040,8 +1048,14 @@ export const createEventLogAppender = async (
     if (transition.duplicate) {
       return { appended: false, endCursor: events.length };
     }
-    const bytes = serializeParsedLogEventBytes(event, needsSeparator);
+    /* WP-17: a known row names what this file already holds; the folds and the view keep the row itself. */
+    const line = known ? compactLogRow(event, dictionary) : event;
+    const bytes =
+      line === event
+        ? serializeParsedLogEventBytes(event, needsSeparator)
+        : serializeCompactLogEventBytes(line, needsSeparator);
     await write(bytes);
+    dictionary.note(line, event);
     term.commit();
     transition.commit();
     /* Rebuilt from the log when next needed, with this row. */

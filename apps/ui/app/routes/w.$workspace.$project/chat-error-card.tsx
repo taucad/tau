@@ -63,12 +63,13 @@ export function ChatErrorCard({
   const isAnnounced = report === undefined;
   const titleId = useId();
   const titleRef = useRef<HTMLParagraphElement>(null);
+  // Said once per failure: the region keeps the first title it hears, and `report` is new for each failure.
   useLayoutEffect(() => {
     const text = titleRef.current?.textContent ?? '';
     if (report !== undefined && text !== '') {
       report(text);
     }
-  }, [report, title]);
+  }, [report]);
   return (
     <section
       role={isAnnounced ? 'alert' : 'group'}

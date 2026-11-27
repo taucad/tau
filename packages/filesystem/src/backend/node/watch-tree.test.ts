@@ -1,11 +1,11 @@
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { watchTree } from '#watch-tree.js';
-import type { TreeWatcher } from '#watch-tree.js';
+import { watchTree } from '#backend/node/watch-tree.js';
+import type { TreeWatcher } from '#backend/node/watch-tree.js';
 
 /**
  * A watch over a fresh temporary root that records what it reports.
@@ -91,7 +91,13 @@ describe('watchTree', () => {
     renameSync(staged, join(root, 'moved'));
     await watch.barrier();
 
-    expect(watch.changes).toEqual(expect.arrayContaining(['moved', 'moved/nested', 'moved/nested/a.ts']));
+    /*
+     * Every platform names the directory, which covers its subtree for every consumer. On Linux,
+     * where this module watches each directory itself, the entries the directory arrived with are
+     * named too; the platform's own recursive watch (macOS, Windows) reports only the move.
+     */
+    const expected = process.platform === 'linux' ? ['moved', 'moved/nested', 'moved/nested/a.ts'] : ['moved'];
+    expect(watch.changes).toEqual(expect.arrayContaining(expected));
   });
 
   it('should keep reporting writes in a directory that replaced a file, and in one that replaced that directory', async () => {
@@ -141,6 +147,46 @@ describe('watchTree', () => {
     control.watcher.close();
 
     expect(watch.changes).toHaveLength(count);
+  });
+
+  it('should watch the directory a symbolic link to the root names', async () => {
+    const real = join(root, 'real');
+    mkdirSync(real);
+    const link = join(root, 'link');
+    /* A junction needs no privilege on Windows; elsewhere the type is ignored. */
+    symlinkSync(real, link, 'junction');
+    watch = watched(link);
+    writeFileSync(join(link, 'inside.ts'), '');
+    await watch.barrier();
+
+    expect(watch.changes).toContain('inside.ts');
+    expect(watch.errors).toEqual([]);
+  });
+
+  it('should open no further watch once a change callback closes it', async () => {
+    const changes: Array<string | undefined> = [];
+    const seen = Promise.withResolvers<void>();
+    const watcher: TreeWatcher = watchTree(root, {
+      change: (path) => {
+        changes.push(path);
+        watcher.close();
+        seen.resolve();
+      },
+      error: () => undefined,
+    });
+    const staged = await mkdtemp(join(tmpdir(), 'tau-watch-tree-closing-'));
+    mkdirSync(join(staged, 'nested'));
+    writeFileSync(join(staged, 'nested', 'a.ts'), '');
+    renameSync(staged, join(root, 'moved'));
+    await seen.promise;
+    /* A second watch on the same root shares the event queue, so its report means the closed one was offered everything. */
+    const control = watched(root);
+    writeFileSync(join(root, 'moved', 'nested', 'b.ts'), '');
+    await control.barrier();
+    control.watcher.close();
+
+    /* Linux would otherwise go on to name `moved/nested` and `moved/nested/a.ts` from a watch it opened after the close. */
+    expect(changes).toHaveLength(1);
   });
 
   it('should throw when its root cannot be watched', () => {

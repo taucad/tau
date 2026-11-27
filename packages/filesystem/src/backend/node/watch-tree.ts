@@ -12,19 +12,29 @@
  * `'error'` listener can catch it, so one ordinary save could end the host. On
  * Linux this module therefore keeps the per-directory watches itself, and every
  * look at the tree it makes tolerates the tree having moved on.
+ *
+ * Every recursive watch of a project tree on Node goes through here. Once
+ * Node's recursive watcher treats `ENOTDIR` as a missing entry, the Linux
+ * branch can go.
  */
 
-import { lstatSync, readdirSync, watch } from 'node:fs';
+import { lstatSync, readdirSync, realpathSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join, sep } from 'node:path';
 
-/** A running tree watch. */
+/**
+ * A running tree watch.
+ * @public
+ */
 export type TreeWatcher = {
   /** Stop watching; no callback is called afterwards. */
   close(): void;
 };
 
-/** What a tree watch reports. */
+/**
+ * What a tree watch reports.
+ * @public
+ */
 export type TreeWatchListener = {
   /**
    * Something at `path` changed: its content, or its kind, or it appeared or went away.
@@ -42,24 +52,41 @@ export type TreeWatchListener = {
 };
 
 /**
+ * How a tree watch holds the process.
+ * @public
+ */
+export type TreeWatchOptions = Readonly<{
+  /** Keep the process alive while the watch is open, as `fs.watch` does by default. Defaults to `false`. */
+  persistent?: boolean;
+}>;
+
+/**
  * Watch every directory under `root`, recursively.
  *
  * @param root - The absolute path of the directory to watch.
  * @param listener - Told of each change, and of the failure that ends the watch.
+ * @param options - Whether the watch keeps the process alive.
  * @returns The running watch.
  * @throws When `root` cannot be watched at all (it is missing, or the platform has no recursive watch).
+ * @public
  */
-export const watchTree = (root: string, listener: TreeWatchListener): TreeWatcher =>
-  process.platform === 'linux' ? watchTreeByDirectory(root, listener) : watchTreeNatively(root, listener);
+export const watchTree = (root: string, listener: TreeWatchListener, options: TreeWatchOptions = {}): TreeWatcher => {
+  /* The directory itself, not a link to it: every later look at the root is an `lstat`. */
+  const directory = realpathSync(root);
+  return process.platform === 'linux'
+    ? watchTreeByDirectory(directory, listener, options.persistent ?? false)
+    : watchTreeNatively(directory, listener, options.persistent ?? false);
+};
 
 /**
  * The platform's own recursive watch, where it has one.
  *
  * @param root - The absolute path of the directory to watch.
  * @param listener - Told of each change, and of the failure that ends the watch.
+ * @param persistent - Whether the watch keeps the process alive.
  * @returns The running watch.
  */
-const watchTreeNatively = (root: string, listener: TreeWatchListener): TreeWatcher => {
+const watchTreeNatively = (root: string, listener: TreeWatchListener, persistent: boolean): TreeWatcher => {
   let closed = false;
   const fail = (error: Error): void => {
     if (!closed) {
@@ -68,7 +95,7 @@ const watchTreeNatively = (root: string, listener: TreeWatchListener): TreeWatch
       listener.error(error);
     }
   };
-  const watcher = watch(root, { recursive: true, persistent: false }, (event, filename) => {
+  const watcher = watch(root, { recursive: true, persistent }, (event, filename) => {
     if (closed) {
       return;
     }
@@ -117,9 +144,10 @@ const rootGone = (root: string): Error =>
  *
  * @param root - The absolute path of the directory to watch.
  * @param listener - Told of each change, and of the failure that ends the watch.
+ * @param persistent - Whether the watch keeps the process alive.
  * @returns The running watch.
  */
-const watchTreeByDirectory = (root: string, listener: TreeWatchListener): TreeWatcher => {
+const watchTreeByDirectory = (root: string, listener: TreeWatchListener, persistent: boolean): TreeWatcher => {
   /* Each watched directory by its relative path (`''` is the root), with the inode it was watched as. */
   const directories = new Map<string, { watcher: FSWatcher; ino: number }>();
   let closed = false;
@@ -152,10 +180,13 @@ const watchTreeByDirectory = (root: string, listener: TreeWatchListener): TreeWa
    * may have landed before its own watch did.
    */
   const add = (relative: string, ino: number, announce: boolean): void => {
+    if (closed) {
+      return;
+    }
     const absolute = join(root, relative);
     let watcher: FSWatcher;
     try {
-      watcher = watch(absolute, { persistent: false }, (event, filename) => {
+      watcher = watch(absolute, { persistent }, (event, filename) => {
         onEvent(relative, event, filename ?? undefined);
       });
     } catch (error) {
@@ -189,6 +220,10 @@ const watchTreeByDirectory = (root: string, listener: TreeWatchListener): TreeWa
       const child = childOf(relative, entry.name);
       if (announce) {
         listener.change(child);
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the listener may have closed the watch; open nothing more.
+        if (closed) {
+          return;
+        }
       }
       if (entry.isDirectory()) {
         const seen = lookAt(join(root, child));
@@ -222,6 +257,10 @@ const watchTreeByDirectory = (root: string, listener: TreeWatchListener): TreeWa
     }
     const child = childOf(relative, filename);
     listener.change(child);
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- the listener may have closed the watch; open nothing more.
+    if (closed) {
+      return;
+    }
     const seen = lookAt(join(root, child));
     const watched = directories.get(child);
     if (watched !== undefined && (event === 'rename' || seen?.directory !== true || seen.ino !== watched.ino)) {

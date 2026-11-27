@@ -8,7 +8,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(215);
+    expect(metrics).toHaveLength(216);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -407,6 +407,26 @@ describe('TauMetrics', () => {
     expect(refusal('GIT_PUSH_RACE_LOST')).toBe(true);
     expect(refusal('other')).toBe(true);
     expect(refusal('GIT_SOMETHING_NEW')).toBe(false);
+  });
+
+  /* Cloud backup admission D12 (R3-1): hook codes have their own counter, bounded to declared codes. */
+  it('should count hook refusals by declared code, first backup and client rules, never a free-form value', () => {
+    const hookRefusal = (code: string, firstBackup = 'true', clientRules = 'none'): boolean =>
+      TauMetrics.syncHookRefusals.attributes.safeParse({
+        'tau.sync.refusal.code': code,
+        'tau.sync.first_backup': firstBackup,
+        'tau.sync.client_rules': clientRules,
+      }).success;
+    expect(toPrometheusName(TauMetrics.syncHookRefusals.name, TauMetrics.syncHookRefusals.type)).toBe(
+      'tau_sync_hook_refusals_total',
+    );
+    expect(hookRefusal('GIT_PUSH_FILE_TOO_LARGE')).toBe(true);
+    expect(hookRefusal('GIT_PUSH_RECORD_UNREADABLE', 'unknown')).toBe(true);
+    expect(hookRefusal('unknown', 'false', 'current')).toBe(true);
+    expect(hookRefusal('other', 'true', 'older')).toBe(true);
+    expect(hookRefusal('GIT_LEASE_OWNER_BUSY')).toBe(false);
+    expect(hookRefusal('GIT_PUSH_FILE_TOO_LARGE', 'yes')).toBe(false);
+    expect(hookRefusal('GIT_PUSH_FILE_TOO_LARGE', 'true', '2')).toBe(false);
   });
 
   it('should label the hot-project gauges by rank alone, never by project or owner', () => {

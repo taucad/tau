@@ -61,6 +61,49 @@ const syncRefusalCodes = [
   'other',
 ] as const;
 
+/**
+ * `tau.sync.refusal.code` on `tau.sync.hook_refusals`: every code the `pre-receive` hook prints (cloud backup
+ * admission contracts § 5), the four authorship codes WP2a retired (counted when a rolled-back worker prints their
+ * sentences), git's two receive refusals, `unknown` (a refused push printed no code) and `other` (a code this
+ * build does not declare). `apps/libs/api-git-core/src/hook-refusals.ts` counts under exactly these.
+ */
+const hookRefusalCodes = [
+  'GIT_PUSH_NOT_ADMITTED',
+  'GIT_PUSH_REF_NOT_PUSHABLE',
+  'GIT_PUSH_REF_DELETION',
+  'GIT_PUSH_RECORD_REWRITTEN',
+  'GIT_PUSH_CONFLICT_REF_INVALID',
+  'GIT_PUSH_CONFLICT_OFF_LINE',
+  'GIT_PUSH_VERSION_TAG_INVALID',
+  'GIT_PUSH_VERSION_MOVED',
+  'GIT_PUSH_FILE_TOO_LARGE',
+  'GIT_PUSH_QUOTA',
+  'GIT_PUSH_CEILING',
+  'GIT_PUSH_VERSION_NUMBER_TAKEN',
+  'GIT_PUSH_NOT_FAST_FORWARD',
+  'GIT_PUSH_CHECK_FAILED',
+  'GIT_PUSH_ACTOR_NOT_PUSHER',
+  'GIT_PUSH_AUTHOR_ADDRESS',
+  'GIT_PUSH_NOT_RECORDED_BY_TAU',
+  'GIT_PUSH_RECORD_UNREADABLE',
+  'GIT_PUSH_TOO_LARGE',
+  'GIT_PUSH_OBJECT_INVALID',
+  'unknown',
+  'other',
+] as const;
+
+/**
+ * `tau.sync.first_backup`: whether the manifest a refused push was prepared against held no branch and no tag
+ * (`true`), held one (`false`), or the worker did not say (`unknown`, a tau-storage below WP2a).
+ */
+const syncFirstBackupValues = ['true', 'false', 'unknown'] as const;
+
+/**
+ * `tau.sync.client_rules`: whether the pushing client's preflight rules match the server's kept guards
+ * (`Tau-Client-Rules`): `current`, `older`, or `none` when it sent no header (every build before WP6).
+ */
+const syncClientRulesValues = ['current', 'older', 'none'] as const;
+
 /** `tau.git.operation`: what a lease was admitted for. `remove_ref` is the audited ref-removal verb. */
 const gitOperations = [
   'upload_pack',
@@ -1265,6 +1308,24 @@ export const TauMetrics = {
       'tau.sync.operation': z.enum(syncOperationNames),
       'tau.sync.refusal.code': z.enum(syncRefusalCodes),
       'http.response.status_code': z.number().int(),
+    }),
+  }),
+
+  /**
+   * Every push the `pre-receive` hook or git's receive refused, once per distinct code (cloud backup admission
+   * blueprint D12, R3-1). Hook codes live here, not on `tau.sync.refusals`, whose code is an HTTP refusal. The
+   * `first_backup="true"` series are seeded at zero at boot so a first refusal after a restart is an increase
+   * `backup-first-refused` can see.
+   */
+  syncHookRefusals: defineCounter({
+    name: 'tau.sync.hook_refusals',
+    unit: '{refusal}',
+    description:
+      'Pushes the pre-receive hook or git receive refused, by code, whether the repository held no branch or tag before the push, and the client preflight rules',
+    attributes: z.object({
+      'tau.sync.refusal.code': z.enum(hookRefusalCodes),
+      'tau.sync.first_backup': z.enum(syncFirstBackupValues),
+      'tau.sync.client_rules': z.enum(syncClientRulesValues),
     }),
   }),
 

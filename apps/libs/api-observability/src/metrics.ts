@@ -513,6 +513,11 @@ export class MetricsService {
     unit: TauMetrics.syncRefusals.unit,
   });
 
+  public readonly syncHookRefusals = this.apiMeter.createCounter(TauMetrics.syncHookRefusals.name, {
+    description: TauMetrics.syncHookRefusals.description,
+    unit: TauMetrics.syncHookRefusals.unit,
+  });
+
   // --- Git execution (lease admission, hydrate, manifest commit) ---
 
   public readonly gitAdmissions = this.apiMeter.createCounter(TauMetrics.gitAdmissions.name, {
@@ -958,6 +963,9 @@ export type SyncOperationDurationAttributes = z.infer<typeof TauMetrics.syncOper
 
 /** Attributes of one `tau.sync.refusals` increment. */
 export type SyncRefusalAttributes = z.infer<typeof TauMetrics.syncRefusals.attributes>;
+
+/** Attributes of one `tau.sync.hook_refusals` increment. */
+export type SyncHookRefusalAttributes = z.infer<typeof TauMetrics.syncHookRefusals.attributes>;
 
 /** `tau.git.operation`: what a lease was admitted for. */
 export type GitOperation = z.infer<typeof TauMetrics.gitAdmissions.attributes>['tau.git.operation'];

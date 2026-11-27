@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T16:41:08.039Z",
+  "updatedAt": "2026-11-27T16:45:18.190Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -6605,6 +6605,19 @@
       "counted": 0,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 46035466712,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2971",
+      "sha": "7d770ba51f597d50428044802b51e024925235d2",
+      "at": "2026-11-27T16:45:00Z",
+      "conclusion": "cancelled",
+      "artifacts": 7,
+      "counted": 283,
+      "replayed": 2190,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -6991,14 +7004,14 @@
       }
     },
     "billing-e2e:test": {
-      "executions": 198,
-      "tests": 10098,
+      "executions": 199,
+      "tests": 10149,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:40:01Z",
+      "lastSeen": "2026-11-27T16:45:00Z",
       "targets": {
-        "test linux-x64": 169
+        "test linux-x64": 170
       }
     },
     "billing-ui:test": {
@@ -8205,14 +8218,14 @@
       }
     },
     "ui-e2e:test": {
-      "executions": 186,
-      "tests": 18414,
+      "executions": 187,
+      "tests": 18513,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-27T16:40:01Z",
+      "lastSeen": "2026-11-27T16:45:00Z",
       "targets": {
-        "test linux-x64": 186
+        "test linux-x64": 187
       }
     },
     "ui-e2e:test:e2e:adaptive": {
@@ -8671,14 +8684,14 @@
       }
     },
     "ui:verify-browser": {
-      "executions": 217,
-      "tests": 28648,
+      "executions": 218,
+      "tests": 28781,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:35:47Z",
+      "lastSeen": "2026-11-27T16:45:00Z",
       "targets": {
-        "verify-browser linux-x64 browser=chromium": 180
+        "verify-browser linux-x64 browser=chromium": 181
       }
     },
     "units:test": {

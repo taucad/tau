@@ -847,3 +847,71 @@ describe('funded route admission of the request the host sends', () => {
     },
   );
 });
+
+/* Chat performance WP-15 step 6 (O-6): the hold from the previous settled step's reported input tokens. */
+describe('CodeOwnedBillableModelQualificationResolver prefix hold', () => {
+  const conversation = (turns: number) =>
+    Array.from({ length: turns }, (_, index) => ({ role: 'user', content: `${'x'.repeat(40_000)} ${index}` }));
+  const body = (turns: number) => ({
+    model: 'openai-gpt-6-sol',
+    instructions: 'Be brief.',
+    input: conversation(turns),
+    max_output_tokens: 100,
+    stream: true,
+  });
+  const previousOf = (turns: number, inputTokens: bigint) => {
+    const previous = resolver.resolve(intent(body(turns)));
+    return {
+      modelId: previous.modelId,
+      providerId: previous.providerId,
+      prefix: previous.invocation.inputPrefix!,
+      inputTokens,
+    };
+  };
+  const input = (result: QualifiedBillableInvocation) =>
+    result.maximumQuantities.find((meter) => meter.dimension === 'uncached_input')?.quantity;
+
+  it('should offer its own prefix and hold the next step from the previous report plus the appended bytes', () => {
+    const previous = previousOf(7, 30_000n);
+    const bytes = resolver.resolve(intent(body(8)));
+    const prefixed = resolver.resolve(intent(body(8)), previous);
+
+    expect(bytes.invocation.holdBasis).toBe('bytes');
+    expect(prefixed.invocation.holdBasis).toBe('prefix');
+    expect(prefixed.invocation.inputPrefix).toMatchObject({ version: 'input-prefix-v1', items: 8 });
+    // 30,000 reported plus one 40,000-character item, its JSON framing and one per-message constant.
+    expect(input(prefixed)).toBeGreaterThan(30_000n + 40_000n);
+    expect(input(prefixed)).toBeLessThan(30_000n + 40_200n);
+    expect(input(bytes)).toBeGreaterThan(320_000n);
+  });
+
+  it('should pin the base tariff when the prefix bound stays under the threshold the byte bound reached', () => {
+    const bytes = resolver.resolve(intent(body(8)));
+    const prefixed = resolver.resolve(intent(body(8)), previousOf(7, 30_000n));
+
+    expect(bytes.sku).toBe('model:openai-gpt-6-sol:long-context');
+    expect(prefixed.sku).toBe('model:openai-gpt-6-sol');
+    expect(prefixed.invocation.supplierValuation?.longContextRates).toBeNull();
+  });
+
+  it('should ignore a previous step on another model and a step that does not prefix this conversation', () => {
+    const previous = previousOf(7, 30_000n);
+
+    expect(resolver.resolve(intent(body(8)), { ...previous, modelId: 'gpt-6-luna' }).invocation.holdBasis).toBe(
+      'bytes',
+    );
+    expect(resolver.resolve(intent({ ...body(8), instructions: 'Be thorough.' }), previous).invocation.holdBasis).toBe(
+      'bytes',
+    );
+  });
+
+  it('should hold again only at a smaller input maximum, re-pinning the tariff from it', () => {
+    const bytes = resolver.resolve(intent(body(8)));
+    const counted = bytes.withInputMaximum(50_000n);
+
+    expect(input(counted)).toBe(50_000n);
+    expect(counted.sku).toBe('model:openai-gpt-6-sol');
+    expect(counted.invocation.jointInputMaximum).toEqual({ version: 'joint-input-v1', quantity: '50000' });
+    expect(() => counted.withInputMaximum(50_001n)).toThrow(RangeError);
+  });
+});

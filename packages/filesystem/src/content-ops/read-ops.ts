@@ -85,8 +85,8 @@ export const withReadContentOps = <View extends ContentFileSystem>(
         return false;
       }
       if (filter?.versionedOnly !== true || kind === 'dir') {
-        /* Directories stay open: `.tau/skills` is versioned under a `.tau` that
-         * is not. */
+        /* Directories stay open: `.tau/parameters` is versioned under a `.tau`
+         * that is not. */
         return true;
       }
       return provenance?.versioned ?? policy.classify(joinRelativePath(path, relativePath)).versioned;

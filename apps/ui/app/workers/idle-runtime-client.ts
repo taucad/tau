@@ -8,11 +8,25 @@ export type IdleRuntimeClient = RuntimeAgentClient &
     readonly capabilities: AppRuntimeClient['capabilities'];
     /** Terminate the live runtime, if any, and refuse every later use. */
     terminate(): void;
+    /**
+     * Start the runtime and connect it ahead of a likely use: a composer took focus, or a turn is being admitted (WP-12
+     * step 7). Its idle window starts again once the connect settles. Best effort: a failed connect is the next use's to
+     * report.
+     */
+    warm(): void;
+    /**
+     * Say whether a chat view of this host is visible. While it is, a started runtime is kept; it idles out only once
+     * no view is visible (WP-12 step 7, HP-15). Nothing is started by a view alone.
+     */
+    setVisible(visible: boolean): void;
   };
 
 /**
  * A runtime client that starts its worker on first use and terminates it after
  * `idleTimeout` milliseconds with no call or open document.
+ *
+ * While a chat view is visible a started runtime stays, so the gaps between turns of a chat in front of the person
+ * pay no restart; it idles out once no view is visible.
  *
  * Every runtime worker holds its own kernels, esbuild and WASM heaps, which
  * never shrink. A host that uses the runtime in bursts, such as an agent turn,
@@ -27,11 +41,14 @@ export type IdleRuntimeClient = RuntimeAgentClient &
 export const createIdleRuntimeClient = (options: {
   readonly create: () => AppRuntimeClient;
   readonly idleTimeout: number;
+  /** Whether a chat view is visible when the client is made. Default: not. */
+  readonly visible?: boolean;
 }): IdleRuntimeClient => {
   let current: AppRuntimeClient | undefined;
   let leases = 0;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let terminated = false;
+  let visible = options.visible ?? false;
 
   const release = (): void => {
     current?.terminate();
@@ -51,11 +68,13 @@ export const createIdleRuntimeClient = (options: {
     current ??= options.create();
     return current;
   };
+  const idle = (): void => {
+    clearTimeout(idleTimer);
+    idleTimer = leases === 0 && !terminated && !visible ? setTimeout(release, options.idleTimeout) : undefined;
+  };
   const settle = (): void => {
     leases -= 1;
-    if (leases === 0 && !terminated) {
-      idleTimer = setTimeout(release, options.idleTimeout);
-    }
+    idle();
   };
   const leased = async <T>(use: (client: AppRuntimeClient) => Promise<T>): Promise<T> => {
     const client = acquire();
@@ -92,6 +111,23 @@ export const createIdleRuntimeClient = (options: {
           }
         },
       };
+    },
+    warm: () => {
+      if (terminated) {
+        return;
+      }
+      // async-iife: bootstrap -- a warm-up has no caller to answer; the next use reports a runtime that failed.
+      void (async (): Promise<void> => {
+        try {
+          await leased(async (client) => client.connect());
+        } catch {
+          /* The next use starts or reports the runtime. */
+        }
+      })();
+    },
+    setVisible: (next) => {
+      visible = next;
+      idle();
     },
     terminate: () => {
       terminated = true;

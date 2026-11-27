@@ -42,6 +42,15 @@ export type ProjectLibraryFileManager = Readonly<{
     | 'probeProjectDirectories'
   >;
   recordFiles: Pick<RootedContentClient, 'readFile' | 'writeFile' | 'readdir' | 'stat' | 'exists' | 'unlink' | 'rmdir'>;
+  /**
+   * The same records over connections that declared the background lane (fast path FW4): the reads nobody waits on one
+   * by one, library-state recovery and the all-chats read, so they yield to every interactive call. `recordFiles` when
+   * absent.
+   */
+  backgroundRecordFiles?: Pick<
+    RootedContentClient,
+    'readFile' | 'writeFile' | 'readdir' | 'stat' | 'exists' | 'unlink' | 'rmdir'
+  >;
   workspace: Readonly<{ syncProjectRoots: () => Promise<void> }>;
   workerChangeChannel: WorkerChangeChannel | undefined;
   watchRecordFile: (

@@ -143,8 +143,28 @@ type HostImportCopier = Readonly<{ copyFromImportGrant: NonNullable<ImportStagin
 /** What the sweep answers for a directory it could not read. */
 const unknownIdentity = '\0unknown';
 
-/** Concurrent `tau.json` probes while scanning a discovery root. */
+/**
+ * Directories one walk reads at once, two files each. A full read, the audit, a sweep and a pass's re-reads of
+ * unretained directories read through a lane's view (FW4), which admits their provider calls a few at a time, so over
+ * those this bounds only the calls queued.
+ */
 const manifestProbeConcurrency = 64;
+
+/**
+ * Directories with evidence a warm pass re-reads at once, interactively (FW4 review m8): the listing waits on them, so
+ * they are not ranked behind background work, but 16 directories (32 reads) is the most they keep unranked in flight,
+ * where the walks above kept 128 before the lanes. A pass after one mutation reads a handful; a burst of evidence on
+ * hundreds of directories reads them 16 at a time.
+ */
+const evidenceReadConcurrency = 16;
+
+/**
+ * The lane a `verifyAbsent` sweep reads in (FW4): `sweep`, its own bounded window, for a person waiting on it; or
+ * `background`, promoted while it holds the id's lock, for the orphan sweep nobody waits on.
+ *
+ * @public
+ */
+export type VerifyAbsentLane = 'sweep' | 'background';
 
 /** Resolved identity kept separate from the authored declaration. @public */
 export type ResolvedProjectManifest = {
@@ -686,13 +706,18 @@ export class ProjectDirectories {
    * `unknown`. What the sweep reads is evidence: a directory or a name the index has otherwise is read again by the
    * next pass.
    *
+   * The sweep's reads run in `lane` (FW4): `sweep`, its own bounded window, for a person waiting on it (a delete, an
+   * adopt, an import), and `background` for the orphan sweep nobody waits on. The lane only orders provider calls below
+   * the id's lock: every read the answer rests on is still made under it.
+   *
    * @param projectId - The id.
-   * @param options - `alreadyLocked` when the caller holds `project:<id>`; `except` a directory to leave out (adopt's).
+   * @param options - `alreadyLocked` when the caller holds `project:<id>`; `except` a directory to leave out (adopt's);
+   *   `lane`, `sweep` when omitted.
    * @returns `absent`, `present` with every directory that carries the id, or `unknown`.
    */
   public async verifyAbsent(
     projectId: string,
-    options?: Readonly<{ alreadyLocked?: boolean; except?: PhysicalDirectory }>,
+    options?: Readonly<{ alreadyLocked?: boolean; except?: PhysicalDirectory; lane?: VerifyAbsentLane }>,
   ): Promise<ProjectAbsence> {
     if (!projectIdSchema.safeParse(projectId).success) {
       throw new TypeError(`Invalid project id: ${JSON.stringify(projectId)}`);
@@ -713,7 +738,16 @@ export class ProjectDirectories {
       for (const { root, scope, storageRootKey } of roots) {
         let provider: FileSystemProvider;
         try {
-          provider = await this._registry.getProvider(scope);
+          /* A background sweep holds `project:<id>` across tabs, which an interactive operation may be waiting on, and
+           * no lock layer here says cheaply whether one is (Web Locks' `query()` is asynchronous and cross-tab, the
+           * resource queue counts no waiters per key). So it is promoted while it holds the lock: its calls wait only
+           * for the lane's four slots, never on aging. The bound: the lock is held for one sweep's I/O, a listing per
+           * root and one identity read per directory four at a time (about 97 rounds of calls on the 386-directory
+           * profile), however busy the interactive lane is (FW4 review m6, re-review C). */
+          provider =
+            options?.lane === 'background'
+              ? this._registry.backgroundOperation(await this._registry.getProvider(scope), { promoted: true })
+              : await this._registry.getLaneProvider(scope, 'sweep');
         } catch (error) {
           return { status: 'unknown', reason: errorMessage(error) };
         }
@@ -757,6 +791,17 @@ export class ProjectDirectories {
     };
     if (options?.alreadyLocked === true) {
       return sweep();
+    }
+    if (options?.lane === 'background') {
+      /* A promoted sweep yields before it takes its lock: one call's wait for the lane, aging behind interactive calls
+       * as any background call does, so consecutive orphan sweeps never run back to back past them (re-review C). It is
+       * the discovery lane's, on no root, so a root's stall accounting neither delays it nor is reset by it
+       * (re-verification F), and a failure of it is an answer like any other (H). */
+      try {
+        await this._registry.ioScheduler.runBackground('discovery', () => undefined);
+      } catch (error) {
+        return { status: 'unknown', reason: errorMessage(error) };
+      }
     }
     const locks = [`project:${projectId}`];
     return this._crossTabCoordinator.withLocks(locks, async () => this._resourceQueue.queueForMany(locks, sweep));
@@ -883,6 +928,7 @@ export class ProjectDirectories {
             : await this.verifyAbsent(options.id, {
                 alreadyLocked: true,
                 except: { storageRootKey: locator.storageRootKey, providerBasePath: path },
+                lane: 'sweep',
               });
         const restored = absence?.status === 'absent' ? options?.id : undefined;
         const identity = await this._resolveIdentity({
@@ -1369,9 +1415,10 @@ export class ProjectDirectories {
   ): Promise<number | undefined> {
     const { scope, storageRootKey, view } = root;
     {
+      /* The audit is background work: its listings and reads wait for the lane (FW4). */
       let provider: FileSystemProvider;
       try {
-        provider = await this._registry.getProvider(scope);
+        provider = this._registry.backgroundOperation(await this._registry.getProvider(scope));
       } catch {
         return undefined;
       }
@@ -1391,11 +1438,16 @@ export class ProjectDirectories {
           this._auditCycles.delete(storageRootKey);
           return undefined;
         }
-        if (view.namesListed && names.join('\0') !== view.names.join('\0')) {
+        const before = view.namesListed ? view.names.join('\0') : undefined;
+        /* A listing evidence overtook is not installed, and says nothing about the index (FW4 review m9). */
+        if (
+          this._index.installNames(storageRootKey, namesVersion, names) &&
+          before !== undefined &&
+          names.join('\0') !== before
+        ) {
           mismatched = true;
           this._index.countAuditMismatch(kind);
         }
-        this._index.installNames(storageRootKey, namesVersion, names);
       }
       const count = share === undefined ? Number.POSITIVE_INFINITY : Math.max(1, Math.ceil(view.names.length * share));
       const batch = this._index.auditBatch(storageRootKey, count);
@@ -1475,13 +1527,16 @@ export class ProjectDirectories {
       const startedAt = this._index.now();
       const namesVersion = this._index.beginColdRead(storageRootKey);
       workerTimings.count('discovery.fullRead');
-      const names = await this._listNames(provider);
+      /* A full read is background work (FW4): each of its provider calls waits for the lane, so an interactive call
+       * waits behind at most the few it admitted. Every capture is still taken before its call is issued. */
+      const background = this._registry.backgroundOperation(provider);
+      const names = await this._listNames(background);
       if (!Array.isArray(names)) {
         this._index.cold(storageRootKey, 'reset');
         return { status: 'inaccessible', reason: errorMessage(names.error) };
       }
       this._index.installNames(storageRootKey, namesVersion, names);
-      const readings = await this._readDirectories(authority, names);
+      const readings = await this._readDirectories({ ...authority, provider: background }, names);
       this._index.warmed(storageRootKey, startedAt);
       return { status: 'complete', readings };
     }
@@ -1497,13 +1552,25 @@ export class ProjectDirectories {
         ? listed
         : [...new Set([...listed, ...(this._index.view(storageRootKey)?.names ?? [])])].sort();
     }
-    const dirty = new Set(this._index.view(storageRootKey)?.dirty);
-    const read = new Map(
-      await this._readDirectories(
-        authority,
-        names.filter((name) => dirty.has(name) || this._index.entry(storageRootKey, name) === undefined),
-      ),
+    const current = this._index.view(storageRootKey);
+    const dirty = new Set(current?.dirty);
+    const notRetained = new Set(current?.unretained);
+    /* Evidence names the directories the listing waits on: interactive, 16 at a time. A directory the index did not
+     * retain (past its budget) has no evidence and is read on every pass: background work (FW4 review m8). */
+    const unretained = names.filter(
+      (name) => notRetained.has(name) || (!dirty.has(name) && this._index.entry(storageRootKey, name) === undefined),
     );
+    const [evidenced, rest] = await Promise.all([
+      this._readDirectories(
+        authority,
+        names.filter((name) => dirty.has(name) && !notRetained.has(name)),
+        evidenceReadConcurrency,
+      ),
+      unretained.length === 0
+        ? []
+        : this._readDirectories({ ...authority, provider: this._registry.backgroundOperation(provider) }, unretained),
+    ]);
+    const read = new Map([...evidenced, ...rest]);
     return {
       status: 'complete',
       readings: names.flatMap((name) => {
@@ -1535,12 +1602,13 @@ export class ProjectDirectories {
   private async _readDirectories(
     authority: Omit<DirectoryAuthority, 'directory'>,
     names: readonly string[],
+    width = manifestProbeConcurrency,
   ): Promise<Array<readonly [string, ProjectDirectoryReading]>> {
     const read: Array<readonly [string, ProjectDirectoryReading]> = [];
     /* oxlint-disable eslint/no-await-in-loop -- Chunked awaits bound the read concurrency; the input order is kept. */
-    for (let offset = 0; offset < names.length; offset += manifestProbeConcurrency) {
+    for (let offset = 0; offset < names.length; offset += width) {
       const chunk = await Promise.all(
-        names.slice(offset, offset + manifestProbeConcurrency).map(async (name) => {
+        names.slice(offset, offset + width).map(async (name) => {
           const version = this._index.version(authority.storageRootKey, name);
           const { reading, determined } = await this._readDirectory({
             ...authority,
@@ -1927,7 +1995,7 @@ export class ProjectDirectories {
     }>
   > {
     const { except, excluded, probed } = leftOut;
-    const absence = await this.verifyAbsent(projectId, { alreadyLocked: true, except });
+    const absence = await this.verifyAbsent(projectId, { alreadyLocked: true, except, lane: 'sweep' });
     if (absence.status !== 'present') {
       return { held: [], unreadable: [], unknown: absence.status === 'unknown', present: false, leftOut: false };
     }
@@ -2272,6 +2340,9 @@ export class ProjectDirectories {
    */
   private async _readDirectory(authority: DirectoryAuthority): Promise<DirectoryRead> {
     const { provider, directory } = authority;
+    /* What a read leads to under the identity's locks (an identity established, a legacy declaration converted) is made
+     * on the interactive provider: a lane only orders reads, and must never stretch a lock (FW4 review m4). */
+    const exact = { ...authority, provider: this._registry.inLane(provider, 'interactive') };
     workerTimings.count('discovery.directoryRead');
     const [manifestResult, identityResult] = await Promise.allSettled([
       provider.readFile(`${directory}/tau.json`),
@@ -2341,7 +2412,7 @@ export class ProjectDirectories {
           establishIdentity: createAsyncLogic<ProjectIdentityResult, { projectId: string }>({
             run: async ({ input, signal }) => {
               const result = await this._resolveIdentity({
-                ...authority,
+                ...exact,
                 preferredProjectId: input.projectId,
                 initialIdentity: { record: identityResult.value },
                 manifestBytes: bytes,
@@ -2353,13 +2424,13 @@ export class ProjectDirectories {
           }),
           replaceManifest: createAsyncLogic<'converted' | 'unchanged' | 'conflict', { projectId: string }>({
             run: async ({ input, signal }) => {
-              const identityBytes = await provider.readFile(`${directory}/${projectIdentityPath}`);
+              const identityBytes = await exact.provider.readFile(`${directory}/${projectIdentityPath}`);
               signal.throwIfAborted();
               if (parseProjectIdentityBytes(identityBytes).projectId !== input.projectId) {
                 return 'conflict';
               }
               const result = await this._checkedWrite({
-                ...authority,
+                ...exact,
                 projectId: input.projectId,
                 path: `${directory}/tau.json`,
                 data: nextBytes,
@@ -2438,7 +2509,7 @@ export class ProjectDirectories {
       return { reading: { kind: 'invalid', issue: read.issue }, determined: true };
     }
     const identity = await this._resolveIdentity({
-      ...authority,
+      ...exact,
       initialIdentity: { record: identityResult.value },
       manifestBytes: bytes,
     });

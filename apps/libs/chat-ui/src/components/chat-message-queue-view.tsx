@@ -38,6 +38,9 @@ export function ChatMessageQueueView({
   const [editing, setEditing] = useState<string>();
   const [text, setText] = useState('');
   const [pending, setPending] = useState<{ id: string; label: string }>();
+  /* The row the person sent with Send now: it speaks until it stops being busy, past `onSteer` settling while the
+   * durable steer is still in flight. */
+  const [steered, setSteered] = useState<string>();
   const [actionError, setActionError] = useState<{
     message: string;
     id: string;
@@ -49,6 +52,11 @@ export function ChatMessageQueueView({
     sendingId !== undefined ||
     items.some((item) => item.command !== undefined || item.steer !== undefined);
   const visibleError = items.some((item) => item.id === actionError?.id) ? actionError : undefined;
+  const steeredItem = items.find((item) => item.id === steered);
+  if (steered !== undefined && pending?.id !== steered && (steeredItem?.steer === undefined || error !== undefined)) {
+    /* The person's send settled (landed, failed or left the queue): a later send of the row is the queue's own. */
+    setSteered(undefined);
+  }
   if (items.length === 0 && error === undefined && visibleError === undefined) {
     return undefined;
   }
@@ -85,10 +93,14 @@ export function ChatMessageQueueView({
           const statusLabel =
             item.steer !== undefined && error !== undefined ? 'Send failed' : busy ? busyLabel : undefined;
           /*
-           * Only the person's own action, and a failed send, speak: an automatic send (`sendingId`, or a durable steer
-           * still in flight) shows its words without a live region, so a queued row adds no voice to the chat's.
+           * Only the person's own action (its durable steer included while in flight), and a failed send, speak: an
+           * automatic send (`sendingId`) shows its words without a live region, so a queued row adds no voice to the
+           * chat's.
            */
-          const spoken = pending?.id === item.id || (item.steer !== undefined && error !== undefined);
+          const spoken =
+            pending?.id === item.id ||
+            (steered === item.id && item.steer !== undefined) ||
+            (item.steer !== undefined && error !== undefined);
           const locked = busy || pending !== undefined || item.command !== undefined || item.steer !== undefined;
           return (
             <li
@@ -257,6 +269,7 @@ export function ChatMessageQueueView({
                     disabled={locked}
                     title='Interrupt the current turn and send this message'
                     onClick={() => {
+                      setSteered(item.id);
                       act(item.id, 'Sending…', async () => onSteer(item.id));
                     }}
                   >

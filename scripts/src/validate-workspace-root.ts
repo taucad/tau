@@ -80,7 +80,6 @@ const main = (): void => {
   const trackedPaths = execFileSync('git', ['ls-files', '-z'], {
     cwd: workspaceRoot,
     encoding: 'utf8',
-    /* The listing passed Node's 1 MiB default (ENOBUFS) as the tree grew; it is read whole, so allow far more. */
     maxBuffer: 64 * 1024 * 1024,
   })
     .split('\0')

@@ -47,6 +47,8 @@ const createStoreWithFiles = (
   } = {},
 ): {
   store: ReturnType<typeof createChatFileStore>;
+  /** The client the store reads and writes through. */
+  client: ChatStoreClient;
   reopen: (projectIds?: () => Promise<string[]>) => ReturnType<typeof createChatFileStore>;
   reads: string[];
   read: (path: string) => Promise<string>;
@@ -130,6 +132,7 @@ const createStoreWithFiles = (
   const store = reopen();
   return {
     store,
+    client,
     reopen,
     reads,
     directoriesRead,
@@ -367,6 +370,34 @@ beforeEach(() => {
 });
 
 describe('chat file store', () => {
+  /* Fast path FW4: the all-chats reads nobody waits on one by one go through connections in the background lane. */
+  it('reads every project’s chats through the background client when one is given, and one project’s through its own', async () => {
+    const files = createStoreWithFiles();
+    const first = await files.store.createChat('proj_one', { name: 'First', messages: [] });
+    const background: string[] = [];
+    const store = createChatFileStore({
+      client: files.client,
+      backgroundClient: {
+        ...files.client,
+        readdir: async (path) => {
+          background.push(path);
+          return files.client.readdir(path);
+        },
+      },
+      projectIds: async () => ['proj_one'],
+    });
+    const listed = files.directoriesRead.length;
+
+    await expect(store.getAllChats()).resolves.toMatchObject([{ id: first.id }]);
+    await expect(store.getAllChatRecords()).resolves.toMatchObject([{ id: first.id }]);
+    expect(background).toEqual(['/projects/proj_one/.tau/chats', '/projects/proj_one/.tau/chats']);
+    expect(files.directoriesRead.length - listed).toBe(background.length);
+
+    await expect(store.getChatsForResource('proj_one')).resolves.toMatchObject([{ id: first.id }]);
+    expect(background).toHaveLength(2);
+    expect(files.directoriesRead.length - listed).toBe(3);
+  });
+
   it('reads all non-deleted chats without adding an index', async () => {
     const store = createStore();
     const first = await store.createChat('proj_one', { name: 'First', messages: [] });

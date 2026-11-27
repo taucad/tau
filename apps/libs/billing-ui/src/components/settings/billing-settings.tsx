@@ -1,5 +1,6 @@
 import { Heading } from '@taucad/ui/components/heading';
 import { SettingsItem, SettingsSectionCard } from '@taucad/settings-ui/components/settings/settings-item';
+import { WebHandOffRow } from '@taucad/settings-ui/components/settings/web-hand-off-row';
 import { useRef, useState } from 'react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, LoaderCircle, Plus } from 'lucide-react';
@@ -58,7 +59,17 @@ const formatBalance = (atoms: bigint): string =>
  * @param props - `accountNotice` is the host app's account notice shown above the plan (its email-deliverability banner).
  * @returns The billing settings.
  */
-export function BillingSettings({ accountNotice }: { readonly accountNotice?: React.ReactNode }): React.JSX.Element {
+export function BillingSettings({
+  accountNotice,
+  webBillingUrl,
+}: {
+  readonly accountNotice?: React.ReactNode;
+  /**
+   * Tau Desktop: the website's Billing page. The portal, automatic reload and cancellation open it instead, since
+   * the desktop's sign-in may not change them (desktop sign-in ruling D1=A). Top up and Choose a plan stay here.
+   */
+  readonly webBillingUrl?: string;
+}): React.JSX.Element {
   const entitlements = useEntitlements();
   const credits = useCredits();
   const availableBalance = credits?.balance ?? undefined;
@@ -139,18 +150,26 @@ export function BillingSettings({ accountNotice }: { readonly accountNotice?: Re
   const openTopup = (): void => {
     setIsTopupOpen(true);
   };
-  const portalButton = (label: string): React.JSX.Element => (
-    <Button
-      variant='outline'
-      disabled={isPortalBusy}
-      onClick={async () => {
-        await openPortal();
-      }}
-    >
-      {label}
-      <ExternalLink aria-hidden='true' className='size-3' />
-    </Button>
-  );
+  const portalButton = (label: string): React.JSX.Element =>
+    webBillingUrl === undefined ? (
+      <Button
+        variant='outline'
+        disabled={isPortalBusy}
+        onClick={async () => {
+          await openPortal();
+        }}
+      >
+        {label}
+        <ExternalLink aria-hidden='true' className='size-3' />
+      </Button>
+    ) : (
+      <Button asChild variant='outline'>
+        <a href={webBillingUrl} target='_blank' rel='noreferrer'>
+          {label}
+          <ExternalLink aria-hidden='true' className='size-3' />
+        </a>
+      </Button>
+    );
 
   return (
     <div className='flex flex-col gap-8 pb-4'>
@@ -332,11 +351,37 @@ export function BillingSettings({ accountNotice }: { readonly accountNotice?: Re
         </SettingsSectionCard>
       </SettingsItem>
 
-      <SettingsItem settingId='automatic-reload'>
-        <AutoReloadSettings binding={binding} />
-      </SettingsItem>
+      {webBillingUrl === undefined ? (
+        <SettingsItem settingId='automatic-reload'>
+          <AutoReloadSettings binding={binding} />
+        </SettingsItem>
+      ) : (
+        <SettingsSectionCard>
+          <CardContent>
+            <WebHandOffRow
+              settingId='automatic-reload'
+              title='Automatic reload'
+              description='Set up or change automatic reload on Tau’s website.'
+              href={webBillingUrl}
+            />
+          </CardContent>
+        </SettingsSectionCard>
+      )}
       {entitlements.tier === 'pro' && !entitlements.cancelAtPeriodEnd ? (
-        <CancelPlanSettings binding={binding} paidThrough={entitlements.paidThrough} />
+        webBillingUrl === undefined ? (
+          <CancelPlanSettings binding={binding} paidThrough={entitlements.paidThrough} />
+        ) : (
+          <SettingsSectionCard>
+            <CardContent>
+              <WebHandOffRow
+                settingId='cancel-plan'
+                title='Cancel plan'
+                description='Cancel your plan on Tau’s website.'
+                href={webBillingUrl}
+              />
+            </CardContent>
+          </SettingsSectionCard>
+        )
       ) : undefined}
 
       <TopupModal isOpen={isTopupOpen} onOpenChange={setIsTopupOpen} />

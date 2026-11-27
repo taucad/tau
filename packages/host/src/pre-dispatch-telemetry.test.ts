@@ -31,15 +31,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNodeHostTelemetry } from '#telemetry.js';
 import type { NodeHostTelemetry } from '#telemetry.js';
 
-/** Paths whose next `writeFile` fails with the kernel's own ENOSPC, read back from `/dev/full`. */
+/**
+ * Paths whose next `writeFile` fails with ENOSPC: the kernel's own, read back from `/dev/full`, where there is one.
+ * Windows (and macOS) have no full device, so there the error is the one Node raises for this platform's libuv ENOSPC,
+ * with its errno and description from the system error map.
+ */
 const exhausted = new Set<string>();
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof FsPromises>();
+  const { getSystemErrorMap } = await import('node:util');
   const writeFile: typeof actual.writeFile = async (path, data, options) => {
     if (typeof path === 'string' && exhausted.has(basename(path))) {
-      // A write to the full device: a genuine ENOSPC from the OS, not a constructed error.
-      await actual.writeFile('/dev/full', data);
+      if (process.platform === 'linux') {
+        // A write to the full device: a genuine ENOSPC from the OS, not a constructed error.
+        await actual.writeFile('/dev/full', data);
+      }
+      const [errno, [code, description]] = [...getSystemErrorMap()].find(([, [name]]) => name === 'ENOSPC')!;
+      throw Object.assign(new Error(`${code}: ${description}, write`), { errno, code, syscall: 'write' });
     }
     return actual.writeFile(path, data, options);
   };

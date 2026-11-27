@@ -44,13 +44,44 @@ const descendants = async (pid: number): Promise<readonly number[]> => {
 };
 
 /**
+ * Every established TCP connection on this Windows machine, with its owner.
+ *
+ * Windows ships neither `lsof` nor `pgrep`, and naming a process's children
+ * there takes a CIM query, a PowerShell start per sample. `netstat -ano` lists
+ * every connection with its owning pid in one fast call, so the Windows sample
+ * is the machine's: a superset of the tree's, which keeps "no peer on the API's
+ * port" a measurement, never a blind spot.
+ *
+ * @returns One row per established connection, IPv4 and IPv6.
+ */
+const sampleWindowsTcpPeers = async (): Promise<readonly TcpPeerSample[]> => {
+  let stdout = '';
+  try {
+    ({ stdout } = await execFileAsync('netstat', ['-ano'], { maxBuffer: 64 * 1024 * 1024, windowsHide: true }));
+  } catch {
+    return [];
+  }
+  /* `  TCP    127.0.0.1:50000    127.0.0.1:3000    ESTABLISHED    1234` */
+  return stdout.split(/\r?\n/u).flatMap((line) => {
+    const [proto, , peer, state, owner] = line.trim().split(/\s+/u);
+    const pid = Number.parseInt(owner ?? '', 10);
+    return proto === 'TCP' && state === 'ESTABLISHED' && peer !== undefined && Number.isSafeInteger(pid)
+      ? [{ pid, peer }]
+      : [];
+  });
+};
+
+/**
  * Sample the established TCP connections of one process tree, once.
  *
- * @param pid - Root of the tree to sample; defaults to this process.
+ * @param pid - Root of the tree to sample; defaults to this process. Windows samples every process (see above).
  * @returns One row per established connection, with the peer address.
  * @public
  */
 export const sampleTcpPeers = async (pid: number = process.pid): Promise<readonly TcpPeerSample[]> => {
+  if (process.platform === 'win32') {
+    return sampleWindowsTcpPeers();
+  }
   const tree = await descendants(pid);
   let stdout = '';
   try {

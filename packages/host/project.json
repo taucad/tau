@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/host",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package", "ci:shell"],
+  "tags": ["scope:shared", "type:package", "ci:shell", "ci:windows-unit"],
   "targets": {
     "build": {
       "executor": "nx:run-commands",

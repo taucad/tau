@@ -1181,7 +1181,13 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
             return;
           }
           const current = desiredDirectory(entry);
-          if (current.directory !== entry.directory || current.targetIsDirectory !== entry.targetIsDirectory) {
+          /* An entry whose first stream is still being admitted has no directory yet: an event then (on Windows, a
+           * sibling watch's probe or a `git init` while this probe is awaited) is no move, and `open` reconciles
+           * the directory itself once admitted. Rearming against `''` reconciled the target as a phantom `delete`. */
+          if (
+            entry.directory !== '' &&
+            (current.directory !== entry.directory || current.targetIsDirectory !== entry.targetIsDirectory)
+          ) {
             /* After any reconciliation the rearm classified, in order. */
             entry.rearming ??= open(entry)
               .then(

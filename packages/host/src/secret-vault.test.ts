@@ -247,8 +247,9 @@ describe('createKeychainSecretVaultWith', () => {
 
 describe('securityRunner', () => {
   it('should resolve the exit code and stdout of a child that read its stdin', async () => {
-    const run = securityRunner('/bin/sh', 5000);
-    await expect(run({ args: ['-c', 'cat; exit 44'], stdin: 'add-generic-password\n' })).resolves.toEqual({
+    const run = securityRunner(process.execPath, 5000);
+    const echoThenExit44 = `let input = ''; process.stdin.on('data', (chunk) => { input += chunk; }).on('end', () => { process.stdout.write(input, () => process.exit(44)); });`;
+    await expect(run({ args: ['-e', echoThenExit44], stdin: 'add-generic-password\n' })).resolves.toEqual({
       exitCode: 44,
       stdout: 'add-generic-password\n',
     });
@@ -256,7 +257,7 @@ describe('securityRunner', () => {
 
   it.each([
     { case: 'cannot be spawned', executable: '/nonexistent/security', args: [] },
-    { case: 'outlives its timeout', executable: '/bin/sh', args: ['-c', 'sleep 5'] },
+    { case: 'outlives its timeout', executable: process.execPath, args: ['-e', 'setTimeout(() => undefined, 5000);'] },
   ])('should reject SECRET_VAULT_UNAVAILABLE without an exit code when the child $case', async (input) => {
     try {
       await securityRunner(input.executable, 200)({ args: input.args });
@@ -295,10 +296,13 @@ describe('createFileSecretVault', () => {
     const directory = join(await sandbox(), 'machines');
     await createFileSecretVault(directory).write(name, 'code');
     const [file, folder] = await Promise.all([stat(join(directory, 'secrets.json')), stat(directory)]);
+    /* Windows has no POSIX mode bits (Node reports 0o666 for files and directories there); the vault is private because its
+     * directory lives in the user's own profile. */
+    const otherBits = process.platform === 'win32' ? 0o066 : 0;
     // oxlint-disable-next-line no-bitwise -- POSIX group/world bits must be absent on protected state.
-    expect(file.mode & 0o077).toBe(0);
+    expect(file.mode & 0o077).toBe(otherBits);
     // oxlint-disable-next-line no-bitwise -- POSIX group/world bits must be absent on protected state.
-    expect(folder.mode & 0o077).toBe(0);
+    expect(folder.mode & 0o077).toBe(otherBits);
   });
 
   it('should serialize parallel writes, also across two vaults over one directory', async () => {

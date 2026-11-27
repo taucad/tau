@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { build } from 'esbuild';
 import tailwindcss from '@tailwindcss/vite';
 import { createElement } from 'react';
@@ -53,12 +54,15 @@ type Visit = {
   readonly viewport?: { width: number; height: number };
   /** The catalog response: a JSON value, raw text, an HTTP status or a network failure. */
   readonly catalog?: unknown;
+  /** The channel's Intel beta DMG probe status; unset, the probe cannot reach the downloads origin. */
+  readonly betaDmg?: number;
 };
 
 /** What a visitor reads and follows on one rendered download page. */
 type Surface = {
   /** `beta` marks a link inside an unqualified beta entry, which stands apart from the qualified Mac routes. */
   readonly links: ReadonlyArray<{ text: string; href: string; visible: boolean; beta: boolean }>;
+  /** Page text outside beta entries, so qualified-route claims are not satisfied by the Intel beta line. */
   readonly text: string;
 };
 
@@ -71,7 +75,13 @@ const surface = async (page: Page): Promise<Surface> => ({
       beta: anchor.closest('[data-beta-route]') !== null,
     })),
   ),
-  text: (await page.locator('body').textContent()) ?? '',
+  text: await page.locator('body').evaluate((body) => {
+    const copy = body.cloneNode(true) as HTMLElement;
+    for (const beta of copy.querySelectorAll('[data-beta-route]')) {
+      beta.remove();
+    }
+    return copy.textContent;
+  }),
 });
 
 describe('shipping installer catalog browser behavior', () => {
@@ -145,6 +155,14 @@ describe('shipping installer catalog browser behavior', () => {
         });
       }
     });
+    const probes: string[] = [];
+    if (visit.betaDmg !== undefined) {
+      const status = visit.betaDmg;
+      await page.route(`${downloads}/latest/Tau-macos-x64.dmg`, async (route) => {
+        probes.push(`${route.request().method()} ${route.request().url()}`);
+        await route.fulfill({ status, headers: { 'Access-Control-Allow-Origin': origin } });
+      });
+    }
     await page.goto(`${origin}/download/`);
     await page.addStyleTag({ content: css });
     await page.addScriptTag({ content: script });
@@ -155,12 +173,13 @@ describe('shipping installer catalog browser behavior', () => {
       }
       TauDownloads.initializeHostDownload(location.hostname);
     `);
+    await page.evaluate('TauDownloads.initializeBetaDownloads(new AbortController().signal)');
     const before = await surface(page);
     if (visit.enabled ?? true) {
       await page.evaluate('document.body.dataset.installerCatalog="true"');
     }
     await page.evaluate('TauDownloads.initializeInstallerCatalog(new AbortController().signal)');
-    return { page, requests, before, close: async () => context.close() };
+    return { page, requests, probes, before, close: async () => context.close() };
   };
 
   /** Every Mac file link names the DMG its URL serves, and no DMG is claimed over another file. */
@@ -181,15 +200,15 @@ describe('shipping installer catalog browser behavior', () => {
   };
 
   /**
-   * The Intel beta ZIP is the one Mac file listed without a qualified catalog route.
+   * The Intel beta DMG is the one Mac file listed without a qualified catalog route.
    * @param links - The rendered page's links.
    * @param shown - Whether the entry is expected visible: hidden once the catalog admits an Intel DMG.
    */
   const expectIntelBeta = (links: Surface['links'], shown: boolean): void => {
     const beta = links.filter((link) => link.beta);
     expect(beta).toHaveLength(1);
-    expect(beta[0]).toMatchObject({ text: 'Download ZIP for Intel Mac', visible: shown });
-    expect(new URL(beta[0]!.href).pathname).toBe('/latest/Tau-macos-x64.zip');
+    expect(beta[0]).toMatchObject({ text: 'Download the Intel beta DMG', visible: shown });
+    expect(new URL(beta[0]!.href).pathname).toBe('/latest/Tau-macos-x64.dmg');
   };
 
   /**
@@ -237,7 +256,7 @@ describe('shipping installer catalog browser behavior', () => {
     await page.locator('[data-download-platform="linux"]').click();
     expect(await page.locator('#linux-installation').getAttribute('open')).not.toBeNull();
     expect(await page.locator('#linux-installation').textContent()).toContain('independently verify');
-    expect(await page.locator('[data-qualified-downloads] a[href$=".deb"]').count()).toBe(2);
+    expect(await page.locator('[data-qualified-downloads] a[href$=".deb"]').count()).toBe(4);
     expect(await page.locator('[data-qualified-downloads] a[href$=".AppImage"]').count()).toBe(1);
     expect(await page.locator('[data-qualified-downloads] a[href$=".zip"]').count()).toBe(3);
     // Untested Windows and Linux routes carry the page's own Beta badge; Mac routes do not.
@@ -324,7 +343,7 @@ describe('shipping installer catalog browser behavior', () => {
     ]);
     const upgraded = await surface(page);
     expectTruthfulMacLabels(upgraded.links);
-    // A qualified Intel DMG replaces the beta ZIP entry.
+    // A qualified Intel DMG replaces the beta DMG line.
     expectIntelBeta(upgraded.links, false);
     const instructions = await page.locator('[data-install-instructions]').textContent();
     expect(instructions).toMatch(
@@ -368,9 +387,9 @@ describe('shipping installer catalog browser behavior', () => {
     expect(visible.filter((link) => !link.beta && /Intel Mac|macos-x64/u.test(`${link.text} ${link.href}`))).toEqual(
       [],
     );
-    // Without a qualified Intel DMG the Intel beta ZIP stays listed, served from the staging origin.
+    // Without a qualified Intel DMG the Intel beta DMG stays listed, served from the staging origin.
     expectIntelBeta(after.links, true);
-    expect(visible.find((link) => link.beta)?.href).toBe('https://downloads.taucad.dev/latest/Tau-macos-x64.zip');
+    expect(visible.find((link) => link.beta)?.href).toBe('https://downloads.taucad.dev/latest/Tau-macos-x64.dmg');
     const apple = visible.filter((link) => link.text === 'Download DMG for Apple silicon');
     expect(apple.length).toBeGreaterThanOrEqual(2);
     for (const link of apple) {
@@ -532,4 +551,93 @@ describe('shipping installer catalog browser behavior', () => {
     expect(downloaded.suggestedFilename()).toBe('Tau-macos-arm64.dmg');
     await close();
   }, 60_000);
+
+  /** The live composed catalog a channel served on 2026-11-27. */
+  const live = (channel: 'staging' | 'production') =>
+    JSON.parse(readFileSync(new URL(`fixtures/installers-${channel}.json`, import.meta.url), 'utf8')) as {
+      platforms: Array<{
+        lane: string;
+        catalog: { tag: string; routes: Array<{ route: string; artifacts: Array<{ kind: string; sha256: string }> }> };
+      }>;
+    };
+
+  it.each([
+    ['https://taucad.dev', 'staging', 'https://downloads.taucad.dev/releases/desktop-staging%400.2.0-staging.1180'],
+    ['https://tau.new', 'production', 'https://downloads.tau.new/releases/desktop%400.4.0'],
+  ] as const)(
+    'offers the Apple silicon DMG with the quiet Intel line from the live %s catalog',
+    async (origin, channel, base) => {
+      const { page, close } = await open({ origin, catalog: live(channel), viewport: { width: 390, height: 844 } });
+      const dmg = `${base}/Tau-macos-arm64.dmg`;
+      expect(await page.locator('a[data-host-download="direct"]').getAttribute('href')).toBe(dmg);
+      const apple = page.locator('#downloads a[data-download-platform="mac"]');
+      expect(await apple.textContent()).toBe('Download DMG for Apple silicon');
+      expect(await apple.getAttribute('href')).toBe(dmg);
+      expect(await apple.isVisible()).toBe(true);
+      // The Intel beta is one small line directly under the Apple silicon entry: never the host download.
+      const line = page.locator('#downloads [data-mac-route="mac"] + [data-beta-route="macIntel"]');
+      expect(await line.isVisible()).toBe(true);
+      const lineText = await line.textContent();
+      expect(lineText?.replaceAll(/\s+/gu, ' ').trim()).toBe('Intel Mac? Download the Intel beta DMG Beta');
+      expect(await line.locator('a').getAttribute('href')).toBe(
+        `${origin.replace('https://', 'https://downloads.')}/latest/Tau-macos-x64.dmg`,
+      );
+      expect(await page.locator('a[data-host-download="direct"]').textContent()).not.toMatch(/Intel/u);
+      expect(await page.locator('#downloads [data-mac-route="macIntel"]').isVisible()).toBe(false);
+      expect(await page.locator('[data-mac-hero]').isVisible()).toBe(false);
+      const fits = await line.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.left >= 0 && rect.right <= innerWidth && node.scrollWidth <= node.clientWidth + 1;
+      });
+      expect(fits).toBe(true);
+      // The live AppImage lane is admitted too: its image and both managed APT packages are listed.
+      const portable = page.locator('[data-qualified-downloads] details').filter({ hasText: 'Linux portable' });
+      expect(await portable.locator('a[href$=".AppImage"]').count()).toBe(1);
+      expect(await portable.locator('a[href$="_amd64.deb"]').count()).toBe(2);
+      expect(await page.locator('[data-download-platform="linux"]').getAttribute('href')).toBe(
+        '/download/#linux-installation',
+      );
+      await close();
+    },
+    60_000,
+  );
+
+  it('keeps the Apple silicon DMG when the Linux lane fails admission, and Linux keeps its archive', async () => {
+    const catalog = live('staging');
+    const linux = catalog.platforms.find(({ lane }) => lane === 'linux')!.catalog;
+    const appImage = linux.routes.find(({ route }) => route === 'linux-appimage')!;
+    // The route shape the page admitted before the 2026-11-16 Linux promotions.
+    appImage.artifacts = appImage.artifacts.filter(({ kind }) => kind === 'linux-appimage' || kind === 'linux-tar');
+    const { page, before, close } = await open({ origin: 'https://taucad.dev', catalog });
+    const apple = page.locator('#downloads a[data-download-platform="mac"]');
+    expect(await apple.isVisible()).toBe(true);
+    expect(await apple.getAttribute('href')).toBe(
+      'https://downloads.taucad.dev/releases/desktop-staging%400.2.0-staging.1180/Tau-macos-arm64.dmg',
+    );
+    const linuxLinks = (links: Surface['links']) => links.filter((link) => /Linux|linux/u.test(link.text + link.href));
+    const after = await surface(page);
+    expect(linuxLinks(after.links)).toEqual(linuxLinks(before.links));
+    expect(await page.locator('[data-download-platform="linux"]').getAttribute('href')).toBe(
+      'https://downloads.taucad.dev/latest/Tau-linux-x64.tar.gz',
+    );
+    expect(await page.locator('[data-qualified-downloads] details').count()).toBe(1);
+    await close();
+  }, 60_000);
+
+  it.each([
+    [200, 'Download the Intel beta DMG', 'Tau-macos-x64.dmg'],
+    [404, 'Download the Intel beta ZIP', 'Tau-macos-x64.zip'],
+  ])(
+    'probes the channel Intel beta DMG once and keeps the line truthful after a %i',
+    async (status, text, file) => {
+      const { page, probes, close } = await open({ origin: 'https://taucad.dev', catalog: 404, betaDmg: status });
+      expect(probes).toEqual(['HEAD https://downloads.taucad.dev/latest/Tau-macos-x64.dmg']);
+      const link = page.locator('a[data-download-beta="macIntel"]');
+      expect(await link.textContent()).toBe(text);
+      expect(await link.getAttribute('href')).toBe(`https://downloads.taucad.dev/latest/${file}`);
+      expect(await link.isVisible()).toBe(true);
+      await close();
+    },
+    60_000,
+  );
 });

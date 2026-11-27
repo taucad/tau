@@ -117,26 +117,28 @@ export const desktopDownloadLabel = (platform: keyof typeof desktopDownloads): s
 const macFileLabels = { mac: 'Apple silicon', macIntel: 'Intel Mac' } as const;
 
 /**
- * Builds offered before they pass installer qualification: the page lists each as a direct channel archive marked beta,
- * never recommends it to a detected host, and drops it once the installer catalog admits that platform's DMG.
+ * Builds offered before they pass installer qualification. Each is one quiet line under its platform's entry, marked
+ * beta, never recommended to a detected host, and dropped once the installer catalog admits that platform's DMG. The
+ * Intel DMG is published beside each Mac release outside the catalog (`desktop-intel-beta-dmg.yml`); a channel that has
+ * not published it falls back to the Intel update ZIP, which every Mac release publishes.
  */
 export const betaDownloads = {
-  macIntel: { file: 'Tau-macos-x64.zip', detail: 'Intel Mac · ZIP download' },
+  macIntel: {
+    file: 'Tau-macos-x64.dmg',
+    fallback: 'Tau-macos-x64.zip',
+    prompt: 'Intel Mac?',
+    label: 'Download the Intel beta DMG',
+    fallbackLabel: 'Download the Intel beta ZIP',
+  },
 };
 
 /**
- * @param platform - A platform offered as a beta archive.
- * @returns The production archive URL.
+ * @param platform - A platform offered as a beta file.
+ * @param file - The beta file, or the fallback served when a channel has not published it.
+ * @returns The production channel's latest file URL.
  */
-export const betaDownloadHref = (platform: keyof typeof betaDownloads): string =>
-  `${downloadsOrigin}/latest/${betaDownloads[platform].file}`;
-
-/**
- * @param platform - A platform offered as a beta archive.
- * @returns Label markup from checked-in icon and product constants only.
- */
-export const betaDownloadLabel = (platform: keyof typeof betaDownloads): string =>
-  `${desktopDownloads[platform].icon}<span>Download ZIP for ${macFileLabels[platform]}</span>`;
+export const betaDownloadHref = (platform: keyof typeof betaDownloads, file: 'file' | 'fallback' = 'file'): string =>
+  `${downloadsOrigin}/latest/${betaDownloads[platform][file]}`;
 
 /**
  * Label a link that downloads a file directly. A Mac link only ever serves its qualified DMG, so it says DMG and names
@@ -267,7 +269,13 @@ const admitDesktopCatalog = (
     'linux-appimage:linux-x64': {
       platform: 'linuxPortable',
       primary: 'linux-appimage',
-      names: { 'linux-appimage': 'Tau-linux-x64.AppImage', 'linux-tar': 'Tau-linux-x64.tar.gz' },
+      // The managed AppImage carries its own APT runtime and selector packages, named as `desktopArtifactName` names them.
+      names: {
+        'linux-appimage': 'Tau-linux-x64.AppImage',
+        'linux-appimage-deb-runtime': `tau${suffix}-appimage-runtime-${version}_${version}_amd64.deb`,
+        'linux-appimage-deb-selector': `tau${suffix}-appimage_${version}_amd64.deb`,
+        'linux-tar': 'Tau-linux-x64.tar.gz',
+      },
       detail: 'Linux x64 · portable AppImage',
       install:
         'Verify the published signing identity and digest, make the image executable, and keep it in a writable folder. Launch with the operating system sandbox enabled.',
@@ -356,7 +364,8 @@ const laneRoutes = {
 
 /**
  * Admit a publisher-produced projection only after explicit cutover and complete route qualification. Schema 1 is one
- * candidate's catalog; schema 2 composes one complete catalog per promoted platform, each from its own candidate.
+ * candidate's catalog; schema 2 composes one complete catalog per promoted platform, each from its own candidate, and
+ * admits each platform on its own: a platform that fails admission is left out without hiding the others.
  * @param options - Opt-in selection and untrusted latest/installers.json document.
  * @returns Qualified installer choices, or undefined while the existing archive catalog remains selected.
  */
@@ -381,26 +390,46 @@ export const createDesktopDownloadCatalog = (options: {
     if (!Array.isArray(composed['platforms']) || composed['platforms'].length === 0) {
       throw new TypeError('Installer catalog has no qualified routes');
     }
-    const lanes = new Set<string>();
-    const result: QualifiedDesktopDownload[] = [];
+    // A lane named twice is ambiguous, so every copy of it is dropped.
+    const named = composed['platforms'].map((input: unknown) =>
+      input !== null && typeof input === 'object' ? (input as Record<string, unknown>)['lane'] : undefined,
+    );
+    const admittedLanes = new Map<string, QualifiedDesktopDownload[]>();
     for (const input of composed['platforms']) {
-      const platform = catalogRecord(input, ['lane', 'catalog']);
-      const { lane } = platform;
-      if (typeof lane !== 'string' || !Object.hasOwn(laneRoutes, lane) || lanes.has(lane)) {
-        throw new TypeError('Unsupported or duplicate installer platform');
+      // Each lane is its own candidate: one that fails admission drops only itself, and its platform keeps its archive
+      // link (Mac has none, so it stays unlisted). Every check inside a lane stays strict.
+      try {
+        const platform = catalogRecord(input, ['lane', 'catalog']);
+        const { lane } = platform;
+        if (
+          typeof lane !== 'string' ||
+          !Object.hasOwn(laneRoutes, lane) ||
+          named.filter((name: unknown) => name === lane).length !== 1
+        ) {
+          throw new TypeError('Unsupported or duplicate installer platform');
+        }
+        // Shared bytes are recorded only once the whole lane is admitted, so a rejected lane leaves no trace.
+        const laneArtifacts = new Map(immutableArtifacts);
+        const admitted = admitDesktopCatalog(platform['catalog'], options.channel, laneArtifacts);
+        // Each platform is complete on its own: exactly its routes, never a partial or another platform's.
+        if (
+          JSON.stringify([...admitted.seen].sort()) !==
+          JSON.stringify([...laneRoutes[lane as keyof typeof laneRoutes]].sort())
+        ) {
+          throw new TypeError('Installer platform catalog is incomplete or carries another platform');
+        }
+        for (const [name, bytes] of laneArtifacts) {
+          immutableArtifacts.set(name, bytes);
+        }
+        admittedLanes.set(lane, admitted.result);
+      } catch {
+        // A rejected lane is absent from the result; the page keeps that platform's pre-catalog entry.
       }
-      lanes.add(lane);
-      const admitted = admitDesktopCatalog(platform['catalog'], options.channel, immutableArtifacts);
-      // Each platform is complete on its own: exactly its routes, never a partial or another platform's.
-      if (
-        JSON.stringify([...admitted.seen].sort()) !==
-        JSON.stringify([...laneRoutes[lane as keyof typeof laneRoutes]].sort())
-      ) {
-        throw new TypeError('Installer platform catalog is incomplete or carries another platform');
-      }
-      result.push(...admitted.result);
     }
-    return result;
+    if (admittedLanes.size === 0) {
+      throw new TypeError('Installer catalog has no qualified platform');
+    }
+    return [...admittedLanes.values()].flat();
   }
   const admitted = admitDesktopCatalog(options.qualification, options.channel, immutableArtifacts);
   if (options.channel === 'production' && admitted.seen.size !== admitted.supported) {

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T14:23:40.275Z",
+  "updatedAt": "2026-11-27T14:27:57.707Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -6178,6 +6178,19 @@
       "rejected": 0
     },
     {
+      "run": 46015068291,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2983",
+      "sha": "b8f76ab5f82fe6764141bb688a6c492fb3330200",
+      "at": "2026-11-27T14:27:47Z",
+      "conclusion": "cancelled",
+      "artifacts": 3,
+      "counted": 53,
+      "replayed": 1522,
+      "rejected": 0
+    },
+    {
       "run": 46015242545,
       "attempt": 1,
       "event": "merge_group",
@@ -6325,14 +6338,14 @@
       }
     },
     "api-contracts:test": {
-      "executions": 108,
-      "tests": 216,
+      "executions": 109,
+      "tests": 218,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T13:46:46Z",
+      "lastSeen": "2026-11-27T14:27:47Z",
       "targets": {
-        "test linux-x64": 96
+        "test linux-x64": 97
       }
     },
     "api-core:test": {
@@ -6575,14 +6588,14 @@
       }
     },
     "billing-e2e:test": {
-      "executions": 183,
-      "tests": 9333,
+      "executions": 184,
+      "tests": 9384,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T14:05:45Z",
+      "lastSeen": "2026-11-27T14:27:47Z",
       "targets": {
-        "test linux-x64": 154
+        "test linux-x64": 155
       }
     },
     "billing-ui:test": {

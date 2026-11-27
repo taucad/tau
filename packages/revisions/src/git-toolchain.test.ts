@@ -5,7 +5,7 @@
  * repository — a host has to be able to ask this before it serves anything.
  */
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { resolveGitToolchain } from '#git-toolchain.js';
 import { RevisionPortError } from '#revision-port.js';
+import { writeShellExecutable } from '#test/script-executable.js';
 
 const roots: string[] = [];
 
@@ -24,34 +25,21 @@ afterEach(async () => {
 const gitWithLfs = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-git-toolchain-'));
   roots.push(root);
-  const executable = join(root, 'git');
-  await writeFile(
-    executable,
-    [
-      '#!/bin/sh',
-      'if [ "$1" = "--version" ]; then echo "git version 2.55.0"; exit 0; fi',
-      'if [ "$1" = "lfs" ] && [ "$2" = "version" ]; then echo "git-lfs/3.8.0 (GitHub; darwin arm64)"; exit 0; fi',
-      'exit 1',
-      '',
-    ].join('\n'),
-    { mode: 0o755 },
-  );
-  return executable;
+  return writeShellExecutable(join(root, 'git'), [
+    'if [ "$1" = "--version" ]; then echo "git version 2.55.0"; exit 0; fi',
+    'if [ "$1" = "lfs" ] && [ "$2" = "version" ]; then echo "git-lfs/3.8.0 (GitHub; darwin arm64)"; exit 0; fi',
+    'exit 1',
+  ]);
 };
 
 /** A `git` that answers `--version` and refuses everything else. */
 const gitWithoutLfs = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-git-toolchain-'));
   roots.push(root);
-  const executable = join(root, 'git-without-lfs');
-  await writeFile(
-    executable,
-    '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "git version 2.55.0"; exit 0; fi\nexit 1\n',
-    {
-      mode: 0o755,
-    },
-  );
-  return executable;
+  return writeShellExecutable(join(root, 'git-without-lfs'), [
+    'if [ "$1" = "--version" ]; then echo "git version 2.55.0"; exit 0; fi',
+    'exit 1',
+  ]);
 };
 
 describe('git toolchain', () => {

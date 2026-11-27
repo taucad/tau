@@ -1,13 +1,19 @@
 import { EventLogError } from '#log/event-log-error.js';
 import { hostTimingNow, recordHostTiming } from '#timing.js';
-import { parseLogEvent } from '#log/event-schema.js';
-import { createEventLogReducer } from '#log/reducer.js';
+import { parseLogRow } from '#log/event-schema.js';
+import { admitParsedLogEvent, createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
 import { parseSegmentFrom, unsettledParsedRuns } from '#log/foreign-runs.js';
 import type { ForeignRun, SegmentParse } from '#log/foreign-runs.js';
 import { foreignClockAheadMilliseconds, mergeSegmentsUpTo, segmentRefreshMilliseconds } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
-import { parseEventLogBytes, serializeLogEventBytes } from '#log/serialization.js';
+import {
+  parseEventLogBytes,
+  serializeCompactLogEventBytes,
+  serializeParsedLogEventBytes,
+  serializedLogEventSize,
+} from '#log/serialization.js';
+import { compactLogRow } from '#log/compact-rows.js';
 import type { AgentLogEvent, ProviderMessage, RowKey } from '#log/event-types.js';
 import { isAbandonedTurn } from '#log/event-types.js';
 
@@ -369,7 +375,7 @@ const byteBounded = (
   for (const event of window) {
     total += opaque.has(event)
       ? encoder.encode(`${JSON.stringify(event)}\n`).byteLength
-      : serializeLogEventBytes(event).byteLength;
+      : serializedLogEventSize(event);
     if (total > maxBytes && taken.length > 0) {
       break;
     }
@@ -907,6 +913,8 @@ export const createEventLogAppender = async (
   };
 
   const events = [...parsed.events];
+  /* What this file holds that a row appended to it may name instead of repeating (WP-17). */
+  const { dictionary } = parsed;
   let { needsSeparator } = parsed;
   /** The bytes this appender's view covers: the log as it read it. */
   let byteLength = parsed.validByteLength;
@@ -1026,7 +1034,11 @@ export const createEventLogAppender = async (
     if (fenced) {
       throw fencedError();
     }
-    const event = parseLogEvent(candidate);
+    /* Parsed once here, at the boundary: the folds and the serializer take the parsed row as it is (HP-05). */
+    const { event, known } = parseLogRow(candidate);
+    if (known) {
+      admitParsedLogEvent(event);
+    }
     /* The term rules first, on this device's rows: a duplicate is answered before any history rule runs. */
     const term = terms.prepare(event);
     if (term.duplicate) {
@@ -1037,13 +1049,19 @@ export const createEventLogAppender = async (
     if (transition.duplicate) {
       return { appended: false, endCursor: events.length };
     }
-    const bytes = serializeLogEventBytes(event, needsSeparator);
+    /* WP-17: a known row names what this file already holds; the folds and the view keep the row itself. */
+    const line = known ? compactLogRow(event, dictionary) : event;
+    const bytes =
+      line === event
+        ? serializeParsedLogEventBytes(event, needsSeparator)
+        : serializeCompactLogEventBytes(line, needsSeparator);
     /* WP-00: one row's fenced write; for a single append it includes the flush, in a batch the flush is measured once. */
     const writeStarted = hostTimingNow();
     await write(bytes);
     if (writeStarted !== undefined) {
       recordHostTiming('log-write', writeStarted, { type: event.type, bytes: bytes.byteLength });
     }
+    dictionary.note(line, event);
     term.commit();
     transition.commit();
     /* Rebuilt from the log when next needed, with this row. */

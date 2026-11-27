@@ -1,5 +1,6 @@
 import { Heading } from '@taucad/ui/components/heading';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { onlineManager } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { MetaFunction } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
@@ -15,8 +16,15 @@ import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { authClient } from '#lib/auth-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { desktopContinuationPath, readDesktopAuthorization } from '#lib/desktop-oauth.js';
-import type { ShellAuthHandoff } from '#providers/auth-provider.js';
-import { authLocalization, callDesktopShell, useShellAuthHandoff } from '#providers/auth-provider.js';
+import type { DesktopSignInOutcome, ShellAuthHandoff } from '#providers/auth-provider.js';
+import {
+  authLocalization,
+  callDesktopShell,
+  startDesktopSignIn,
+  useDesktopSignInOutcome,
+  useDesktopSignInStatus,
+  useShellAuthHandoff,
+} from '#providers/auth-provider.js';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 
@@ -68,26 +76,153 @@ function ShellHandoff({ handoff }: { readonly handoff: ShellAuthHandoff }): Reac
     return undefined;
   }
 
+  return <DesktopSignInPanel />;
+}
+
+/** What each ended attempt says, and whether it offers another account. */
+const endedAttemptCopy: Readonly<
+  Record<Exclude<DesktopSignInOutcome, 'signed-in'>, { readonly title: string; readonly detail: string }>
+> = {
+  canceled: {
+    title: 'Sign-in canceled',
+    detail: 'Tau Desktop was not signed in.',
+  },
+  expired: {
+    title: 'Sign-in timed out',
+    detail: 'The browser did not finish signing in within ten minutes.',
+  },
+  error: {
+    title: "Couldn't sign in",
+    detail: 'Something went wrong while signing in. Try again.',
+  },
+};
+
+/**
+ * The desktop window's side of a sign-in (DSI-4): waiting for the browser (Copy link, Open browser again, Cancel
+ * sign-in), finishing, signed in, ended (canceled, timed out, failed) and offline.
+ *
+ * @returns The panel.
+ */
+function DesktopSignInPanel(): React.JSX.Element {
+  const status = useDesktopSignInStatus();
+  const outcome = useDesktopSignInOutcome();
+  const isOnline = useSyncExternalStore(
+    (listener) => onlineManager.subscribe(listener),
+    () => onlineManager.isOnline(),
+    () => true,
+  );
+  const attempt = status?.attempt;
+  const retry = (
+    <div className='mt-6 flex flex-wrap justify-center gap-2'>
+      <Button
+        onClick={() => {
+          void startDesktopSignIn('consent');
+        }}
+      >
+        Sign in
+      </Button>
+      <Button
+        variant='outline'
+        onClick={() => {
+          void startDesktopSignIn('different-account');
+        }}
+      >
+        Use a different account
+      </Button>
+    </div>
+  );
+
+  if (outcome === 'signed-in') {
+    return (
+      <div className='w-full max-w-md text-center'>
+        <Heading level={1} variant='title'>
+          Signed in
+        </Heading>
+        {status?.email === undefined ? undefined : (
+          <p className='mt-2 text-sm text-muted-foreground'>Tau Desktop is signed in as {status.email}.</p>
+        )}
+      </div>
+    );
+  }
+
+  if (attempt?.phase === 'finishing') {
+    return (
+      <div className='w-full max-w-md text-center' role='status'>
+        <Heading level={1} variant='title'>
+          Finishing sign-in…
+        </Heading>
+      </div>
+    );
+  }
+
+  if (!isOnline) {
+    return (
+      <div className='w-full max-w-md text-center'>
+        <Heading level={1} variant='title'>
+          You&apos;re offline
+        </Heading>
+        <p className='mt-2 text-sm text-muted-foreground'>Connect to the internet, then sign in.</p>
+        {attempt === undefined ? retry : undefined}
+      </div>
+    );
+  }
+
+  if (outcome !== undefined && attempt === undefined) {
+    const copy = endedAttemptCopy[outcome];
+    return (
+      <div className='w-full max-w-md text-center'>
+        <Heading level={1} variant='title'>
+          {copy.title}
+        </Heading>
+        <p className='mt-2 text-sm text-muted-foreground'>{copy.detail}</p>
+        {retry}
+      </div>
+    );
+  }
+
   return (
     <div className='w-full max-w-md text-center'>
       <Heading level={1} variant='title'>
         Continue in your browser
       </Heading>
       <p className='mt-2 text-sm text-muted-foreground'>
-        Tau signs you in through your browser, then hands the session back to this window.
+        {attempt?.browserFailed
+          ? "Tau couldn't open your browser. Copy the link and open it in a browser on this computer."
+          : 'Tau signs you in through your browser, then hands the sign-in back to this window.'}
       </p>
-      <Button
-        className='mt-6'
-        variant='outline'
-        onClick={() => {
-          const bridge = globalThis.window.tauAuth;
-          if (bridge) {
-            void callDesktopShell(bridge.signIn);
-          }
-        }}
-      >
-        Open my browser again
-      </Button>
+      <div className='mt-6 flex flex-wrap justify-center gap-2'>
+        <Button
+          variant='outline'
+          disabled={attempt === undefined}
+          onClick={() => {
+            if (attempt !== undefined) {
+              void navigator.clipboard.writeText(attempt.url);
+            }
+          }}
+        >
+          Copy link
+        </Button>
+        <Button
+          variant='outline'
+          onClick={() => {
+            void startDesktopSignIn('consent');
+          }}
+        >
+          Open browser again
+        </Button>
+        <Button
+          variant='ghost'
+          disabled={attempt === undefined}
+          onClick={() => {
+            const bridge = globalThis.window.tauAuth;
+            if (bridge) {
+              void callDesktopShell(bridge.cancelSignIn);
+            }
+          }}
+        >
+          Cancel sign-in
+        </Button>
+      </div>
     </div>
   );
 }

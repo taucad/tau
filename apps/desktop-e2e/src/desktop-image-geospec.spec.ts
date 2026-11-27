@@ -120,6 +120,11 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
     if (failedTools.length > 0) {
       throw new Error(`Packaged agent tools failed: ${failedTools.join('\n')}`);
     }
+    // The finished turn rests folded behind its "Worked for …" line (#2860); its captures are inside.
+    await page
+      .getByRole('button', { name: /^Worked\b/u })
+      .last()
+      .click();
     const screenshotActivities = page.getByRole('button', { name: 'Captured images', exact: true });
     for (const activity of await screenshotActivities.all()) {
       // oxlint-disable-next-line no-await-in-loop -- Each disclosure must open before its child result is queried.
@@ -428,6 +433,11 @@ it('accepts the project Runtime mesh', async () => {
     expect(reportLoadIds.map((id) => loads.find((load) => load.loadId === id)!.evidence!.artifacts[0]!.sha256)).toEqual(
       measuredSubjects,
     );
+    // The finished turn rests folded behind its "Worked for …" line (#2860); its test run is inside.
+    await page
+      .getByRole('button', { name: /^Worked\b/u })
+      .last()
+      .click();
     await page.getByRole('button', { name: /^(?:Edited files, )?ran tests$/iu }).click();
     await expectVisible(page.getByText('Tested 3 requirements', { exact: true }));
     await expectVisible(page.getByText('1. rejects the impossible fixed box volume', { exact: true }));

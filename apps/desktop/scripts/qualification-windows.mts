@@ -264,6 +264,79 @@ const executeInstaller = (path: string, args: string[]): void => {
     throw new Error(`Installer failed: ${result.status} ${result.stderr} ${result.error?.message ?? ''}`);
   }
 };
+/** One program run: its exit status and output. Injectable so the admission tests run on any host. */
+export type WindowsQualificationRun = (
+  file: string,
+  arguments_: readonly string[],
+  timeoutMilliseconds: number,
+) => Readonly<{
+  status: number | undefined;
+  stdout: string;
+  stderr: string;
+  error?: Error | undefined;
+}>;
+
+const spawnProgram: WindowsQualificationRun = (file, arguments_, timeoutMilliseconds) => {
+  const result = spawnSync(file, [...arguments_], {
+    encoding: 'utf8',
+    timeout: timeoutMilliseconds,
+    windowsHide: true,
+  });
+  /* A program that could not start has no output streams, whatever the types say: answer empty ones beside its error. */
+  if (result.error !== undefined) {
+    return { status: undefined, stdout: '', stderr: '', error: result.error };
+  }
+  return { status: result.status ?? undefined, stdout: result.stdout, stderr: result.stderr };
+};
+
+/**
+ * Run the installed Windows sandbox helper's one-time elevated `setup` for this runner's account (operator decision
+ * 2026-11-27: "qualification runs Build123d after the hosted runner (admin) runs setup"). The installed app would ask
+ * for it with one administrator prompt on the first native-kernel use; a hosted runner is an administrator, so the
+ * qualification runs the same `setup --for-user <SID>` the app's `setUpWindowsShellSandbox` runs, before the renderer
+ * clicks Build123d (route qualification run 44709543167, windows-nsis-x64, timed out on `kernel-build123d` with the
+ * sandbox off). It then confirms the helper's own `status` reads installed. The bounds are the app's own: 10 seconds
+ * for `whoami`, 10 minutes for `setup` (`setUpWindowsShellSandbox`).
+ *
+ * @param installationPath - The NSIS installation directory.
+ * @param options - The system root and the program runner; injectable for tests.
+ * @throws {Error} When the helper is missing, the account is unreadable, `setup` fails or `status` is not installed.
+ */
+export const setUpWindowsQualificationSandbox = (
+  installationPath: string,
+  options: Readonly<{
+    systemRoot?: string | undefined;
+    run?: WindowsQualificationRun | undefined;
+  }> = {},
+): void => {
+  const run = options.run ?? spawnProgram;
+  const systemRoot = options.systemRoot ?? process.env['SystemRoot'] ?? String.raw`C:\Windows`;
+  const helper = win32.join(installationPath, 'resources', 'windows-sandbox', 'win32-x64', 'tau-windows-sandbox.exe');
+  const outcome = (label: string, result: ReturnType<WindowsQualificationRun>): string => {
+    if (result.status !== 0) {
+      throw new Error(
+        `Windows sandbox ${label} failed: ${result.status} ${result.stderr.trim()} ${result.error?.message ?? ''}`.trim(),
+      );
+    }
+    return result.stdout;
+  };
+  const identity = outcome(
+    'account lookup',
+    run(win32.join(systemRoot, 'System32', 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], 10_000),
+  );
+  const sid = /"(S-1-5-21(?:-\d+)+)"\s*$/u.exec(identity.trim())?.[1];
+  if (sid === undefined) {
+    throw new Error('Windows sandbox setup could not read the runner account SID');
+  }
+  outcome('setup', run(helper, ['setup', '--for-user', sid], 600_000));
+  const status = z
+    .object({ installed: z.boolean() })
+    .safeParse(JSON.parse(outcome('status', run(helper, ['status', '--quick'], 10_000))) as unknown);
+  if (!status.success || !status.data.installed) {
+    throw new Error('Windows sandbox setup completed but its status does not read installed');
+  }
+};
+
 const packageSchema = z.object({
   version: z.string(),
   tauDesktop: z.object({
@@ -615,6 +688,11 @@ $items=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Unins
         await visibleInstall(candidate, 'initial');
       } else {
         executeInstaller(path, ['/S', `/D=${installationPath}`]);
+        /* The hosted runner is an administrator: set the sandbox up before any renderer step uses Build123d. A fixture
+           installer (`test-windows-package`) carries a synthetic payload with no helper and runs no renderer. */
+        if (options.mode === 'release') {
+          setUpWindowsQualificationSandbox(installationPath);
+        }
       }
       installed = true;
       lifecycle.installed();

@@ -357,16 +357,18 @@ export const bundledStoreGuardEnvironment = (
 /**
  * The Windows shell sandbox for the services utility (desktop Bash/Terminal blueprint Q15, D15): the helper this build
  * ships, `resources/windows-sandbox/win32-x64/tau-windows-sandbox.exe` (`desktop:prepare-windows-sandbox`), as
- * `TAU_WINDOWS_SANDBOX_HELPER`, and the switch that composes the sandbox, `TAU_WINDOWS_SHELL_SANDBOX=1`, when main
- * itself was started with it. The sandbox stays off by default until the WIN-X64 conformance row is green on a merged
- * head; the services host then asks for the helper's one-time elevated setup from the Terminal.
+ * `TAU_WINDOWS_SANDBOX_HELPER`, and the switch that composes the sandbox, `TAU_WINDOWS_SHELL_SANDBOX=1`. The sandbox is
+ * on by default on Windows (operator decision 2026-11-27, once WIN-X64 shell conformance was green on main's candidate
+ * gate, run 45966873741): only main started with `TAU_WINDOWS_SHELL_SANDBOX=0` turns it off, for diagnostics, and then
+ * the shell, the Terminal and every native kernel are unavailable rather than uncontained. The services host and main
+ * ask for the helper's one-time elevated setup on the first shell, Terminal or native-kernel use.
  *
  * The helper path is always the build's own: an inherited `TAU_WINDOWS_SANDBOX_HELPER` is never forwarded, so nothing
  * that launches Tau can choose the executable Tau asks Windows to run elevated. Absent (another platform, or a
  * development tree where `prepare-windows-sandbox` has not run), the services host has no Windows sandbox to compose.
  *
  * @param resourceRoot - `process.resourcesPath` in a packaged app; `apps/desktop/resources` in a development tree.
- * @param source - Main's environment, read for `TAU_WINDOWS_SHELL_SANDBOX` only.
+ * @param source - Main's environment, read for `TAU_WINDOWS_SHELL_SANDBOX` only: `0` opts out; anything else is on.
  * @param target - Operating system and CPU architecture the helper was built for.
  * @returns The helper and the switch, each only where it applies.
  */
@@ -387,6 +389,6 @@ export const windowsShellSandboxEnvironment = (
     // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
     ...(existsSync(helper) ? { TAU_WINDOWS_SANDBOX_HELPER: helper } : {}),
     // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
-    ...(source['TAU_WINDOWS_SHELL_SANDBOX'] === '1' ? { TAU_WINDOWS_SHELL_SANDBOX: '1' } : {}),
+    ...(source['TAU_WINDOWS_SHELL_SANDBOX'] === '0' ? {} : { TAU_WINDOWS_SHELL_SANDBOX: '1' }),
   };
 };

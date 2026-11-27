@@ -120,6 +120,10 @@
 \* FW5 review (2026-11-27): after the removal the permanent delete also publishes the removed directory as deleted at
 \* each logical path a current mount gives it, attributed to that mount, beside the unchanged root summary and notices.
 \* A local change event, not evidence the index takes: every action and verdict is unchanged.
+\* FW5 re-verification (2026-11-27): a permanent delete reads whether the directory is gone in its settle step, before
+\* its notices instead of after them, and publishes it as deleted only then; a removal that threw or left the
+\* directory records no removal, and its views hear it changed. The version is still taken before the check and the
+\* install is unchanged, and the publication takes one object argument: every action and verdict is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

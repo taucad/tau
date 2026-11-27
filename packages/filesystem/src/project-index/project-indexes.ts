@@ -1337,9 +1337,18 @@ export class ProjectIndexes {
    * overlap (see `mayOverlap`). Every other root, which reads none of the
    * removed bytes, stays warm.
    *
+   * When the removal did not complete (it threw, or the directory is still
+   * there), nothing is recorded as removed: the readers are evicted all the
+   * same, and a holder marks the directory unknown, so each re-reads what is
+   * really there.
+   *
    * @param removed - The provider and provider path of the removed directory.
+   * @param outcome - `removed` once the directory is gone; `unsettled` when the removal failed or left it in place.
    */
-  public forgetRemovedDirectory(removed: Readonly<{ provider: FileSystemProvider; path: string }>): void {
+  public forgetRemovedDirectory(
+    removed: Readonly<{ provider: FileSystemProvider; path: string }>,
+    outcome: 'removed' | 'unsettled' = 'removed',
+  ): void {
     const roots = new Set<string>([
       ...this._states.keys(),
       ...this._stored.keys(),
@@ -1375,16 +1384,22 @@ export class ProjectIndexes {
       this._importFactsPending.delete(root);
       this._importSeeded.delete(root);
     }
-    /* A holder the evictions above dropped has nothing left to record into. One that remains records the removal in its
+    /* A holder the evictions above dropped has nothing left to record into. One that remains records the outcome in its
      * own index directly, even where the removed directory's logical path is itself a mount prefix, which `removeDirectory`
-     * would leave to the mount's own index. */
+     * would leave to the mount's own index: the removal, or, when it did not complete, that the directory is unknown. */
     for (const { root, inside } of holding) {
       const path = root === '/' ? `/${inside}` : `${root}/${inside}`;
       this._forget(path);
-      this._removed(path);
+      if (outcome === 'removed') {
+        this._removed(path);
+      }
       const state = this._states.get(root);
       if (state !== undefined && !this._excluded(inside)) {
-        state.index.remove(inside);
+        if (outcome === 'removed') {
+          state.index.remove(inside);
+        } else {
+          state.index.invalidate(inside);
+        }
         this._schedulePersist(root);
       }
     }

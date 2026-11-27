@@ -231,4 +231,27 @@ describe('ProjectIndexes.forgetRemovedDirectory', () => {
     expect(indexes.get('/home')?.entry('x')).toBeUndefined();
     expect(indexes.get('/home')?.entry('y/main.ts')).toBeDefined();
   });
+
+  /* FW5 re-verification: a removal that failed records nothing removed; every index that reads or holds it re-reads. */
+  it('should record no removal when the removal did not complete, and leave the holder to re-read the directory', async () => {
+    const provider = await durableProvider(['x', 'y']);
+    const table: Table = new Map([
+      ['/projects/x', at(provider, 'x')],
+      ['/projects/y', at(provider, 'y')],
+      ['/home', at(provider, '')],
+    ]);
+    const indexes = indexesOver(table);
+    for (const root of table.keys()) {
+      // oxlint-disable-next-line no-await-in-loop -- Each root opens in turn.
+      await indexes.ready(root);
+    }
+
+    indexes.forgetRemovedDirectory({ provider, path: 'x' }, 'unsettled');
+
+    expect(indexes.get('/projects/x')).toBeUndefined();
+    expect(indexes.get('/projects/y')).toBeDefined();
+    const home = await indexes.ready('/home');
+    expect(home.entry('x/main.ts')).toBeDefined();
+    expect(home.entry('y/main.ts')).toBeDefined();
+  });
 });

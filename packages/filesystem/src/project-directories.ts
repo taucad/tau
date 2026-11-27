@@ -92,7 +92,7 @@ import type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '
 import { isReservedImportPath } from '#importer/path-policy.js';
 import { directoryConcurrency, mapConcurrent } from '#concurrency.js';
 import { workerTimings } from '#worker-timings.js';
-import type { ProjectDirectoryIndex } from '#project-directory-index.js';
+import type { IndexVersion, ProjectDirectoryIndex } from '#project-directory-index.js';
 import { foldPathSpelling } from '#path-fold.js';
 
 /** Declaration or generated-identity failure affecting one discovery entry. @public */
@@ -1078,14 +1078,30 @@ export class ProjectDirectories {
         const physicalParent = separator === -1 ? '' : path.slice(0, separator);
         const authorityParent = physicalParent === '' ? '/' : `/${physicalParent}`;
         const parentAuthority = this._scopedPhysicalAuthority(scope, physicalParent);
+        let completed = false;
+        let present = true;
+        let version: IndexVersion | undefined;
         try {
           await this._deleteProjectDirectory({ provider, directoryPath: path, ...removal });
+          completed = true;
         } finally {
-          /* Only the indexes that read or hold the removed bytes: every other project's stays warm (fast-path FW5). */
-          this._projectIndexes.forgetRemovedDirectory({ provider, path });
-          /* Every view that shows the directory hears it go, the Home connection's alias included (FW5 review M2); the
-           * root summary below stays the discovery epoch's signal and the only one for a copy no mount shows. */
-          this._pipeline.publishRemovedDirectory(storageRootKey, provider, path);
+          if (completed) {
+            /* Every write of the removal has settled: what the check below reads is installed if nothing moved since. */
+            version = this._index.version(storageRootKey, path);
+            try {
+              present = await provider.exists(path);
+            } catch {
+              /* Unknown is not gone. */
+            }
+          }
+          /* Only what the removal did, and only to the indexes that read or hold the directory: every other project's
+           * stays warm (fast-path FW5). A removal that threw or left the directory in place records no removal: the
+           * indexes re-read it and every view hears it changed. */
+          const outcome = completed && !present ? 'removed' : 'unsettled';
+          this._projectIndexes.forgetRemovedDirectory({ provider, path }, outcome);
+          /* Every view that shows the directory hears it, the Home connection's alias included (FW5 review M2); the root
+           * summary below stays the discovery epoch's signal and the only one for a copy no mount shows. */
+          this._pipeline.publishRemovedDirectory({ storageRootKey, provider, providerPath: path, outcome });
           this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
           /* The root fact is for an older tab; the named one tells a sibling's index which directory went (A2 b). */
           this._crossTabCoordinator.notifyChanges([
@@ -1093,9 +1109,7 @@ export class ProjectDirectories {
             namedDirectoryFact(storageRootKey, path),
           ]);
         }
-        /* Every write of the removal has settled: what the check below reads is installed if nothing moved since. */
-        const version = this._index.version(storageRootKey, path);
-        if (await provider.exists(path)) {
+        if (present || version === undefined) {
           throw new Error(`Permanent delete did not remove ${path}`);
         }
         this._index.installGone(storageRootKey, path, version);

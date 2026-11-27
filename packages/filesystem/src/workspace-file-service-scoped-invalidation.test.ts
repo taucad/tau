@@ -616,3 +616,95 @@ describe('an unrooted watch of a path with dot segments', () => {
     expect(events).toEqual([{ type: 'reset' }]);
   });
 });
+
+/*
+ * FW5 re-verification: a permanent delete whose removal fails leaves the directory on disk, so nothing may say it went.
+ * The indexes that read or hold it re-read what is there, and every view that shows it hears it changed, not deleted.
+ */
+describe.each(['bound', 'unbound'] as const)('a permanent delete whose removal fails, %s copy', (kind) => {
+  it('should publish no removal, keep or re-read the directory in every index, and list it again', async () => {
+    const { service, rootProvider } = await createIdbWorkspaceFileService();
+    services.push(service);
+    await writeProject(rootProvider, 'x', x);
+    await writeProject(rootProvider, 'y', y);
+    const durable = (projectId: string, directory: string): ProjectRootConfig => ({
+      projectId,
+      backend: 'indexeddb',
+      providerBasePath: directory,
+    });
+    await service.configureProjectRoots({
+      projects: kind === 'bound' ? [durable(x, 'x'), durable(y, 'y')] : [durable(y, 'y')],
+      roots: [{ backend: 'indexeddb' }],
+    });
+    const indexes = indexesOf(service);
+    await indexes.ready('/');
+    await indexes.ready('/x');
+    const home = service.createRootedFileSystem('/');
+    const sets: ChangeSet[] = [];
+    const events: WatchEvent[] = [];
+    home.watchChangeSets!({ paths: [''], recursive: true }, (set) => sets.push(set));
+    home.watch({ paths: [''] }, (event) => events.push(event));
+    const rmdir = rootProvider.rmdir.bind(rootProvider);
+    vi.spyOn(rootProvider, 'rmdir').mockImplementation(async (path: string) => {
+      if (path === 'x') {
+        throw new Error('EBUSY: simulated');
+      }
+      return rmdir(path);
+    });
+
+    const outcome = await service
+      .permanentlyDeleteProjectDirectory({ projectId: x, providerBasePath: 'x', scope: { backend: 'indexeddb' } })
+      .then(
+        (result) => result.status,
+        () => 'threw',
+      );
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+
+    expect(outcome).not.toBe('deleted');
+    await expect(rootProvider.exists('x')).resolves.toBe(true);
+    expect(sets.flatMap((set) => set.entries).filter((entry) => entry.op === 'deleted' && entry.path === 'x')).toEqual(
+      [],
+    );
+    expect(events).not.toContainEqual({ type: 'delete', path: 'x' });
+    /* The Home connection hears the directory changed, so it lists it again. */
+    expect(sets.some((set) => set.reset?.prefix === 'x')).toBe(true);
+    const root = indexes.get('/');
+    expect(root === undefined || root.entry('x') !== undefined).toBe(true);
+    expect(indexes.get('/x')).toBeUndefined();
+    const listed = await home.readdir('');
+    expect(listed).toContain('x');
+  });
+});
+
+/* FW5 re-verification nit: a removed directory whose Home alias a deeper mount shadows is still published, as the
+ * ingest publishes it: the Home connection, which reads it through its own mount, hears it go; an unrooted watch, which
+ * sees the deeper mount there, does not. */
+describe('a permanently deleted directory a deeper mount shadows', () => {
+  it('should reach the connection of the mount that held it and no unrooted watch of the shadowing mount', async () => {
+    const { service, rootProvider, mountMemory } = await createIdbWorkspaceFileService();
+    services.push(service);
+    await writeProject(rootProvider, 'p1', x);
+    await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+    await mountMemory('/p1', 'memory:shadow');
+    const home: ChangeSet[] = [];
+    service.createRootedFileSystem('/').watchChangeSets!({ paths: [''], recursive: true }, (set) => home.push(set));
+    const unrooted: WatchEvent[] = [];
+    service.watch({ paths: ['/p1'], recursive: true }, (event) => unrooted.push(event));
+
+    await expect(
+      service.permanentlyDeleteProjectDirectory({
+        projectId: x,
+        providerBasePath: 'p1',
+        scope: { backend: 'indexeddb' },
+      }),
+    ).resolves.toMatchObject({ status: 'deleted' });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+
+    expect(home.flatMap((set) => set.entries)).toContainEqual(expect.objectContaining({ op: 'deleted', path: 'p1' }));
+    expect(unrooted).not.toContainEqual({ type: 'delete', path: '/p1' });
+  });
+});

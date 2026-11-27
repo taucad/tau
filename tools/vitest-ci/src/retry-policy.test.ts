@@ -237,9 +237,11 @@ const fakeCase = (options: {
   retryCount?: number;
   flaky?: boolean;
   noDiagnostic?: boolean;
+  fails?: boolean;
 }): FakeCase => ({
   fullName: options.fullName,
   module: { moduleId: options.moduleId },
+  options: { fails: options.fails },
   result: () => ({ state: options.state ?? 'passed' }),
   diagnostic: () =>
     options.noDiagnostic ? undefined : { retryCount: options.retryCount ?? 0, flaky: options.flaky ?? false },
@@ -331,6 +333,34 @@ describe('RetryPolicyReporter', () => {
         '',
       ].join('\n'),
     );
+  });
+
+  it('treats an expected failure that Vitest reports as a retried pass as no flake event, and still records an ordinary retried pass', () => {
+    const file = join(workspace, 'src', 'a.test.ts');
+    const { reporter, lines, fail } = reporterWith(
+      { GITHUB_ACTIONS: 'true', GITHUB_WORKSPACE: workspace, NX_BASE: 'base' },
+      { kind: 'known', files: new Set([file]) },
+    );
+    // `it.fails` whose body failed both attempts: Vitest flips it to a pass with one retry after the retry loop.
+    reporter.onTestCaseResult(
+      fakeCase({ moduleId: file, fullName: 'fails as expected', retryCount: 1, flaky: true, fails: true }),
+    );
+    // `it.fails` whose body passed: flipped to a failure on its first attempt.
+    reporter.onTestCaseResult(
+      fakeCase({ moduleId: file, fullName: 'passes unexpectedly', state: 'failed', fails: true }),
+    );
+    reporter.onTestRunEnd();
+
+    expect(lines).toEqual([]);
+    expect(fail).not.toHaveBeenCalled();
+    expect(reporter.verdict).toEqual({ passes: [], taskCount: 0, overRetried: [], failures: [] });
+
+    reporter.onTestCaseResult(
+      fakeCase({ moduleId: file, fullName: 'retried', retryCount: 1, flaky: true, fails: false }),
+    );
+    reporter.onTestRunEnd();
+    expect(reporter.verdict?.passes.map((pass) => pass.name)).toEqual(['retried']);
+    expect(fail).toHaveBeenCalledOnce();
   });
 
   it('fails the task for a retried pass in a changed file, with error annotations', () => {
@@ -587,6 +617,21 @@ describe('the recorded retry in a real Vitest run (FQ-4 acceptance)', () => {
     expect(task.status, task.output).toBe(1);
     expect(task.output).toContain('earns no credit: its file is changed by this change (RT-3)');
     expect(task.output).toContain('::error title=Retry policy::Task failed: 1 retried pass earns no retry credit');
+  }, 60_000);
+
+  it('an expected failure that fails every attempt, in a file the change touches, is no retried pass and exits 0', () => {
+    const base = commitAll(directory, 'base');
+    place('expected-failure.fixture.ts');
+    const head = commitAll(directory, 'add the test');
+
+    const task = runTask('expected-failure', base, head);
+    expect(task.status, task.output).toBe(0);
+    expect(task.output).not.toContain('Retried pass');
+    // Vitest's own `github-actions` job summary still lists it under "Flaky Tests" (its display, which the ledger does
+    // not read); the recorded retry adds no row for it.
+    expect(task.summary).not.toContain('Retried passes');
+    const rows = readFileSync(join(directory, 'out', 'test-results', 'fixture', 'test.outcomes.jsonl'), 'utf8');
+    expect(rows).toContain('"state":"passed","retryCount":1,"flaky":false');
   }, 60_000);
 
   it('four retried passes in a task exit 1', () => {

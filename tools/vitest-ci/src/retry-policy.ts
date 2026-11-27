@@ -220,6 +220,7 @@ const escapeProperty = (text: string): string => escapeData(text).replaceAll(':'
 type TestCaseLike = {
   readonly fullName: string;
   readonly module: { readonly moduleId: string };
+  readonly options?: { readonly fails?: boolean | undefined };
   result(): { readonly state: string };
   diagnostic(): { readonly retryCount: number; readonly flaky: boolean } | undefined;
 };
@@ -318,7 +319,9 @@ export class RetryPolicyReporter implements Reporter {
     if (diagnostic.retryCount > retryBudget.retries && onCi(this.#env)) {
       this.#overRetried.push(pass);
     }
-    if (diagnostic.flaky && testCase.result().state === 'passed') {
+    // Vitest inverts an expected failure (`it.fails`) after its retry loop, so a retried pass of one failed every
+    // attempt as expected: no flake event. The outcome recorder classifies it the same way.
+    if (diagnostic.flaky && testCase.result().state === 'passed' && testCase.options?.fails !== true) {
       this.#passes.push(pass);
     }
   }

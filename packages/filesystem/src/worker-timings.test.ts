@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { withCrossTabLocks } from '#cross-tab-coordinator.js';
 import {
+  countDiscoveryRootCold,
   createWorkerTimings,
+  discoveryRootColdReasons,
   formatWorkerTimingSummary,
   workerTimingCounters,
   workerTimings,
@@ -109,6 +111,29 @@ describe('system skill overlay counters', () => {
       'overlay.read': { total: 3, peakPerSecond: 3 },
       'overlay.fetch': { total: 1, peakPerSecond: 1 },
     });
+  });
+});
+
+describe('discovery counters', () => {
+  it('should count a cold root in total and under its reason', () => {
+    const { timings } = recorder();
+    const startedAt = timings.now();
+
+    countDiscoveryRootCold('gap', timings);
+    countDiscoveryRootCold('gap', timings);
+    countDiscoveryRootCold('reset', timings);
+
+    expect(timings.summarize(startedAt).counters).toEqual({
+      'discovery.rootCold': { total: 3, peakPerSecond: 3 },
+      'discovery.rootCold.gap': { total: 2, peakPerSecond: 2 },
+      'discovery.rootCold.reset': { total: 1, peakPerSecond: 1 },
+    });
+  });
+
+  it('should name a counter for every reason a root goes cold', () => {
+    expect(discoveryRootColdReasons.map((reason) => `discovery.rootCold.${reason}`)).toEqual(
+      workerTimingCounters.filter((name) => name.startsWith('discovery.rootCold.')),
+    );
   });
 });
 

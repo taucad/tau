@@ -1,7 +1,8 @@
 /**
- * The project providers (A6b): each leases a project runtime and provides its view as `ProjectContext`. They live
- * apart from `use-project.tsx`, which holds the context and its hooks, so a surface that only reads the open project
- * (the shared composer on Home) never reaches the project runtime, the editor or the viewer (progressive loading PL1).
+ * The project providers (A6b): each leases a project runtime and provides its view as `ProjectContext`
+ * (`@taucad/ui-core/contexts/project-context`). They live apart from `use-project.tsx`, which holds the hooks, so a
+ * surface that only reads the open project (the shared composer on Home) never reaches the project runtime, the
+ * editor or the viewer (progressive loading PL1).
  */
 /* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
 import type { ReactNode } from 'react';
@@ -37,7 +38,7 @@ import { sessionProjectRuntimeOf } from '#runtime/project-runtime.session.js';
 import type { ProjectRuntimeViewSource } from '#runtime/project-runtime.session.js';
 import { standaloneProjectPortOf } from '#runtime/standalone-project-port.js';
 
-import { ProjectContext } from '#hooks/use-project.js';
+import { ProjectContext } from '@taucad/ui-core/contexts/project-context';
 import type { ProjectContextType } from '#hooks/use-project.js';
 
 const errorMessage = (error: unknown): string =>

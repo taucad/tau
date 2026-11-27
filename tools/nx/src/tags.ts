@@ -9,6 +9,13 @@
  * them is enforced even where their `layer:` tags are equal. `shell:<role>`
  * names the private libraries the shell split extracts (`sandbox`, `service`,
  * `terminal`), so their dependency direction can be constrained the same way.
+ * `ui:<name>` names each UI app library (`scope:ui type:app-lib`) in the
+ * layering of `docs/research/ui-app-lib-layering-blueprint.md`: a layered
+ * library by its own name, `infra` for the libraries every layer may use and
+ * `unlayered` for those no layered library may use; `eslint.config.mjs` gives
+ * each layered library the libraries it may depend on.
+ * `protocol:agent` marks the agent-protocol projects that the UI foundation
+ * libraries may not reach.
  * `ci:<lane>` names the CI lanes that select a project by tag (`nx show
  * projects --projects tag:ci:<lane>`): a project may carry several, one per
  * lane, so it is the one dimension whose values are not exclusive. `ci:desktop`
@@ -46,5 +53,23 @@ export const projectTagVocabulary = {
     'projects',
   ],
   shell: ['sandbox', 'service', 'terminal'],
-  ci: ['browser', 'standalone', 'quarantined', 'shell', 'desktop', 'native-hosts'],
+  ui: [
+    'ui-core',
+    'ui-kit',
+    'chat-ui',
+    'files-ui',
+    'editor-ui',
+    'revisions-ui',
+    'publish-ui',
+    'settings-ui',
+    'billing-ui',
+    'chat-surfaces',
+    'project-library',
+    'project-workspace',
+    'agent-host-ui',
+    'infra',
+    'unlayered',
+  ],
+  protocol: ['agent'],
+  ci: ['browser', 'standalone', 'nightly-only', 'shell', 'desktop', 'native-hosts'],
 } as const;

@@ -47,10 +47,11 @@ trap 'exit 1' INT TERM
 { cat /etc/os-release; uname -a; printf 'source=%s\nrun=%s\nrepository=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_REPOSITORY"; } > "$evidence/identity.txt"
 
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-# Runtime prerequisites (bubblewrap, socat, ripgrep) and the toolchain node-pty builds from source with.
+# Runtime prerequisites (bubblewrap, socat, ripgrep), the toolchain node-pty builds from source with, and libatomic1,
+# which the official Node 26 binary copied into ~/node links (libatomic.so.1) and minimal images lack.
 if [[ "$tier" == full ]]; then
   sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux \
+    libatomic1 apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux \
     xvfb xauth dbus-x11 dbus-user-session xdg-utils libsecret-1-0 libgtk-3-0t64 libnss3 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 \
     libdrm2 libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libx11-xcb1 libxss1 \
     libvulkan1 mesa-vulkan-drivers vulkan-tools docker.io
@@ -59,7 +60,7 @@ else
   host_packages=()
   if listed host; then host_packages=(dbus-user-session docker.io); fi
   sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux \
+    libatomic1 apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux \
     "${host_packages[@]}"
 fi
 # The host rows (W7 E06) assert that /var/run/docker.sock and the session bus are live sockets: every full run, and

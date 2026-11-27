@@ -11,6 +11,7 @@ import {
   desktopArchiveName,
   desktopArtifactKinds,
   desktopArtifactName,
+  desktopDownloadPage,
   desktopReleaseBaseUrl,
   desktopReleaseIdentity,
   parseDesktopAcceptanceReceipt,
@@ -460,5 +461,25 @@ describe('desktop installed acceptance receipt', () => {
     expect(() =>
       parseDesktopAcceptanceReceipt({ ...proof, artifacts: proof.artifacts.slice(1) }, manifest(artifacts)),
     ).toThrow(new TypeError('Acceptance receipt artifacts disagree with candidate route'));
+  });
+});
+
+describe('desktop download page (T-DL.1)', () => {
+  it('should return the offered release page when the updater has one', () => {
+    const releasePage = 'https://github.com/taucad/tau/releases/tag/desktop%401.15.1';
+    expect(desktopDownloadPage('production', { releasePage })).toBe(releasePage);
+    expect(desktopDownloadPage('staging', { releasePage })).toBe(releasePage);
+  });
+
+  it("should return the channel's page otherwise, the release list for staging pre-releases", () => {
+    expect(desktopDownloadPage('production')).toBe('https://github.com/taucad/tau/releases/latest');
+    expect(desktopDownloadPage('production', {})).toBe('https://github.com/taucad/tau/releases/latest');
+    expect(desktopDownloadPage('staging')).toBe('https://github.com/taucad/tau/releases');
+  });
+
+  it('should not send a person to a page outside the Tau releases on GitHub', () => {
+    expect(desktopDownloadPage('production', { releasePage: 'https://example.com/tau.exe' })).toBe(
+      'https://github.com/taucad/tau/releases/latest',
+    );
   });
 });

@@ -1,4 +1,5 @@
 import type { CadReference } from '@taucad/chat/references';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
 import {
   useState,
   useRef,
@@ -9,7 +10,7 @@ import {
   useMemo,
   useSyncExternalStore,
 } from 'react';
-import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
 import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
@@ -17,18 +18,18 @@ import { chatDragKindOf } from '#components/chat/chat-drop-zone.js';
 import type { ChatDragEvent } from '#components/chat/chat-drop-zone.js';
 import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
-import type { DraftAttachment, DraftAttachmentSource, PendingDraftImage } from '#hooks/draft.machine.js';
+import type { DraftAttachment, DraftAttachmentSource, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { attachmentModelForExecution, attachmentSendBlockReason } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import { homeComposerAttachmentDirectory, useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
-import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { toast } from '@taucad/ui/components/sonner';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useComposerExit } from '@taucad/chat-ui/components/use-composer-exit';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
+import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-submit-button.js';
 import { getClipboardImageFiles, handleClipboardImagePaste } from '@taucad/chat-ui/components/chat-paste-handler';
 import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
 import type { AttachmentIntakeRefusal } from '@taucad/chat-ui/utils/attachment-intake';
@@ -42,7 +43,7 @@ import {
 import { recordAttachmentIntake } from '#telemetry/attachment-intake-telemetry.js';
 import { osClass } from '#telemetry/platform-class.js';
 import { attachmentAccept } from '#utils/attachment-accept.js';
-import { attachmentRefusalCopy } from '#utils/attachment-refusal.js';
+import { attachmentRefusalCopy } from '@taucad/chat-ui/utils/attachment-refusal';
 
 /**
  * Payload the chat textarea hands to its host's `onSubmit` callback.
@@ -63,6 +64,8 @@ export type ChatTextareaSubmitPayload = {
   readonly attachments: readonly StoredAttachmentRef[];
   /** The structured geometry references of the draft's chips (blueprint D6); present only when there are some. */
   readonly references?: readonly CadReference[];
+  /** The draft's comments and annotated pictures; present only when there are some. */
+  readonly annotations?: MessageAnnotations;
 };
 
 /** Count a file intake refused and say so, naming its format and the next step. */
@@ -199,14 +202,6 @@ export type ChatTextareaProperties = {
   readonly enableMobileCollapse?: boolean;
 };
 
-// Define the key combination for cancelling the stream
-export const cancelChatStreamKeyCombination = {
-  key: 'Backspace',
-  modKey: true,
-  shiftKey: true,
-  requireAllModifiers: true,
-} satisfies KeyCombination;
-
 /**
  * Optional callbacks the chat textarea uses to dispatch drag-drops of
  * non-image MIME types that the container alone can recognise.
@@ -300,6 +295,8 @@ export function useChatTextareaLogic({
   handlePointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   focusInput: () => void;
   removeAttachment: (index: number) => void;
+  /** This composer's draft holds at least one comment. */
+  hasDraftComments: boolean;
   setDraftToolChoice: (choice: ToolSelection) => void;
   setShowContextMenu: (show: boolean) => void;
   setAtSymbolPosition: (position: number) => void;
@@ -330,9 +327,11 @@ export function useChatTextareaLogic({
     attachmentSource,
     agentActivity,
   } = useChatComposer();
+  /* A turn being admitted, or a send leaving for one, is stoppable before any byte streams: Stop puts it back. */
   const canStop =
     status === 'streaming' ||
     status === 'submitted' ||
+    agentActivity === 'working' ||
     agentActivity === 'approval-required' ||
     agentActivity === 'stopping';
   const attachmentModel = useMemo(
@@ -374,6 +373,9 @@ export function useChatTextareaLogic({
   const inputText = useDraftSelector((state) => (mode === 'main' ? state.draftText : state.editDraftText));
   const attachments = useDraftSelector((state) =>
     mode === 'main' ? state.draftAttachments : state.editDraftAttachments,
+  );
+  const annotations = useDraftSelector((state) =>
+    mode === 'main' ? state.draftAnnotations : state.editDraftAnnotations,
   );
   const sendBlockReason = attachmentSendBlockReason(attachments, attachmentModel);
   const isAttaching = useDraftSelector((state) => (mode === 'main' ? state.attachingMain : state.attachingEdit));
@@ -484,6 +486,7 @@ export function useChatTextareaLogic({
   // Refs for stable handleSubmit — prevents re-render cascades through memo'd children
   const inputTextRef = useRef(inputText);
   const attachmentsRef = useRef(attachments);
+  const annotationsRef = useRef(annotations);
   const sendBlockReasonRef = useRef(sendBlockReason);
   const isAttachingRef = useRef(isAttaching);
   const isSubmittingRef = useRef(isSubmitting);
@@ -496,6 +499,7 @@ export function useChatTextareaLogic({
   useLayoutEffect(() => {
     inputTextRef.current = inputText;
     attachmentsRef.current = attachments;
+    annotationsRef.current = annotations;
     sendBlockReasonRef.current = sendBlockReason;
     isAttachingRef.current = isAttaching;
     isSubmittingRef.current = isSubmitting;
@@ -503,6 +507,7 @@ export function useChatTextareaLogic({
     onSubmitRef.current = onSubmit;
     resumeRef.current = canResume ? resume : undefined;
   }, [
+    annotations,
     attachments,
     canResume,
     inputText,
@@ -539,6 +544,7 @@ export function useChatTextareaLogic({
           content,
           attachments: attachmentsRef.current,
           ...(references === undefined || references.length === 0 ? {} : { references }),
+          ...(annotationsRef.current === undefined ? {} : { annotations: annotationsRef.current }),
         });
       } finally {
         submitInFlightRef.current = false;
@@ -930,6 +936,7 @@ export function useChatTextareaLogic({
     handlePointerDown,
     focusInput,
     removeAttachment,
+    hasDraftComments: (annotations?.comments.length ?? 0) > 0,
     setDraftToolChoice,
     setShowContextMenu,
     setAtSymbolPosition,

@@ -3,7 +3,7 @@
  */
 
 import { createEventLogAppender } from '#log/event-log-appender.js';
-import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
+import type { EventLogAppendOutcome, EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
 import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
 import type { CreateTauAgentHostOptions } from '#host/tau-agent-host.js';
 import type {
@@ -51,6 +51,31 @@ export const createMemoryLogFile = (
     },
   };
 };
+
+/**
+ * A test's log whose `append` is hooked: its batches go through the hook one row at a time, as the appender's own
+ * `appendMany` writes them in order, so a hook that waits or fails on one row still sees that row (WP-10 step A).
+ *
+ * @param log - The hooked log; its `appendMany`, if it spread one in, is replaced.
+ * @returns The log, batching through `append`.
+ */
+export const rowByRow = <Log extends Pick<EventLogAppender, 'append'>>(
+  log: Log,
+): Log & Pick<EventLogAppender, 'appendMany'> => ({
+  ...log,
+  appendMany: async (events) => {
+    const outcomes: EventLogAppendOutcome[] = [];
+    try {
+      for (const event of events) {
+        // oxlint-disable-next-line no-await-in-loop -- the batch's rows are written in order.
+        outcomes.push(await log.append(event));
+      }
+    } catch (error) {
+      return { outcomes, failure: error, known: (error as { readonly code?: unknown }).code !== 'LOG_POISONED' };
+    }
+    return { outcomes, known: true };
+  },
+});
 
 export const createIds = (prefix: string): (() => string) => {
   let next = 0;

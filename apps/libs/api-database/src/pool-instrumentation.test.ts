@@ -125,10 +125,10 @@ describe('pool instrumentation (database connection audit R4)', () => {
     await once(server, 'listening');
     const { port } = server.address() as net.AddressInfo;
 
-    const socket = countedSocket('request')({ host: ['127.0.0.1'], port: [port], path: undefined });
+    const socket = countedSocket('request')({ path: false }, '127.0.0.1', port);
     await once(socket, 'connect');
 
-    expect(Reflect.get(socket, 'host')).toBe('127.0.0.1');
+    expect([socket.remoteAddress, socket.remotePort]).toEqual(['127.0.0.1', port]);
     expect(open('request')).toBe(1);
     expect(total('tau.db.client.connects', { 'tau.db.pool': 'request', outcome: 'ok' })).toBe(1);
 
@@ -145,7 +145,7 @@ describe('pool instrumentation (database connection audit R4)', () => {
     const { port } = probe.address() as net.AddressInfo;
     probe.close();
 
-    const socket = countedSocket('background')({ host: ['127.0.0.1'], port: [port], path: undefined });
+    const socket = countedSocket('background')({ path: false }, '127.0.0.1', port);
     await new Promise((resolve) => {
       socket.once('close', resolve);
     });

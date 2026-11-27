@@ -95,8 +95,8 @@ describe('runtime.operation (T10)', () => {
 
   it('should keep an allowlisted limit with its numbers', () => {
     const limit = {
-      id: 'occt.export.triangles',
-      unit: '{triangle}',
+      id: 'geospec.work.units',
+      unit: '{unit}',
       maximum: 5_000_000,
       demand: { kind: 'measured', value: 6_000_000 },
       origin: 'default',
@@ -105,6 +105,17 @@ describe('runtime.operation (T10)', () => {
       limit,
     });
   });
+
+  it.each(['occt.export.triangles', 'mesh.export.triangles'])(
+    'should read the retired limit id %s as _OTHER without its numbers',
+    (id) => {
+      const limit = { id, unit: '{triangle}', maximum: 10, demand: { kind: 'measured', value: 12 }, origin: 'default' };
+      expect(parseRuntimeEntry(operation({ outcome: 'issue', code: 'RESOURCE_LIMIT', limit }))?.detail).toHaveProperty(
+        'limit',
+        { id: otherValue },
+      );
+    },
+  );
 
   it.each([
     ['a forged population', { population: 'signed-in' }],

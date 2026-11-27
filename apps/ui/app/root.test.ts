@@ -111,23 +111,18 @@ describe('root shouldRevalidate on client navigation', () => {
     expect(shouldRevalidate(rootNavigation('/projects/abc', '/projects/abc', 'POST'))).toBe(true);
   });
 
-  it('keeps the default for an explicit revalidation of the same URL', () => {
-    expect(shouldRevalidate(rootNavigation('/projects/abc', '/projects/abc'))).toBe(true);
-    expect(shouldRevalidate(rootNavigation('/community?q=gear', '/community?q=gear'))).toBe(true);
+  it('does not revalidate for a navigation to the URL already shown (launch audit N-3)', () => {
+    expect(shouldRevalidate(rootNavigation('/projects/abc', '/projects/abc'))).toBe(false);
+    expect(shouldRevalidate(rootNavigation('/community?q=gear', '/community?q=gear'))).toBe(false);
   });
 
-  it('never revalidates into the offline shell path', () => {
+  it('treats /usage as any page: a click does not revalidate, a submission keeps the default (W12)', () => {
     expect(shouldRevalidate(rootNavigation('/', '/usage'))).toBe(false);
-    expect(shouldRevalidate(rootNavigation('/', '/usage', 'POST'))).toBe(false);
+    expect(shouldRevalidate(rootNavigation('/', '/usage', 'POST'))).toBe(true);
   });
 
   it('skips the remote-host harness too: its check reads the location, not loader data (P2)', () => {
     expect(shouldRevalidate(rootNavigation('/', '/__e2e/remote-host'))).toBe(false);
     expect(shouldRevalidate(rootNavigation('/__e2e/remote-host', '/projects/abc'))).toBe(false);
-  });
-
-  it('keeps the default when leaving the offline shell path, whose neutral document carries no real root data', () => {
-    expect(shouldRevalidate(rootNavigation('/usage', '/projects/abc'))).toBe(true);
-    expect(shouldRevalidate(rootNavigation('/usage/', '/'))).toBe(true);
   });
 });

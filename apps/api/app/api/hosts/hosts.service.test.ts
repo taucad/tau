@@ -940,7 +940,7 @@ describe('HostsService cloud provisioning', () => {
     const service = new HostsService(harness.database, harness.redis, harness.config, harness.provisioner);
 
     const first = await service.provisionCloudHost({ userId: 'owner-1', projectId: 'project-a' });
-    expect(first).toMatchObject({ label: 'Tau Cloud', state: 'provisioned' });
+    expect(first).toMatchObject({ label: 'Cloud', state: 'provisioned' });
     expect(first.deviceId).toMatch(/^agent_/u);
     expect(JSON.stringify(first)).not.toContain(harness.started[0]?.credential ?? 'unreachable');
     expect(harness.started).toHaveLength(1);
@@ -963,7 +963,7 @@ describe('HostsService cloud provisioning', () => {
     expect(harness.devices[0]?.gitCredentialHash).toBe(hashHostGitCredential(gitCredential));
 
     const second = await service.provisionCloudHost({ userId: 'owner-1', projectId: 'project-a' });
-    expect(second).toEqual({ deviceId: first.deviceId, label: 'Tau Cloud', state: 'existing' });
+    expect(second).toEqual({ deviceId: first.deviceId, label: 'Cloud', state: 'existing' });
     expect(harness.started).toHaveLength(1);
     expect(harness.devices).toHaveLength(1);
     service.onModuleDestroy();
@@ -1050,7 +1050,7 @@ describe('HostsService cloud provisioning', () => {
     harness.devices.push({
       id: 'device-cloud',
       ownerId: 'owner-1',
-      label: 'Tau Cloud',
+      label: 'Cloud',
       credentialHash: 'hash',
       cloudProjectId: 'project-c',
     });
@@ -1093,7 +1093,7 @@ describe('HostsService cloud provisioning', () => {
     harness.devices.push({
       id: 'device-before-0045',
       ownerId: 'owner-1',
-      label: 'Tau Cloud',
+      label: 'Cloud',
       credentialHash: 'hash',
       gitCredentialHash: null,
       cloudProjectId: 'project-e',
@@ -1116,7 +1116,7 @@ describe('HostsService cloud provisioning', () => {
     const cloud = (id: string, cloudProjectId: string) => ({
       id,
       ownerId: 'owner-leaving',
-      label: 'Tau Cloud',
+      label: 'Cloud',
       credentialHash: `hash-${id}`,
       gitCredentialHash: `git-${id}`,
       cloudProjectId,
@@ -1180,7 +1180,7 @@ describe('HostsService cloud provisioning', () => {
     harness.devices.push({
       id: 'device-cloud',
       ownerId: 'owner-1',
-      label: 'Tau Cloud',
+      label: 'Cloud',
       credentialHash: 'hash',
       cloudProjectId: 'project-c',
     });

@@ -238,6 +238,8 @@ export const smlibKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: smlibDetectPattern,
   builtinModuleNames: [smlibModuleName],
+  // Resolves through the bundler and reads model sources only as bundle output.
+  sourceIdentity: 'bundle',
   builtinPackages: {
     [smlibModuleName]: { name: smlibPackage.name, version: smlibPackage.version },
   },

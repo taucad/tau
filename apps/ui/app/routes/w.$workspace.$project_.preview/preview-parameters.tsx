@@ -1,4 +1,5 @@
 import { Heading } from '@taucad/ui/components/heading';
+import { PaneWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { useState, useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import { RefreshCcw, ChevronRight, Search } from 'lucide-react';
@@ -111,7 +112,7 @@ export function PreviewParameters(): React.JSX.Element {
             onParametersChange={handleParametersChange}
           />
         ) : (
-          <div className='p-3 text-sm text-muted-foreground'>Loading parameter metadata…</div>
+          <PaneWaitSkeleton shape='fields' label='Parameters' />
         )}
       </div>
     </div>

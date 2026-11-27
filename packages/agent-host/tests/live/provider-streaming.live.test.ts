@@ -23,7 +23,7 @@ type ProviderCase = {
 
 const defaults: Record<ProviderCase['providerKind'], Omit<ProviderCase, 'providerKind'>> = {
   openai: {
-    modelId: 'openai-gpt-5.6-luna',
+    modelId: 'openai-gpt-6-luna',
     contextWindow: 200_000,
     reasoning: { effort: 'high', summary: 'detailed' },
   },

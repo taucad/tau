@@ -1,0 +1,95 @@
+// @vitest-environment jsdom
+/**
+ * Naming the chat a receipt was spent in, without opening every project.
+ *
+ * The usage page has no chat context of its own, and the global inventory
+ * (`getAllChats`) opens each project this device holds. A receipt carries the
+ * project as well as the chat, so exactly one project's storage is read, and
+ * only once a reader opens the row.
+ */
+import { renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useChatName } from '#components/usage/use-chat-name.js';
+import type { ChatRecordsReader } from '#components/usage/use-chat-name.js';
+import { chatLabel } from '#components/usage/activity-names.js';
+
+const getChatRecordsForResource = vi.fn<ChatRecordsReader>();
+
+const wrapper = ({ children }: { readonly children: React.ReactNode }): React.JSX.Element => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    {children}
+  </QueryClientProvider>
+);
+
+const chat = (
+  id: string,
+  name: string,
+): { readonly id: string; readonly name: string; readonly resourceId: string } => ({
+  id,
+  name,
+  resourceId: 'proj_gearbox',
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  getChatRecordsForResource.mockResolvedValue([chat('chat_one', 'Bracket redesign'), chat('chat_two', 'Gear ratios')]);
+});
+
+describe('useChatName', () => {
+  it('names the chat from the one project the receipt points at', async () => {
+    const { result } = renderHook(() => useChatName('proj_gearbox', 'chat_two', getChatRecordsForResource), {
+      wrapper,
+    });
+
+    expect(result.current).toBeUndefined();
+    await waitFor(() => {
+      expect(result.current).toBe('Gear ratios');
+    });
+    expect(getChatRecordsForResource).toHaveBeenCalledWith('proj_gearbox', { includeDeleted: true });
+  });
+
+  it('settles on nothing when this device does not hold the chat', async () => {
+    const { result } = renderHook(() => useChatName('proj_gearbox', 'chat_elsewhere', getChatRecordsForResource), {
+      wrapper,
+    });
+
+    await waitFor(() => {
+      expect(result.current).toBeNull();
+    });
+  });
+
+  it('settles on nothing rather than retrying when storage cannot answer', async () => {
+    getChatRecordsForResource.mockRejectedValue(new Error('storage unavailable'));
+
+    const { result } = renderHook(() => useChatName('proj_gearbox', 'chat_two', getChatRecordsForResource), {
+      wrapper,
+    });
+
+    await waitFor(() => {
+      expect(result.current).toBeNull();
+    });
+    expect(getChatRecordsForResource).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { label: 'no chat', projectHint: 'proj_gearbox', chatHint: null },
+    { label: 'no project to look in', projectHint: null, chatHint: 'chat_two' },
+  ])('reads nothing at all when the receipt has $label', ({ projectHint, chatHint }) => {
+    const { result } = renderHook(() => useChatName(projectHint, chatHint, getChatRecordsForResource), { wrapper });
+
+    expect(result.current).toBeNull();
+    expect(getChatRecordsForResource).not.toHaveBeenCalled();
+  });
+
+  /*
+   * `null` here means "nothing was looked up", not "looked and found nothing",
+   * and the two must not render the same: the label tells them apart by whether
+   * there was a project to look in at all.
+   */
+  it('never lets a lookup that never happened read as an absent chat', () => {
+    const { result } = renderHook(() => useChatName(null, 'chat_two', getChatRecordsForResource), { wrapper });
+
+    expect(chatLabel({ projectHint: null, chatHint: 'chat_two' }, result.current)).toBe('Chat name not available');
+  });
+});

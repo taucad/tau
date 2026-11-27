@@ -369,6 +369,120 @@ describe('the supervised compute worker (W5)', () => {
     expect(await supervised.inflate(await inline.deflate(data))).toStrictEqual(data);
   });
 
+  it('serves inflateObject past a dead worker from a fallback that lacks it: inflate, size check and SHA-1', async () => {
+    // A fallback built before `inflateObject` answered it `unavailable`, so every read for a copy failed where the
+    // fallback's inflate and sha1 had served it before (SP6-import re-review).
+    const { inflateObject: _absent, ...older } = createInlineCompute();
+    const inline = createInlineCompute();
+    const data = encoder.encode('cube(1);\n'.repeat(100));
+    const deflated = await inline.deflate(data);
+    const oid = digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(data.byteLength)}\0`), ...data]));
+    const abandoned = createSupervisedComputeWorker({
+      spawn: () => {
+        throw new Error('no workers');
+      },
+      maxRestarts: 0,
+      fallback: older,
+    });
+    const answered = await abandoned.inflateObject!('blob', new Uint8Array(deflated), data.byteLength);
+    expect(answered.oid).toBe(oid);
+    expect(new Uint8Array(answered.data)).toStrictEqual(data);
+    for (const [bytes, declared] of [
+      [encoder.encode('not zlib at all'), 10],
+      [deflated, data.byteLength - 1],
+      [deflated, data.byteLength + 1],
+      [deflated, 2 ** 52],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one refusal at a time.
+      const refusal = await abandoned.inflateObject!('blob', new Uint8Array(bytes), declared).catch(
+        (error: unknown) => error,
+      );
+      expect(refusal).toBeInstanceOf(CorruptBytesError);
+    }
+
+    /* A worker that never loaded: its held inflateObject goes to that fallback, and no call is counted failed. */
+    const crashes: unknown[] = [];
+    const unloadable = createSupervisedComputeWorker({
+      spawn: () => {
+        const worker = fakeWorker();
+        worker.freeze();
+        queueMicrotask(() => {
+          worker.crash();
+        });
+        return worker;
+      },
+      maxRestarts: 2,
+      fallback: older,
+      onCrash: (report) => crashes.push(report),
+    });
+    const rerouted = await unloadable.inflateObject!('blob', new Uint8Array(deflated), data.byteLength);
+    expect(rerouted.oid).toBe(oid);
+    expect(crashes).toEqual([{ failedCalls: 0, restarts: 1, abandoned: false }]);
+  });
+
+  it('serves a fallback that is a class instance through its own prototype methods and `this`', async () => {
+    /* A fallback built as a class, before `inflateObject`: its methods live on its prototype and read `this`. */
+    class OlderCompute {
+      public calls = 0;
+      readonly #inline = createInlineCompute();
+      public async inflate(compressed: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+        this.calls += 1;
+        return this.#inline.inflate(compressed);
+      }
+      public async sha1(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+        this.calls += 1;
+        return this.#inline.sha1(bytes);
+      }
+      public async deflate(raw: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#inline.deflate(raw);
+      }
+      public async sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+        return this.#inline.sha256(bytes);
+      }
+      public async sha256Kept(
+        bytes: Uint8Array<ArrayBuffer>,
+      ): Promise<Readonly<{ sha256: string; data: Uint8Array<ArrayBuffer> }>> {
+        return this.#inline.sha256Kept(bytes);
+      }
+      public async indexPack(pack: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#inline.indexPack(pack);
+      }
+      public async resolveDelta(
+        compressed: Uint8Array<ArrayBuffer>,
+        declared: number,
+        base: Uint8Array<ArrayBuffer>,
+      ): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#inline.resolveDelta(compressed, declared, base);
+      }
+      public async decodeImportEntry(
+        request: Parameters<ComputeWorker['decodeImportEntry']>[0],
+      ): ReturnType<ComputeWorker['decodeImportEntry']> {
+        return this.#inline.decodeImportEntry(request);
+      }
+      public async measureImportBytes(
+        bytes: Uint8Array<ArrayBuffer>,
+        expectedSize: number,
+      ): ReturnType<ComputeWorker['measureImportBytes']> {
+        return this.#inline.measureImportBytes(bytes, expectedSize);
+      }
+    }
+    const older = new OlderCompute();
+    const supervised = createSupervisedComputeWorker({
+      spawn: () => {
+        throw new Error('no workers');
+      },
+      maxRestarts: 0,
+      fallback: older,
+    });
+    const data = encoder.encode('cube(2);\n'.repeat(50));
+    const deflated = await createInlineCompute().deflate(data);
+    const oid = digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(data.byteLength)}\0`), ...data]));
+    const answered = await supervised.inflateObject!('blob', new Uint8Array(deflated), data.byteLength);
+    expect(answered.oid).toBe(oid);
+    expect(await supervised.sha1(data)).toBe(digestHex('sha1', data));
+    expect(older.calls).toBe(3);
+  });
+
   it('keeps a pack whose read failed because the worker crashed, and reads it once restarted', async () => {
     /* The first worker dies the moment it is asked to inflate; its successor does not. */
     let spawned = 0;

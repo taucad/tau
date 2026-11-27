@@ -68,8 +68,8 @@ export function CheckEmail({ className, email, reason, onUseDifferentEmail }: Ch
           {reason === 'sign-up'
             ? 'We sent a verification link to '
             : 'Your email is not verified yet. We sent a new link to '}
-          <span className='font-medium text-foreground'>{email}</span>. Open it to finish setting up your Tau account.
-          The link expires in 1 hour.
+          <span className='font-medium text-foreground'>{email}</span>. Open it to finish setting up your account. The
+          link expires in 1 hour.
         </CardDescription>
       </CardHeader>
       <CardContent className='flex flex-col gap-3'>

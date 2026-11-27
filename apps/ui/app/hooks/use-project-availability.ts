@@ -5,12 +5,13 @@ import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
-import type { RevisionClient } from '#types/revision-client.types.js';
+import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
 import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
-import { closureHasPending, kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
-import type { KernelClosure } from '@taucad/ui-core/lib/large-object-guard';
+import { closureHasPending, kernelClosure } from '@taucad/ui-core/lib/kernel-closure';
+import type { KernelClosure } from '@taucad/ui-core/lib/kernel-closure';
+import { useReconciledManifest } from '#lib/manifest-reconciliation.js';
 
 /** First-open readiness comes from the durable gesture and the worker's acknowledged checkout. */
 export type ProjectAvailability =
@@ -309,7 +310,15 @@ export type ModelAvailability = ProjectAvailability | 'files' | 'filesFailed' | 
 export type ModelStatus = Readonly<{
   largeObjects?: Pick<LargeObjectsFacet, 'phase' | 'paths'> | undefined;
   readiness?: ProjectReadiness | undefined;
+  /** The render opened on a Tau Cloud open's first view ({@link modelFirstViewOpens}). */
+  firstView?: boolean | undefined;
 }>;
+
+/**
+ * The model surfaces: the viewer and what draws from its render (Parameters, the model panel, kinematics) render from
+ * a Tau Cloud open's first view; export and print need every authored file (D10).
+ */
+export type ModelSurface = 'viewer' | 'export';
 
 /**
  * {@link ModelAvailability} from the project's availability, its large-object
@@ -317,11 +326,15 @@ export type ModelStatus = Readonly<{
  *
  * A render opens at `materialized` (D10, {@link surfaceReadiness}): a project
  * whose host publishes readiness waits for it there, a check and never a
- * download (T5). From there, only a pending path in the closure holds it; a
- * failed fill is shown whatever it was fetching, so Try again stays reachable.
+ * download (T5). A render that opened on a Tau Cloud open's first view
+ * (`firstView`, see {@link modelFirstViewOpens}) opens from `entryReady`: every
+ * read of a path the open's write has yet to land waits for it (D10, Rule 33).
+ * From there, only a pending path in the closure holds it; a failed fill is
+ * shown whatever it was fetching, so Try again stays reachable.
  *
  * @param project - The project's availability.
- * @param status - The large-object facet, and the published readiness when the host publishes one.
+ * @param status - The large-object facet, the published readiness when the host publishes one, and `firstView` when
+ *   the render opened on the open's first view.
  * @param closure - The render closure, see {@link kernelClosure}.
  * @returns What the model surface shows.
  */
@@ -333,8 +346,8 @@ export function modelAvailability(
   if (project !== 'ready') {
     return project;
   }
-  const { largeObjects, readiness } = status ?? {};
-  if (readiness !== undefined && !readyFor('model', readiness)) {
+  const { largeObjects, readiness, firstView } = status ?? {};
+  if (readiness !== undefined && !readyFor(firstView === true ? 'viewer' : 'model', readiness)) {
     return 'filesChecking';
   }
   if (largeObjects === undefined) {
@@ -390,16 +403,61 @@ export function useFileCheckSlow(): boolean {
   return useSelector(useSessions(), (state) => state.context.status[projectId]?.availability === 'slow');
 }
 
-/** Shared readiness for the viewer, export and the other kernel surfaces. */
-export function useModelAvailability(): ModelAvailability {
-  const { mainEntryPath, viewRecords, geometryUnits } = useProject();
+/**
+ * Whether a model surface opens on a Tau Cloud open's first view, before the whole apply and the intent (STO-25).
+ *
+ * It opens once its first view does (the entry closure has landed, the write is running or landed and has not failed,
+ * the account may open the project) and only while the project's loaded manifest is the `tau.json` that write landed:
+ * the host names those bytes (`entryManifest`) and the manifest observation names the bytes the loaded manifest was
+ * found equal to. Until both name the same bytes the project may still hold the open's placeholder manifest, whose
+ * main entry the tree need not hold (I7). Every other file the render reads waits for the write to land it (Rule 33).
+ *
+ * @param input - The surface, the project's whole and first-view availability, the projection, and the digest of the
+ *   manifest the project holds.
+ * @returns `true` when the surface opens now.
+ */
+export function modelFirstViewOpens(
+  input: Readonly<{
+    surface: ModelSurface;
+    project: ProjectAvailability;
+    firstView: ProjectAvailability;
+    status: Pick<RevisionStatusProjection, 'entryManifest'> | undefined;
+    reconciled: string | undefined;
+  }>,
+): boolean {
+  const { surface, project, firstView, status, reconciled } = input;
+  return (
+    surface === 'viewer' &&
+    project !== 'ready' &&
+    firstView === 'ready' &&
+    status?.entryManifest !== undefined &&
+    status.entryManifest === reconciled
+  );
+}
+
+/**
+ * Shared readiness for the viewer, export and the other kernel surfaces.
+ *
+ * @param surface - `viewer` (the default) renders from a Tau Cloud open's first view once its manifest is the landed
+ *   one ({@link modelFirstViewOpens}); `export` waits for the whole apply.
+ * @returns What the model surface shows.
+ */
+export function useModelAvailability(surface: ModelSurface = 'viewer'): ModelAvailability {
+  const { projectId, mainEntryPath, viewRecords, geometryUnits } = useProject();
   const project = useProjectAvailability();
+  const firstView = useProjectAvailability('viewer');
   const status = useRevisionStatus();
+  const reconciled = useReconciledManifest(projectId);
+  const opensEarly = modelFirstViewOpens({ surface, project, firstView, status, reconciled });
   const viewEntryPaths = [
     ...[...viewRecords.values()].map(({ entryPath }) => entryPath),
     ...geometryUnits.keys(),
   ].filter((path): path is string => typeof path === 'string' && path !== '');
-  return modelAvailability(project, status, projectRenderClosure(mainEntryPath, viewEntryPaths));
+  return modelAvailability(
+    opensEarly ? 'ready' : project,
+    opensEarly ? { largeObjects: status?.largeObjects, readiness: status?.readiness, firstView: true } : status,
+    projectRenderClosure(mainEntryPath, viewEntryPaths),
+  );
 }
 
 /**
@@ -491,6 +549,8 @@ export const surfaceReadiness: Readonly<Record<ReadinessSurface, ProjectReadines
   export: 'materialized',
   lsp: 'materialized',
   cut: 'materialized',
+  /* A render during a Tau Cloud open opens at the viewer's `entryReady` once its manifest is the landed one
+     ({@link modelFirstViewOpens}). */
   model: 'materialized',
 };
 

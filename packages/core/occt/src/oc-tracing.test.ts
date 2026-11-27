@@ -408,6 +408,107 @@ describe('in-flight cooperative abort', () => {
     });
   });
 
+  describe('ownership calls after a superseding abort', () => {
+    /* eslint-disable @typescript-eslint/naming-convention -- embind classes are PascalCase members of the OC module. */
+    class Shape {
+      public deleted = false;
+
+      public area(): number {
+        return 7;
+      }
+
+      public isDeleted(): boolean {
+        return this.deleted;
+      }
+
+      public isAliasOf(other: unknown): boolean {
+        return other === this;
+      }
+
+      public delete(): void {
+        this.deleted = true;
+      }
+
+      public deleteLater(): this {
+        return this;
+      }
+    }
+    // What embind throws for a second `delete()` of a handle.
+    class BindingError extends Error {}
+    class DeletedTwice extends Shape {
+      public override delete(): void {
+        if (this.deleted) {
+          throw new BindingError('Object already scheduled for deletion');
+        }
+        this.deleted = true;
+      }
+    }
+    const { dispose } = Symbol as unknown as { dispose?: symbol };
+    if (dispose) {
+      // Embind's `ClassHandle.prototype[Symbol.dispose]` is its `delete`.
+      Object.defineProperty(Shape.prototype, dispose, { value: Shape.prototype.delete });
+    }
+    const proxies = {
+      exceptions: (oc: MockOc) => wrapOcForExceptions(oc),
+      tracing: (oc: MockOc) => wrapOcWithTracing(oc, createMockTracer(), { mode: 'summary' }).tracedInstance,
+    };
+
+    for (const [name, wrap] of Object.entries(proxies)) {
+      it(`${name}: lets cleanup query and delete a handle while the operation is aborted`, () => {
+        const oc = createMockOc({ getExceptionMessage: vi.fn(), Shape });
+        const traced = wrap(oc) as unknown as { Shape: new () => Shape };
+        const shape = new traced.Shape();
+        const raw = shape as unknown as Shape;
+        // A FinalizationRegistry callback or a finally block runs after the abort word moved.
+        checkAbortMock.mockImplementation(() => {
+          throw new RenderAbortedError();
+        });
+
+        expect(shape.isDeleted()).toBe(false);
+        expect(shape.isAliasOf(raw)).toBe(false);
+        expect(shape.deleteLater()).toBeDefined();
+        shape.delete();
+        expect(shape.isDeleted()).toBe(true);
+        // Real work still stops.
+        expect(() => shape.area()).toThrow(RenderAbortedError);
+      });
+
+      it(`${name}: lets \`Symbol.dispose\` release a handle while the operation is aborted`, () => {
+        const { dispose: symbol } = Symbol as unknown as { dispose?: symbol };
+        expect(symbol).toBeDefined();
+        const oc = createMockOc({ getExceptionMessage: vi.fn(), Shape });
+        const traced = wrap(oc) as unknown as { Shape: new () => Shape };
+        const shape = new traced.Shape() as Shape & Record<symbol, () => void>;
+        checkAbortMock.mockImplementation(() => {
+          throw new RenderAbortedError();
+        });
+
+        shape[symbol!]!();
+        expect(shape.isDeleted()).toBe(true);
+      });
+
+      it(`${name}: surfaces a throwing ownership call unchanged`, () => {
+        const oc = createMockOc({ getExceptionMessage: vi.fn(), DeletedTwice });
+        const traced = wrap(oc) as unknown as { DeletedTwice: new () => DeletedTwice };
+        const shape = new traced.DeletedTwice();
+        checkAbortMock.mockImplementation(() => {
+          throw new RenderAbortedError();
+        });
+
+        shape.delete();
+        let thrown: unknown;
+        try {
+          shape.delete();
+        } catch (error) {
+          thrown = error;
+        }
+        expect(thrown).toBeInstanceOf(BindingError);
+        expect((thrown as Error).message).toBe('Object already scheduled for deletion');
+      });
+    }
+    /* eslint-enable @typescript-eslint/naming-convention -- Restore Tau naming policy. */
+  });
+
   describe('wrapOcWithTracing proxy', () => {
     it('should complete all calls when generation matches throughout', () => {
       const oc = createMultiStepOc();

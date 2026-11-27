@@ -7,7 +7,7 @@ import type {
   TranscoderPlugin,
 } from '#plugins/plugin-types.js';
 import type { RuntimeSource, RuntimeSourceFiles } from '#client/runtime-document-source.js';
-import type { Artifact, ExportFile, ViewInstance } from '#types/runtime-kernel-v2.types.js';
+import type { Artifact, BuildReport, ExportFile, ViewInstance } from '#types/runtime-kernel-v2.types.js';
 import type { KernelIssue, SourceRevision } from '#types/runtime.types.js';
 import type {
   RuntimeContentInput,
@@ -47,6 +47,8 @@ export type Evaluation<ViewId extends string = string, ExportId extends string =
          * changes them with `update({ evaluateOptions })`, which re-evaluates the document.
          */
         evaluateOptions?: Readonly<{ schema: JSONSchema7; defaults: Readonly<Record<string, unknown>> }>;
+        /** What this evaluation's build cost and reused; absent from a worker that predates the report. */
+        build?: BuildReport;
       }
     | { success: false }
   ) & {

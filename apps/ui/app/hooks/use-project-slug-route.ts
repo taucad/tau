@@ -13,9 +13,9 @@
 import { useEffect, useRef } from 'react';
 import { idPrefix } from '@taucad/types/constants';
 import { useProjects } from '#hooks/use-projects.js';
-import type { ProjectListItem } from '#types/project-library.types.js';
-import type { ProjectSlugs } from '#utils/project-url.utils.js';
-import { projectUrl, projectUrlOr } from '#utils/project-url.utils.js';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
+import type { ProjectSlugs } from '@taucad/files-ui/utils/project-url.utils';
+import { projectUrl, projectUrlOr } from '@taucad/files-ui/utils/project-url.utils';
 import { legacyWorkspaceSlugTombstones } from '@taucad/files-ui/filesystem/handle-store';
 
 const equalsFolded = (a: string, b: string): boolean => a.toLocaleLowerCase() === b.toLocaleLowerCase();

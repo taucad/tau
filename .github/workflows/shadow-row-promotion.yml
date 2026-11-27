@@ -1,0 +1,63 @@
+# Shadow-row promotion (CI flake quarantine blueprint, FQ-13; Brain research/ci-flake-quarantine-blueprint.md, D5, and
+# the CI decomposition blueprint's Q1 ruling).
+#
+# A shadow row is an end-to-end suite a project lists in its `test:e2e:shadow` target: it runs and reports, and does
+# not gate. The flake ledger (`flake-ledger.yml`) counts each row's consecutive passing runs from the same outcome rows
+# as every test; once a row reaches the Q1 bar (100), this opens one pull request that moves the suite to the
+# project's `test:e2e:queue`, so it gates. Promotion changes the gate, so the pull request is only proposed: nothing
+# here merges it or enables auto-merge. A pull request opened with the workflow token starts no CI; its body asks the
+# reviewer to close and reopen it.
+#
+# It reads the ledger state from the `flake-ledger` branch and `project.json` files from `main`, uses no environment
+# and no secret: `contents: write` pushes the proposal's branch (the `main` ruleset keeps `main` out of its reach),
+# `pull-requests: write` opens it. Nothing from a pull request runs here.
+name: Shadow-row promotion
+
+on:
+  workflow_run:
+    workflows: [Flake ledger]
+    types: [completed]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  promote:
+    name: Propose shadow-row promotions
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.head_branch == github.event.repository.default_branch
+    concurrency:
+      group: shadow-row-promotion
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout the promotion scripts and project files
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            scripts/package.json
+            scripts/src/ci-flake-ledger.ts
+            scripts/src/ci-flake-ledger-state.ts
+            scripts/src/ci-flake-ledger-store.ts
+            scripts/src/ci-github-client.ts
+            scripts/src/ci-queue-health.ts
+            scripts/src/ci-shadow-rows.ts
+            scripts/src/ci-shadow-rows-promote-cli.ts
+            project.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26.13.1'
+
+      - name: Propose promotions
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/src/ci-shadow-rows-promote-cli.ts --base main

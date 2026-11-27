@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 import { Topic } from '@taucad/events';
-import { getRevisionSessionUser } from '#lib/revision-actor.js';
+import { getRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 
 export const deletionReceiptSchema = z.discriminatedUnion('state', [
   z.object({ id: z.string(), name: z.string(), state: z.enum(['checking', 'deleting']) }),
@@ -107,7 +107,7 @@ export const tauCloudIntent = Object.freeze({
 export const isCloudProjectPending = (projectId: string): boolean => tauCloudIntent.get(projectId) === 'open';
 
 /** Why a pending open goes no further under this account: the one account that may continue it is the opener's. */
-export const cloudOpenAccountReason = 'Use the account that opened this project from Tau Cloud.';
+export const cloudOpenAccountReason = 'Sign in with the account you used to open this project.';
 
 /** Prevent a pending gesture from connecting under a different signed-in account. */
 export const canOpenCloudProject = (projectId: string): boolean => {

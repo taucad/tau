@@ -32,7 +32,7 @@ import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
-import { projectChatUrl } from '#utils/project-url.utils.js';
+import { projectChatUrl } from '@taucad/files-ui/utils/project-url.utils';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { sidebarRowEditorClass } from '#components/nav/sidebar-row.js';
@@ -299,12 +299,14 @@ export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode
   const { chats, isLoading: isChatsLoading } = useChatRecords(projectId);
   const { applyGeneratedChatName, updateChatName } = useChats(projectId, { enabled: false });
   const firstMessage = useChatSelector((state) => state.messages[0]);
+  const isAwaitingFirstStep = useChatSelector((state) => state.status === 'submitted');
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId), [chats, activeChatId]);
   const isGeneratingName = useActiveChatNaming({
     activeChat,
     firstMessage,
     isProjectLoading,
     isChatsLoading,
+    isAwaitingFirstStep,
     applyGeneratedChatName,
   });
   const [isRenaming, setIsRenaming] = useState(false);

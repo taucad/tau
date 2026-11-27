@@ -105,16 +105,16 @@ describe('desktop share links', () => {
      * the shared helper hands the chooser over only while that has not
      * happened, so it never clicks a choice that is about to unmount. */
     await connectTauCloud(page);
-    await expectVisible(page.getByRole('status', { name: 'Backup status' }).filter({ hasText: 'Tau Cloud' }), 180_000);
+    await expectVisible(page.getByRole('status', { name: 'Backup status' }).filter({ hasText: 'Cloud' }), 180_000);
 
-    /* C4 (dbee175fd2): People with access moved from History to Share. */
+    /* C4 (dbee175fd2): Collaborators moved from History to Share. */
     await page.getByRole('button', { name: 'Share', exact: true }).first().click();
-    const people = page.getByRole('region', { name: 'People with access' });
-    const email = people.getByLabel('Invite by email');
+    const people = page.getByRole('region', { name: 'Collaborators' });
+    const email = people.getByLabel('Email address');
     await expectVisible(email, 180_000);
     await email.fill(invitee);
-    await people.getByRole('button', { name: 'Create invite link' }).click();
-    const created = page.getByRole('status', { name: 'Invitation created' }).first();
+    await people.getByRole('button', { name: 'Invite', exact: true }).click();
+    const created = page.getByRole('status', { name: 'Invite link created' }).first();
     await expectVisible(created, 60_000);
 
     await application.evaluate(({ clipboard }, sentinel) => {

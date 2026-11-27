@@ -18,7 +18,7 @@ import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Progress } from '@taucad/ui/components/progress';
 import { cn } from '@taucad/ui/utils/cn';
-import { ExternalLink } from '#components/external-link.js';
+import { ExternalLink } from '@taucad/editor-ui/components/external-link';
 import { describeOutcome, formatQuantity, materialSystemOf, toolheadOf } from '#components/print/machine-facts.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import {

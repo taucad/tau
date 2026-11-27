@@ -554,20 +554,10 @@ test('defers a cold part preview worker and resumes automatic previews after exp
   await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
   await openSecondGeometryUnit('public/models/preview-mixed.js');
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
-  await target.waitFor(() =>
-    Boolean((globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: unknown }).__TAU_SECTION_VIEW_TEST__),
-  );
+  await target.waitFor(() => Boolean(globalThis.__TAU_SECTION_VIEW_TEST__));
   const beginProbe = async () =>
     target.evaluate(() => {
-      const bridge = (
-        globalThis as typeof globalThis & {
-          __TAU_SECTION_VIEW_TEST__?: {
-            getRendererIdentity(): { frame: number };
-            getViewportCanvas(): HTMLCanvasElement;
-            getCamera(): unknown;
-          };
-        }
-      ).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       if (!bridge) {
         throw new Error('Viewport render bridge is missing');
       }
@@ -647,14 +637,9 @@ test('defers a cold part preview worker and resumes automatic previews after exp
             pendingInputs: number[];
             cameraBefore: string;
           };
-          __TAU_SECTION_VIEW_TEST__?: { getRendererIdentity(): { api: string; name: string }; getCamera(): unknown };
         }
       ).__TAU_MIXED_PREVIEW_PROBE__;
-      const bridge = (
-        globalThis as typeof globalThis & {
-          __TAU_SECTION_VIEW_TEST__?: { getRendererIdentity(): { api: string; name: string }; getCamera(): unknown };
-        }
-      ).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       if (!state || !bridge) {
         throw new Error('Viewport render probe is missing');
       }
@@ -717,15 +702,7 @@ test('defers a cold part preview worker and resumes automatic previews after exp
 
   await target.waitFor(
     () => {
-      const bridge = (
-        globalThis as typeof globalThis & {
-          __TAU_SECTION_VIEW_TEST__?: {
-            getModelComponents(): readonly unknown[];
-            getRendererIdentity(): { frame: number };
-            isGeometryFramed(): boolean;
-          };
-        }
-      ).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       return Boolean(
         bridge?.isGeometryFramed() &&
         bridge.getModelComponents().length >= 12 &&

@@ -130,14 +130,11 @@ export const killPhases = [
 export const killClasses = ['foreground', 'background', 'unknown'] as const;
 /** Viewer graphics backends. @public */
 export const viewerBackends = ['webgl', 'webgpu'] as const;
-/** Limit ids that keep their numbers on the wire; any other id is sent as `_OTHER` alone. @public */
-export const runtimeLimitIds = [
-  'occt.export.triangles',
-  'mesh.export.triangles',
-  'host.utility.resident',
-  'picovoxel.tape.instructions',
-  'geospec.work.units',
-] as const;
+/**
+ * Limit ids that keep their numbers on the wire; any other id is sent as `_OTHER` alone. Each id has a producer:
+ * Electron main's resident-memory kill, PicoVoxel's SDF tape refusal and GeoSpec's work-unit budget. @public
+ */
+export const runtimeLimitIds = ['host.utility.resident', 'picovoxel.tape.instructions', 'geospec.work.units'] as const;
 /** Units a limit may carry with numbers. @public */
 export const runtimeLimitUnits = [
   'By',
@@ -765,6 +762,24 @@ export const usageCoverage = [
     dimension: 'agent tools (existing instruments)',
     series: 'tau_agent_tool_calls_total',
     by: 'tool_name',
+    panel: 'agent',
+  },
+  {
+    dimension: 'agent tool-result delivery: timed, excluded and unsettled results (B4)',
+    series: 'tau_agent_tool_results_total',
+    by: 'delivery',
+    panel: 'agent',
+  },
+  {
+    dimension: 'agent tool-result delay, slowest timed result per turn (B4)',
+    series: 'tau_agent_tool_result_delay_bucket',
+    by: 'agent_placement',
+    panel: 'agent',
+  },
+  {
+    dimension: 'agent admission delay by phase, host start, chat state and deployment refetch (C3)',
+    series: 'tau_agent_admission_delay_bucket',
+    by: 'phase',
     panel: 'agent',
   },
 ] as const satisfies ReadonlyArray<Readonly<{ dimension: string; series: string; by: string; panel: number | string }>>;

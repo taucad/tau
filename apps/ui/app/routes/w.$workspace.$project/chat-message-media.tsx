@@ -18,7 +18,7 @@ import {
 } from '#components/chat/attachment-preview.js';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import { useProject } from '#hooks/use-project.js';
-import { useAttachmentSource } from '#hooks/use-attachment-source.js';
+import { useAttachmentSource } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { attachmentUrlPrefix, isAttachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 
 /** One piece of media: an `attachments/…` reference or a `data:` URL, and what its bytes are. */
@@ -177,4 +177,30 @@ export function ChatMessageMedia({
     return <ChatMediaAudio media={media} directory={directory} />;
   }
   return <AttachmentFileChip directory={directory} part={media} className='w-fit max-w-full' />;
+}
+
+/**
+ * A small preview of agent images for a collapsed row, so the picture is visible before the row is opened.
+ *
+ * The previews are decoration on the row's own disclosure button: opening the row shows each image at reading size,
+ * with its own label and viewer.
+ *
+ * @param properties - The row's media; anything that is not an image is left out.
+ * @returns Up to three thumbnails, or nothing when the row holds no image.
+ */
+export function ChatMessageMediaThumbnails({ media }: { readonly media: readonly ChatMedia[] }): ReactNode {
+  const directory = useChatAttachmentDirectories()?.transcript;
+  const images = media.filter((item) => item.mediaType.startsWith('image/')).slice(0, 3);
+  if (images.length === 0) {
+    return null;
+  }
+  return (
+    <span aria-hidden='true' data-slot='media-thumbnails' className='flex items-center gap-1'>
+      {images.map((item) => (
+        <span key={item.url} className='block size-5 overflow-hidden rounded-sm border bg-background'>
+          <AttachmentImage directory={directory} part={item} alt='' className='size-full object-cover' />
+        </span>
+      ))}
+    </span>
+  );
 }

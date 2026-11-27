@@ -4,7 +4,7 @@
  */
 import type { TessellationReport } from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/types';
-import type { Mesh, Voxels } from 'picovoxel';
+import type { MeshChunk, Voxels } from 'picovoxel';
 
 import type { PicovoxelLane } from '#picovoxel.schemas.js';
 
@@ -98,16 +98,77 @@ export const resolvePicovoxelMeshing = (
   return { meshing: { adaptivity: meshAdaptivity } };
 };
 
+/** A field's mesh as JavaScript-owned arrays (no wasm views), with its provenance. */
+export type PicovoxelMeshArrays = Readonly<{
+  vertices: Float32Array;
+  triangles: Uint32Array;
+  lane: 'exact' | 'fast';
+}>;
+
 /**
- * Mesh a Voxels field with the build's meshing; without one, exactly `toMesh()`.
+ * The chunk sink a uniform mesh streams into: each chunk is a view into wasm memory that is valid only while the
+ * callback runs, so it is copied out at once, and the copies are joined when the stream ends.
+ *
+ * @returns The sink, and `finish`, which joins what it received.
+ */
+export const createPicovoxelMeshSink = (): {
+  readonly write: (chunk: MeshChunk) => void;
+  readonly finish: () => { readonly vertices: Float32Array<ArrayBuffer>; readonly triangles: Uint32Array<ArrayBuffer> };
+} => {
+  const vertexChunks: Array<Float32Array<ArrayBuffer>> = [];
+  const triangleChunks: Array<Uint32Array<ArrayBuffer>> = [];
+  const join = <Words extends Float32Array<ArrayBuffer> | Uint32Array<ArrayBuffer>>(
+    chunks: Words[],
+    create: (length: number) => Words,
+  ): Words => {
+    const joined = create(chunks.reduce((length, chunk) => length + chunk.length, 0));
+    let offset = 0;
+    for (const chunk of chunks) {
+      joined.set(chunk, offset);
+      offset += chunk.length;
+    }
+    // The copies are garbage now; drop them before the caller allocates anything else.
+    chunks.length = 0;
+    return joined;
+  };
+  return {
+    write({ vertices, triangles }) {
+      vertexChunks.push(new Float32Array(vertices));
+      triangleChunks.push(new Uint32Array(triangles));
+    },
+    finish: () => ({
+      vertices: join(vertexChunks, (length) => new Float32Array(length)),
+      triangles: join(triangleChunks, (length) => new Uint32Array(length)),
+    }),
+  };
+};
+
+/**
+ * Mesh a Voxels field with the build's meshing, into JavaScript-owned arrays.
+ *
+ * The uniform mesh streams (`voxels.streamMesh`): the grid is meshed in batches of 128³-voxel nodes and each batch is
+ * copied out of the heap, so no whole `Mesh` is ever held in WebAssembly memory beside the grid. The joined arrays are
+ * exactly `toMesh()`'s, element for element, which keeps every exact byte. The adaptive mesh has no streamed form, so
+ * it is built whole with `toMesh(meshing)`, read once and freed at once.
  *
  * @param field - The field to mesh.
  * @param meshing - The build's adaptive meshing, when it has one.
- * @returns The field's mesh.
+ * @returns The field's mesh arrays and lane.
  */
-export const meshPicovoxelField = (field: Voxels, meshing: PicovoxelMeshing | undefined): Mesh =>
-  // PicoVoxel 0.2.0 added the option form; resolvePicovoxelMeshing never passes it under 0.1.0.
-  field.toMesh(meshing);
+export const meshPicovoxelField = (field: Voxels, meshing: PicovoxelMeshing | undefined): PicovoxelMeshArrays => {
+  if (meshing === undefined) {
+    const sink = createPicovoxelMeshSink();
+    field.streamMesh(sink.write);
+    return { ...sink.finish(), lane: field.lane };
+  }
+  const mesh = field.toMesh(meshing);
+  try {
+    // The facade's arrays are fresh JavaScript copies of the native mesh, so freeing it leaves them intact.
+    return { vertices: mesh.vertices, triangles: mesh.triangles, lane: mesh.lane };
+  } finally {
+    mesh.dispose();
+  }
+};
 
 /**
  * The tessellation field an adaptive mesh adds; none for the uniform mesh.

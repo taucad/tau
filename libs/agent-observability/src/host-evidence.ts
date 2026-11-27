@@ -89,19 +89,18 @@ const presentedLimit = 256;
 /** How far ahead of the host's clock the UI's may be; anything later is not a time this device saw. */
 const clockSlackMilliseconds = 5000;
 
+/** The server's answer for this account and project, dated on this host's clock; `undefined` when signed out. */
+type PurposesRead = Readonly<{ answer: EffectivePurposesAnswer; principal: string; receivedAt: number }> | undefined;
+
 /**
- * The server's grant for one purpose, this account and project, read now. A
+ * Read the server's purposes answer for this account and project now. A
  * signed-out credential grants nothing; any other failure rejects, which the
  * reporter treats as unknown: it reports nothing and keeps what is held.
  *
  * @param options - The API, account, project and transport.
- * @param purpose - The purpose the reporter asking answers to.
- * @returns The grant, or `undefined`.
+ * @returns The answer, or `undefined`.
  */
-const readGrant = async (
-  options: HostEvidenceOptions,
-  purpose: ReportingPurpose,
-): Promise<ReportingGrant | undefined> => {
+const readPurposes = async (options: HostEvidenceOptions): Promise<PurposesRead> => {
   const principal = options.principal();
   if (principal === undefined) {
     return undefined;
@@ -118,12 +117,30 @@ const readGrant = async (
   if (!response.ok) {
     throw new Error(`The agent-observability purposes could not be read: ${response.status}`);
   }
-  const answer = (await response.json()) as EffectivePurposesAnswer;
-  /* An account switched while the answer was in flight is not the account it answered for. */
-  return options.principal() === principal
-    ? purposeGrantOf(answer, { principal, project: options.project, receivedAt }, purpose)
-    : undefined;
+  return { answer: (await response.json()) as EffectivePurposesAnswer, principal, receivedAt };
 };
+
+/**
+ * One purpose's grant from an answer. An account switched while the answer was
+ * in flight is not the account it answered for.
+ *
+ * @param options - The account and project.
+ * @param read - The answer read.
+ * @param purpose - The purpose the reporter asking answers to.
+ * @returns The grant, or `undefined`.
+ */
+const grantOf = (
+  options: HostEvidenceOptions,
+  read: PurposesRead,
+  purpose: ReportingPurpose,
+): ReportingGrant | undefined =>
+  options.principal() === read?.principal && read !== undefined
+    ? purposeGrantOf(
+        read.answer,
+        { principal: read.principal, project: options.project, receivedAt: read.receivedAt },
+        purpose,
+      )
+    : undefined;
 
 /**
  * Compose one host's evidence reporter. It reads the grant at once, so a run
@@ -137,6 +154,21 @@ const readGrant = async (
 export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence => {
   const now = options.now ?? Date.now;
   const transport = { fetch: options.fetch, baseUrl: options.apiBaseUrl };
+  /* One answer serves both purposes: the summary and feedback reporters read the grant at the same moments (a run's
+   * start, each quiescence), and asked the same question twice, two requests per moment (chat performance plan WP-02).
+   * A read joins the request in flight; the next read after it settles asks again, so a withdrawal is seen as soon as
+   * before. */
+  let reading: Promise<PurposesRead> | undefined;
+  const readShared = async (): Promise<PurposesRead> => {
+    reading ??= (async () => {
+      try {
+        return await readPurposes(options);
+      } finally {
+        reading = undefined;
+      }
+    })();
+    return reading;
+  };
   const reporterFor = (purpose: ReportingPurpose, store: PendingEvidenceStore): EvidenceReporter =>
     createEvidenceReporter({
       outbox: createEvidenceOutbox({
@@ -144,7 +176,7 @@ export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence =
         submit: async (evidence, signal) => submitEvidence(transport, evidence, signal),
         now,
       }),
-      grant: async () => readGrant(options, purpose),
+      grant: async () => grantOf(options, await readShared(), purpose),
       uploader: options.uploader,
       hostBuild:
         options.hostBuild !== undefined && contractIdPattern.test(options.hostBuild) ? options.hostBuild : undefined,

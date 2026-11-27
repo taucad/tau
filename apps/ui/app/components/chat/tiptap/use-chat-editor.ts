@@ -8,6 +8,7 @@ import { History } from '@tiptap/extension-history';
 import { Placeholder } from '@tiptap/extension-placeholder';
 import type { Editor, JSONContent } from '@tiptap/core';
 import { Slice } from '@tiptap/pm/model';
+import { EditorState } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import {
@@ -22,7 +23,7 @@ import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { ChipType } from '@taucad/chat-ui/components/context-chip';
 import { buildPastedContent, invocationTokenRegex } from '@taucad/chat-ui/utils/at-reference.utils';
 import type { PastedContentSegment } from '@taucad/chat-ui/utils/at-reference.utils';
-import { ContextChipNode } from '#components/chat/tiptap/context-chip-node.js';
+import { ContextChipNode } from '@taucad/chat-surfaces/components/chat/context-chip-node';
 import { SubmitOnEnter } from '@taucad/chat-ui/components/tiptap/submit-on-enter';
 import { ChatInputDropHandler } from '@taucad/chat-ui/components/tiptap/chat-input-drop-handler';
 import { ContextMention } from '@taucad/chat-ui/components/tiptap/context-suggestion';
@@ -116,6 +117,22 @@ function walkChildren(node: JSONContent, visitor: (child: JSONContent) => void):
     }
   }
 }
+
+/**
+ * Forget the editor's undo history, keeping the document and selection it holds.
+ *
+ * One editor serves every chat's draft, and the history plugin records the content swap of a chat switch like any other
+ * edit. Left alone, an undo in the chat the composer moved to reverts the swap, shows the previous chat's draft and
+ * reports it as an edit, which saves it into this chat. A history is a draft's own, so it ends where the draft does:
+ * the state is rebuilt from the same document with the same plugins, which starts every plugin state, the history
+ * among them, afresh, and emits no update.
+ *
+ * @param editor - The composer's editor.
+ */
+export const forgetEditorHistory = (editor: Editor): void => {
+  const { doc, selection, plugins } = editor.state;
+  editor.view.updateState(EditorState.create({ doc, selection, plugins }));
+};
 
 /**
  * The structured references the composer's geometry chips hold (blueprint D6), in document order, without duplicates.

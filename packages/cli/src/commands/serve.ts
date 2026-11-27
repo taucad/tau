@@ -23,7 +23,12 @@ import type {
   RuntimeChildNativeKernels,
 } from '@taucad/host';
 import type { HostSystemSkillBundle } from '@taucad/host/agent-tools';
-import { preparationReporter, reportingPrepareKernel } from '@taucad/host/telemetry';
+import {
+  admissionRefusalReporter,
+  machineOperationReporter,
+  preparationReporter,
+  reportingPrepareKernel,
+} from '@taucad/host/telemetry';
 import type { PreparationReport } from '@taucad/host/telemetry';
 import { nativeDeploymentReportSchema } from '@taucad/native-process-core/store';
 import type { NativeDeploymentReport, NativePreparation } from '@taucad/native-process-core/store';
@@ -34,6 +39,8 @@ import { createConsola } from 'consola';
 import { acquisitionOf } from '#acquisition.js';
 import type { Acquisition } from '#acquisition.js';
 import { prepareServeUi } from '#serve-ui.js';
+import { prepareServeEngines, sha256OfResponse, smokeTestEngine } from '#serve-engines.js';
+import type { ServeEngines } from '#serve-engines.js';
 import type { ServeUi } from '#serve-ui.js';
 import { stageUiEnvironment } from '#ui-environment.js';
 import { resolveZooAuthToken, cliZooProxyUrl } from '#zoo-proxy.js';
@@ -691,6 +698,8 @@ const announceServed = async (served: {
   readonly workspace: string;
   readonly relay: string | undefined;
   readonly ui: boolean;
+  /** What the daemon serves beside the UI: the installed cadmpeg engines, nothing on a skew, or nothing to serve. */
+  readonly engines: ServeEngines['status'];
   readonly print: boolean;
   readonly json: boolean;
   readonly open: boolean;
@@ -703,6 +712,7 @@ const announceServed = async (served: {
       workspace: served.workspace,
       relay: served.relay ?? null,
       ui: served.ui,
+      engines: served.engines,
       ...(served.handOff === undefined ? {} : { handOff: served.handOff }),
     });
   } else if (served.print) {
@@ -807,14 +817,48 @@ const mintHandOffCode = async (served: string, token: string): Promise<string> =
 };
 
 /**
+ * `--smoke-test`, for mounted engines: one engine, fetched as the served page fetches it, must answer as
+ * `application/wasm` with the isolation headers and carry exactly the bytes `cadmpeg-ts/digests` states.
+ *
+ * @param engineUrl - The engine's URL on the served origin.
+ * @param engine - What its bytes must be.
+ * @param version - The `cadmpeg-ts` version that states them.
+ * @throws {Error} When the engine does not answer, or its bytes differ.
+ */
+const smokeTestEngines = async (
+  engineUrl: URL,
+  engine: { readonly sha256: string; readonly byteLength: number },
+  version: string,
+): Promise<void> => {
+  const response = await fetch(engineUrl, { redirect: 'error', signal: AbortSignal.timeout(smokeTestTimeout) });
+  if (
+    !response.ok ||
+    response.headers.get('content-type') !== 'application/wasm' ||
+    response.headers.get('cross-origin-embedder-policy') !== 'require-corp' ||
+    response.headers.get('cross-origin-resource-policy') !== 'same-origin'
+  ) {
+    await response.body?.cancel();
+    throw new Error(`answered ${String(response.status)} ${response.headers.get('content-type') ?? ''}`.trim());
+  }
+  const actual = await sha256OfResponse(response);
+  if (actual.sha256 !== engine.sha256 || actual.byteLength !== engine.byteLength) {
+    throw new Error(
+      `answered ${String(actual.byteLength)} bytes with sha256 ${actual.sha256}; cadmpeg-ts ${version} states ${String(engine.byteLength)} and ${engine.sha256}`,
+    );
+  }
+};
+
+/**
  * `--smoke-test`: the daemon's descriptor must answer, as a page or client would ask it, and so must the UI's document
- * when one is served.
+ * when one is served, and one engine when engines are mounted.
  *
  * @param url - The served origin.
  * @param ui - Whether a UI is served.
- * @throws {CliError} `SMOKE_TEST_FAILED` (exit 1) when it does not answer 200 with a descriptor, or with a document.
+ * @param engines - What the daemon serves beside the UI.
+ * @throws {CliError} `SMOKE_TEST_FAILED` (exit 1) when it does not answer 200 with a descriptor, or with a document, or
+ *   a mounted engine does not answer with its stated bytes.
  */
-const smokeTest = async (url: string, ui: boolean): Promise<void> => {
+const smokeTest = async (url: string, ui: boolean, engines: ServeEngines): Promise<void> => {
   const descriptorUrl = new URL('/.well-known/tau-host', url);
   const documentUrl = new URL('/', url);
   let checked = descriptorUrl;
@@ -831,6 +875,11 @@ const smokeTest = async (url: string, ui: boolean): Promise<void> => {
       if (!document.ok || !(document.headers.get('content-type') ?? '').includes('text/html')) {
         throw new Error(`answered ${String(document.status)} ${document.headers.get('content-type') ?? ''}`.trim());
       }
+      if (engines.status === 'mounted') {
+        const engine = smokeTestEngine(engines.modules);
+        checked = new URL(`${engines.mount.path}${engine.id}_bg.wasm`, url);
+        await smokeTestEngines(checked, engine, engines.version);
+      }
     }
   } catch (error) {
     throw cliError(
@@ -839,14 +888,16 @@ const smokeTest = async (url: string, ui: boolean): Promise<void> => {
       exitCodes.error,
     );
   }
-  consola.success(`Smoke test passed: ${descriptorUrl.href}${ui ? ` and ${documentUrl.href}` : ''} answer.`);
+  consola.success(
+    `Smoke test passed: ${descriptorUrl.href}${ui ? ` and ${documentUrl.href}` : ''}${engines.status === 'mounted' ? ` and ${checked.href} (verified against cadmpeg-ts/digests)` : ''} answer.`,
+  );
 };
 
 /** `tau serve` command. */
 export const serveCommand = defineCommand({
   meta: {
     name: 'serve',
-    description: 'Serve a project folder to the browser on this machine; --relay also offers it to Tau Cloud',
+    description: 'Serve a project folder to the browser on this machine; --relay also offers it to Tau',
   },
   args: {
     dir: {
@@ -969,7 +1020,7 @@ export const serveCommand = defineCommand({
     model: {
       type: 'string',
       description: 'Catalog model id from GET /v1/models for agent turns a client does not override',
-      default: process.env['TAU_HOST_MODEL'] ?? 'openai-gpt-5.6-luna',
+      default: process.env['TAU_HOST_MODEL'] ?? 'openai-gpt-6-luna',
     },
     modelProvider: {
       type: 'string',
@@ -1100,7 +1151,28 @@ export const serveCommand = defineCommand({
                   ? undefined
                   : acquisitionOf(acquisitionValue),
             });
-      const agent = configured && stagedUi ? { ...configured, uiRoot: stagedUi.root } : configured;
+      /* The served UI's cadmpeg engines, from this CLI's own cadmpeg-ts and only when the UI was built against the same
+       * version and digests (engine delivery charter W6, EQ1 option A): a skew mounts nothing and says why. */
+      const engines: ServeEngines =
+        configured?.uiRoot === undefined
+          ? { status: 'none' }
+          : await prepareServeEngines(configured.uiRoot).catch(
+              (error: unknown): ServeEngines => ({
+                status: 'skew',
+                message: `The Tau UI's engine manifest could not be read (${error instanceof Error ? error.message : String(error)}), so tau serve serves no cadmpeg engines; native CAD import is unavailable in the served UI.`,
+              }),
+            );
+      if (engines.status === 'skew') {
+        consola.warn(engines.message);
+      }
+      const agent =
+        configured && stagedUi
+          ? {
+              ...configured,
+              uiRoot: stagedUi.root,
+              ...(engines.status === 'mounted' ? { uiWasmMounts: [engines.mount] } : {}),
+            }
+          : configured;
       const computeWorkspaceRoot = agent?.workspaceRoot;
       const computeStore = createComputeStoreHost({
         directory: join(defaultConfigDirectory(), 'compute'),
@@ -1187,6 +1259,11 @@ export const serveCommand = defineCommand({
               observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller),
               /* PR-7 (AR-W6-02): sync attempts under the same rule as the runtime reporter. */
               syncTelemetryConsent: () => runtimeTelemetry.status().consent,
+              /* T19: `--machines` operations and refused admissions, as `tau mcp --machines` reports them. */
+              machineTelemetry: {
+                onOperation: machineOperationReporter(runtimeTelemetry),
+                onAdmissionRefusal: admissionRefusalReporter(runtimeTelemetry),
+              },
             }),
         ...(observeChats === undefined ? {} : { observeChats }),
         onEvent,
@@ -1230,6 +1307,7 @@ export const serveCommand = defineCommand({
             workspace: configuredAgent.workspaceRoot,
             relay,
             ui: configuredAgent.uiRoot !== undefined,
+            engines: engines.status,
             print: args.print,
             json: args.json,
             /* A hand-off is the point of the run: it opens unless printed for a script or refused with --no-open. */
@@ -1245,7 +1323,7 @@ export const serveCommand = defineCommand({
                 : (args.open ?? !scripted),
           });
           if (args.smokeTest) {
-            await smokeTest(url, configuredAgent.uiRoot !== undefined);
+            await smokeTest(url, configuredAgent.uiRoot !== undefined, engines);
             return;
           }
         }

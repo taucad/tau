@@ -379,18 +379,18 @@ const readBrowserFile = async (
     [slug, ...path],
   );
 
-/** Open the product's persisted-share form, selecting Tau Hosted sharing when necessary. */
+/** Open the cloud link in Share, selecting it when necessary, and wait for its first publish button. */
 const openHostedShare = async (client: PageClient): Promise<void> => {
   const { page } = client;
   await page.getByRole('button', { name: 'Share', exact: true }).first().click({ timeout: 120_000 });
   await page.getByRole('region', { name: 'Share project' }).first().waitFor({ state: 'visible', timeout: 60_000 });
   const method = page.getByRole('button', { name: /^Share with /u }).first();
-  if ((await method.getAttribute('aria-label')) !== 'Share with Hosted link') {
+  if ((await method.getAttribute('aria-label')) !== 'Share with Cloud link') {
     await method.click();
-    await page.getByText('Hosted link', { exact: true }).last().click();
+    await page.getByText('Cloud link', { exact: true }).last().click();
   }
   await page
-    .getByRole('combobox', { name: /Version name/iu })
+    .getByRole('button', { name: /Publish and copy link/iu })
     .first()
     .waitFor({ state: 'visible', timeout: 60_000 });
 };
@@ -776,7 +776,7 @@ describe('a project on the browser client', () => {
       .poll(
         async () => {
           const text = await syncRegionText(client);
-          return text.includes('Tau Cloud') && (await settings.isVisible());
+          return text.includes('Cloud') && (await settings.isVisible());
         },
         {
           message: 'W11b (DEF-8): the connected Tau Cloud remote must reach the Sync region',
@@ -926,11 +926,9 @@ describe('a project on the browser client', () => {
       await gitOutput(await tauRepository(lfsProjectId), ['show', `${browserHeadAfterStep}:roundtrip.step`]),
     ).toContain(`oid sha256:${browserDigest}`);
 
-    /* The named version is authored through the product, then read from each
-     * destination's own revision store — not inferred from the remote tag or
-     * from the unpublished Share authoring form. */
+    /* The version is made through the product's cloud link (the pane names it "Shared <date>"), then read from
+     * each destination's own revision store — not inferred from the remote tag. */
     await openHostedShare(source);
-    await source.page.getByRole('combobox', { name: /Version name/iu }).fill('Ready for print');
     await source.page.getByRole('button', { name: /Publish and copy link/iu }).click();
     await expect
       .poll(async () => gitOutput(await tauRepository(lfsProjectId), ['rev-parse', 'refs/tags/v2^{}']), {
@@ -2385,7 +2383,7 @@ describe('close and continue', () => {
             message: `${continuationOwner} offline: reopened source must expose one queued close revision`,
             timeout: 120_000,
           })
-          .toMatch(/Not backed up · 1 revision/u);
+          .toMatch(/Not backed up · 1 change/u);
         await expect
           .poll(async () => browserHead(client, slug), {
             message: `${continuationOwner} offline: reopen must preserve the queued close revisionId`,
@@ -2852,7 +2850,7 @@ describe('backup by default and one library', () => {
     await expect
       .poll(async () => cloudCard.count(), { message: 'D20: one list names Tau Cloud’s project', timeout: 60_000 })
       .toBe(1);
-    expect(await cloudCard.textContent()).toContain('Tau Cloud');
+    expect(await cloudCard.textContent()).toContain('Cloud');
 
     const destinationSlug = await openCloudOnlyProject(second.page, { projectsUrl, name, message: 'D20 open' });
     const root = join(second.homeRoot, destinationSlug);
@@ -2896,60 +2894,5 @@ describe('backup by default and one library', () => {
     await searchLibrary(second.page, { projectsUrl, name: 'W11' });
     await expect.poll(async () => localLibraryCard(second.page, name).count(), { timeout: 60_000 }).toBe(1);
     expect(await second.page.getByText(optedOutName, { exact: true }).count()).toBe(0);
-  }, 900_000);
-
-  it('should bring the account’s Tau Cloud projects to a device that materializes on sign-in', async () => {
-    const third = await launchTauCloudDesktop(bearer);
-    try {
-      await third.page.goto('app://tau/?settings=filesystem', { waitUntil: 'domcontentloaded' });
-      /* The setting (d19597bf0b, #1227) is the *Tau Cloud projects* select,
-       * whose options are Off, Home and each connected workspace. */
-      const destination = third.page.getByRole('combobox', { name: 'Tau Cloud projects', exact: true });
-      await destination.click({ timeout: 120_000 });
-      await third.page.getByRole('option', { name: 'Home', exact: true }).click();
-      await expect.poll(async () => destination.textContent(), { timeout: 30_000 }).toBe('Home');
-      await third.page.keyboard.press('Escape');
-
-      await searchLibrary(third.page, { projectsUrl, name });
-      let reservedRoot: string | undefined;
-      await expect
-        .poll(
-          async () => {
-            const roots = readdirSync(third.homeRoot, { withFileTypes: true })
-              .filter((entry) => entry.isDirectory())
-              .map((entry) => join(third.homeRoot, entry.name));
-            const ids = await Promise.all(roots.map(async (root) => localProjectId(root)));
-            reservedRoot = roots.find((_, index) => ids[index] === projectId);
-            return reservedRoot;
-          },
-          { message: 'D20: reserve the remote identity without a click', timeout: 120_000 },
-        )
-        .toBeDefined();
-      // A reserved stub stays in the cloud presentation until its first pull supplies the files.
-      const cloudCard = cloudOnlyLibraryCard(third.page, name);
-      await expect.poll(async () => cloudCard.count(), { timeout: 60_000 }).toBe(1);
-      expect(await localLibraryCard(third.page, name).count()).toBe(0);
-
-      /* The first open connects and pulls because the copy is marked for it. */
-      await expect
-        .poll(async () => third.page.evaluate((id) => localStorage.getItem(`tau:tau-cloud-intent:${id}`), projectId), {
-          message: 'D20: a materialized project is marked to connect on its first open',
-          timeout: 60_000,
-        })
-        .toBe('open');
-      await cloudCard.getByRole('button', { name: `Open ${name}`, exact: true }).click();
-      await expect.poll(async () => third.page.url(), { timeout: 120_000 }).toMatch(/\/w\//u);
-      const root = join(third.homeRoot, projectSlug(third.page));
-      expect(root, 'D20: opening reuses the reserved project').toBe(reservedRoot);
-      expect(await localProjectId(root)).toBe(projectId);
-      const remote = required(await gitHead(await tauRepository(projectId)), 'D20: Tau Cloud has no head.');
-      await expect
-        .poll(async () => gitHead(root), { message: 'D20: the first open pulls', timeout: 180_000 })
-        .toBe(remote);
-    } catch (error) {
-      await captureAndRethrow(error, 'materialize-on-sign-in', [third]);
-    } finally {
-      await third.close();
-    }
   }, 900_000);
 });

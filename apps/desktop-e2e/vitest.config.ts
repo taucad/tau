@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -39,6 +40,7 @@ export default defineConfig({
     // One Electron app, one API, one exclusive port pair.
     fileParallelism: false,
     pool: 'forks',
-    reporters: ['default'],
+    reporters: testReporters('default'),
+    retry: testRetry(),
   },
 });

@@ -68,6 +68,27 @@ export const isRendererUrl = (url: string, origins: readonly string[]): boolean 
   return origin !== undefined && origins.includes(origin);
 };
 
+/**
+ * What the diagnostics log records of a navigation target: its origin, or its scheme when it has no host.
+ *
+ * A URL's path and query can carry a sign-in's state or code (a vendor link the person Cmd+clicked in the agent
+ * sign-in tab), and the log is a file on disk, so the rest is never written.
+ *
+ * @param url - The target as requested.
+ * @returns The origin, the scheme, or `invalid`.
+ */
+export const navigationLogTarget = (url: string): string => {
+  const origin = originOf(url);
+  if (origin !== undefined) {
+    return origin;
+  }
+  try {
+    return new URL(url).protocol;
+  } catch {
+    return 'invalid';
+  }
+};
+
 /** What to do with a navigation or window-open request. */
 export type NavigationDecision = 'allow' | 'open-externally' | 'deny';
 

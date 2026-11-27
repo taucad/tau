@@ -3,5 +3,10 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/skills",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"]
+  "tags": ["scope:shared", "type:package", "protocol:agent"],
+  "targets": {
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "{workspaceRoot}/packages/plugins/*/package.json"]
+    }
+  }
 }

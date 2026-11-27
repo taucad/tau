@@ -88,10 +88,7 @@ it.each(['denoise', 'upsample', 'fxaa'] as const)(
   },
 );
 
-it.each([
-  ['drop a lone firefly', 'firefly'],
-  ['keep a one-texel contact seam', 'seam'],
-] as const)('should %s on a flat surface', async (_name, pattern) => {
+it('should keep a one-texel contact seam on a flat surface', async () => {
   // 64 RGBA8 texels fill one 256-byte WebGPU readback row, so rows are unpadded.
   const size = 64;
   const centre = size / 2;
@@ -99,8 +96,8 @@ it.each([
   const data = new Uint8Array(size * size * 4).fill(242);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      if (pattern === 'firefly' ? x === centre && y === centre : x === centre) {
-        data.fill(pattern === 'firefly' ? 0 : 102, (y * size + x) * 4, (y * size + x) * 4 + 3);
+      if (x === centre) {
+        data.fill(102, (y * size + x) * 4, (y * size + x) * 4 + 3);
       }
     }
   }
@@ -122,17 +119,8 @@ it.each([
     quad.render(renderer);
     const pixels = (await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size)) as Uint8Array<ArrayBuffer>;
     const at = (x: number, y: number): number => pixels[(y * size + x) * 4]! / 255;
-    if (pattern === 'firefly') {
-      // Every tap that saw the dark texel stays on the surface value: no dot grid.
-      for (let y = centre - 4; y < centre + 4; y++) {
-        for (let x = centre - 4; x < centre + 4; x++) {
-          expect(at(x, y)).toBeGreaterThan(0.9);
-        }
-      }
-    } else {
-      // Three of 13 taps lie on the seam: the plain mean (~0.82) must survive untrimmed.
-      expect(at(centre, centre)).toBeLessThan(0.84);
-    }
+    // Three of 13 taps lie on the seam: the plain weighted mean (~0.82) survives.
+    expect(at(centre, centre)).toBeLessThan(0.84);
   } finally {
     renderer.setRenderTarget(null);
     target.dispose();

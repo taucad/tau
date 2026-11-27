@@ -12,7 +12,8 @@ import { useViewerCameraInput } from '#routes/w.$workspace.$project/use-viewer-c
 
 const flags = vi.hoisted(() => ({ viewerControls: true }));
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => (flag === 'viewerControls' ? flags.viewerControls : false),
+  useFeature: () => false,
+  useFeatureState: (flag: string) => (flag === 'viewerControls' && flags.viewerControls ? 'on' : 'off'),
 }));
 
 afterEach(() => {
@@ -28,7 +29,7 @@ describe('the preset and gizmo enums', () => {
     expect([...cameraPresetIds]).toEqual([...mousePresetIds]);
     expect([...viewerGizmoIds]).toEqual([...preferenceGizmoIds]);
     expectTypeOf<OrbitStyle>().toEqualTypeOf<OrbitStyleId>();
-    expect([...orbitStyleIds]).toEqual(['turntable', 'tumble']);
+    expect([...orbitStyleIds]).toEqual(['turntable', 'free']);
   });
 });
 
@@ -84,9 +85,9 @@ describe('useViewerCameraInput (C9)', () => {
     const { person, input } = renderRecords();
     expect(input.result.current.cameraInput).not.toHaveProperty('orbitStyle');
     act(() => {
-      person.result.current.writeViewer({ controls: { orbitStyle: 'tumble' } });
+      person.result.current.writeViewer({ controls: { orbitStyle: 'free' } });
     });
-    expect(input.result.current.cameraInput).toEqual({ preset: 'tau', orbitStyle: 'tumble' });
+    expect(input.result.current.cameraInput).toEqual({ preset: 'tau', orbitStyle: 'free' });
   });
 
   it("passes nothing with viewerControls off, so the viewer keeps today's bindings", () => {

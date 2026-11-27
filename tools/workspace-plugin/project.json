@@ -3,5 +3,17 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "tools/workspace-plugin/src",
   "projectType": "library",
-  "tags": ["scope:shared", "type:tool"]
+  "tags": ["scope:shared", "type:tool"],
+  "targets": {
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/.agents/skills/create-package/SKILL.md",
+        "{workspaceRoot}/.agents/skills/create-plugin/SKILL.md",
+        "{workspaceRoot}/packages/plugins/image/**/*"
+      ]
+    }
+  }
 }

@@ -176,8 +176,23 @@ const shell = createDesktopShell({
       }),
 });
 
+/* T19: the utility's runtime reporter, when main names the API, the app's release and the config directory. */
+const telemetryApiOrigin = process.env['TAU_API_URL'];
+const telemetryRelease = process.env['TAU_DESKTOP_RELEASE'];
+const telemetryConfigDirectory = process.env['TAU_CONFIG_DIR'];
+const runtimeTelemetry =
+  telemetryApiOrigin && telemetryRelease && telemetryConfigDirectory
+    ? {
+        apiOrigin: telemetryApiOrigin,
+        release: telemetryRelease,
+        configDir: telemetryConfigDirectory,
+        cloudBuild: tauTelemetryHostCloudBuild,
+      }
+    : undefined;
+
 const host = createServicesHost({
   authorityDirectory,
+  ...(runtimeTelemetry === undefined ? {} : { runtimeTelemetry }),
   ...(machinesDirectory === undefined || machinesDirectory === '' ? {} : { machinesDirectory }),
   ...(legacyMachinesDirectory === undefined || legacyMachinesDirectory === '' ? {} : { legacyMachinesDirectory }),
   ...(permissionsDirectory === undefined || permissionsDirectory === '' ? {} : { permissionsDirectory }),

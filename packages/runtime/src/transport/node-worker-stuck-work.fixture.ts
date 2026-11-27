@@ -1,6 +1,8 @@
 /**
- * Worker entry for `node-worker-stuck-work.integration.test.ts`, written as an application-owned entry is: build a kernel
- * worker, host it with `nodeWorkerHost`. Its one kernel gets stuck in the way its entry file names.
+ * Worker entry for `node-worker-stuck-work.integration.test.ts` and `node-worker-kill-recovery.integration.test.ts`,
+ * written as an application-owned entry is: build a kernel worker, host it with `nodeWorkerHost`. Its one kernel gets
+ * stuck, or crashes, in the way its entry file names: evaluating `crash.circuit` ends the worker thread with exit
+ * code 70.
  *
  * The worker keeps its own record apart from the runtime wire: every span its telemetry collector is handed, and
  * every cancel its kernel sees, is posted on the port handed over in `workerData`, so a test can read what the
@@ -24,6 +26,9 @@ export type WorkerRecord =
   | Readonly<{ kind: 'span'; entry: TelemetryEntry }>
   | Readonly<{ kind: 'entered'; operation: string }>
   | Readonly<{ kind: 'abort-seen'; operation: string; reason: unknown }>;
+
+/** The exit code a `crash.circuit` evaluation ends the worker thread with; the T04 test expects this value. */
+const crashExitCode = 70;
 
 const { record } = workerData as { record: MessagePort };
 record.unref();
@@ -93,6 +98,14 @@ const stuckKernel = defineKernelV2({
     return createKernelSuccess({ parameters });
   },
   async evaluate({ entryPath }, { signal }) {
+    if (entryPath.endsWith('crash.circuit')) {
+      post({ kind: 'entered', operation: 'evaluate' });
+      // A crash in the worker realm: the thread exits with its own code once its record line is on the port.
+      setTimeout(() => {
+        process.exit(crashExitCode);
+      }, 20);
+      return forever();
+    }
     if (entryPath.endsWith('slow.circuit')) {
       recordAbort('evaluate', signal);
       post({ kind: 'entered', operation: 'evaluate' });

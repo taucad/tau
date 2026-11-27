@@ -181,7 +181,7 @@ vi.mock('@taucad/ui/components/hover-card', () => ({
   HoverCardContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-const { ChatModelSelector } = await import('#components/chat/chat-model-selector.js');
+const { ChatModelSelector } = await import('#components/chat/chat-model-selector.funded.js');
 
 function renderSelector(onSelect?: (id: string) => void) {
   return render(

@@ -1,10 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectFileSystemConfig, Workspace, WorkspaceConnection } from '@taucad/files-ui/filesystem/handle-store';
-import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
+import type { ConnectedWorkspace } from '@taucad/project-library/runtime/project-library-workspace';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
 
 vi.mock('@taucad/files-ui/filesystem/use-persistent-storage-status', () => ({
@@ -30,6 +29,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
+    fileManagerRef: mockFileManagerRef,
     workspace: {
       syncProjectRoots: vi.fn(),
       replaceWorkspaceHandle: vi.fn(),
@@ -41,6 +41,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 
 const {
   mockAssertWorkspaceMutationAllowed,
+  mockFileManagerRef,
   mockCheckHandlePermission,
   mockConnectWorkspace,
   mockCreateWorkspace,
@@ -57,6 +58,27 @@ const {
   mockWorkspaceCreated,
 } = vi.hoisted(() => ({
   mockAssertWorkspaceMutationAllowed: vi.fn(),
+  /* The root file manager, as far as the folder rows read it: started, with Home's root status and the connected
+   * folder's published, not in `error` and not in safe mode. One snapshot object, as an actor returns until it changes,
+   * so a selector over it settles. */
+  mockFileManagerRef: {
+    snapshot: {
+      status: 'active',
+      matches: () => false,
+      context: {
+        rootStatuses: [
+          { storageRootKey: 'opfs:origin', backend: 'opfs', state: 'available' },
+          { storageRootKey: 'webaccess:wsp_connected', backend: 'webaccess', state: 'available' },
+        ],
+        safeMode: false,
+      },
+    },
+    getSnapshot() {
+      return this.snapshot;
+    },
+    subscribe: () => ({ unsubscribe: () => undefined }),
+    send: vi.fn(),
+  },
   mockCheckHandlePermission: vi.fn(),
   mockConnectWorkspace: vi.fn<() => Promise<ConnectedWorkspace | undefined>>(),
   mockCreateWorkspace: vi.fn<(handle: FileSystemDirectoryHandle) => Promise<WorkspaceConnection>>(),
@@ -81,10 +103,12 @@ vi.mock('#utils/workspace-telemetry.utils.js', () => ({
   }),
 }));
 
+const folderAccess = vi.hoisted(() => ({ available: true }));
+
 vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: true,
   directoryPicker: () => ({
-    available: true,
+    available: folderAccess.available,
     backend: 'webaccess',
     pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) => {
       const handle = await globalThis.window.showDirectoryPicker({
@@ -111,8 +135,6 @@ vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
 }));
 
 /* The self-host build gates nothing; the Free row closes the gate the cloud build reads. */
-const plan = vi.hoisted(() => ({ isResolved: true, canSyncFiles: true }));
-vi.mock('#cloud/commercial-features.js', () => ({ useCommercialFeatures: () => plan }));
 
 vi.mock('@taucad/ui/components/sonner', () => ({
   toast: {
@@ -298,58 +320,47 @@ describe('FileSystemSettings workspace disconnect', () => {
     await act(async () => options.action.onClick());
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith('Failed to reconnect workspace.');
+      expect(mockToastError).toHaveBeenCalledWith('Couldn’t reconnect the folder. Try again.');
     });
     expect(error).toHaveBeenCalled();
   });
 });
 
-/** D20: materialize on sign-in is off by default and names one workspace when on. */
-describe('FileSystemSettings Tau Cloud projects', () => {
-  const workspace = {
-    workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa',
-    name: 'Parts',
-    lastConnectedAt: 0,
-    slug: 'parts',
-  } satisfies Workspace;
-
-  beforeEach(async () => {
-    Object.assign(plan, { isResolved: true, canSyncFiles: true });
-    const { materializeOnSignIn } = await import('#hooks/use-cloud-projects.js');
-    materializeOnSignIn.set(undefined);
+/** Auto-bring on sign-in was removed: it cloned cloud projects under their cloud id into a second root (R9). */
+describe('FileSystemSettings cloud projects', () => {
+  it('should not offer a setting that brings cloud projects onto this device', async () => {
     stubEstimate(async () => ({ usage: 0, quota: 0 }));
-    mockListWorkspaces.mockResolvedValue([workspace]);
-    mockGetWorkspace.mockResolvedValue(undefined);
-  });
-
-  it('should leave materialize on sign-in off by default', async () => {
     render(<FileSystemSettings />, { wrapper: TooltipProvider });
 
-    expect(await screen.findByRole('combobox', { name: 'Tau Cloud projects' })).toHaveTextContent('Off');
+    expect(await screen.findByText('Browser storage')).toBeInTheDocument();
+    expect(screen.queryByText('Cloud projects')).not.toBeInTheDocument();
+  });
+});
+
+describe('FileSystemSettings without folder access', () => {
+  afterEach(() => {
+    folderAccess.available = true;
   });
 
-  it('should remember the one workspace that receives Tau Cloud projects', async () => {
-    const { materializeOnSignIn } = await import('#hooks/use-cloud-projects.js');
-    render(<FileSystemSettings />, { wrapper: TooltipProvider });
+  it('should leave out the Workspaces section where folders cannot be connected (Safari, Brave)', async () => {
+    folderAccess.available = false;
+    render(
+      <TooltipProvider>
+        <FileSystemSettings />
+      </TooltipProvider>,
+    );
 
-    const select = await screen.findByRole('combobox', { name: 'Tau Cloud projects' });
-    await screen.findAllByText('Parts');
-    Element.prototype.scrollIntoView = vi.fn();
-    select.focus();
-    await userEvent.keyboard('{Enter}');
-    expect(await screen.findByRole('option', { name: 'Parts' })).toBeInTheDocument();
-    await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}');
-
-    expect(materializeOnSignIn.get()).toEqual({ kind: 'workspace', workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa' });
-    expect(screen.getByRole('combobox', { name: 'Tau Cloud projects' })).toHaveTextContent('Parts');
+    expect(await screen.findByRole('region', { name: 'Browser storage' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Workspaces' })).not.toBeInTheDocument();
   });
 
-  it('should not offer the setting on a plan without backup', async () => {
-    Object.assign(plan, { canSyncFiles: false });
-    render(<FileSystemSettings />, { wrapper: TooltipProvider });
+  it('should keep the Workspaces section where folders can be connected', async () => {
+    render(
+      <TooltipProvider>
+        <FileSystemSettings />
+      </TooltipProvider>,
+    );
 
-    await screen.findAllByText('Parts');
-    expect(screen.queryByRole('combobox', { name: 'Tau Cloud projects' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Tau Cloud projects')).not.toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'Workspaces' })).toBeInTheDocument();
   });
 });

@@ -63,7 +63,10 @@ export type DesktopShellOptions = Readonly<{
    * and the Terminal run the git the revision engine records with.
    */
   toolchain?: Readonly<{ roots: readonly string[]; bins: readonly string[] }> | undefined;
-  /** Injected for tests; otherwise {@link desktopShellProvider}. */
+  /**
+   * Injected for tests; otherwise {@link desktopShellProvider}. The shell owns it: a probe that leaves no shell closes
+   * it.
+   */
   provider?: ShellProvider | undefined;
   /** Injected for tests; otherwise {@link setUpWindowsShellSandbox}. */
   setUpWindowsSandbox?: ((helperPath: string) => Promise<WindowsShellSandboxSetup>) | undefined;
@@ -563,6 +566,14 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
               );
       /* A refusal the helper's own setup repairs (an app update, a removed account) asks for setup again. */
       const outcome = windowsStatus?.installed === true ? (windowsSandboxSetupNeeded(probed, true) ?? probed) : probed;
+      /* A probe that leaves no shell drops its provider (a later probe makes a new one), so the custody it still holds,
+         such as the probe's own recovered execution, is released now: from Node 26 a lock file left to garbage
+         collection is an uncaught `ERR_INVALID_STATE`. An available provider serves for the process's life. */
+      if (outcome.status !== 'available' && provider !== undefined) {
+        await provider.close?.().catch((error: unknown) => {
+          options.log?.('shell.close-failed', error instanceof Error ? error.message : String(error), 'warn');
+        });
+      }
       recording =
         outcome.status === 'available'
           ? {

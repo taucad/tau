@@ -385,7 +385,7 @@
     "drift": "round 21, finding 3: the appender puts every row it appends at the merged fold's tail, so a row under an older term follows a later term until the next refold (T14: t14_incremental_is_merge)",
     "file": "src/log/event-log-appender.ts",
     "test": "src/log/history-invariant.test.ts",
-    "find": "        const atTail = merged === undefined || extendsMergedTail(transition.event);",
+    "find": "    const atTail = merged === undefined || extendsMergedTail(transition.event);",
     "replace": "        const atTail = true;"
   },
   {

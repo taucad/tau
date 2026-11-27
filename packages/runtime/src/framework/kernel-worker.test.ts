@@ -2135,6 +2135,65 @@ public static class Params
       }
     });
 
+    /*
+     * STO-25: a read a tree write held and then refused (PENDING: the write failed or stalled) names a file the render
+     * reads but no dependency set yet names. It is watched, so the render runs again when that file lands, never
+     * staying on the refusal once the project is ready.
+     */
+    it('should run a failed watched render again when a file it was refused lands', async () => {
+      const contents: Record<string, Uint8Array<ArrayBuffer>> = { 'main.ts': new Uint8Array([1, 2]) };
+      const filesystem = createMockFileSystem({
+        existsResult: (path) => path in contents,
+        readFileResult: (path) => {
+          const content = contents[path];
+          if (content === undefined) {
+            throw Object.assign(new Error(`${path} was not written yet`), { code: 'PENDING' });
+          }
+          return content;
+        },
+      });
+      filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
+        Object.fromEntries(paths.map((path) => [path, contents[path]])),
+      );
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+      // @ts-expect-error - the kernel's filesystem is made over the proxy, as production initialization makes it
+      worker._filesystem = worker.createFileSystem();
+      const describeParameters = vi.fn(
+        async (_input: GetParametersInput, runtime: KernelRuntime): Promise<GetParameterDeclarationsResult> => {
+          await runtime.filesystem.readFile('part.ts');
+          return createParameterDeclaration();
+        },
+      );
+      // @ts-expect-error - inject the producer description at the existing protected fixture seam
+      worker.onGetParameters = describeParameters;
+
+      try {
+        const failed = await openDocument(worker, {}, createGeometryFile('main.ts'), { watch: true });
+        expect(failed.success).toBe(false);
+        expect(worker.getWatchedPaths()).toContain('part.ts');
+        const evaluated = vi.fn<NonNullable<MockKernelWorker['onEvaluated']>>();
+        worker.onEvaluated = evaluated;
+
+        contents['part.ts'] = new Uint8Array([3]);
+        watchHandler!({ type: 'change', path: 'part.ts' });
+        await vi.waitFor(() => {
+          expect(evaluated).toHaveBeenCalledOnce();
+        });
+        expect(evaluated.mock.calls[0]?.[0]).toMatchObject({ documentId: 'test-document', success: true });
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
     it('clears the internal progress relay when document evaluation throws', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
@@ -2311,6 +2370,9 @@ public static class Params
         issues: [],
         success: true,
       });
+      // ...built with the same script globals (none narrowed: no kernel is selected).
+      // @ts-expect-error - accessing private for test verification
+      worker.bundleGlobalsKeys.set('main.ts', 'null');
 
       const mockBundlerDefinition = {
         name: 'MockBundler',
@@ -3266,6 +3328,54 @@ describe('document cancellation', () => {
     expect(bundlerSignals[1]).toBe(kernelSignals[1]);
     expect(kernelSignals[1]).not.toBe(firstSignal);
     expect(kernelSignals[1]?.aborted).toBe(false);
+    await worker.cleanup();
+  });
+
+  it('runs a module fresh, replacing its cached instance under the same code, only when asked', async () => {
+    const calls: string[] = [];
+    class FreshWorker extends MockKernelWorker {
+      protected override async onEvaluateForOwner(
+        _owner: OperationOwner,
+        _input: NativeBuildInput,
+        runtime: KernelRuntime,
+      ): Promise<EvaluateResult> {
+        await runtime.execute('export default 1;');
+        await runtime.execute('export default 1;', { fresh: true });
+        return this.completeFixtureEvaluation(new Uint8Array([1]));
+      }
+    }
+    const worker = new FreshWorker({ middleware: [], filesystem: createMockFileSystem() });
+    const bundlerDefinition = {
+      name: 'fresh bundler',
+      version: '1.0.0',
+      extensions: ['ts'],
+      initialize: vi.fn(async () => ({})),
+      detectImports: vi.fn(async () => ({ detectedModules: [], dependencies: [] })),
+      bundle: vi.fn(async () => ({ code: '', dependencies: [], unresolvedPaths: [], issues: [], success: true })),
+      execute: vi.fn(async ({ code }: { code: string }) => {
+        calls.push(`execute ${code}`);
+        return { success: true, value: undefined };
+      }),
+      clearExecutionCache: vi.fn((code: string | undefined) => {
+        calls.push(`clear ${String(code)}`);
+      }),
+      registerModule: vi.fn(),
+    };
+    // @ts-expect-error -- install the already-loaded bundler seam used by the production runtime facade.
+    worker.loadedBundlers.set('ts', { definition: bundlerDefinition, ctx: {} });
+    const evaluated: number[] = [];
+    worker.onEvaluated = ({ intent }) => evaluated.push(intent);
+    worker.handleOpenDocument({
+      documentId: 'doc',
+      intent: 0,
+      file: createGeometryFile('main.ts'),
+      parameters: {},
+      watch: false,
+    });
+    await vi.waitFor(() => {
+      expect(evaluated).toEqual([0]);
+    });
+    expect(calls).toEqual(['execute export default 1;', 'clear export default 1;', 'execute export default 1;']);
     await worker.cleanup();
   });
 

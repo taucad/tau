@@ -31,7 +31,7 @@ export const content = (): React.JSX.Element => (
         ],
         [
           'Export for manufacturing',
-          'Export STEP for CAM software or a manufacturer, and STL or 3MF for a slicer. The source and revision history stay with the project.',
+          'Export STEP for CAM software or a manufacturer, and STL or 3MF for a slicer. The source and history stay with the project.',
         ],
       ].map(([title, body]) => (
         <article key={title} className='cell'>

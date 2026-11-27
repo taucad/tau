@@ -1,8 +1,8 @@
 import {
-  lazy,
   memo,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -77,13 +77,17 @@ import type {
   ViewerPanelParameters,
   ViewSource,
 } from '#workbench-records/viewer-adapter.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { openWaitContext, useOpenWaitStart } from '#hooks/use-wait-start.js';
+import { projectOpenCopy } from '#lib/project-open-copy.js';
 
 /*
  * The viewer is deferred (progressive loading PL5, rule 10): three.js, the viewer package and the runtime client
  * load when a viewer pane first mounts, and the model appears in the pane's frame when it is ready. There is no
  * cached picture of the model (operator ruling).
  */
-const ChatViewer = lazy(async () => {
+const ChatViewer = lazyCode(async () => {
   // `tau.load.viewer.chunk`: how long the deferred viewer took to arrive, for the harness.
   const span = pageProjectOpenPerformance().begin('viewer.chunk');
   try {
@@ -96,9 +100,25 @@ const ChatViewer = lazy(async () => {
   }
 });
 
-/** The viewer's frame until its chunk is in: the pane's own box, busy. */
+/**
+ * The viewer's frame until its chunk is in: the pane's own box, busy. While the project opens it keeps the open's one
+ * status where the workspace frame drew it, on the open's clock (Progressive Loading Policy rules 16 and 17), so the
+ * pill neither leaves nor starts over when the live pane takes the frame's place. A viewer a person opens later shows
+ * the box alone. Not live: the route speaks for the open (rule 22).
+ */
 function ViewerFrame(): React.JSX.Element {
-  return <div aria-busy='true' data-slot='viewer-frame' className='size-full' />;
+  const open = useContext(openWaitContext);
+  const { startedAt } = useOpenWaitStart(true);
+  const isOpenWait = open !== undefined && startedAt <= open.startedAt;
+  return (
+    <div aria-busy='true' data-slot='viewer-frame' className='relative size-full'>
+      {isOpenWait ? (
+        <div className='absolute top-1/2 right-2 left-2 mx-auto flex w-fit max-w-full -translate-y-1/2'>
+          <WaitIndicator active variant='pill' live={false} label={projectOpenCopy.label} startedAt={startedAt} />
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 type ViewerNewTabParameters = { mode: 'launcher' };

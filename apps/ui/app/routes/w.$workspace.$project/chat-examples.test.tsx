@@ -70,7 +70,8 @@ vi.mock('@taucad/ui-core/constants/chat-prompt-examples', () => ({
   ],
 }));
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => (flag === 'onboarding' ? harness.onboarding : false),
+  useFeature: () => false,
+  useFeatureState: (flag: string) => (flag === 'onboarding' && harness.onboarding ? 'on' : 'off'),
 }));
 vi.mock('#preferences/use-person-record.js', () => ({
   usePersonRecord: () => ({ profile: { version: 1, goals: harness.goals, languages: [] } }),

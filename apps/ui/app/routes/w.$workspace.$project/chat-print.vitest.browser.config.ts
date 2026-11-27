@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 
@@ -10,16 +11,19 @@ import { tauRuntime } from '@taucad/runtime/vite';
  */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   plugins: [tailwindcss(), tauRuntime()],
   server: {
     host: '127.0.0.1',
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     include: [
       'app/routes/w.$workspace.$project/chat-print.browser.test.tsx',
       'app/components/select-alignment.browser.test.tsx',
+      'app/components/publish/share-pane-scroll.browser.test.tsx',
       'app/components/machines/machines.browser.test.tsx',
     ],
     fileParallelism: false,

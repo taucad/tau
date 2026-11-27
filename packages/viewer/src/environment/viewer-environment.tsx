@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 import type { GraphicsBackendPreference } from '#graphics/graphics-settings.js';
+import type { RenderTierOverride } from '#graphics/three/render-tier.js';
 
 /**
  * Developer and experimental switches the viewer reads. Each defaults to off.
@@ -51,6 +52,11 @@ export type ViewerEnvironment = {
    * on; an application test bridge uses it to drive and observe the section view.
    */
   readonly debugStageBridge?: React.ComponentType<{ readonly isGeometryFramed: boolean }> | undefined;
+  /**
+   * Test-only: the rasterizer whose features every canvas runs, whatever its adapter is (see `RenderTierOverride`).
+   * An embedder sets it only in an undeployed debug build, so a software GPU in CI can exercise the hardware pipeline.
+   */
+  readonly renderTierOverride?: RenderTierOverride | undefined;
 };
 
 /**

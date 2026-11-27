@@ -3,11 +3,12 @@
  * the file the marketing edge function rewrites to.
  *
  * Called from `react-router.config.ts`'s `buildEnd`, the only hook that runs after prerendering. The Home shell is
- * prerendered at `/`, which writes `index.html` and `_root.data` at the root of the client output. Netlify's React Router
- * function is registered with `preferStatic`, so left there those files would answer every `/` and `/_root.data` request
- * the edge function passes on (no preference, `?app`, `?code=…`, a client navigation's data request) in place of the
- * function. The document moves to `__shell/<id>/index.html`; the data file goes, since a shell hydrates from the data it
- * embeds and client navigations ask the function.
+ * prerendered at `/`, which writes `index.html` and the root data file at the root of the client output (`_.data` with
+ * trailing-slash-aware data requests, `_root.data` without them). Netlify's React Router function is registered with
+ * `preferStatic`, so left there those files would answer every `/` and root data request the edge function passes on
+ * (no preference, `?app`, `?code=…`, a client navigation's data request) in place of the function. The document moves
+ * to `__shell/<id>/index.html`; the data file goes, since a shell hydrates from the data it embeds and client
+ * navigations ask the function.
  */
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';

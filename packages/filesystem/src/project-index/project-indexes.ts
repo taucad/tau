@@ -31,7 +31,13 @@ import type {
 } from '#project-index/project-index.js';
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexSnapshot, IndexVector } from '#project-index/index-snapshot.js';
-import { mayBePointerSize, pendingObjectOf, pendingStallMilliseconds, untilDeclared } from '#pending-content.js';
+import {
+  ArrivingContentError,
+  mayBePointerSize,
+  pendingObjectOf,
+  pendingStallMilliseconds,
+  untilDeclared,
+} from '#pending-content.js';
 import type { MarkAnswer, PendingObject, SettledFile } from '#pending-content.js';
 import { importFactsMaximumBytes, importFactsPath, parseImportFacts, verifiedImportFacts } from '#importer/facts.js';
 
@@ -157,13 +163,61 @@ type RootState = {
 };
 
 /*
+ * How often a read waiting on a tree write asks again what it is owed, landing or not: a landing it was not woken for
+ * is seen within this, never only at the stall bound.
+ */
+const landingRecheckMilliseconds = 250;
+
+/* What a tree write said of one path (D10), and whether its write had yet to land it when the index last knew. */
+type ExpectedAnswer = Readonly<{ size: number; pending?: PendingObject; arriving: boolean }>;
+
+/*
+ * One root's tree write as the reads it owes see it (D10, I7; see `untilLanded`), its lookups made once as it is
+ * announced so a probe never scans the tree.
+ */
+type Landing = {
+  /** What the write said of each path it names. */
+  readonly expected: ReadonlyMap<string, ExpectedAnswer>;
+  /** Every folder above a path the write lands: only these can be owed for not existing yet. */
+  readonly arrivingFolders: ReadonlySet<string>;
+  /** The files the write removes, and the folders removing them empties (no entry of the tree is under them). */
+  readonly removing: ReadonlySet<string>;
+  /** Every folder above a removed path. */
+  readonly removingFolders: ReadonlySet<string>;
+  /** Per folder, the removed paths directly in it. */
+  readonly removingIn: ReadonlyMap<string, readonly string[]>;
+  /** Removed paths seen gone; one put back (a failed step's move-back) is owed again. */
+  readonly gone: Set<string>;
+  /** How many times a path the write names landed, went or came back: what a held read counts as progress. */
+  progress: number;
+  /**
+   * Once the write failed, the paths it still owed then (`owed`) and the folders whose listing would show one
+   * (`listings`): each refuses until the root's next expectation or end, through its rollback (I7).
+   */
+  failed?: Readonly<{ owed: ReadonlySet<string>; listings: ReadonlySet<string> }>;
+};
+
+/* The folders above a root-relative path, outermost first. */
+const foldersAbove = (path: string): string[] =>
+  path
+    .split('/')
+    .slice(0, -1)
+    .map((_, index, segments) => segments.slice(0, index + 1).join('/'));
+
+/* A tree write's staged sibling (`dir/.name.tau-staged.<uuid>.tmp`) stands for its path: staging it is progress. */
+const stagedSibling = /^(?<folder>.*\/)?\.(?<name>.+)\.tau-staged\.[\da-f-]{36}\.tmp$/u;
+const stagedOriginal = (relative: string | undefined): string | undefined => {
+  const match = relative === undefined ? undefined : stagedSibling.exec(relative)?.groups;
+  return match === undefined ? relative : `${match['folder'] ?? ''}${match['name'] ?? ''}`;
+};
+
+const parentOf = (path: string): string => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
+
+/*
  * Marks known for a root whose index has not compared yet (D9): its stored snapshot's, or a declared root's own,
  * kept across an eviction that left its mount as it was. Each answers a file only while the file is at the size and
  * mtime it was stored at.
  */
-/* What a tree write said of one path (D10), and whether its write had yet to land it when the index last knew. */
-type ExpectedAnswer = Readonly<{ size: number; pending?: PendingObject; arriving: boolean }>;
-
 type StoredMarks = Readonly<{
   rows: ReadonlyMap<string, Readonly<{ size: number; mtimeMs: number }>>;
   pending: Readonly<Record<string, PendingObject>>;
@@ -171,6 +225,41 @@ type StoredMarks = Readonly<{
   /** Carried from an evicted index rather than read from a snapshot. */
   carried: boolean;
 }>;
+
+/*
+ * A tree write as its reads see it: what it names, the folders its landings make, the files it removes and the
+ * folders that removing them empties (as `pruneEmptiedDirectories` finds them: no entry of the tree is under them).
+ */
+const landingOf = (expected: ReadonlyMap<string, ExpectedAnswer>, removed: readonly string[]): Landing => {
+  const arrivingFolders = new Set<string>();
+  const kept = new Set<string>();
+  for (const [path, answer] of expected) {
+    for (const folder of foldersAbove(path)) {
+      kept.add(folder);
+      if (answer.arriving) {
+        arrivingFolders.add(folder);
+      }
+    }
+  }
+  const removing = new Set(removed);
+  for (const path of removed) {
+    for (const folder of foldersAbove(path)) {
+      if (!kept.has(folder)) {
+        removing.add(folder);
+      }
+    }
+  }
+  const removingFolders = new Set<string>();
+  const removingIn = new Map<string, string[]>();
+  for (const path of removing) {
+    for (const folder of foldersAbove(path)) {
+      removingFolders.add(folder);
+    }
+    const parent = parentOf(path);
+    removingIn.set(parent, [...(removingIn.get(parent) ?? []), path]);
+  }
+  return { expected, arrivingFolders, removing, removingFolders, removingIn, gone: new Set(), progress: 0 };
+};
 
 /**
  * The set of Project Indexes, one per root.
@@ -196,6 +285,15 @@ export class ProjectIndexes {
   private readonly _expected = new Map<string, Map<string, ExpectedAnswer>>();
   /** Per root, how many tree writes have announced their entries ({@link declarationBasis}). */
   private readonly _expectations = new Map<string, number>();
+  /**
+   * Per root a tree write is landing now (announced and not yet ended), or failed and not yet followed by another
+   * expectation or end: only these owe a read anything (D10), whatever a declaration has since made of `_expected`.
+   */
+  private readonly _landing = new Map<string, Landing>();
+  /** Told as each root's tree write ends ({@link ProjectIndexes.onExpectationEnd}). */
+  private readonly _endListeners = new Set<(root: string, failed: boolean) => void>();
+  /** Reads waiting on a tree write ({@link ProjectIndexes.untilLanded}), woken by every landing. */
+  private readonly _landingWaiters = new Set<() => void>();
   /** Per cold root, the marks known before its index compares (see `StoredMarks`). */
   private readonly _stored = new Map<string, StoredMarks>();
   /** Indexes whose first observation is a scan, which finds every row new rather than changed. */
@@ -226,6 +324,15 @@ export class ProjectIndexes {
    * asked (the first capture after the import), so no later walk trusts it.
    */
   private readonly _importSeeded = new Map<string, Map<string, Readonly<{ size: number; mtimeMs: number }>>>();
+  /**
+   * The snapshot writes still running. {@link ProjectIndexes.clear} stops each
+   * at its next await before the disk, and {@link ProjectIndexes.close} waits for them.
+   */
+  private readonly _persisting = new Set<Promise<unknown>>();
+  /* Aborted by every clear: a write begun before it stores nothing after it. */
+  private _cleared = new AbortController();
+  /* Set once by `dispose` or `close`: no snapshot write starts after it. */
+  private _closed = false;
 
   /**
    * @param options - Mount boundaries, provider resolution, path policy and tab identity.
@@ -476,60 +583,44 @@ export class ProjectIndexes {
    *
    * @param root - Absolute root.
    * @returns `'written'`, `'stale'` when a newer snapshot is stored,
-   *   `'skipped'` when the root keeps none or is not open, or `'busy'` when
+   *   `'skipped'` when the root keeps none, is not open, or a clear or close
+   *   overtook the write before it reached the disk, or `'busy'` when
    *   another holder has the lock: a later write is scheduled, never waited for.
    */
   public async persist(root: string): Promise<'written' | 'stale' | 'skipped' | 'busy'> {
-    const key = normalizePath(root);
-    const state = this._states.get(key);
-    if (state === undefined || !state.index.isComplete) {
+    if (this._closed) {
       return 'skipped';
     }
-    clearTimeout(state.persistTimer);
-    state.persistTimer = undefined;
-    const resolution = this._resolve(key);
-    if (resolution.persist === undefined) {
-      return 'skipped';
+    const writing = this._persist(normalizePath(root), this._cleared.signal);
+    this._persisting.add(writing);
+    try {
+      return await writing;
+    } finally {
+      this._persisting.delete(writing);
     }
-    /* A snapshot claims every notice its vector names: re-observe what those
-     * notices left unknown first, so it never stores a view older than its vector.
-     * A pending entry still waiting for its mtime is observed too, so the stored
-     * mtime is the provider's and the reload keeps it pending (D9). */
-    for (const path of state.index.unmeasuredPendingPaths) {
-      state.index.invalidate(path);
+  }
+
+  /**
+   * Stop writing snapshots, drop every index, and wait until no snapshot write
+   * this set began can still touch the disk.
+   *
+   * A write past its last await before the disk (the snapshot file's own write)
+   * finishes; every other stops there. Then a caller may remove or move a root.
+   *
+   * @returns Once every snapshot write this set began has ended.
+   */
+  public async close(): Promise<void> {
+    this.dispose();
+    while (this._persisting.size > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- a write that ends may not start another, but wait for the set to empty.
+      await Promise.allSettled(this._persisting);
     }
-    if (state.index.stalePaths.length > 0) {
-      await this._refreshStale(key, state.index);
-      clearTimeout(state.persistTimer);
-      state.persistTimer = undefined;
-    }
-    /* Storing creates `.tau` when the root has none: hold it first, or the next
-     * compare finds it new and stores the snapshot again for it. */
-    const container = projectIndexDirectory.split('/', 1)[0]!;
-    if (state.index.entry(container) === undefined) {
-      state.index.recordDirectory(container);
-    }
-    const written = await writeIndexSnapshot({
-      provider: resolution.provider,
-      providerRoot: resolution.path,
-      lockName: resolution.persist.lockName,
-      snapshot: () => {
-        const pending = state.index.pendingSnapshot();
-        return {
-          vector: this.vector(key),
-          rescan: false,
-          writtenAt: Date.now(),
-          entries: state.index.toSnapshot(),
-          ...(Object.keys(pending).length === 0 ? {} : { pending }),
-          ...(state.index.declared ? { declared: true } : {}),
-          removals: state.index.removalSnapshot(),
-        };
-      },
-    });
-    if (written === 'busy') {
-      this._schedulePersist(key);
-    }
-    return written;
+  }
+
+  /** Stop writing snapshots and drop every index, without waiting for a write in flight (see {@link ProjectIndexes.close}). */
+  public dispose(): void {
+    this._closed = true;
+    this.clear();
   }
 
   /**
@@ -600,6 +691,7 @@ export class ProjectIndexes {
    */
   public addFile(absolutePath: string, written: Readonly<{ size: number; facts?: ContentFacts }>): void {
     const observedAt = Date.now();
+    this._reappeared(normalizePath(absolutePath));
     this._apply(absolutePath, (index, relative) => {
       index.recordFile(relative, { ...written, observedAt });
     });
@@ -871,10 +963,12 @@ export class ProjectIndexes {
    *
    * @param root - Absolute root the tree is written to.
    * @param entries - Every entry of the tree, root-relative.
+   * @param removing - The root-relative files the write removes: a read of one waits until it is gone.
    */
-  public async expect(root: string, entries: readonly ExpectedEntry[]): Promise<void> {
+  public async expect(root: string, entries: readonly ExpectedEntry[], removing?: readonly string[]): Promise<void> {
+    const key = normalizePath(root);
     /* A declaration found before this write announced its tree speaks for the older one (D10). */
-    this._expectations.set(normalizePath(root), this.declarationBasis(root) + 1);
+    this._expectations.set(key, this.declarationBasis(root) + 1);
     /* Known now, before the index opens or a byte lands: every path the tree names answers as the tree says (D9). */
     this._expected.set(
       normalizePath(root),
@@ -885,9 +979,59 @@ export class ProjectIndexes {
         ),
       ),
     );
+    this._landing.set(key, landingOf(this._expected.get(key)!, removing ?? []));
+    this._noteLanding();
     /* A cold root is opened first, so a cold open's write is known as it lands. */
     const index = await this.ready(root);
     index.expect(entries);
+    this._noteLanding();
+  }
+
+  /**
+   * Wait until the tree write landing under a path's root has put there what its tree says (D10, I7): a file it writes
+   * until it lands (a placeholder until its pointer does, after which a read goes through to the object, D9), a file
+   * it removes until it is gone, and a folder only its entries make until one of them lands. A listing waits while a
+   * child it would list has yet to land or go. Every other path, and every path while no write is landing, answers at
+   * once, so a read never answers old bytes or a missing file in place of what the write is landing, and only a path
+   * the write owes waits.
+   *
+   * @param absolutePath - Absolute path.
+   * @param options - `listing` for a directory listing; the caller's `signal`; and the stall bound, how long nothing
+   *   may land under any root before the wait refuses ({@link pendingStallMilliseconds} when omitted).
+   * @throws {ArrivingContentError} When the write failed before landing it, or nothing landed for the bound.
+   */
+  public async untilLanded(
+    absolutePath: string,
+    options?: Readonly<{ listing?: boolean; signal?: AbortSignal | undefined; stallMilliseconds?: number | undefined }>,
+  ): Promise<void> {
+    if (this._landing.size === 0) {
+      return;
+    }
+    const normalized = normalizePath(absolutePath);
+    const listing = options?.listing === true;
+    const bound = options?.stallMilliseconds ?? pendingStallMilliseconds;
+    let owed = this._owedBy(normalized, listing);
+    let progress = owed?.progress;
+    let progressAt = Date.now();
+    while (owed !== undefined) {
+      /* The write that owed it failed: what is there now is neither tree, until the root's next write or end (I7). */
+      if (owed.failed !== undefined) {
+        throw new ArrivingContentError(normalized, 'failed');
+      }
+      const remaining = bound - (Date.now() - progressAt);
+      if (remaining <= 0) {
+        throw new ArrivingContentError(normalized, 'stalled');
+      }
+      // oxlint-disable-next-line no-await-in-loop -- each landing is waited for in turn until the path's own.
+      await this._nextLanding(Math.min(remaining, landingRecheckMilliseconds), options?.signal);
+      const next = this._owedBy(normalized, listing);
+      /* Only the owing write's own landings are progress: another root's, or a write it never named, are not. */
+      if (next?.progress !== progress || next !== owed) {
+        progressAt = Date.now();
+      }
+      owed = next;
+      progress = next?.progress;
+    }
   }
 
   /**
@@ -898,6 +1042,10 @@ export class ProjectIndexes {
    * @returns `true` when none is arriving; `undefined` when that root's index expects no tree.
    */
   public landed(root: string, paths: readonly string[]): boolean | undefined {
+    /* A write that failed landed none of its tree for good, through its rollback (I7). */
+    if (this._landing.get(normalizePath(root))?.failed !== undefined) {
+      return false;
+    }
     const index = this._states.get(normalizePath(root))?.index;
     return index?.expecting === true ? paths.every((path) => !index.arriving(path)) : undefined;
   }
@@ -964,6 +1112,17 @@ export class ProjectIndexes {
   public endExpectation(root: string, options?: Readonly<{ failed?: boolean }>): void {
     const key = normalizePath(root);
     const expected = this._expected.get(key);
+    const landing = this._landing.get(key);
+    if (options?.failed === true && landing !== undefined && landing.failed === undefined) {
+      /*
+       * A read it still owed was owed the tree, which never came, and the move-backs and rollback that follow write
+       * neither tree: each such path refuses until the root's next expectation or end, never answering what is left.
+       */
+      landing.failed = this._stillOwed(key, landing);
+    } else if (options?.failed !== true || landing?.failed === undefined) {
+      /* A later write that failed before announcing its entries leaves an earlier failure's checkout torn still. */
+      this._landing.delete(key);
+    }
     if (options?.failed === true) {
       /* A failed write landed what it landed: every path is what is on disk, as the index observes it. */
       this._expected.delete(key);
@@ -974,6 +1133,24 @@ export class ProjectIndexes {
       }
     }
     this._states.get(key)?.index.endExpectation();
+    this._noteLanding();
+    for (const listener of this._endListeners) {
+      listener(key, options?.failed === true);
+    }
+  }
+
+  /**
+   * Be told as each root's tree write ends, landed or failed, so a host that read the write's landings reads again
+   * (D10, I7): a failed write's landings are no tree, and {@link ProjectIndexes.landed} answers `false` from then.
+   *
+   * @param listener - Called with the root and whether its write failed.
+   * @returns Stops the listening.
+   */
+  public onExpectationEnd(listener: (root: string, failed: boolean) => void): () => void {
+    this._endListeners.add(listener);
+    return () => {
+      this._endListeners.delete(listener);
+    };
   }
 
   /**
@@ -982,6 +1159,7 @@ export class ProjectIndexes {
    * @param absolutePath - Absolute directory path.
    */
   public addDirectory(absolutePath: string): void {
+    this._reappeared(normalizePath(absolutePath));
     this._apply(absolutePath, (index, relative) => {
       index.recordDirectory(relative);
     });
@@ -993,6 +1171,7 @@ export class ProjectIndexes {
    * @param absolutePath - Absolute file path.
    */
   public removeFile(absolutePath: string): void {
+    this._removed(absolutePath);
     this._apply(absolutePath, (index, relative) => {
       index.remove(relative);
     });
@@ -1016,6 +1195,10 @@ export class ProjectIndexes {
   public rename(from: string, to: string): void {
     const source = normalizePath(from);
     const target = normalizePath(to);
+    this._removed(source);
+    this._reappeared(target);
+    this._progress(source);
+    this._progress(target);
     for (const [root, state] of this._states) {
       const relativeFrom = this._inside(root, source);
       const relativeTo = this._inside(root, target);
@@ -1032,6 +1215,7 @@ export class ProjectIndexes {
       }
       this._schedulePersist(root);
     }
+    this._noteLanding();
   }
 
   /**
@@ -1089,6 +1273,13 @@ export class ProjectIndexes {
         this._expected.delete(root);
       }
     }
+    /* The root no longer reads the same bytes: its write is not landed there, and nothing waits on it. */
+    for (const root of this._landing.keys()) {
+      if (relativeTo(changed, root) !== undefined) {
+        this._landing.delete(root);
+      }
+    }
+    this._noteLanding();
     /*
      * A root that moved is no longer what the revision layer declared: what waited answers now, a root still mounted
      * is unknown again and held again when it is configured, and an unmounted one is no revision root.
@@ -1113,6 +1304,8 @@ export class ProjectIndexes {
 
   /** Drop every index: disposal, or a reset fact that may have moved the whole tree. */
   public clear(): void {
+    this._cleared.abort();
+    this._cleared = new AbortController();
     this._readFacts.clear();
     this._importFactsPending.clear();
     this._importSeeded.clear();
@@ -1125,6 +1318,8 @@ export class ProjectIndexes {
     this._settled.clear();
     this._declaration.clear();
     this._expected.clear();
+    this._landing.clear();
+    this._noteLanding();
     this._stored.clear();
     this._peeking.clear();
   }
@@ -1711,9 +1906,67 @@ export class ProjectIndexes {
     return resolve(root);
   }
 
+  private async _persist(key: string, cleared: AbortSignal): Promise<'written' | 'stale' | 'skipped' | 'busy'> {
+    const state = this._states.get(key);
+    if (state === undefined || !state.index.isComplete) {
+      return 'skipped';
+    }
+    clearTimeout(state.persistTimer);
+    state.persistTimer = undefined;
+    const resolution = this._resolve(key);
+    if (resolution.persist === undefined) {
+      return 'skipped';
+    }
+    /* A snapshot claims every notice its vector names: re-observe what those
+     * notices left unknown first, so it never stores a view older than its vector.
+     * A pending entry still waiting for its mtime is observed too, so the stored
+     * mtime is the provider's and the reload keeps it pending (D9). */
+    for (const path of state.index.unmeasuredPendingPaths) {
+      state.index.invalidate(path);
+    }
+    if (state.index.stalePaths.length > 0) {
+      await this._refreshStale(key, state.index);
+      clearTimeout(state.persistTimer);
+      state.persistTimer = undefined;
+    }
+    /* A clear can come at any await: read the signal afresh each time. */
+    const overtaken = (): boolean => cleared.aborted;
+    if (overtaken()) {
+      return 'skipped';
+    }
+    /* Storing creates `.tau` when the root has none: hold it first, or the next
+     * compare finds it new and stores the snapshot again for it. */
+    const container = projectIndexDirectory.split('/', 1)[0]!;
+    if (state.index.entry(container) === undefined) {
+      state.index.recordDirectory(container);
+    }
+    const written = await writeIndexSnapshot({
+      provider: resolution.provider,
+      providerRoot: resolution.path,
+      lockName: resolution.persist.lockName,
+      signal: cleared,
+      snapshot: () => {
+        const pending = state.index.pendingSnapshot();
+        return {
+          vector: this.vector(key),
+          rescan: false,
+          writtenAt: Date.now(),
+          entries: state.index.toSnapshot(),
+          ...(Object.keys(pending).length === 0 ? {} : { pending }),
+          ...(state.index.declared ? { declared: true } : {}),
+          removals: state.index.removalSnapshot(),
+        };
+      },
+    });
+    if (written === 'busy' && !overtaken()) {
+      this._schedulePersist(key);
+    }
+    return written;
+  }
+
   private _schedulePersist(root: string): void {
     const state = this._states.get(root);
-    if (state === undefined || this._options.resolve === undefined) {
+    if (state === undefined || this._options.resolve === undefined || this._closed) {
       return;
     }
     clearTimeout(state.persistTimer);
@@ -1768,6 +2021,7 @@ export class ProjectIndexes {
 
   private _apply(absolutePath: string, update: (index: ProjectIndex, relative: string) => void): void {
     const normalized = normalizePath(absolutePath);
+    this._progress(normalized);
     for (const [root, state] of this._states) {
       const relative = this._inside(root, normalized);
       if (relative === undefined || relative === '' || this._excluded(relative)) {
@@ -1776,6 +2030,173 @@ export class ProjectIndexes {
       update(state.index, relative);
       this._schedulePersist(root);
     }
+    this._noteLanding();
+  }
+
+  /* A file or folder a tree write removes is gone: a read of it, or of anything under it, no longer waits. */
+  private _removed(normalized: string): void {
+    for (const [root, landing] of this._landing) {
+      const relative = relativeTo(root, normalized);
+      if (relative === undefined || landing.failed !== undefined) {
+        continue;
+      }
+      if (landing.removing.has(relative)) {
+        landing.gone.add(relative);
+      }
+      if (relative === '' || landing.removingFolders.has(relative)) {
+        for (const path of landing.removing) {
+          if (relative === '' || path.startsWith(`${relative}/`)) {
+            landing.gone.add(path);
+          }
+        }
+      }
+    }
+  }
+
+  /* A path the write removes is back (a failed step moving its backup back, I7): it is owed again until it goes. */
+  private _reappeared(normalized: string): void {
+    for (const [root, landing] of this._landing) {
+      const relative = relativeTo(root, normalized);
+      if (relative === undefined || relative === '' || landing.gone.size === 0) {
+        continue;
+      }
+      for (const path of [...foldersAbove(relative), relative]) {
+        landing.gone.delete(path);
+      }
+    }
+  }
+
+  /* A path a live write names landed, went or came back, or its staged bytes did: progress for the reads it holds. */
+  private _progress(normalized: string): void {
+    for (const [root, landing] of this._landing) {
+      const relative = stagedOriginal(relativeTo(root, normalized));
+      if (
+        relative !== undefined &&
+        (landing.expected.has(relative) ||
+          landing.removing.has(relative) ||
+          landing.arrivingFolders.has(relative) ||
+          landing.removingFolders.has(relative))
+      ) {
+        landing.progress += 1;
+      }
+    }
+  }
+
+  /* What a failed write still owed as it failed: each path a read would have waited on, and each listing (I7). */
+  private _stillOwed(root: string, landing: Landing): NonNullable<Landing['failed']> {
+    const owed = new Set<string>();
+    for (const path of [...landing.expected.keys(), ...landing.removing, ...landing.arrivingFolders]) {
+      if (this._owesEntry(root, landing, path)) {
+        owed.add(path);
+      }
+    }
+    return { owed, listings: new Set([...owed].map((path) => parentOf(path))) };
+  }
+
+  /*
+   * The tree write a read of this path waits on, if it owes the read anything (see `untilLanded`): only a write
+   * landing now owes, or one that failed owing it. A listing is owed while a child it lists has yet to land (not on
+   * disk at all) or to go.
+   */
+  private _owedBy(normalized: string, listing: boolean): Landing | undefined {
+    for (const [root, landing] of this._landing) {
+      const relative = relativeTo(root, normalized);
+      if (relative === undefined) {
+        continue;
+      }
+      if (listing ? this._owesListing(landing, normalized, relative) : this._owesEntry(root, landing, relative)) {
+        return landing;
+      }
+    }
+    return undefined;
+  }
+
+  private _owesListing(landing: Landing, normalized: string, relative: string): boolean {
+    if (landing.failed !== undefined) {
+      return landing.failed.listings.has(relative);
+    }
+    for (const path of landing.removingIn.get(relative) ?? []) {
+      if (!landing.gone.has(path)) {
+        return true;
+      }
+    }
+    return (
+      (relative === '' || landing.arrivingFolders.has(relative)) &&
+      this.arrivingIn(normalized, { absent: true }).length > 0
+    );
+  }
+
+  private _owesEntry(root: string, landing: Landing, relative: string): boolean {
+    if (relative === '') {
+      return false;
+    }
+    if (landing.failed !== undefined) {
+      return landing.failed.owed.has(relative);
+    }
+    if (landing.removing.has(relative) && !landing.gone.has(relative)) {
+      return true;
+    }
+    const index = this._states.get(root)?.index;
+    const answer = landing.expected.get(relative);
+    if (answer === undefined) {
+      /* A folder only the write's entries make is owed until it exists. */
+      return (
+        landing.arrivingFolders.has(relative) &&
+        index?.entry(relative) === undefined &&
+        this.arrivingIn(root === '/' ? `/${relative}` : `${root}/${relative}`, { absent: true }).length > 0
+      );
+    }
+    /*
+     * Only what the write itself lands is owed: an entry already in the checkout when it was announced is the tree's
+     * now (a placeholder there reads through by the tree's word, see `markAt`). Once the root's index knows the tree,
+     * it says what has landed; before, the write said what it would land.
+     */
+    if (!answer.arriving || (index?.expecting === true && !index.arriving(relative))) {
+      return false;
+    }
+    /* A placeholder whose own pointer has landed is read through to its object (D9): only its pointer was owed. */
+    const mark = index?.pendingFor(relative);
+    return answer.pending === undefined || mark?.oid !== answer.pending.oid;
+  }
+
+  /* Wake every read waiting on a tree write: something landed, went or ended. Each asks again what it is owed. */
+  private _noteLanding(): void {
+    if (this._landingWaiters.size === 0) {
+      return;
+    }
+    const waiters = [...this._landingWaiters];
+    this._landingWaiters.clear();
+    for (const wake of waiters) {
+      wake();
+    }
+  }
+
+  /* The next landing: `true` when one came, `false` when the time passed first; rejects when the caller stops. */
+  private async _nextLanding(milliseconds: number, signal: AbortSignal | undefined): Promise<boolean> {
+    signal?.throwIfAborted();
+    return new Promise<boolean>((resolve, reject) => {
+      const settle = (landed: boolean): void => {
+        clearTimeout(timer);
+        this._landingWaiters.delete(wake);
+        signal?.removeEventListener('abort', stop);
+        resolve(landed);
+      };
+      const wake = (): void => {
+        settle(true);
+      };
+      const stop = (): void => {
+        clearTimeout(timer);
+        this._landingWaiters.delete(wake);
+        // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- an abort rejects with the caller's own reason.
+        reject(signal!.reason);
+      };
+      const timer = setTimeout(() => {
+        settle(false);
+      }, milliseconds);
+      (timer as { unref?: () => void }).unref?.();
+      this._landingWaiters.add(wake);
+      signal?.addEventListener('abort', stop, { once: true });
+    });
   }
 
   /** `absolutePath` relative to `root` when inside it with no nested mount between them. */

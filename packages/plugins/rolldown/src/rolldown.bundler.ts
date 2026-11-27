@@ -37,8 +37,8 @@ export const rolldownBundler = defineBundler({
   async detectImports({ entryPath }, { signal }, context) {
     return context.vm.detectImports(entryPath, signal);
   },
-  async bundle({ entryPath }, { signal }, context) {
-    return context.vm.bundle(entryPath, signal);
+  async bundle({ entryPath, globals }, { signal }, context) {
+    return context.vm.bundle(entryPath, signal, globals);
   },
   async execute({ code }, { signal }, context) {
     return context.vm.execute(code, signal);

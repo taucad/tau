@@ -26,7 +26,7 @@ export async function assertProjectActive(
   if (userId !== undefined && userId !== deletion.ownerId) {
     throw new NotFoundException('Project not found');
   }
-  throw new GoneException({ code: 'PROJECT_DELETED', message: 'This project has been deleted from Tau Cloud.' });
+  throw new GoneException({ code: 'PROJECT_DELETED', message: 'This project has been deleted from the cloud.' });
 }
 
 /** Existing publication lock key. Acquire the owner lock first when both are needed. */

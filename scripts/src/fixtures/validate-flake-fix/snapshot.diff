@@ -1,0 +1,7 @@
+--- a/apps/ui/src/__snapshots__/boot.test.ts.snap
++++ b/apps/ui/src/__snapshots__/boot.test.ts.snap
+@@
+ exports[`boot > renders 1`] = `
+-"<div>ready</div>"
++"<div>"
+ `;

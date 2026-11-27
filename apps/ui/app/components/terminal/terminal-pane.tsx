@@ -37,22 +37,16 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { useProject } from '#hooks/use-project.js';
 import { useTerminalAvailability } from '#components/terminal/terminal-availability.js';
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
-import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
+import type { TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 import { outputSlices } from '#components/terminal/terminal-output-text.js';
+import { highContrastQuery, readTerminalTheme, terminalTextRendering } from '#components/terminal/terminal-theme.js';
 import {
-  highContrastQuery,
-  highContrastRatio,
-  readTerminalTheme,
-  terminalTextRendering,
-} from '#components/terminal/terminal-theme.js';
-
-/** Loads the renderer; the default imports it lazily so no other surface pays for it. @public */
-export type TerminalRendererLoader = (options: TerminalRendererOptions) => Promise<TerminalRendererView>;
-
-const loadTerminalRenderer: TerminalRendererLoader = async (options) => {
-  const { createTerminalRenderer } = await import('#components/terminal/terminal-renderer.js');
-  return createTerminalRenderer(options);
-};
+  loadTerminalRenderer,
+  openTerminalLink,
+  readMinimumContrastRatio,
+  terminalViewOptions,
+} from '#components/terminal/terminal-view-options.js';
+import type { TerminalRendererLoader } from '#components/terminal/terminal-view-options.js';
 
 type AccessRequest = Readonly<{ requestId: string; access: TerminalAccess; expiresAt: string }>;
 
@@ -67,21 +61,6 @@ type PaneState =
     }>
   | Readonly<{ phase: 'refused'; refusal: TerminalRefusal }>;
 
-/* The code editor's font (`--font-mono`, 14px, line-height 1.5), so the Terminal and the editor set code the same way. */
-const fallbackFontFamily = "'Geist Mono', ui-monospace, monospace";
-const fontSize = 14;
-const lineHeight = fontSize * 1.5;
-/**
- * The editor's monospace family, read from the `--font-mono` token the code editor uses.
- *
- * @param element - An element inside the themed document.
- * @returns The font family list.
- */
-const readEditorFontFamily = (element: Element): string =>
-  getComputedStyle(element).getPropertyValue('--font-mono').trim() || fallbackFontFamily;
-const readMinimumContrastRatio = (): number =>
-  globalThis.matchMedia(highContrastQuery).matches ? highContrastRatio : 1;
-const scrollbackLines = 10_000;
 // Bound synchronous bridge startup separately from the host's ongoing backpressure window.
 const initialFrameLimit = 64;
 
@@ -403,24 +382,11 @@ export function TerminalPane({
         ? 'Setting up the shell sandbox. Approve the administrator prompt your computer shows; Tau asks only once.'
         : undefined,
     );
-    const theme = readTerminalTheme(host);
     let view: TerminalRendererView;
     try {
       view = await loadRenderer({
-        host,
-        fontFamily: readEditorFontFamily(host),
-        fontSize,
-        lineHeight,
-        theme,
-        ...terminalTextRendering(theme),
-        scrollback: scrollbackLines,
-        screenReaderMode: screenReaderModeRef.current,
-        minimumContrastRatio: readMinimumContrastRatio(),
-        reducedMotion: globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches,
-        onLinkActivate(uri) {
-          /* The desktop navigation policy sends http(s) to the person's browser and opens nothing in the app. */
-          globalThis.open(uri, '_blank', 'noopener,noreferrer');
-        },
+        ...terminalViewOptions(host, screenReaderModeRef.current),
+        onLinkActivate: openTerminalLink,
         onLeave() {
           chromeRef.current?.focus();
         },

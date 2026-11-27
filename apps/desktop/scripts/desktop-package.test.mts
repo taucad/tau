@@ -9,14 +9,16 @@
  */
 
 import assert from 'node:assert/strict';
-import { accessSync, constants, readFileSync, statSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
+import { copyFile, mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createPackageWithOptions, statFile } from '@electron/asar';
 
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
+import { copyRuntimeClosure } from '@taucad/nx/runtime-closure';
 import {
   desktopArchiveCommand,
   desktopGitPayloadRefusal,
@@ -28,7 +30,9 @@ import {
 } from './desktop-package-target.mjs';
 import { gitPayloadExecutables, gitPayloadLayout } from './git-payload.mjs';
 import {
+  desktopBundledImports,
   desktopManifestFields,
+  excludesBuildDiagnostics,
   desktopPackageChannel,
   keepsNodePtyPath,
   markNodePtySpawnHelperExecutable,
@@ -378,6 +382,7 @@ assert.deepEqual(runtimePlatformPackages['darwin-arm64'], {
   esbuild: '@esbuild/darwin-arm64',
   libassimp: 'libassimp-darwin-arm64',
   nanoraster: 'nanoraster-darwin-arm64',
+  cadmpeg: 'cadmpeg-ts-darwin-arm64',
   bundledOptionalDependencies: [
     '@img/sharp-libvips-darwin-arm64',
     '@img/sharp-darwin-arm64',
@@ -388,7 +393,13 @@ assert.deepEqual(runtimePlatformPackages['darwin-arm64'], {
 });
 for (const [target, packages] of Object.entries(runtimePlatformPackages)) {
   const [platform, arch] = target.split('-') as [string, string];
-  for (const name of [packages.openrscadEngine, packages.esbuild, packages.libassimp, packages.nanoraster]) {
+  for (const name of [
+    packages.openrscadEngine,
+    packages.esbuild,
+    packages.libassimp,
+    packages.nanoraster,
+    packages.cadmpeg,
+  ]) {
     if (name === undefined) {
       continue;
     }
@@ -415,6 +426,18 @@ for (const packages of Object.values(runtimePlatformPackages)) {
   }
 }
 assert.equal(runtimePlatformPackages['darwin-x64'].libassimp, undefined, 'Intel uses the staged Assimp WASM backend');
+const cadmpegManifest = JSON.parse(
+  readFileSync(
+    new URL('../../../packages/plugins/cadmpeg/node_modules/cadmpeg-ts/package.json', import.meta.url),
+    'utf8',
+  ),
+) as { optionalDependencies: Record<string, string> };
+for (const packages of Object.values(runtimePlatformPackages)) {
+  assert.ok(
+    cadmpegManifest.optionalDependencies[packages.cadmpeg],
+    `${packages.cadmpeg} must be published by the pinned engine`,
+  );
+}
 console.log('✓ each target stages its own native platform packages');
 
 /* Sandbox helpers: a target keeps only the one it executes, for its own architecture. */
@@ -555,3 +578,57 @@ try {
   await rm(nativeResources, { recursive: true, force: true });
 }
 console.log("✓ the app ships each native package's own dependency files for first-use preparation");
+
+/*
+ * The bundled imports load from the app's own `node_modules` at run time (the Windows NSIS and AppImage updaters import
+ * `electron-updater`). Stage each closure exactly as `stageRuntimePackages` does and prove every staged package's `main`
+ * is there: `debug`, under `builder-util-runtime`, runs from `src/index.js`, and a staged copy without it made a real
+ * Windows install refuse its own update route (`updater.installed-route-invalid`).
+ */
+const bundledModules = await mkdtemp(join(tmpdir(), 'tau-bundled-imports-'));
+try {
+  const desktopRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const sources = await Promise.all(
+    desktopBundledImports.map(async (name) => ({
+      name,
+      source: await realpath(join(desktopRoot, 'node_modules', name)),
+    })),
+  );
+  for (const { name, source } of sources) {
+    // oxlint-disable-next-line no-await-in-loop -- Staging nests packages; one closure at a time, as the stage does.
+    await copyRuntimeClosure({ name, source, modulesRoot: bundledModules, filter: excludesBuildDiagnostics });
+  }
+  const missingMains: string[] = [];
+  const visit = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const path = join(directory, entry.name);
+      if (entry.name.startsWith('@')) {
+        // oxlint-disable-next-line no-await-in-loop -- A bounded serial walk of the staged tree.
+        await visit(path);
+        continue;
+      }
+      const manifest = JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) as { readonly main?: string };
+      if (manifest.main !== undefined) {
+        const main = join(path, manifest.main);
+        if (![main, `${main}.js`, join(main, 'index.js')].some((candidate) => existsSync(candidate))) {
+          missingMains.push(`${relative(bundledModules, path)} (${manifest.main})`);
+        }
+      }
+      if (existsSync(join(path, 'node_modules'))) {
+        // oxlint-disable-next-line no-await-in-loop -- A bounded serial walk of the staged tree.
+        await visit(join(path, 'node_modules'));
+      }
+    }
+  };
+  await visit(bundledModules);
+  assert.deepEqual(missingMains, [], 'every staged bundled-import package keeps its main entry');
+  const updaterRequire = createRequire(join(bundledModules, 'electron-updater', 'package.json'));
+  const runtime = updaterRequire('builder-util-runtime') as { readonly CancellationToken?: unknown };
+  assert.equal(typeof runtime.CancellationToken, 'function');
+} finally {
+  await rm(bundledModules, { recursive: true, force: true });
+}
+console.log("✓ each bundled import's staged closure keeps every package's main entry, so the updater loads");

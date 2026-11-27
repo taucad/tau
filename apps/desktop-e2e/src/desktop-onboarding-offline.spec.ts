@@ -10,6 +10,10 @@ import { expectNoDesktopAnalytics, expectVisible } from '#support/scenario.js';
  * With the network off, setup runs to the end on desktop, its live preview included, and nothing is requested
  * from a remote origin. The renderer's own `app://tau` pages and assets are served by main and stay reachable; the
  * tour adds its own steps to this spec when it lands.
+ *
+ * The network goes off the way the operating system takes it away: requests fail (session emulation) and the page
+ * reads offline (`navigator.onLine`, from each document's first script). Session emulation alone leaves the page
+ * reading online, and a page that reads online must ask to find out it cannot reach Tau.
  */
 
 let session: DesktopSession | undefined;
@@ -47,6 +51,11 @@ test('runs setup to the end, preview included, with the network off and no remot
   await application.evaluate(async ({ session: electronSession }) => {
     electronSession.defaultSession.enableNetworkEmulation({ offline: true });
   });
+  /* The operating system's half: every document from the reload on reads offline from its first script. Neither
+   * Playwright's `setOffline` nor DevTools' offline emulation survives a reload of an Electron page. */
+  await application.context().addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => false });
+  });
   const pageOrigin = new URL(page.url()).origin;
   const remote: string[] = [];
   application.context().on('request', (request) => {
@@ -57,6 +66,7 @@ test('runs setup to the end, preview included, with the network off and no remot
   });
   try {
     await page.reload({ waitUntil: 'load' });
+    expect(await page.evaluate(() => navigator.onLine)).toBe(false);
     await expectVisible(page.getByRole('heading', { level: 1, name: 'What do you want to make?' }), 60_000);
 
     await page.getByRole('checkbox', { name: /Mechanical parts/u }).click();

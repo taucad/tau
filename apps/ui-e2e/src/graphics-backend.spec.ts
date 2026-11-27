@@ -1,6 +1,7 @@
 import { beforeEach, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import type { SectionViewTestBridgeApi } from '@taucad/app/test-bridges/section-view';
 
 /**
  * Graphics-backend regression spec.
@@ -38,81 +39,7 @@ const webgpuValidationPatterns: readonly RegExp[] = [
 
 type GraphicsBackend = 'webgl' | 'webgpu';
 
-type GraphicsTestBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<NonNullable<GraphicsTestBridgeWindow['__TAU_SECTION_VIEW_TEST__']>>;
-  __TAU_SECTION_VIEW_TEST__?: {
-    getGraphicsBackend(): GraphicsBackend;
-    getRendererIdentity(): { api: GraphicsBackend; name: string; frame: number };
-    getViewportCanvas(): HTMLCanvasElement;
-    measureRenderFrames(options?: { gpuTiming?: boolean; orbit?: boolean }): Promise<{
-      submission: number[];
-      completion: number[];
-      gpu: Array<number | undefined>;
-      gpuMethod: string;
-      firstSubmission: number;
-      geometries: number;
-      textures: number;
-      drawCalls: number;
-      triangles: number;
-      revision: string;
-      width: number;
-      height: number;
-      pixelRatio: number;
-    }>;
-    isGeometryFramed(): boolean;
-    setCamera(camera: {
-      position: readonly [number, number, number];
-      target?: readonly [number, number, number];
-      fov?: number;
-      zoom?: number;
-    }): void;
-    setFovAngle(angle: number): void;
-    setPresentation(presentation: Readonly<{ surfaces: boolean; lines: boolean }>): void;
-    setGridPresentationClipPolicy(policy: Readonly<{ far: boolean; near: boolean }>): void;
-    getCamera(): {
-      actorStatus: string;
-      projection: 'orthographic' | 'perspective';
-      requestedFov: number;
-      handoffFov?: number;
-      verticalSpan: number;
-      position: readonly [number, number, number];
-      quaternion: readonly [number, number, number, number];
-      target: readonly [number, number, number];
-      fov?: number;
-      zoom?: number;
-      controlsDistance: number;
-      controlsEnabled: boolean;
-      viewportGizmoLockActive: boolean;
-      clipping: Readonly<{ near: number; far: number }>;
-      nativeClipping: Readonly<{ near: number; far: number }>;
-    };
-    getCameraTransitionDiagnostics(): {
-      requests: number;
-      frames: number;
-      actorSyncFailures: number;
-      averageRequestToActorSyncMilliseconds: number;
-      maximumRequestToActorSyncMilliseconds: number;
-      maximumRequestToFrameMilliseconds: number;
-      staleFrames: number;
-    };
-    resetCameraTransitionDiagnostics(): void;
-    getRenderFrame(): {
-      anchorFrameId: string;
-      originMeters: readonly [number, number, number];
-      metersPerRenderUnit: number;
-    };
-    setRenderFrame(renderFrame: {
-      anchorFrameId: string;
-      originMeters: readonly [number, number, number];
-      metersPerRenderUnit: number;
-    }): void;
-    projectWorldPoint(point: readonly [number, number, number]): { x: number; y: number; visible: boolean };
-  };
-};
-
-type GraphicsTestCameraState = ReturnType<
-  NonNullable<GraphicsTestBridgeWindow['__TAU_SECTION_VIEW_TEST__']>['getCamera']
->;
+type GraphicsTestCameraState = ReturnType<SectionViewTestBridgeApi['getCamera']>;
 
 type CanvasSampleRegion = Readonly<{
   x: number;
@@ -589,7 +516,7 @@ async function driveEdgeOcclusionCamera({
   await waitForGraphicsTestBridge();
   await target.evaluate(
     ({ cameraDistance, cameraFov }) => {
-      const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       if (!bridge) {
         throw new Error('Graphics e2e bridge is not installed.');
       }
@@ -609,7 +536,7 @@ async function driveEdgeOcclusionCamera({
 }
 
 async function waitForGraphicsTestBridge(): Promise<void> {
-  await target.waitFor(() => Boolean((globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__));
+  await target.waitFor(() => Boolean(globalThis.__TAU_SECTION_VIEW_TEST__));
   const requestedBackend = await target.evaluate(() => new URL(location.href).searchParams.get('graphicsBackend'));
   if (requestedBackend === 'webgl' || requestedBackend === 'webgpu') {
     await target.expectPresentedGraphicsBackend(requestedBackend);
@@ -665,7 +592,7 @@ async function dragMainPreviewCanvas(): Promise<void> {
 
 async function sampleCameraFrames(frameCount: number): Promise<GraphicsTestCameraState[]> {
   return target.evaluate(async (count) => {
-    const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Graphics e2e bridge is not installed.');
     }
@@ -752,11 +679,11 @@ function expectMainCanvasControlsAvailable(camera: GraphicsTestCameraState, back
 
 async function setFovAngleAndWait(angle: number): Promise<GraphicsTestCameraState> {
   const previousFrames = await target.evaluate(() => {
-    const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     return bridge?.getCameraTransitionDiagnostics().frames ?? 0;
   });
   await target.evaluate((nextAngle) => {
-    const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Graphics e2e bridge is not installed.');
     }
@@ -767,7 +694,7 @@ async function setFovAngleAndWait(angle: number): Promise<GraphicsTestCameraStat
   try {
     await target.waitFor(
       ({ expected, expectedFrames }) => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         const camera = bridge?.getCamera();
         const diagnostics = bridge?.getCameraTransitionDiagnostics();
         return (
@@ -781,8 +708,7 @@ async function setFovAngleAndWait(angle: number): Promise<GraphicsTestCameraStat
     );
   } catch (error) {
     const state = await target.evaluate(() => {
-      const scope = globalThis as unknown as GraphicsTestBridgeWindow;
-      return (scope.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? []).map((bridge) => ({
+      return (globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? []).map((bridge) => ({
         backend: bridge.getGraphicsBackend(),
         camera: bridge.getCamera(),
         diagnostics: bridge.getCameraTransitionDiagnostics(),
@@ -793,7 +719,7 @@ async function setFovAngleAndWait(angle: number): Promise<GraphicsTestCameraStat
   }
 
   return target.evaluate(() => {
-    const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Graphics e2e bridge is not installed.');
     }
@@ -931,7 +857,7 @@ test.describe('Graphics backend regression guard', () => {
 
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         if (!bridge) {
           throw new Error('Graphics e2e bridge is not installed.');
         }
@@ -968,7 +894,7 @@ test.describe('Graphics backend regression guard', () => {
       const canvas = selectors.getByCss(previewCanvasSelector).first();
       const beforePixels = await target.screenshot(canvas);
       const before = await target.evaluate(() => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
         return {
           camera: bridge.getCamera(),
           point: bridge.projectWorldPoint([0, 0, 0]),
@@ -976,7 +902,7 @@ test.describe('Graphics backend regression guard', () => {
         };
       });
       await target.evaluate((current) => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
         const scale = current.metersPerRenderUnit * 1000;
         bridge.setRenderFrame({
           anchorFrameId: current.anchorFrameId,
@@ -987,7 +913,7 @@ test.describe('Graphics backend regression guard', () => {
       await target.delay(250);
       const afterPixels = await target.screenshot(canvas);
       const after = await target.evaluate(() => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
         return { camera: bridge.getCamera(), point: bridge.projectWorldPoint([0, 0, 0]) };
       });
 
@@ -1014,13 +940,13 @@ test.describe('Graphics backend regression guard', () => {
       ).toBeLessThan(0.08);
 
       await target.evaluate((frame) => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
         bridge.setRenderFrame(frame);
       }, before.frame);
       await target.delay(750);
       const beforeAoPixels = await target.screenshot(canvas);
       await target.evaluate((current) => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
         const scale = current.metersPerRenderUnit * 1000;
         bridge.setRenderFrame({
           anchorFrameId: current.anchorFrameId,
@@ -1047,7 +973,7 @@ test.describe('Graphics backend regression guard', () => {
       await waitForGraphicsViewer();
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
         bridge.setPresentation({ surfaces: false, lines: false });
         bridge.setCamera({ position: [1, -1, 0.7], target: [0, 0, 0], fov: 60, zoom: 1 });
       });
@@ -1056,11 +982,11 @@ test.describe('Graphics backend regression guard', () => {
       const canvas = selectors.getByCss(previewCanvasSelector).first();
       const paddedPixels = await target.screenshot(canvas, `grid-fade-padded-${backend}.png`);
       const paddedCamera = await target.evaluate(() => {
-        return (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getCamera();
+        return globalThis.__TAU_SECTION_VIEW_TEST__!.getCamera();
       });
 
       await target.evaluate(() => {
-        (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.setGridPresentationClipPolicy({
+        globalThis.__TAU_SECTION_VIEW_TEST__!.setGridPresentationClipPolicy({
           far: true,
           near: false,
         });
@@ -1068,11 +994,11 @@ test.describe('Graphics backend regression guard', () => {
       await target.delay(250);
       const nearClippedPixels = await target.screenshot(canvas, `grid-fade-no-near-control-${backend}.png`);
       const farOnlyCamera = await target.evaluate(() => {
-        return (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getCamera();
+        return globalThis.__TAU_SECTION_VIEW_TEST__!.getCamera();
       });
 
       await target.evaluate(() => {
-        (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.setGridPresentationClipPolicy({
+        globalThis.__TAU_SECTION_VIEW_TEST__!.setGridPresentationClipPolicy({
           far: false,
           near: true,
         });
@@ -1080,11 +1006,11 @@ test.describe('Graphics backend regression guard', () => {
       await target.delay(250);
       const farClippedPixels = await target.screenshot(canvas, `grid-fade-no-far-control-${backend}.png`);
       const nearOnlyCamera = await target.evaluate(() => {
-        return (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getCamera();
+        return globalThis.__TAU_SECTION_VIEW_TEST__!.getCamera();
       });
 
       await target.evaluate(() => {
-        (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.setGridPresentationClipPolicy({
+        globalThis.__TAU_SECTION_VIEW_TEST__!.setGridPresentationClipPolicy({
           far: true,
           near: true,
         });
@@ -1157,7 +1083,7 @@ test.describe('Graphics backend regression guard', () => {
         await waitForGraphicsViewer();
         await waitForGraphicsTestBridge();
         await target.evaluate(({ fov, position }) => {
-          const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+          const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
           bridge.setPresentation({ surfaces: false, lines: false });
           bridge.setCamera({ position, target: [0, 0, 0], fov, zoom: 1 });
           bridge.setGridPresentationClipPolicy({ far: true, near: true });
@@ -1170,11 +1096,11 @@ test.describe('Graphics backend regression guard', () => {
           `grid-fade-${cameraCase.label}-protected-${backend}.png`,
         );
         const protectedCamera = await target.evaluate(() => {
-          return (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getCamera();
+          return globalThis.__TAU_SECTION_VIEW_TEST__!.getCamera();
         });
 
         await target.evaluate(() => {
-          (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.setGridPresentationClipPolicy({
+          globalThis.__TAU_SECTION_VIEW_TEST__!.setGridPresentationClipPolicy({
             far: true,
             near: false,
           });
@@ -1185,11 +1111,11 @@ test.describe('Graphics backend regression guard', () => {
           `grid-fade-${cameraCase.label}-no-near-control-${backend}.png`,
         );
         const farOnlyCamera = await target.evaluate(() => {
-          return (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getCamera();
+          return globalThis.__TAU_SECTION_VIEW_TEST__!.getCamera();
         });
 
         await target.evaluate(() => {
-          (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.setGridPresentationClipPolicy({
+          globalThis.__TAU_SECTION_VIEW_TEST__!.setGridPresentationClipPolicy({
             far: true,
             near: true,
           });
@@ -1266,7 +1192,7 @@ test.describe('Graphics backend regression guard', () => {
       await waitForGraphicsViewer();
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         bridge?.resetCameraTransitionDiagnostics();
       });
 
@@ -1286,7 +1212,7 @@ test.describe('Graphics backend regression guard', () => {
       /* oxlint-enable no-await-in-loop -- sequential camera observation ends. */
 
       const diagnostics = await target.evaluate(() => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         return bridge?.getCameraTransitionDiagnostics();
       });
       expect(diagnostics?.requests).toBe(angles.length + 1);
@@ -1310,7 +1236,7 @@ test.describe('Graphics backend regression guard', () => {
       await waitForGraphicsViewer();
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         bridge?.resetCameraTransitionDiagnostics();
       });
 
@@ -1325,7 +1251,7 @@ test.describe('Graphics backend regression guard', () => {
       /* oxlint-enable no-await-in-loop -- sequential camera observation ends. */
 
       const diagnostics = await target.evaluate(() => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         return bridge?.getCameraTransitionDiagnostics();
       });
       expect(diagnostics?.requests).toBe(3);
@@ -1341,7 +1267,7 @@ test.describe('Graphics backend regression guard', () => {
 
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         if (!bridge) {
           throw new Error('Graphics e2e bridge is not installed.');
         }
@@ -1419,11 +1345,12 @@ test.describe('Graphics backend regression guard', () => {
     await waitForGraphicsTestBridge();
     await target.expectGeometryFramed();
     const result = await target.evaluate(async () => {
-      const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
       const original = bridge.getCamera();
       bridge.setCamera({ position: original.position, target: original.target, fov: 60, zoom: 2 });
       const before = bridge.getCamera();
-      await bridge.measureRenderFrames({ orbit: true });
+      // The row asserts the camera is restored after timed motion, so a few orbit frames carry it on any adapter.
+      await bridge.measureRenderFrames({ orbit: true, warmup: 2, samples: 4 });
       return { before, after: bridge.getCamera() };
     });
     expect(result.before.zoom).toBe(2);
@@ -1434,6 +1361,17 @@ test.describe('Graphics backend regression guard', () => {
     }
   });
 
+  /*
+   * Sample counts and counterbalanced repeats are for timing statistics, which only a real GPU makes meaningful (the GPU
+   * smoke runs this suite on the hardware profile). On the software profile the browser composites every frame on the
+   * CPU: one animation frame of the 1280 x 900 viewport takes about 1.4 s there, so 140 frames per case, and three
+   * repeats of the core row, measured CI's CPU and ran the row past its timeout. One short pass per backend still proves
+   * the work these rows assert: no idle draws, one sample per recorded frame, draws and triangles, matched workloads and
+   * no validation errors.
+   */
+  const hardwareTiming = target.currentWebGpuProfile() === 'hardware';
+  const benchmarkFrames = hardwareTiming ? { warmup: 20, samples: 120 } : { warmup: 2, samples: 12 };
+
   for (const fixture of ['replicad.birdhouse', 'replicad.v8-engine'] as const) {
     for (const scenario of [
       { id: 'core', dpr: 1, fov: 60, orbit: false, repeats: 3 },
@@ -1443,11 +1381,15 @@ test.describe('Graphics backend regression guard', () => {
     ]) {
       test(`records warmed whole-frame benchmark ${fixture} ${scenario.id}`, async () => {
         await target.commands.uiOpenTarget({ deviceScaleFactor: scenario.dpr });
-        await target.setViewport({ width: 1280, height: 900 });
+        // On the software profile the device pixel ratio row keeps the core row's 1280 x 900 backing store, so it proves
+        // the ratio reaches the renderer without asking the CPU to composite four times the pixels.
+        await target.setViewport(
+          hardwareTiming ? { width: 1280, height: 900 } : { width: 1280 / scenario.dpr, height: 900 / scenario.dpr },
+        );
         const results = [];
         const messageStart = await consoleMessageCount();
         /* oxlint-disable no-await-in-loop -- counterbalanced cases own one renderer at a time. */
-        for (let repetition = 0; repetition < scenario.repeats; repetition++) {
+        for (let repetition = 0; repetition < (hardwareTiming ? scenario.repeats : 1); repetition++) {
           const order = repetition % 2 === 0 ? (['webgl', 'webgpu'] as const) : (['webgpu', 'webgl'] as const);
           for (const backend of order) {
             const openedAt = performance.now();
@@ -1464,15 +1406,13 @@ test.describe('Graphics backend regression guard', () => {
                     target: [0, 0, 0.047] as const,
                   }
                 : await target.evaluate(() => {
-                    const view = (
-                      globalThis as unknown as GraphicsTestBridgeWindow
-                    ).__TAU_SECTION_VIEW_TEST__!.getCamera();
+                    const view = globalThis.__TAU_SECTION_VIEW_TEST__!.getCamera();
                     return { position: view.position, target: view.target };
                   });
             {
               await target.evaluate(
                 ({ view, configuration }) => {
-                  const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+                  const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
                   bridge.setCamera({ ...view, fov: 60 });
                   bridge.setFovAngle(configuration.fov);
                 },
@@ -1486,7 +1426,7 @@ test.describe('Graphics backend regression guard', () => {
                 .poll(
                   async () =>
                     target.evaluate(async () => {
-                      const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+                      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
                       const before = bridge.getRendererIdentity().frame;
                       await new Promise<void>((resolve) => {
                         setTimeout(resolve, 2000);
@@ -1497,21 +1437,17 @@ test.describe('Graphics backend regression guard', () => {
                 )
                 .toBe(true);
               const frameBeforeIdle = await target.evaluate(
-                () =>
-                  (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getRendererIdentity()
-                    .frame,
+                () => globalThis.__TAU_SECTION_VIEW_TEST__!.getRendererIdentity().frame,
               );
               await target.delay(500);
               const idleFrames = await target.evaluate(
-                (before) =>
-                  (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getRendererIdentity()
-                    .frame - before,
+                (before) => globalThis.__TAU_SECTION_VIEW_TEST__!.getRendererIdentity().frame - before,
                 frameBeforeIdle,
               );
               for (const gpuTiming of [false, true]) {
                 const measurements = await target.evaluate(
                   async (options) => {
-                    const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+                    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
                     const frames = await bridge.measureRenderFrames(options);
                     return {
                       ...frames,
@@ -1522,22 +1458,22 @@ test.describe('Graphics backend regression guard', () => {
                       cssHeight: bridge.getViewportCanvas().clientHeight,
                     };
                   },
-                  { gpuTiming, orbit: scenario.orbit },
+                  { gpuTiming, orbit: scenario.orbit, ...benchmarkFrames },
                 );
-                expect(measurements.backend).toBe(backend);
+                expect(measurements.backend).toBe(target.presentedGraphicsBackend(backend));
                 expect(measurements.pixelRatio).toBe(scenario.dpr);
                 expect(measurements.width).toBe(measurements.cssWidth * scenario.dpr);
                 expect(measurements.height).toBe(measurements.cssHeight * scenario.dpr);
                 expect(idleFrames, `${fixture}/${scenario.id}/${backend}/repeat=${repetition}`).toBe(0);
-                expect(measurements.submission).toHaveLength(120);
-                expect(measurements.completion).toHaveLength(120);
+                expect(measurements.submission).toHaveLength(benchmarkFrames.samples);
+                expect(measurements.completion).toHaveLength(benchmarkFrames.samples);
                 expect(measurements.drawCalls).toBeGreaterThan(0);
                 expect(measurements.triangles).toBeGreaterThan(0);
                 expect(measurements.completion.every((value) => Number.isFinite(value) && value > 0)).toBe(true);
                 if (gpuTiming && measurements.gpuMethod !== 'unsupported') {
                   expect(
                     measurements.gpu.filter((value) => typeof value === 'number' && value > 0).length,
-                  ).toBeGreaterThan(100);
+                  ).toBeGreaterThan((benchmarkFrames.samples * 5) / 6);
                   expect(
                     measurements.gpu.every(
                       (value) => typeof value !== 'number' || (Number.isFinite(value) && value > 0),
@@ -1545,6 +1481,7 @@ test.describe('Graphics backend regression guard', () => {
                   ).toBe(true);
                 }
                 results.push({
+                  requested: backend,
                   repetition,
                   gpuTiming,
                   readyMilliseconds,
@@ -1558,7 +1495,7 @@ test.describe('Graphics backend regression guard', () => {
                     {
                       fixture,
                       scenario,
-                      warmup: 20,
+                      warmup: benchmarkFrames.warmup,
                       unit: 'milliseconds',
                       results,
                     },
@@ -1577,8 +1514,8 @@ test.describe('Graphics backend regression guard', () => {
           }
         }
         /* oxlint-enable no-await-in-loop -- sequential measurements end. */
-        const gl = results.find((row) => row.backend === 'webgl')!.triangles;
-        const gpu = results.find((row) => row.backend === 'webgpu')!.triangles;
+        const gl = results.find((row) => row.requested === 'webgl')!.triangles;
+        const gpu = results.find((row) => row.requested === 'webgpu')!.triangles;
         expect(gpu / gl, 'whole-scene workload equivalence').toBeGreaterThan(0.95);
         expect(gpu / gl, 'whole-scene workload equivalence').toBeLessThan(1.05);
         expect(await webGpuValidationFailures(messageStart)).toEqual([]);
@@ -1610,7 +1547,7 @@ test.describe('Graphics backend regression guard', () => {
       await waitForGraphicsViewer();
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
         bridge.setCamera({
           position: [0.12857841861747968, -0.12857841861747965, 0.15198383757294057],
           target: [0, 0, 0.047],

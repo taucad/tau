@@ -1,0 +1,14 @@
+--- a/apps/ui/src/debounce.test.ts
++++ b/apps/ui/src/debounce.test.ts
+@@
+ import { expect, it, vi } from 'vitest';
+
+ it('resolves after the delay', async () => {
+   vi.useFakeTimers();
+-  const delayed = new Promise((resolve) => setTimeout(resolve, 100));
+   vi.advanceTimersByTime(100);
+   vi.useRealTimers();
++  const delayed = new Promise((resolve) => setTimeout(resolve, 100));
+   await delayed;
+   expect(await delayed).toBeUndefined();
+ });

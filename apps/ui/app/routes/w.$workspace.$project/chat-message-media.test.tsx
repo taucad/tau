@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render as renderBare, screen } from '@testing-library/react';
+import { mock } from 'vitest-mock-extended';
+import { FileManagerContext } from '@taucad/ui-core/contexts/file-manager-context';
+import type { FileManagerContextValue } from '@taucad/ui-core/contexts/file-manager-context';
 import { userEvent } from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { ChatAttachmentDirectoriesContext } from '#components/chat/attachment-preview.js';
@@ -23,8 +26,15 @@ const readFile = vi.fn(async (path: string) => {
   throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 });
 // The provider memoizes its record client; attachment sources are keyed by that identity.
-const fileManager = { recordFiles: { readFile } };
-vi.mock('#hooks/use-file-manager.js', () => ({ useOptionalFileManager: () => fileManager }));
+const fileManager = mock<FileManagerContextValue>({
+  recordFiles: mock<FileManagerContextValue['recordFiles']>({ readFile }),
+});
+
+function FileManagerWrapper({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <FileManagerContext.Provider value={fileManager}>{children}</FileManagerContext.Provider>;
+}
+
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
 
 const send = vi.fn();
 let project: { readonly editorRef: { readonly send: typeof send } } | undefined;

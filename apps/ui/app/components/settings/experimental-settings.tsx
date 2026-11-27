@@ -10,7 +10,7 @@ import { useFocusedProjectSession } from '#routes/w.$workspace.$project/focused-
 import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { Switch } from '@taucad/ui/components/switch';
 import { flagRegistry, experimentalFeatureFlagNames } from '#flags/flag.constants.js';
-import type { FeatureFlagName } from '#flags/flag.constants.js';
+import type { LocalFeatureFlagName } from '#flags/flag.constants.js';
 import { useFeatureFlags, useSetFeatureFlag } from '#flags/use-feature.js';
 
 function ActiveRendererStatus({
@@ -78,7 +78,7 @@ function NoActiveViewer(): React.JSX.Element {
   );
 }
 
-function FlagRow({ flag }: { readonly flag: FeatureFlagName }): React.JSX.Element | undefined {
+function FlagRow({ flag }: { readonly flag: LocalFeatureFlagName }): React.JSX.Element | undefined {
   const flags = useFeatureFlags();
   const setFlag = useSetFeatureFlag();
   const definition = flagRegistry[flag];

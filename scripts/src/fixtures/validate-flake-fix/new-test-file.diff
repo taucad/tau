@@ -1,0 +1,11 @@
+--- /dev/null
++++ b/apps/ui/src/boot-order.test.ts
+@@
++import { expect, it, vi } from 'vitest';
++
++it('boots after the registry is ready', async () => {
++  const registry = createRegistry();
++  const worker = boot({ registry });
++  await vi.waitFor(() => expect(registry.ready).toBe(true));
++  expect((await worker).state).toBe('ready');
++});

@@ -280,7 +280,7 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  *   `sectionCuts` (entry-scoped; the cut ids are made anew at every seed).
  * - **session** -- survives an in-app revisit because this actor is retained, and is lost on reload
  *   by decision: `displayUnits.length` (the grid unit symbol, session-scoped by ruling E4),
- *   `isGridSizeLocked`, `isMeasureActive`, the unpinned half of `measurements`,
+ *   `isGridSizeLocked`, `isMeasureActive`, `isCommentActive`, the unpinned half of `measurements`,
  *   `currentMeasurementStart`, `modelInteractionUnitId` and `selectedSectionCutId`.
  * - **ephemeral** -- derived from geometry, the canvas or a pointer on every mount, never seeded:
  *   `gridSizes`, `gridSizesComputed`, `cadUnits`, `cameraVisibleSpan`, `geometryRadius`,
@@ -376,6 +376,9 @@ export interface GraphicsContext {
    * sources it cuts are known; none is refused.
    */
   committedSectionCuts: readonly SectionCut[];
+
+  /** Whether the Comment tool takes clicks on the model. Never on with Measure: both read the same click. */
+  isCommentActive: boolean;
 
   // Measure state
   isMeasureActive: boolean;
@@ -600,6 +603,8 @@ export type GraphicsEvent =
   | { type: 'hoverSectionCut'; payload: string | undefined }
   /** From the caps, in the frame they commit a cut list. A repeated value keeps the snapshot. */
   | { type: 'commitSectionCuts'; payload: readonly SectionCut[] }
+  /** Turns the Comment tool on or off; turning it on turns Measure off. */
+  | { type: 'setCommentActive'; payload: boolean }
   // Measure events
   | { type: 'setMeasureActive'; payload: boolean }
   | { type: 'setMeasureInputReady'; ready: boolean }
@@ -853,6 +858,7 @@ export const graphicsEventTypes = [
   'selectSectionCut',
   'hoverSectionCut',
   'commitSectionCuts',
+  'setCommentActive',
   'setMeasureActive',
   'setMeasureInputReady',
   'adoptPinnedMeasurements',
@@ -991,6 +997,7 @@ export type ViewerShortcutOutcome =
   | 'measureOn'
   | 'measureOff'
   | 'measureNeedsModel'
+  | 'commentOff'
   | 'gridShown'
   | 'gridHidden'
   | 'perspective'
@@ -1180,10 +1187,13 @@ const decideToolToggle = (
     : { outcome: 'measureNeedsModel' };
 };
 
-/** Escape steps back: a half-placed point, then Measure, then Section. */
+/** Escape steps back: a half-placed point, then Comment, then Measure, then Section. */
 const decideEscape = (context: GraphicsContext): ViewerShortcutDecision | undefined => {
   if (context.currentMeasurementStart) {
     return { outcome: 'pointCancelled', event: { type: 'cancelCurrentMeasurement' } };
+  }
+  if (context.isCommentActive) {
+    return { outcome: 'commentOff', event: { type: 'setCommentActive', payload: false } };
   }
   if (context.isMeasureActive) {
     return measureOffDecision;
@@ -1632,6 +1642,8 @@ const graphicsMachineDefinition = setup({
       ...createSectionViewSeed(input.sectionView),
       committedSectionCuts: [],
 
+      isCommentActive: false,
+
       // Measure state
       isMeasureActive: false,
       isMeasureInputReady: false,
@@ -1910,6 +1922,13 @@ const graphicsMachineDefinition = setup({
         },
         setGizmoVisibility: { context: ({ event }) => ({ enableGizmo: event.payload }) },
         setGridVisibility: { context: ({ event }) => ({ enableGrid: event.payload }) },
+        // Comment and Measure both read a click on the model, so starting one ends the other.
+        setCommentActive: ({ context, event }, enq) => {
+          if (event.payload && context.isMeasureActive) {
+            enq.raise({ type: 'setMeasureActive', payload: false });
+          }
+          return { context: { isCommentActive: event.payload } };
+        },
         setAxesVisibility: { context: ({ event }) => ({ enableAxes: event.payload }) },
         setMatcapVisibility: { context: ({ event }) => ({ enableMatcap: event.payload }) },
         setUpDirection: ({ context, event }, enq) => {
@@ -2854,6 +2873,7 @@ const graphicsMachineDefinition = setup({
                         target: 'on',
                         context: {
                           isMeasureActive: true,
+                          isCommentActive: false,
                           isMeasureInputReady: false,
                           ...beginMeasureHoverSuppression(context, enq),
                         },

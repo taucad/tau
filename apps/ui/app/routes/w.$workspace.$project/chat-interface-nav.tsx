@@ -38,7 +38,7 @@ import {
 } from '@taucad/ui/components/drawer';
 import { Button } from '@taucad/ui/components/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent } from '@taucad/ui/components/dropdown-menu';
-import { FileSelector } from '#components/files/file-selector.js';
+import { FileSelector } from '@taucad/files-ui/components/files/file-selector';
 import { ViewerTabContextMenu } from '#components/panes/viewer-tab-context-menu.js';
 import type { ViewerFileActions } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { MobileWorkbenchNavigation } from '#components/mobile-workbench-navigation.js';

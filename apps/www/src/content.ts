@@ -246,6 +246,10 @@ export const pricingFaq: Array<[string, string]> = [
     'Credits pay for metered Tau-hosted activity such as AI models and the Zoo KCL kernel. Usage varies by model and task, so a balance is not a guaranteed number of designs.',
   ],
   [
+    'What if I stop a response?',
+    'You pay for what it used up to the moment you stopped, estimated on the low side, and nothing if no answer had started yet. A response that fails because of Tau or the model provider costs nothing.',
+  ],
+  [
     'Can I buy credits without Pro?',
     'Yes. Credits cost $1 per 100, and you can add from $5 to $5,000 at a time, plus tax. Purchased credits never expire.',
   ],

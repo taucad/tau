@@ -5,6 +5,14 @@
       "expect": "pass",
       "ref": "GI-A5 one-key graph for the credit operation oracle"
     },
+    "GatewayInvocation.charged-cut-NoChargedCut.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoChargedCut"
+      },
+      "kind": "witness",
+      "ref": "D-3: a client cut that relayed output settles charged for what it used (ruled 2026-11-27)"
+    },
     "GatewayInvocation.cut-absorbs-NoLiveAbsorb.cfg": {
       "tier": "pr",
       "expect": {

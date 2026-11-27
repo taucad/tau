@@ -5,7 +5,7 @@
     "src/billable-model-invocation.service.ts#finish": "ab528b1419d6bd58a5cac896dbe7e1afda578a31dd4d5ab76aa793d6fcf696a5"
   },
   "specs": {
-    "GatewayInvocation.tla": "0b50dbe718d6fda179d29c678d496158282a112e39496b6c4e18027f091e4a6b"
+    "GatewayInvocation.tla": "b3993bb115f96b83081fdcc7ee5e3c9bdb4e1e630adf2c2a5207ebe54f3beee5"
   },
   "tables": {}
 }

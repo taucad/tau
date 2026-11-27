@@ -2,6 +2,13 @@ import { z } from 'zod';
 import type { BillableInvocationEvidenceCollector, BillableProviderWire } from '#billable-model-invocation.types.js';
 import type { NormalizedMeterItem, TerminalEvidence } from '#credit-ledger.types.js';
 import { providerFailureOf } from '@taucad/api-llm-gateway';
+import {
+  estimatedOutputTokensField,
+  relayedOutputCharacters,
+  relayedOutputCharactersField,
+  stoppedStepMeters,
+} from '#billable-stop-charge.js';
+import type { StopRateKey } from '#billable-stop-charge.js';
 
 type Usage = {
   input?: bigint;
@@ -186,11 +193,22 @@ const anthropicCacheWrites = (
   return fiveMinutes + oneHour === usage.cacheWrite ? { fiveMinutes, oneHour } : undefined;
 };
 
-/** Creates an exact protocol usage collector over preserved provider response bytes. */
+/**
+ * Creates an exact protocol usage collector over preserved provider response bytes.
+ *
+ * @param wire - The supplier wire.
+ * @param expectedDimensions - The dimensions the pinned tariff prices.
+ * @param providerId - The supplier.
+ * @param stop - The pinned meters and any exact input count, which price a step the person stopped
+ *   (`billable-stop-charge.ts`); without it a stop settles absorbed at zero.
+ * @returns The collector.
+ */
+// eslint-disable-next-line max-params -- the stop pricing is optional, so every existing caller keeps its three arguments
 export const createBillableModelEvidenceCollector = (
   wire: BillableProviderWire,
   expectedDimensions: ReadonlySet<string>,
   providerId: string,
+  stop?: { readonly rates: readonly StopRateKey[]; readonly countedInputTokens?: bigint | undefined },
 ): BillableInvocationEvidenceCollector => {
   const chunks: Array<Uint8Array<ArrayBuffer>> = [];
 
@@ -342,6 +360,44 @@ export const createBillableModelEvidenceCollector = (
         kind: 'provider_rejected',
         executionStatus: 'rejected',
         normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_failed', fields: {} },
+      };
+    }
+    /* A stop the person chose is billed for what it used (D-3): the usage reported so far plus a
+     * rounded-down estimate of the rest. Nothing relayed yet, or no pinned meters, keeps it free. */
+    const characters = failure === 'client_abort' && stop !== undefined ? relayedOutputCharacters(wire, events) : 0;
+    const stopped =
+      stop === undefined || invalidCache
+        ? undefined
+        : stoppedStepMeters({
+            rates: stop.rates,
+            reported: knownItems,
+            relayedCharacters: characters,
+            countedInputTokens: stop.countedInputTokens,
+          });
+    if (stopped !== undefined) {
+      const reasoningTokens = latest?.reasoning;
+      const meterItems = stopped.meterItems.map((item) =>
+        item.dimension === 'output' && reasoningTokens !== undefined && reasoningTokens > item.quantity
+          ? { ...item, quantity: reasoningTokens }
+          : item,
+      );
+      return {
+        kind: 'absorbed_unknown',
+        executionStatus: 'cancelled',
+        usageOccurredAt: new Date(),
+        meterItems,
+        ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+        normalizationEvidence: {
+          version: 'provider-usage-v1',
+          ...(latest?.requestId === undefined ? {} : { providerRequestId: latest.requestId }),
+          terminalReason: 'client_abort',
+          fields: {
+            ...(latest?.input === undefined ? {} : { input: latest.input.toString() }),
+            ...(latest?.output === undefined ? {} : { output: latest.output.toString() }),
+            [relayedOutputCharactersField]: characters.toString(),
+            [estimatedOutputTokensField]: stopped.estimatedOutputTokens.toString(),
+          },
+        },
       };
     }
     /* A cut at the authorized ceiling is the designed outcome of an in-stream control (R8),

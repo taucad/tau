@@ -26,8 +26,24 @@ const createFakeRenderer = () => {
   };
   const render = vi.fn();
   const setAnimationLoop = vi.fn(async () => undefined);
-  const renderer = { _animation: animation, _nodes: { nodeFrame }, info, render, setAnimationLoop };
-  return { renderer: renderer as unknown as WebGPURenderer, animation, nodeFrame, info, render, setAnimationLoop };
+  const inspector = { begin: vi.fn(), finish: vi.fn() };
+  const renderer = {
+    _animation: animation,
+    _nodes: { nodeFrame },
+    _inspector: inspector,
+    info,
+    render,
+    setAnimationLoop,
+  };
+  return {
+    renderer: renderer as unknown as WebGPURenderer,
+    animation,
+    nodeFrame,
+    info,
+    inspector,
+    render,
+    setAnimationLoop,
+  };
 };
 
 describe('renderOnDemand', () => {
@@ -57,8 +73,11 @@ describe('renderOnDemand', () => {
     expect(fake.nodeFrame.update).toHaveBeenCalledOnce();
     expect(fake.info.reset).toHaveBeenCalledOnce();
     expect(fake.info.frame).toBe(1);
+    expect(fake.inspector.begin).toHaveBeenCalledOnce();
+    expect(fake.inspector.finish).not.toHaveBeenCalled();
 
     await Promise.resolve();
+    expect(fake.inspector.finish).toHaveBeenCalledOnce();
     fake.renderer.render(scene, camera);
     expect(fake.nodeFrame.update).toHaveBeenCalledTimes(2);
     expect(fake.info.frame).toBe(2);
@@ -82,6 +101,11 @@ describe('renderOnDemand', () => {
     await fake.renderer.setAnimationLoop(frame);
     expect(fake.setAnimationLoop).toHaveBeenCalledWith(frame);
     expect(fake.animation.start).toHaveBeenCalledOnce();
+    // Three's `start` runs one update at once; it ran before the callback was installed, so the callback's first
+    // call comes from a browser frame, with a timestamp.
+    expect(fake.animation.start.mock.invocationCallOrder[0]).toBeLessThan(
+      fake.setAnimationLoop.mock.invocationCallOrder[0]!,
+    );
     fake.renderer.render(new Scene(), new PerspectiveCamera());
     expect(fake.nodeFrame.update).not.toHaveBeenCalled();
 
@@ -114,5 +138,6 @@ describe('renderOnDemand', () => {
       'this.renderer._inspector.finish();',
     ]);
     expect(source).toContain('this._animation = new Animation( this, this._nodes, this.info );');
+    expect(source).toContain('this._animation.setAnimationLoop( callback );');
   });
 });

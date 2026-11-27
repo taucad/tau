@@ -245,10 +245,10 @@ Use `0.01ms` rather than `0s` to preserve `transitionend` and `animationend` eve
 
 Waiting and streaming can last minutes, so a decoration that runs for more than 1 s costs nothing on the main thread. The 2026-11-25 chat profile measured flat spinners and text shimmers at 171 ms of every second while a turn waited.
 
-1. A looping decoration animates only `transform` or `opacity` on its own layer (`will-change: transform`), or is a single canvas presented directly. No `background-position`, `width`, colour or SVG child transform in a loop, no per-frame script, no layout read in a frame loop, and no per-frame copy from one canvas to another.
+1. A looping decoration animates only `transform` or `opacity` on its own layer (`will-change: transform`), or is a single canvas presented directly. No `background-position`, `width`, colour or SVG child transform in a loop, no per-frame script, no layout read in a frame loop, and no per-frame copy from one canvas to another. The one exception is the shared liquid-metal spinner on WebGPU: one renderer for the page, its frame copied into each spinner on screen, paused while none is visible.
 2. A spinning glyph turns its own box (`spin-glyph`) at a whole-pixel size (`size-3`, `size-3.5`, `size-4`), where WebKit's pixel-snapped centre is the true centre.
 3. A text sweep is a masked band that moves on the compositor over the text (`animate-activity-shimmer`), never a gradient under `background-clip: text`; work in flight breathes on opacity (`animate-shiny-text`).
-4. The fallback path, with no WebGPU, is the composited flat glyph. It never renders 3D into a detached canvas and copies it per frame.
+4. The fallback path, with no WebGPU, is the composited flat glyph, which every caller of the liquid-metal spinner passes as its `fallback`. It never renders 3D into a detached canvas and copies it per frame; `?graphicsBackend=webgl` still runs the WebGL renderer, for its browser suite and for diagnosis only.
 5. Sizes come from a `ResizeObserver` and are cached; a paint loop never calls `getBoundingClientRect`.
 6. A surface renders on demand. An unchanged scene requests no frames; only a change to what the frame shows schedules one (the viewer stops Three's internal loop, `render-on-demand.ts`).
 

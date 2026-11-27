@@ -12,8 +12,11 @@ import { useTheme } from '#hooks/use-theme.js';
 
 export type MetalMorphSpinnerProperties = Readonly<{
   className?: string;
-  /** Stands in until the first frame arrives; without one the spinner is simply blank while it warms up. */
-  fallback?: React.ReactNode;
+  /**
+   * Stands in until the first frame arrives, and for good on a page without WebGPU, where the spinner renders no
+   * frame (UI Policy, steady-state decorations): pass the flat spinner.
+   */
+  fallback: React.ReactNode;
 }>;
 
 /** Upper bound for the device pixel ratio a spinner asks the shared source to cover. */

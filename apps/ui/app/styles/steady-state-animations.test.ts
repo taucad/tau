@@ -48,6 +48,45 @@ const readKeyframes = (): Map<string, KeyframeRule[]> => {
   return keyframes;
 };
 
+/** The `animation` shorthand keywords that are not a keyframe name. */
+const animationKeywords = new Set([
+  'infinite',
+  'linear',
+  'ease',
+  'ease-in',
+  'ease-out',
+  'ease-in-out',
+  'step-start',
+  'step-end',
+  'normal',
+  'reverse',
+  'alternate',
+  'alternate-reverse',
+  'none',
+  'forwards',
+  'backwards',
+  'both',
+  'running',
+  'paused',
+]);
+
+/** The keyframe names in an `animation` value, wherever each sits among its layer's tokens. */
+const animationNames = (value: string): string[] => {
+  // Drop function arguments first (`cubic-bezier(…)`, `steps(…)`, `var(…)`), so their commas do not split layers.
+  let flat = value;
+  for (let previous = ''; previous !== flat; ) {
+    previous = flat;
+    flat = flat.replaceAll(/[\w-]*\([^()]*\)/gu, ' ');
+  }
+  return flat.split(',').flatMap((layer) =>
+    layer
+      .trim()
+      .split(/\s+/u)
+      .filter((token) => /^[a-z][\w-]*$/u.test(token) && !animationKeywords.has(token))
+      .slice(0, 1),
+  );
+};
+
 /** Keyframe names an `animation` shorthand or a `--animate-*` theme token runs with an `infinite` count. */
 const readLoopingAnimations = (): Map<string, string> => {
   const looping = new Map<string, string>();
@@ -58,11 +97,8 @@ const readLoopingAnimations = (): Map<string, string> => {
       if (!/\binfinite\b/u.test(value)) {
         continue;
       }
-      for (const item of value.split(',')) {
-        const name = item.trim().split(/\s+/u)[0];
-        if (name !== undefined && /^[a-z][\w-]*$/u.test(name)) {
-          looping.set(name, file);
-        }
+      for (const name of animationNames(value)) {
+        looping.set(name, file);
       }
     }
   }
@@ -89,6 +125,15 @@ describe('steady-state decorations', () => {
       ),
     );
     expect(violations).toEqual([]);
+  });
+
+  it('should find a keyframe name wherever the shorthand puts it', () => {
+    expect(animationNames('1s repaint infinite')).toEqual(['repaint']);
+    expect(animationNames('spin 1s linear infinite, fade var(--d, 2s) cubic-bezier(0.4, 0, 0.2, 1) infinite')).toEqual([
+      'spin',
+      'fade',
+    ]);
+    expect(animationNames('var(--animate-pulse)')).toEqual([]);
   });
 
   it('should turn a spinning glyph as one box, not its SVG children', () => {

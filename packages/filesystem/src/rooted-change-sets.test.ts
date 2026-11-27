@@ -131,6 +131,30 @@ describe('rooted change-set watches (D6)', () => {
 
   it('resets the root when its mount goes', async () => {
     const context = await createWorkspaceFileService();
+    const preview = {
+      class: 'authored',
+      backend: 'memory',
+      storageRootKey: 'memory:preview:sets',
+    } as const;
+    await context.service.mount('/previews/sets', preview);
+    const rooted = context.service.createRootedFileSystem('/previews/sets');
+    const handler = vi.fn();
+    const stop = rooted.watchChangeSets!({ paths: [''], recursive: true }, handler);
+    try {
+      context.service.unmount('/previews/sets');
+      const last = handler.mock.lastCall?.[0] as ChangeSet | undefined;
+      expect(last?.entries).toEqual([]);
+      expect(last?.reset?.prefix).toBe('');
+    } finally {
+      stop();
+      context.service.dispose();
+    }
+  });
+
+  /* Fast-path FW5: a mount added below the root resets what it can be seen from, the parent that lists it, in the
+   * root's namespace; before FW5 every topology change reset the whole root. */
+  it('resets the parent of a mount added below the root, in the root namespace', async () => {
+    const context = await createWorkspaceFileService();
     const rooted = context.service.createRootedFileSystem('/');
     const handler = vi.fn();
     const stop = rooted.watchChangeSets!({ paths: [''], recursive: true }, handler);
@@ -142,7 +166,7 @@ describe('rooted change-set watches (D6)', () => {
       });
       const last = handler.mock.lastCall?.[0] as ChangeSet | undefined;
       expect(last?.entries).toEqual([]);
-      expect(last?.reset?.prefix).toBe('');
+      expect(last?.reset).toEqual({ prefix: 'previews', reason: 'topology' });
     } finally {
       stop();
       context.service.dispose();

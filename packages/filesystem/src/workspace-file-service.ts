@@ -2224,13 +2224,15 @@ export class WorkspaceFileService {
    * every watcher of a moved route needs.
    *
    * @param prefixes - The mount prefixes that changed. Each evicts its own index
-   * and the one that now covers it; every other root stays warm (W7c).
+   * and the one that now covers it; every other root stays warm (W7c). Each
+   * resets only the watches that can see it (fast-path FW5); `/`, a changed
+   * discovery-root set, resets every watch.
    */
   private _resetTopologyState(prefixes: readonly string[]): void {
     for (const prefix of prefixes) {
       this._projectIndexes.evict(prefix);
     }
-    this._watchRegistry.emitResetAll();
+    this._watchRegistry.emitReset(prefixes);
   }
 
   private async _statToTreeNode(

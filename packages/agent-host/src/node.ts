@@ -1,13 +1,11 @@
-import { watch } from 'node:fs';
-import type { FSWatcher } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { link, mkdir, open, readdir, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { FileHandle } from 'node:fs/promises';
-import { basename, dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import { isMainThread } from 'node:worker_threads';
-import { acquireNodeAuthorityWriter, NodeAuthorityWriterError } from '@taucad/filesystem/backend/node';
-import type { NodeAuthorityWriter } from '@taucad/filesystem/backend/node';
+import { acquireNodeAuthorityWriter, NodeAuthorityWriterError, watchTree } from '@taucad/filesystem/backend/node';
+import type { NodeAuthorityWriter, TreeWatcher } from '@taucad/filesystem/backend/node';
 import { EventLogError } from '#log/event-log-error.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
@@ -540,7 +538,7 @@ export type NodeChatStoreOptions = Readonly<{
 export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore => {
   const filePath = (chatId: string): string =>
     join(options.workspaceRoot, '.tau', 'chats', requireChatPathSegment(chatId), 'events.jsonl');
-  let observer: FSWatcher | undefined;
+  let observer: TreeWatcher | undefined;
   const subscriptions = new Map<
     symbol,
     Readonly<{
@@ -558,39 +556,40 @@ export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore =>
     purged: async (chatId) => isNodeChatPurged(options.workspaceRoot, chatId),
     observeBytes: async (chatId, { signal, onChange, onError }) => {
       const key = Symbol(chatId);
-      subscriptions.set(key, { path: relative(options.workspaceRoot, filePath(chatId)), onChange, onError });
+      /* `/`-separated, as `watchTree` reports paths on every platform. */
+      const logPath = relative(options.workspaceRoot, filePath(chatId)).split(sep).join('/');
+      subscriptions.set(key, { path: logPath, onChange, onError });
       if (observer === undefined) {
         try {
-          // One binding-owned watch also sees creation of a missing chat's ancestors.
-          const watching = watch(options.workspaceRoot, { recursive: true }, (_event, filename) => {
-            if (observer !== watching) {
-              return;
-            }
-            for (const subscription of subscriptions.values()) {
-              if (filename === null || filename === subscription.path || subscription.path.startsWith(`${filename}/`)) {
-                subscription.onChange();
+          /*
+           * One binding-owned watch also sees creation of a missing chat's ancestors. `watchTree`
+           * survives a directory in the workspace replaced by a file of the same name, which
+           * Node's recursive watch on Linux turns into an uncaught `ENOTDIR` (#2977).
+           */
+          const watching = watchTree(options.workspaceRoot, {
+            change: (path) => {
+              if (observer !== watching) {
+                return;
               }
-            }
+              for (const subscription of subscriptions.values()) {
+                if (path === undefined || path === subscription.path || subscription.path.startsWith(`${path}/`)) {
+                  subscription.onChange();
+                }
+              }
+            },
+            error: (error) => {
+              if (observer !== watching) {
+                return;
+              }
+              /* The watch has closed itself; the next subscription opens a fresh one. */
+              observer = undefined;
+              // oxlint-disable-next-line unicorn/no-useless-spread -- callbacks can release or replace subscriptions.
+              for (const subscription of [...subscriptions.values()]) {
+                subscription.onError(error);
+              }
+            },
           });
           observer = watching;
-          watching.on('error', (error) => {
-            if (observer !== watching) {
-              return;
-            }
-            // oxlint-disable-next-line unicorn/no-useless-spread -- callbacks can release or replace subscriptions.
-            for (const subscription of [...subscriptions.values()]) {
-              subscription.onError(error);
-            }
-          });
-          watching.on('close', () => {
-            if (observer === watching) {
-              observer = undefined;
-              // oxlint-disable-next-line unicorn/no-useless-spread -- notify precisely the owners present at closure.
-              for (const subscription of [...subscriptions.values()]) {
-                subscription.onError(new Error('The chat source observation closed.'));
-              }
-            }
-          });
         } catch (error) {
           subscriptions.delete(key);
           throw error;

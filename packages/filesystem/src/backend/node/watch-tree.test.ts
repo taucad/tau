@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { watchTree } from '#watch-tree.js';
-import type { TreeWatcher } from '#watch-tree.js';
+import { watchTree } from '#backend/node/watch-tree.js';
+import type { TreeWatcher } from '#backend/node/watch-tree.js';
 
 /**
  * A watch over a fresh temporary root that records what it reports.
@@ -91,7 +91,13 @@ describe('watchTree', () => {
     renameSync(staged, join(root, 'moved'));
     await watch.barrier();
 
-    expect(watch.changes).toEqual(expect.arrayContaining(['moved', 'moved/nested', 'moved/nested/a.ts']));
+    /*
+     * The directory's own path stands for everything under it on every platform. On Linux the
+     * per-directory watches also report each entry, since writes may land before a new
+     * directory's watch does; the platforms' own recursive watches report the directory alone.
+     */
+    const expected = process.platform === 'linux' ? ['moved', 'moved/nested', 'moved/nested/a.ts'] : ['moved'];
+    expect(watch.changes).toEqual(expect.arrayContaining(expected));
   });
 
   it('should keep reporting writes in a directory that replaced a file, and in one that replaced that directory', async () => {

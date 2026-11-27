@@ -20,15 +20,14 @@ import { hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { resolveNodeProjectIdentity, openNodeProjectFileSystem } from '#project-identity.js';
-import { watchTree } from '#watch-tree.js';
-import type { TreeWatcher } from '#watch-tree.js';
 import type { ShellExecutionHolds } from '@taucad/shell-service';
 
 import { jsonValueSchema } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
 import type { AgentChannelRevisionEvent } from '@taucad/agent-host/wire';
 import type { FileMode } from '@taucad/filesystem';
-import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { NodeFsProvider, watchTree } from '@taucad/filesystem/backend/node';
+import type { TreeWatcher } from '@taucad/filesystem/backend/node';
 import { classify } from '@taucad/filesystem/path-registry';
 import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';
 import type { ParameterRecordCodec } from '@taucad/revisions/algorithms';

@@ -30,7 +30,8 @@ describe('LibraryCatalog.tla implementation correspondence', () => {
         versions: Object.fromEntries(machines.map((machine) => [machine.id, String(machine.version)])),
         actions: machineActions(machines),
         tables: hashFiles(specs, ['expected.json', ...configs]),
-        sources: hashFiles(workspace, [
+        // Acknowledged by a new file in reviews/ per change, so independent changes merge (FM-R13).
+        reviewed: hashFiles(workspace, [
           'apps/libs/project-library/src/hooks/project-manager-provider.tsx',
           'apps/libs/project-library/src/machines/library-discovery.machine.ts',
           'apps/libs/project-library/src/machines/library-recovery.machine.ts',

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T20:21:34.310Z",
+  "updatedAt": "2026-11-27T20:25:59.657Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -7244,6 +7244,19 @@
       "rejected": 0
     },
     {
+      "run": 46061965660,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-3005",
+      "sha": "53a32cd584f79a38d13cf29dc317c571c3065e03",
+      "at": "2026-11-27T20:25:48Z",
+      "conclusion": "success",
+      "artifacts": 3,
+      "counted": 31,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
       "run": 46062428585,
       "attempt": 1,
       "event": "push",
@@ -7866,36 +7879,36 @@
       }
     },
     "desktop-e2e:test:e2e:chat": {
-      "executions": 79,
-      "tests": 711,
-      "failures": 80,
+      "executions": 80,
+      "tests": 720,
+      "failures": 81,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T18:58:53Z",
-      "lastSeen": "2026-11-27T20:18:23Z",
+      "lastSeen": "2026-11-27T20:25:48Z",
       "targets": {
-        "test:e2e:chat linux-x64": 79
+        "test:e2e:chat linux-x64": 80
       }
     },
     "desktop-e2e:test:e2e:onboarding": {
-      "executions": 100,
-      "tests": 1100,
+      "executions": 101,
+      "tests": 1111,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T17:03:39Z",
-      "lastSeen": "2026-11-27T20:18:23Z",
+      "lastSeen": "2026-11-27T20:25:48Z",
       "targets": {
-        "test:e2e:onboarding linux-x64": 100
+        "test:e2e:onboarding linux-x64": 101
       }
     },
     "desktop-e2e:test:e2e:project": {
-      "executions": 89,
-      "tests": 979,
+      "executions": 90,
+      "tests": 990,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T18:43:27Z",
-      "lastSeen": "2026-11-27T20:18:23Z",
+      "lastSeen": "2026-11-27T20:25:48Z",
       "targets": {
-        "test:e2e:project linux-x64": 89
+        "test:e2e:project linux-x64": 90
       }
     },
     "desktop-services-host:test": {
@@ -10718,18 +10731,18 @@
       "targetKey": "test:e2e:chat",
       "file": "src/desktop-chat-in-project.spec.ts",
       "firstSeen": "2026-11-27T19:11:02Z",
-      "lastSeen": "2026-11-27T20:18:23Z",
-      "lastFailure": "2026-11-27T20:18:23Z",
-      "executions": 7,
+      "lastSeen": "2026-11-27T20:25:48Z",
+      "lastFailure": "2026-11-27T20:25:48Z",
+      "executions": 8,
       "failures": 0,
-      "retriedPasses": 2,
+      "retriedPasses": 3,
       "passStreak": 0,
       "variants": {
         "linux-x64": {
-          "executions": 7,
+          "executions": 8,
           "failures": 0,
-          "events": 2,
-          "lastSeen": "2026-11-27T20:18:23Z",
+          "events": 3,
+          "lastSeen": "2026-11-27T20:25:48Z",
           "stableBefore": 72
         }
       },
@@ -10761,6 +10774,20 @@
           "variantExecution": 7,
           "error": "AssertionError: expected 'Saving…' to match /^Saved/u",
           "shadow": true
+        },
+        {
+          "kind": "retry",
+          "at": "2026-11-27T20:25:48Z",
+          "run": 46061965660,
+          "attempt": 1,
+          "failedRun": 46061965660,
+          "failedAttempt": 1,
+          "variant": "linux-x64",
+          "hash": "2674964199379761989",
+          "execution": 8,
+          "variantExecution": 8,
+          "error": "AssertionError: expected 'Saving…' to match /^Saved/u",
+          "shadow": true
         }
       ],
       "openFailures": [],
@@ -10771,7 +10798,8 @@
         "linux-x64 338923771997247464",
         "linux-x64 10023043913925268569",
         "linux-x64 9651932895822474995",
-        "linux-x64 8544641002783791237"
+        "linux-x64 8544641002783791237",
+        "linux-x64 2674964199379761989"
       ],
       "failureShas": [],
       "aliases": [],
@@ -10782,18 +10810,18 @@
       "targetKey": "test:e2e:chat",
       "file": "src/desktop-chat-replay.spec.ts",
       "firstSeen": "2026-11-26T22:44:41Z",
-      "lastSeen": "2026-11-27T20:18:23Z",
+      "lastSeen": "2026-11-27T20:25:48Z",
       "lastFailure": "2026-11-26T22:44:41Z",
-      "executions": 73,
+      "executions": 74,
       "failures": 0,
       "retriedPasses": 1,
-      "passStreak": 72,
+      "passStreak": 73,
       "variants": {
         "linux-x64": {
-          "executions": 73,
+          "executions": 74,
           "failures": 0,
           "events": 1,
-          "lastSeen": "2026-11-27T20:18:23Z",
+          "lastSeen": "2026-11-27T20:25:48Z",
           "stableBefore": 6
         }
       },
@@ -10815,14 +10843,14 @@
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 6161273155744781344",
         "linux-x64 17362213723549711434",
         "linux-x64 10378630901122982789",
         "linux-x64 15481875278543017583",
         "linux-x64 338923771997247464",
         "linux-x64 10023043913925268569",
         "linux-x64 9651932895822474995",
-        "linux-x64 8544641002783791237"
+        "linux-x64 8544641002783791237",
+        "linux-x64 2674964199379761989"
       ],
       "failureShas": [],
       "aliases": [],
@@ -10833,18 +10861,18 @@
       "targetKey": "test:e2e:chat",
       "file": "src/desktop-chat-replay.spec.ts",
       "firstSeen": "2026-11-27T18:50:38Z",
-      "lastSeen": "2026-11-27T20:18:23Z",
+      "lastSeen": "2026-11-27T20:25:48Z",
       "lastFailure": "2026-11-27T20:09:52Z",
-      "executions": 10,
+      "executions": 11,
       "failures": 1,
       "retriedPasses": 1,
-      "passStreak": 3,
+      "passStreak": 4,
       "variants": {
         "linux-x64": {
-          "executions": 10,
+          "executions": 11,
           "failures": 1,
           "events": 2,
-          "lastSeen": "2026-11-27T20:18:23Z",
+          "lastSeen": "2026-11-27T20:25:48Z",
           "stableBefore": 69
         }
       },
@@ -10880,14 +10908,14 @@
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 6161273155744781344",
         "linux-x64 17362213723549711434",
         "linux-x64 10378630901122982789",
         "linux-x64 15481875278543017583",
         "linux-x64 338923771997247464",
         "linux-x64 10023043913925268569",
         "linux-x64 9651932895822474995",
-        "linux-x64 8544641002783791237"
+        "linux-x64 8544641002783791237",
+        "linux-x64 2674964199379761989"
       ],
       "failureShas": [
         "c83ee7158eb3f94c5ad8eaa6000aa87b2009a6de"
@@ -10900,18 +10928,18 @@
       "targetKey": "test:e2e:chat",
       "file": "src/desktop-mcp-fixture.spec.ts",
       "firstSeen": "2026-11-26T18:58:53Z",
-      "lastSeen": "2026-11-27T20:18:23Z",
-      "lastFailure": "2026-11-27T20:18:23Z",
-      "executions": 79,
-      "failures": 79,
+      "lastSeen": "2026-11-27T20:25:48Z",
+      "lastFailure": "2026-11-27T20:25:48Z",
+      "executions": 80,
+      "failures": 80,
       "retriedPasses": 0,
       "passStreak": 0,
       "variants": {
         "linux-x64": {
-          "executions": 79,
-          "failures": 79,
+          "executions": 80,
+          "failures": 80,
           "events": 0,
-          "lastSeen": "2026-11-27T20:18:23Z",
+          "lastSeen": "2026-11-27T20:25:48Z",
           "stableBefore": 0
         }
       },
@@ -12022,11 +12050,24 @@
           "variantExecution": 79,
           "error": "TimeoutError: locator.waitFor: Timeout 60000ms exceeded.",
           "shadow": true
+        },
+        {
+          "run": 46061965660,
+          "attempt": 1,
+          "at": "2026-11-27T20:25:48Z",
+          "hash": "2674964199379761989",
+          "variant": "linux-x64",
+          "sha": "53a32cd584f79a38d13cf29dc317c571c3065e03",
+          "lineage": "pr-3005",
+          "base": "639aef07c787e68607d49f2a6d5572ece3574f61",
+          "execution": 80,
+          "variantExecution": 80,
+          "error": "TimeoutError: locator.waitFor: Timeout 60000ms exceeded.",
+          "shadow": true
         }
       ],
       "passHashes": [],
       "failureShas": [
-        "046741121294abb5f9402faf5f8315809959597e",
         "79a8232a90b9bcff74a65e6a37dc87b62509aff4",
         "1602babc6761731ce89d03ef6031ede2c526c1b4",
         "f8053f16c848df9270d274154a5c8e6c14b417ab",
@@ -12045,7 +12086,8 @@
         "b66e73f268d14456994d7ed3f1ad63c0ef536265",
         "60b11599cd8fbbc78b03fb49e88eeb4c7c04efd9",
         "3215a15ae1ed736e2daf133a99e378e1d235dbd9",
-        "639aef07c787e68607d49f2a6d5572ece3574f61"
+        "639aef07c787e68607d49f2a6d5572ece3574f61",
+        "53a32cd584f79a38d13cf29dc317c571c3065e03"
       ],
       "aliases": [],
       "lastOutcome": "failed"
@@ -12055,18 +12097,18 @@
       "targetKey": "test:e2e:project",
       "file": "src/desktop-quit-hold.spec.ts",
       "firstSeen": "2026-11-27T11:33:51Z",
-      "lastSeen": "2026-11-27T20:18:23Z",
+      "lastSeen": "2026-11-27T20:25:48Z",
       "lastFailure": "2026-11-27T19:18:01Z",
-      "executions": 41,
+      "executions": 42,
       "failures": 0,
       "retriedPasses": 3,
-      "passStreak": 5,
+      "passStreak": 6,
       "variants": {
         "linux-x64": {
-          "executions": 41,
+          "executions": 42,
           "failures": 0,
           "events": 3,
-          "lastSeen": "2026-11-27T20:18:23Z",
+          "lastSeen": "2026-11-27T20:25:48Z",
           "stableBefore": 48
         }
       },
@@ -12116,14 +12158,14 @@
       ],
       "openFailures": [],
       "passHashes": [
-        "linux-x64 15159514825381447828",
         "linux-x64 9622929247240604907",
         "linux-x64 6753835889739870697",
         "linux-x64 6036817580438335161",
         "linux-x64 14486146083146894180",
         "linux-x64 14804585425082662712",
         "linux-x64 2790417912745307116",
-        "linux-x64 11326959227371574970"
+        "linux-x64 11326959227371574970",
+        "linux-x64 18437203524259035488"
       ],
       "failureShas": [],
       "aliases": [],
@@ -33462,8 +33504,8 @@
       "project": "desktop-e2e",
       "target": "test:e2e:chat",
       "firstSeen": "2026-11-26T18:58:53Z",
-      "lastSeen": "2026-11-27T20:18:23Z",
-      "runs": 79,
+      "lastSeen": "2026-11-27T20:25:48Z",
+      "runs": 80,
       "streak": 0,
       "streakRetried": 0,
       "history": [
@@ -34336,12 +34378,23 @@
           "failed": [
             "desktop-e2e › src/desktop-mcp-fixture.spec.ts > serves the utility MCP endpoint to an agent it spawned"
           ]
+        },
+        {
+          "run": 46061965660,
+          "attempt": 1,
+          "at": "2026-11-27T20:25:48Z",
+          "passed": false,
+          "tests": 9,
+          "retried": 1,
+          "failed": [
+            "desktop-e2e › src/desktop-mcp-fixture.spec.ts > serves the utility MCP endpoint to an agent it spawned"
+          ]
         }
       ],
       "lastFailure": {
-        "run": 46061134595,
+        "run": 46061965660,
         "attempt": 1,
-        "at": "2026-11-27T20:18:23Z",
+        "at": "2026-11-27T20:25:48Z",
         "passed": false,
         "tests": 9,
         "retried": 1,
@@ -34354,9 +34407,9 @@
       "project": "desktop-e2e",
       "target": "test:e2e:onboarding",
       "firstSeen": "2026-11-26T17:03:39Z",
-      "lastSeen": "2026-11-27T20:18:23Z",
-      "runs": 100,
-      "streak": 100,
+      "lastSeen": "2026-11-27T20:25:48Z",
+      "runs": 101,
+      "streak": 101,
       "streakRetried": 0,
       "history": [
         {
@@ -35258,6 +35311,15 @@
           "tests": 11,
           "retried": 0,
           "failed": []
+        },
+        {
+          "run": 46061965660,
+          "attempt": 1,
+          "at": "2026-11-27T20:25:48Z",
+          "passed": true,
+          "tests": 11,
+          "retried": 0,
+          "failed": []
         }
       ]
     },
@@ -35265,9 +35327,9 @@
       "project": "desktop-e2e",
       "target": "test:e2e:project",
       "firstSeen": "2026-11-26T18:43:27Z",
-      "lastSeen": "2026-11-27T20:18:23Z",
-      "runs": 89,
-      "streak": 89,
+      "lastSeen": "2026-11-27T20:25:48Z",
+      "runs": 90,
+      "streak": 90,
       "streakRetried": 3,
       "history": [
         {
@@ -36066,6 +36128,15 @@
           "run": 46061134595,
           "attempt": 1,
           "at": "2026-11-27T20:18:23Z",
+          "passed": true,
+          "tests": 11,
+          "retried": 0,
+          "failed": []
+        },
+        {
+          "run": 46061965660,
+          "attempt": 1,
+          "at": "2026-11-27T20:25:48Z",
           "passed": true,
           "tests": 11,
           "retried": 0,

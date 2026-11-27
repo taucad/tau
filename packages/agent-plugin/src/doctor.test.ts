@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { chmod, copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -34,20 +34,38 @@ process.stdin.setEncoding('utf8').on('data', (chunk) => {
   }
 });`;
 
-describe.skipIf(process.platform === 'win32')('doctor', () => {
+/**
+ * Write an executable stand-in that the current Node.js runs. Windows has no shebang, so there it is an
+ * npm-style `.cmd` shim beside a `.cjs` script, as `npm install -g` writes for `tau`, and the returned path
+ * names the shim.
+ *
+ * @param path - The executable's path, without an extension.
+ * @param source - CommonJS source; its arguments are `process.argv.slice(2)`.
+ * @returns The path to start.
+ */
+const writeExecutable = async (path: string, source: string): Promise<string> => {
+  await mkdir(dirname(path), { recursive: true });
+  if (process.platform === 'win32') {
+    await writeFile(`${path}.cjs`, source);
+    await writeFile(`${path}.cmd`, `@"${process.execPath}" "%~dpn0.cjs" %*\r\n`);
+    return `${path}.cmd`;
+  }
+  await writeFile(path, `#!${process.execPath}\n${source}`);
+  await chmod(path, 0o755);
+  return path;
+};
+
+describe('doctor', () => {
   let directory: string;
   let entry: string;
   let tools: string;
 
   /** An executable stand-in, run by the current Node.js, that answers `--version` with `answer`. */
   const fakeExecutable = async (path: string, answer: string, body: string): Promise<string> => {
-    await mkdir(join(path, '..'), { recursive: true });
-    await writeFile(
+    return writeExecutable(
       path,
-      `#!${process.execPath}\nif (process.argv[2] === '--version') { process.stdout.write(${JSON.stringify(answer)} + '\\n'); process.exit(0); }\n${body}\n`,
+      `if (process.argv[2] === '--version') { process.stdout.write(${JSON.stringify(answer)} + '\\n'); process.exit(0); }\n${body}\n`,
     );
-    await chmod(path, 0o755);
-    return path;
   };
 
   /** An `npm` 11.19.0 whose cache is `cache` and whose registry has this plugin's version as `beta`. */
@@ -71,6 +89,10 @@ describe.skipIf(process.platform === 'win32')('doctor', () => {
       const environment: NodeJS.ProcessEnv = {};
       environment['PATH'] = tools;
       environment['HOME'] = directory;
+      /* Windows processes, `cmd.exe` and Node.js among them, need the system root a host always passes. */
+      if (process.platform === 'win32') {
+        environment['SystemRoot'] = process.env['SystemRoot'];
+      }
       const child = spawn(process.execPath, [entry, ...args], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';

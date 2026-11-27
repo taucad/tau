@@ -29,7 +29,6 @@
   "apps/ui/app/hooks/active-chat-provider.tsx": 6,
   "apps/ui/app/hooks/use-cad-preview.tsx": 2,
   "apps/ui/app/hooks/use-chat-snapshot.ts": 1,
-  "apps/ui/app/hooks/use-chat.tsx": 2,
   "apps/ui/app/hooks/use-chats.ts": 1,
   "apps/ui/app/hooks/use-editor-document-session.tsx": 2,
   "apps/ui/app/hooks/use-jobs.ts": 1,

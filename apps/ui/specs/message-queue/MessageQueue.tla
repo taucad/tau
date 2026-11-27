@@ -286,6 +286,9 @@
 \* (`s.observed # s.selected`); before, it restarted a reader already on the selected host and dropped the live text
 \* of the run under way. The grant, the prepared-command marking and delivery are unchanged. No action or verdict
 \* changes.
+\* One voice during an open (2026-11-27): `chat-message-queue-view.tsx` makes a queued row's busy label a live region
+\* only for the person's own Send now or a failed send; an automatic send shows the same words without speaking.
+\* Presentation only. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

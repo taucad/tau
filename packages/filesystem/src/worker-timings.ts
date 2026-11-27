@@ -9,9 +9,13 @@
  * need no bookkeeping of their own, and memory stays bounded by the buckets
  * kept, never by the operations recorded.
  *
- * Every span is also a `performance.measure` (`tau:<span>`), cleared in bulk
- * once enough have accumulated, so a profile of the worker shows the same
- * spans the summary counts.
+ * Every span is also a `performance.measure` named `tau.worker.<span>`, cleared
+ * in bulk once enough have accumulated, so a profile of the worker shows the
+ * same spans the summary counts. A worker's timeline is its own, so the page
+ * cannot read it: {@link forwardWorkerTimings} posts each span to the page and
+ * {@link receiveWorkerTimings} writes it there as the same measure, on the
+ * page's clock, so one `performance.getEntriesByType('measure')` in the page
+ * reads both realms under one name (tau #2014).
  *
  * No path, URL, oid or id is ever recorded: names are a closed vocabulary.
  *
@@ -74,12 +78,17 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  *   and `.tau/project.json`.
  * - `discovery.listing`: listings made to learn what a root or a project directory holds.
  * - `discovery.identitySweep`: sweeps that read every directory's identity record to prove no directory carries an id.
+ * - `discovery.probe`: known locations of an id read under its locks to prove whether each still holds it (FW3): two
+ *   file reads each, `tau.json` and `.tau/project.json`.
  * - `discovery.auditRead` / `discovery.auditMismatch`: directories the discovery index's audit re-read from content,
- *   and those whose reading differed from the index's entry.
+ *   and those whose reading differed from the index's entry; each mismatch also moves its root kind's counter,
+ *   `discovery.auditMismatch.<kind>`. On an `exclusive` root, which only Tau writes, any count is a defect in a tap.
+ * - `discovery.unretained`: directories the discovery index did not retain, past its bounds (a root with more than
+ *   20,000 children, or past the retained-manifest budget); they are read again on each pass.
  * - `discovery.rootCold`: discovery roots whose index went cold, every directory unknown; each also moves its reason's
  *   counter, `discovery.rootCold.<reason>` (see {@link discoveryRootColdReasons}).
  *
- * The discovery index (fast-path blueprint FW2) moves the sweep, audit and cold counters; until it lands they stay 0.
+ * The discovery index (fast-path blueprint FW2) moves the sweep, audit, cold and unretained counters.
  *
  * @public
  */
@@ -107,8 +116,13 @@ export const workerTimingCounters = [
   'discovery.directoryRead',
   'discovery.listing',
   'discovery.identitySweep',
+  'discovery.probe',
   'discovery.auditRead',
   'discovery.auditMismatch',
+  'discovery.auditMismatch.exclusive',
+  'discovery.auditMismatch.observed',
+  'discovery.auditMismatch.polled',
+  'discovery.unretained',
   'discovery.rootCold',
   'discovery.rootCold.reset',
   'discovery.rootCold.gap',
@@ -152,15 +166,34 @@ export const countDiscoveryRootCold = (
   timings.count(`discovery.rootCold.${reason}`);
 };
 
+/** The kinds of warm discovery root an audit mismatch is counted under. @public */
+export type DiscoveryAuditRootKind = 'exclusive' | 'observed' | 'polled';
+
+/**
+ * Count one audit mismatch, in total and under its root's kind.
+ *
+ * @param kind - The kind of root the audited directory is in.
+ * @param timings - The recorder; this realm's by default.
+ * @public
+ */
+export const countDiscoveryAuditMismatch = (
+  kind: DiscoveryAuditRootKind,
+  timings: Pick<WorkerTimings, 'count'> = workerTimings,
+): void => {
+  timings.count('discovery.auditMismatch');
+  timings.count(`discovery.auditMismatch.${kind}`);
+};
+
 /**
  * The gauges, summarised as their highest value.
  *
  * - `capture.inflight`: comparison captures running at once.
  * - `bridge.pending`: page requests the worker's filesystem bridge has not answered yet.
+ * - `discovery.indexBytes`: what the discovery index's retained readings hold, estimated by their serialized size.
  *
  * @public
  */
-export const workerTimingGauges = ['capture.inflight', 'bridge.pending'] as const;
+export const workerTimingGauges = ['capture.inflight', 'bridge.pending', 'discovery.indexBytes'] as const;
 
 /** One gauge's name. @public */
 export type WorkerTimingGauge = (typeof workerTimingGauges)[number];
@@ -193,7 +226,23 @@ export type WorkerTimings = Readonly<{
   gauge: (gauge: WorkerTimingGauge, delta: number) => void;
   /** Everything recorded from `startedAt` until now, to the second. */
   summarize: (startedAt: number) => WorkerTimingSummary;
+  /**
+   * Hear each span as it is recorded, on this recorder's clock.
+   *
+   * @returns The unsubscribe.
+   */
+  observe: (listener: WorkerTimingListener) => () => void;
 }>;
+
+/** One recorded span, as {@link WorkerTimings.observe} hears it: its name, start and end on the recorder's clock. @public */
+export type WorkerTimingListener = (span: WorkerTimingSpan, startedAt: number, endedAt: number) => void;
+
+/**
+ * The prefix of every worker span's `performance.measure` name, in the worker and in the page alike.
+ *
+ * @public
+ */
+export const workerTimingMeasurePrefix = 'tau.worker.';
 
 type SpanBucket = { count: number; total: number; max: number };
 type Bucket = {
@@ -206,6 +255,13 @@ type Bucket = {
 const keptSeconds = 2 * 60 * 60;
 /** Measures the timeline may hold before this recorder clears its own. */
 const measuresBeforeClear = 4096;
+
+/** Clear every `tau.worker.*` measure from this realm's timeline. */
+const clearWorkerTimingMeasures = (): void => {
+  for (const name of workerTimingSpans) {
+    performance.clearMeasures(`${workerTimingMeasurePrefix}${name}`);
+  }
+};
 
 /**
  * Create a recorder.
@@ -221,6 +277,7 @@ export const createWorkerTimings = (
   const measuring = options.measure ?? typeof performance.measure === 'function';
   const buckets = new Map<number, Bucket>();
   const gaugeLevels = new Map<WorkerTimingGauge, number>();
+  const listeners = new Set<WorkerTimingListener>();
   let measures = 0;
 
   const bucketAt = (milliseconds: number): Bucket => {
@@ -245,13 +302,11 @@ export const createWorkerTimings = (
       return;
     }
     try {
-      performance.measure(`tau:${span}`, { start: startedAt, end: endedAt });
+      performance.measure(`${workerTimingMeasurePrefix}${span}`, { start: startedAt, end: endedAt });
       measures += 1;
       if (measures >= measuresBeforeClear) {
         measures = 0;
-        for (const name of workerTimingSpans) {
-          performance.clearMeasures(`tau:${name}`);
-        }
+        clearWorkerTimingMeasures();
       }
     } catch {
       /* A timeline that refuses a measure (an origin clock reset) still has the summary. */
@@ -271,6 +326,13 @@ export const createWorkerTimings = (
       current.max = Math.max(current.max, milliseconds);
     }
     measure(span, startedAt, endedAt);
+    for (const listener of listeners) {
+      try {
+        listener(span, startedAt, endedAt);
+      } catch {
+        /* A listener is diagnostic; it never fails the operation it times. */
+      }
+    }
   };
 
   const span = async <Result>(name: WorkerTimingSpan, operation: () => Promise<Result>): Promise<Result> => {
@@ -339,7 +401,14 @@ export const createWorkerTimings = (
     };
   };
 
-  return Object.freeze({ now: clock, span, record, count, gauge, summarize });
+  const observe = (listener: WorkerTimingListener): (() => void) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  };
+
+  return Object.freeze({ now: clock, span, record, count, gauge, summarize, observe });
 };
 
 const seconds = (milliseconds: number): string => `${(milliseconds / 1000).toFixed(1)}s`;
@@ -379,3 +448,204 @@ export const formatWorkerTimingSummary = (label: string, summary: WorkerTimingSu
  * @public
  */
 export const workerTimings: WorkerTimings = createWorkerTimings();
+
+/**
+ * What a worker posts to its page: the spans it recorded since its last post, each as `[span, start, end]` on the
+ * worker's clock, and that clock's origin, so the page can place them on its own.
+ *
+ * @public
+ */
+export type WorkerTimingsMessage = Readonly<{
+  type: typeof workerTimingsMessageType;
+  timeOrigin: number;
+  spans: ReadonlyArray<readonly [WorkerTimingSpan, number, number]>;
+}>;
+
+/** The `type` of a {@link WorkerTimingsMessage}. @public */
+export const workerTimingsMessageType = 'tau.worker-timings';
+
+const spanNames: ReadonlySet<string> = new Set(workerTimingSpans);
+
+/**
+ * Whether a worker message is a {@link WorkerTimingsMessage}; spans outside the vocabulary are dropped on receipt.
+ *
+ * @param data - A message's data.
+ * @returns True for a timings message.
+ * @public
+ */
+export const isWorkerTimingsMessage = (data: unknown): data is WorkerTimingsMessage =>
+  typeof data === 'object' &&
+  data !== null &&
+  Reflect.get(data, 'type') === workerTimingsMessageType &&
+  typeof Reflect.get(data, 'timeOrigin') === 'number' &&
+  Array.isArray(Reflect.get(data, 'spans'));
+
+/** How often a worker posts the spans it has recorded, at most, in milliseconds. */
+const forwardIntervalMilliseconds = 250;
+/** Spans a worker holds before it posts them without waiting for the interval. */
+const forwardBatchLimit = 512;
+
+/**
+ * Post every span `timings` records to the page, batched: at most one message per 250 ms, or sooner once 512 spans
+ * are waiting. A worker with nothing recorded posts nothing.
+ *
+ * @param post - Sends one message to the page (`self.postMessage` in a dedicated worker).
+ * @param timings - The recorder; this realm's by default.
+ * @returns Stops forwarding, after posting what is waiting.
+ * @public
+ */
+export const forwardWorkerTimings = (
+  post: (message: WorkerTimingsMessage) => void,
+  timings: WorkerTimings = workerTimings,
+): (() => void) => {
+  let pending: Array<readonly [WorkerTimingSpan, number, number]> = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const flush = (): void => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    if (pending.length === 0) {
+      return;
+    }
+    const spans = pending;
+    pending = [];
+    try {
+      post({ type: workerTimingsMessageType, timeOrigin: performance.timeOrigin, spans });
+    } catch {
+      /* A page that has gone keeps no timeline to write to. */
+    }
+  };
+  const stop = timings.observe((span, startedAt, endedAt) => {
+    pending.push([span, startedAt, endedAt]);
+    if (pending.length >= forwardBatchLimit) {
+      flush();
+    } else {
+      timer ??= setTimeout(flush, forwardIntervalMilliseconds);
+    }
+  });
+  return () => {
+    stop();
+    flush();
+  };
+};
+
+/** Detail of a forwarded `tau.worker.*` measure in the page; it carries no path, URL or id. @public */
+export type WorkerTimingMeasureDetail = Readonly<{
+  schemaVersion: 1;
+  span: WorkerTimingSpan;
+  /** Which worker recorded it, as the page named it when it began receiving. */
+  worker: string;
+  realm: 'dedicated-worker';
+}>;
+
+/** Forwarded measures the page keeps before it clears them and starts again, as the worker does. */
+const pageMeasuresBeforeClear = 4096;
+let pageMeasures = 0;
+
+/**
+ * Write a worker's forwarded spans into this realm's timeline as `tau.worker.<span>` measures on this realm's clock.
+ *
+ * @param message - What the worker posted: its spans and its clock's origin.
+ * @param worker - The sender's name for each measure's detail, such as `file-manager`.
+ * @public
+ */
+export const recordWorkerTimings = (message: WorkerTimingsMessage, worker: string): void => {
+  const offset = message.timeOrigin - performance.timeOrigin;
+  for (const entry of message.spans) {
+    const [span, startedAt, endedAt] = entry;
+    if (!spanNames.has(span) || !Number.isFinite(startedAt) || !Number.isFinite(endedAt)) {
+      continue;
+    }
+    const start = Math.max(0, startedAt + offset);
+    const end = Math.max(start, endedAt + offset);
+    const detail: WorkerTimingMeasureDetail = { schemaVersion: 1, span, worker, realm: 'dedicated-worker' };
+    try {
+      if (pageMeasures >= pageMeasuresBeforeClear) {
+        pageMeasures = 0;
+        clearWorkerTimingMeasures();
+      }
+      performance.measure(`${workerTimingMeasurePrefix}${span}`, { start, end, detail });
+      pageMeasures += 1;
+    } catch {
+      /* Diagnostic measurement never affects the page. */
+    }
+  }
+};
+
+/**
+ * Write every span `worker` forwards into this realm's timeline (see {@link recordWorkerTimings}).
+ *
+ * @param target - The worker, as the page holds it.
+ * @param worker - Its name in each measure's detail (`file-manager`).
+ * @returns Stops receiving.
+ * @public
+ */
+export const receiveWorkerTimings = (
+  target: Pick<Worker, 'addEventListener' | 'removeEventListener'>,
+  worker: string,
+): (() => void) => {
+  const onMessage = (event: MessageEvent<unknown>): void => {
+    if (isWorkerTimingsMessage(event.data)) {
+      recordWorkerTimings(event.data, worker);
+    }
+  };
+  target.addEventListener('message', onMessage);
+  return () => {
+    target.removeEventListener('message', onMessage);
+  };
+};
+
+/** One measure as a breakdown reads it: its name and duration. @public */
+export type TimedEntry = Readonly<{ name: string; duration: number }>;
+
+/** One name's figures in a {@link summarizeMeasures} breakdown, in milliseconds. @public */
+export type MeasureBreakdownRow = Readonly<{
+  name: string;
+  count: number;
+  totalMilliseconds: number;
+  maxMilliseconds: number;
+}>;
+
+/**
+ * Sum measures by name, the largest total first: what a failed budget prints, so the time it overran is attributed.
+ *
+ * @param entries - Measures from a timeline, any names.
+ * @returns One row per name.
+ * @public
+ */
+export const summarizeMeasures = (entries: Iterable<TimedEntry>): MeasureBreakdownRow[] => {
+  const rows = new Map<string, { count: number; total: number; max: number }>();
+  for (const { name, duration } of entries) {
+    const row = rows.get(name) ?? { count: 0, total: 0, max: 0 };
+    row.count += 1;
+    row.total += duration;
+    row.max = Math.max(row.max, duration);
+    rows.set(name, row);
+  }
+  return [...rows]
+    .map(([name, row]) => ({
+      name,
+      count: row.count,
+      totalMilliseconds: Math.round(row.total),
+      maxMilliseconds: Math.round(row.max),
+    }))
+    .toSorted((left, right) => right.totalMilliseconds - left.totalMilliseconds || left.name.localeCompare(right.name));
+};
+
+/**
+ * One line per name of a {@link summarizeMeasures} breakdown, in milliseconds, for an assertion message.
+ *
+ * @param rows - Rows from {@link summarizeMeasures}.
+ * @returns The lines, or a line saying nothing was recorded.
+ * @public
+ */
+export const formatMeasureBreakdown = (rows: readonly MeasureBreakdownRow[]): string =>
+  rows.length === 0
+    ? 'no tau.* measures recorded'
+    : rows
+        .map(
+          (row) =>
+            `${row.name} ${String(row.count)}× ${String(row.totalMilliseconds)} ms max ${String(row.maxMilliseconds)} ms`,
+        )
+        .join('\n');

@@ -47,6 +47,7 @@
 // EVAL(viewer-added-to-chat): pending benchmark-2026-10-19 — view_state prints `Added to chat: <label> (<componentId>), … | none.` and structuredContent.view.references lists the parts the person added in the Tau viewer (VUI-3); the view_state and show_model select descriptions say the component id is the part after # in a @cad[<path>#<componentId>] reference (VUI-4). Validates the agent resolves "the parts I added" or a pasted @cad token by calling view_state instead of asking, and passes those ids to show_model select.
 // EVAL(show-model-export-hint): pending benchmark-2026-10-19 — show_model on an export under .tau/artifacts answers a hint naming its source ("… is an export of main.ts, drawn as exported. Call show_model with targetFile main.ts …"), and tau mcp's viewer instructions say a source shows with its parameters and mechanism while an exported file shows only itself, and that @cad[path#componentId] names a part (LRP-10, VUI-4). Validates the agent re-shows the source instead of describing an export's missing parameters or motion as the model's.
 // EVAL(mcp-acceptance-loop): pending benchmark-2026-10-19 — tau mcp's initialize instructions say when a static part is done (evaluate_model ready, summary bounds and componentCount within the brief, the whole test_model suite runStatus passed, undecided requirements not passed), that a moving assembly also needs mechanism declared and admitted and a requested file its export_model validation, and to name the case met (VER-7). Validates the agent never reports done while requirements are undecided and names the acceptance case in its final message.
+// EVAL(agents-md-descriptive): pending benchmark-2026-11-26 — new per-request <project_instructions> section says a project may carry `AGENTS.md` at its root, that its content arrives as <agent_memory>, that the agent may create or edit it at its judgement, and that a subdirectory's own `AGENTS.md` is read before working there; the per-turn <memory_guidelines> block (seven imperative rules, "updating memory must be your FIRST, IMMEDIATE action") is replaced by one descriptive sentence (operator ruling U4, docs/research/project-agent-files-standard-paths.md). Validates the agent still records a durable correction in `AGENTS.md` without being told to, and stops writing to it on turns that teach nothing lasting.
 // EVAL(export-model-validation): pending benchmark-2026-10-19 — export_model returns validation { units, triangles, watertight } for a GLB or a per-part STL export and { units, solids } for STEP, read from the exported bytes (VER-7). Validates the agent checks watertight or the solid count before delivering a manufacturing file.
 // EVAL(show-model-live-source): pending benchmark-2026-10-21 — show_model on a CAD source opens one watched runtime document: its render stays in memory (model.path is the source, nothing under .tau/artifacts), every page showing it redraws after a file or parameter edit without another show_model, app_sync carries status { entryPath, building, sourceRevision, issues } and view_state's view.sourceRevision names what the page draws; the initialize instructions say the viewer follows the source's file and parameter changes. Validates the agent stops re-calling show_model after each edit and reads view_state.sourceRevision to confirm the person sees the edit.
 // EVAL(viewer-files-pane): pending benchmark-2026-10-23 — browse_models is removed (Codex's sidebar entrypoint is show_model without a target), and the viewer page lists and opens project files through the app-only app_list_files and app_open_file, which the agent never sees (PAR-9). Validates the agent still shows a file to the person with show_model targetFile and never asks for a file-listing tool.
@@ -173,6 +174,25 @@ ${sections.join('\n\n')}
 </system-reminder>`,
   };
 }
+
+/**
+ * The line naming one chat's conversation log. Tau's turns send it in the turn's context message rather than in the
+ * system prompt, so the system prompt, and the prefix a supplier caches, is the same for every chat.
+ *
+ * @param chatId - The chat whose log it names.
+ * @returns The note.
+ *
+ * @public
+ *
+ * @example <caption>The note for one chat</caption>
+ * ```typescript
+ * import { getConversationLogNote } from '@taucad/chat/prompts';
+ *
+ * getConversationLogNote('chat_1'); // 'Your conversation log: `.tau/chats/chat_1/events.jsonl`'
+ * ```
+ */
+export const getConversationLogNote = (chatId: string): string =>
+  `Your conversation log: \`.tau/chats/${chatId}/events.jsonl\``;
 
 /**
  * Generates the CAD system prompt for the specified kernel and mode.
@@ -488,10 +508,23 @@ For work with three or more steps, keep the person's task list at \`.tau/chats/<
     compute: () => renderPersonBlock(options.person),
   });
 
+  /* Only a caller that passes `chatId` (an external agent's embedded context) gets the path here. Tau's own turns carry
+   * it in the turn's context message (`getConversationLogNote`), because OpenAI renders the tools after the system
+   * text: one per-chat line there stops every new chat sharing the cached prefix (WP-15, measured 0 of 10). */
   registry.register({
     name: 'transcript_path',
     cacheBreak: true,
-    compute: () => `Your conversation log: \`.tau/chats/${options.chatId ?? '{chatId}'}/events.jsonl\``,
+    compute: () => (options.chatId === undefined ? '' : getConversationLogNote(options.chatId)),
+  });
+
+  /* Per-request block, like `workbench`: the behavioural core has no room for it, and it describes the project, not the
+   * agent. Descriptive by ruling: it says the file exists and what it is for, and leaves when to write it to the agent. */
+  registry.register({
+    name: 'project_instructions',
+    cacheBreak: true,
+    compute: () => `<project_instructions>
+A project may carry \`AGENTS.md\` at its root: standing instructions and notes for agents working on it. When present, its content arrives as \`<agent_memory>\`. It is an ordinary project file; create or edit it when something learned here would help a later session. A subdirectory's own \`AGENTS.md\` covers the files under it; read it before working there.
+</project_instructions>`,
   });
 
   registry.register({

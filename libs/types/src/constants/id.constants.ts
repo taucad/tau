@@ -141,6 +141,34 @@ export const idPrefix = {
    */
   secretKey: 'sk',
   /**
+   * An OAuth client row (`oauth_client.id`), as distinct from its public `client_id`.
+   */
+  oauthClient: 'oac',
+  /**
+   * An OAuth refresh token row (`oauth_refresh_token.id`); the row holds only the token's hash.
+   */
+  oauthRefreshToken: 'ort',
+  /**
+   * An OAuth access token row (`oauth_access_token.id`); the row holds only the token's hash.
+   */
+  oauthAccessToken: 'oat',
+  /**
+   * An OAuth consent row (`oauth_consent.id`).
+   */
+  oauthConsent: 'ocs',
+  /**
+   * An OAuth protected resource row (`oauth_resource.id`).
+   */
+  oauthResource: 'ores',
+  /**
+   * An OAuth client-to-resource link row (`oauth_client_resource.id`).
+   */
+  oauthClientResource: 'ocr',
+  /**
+   * An OAuth client assertion replay tombstone row (`oauth_client_assertion.id`).
+   */
+  oauthClientAssertion: 'oca',
+  /**
    * A public key ID (for API keys).
    */
   publicKey: 'pk',

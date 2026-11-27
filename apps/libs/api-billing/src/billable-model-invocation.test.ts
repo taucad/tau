@@ -67,6 +67,9 @@ const qualification = (): QualifiedBillableInvocation => ({
     }),
     executeOnce: vi.fn(async () => new Response('ok')),
   },
+  withInputMaximum() {
+    return this;
+  },
 });
 
 /** The gen_ai instruments the funded terminal records on every invocation. */
@@ -657,6 +660,55 @@ describe('BillableModelInvocationService', () => {
     expect(qualified.adapter.executeOnce).toHaveBeenCalledOnce();
     expect(invocationTimeout).toHaveBeenCalledWith(12_345);
     expect(ledger.terminalizeOperation).toHaveBeenCalledOnce();
+  });
+
+  /* Chat performance WP-15 step 6 (O-6). */
+  it.each([
+    [
+      'read',
+      vi.fn(async () => ({
+        modelId: 'm',
+        providerId: 'p',
+        prefix: { version: 'input-prefix-v1', digest: `sha256:${'a'.repeat(64)}`, items: 1 },
+        inputTokens: 10n,
+      })),
+    ],
+    [
+      'failed',
+      vi.fn(async () => {
+        throw new Error('pool exhausted');
+      }),
+    ],
+  ])("qualifies with the chat's previous settled step when the lookup %s", async (outcome, previousSettledInput) => {
+    const qualified = qualification();
+    qualified.adapter.executeOnce = vi.fn(async () => {
+      throw new Error('provider failed');
+    });
+    const resolve = vi.fn((_intent: unknown, _previous?: unknown) => qualified);
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      previousSettledInput,
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'denied', reason: 'debt' })),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+    );
+
+    await expect(service.invoke({ ...intent(), chatHint: 'chat-hash' })).rejects.toBeInstanceOf(LlmGatewayError);
+
+    expect(previousSettledInput).toHaveBeenCalledWith({
+      environment: 'development',
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- asymmetric matcher
+      authUserId: expect.any(String),
+      chatHint: 'chat-hash',
+    });
+    expect(resolve.mock.calls[0]?.[1]).toEqual(
+      outcome === 'read' ? expect.objectContaining({ inputTokens: 10n }) : undefined,
+    );
   });
 
   it('ends an atomically admitted step at zero when the caller left before dispatch', async () => {

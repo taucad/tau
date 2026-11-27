@@ -34,6 +34,12 @@ vi.mock('#components/filesystem/workspace-selector.js', () => ({
 vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({ SvgIcon: () => null }));
 
 const { default: ProjectsNew } = await import('#routes/projects_.new/route.js');
+const { defaultWideFrameHint, readWideFrameHint } = await import('#lib/frame-hint.js');
+
+beforeEach(() => {
+  /* The frame hint lives in the document's storage: each row starts with none. */
+  localStorage.clear();
+});
 
 const homeOnlyState = (): ProjectCreationLocationState => ({
   phase: 'ready',
@@ -145,6 +151,24 @@ describe('/projects/new creation location', () => {
         desktopLayout: { workbenchOpen: true, compactAuxiliary: 'workbench' },
         mobileActiveTab: 'chat',
       },
+    });
+  });
+
+  /* QA: the workspace frame drew the remembered-or-default lanes (the chat lane and its composer box at a compact
+   * width) while the new project opens on the Workbench lane, so a draft typed in the frame's chat lane vanished with
+   * the lane at the hand-over. The frame draws the lanes the project opens with. */
+  it('hands the workspace frame the lanes the new project opens with', async () => {
+    renderRoute();
+
+    await userEvent.type(screen.getByLabelText('Project Name *'), 'Bracket');
+    await userEvent.click(screen.getByRole('button', { name: /Create Project/ }));
+
+    await waitFor(() => {
+      expect(readWideFrameHint('home/bracket')).toEqual({
+        ...defaultWideFrameHint,
+        workbenchOpen: true,
+        compactAuxiliary: 'workbench',
+      });
     });
   });
 

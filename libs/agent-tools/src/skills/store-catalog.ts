@@ -7,7 +7,16 @@
  * @module
  */
 
-/** One Tau Store skill and its shipped SKILL.md body. @public */
+/**
+ * One Tau Store skill and its shipped SKILL.md body.
+ *
+ * The body's frontmatter follows the Agent Skills specification: its
+ * `description` says what the skill does and when to use it, and Tau's own
+ * `source` and `version` sit under `metadata`. `description` and `whenToUse`
+ * here are the two halves of that sentence, kept apart for the store's cards.
+ *
+ * @public
+ */
 export type TauStoreSkill = {
   readonly slug: string;
   readonly name: string;
@@ -28,11 +37,10 @@ export const tauStoreSkills: readonly TauStoreSkill[] = [
       'Use when designing sheet-metal parts, enclosures, brackets, tabs, bends, cutouts, reliefs, or flat patterns.',
     skillMarkdown: `---
 name: sheet-metal-manufacturing
-description: Bend relief, K-factor, gauges, and manufacturable flat patterns
-source: tau-store
-version: 1.0.0
-when_to_use: Use when designing sheet-metal parts, enclosures, brackets, tabs, bends, cutouts, reliefs, or flat patterns.
-enabled: true
+description: Bend relief, K-factor, gauges, and manufacturable flat patterns. Use when designing sheet-metal parts, enclosures, brackets, tabs, bends, cutouts, reliefs, or flat patterns.
+metadata:
+  source: tau-store
+  version: "1.0.0"
 ---
 
 # Sheet Metal Manufacturing
@@ -51,11 +59,10 @@ Check bend radius, material thickness, K-factor assumptions, relief geometry, fl
       'Use when designing wood parts, furniture, fixtures, joinery, panels, shelves, cabinets, jigs, or cut lists.',
     skillMarkdown: `---
 name: woodworking
-description: Joinery, grain direction, tolerances, and cut-list reasoning
-source: tau-store
-version: 1.0.0
-when_to_use: Use when designing wood parts, furniture, fixtures, joinery, panels, shelves, cabinets, jigs, or cut lists.
-enabled: true
+description: Joinery, grain direction, tolerances, and cut-list reasoning. Use when designing wood parts, furniture, fixtures, joinery, panels, shelves, cabinets, jigs, or cut lists.
+metadata:
+  source: tau-store
+  version: "1.0.0"
 ---
 
 # Woodworking
@@ -74,11 +81,10 @@ Account for grain direction, seasonal movement, edge banding, panel goods, joine
       'Use when creating FDM, SLA, SLS, or general additive-manufacturing parts, fixtures, brackets, enclosures, and prototypes.',
     skillMarkdown: `---
 name: design-for-3d-printing
-description: Wall thickness, support strategy, orientation, and fit checks
-source: tau-store
-version: 1.0.0
-when_to_use: Use when creating FDM, SLA, SLS, or general additive-manufacturing parts, fixtures, brackets, enclosures, and prototypes.
-enabled: true
+description: Wall thickness, support strategy, orientation, and fit checks. Use when creating FDM, SLA, SLS, or general additive-manufacturing parts, fixtures, brackets, enclosures, and prototypes.
+metadata:
+  source: tau-store
+  version: "1.0.0"
 ---
 
 # Design for 3D Printing
@@ -97,11 +103,10 @@ Check wall thickness, bridge spans, overhang angles, support access, orientation
       'Use when a CAD task involves screws, bolts, threaded inserts, clearance holes, countersinks, or assembly fastening.',
     skillMarkdown: `---
 name: fastener-selection
-description: Hardware families, clearances, countersinks, and assembly notes
-source: tau-store
-version: 1.0.0
-when_to_use: Use when a CAD task involves screws, bolts, threaded inserts, clearance holes, countersinks, or assembly fastening.
-enabled: true
+description: Hardware families, clearances, countersinks, and assembly notes. Use when a CAD task involves screws, bolts, threaded inserts, clearance holes, countersinks, or assembly fastening.
+metadata:
+  source: tau-store
+  version: "1.0.0"
 ---
 
 # Fastener Selection

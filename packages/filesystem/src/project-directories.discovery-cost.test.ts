@@ -13,14 +13,15 @@ import { createMockRootHandle } from '#testing/mock-handle-factory.js';
 import type { MockBrowserCall } from '#testing/mock-handle-factory.js';
 
 /**
- * What one full discovery scan costs on the operator's profile (project-library fast-path blueprint FW0, Finding 1):
- * 386 project directories, 84 in Home (OPFS) and 302 in one File System Access folder, three ids carried by a copy in
- * each. A scan lists each root once and reads `tau.json` and `.tau/project.json` of every directory, and stats
- * `tau.json` only where an id has more than one directory.
+ * What discovery costs on the operator's profile (project-library fast-path blueprint FW0, Finding 1; FW2): 386
+ * project directories, 84 in Home (OPFS) and 302 in one File System Access folder, three ids carried by a copy in each.
+ * A full read lists each root once and reads `tau.json` and `.tau/project.json` of every directory, and stats
+ * `tau.json` only where an id has more than one directory. With the discovery index (FW2) only the first pass after a
+ * reload, or after a reset, is a full read; a warm pass reads only the directories with evidence.
  *
- * These are the per-scan figures `apps/libs/project-library/src/discovery-budget.ceiling.json` multiplies by the scans
- * each library mutation makes. `the discovery unit cost` below records them in `testing/discovery-unit-cost.json`, and
- * the library budget test holds its ceiling's `scan` and `verification` rows to that file.
+ * These are the per-call figures `apps/libs/project-library/src/discovery-budget.ceiling.json` multiplies by what each
+ * library mutation asks. `the discovery unit cost` below records them in `testing/discovery-unit-cost.json`, and the
+ * library budget test holds its ceiling's unit rows to that file.
  */
 describe('listProjectManifests cost on the 386-directory profile', () => {
   let profile: DiscoveryProfile;
@@ -71,10 +72,23 @@ describe('listProjectManifests cost on the 386-directory profile', () => {
     });
   });
 
-  it('should cost the same browser calls on every warm scan: nothing about a directory is remembered', async () => {
-    /* The first scan of a fresh profile is cold: it opens every directory handle. The scans measured below are warm. */
+  it('should make no provider or browser call on a warm pass with no evidence (FW2, S9)', async () => {
     await profile.service.listProjectManifests();
+
+    const warm = await profile.measure(async () => profile.service.listProjectManifests());
+
+    expect(warm.result.entries).toHaveLength(operatorDiscoveryProfile.home + operatorDiscoveryProfile.workspace);
+    expect(warm.cost.counters).toEqual({});
+    expect(warm.cost.providers.home.total + warm.cost.providers.workspace.total).toBe(0);
+    expect(warm.cost.browserCalls).toBe(0);
+  });
+
+  it('should cost the same browser calls on every full read with warm handles: a reset index reads everything', async () => {
+    /* The first pass of a fresh profile is cold: it opens every directory handle. The reads measured below are warm. */
+    await profile.service.listProjectManifests();
+    profile.index.cold(undefined, 'reset');
     const first = await profile.measure(async () => profile.service.listProjectManifests());
+    profile.index.cold(undefined, 'reset');
     const second = await profile.measure(async () => profile.service.listProjectManifests());
 
     expect(second.cost).toEqual(first.cost);
@@ -123,13 +137,70 @@ describe('listProjectManifests cost on the 386-directory profile', () => {
       }
     `);
   });
+
+  /* Fast-path FW3: the delete answers what remains of the id under the same hold of its lock, from reads of the known
+   * locations; no other directory is read unless no known location holds the id. A copy in another root than the
+   * target cannot be the target under another spelling, so its root is not listed (review M1, budget). */
+  it('should delete a copy with its own checks and one probe of the other copy in another root, listing no root', async () => {
+    await profile.service.listProjectManifests();
+    const projectId = discoveryProfileHomeId(0);
+
+    const { result, cost } = await profile.measure(async () =>
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId,
+        providerBasePath: 'copy-000',
+        scope: profile.workspaceScope,
+        copy: true,
+      }),
+    );
+
+    expect(result).toMatchObject({ status: 'deleted', remaining: [{ relativeDirectory: 'home-000' }] });
+    expect(cost.counters).toEqual({ 'discovery.probe': 1 });
+    /* The target's checks: its manifest and its identity, and whether it, its manifest and then nothing remains. */
+    expect(cost.providers.workspace.kinds).toMatchObject({ manifestRead: 1, identityRead: 1, head: 0 });
+    expect(cost.providers.workspace.fileReads).toBe(2);
+    /* The other copy: two reads, no listing. */
+    expect(cost.providers.home).toMatchObject({ fileReads: 2, listings: 0 });
+  });
+
+  it('should delete a sole copy with its own checks and one identity sweep (until W5)', async () => {
+    await profile.service.listProjectManifests();
+    const [home] = await profile.service.getRootStatuses();
+    const projectId = discoveryProfileHomeId(10);
+
+    const { result, cost } = await profile.measure(async () =>
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId,
+        providerBasePath: 'home-010',
+        scope: { backend: 'opfs' },
+      }),
+    );
+
+    expect(result).toEqual({ status: 'deleted', remaining: [], absence: 'absent' });
+    expect(home?.storageRootKey).toBeDefined();
+    expect(cost.counters).toEqual({ 'discovery.identitySweep': 1, 'discovery.listing': 2 });
+    /* The sweep: one identity read of every other directory; the target: its manifest and its identity. */
+    const { home: homeRoot, workspace } = operatorDiscoveryProfile;
+    expect(cost.providers.home.kinds.identityRead + cost.providers.workspace.kinds.identityRead).toBe(
+      homeRoot - 1 + workspace + 1,
+    );
+    expect(cost.providers.home.kinds.manifestRead).toBe(1);
+  });
 });
 
 /** The per-call figures the library's discovery budget charges every mutation at; see `discovery-unit-cost.json`. */
 type UnitCost = Readonly<{ fileReads: number; listings: number; browserCalls: number }>;
 const unitCost = JSON.parse(
   readFileSync(path.join(import.meta.dirname, 'testing/discovery-unit-cost.json'), 'utf8'),
-) as Readonly<{ scan: UnitCost; verification: UnitCost }>;
+) as Readonly<{
+  scan: UnitCost;
+  warmPass: UnitCost;
+  directoryRead: UnitCost;
+  sweep: UnitCost;
+  verification: UnitCost;
+  probe: UnitCost;
+  listing: UnitCost;
+}>;
 
 describe('the discovery unit cost', () => {
   let profile: DiscoveryProfile;
@@ -148,16 +219,50 @@ describe('the discovery unit cost', () => {
     browserCalls: cost.browserCalls,
   });
 
-  it('should record what one warm scan and one route verification cost on the profile', async () => {
+  it('should record what a full read, a warm pass, one directory re-read, an identity sweep, one route verification, one probe and one root listing cost on the profile', async () => {
     await profile.service.listProjectManifests();
+    profile.index.cold(undefined, 'reset');
     const scan = await profile.measure(async () => profile.service.listProjectManifests());
+    const warmPass = await profile.measure(async () => profile.service.listProjectManifests());
+    const [home] = await profile.service.getRootStatuses();
+    /* Evidence names one directory's manifest, as the provider tap or a sibling's named notice would. */
+    profile.index.note(home!.storageRootKey, ['home-010/tau.json']);
+    const directoryRead = await profile.measure(async () => profile.service.listProjectManifests());
+    const sweep = await profile.measure(async () => profile.service.verifyAbsent(discoveryProfileHomeId(0)));
     const verification = await profile.measure(async () =>
       profile.service.verifyProjectRoute({ projectId: discoveryProfileHomeId(0) }),
     );
+    const [, workspaceRoot] = await profile.service.getRootStatuses();
+    /* FW3: one known location of an id read under its locks; and one fresh listing of a root's child names. */
+    const probe = await profile.measure(async () =>
+      profile.service.probeProjectDirectories({
+        projectId: discoveryProfileHomeId(0),
+        locators: [{ backend: 'opfs', storageRootKey: home!.storageRootKey, relativeDirectory: 'home-000' }],
+      }),
+    );
+    const listing = await profile.measure(async () =>
+      profile.service.probeProjectDirectories({ root: workspaceRoot!.storageRootKey }),
+    );
 
-    expect({ scan: unitCostOf(scan.cost), verification: unitCostOf(verification.cost) }).toEqual({
+    expect(sweep.result.status).toBe('present');
+    expect(probe.result.locations.map((location) => location.status)).toEqual(['held']);
+    expect(listing.result.names).toHaveLength(operatorDiscoveryProfile.workspace);
+    expect({
+      scan: unitCostOf(scan.cost),
+      warmPass: unitCostOf(warmPass.cost),
+      directoryRead: unitCostOf(directoryRead.cost),
+      sweep: unitCostOf(sweep.cost),
+      verification: unitCostOf(verification.cost),
+      probe: unitCostOf(probe.cost),
+      listing: unitCostOf(listing.cost),
+    }).toEqual({
       scan: unitCost.scan,
+      warmPass: unitCost.warmPass,
+      directoryRead: unitCost.directoryRead,
+      sweep: unitCost.sweep,
       verification: unitCost.verification,
+      probe: unitCost.probe,
+      listing: unitCost.listing,
     });
   });
 });

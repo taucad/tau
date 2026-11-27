@@ -23,6 +23,21 @@ const answer = (status: 'applied' | 'replayed'): CommandAnswer => ({
 });
 
 describe('sendHostCommand', () => {
+  it('marks the connection, the send and the answer on the page timeline with the verb and status only', async () => {
+    const mark = vi.spyOn(performance, 'mark');
+    const connect = vi.fn(
+      async () =>
+        ({ hostCommand: async () => answer('applied'), close: async () => undefined }) as unknown as AgentHostClient,
+    );
+    await sendHostCommand(connect, start);
+    expect(mark.mock.calls.filter(([name]) => name.startsWith('tau.chat.'))).toEqual([
+      ['tau.chat.host-command-connected', { detail: { type: 'start' } }],
+      ['tau.chat.host-command-sent', { detail: { type: 'start' } }],
+      ['tau.chat.host-command-answered', { detail: { type: 'start', status: 'applied' } }],
+    ]);
+    mark.mockRestore();
+  });
+
   it('reopens after a rejected channel close and resends the identical gesture', async () => {
     const hostCommand = vi
       .fn()

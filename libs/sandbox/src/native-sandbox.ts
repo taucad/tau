@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 import { getDefaultWritePaths, SandboxManager } from '@anthropic-ai/sandbox-runtime';
 
+import { spawnWindowsNative, windowsNativeLaunchVector } from '#native-sandbox-windows.js';
+
 /**
  * The operating-system sandbox could not be established, so no native worker was started.
  *
@@ -38,6 +40,11 @@ export type NativeSandboxLaunch = {
   readonly workingDirectory: string;
   /** Opaque key that attributes sandbox violations to this launch. */
   readonly commandId: string;
+  /**
+   * The executable's lowercase hex sha256, as the host verified it. Required on Windows, whose helper hashes the
+   * executable again through a handle it holds until the process exists.
+   */
+  readonly executableSha256?: string;
 };
 
 /**
@@ -378,10 +385,6 @@ const ensureInitialized = async (): Promise<void> => {
     // A failed reset was reported to its releasing session; initialization starts afresh.
   }
   initialization ??= (async () => {
-    if (process.platform === 'win32') {
-      // The released Windows backend cannot grant per-launch filesystem paths; see the blueprint's release gates.
-      throw new NativeRuntimeUnavailableError('Windows is not yet a supported native runtime platform.');
-    }
     if (!SandboxManager.isSupportedPlatform()) {
       throw new NativeRuntimeUnavailableError(`${process.platform} has no supported sandbox backend.`);
     }
@@ -554,6 +557,24 @@ const refuseLinkCreation = (argv: readonly string[]): readonly string[] => {
  * @returns The spawn vector, or a rejection with {@link NativeRuntimeUnavailableError}.
  */
 export const launchInNativeSandbox = async (launch: NativeSandboxLaunch): Promise<readonly string[]> => {
+  if (process.platform === 'win32') {
+    // Windows contains a process through `tau-windows-sandbox.exe`, not a wrapped command line (native-sandbox-windows).
+    if (launch.executableSha256 === undefined) {
+      throw new NativeRuntimeUnavailableError('a native launch on Windows needs its executable’s verified digest.');
+    }
+    try {
+      return await windowsNativeLaunchVector({
+        executablePath: launch.executablePath,
+        executableSha256: launch.executableSha256,
+        arguments: launch.arguments,
+        readablePaths: launch.readablePaths,
+        writablePath: launch.writablePath,
+        workingDirectory: launch.workingDirectory,
+      });
+    } catch (error) {
+      throw unavailable(error);
+    }
+  }
   await ensureInitialized();
   const vector = [launch.executablePath, ...launch.arguments].map((value) => quote(value)).join(' ');
   // The runtime's wrapper points TMPDIR at its own shared `/tmp/claude`, which this profile denies;
@@ -589,15 +610,17 @@ export const spawnInNativeSandbox = (
   vector: readonly string[],
   options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
 ): ChildProcessWithoutNullStreams => {
+  if (process.platform === 'win32') {
+    return spawnWindowsNative(vector, options);
+  }
   const [command, ...commandArguments] = vector;
   const filtered = process.platform === 'linux';
   const program = filtered ? linkRefusalProgram() : undefined;
   const child = spawn(command!, commandArguments, {
     cwd: options.cwd,
-    detached: process.platform !== 'win32',
+    detached: true,
     env: options.env,
     shell: false,
-    windowsHide: true,
     stdio: filtered ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
   });
   const channel = program === undefined ? undefined : child.stdio[linkRefusalDescriptor];

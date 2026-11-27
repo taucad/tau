@@ -18,6 +18,31 @@ import type { ViewerColorScheme, ViewerToneMapping } from '@taucad/types/constan
  */
 export const viewerCaptureReferenceViewport = { width: 768, height: 576 } as const;
 
+/**
+ * The one isometric framing every card surface shares: the card thumbnail (the app's generator and the examples'
+ * script), the single-image capture, and the first frame of a card's live preview, whose viewer stage defaults and
+ * card field of view must equal it (`project-card.test.tsx` in the app holds them together). It lives beside the look
+ * options, which every thumbnail already loads, so taking it adds no module to a page. Bounds framing runs
+ * `frameCameraBounds` from `@taucad/camera`, the function the viewer's camera frames with, so equal inputs give equal
+ * framing. The direction is the isometric preset's (`cameraPresetOrientations`), from the subject toward the camera.
+ *
+ * @returns A fresh camera, so a caller may hand it to an export that takes mutable vectors.
+ * @public
+ */
+export const createIsometricCaptureCamera = (): {
+  framing: 'bounds';
+  direction: [number, number, number];
+  up: [number, number, number];
+  margin: number;
+  projection: { kind: 'perspective'; verticalFieldOfView: number };
+} => ({
+  framing: 'bounds',
+  direction: [0.6123724357, -0.6123724357, 0.5],
+  up: [0, 0, 1],
+  margin: 0.1,
+  projection: { kind: 'perspective', verticalFieldOfView: 45 },
+});
+
 /** Inputs of {@link buildViewerCaptureImageOptions}. @public */
 export type ViewerCaptureImageOptionsInput = Readonly<{
   /** Output width in pixels. */

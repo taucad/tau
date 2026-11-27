@@ -181,10 +181,17 @@ type TopupModalProps = {
   readonly isOpen: boolean;
   readonly onOpenChange: (isOpen: boolean) => void;
   readonly defaultAmountCents?: number;
+  /** A line under the amount when payment leaves the page for Stripe, such as that the chat keeps the person's message. */
+  readonly returnNote?: string;
 };
 
 /** The Add credits dialog: choose an amount, review, pay, and see the result, with recovery for a purchase left open. */
-export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: TopupModalProps): React.JSX.Element {
+export function TopupModal({
+  isOpen,
+  onOpenChange,
+  defaultAmountCents = 2500,
+  returnNote,
+}: TopupModalProps): React.JSX.Element {
   const entitlements = useEntitlements();
   const canPurchase = entitlements.isResolved && entitlements.paymentCollectionAvailable;
   const queryClient = useQueryClient();
@@ -526,6 +533,9 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
                         }`
                       : `Enter ${amountRange}.`}
                 </p>
+                {returnNote !== undefined && !savedCard ? (
+                  <p className='text-xs text-muted-foreground'>{returnNote}</p>
+                ) : undefined}
               </div>
               {purchasesUnavailable ? (
                 <div role='status' className='rounded-md border px-3 py-2.5 text-sm'>

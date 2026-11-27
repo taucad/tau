@@ -5,7 +5,7 @@ import type { BillingLegalLinks } from '@taucad/billing-ui/providers/billing-leg
 import { cloudLegalUrl } from '#cloud/cloud-legal-url.js';
 import { CloudFinancialSessionProvider } from '#cloud/cloud-financial-session.js';
 import type { CloudFinancialSession } from '#cloud/cloud-financial-session.js';
-import { isKernelAllowed, storageLimitBytesByTier } from '@taucad/billing';
+import { isKernelAllowed, purchasedCreditsPerUsd, storageLimitBytesByTier } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useModelEstimates } from '@taucad/billing/hooks/use-model-estimates';
@@ -111,6 +111,7 @@ export function CloudBridge({ identityKey }: { readonly identityKey: string }): 
               estimates.routes.map((route) => [route.routeId, route.minimumHoldAtoms]),
             ),
             autoReloadEnabled,
+            creditsPerUsd: purchasedCreditsPerUsd,
           };
     return {
       ...(commercial === undefined ? {} : { commercial }),

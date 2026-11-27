@@ -141,6 +141,8 @@ type ChatTextareaDesktopProperties = {
   readonly containerReference: React.RefObject<HTMLDivElement | null>;
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object for imperative focus
   readonly focusEditorRef: React.RefObject<(() => void) | undefined>;
+  /** Receives this composer's Send, for the imperative handle's `submit`. */
+  readonly submitEditorRef?: React.RefObject<(() => Promise<void>) | undefined>;
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object populated by this component for parent-driven chip insertion
   readonly addContextChipsRef: React.RefObject<((paths: string[]) => void) | undefined>;
   readonly addContextReferencesRef: React.RefObject<((references: ChatContextReference[]) => void) | undefined>;
@@ -340,6 +342,7 @@ export const ChatTextareaDesktop = memo(function ({
   fileInputReference,
   containerReference,
   focusEditorRef,
+  submitEditorRef,
   addContextChipsRef,
   addContextReferencesRef,
 
@@ -468,6 +471,15 @@ export const ChatTextareaDesktop = memo(function ({
         : [],
     );
   }, [dictation.phase, dictation.stop, draftActorRef, submitWithReferences]);
+  useEffect(() => {
+    if (submitEditorRef === undefined) {
+      return undefined;
+    }
+    submitEditorRef.current = submitWithDictation;
+    return () => {
+      submitEditorRef.current = undefined;
+    };
+  }, [submitEditorRef, submitWithDictation]);
   const escapeWithDictation = useCallback((): void => {
     if (dictation.phase === 'idle') {
       onEscapePressed?.();

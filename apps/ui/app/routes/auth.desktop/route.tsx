@@ -2,6 +2,7 @@ import { useAuthenticate } from '@better-auth-ui/react';
 import { CircleAlert, Download, ExternalLink, MonitorSmartphone } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
+import type { HeadersFunction } from 'react-router';
 
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
@@ -9,6 +10,9 @@ import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { isTauDesktopReleased, tauDesktopDownloadUrl } from '#lib/desktop-release.js';
 import { authClient } from '#lib/auth-client.js';
 import type { Handle } from '#types/matches.types.js';
+import { readDesktopAuthorization, readDesktopSignInResult } from '#lib/desktop-oauth.js';
+import { DesktopConsent } from '#routes/auth.desktop/desktop-consent.js';
+import { DesktopResult } from '#routes/auth.desktop/desktop-result.js';
 
 /** Query params this page accepts, and the ones it hands back over `tau://`. */
 export const desktopHandoffParameterNames = {
@@ -76,6 +80,40 @@ export const handle: Handle = {
   enablePageWrapper: false,
 };
 
+/**
+ * The consent page names the account and answers a sign-in: no other site may frame it (RFC 9700 §4.16), and the
+ * signed request in its address never leaves it in a `Referer`.
+ *
+ * @param args - React Router's header arguments.
+ * @returns The parent's headers with the two added.
+ */
+export const headers: HeadersFunction = ({ parentHeaders }) => {
+  const documentHeaders = new Headers(parentHeaders);
+  documentHeaders.set('X-Frame-Options', 'DENY');
+  documentHeaders.set('Referrer-Policy', 'no-referrer');
+  return documentHeaders;
+};
+
+/**
+ * `/auth/desktop`: Tau Desktop's consent page when the API's OAuth provider sends a signed request, the outcome page
+ * when the app reports one, and the one-time-token hand-off for desktops released before the provider (until the
+ * cutover, execution plan DSI-8).
+ *
+ * @returns The page for the address.
+ */
+export default function AuthDesktopRoute(): React.JSX.Element {
+  const { search } = useLocation();
+  const result = useMemo(() => readDesktopSignInResult(search), [search]);
+  const authorization = useMemo(() => readDesktopAuthorization(search), [search]);
+  if (result !== undefined) {
+    return <DesktopResult result={result} />;
+  }
+  if (authorization !== undefined) {
+    return <DesktopConsent authorization={authorization} />;
+  }
+  return <LegacyDesktopHandoff />;
+}
+
 type HandoffStatus = 'invalid-request' | 'awaiting-consent' | 'minting' | 'opening' | 'not-opened' | 'failed';
 
 /** One sentence per state, so the card is a lookup rather than a ternary chain. */
@@ -137,7 +175,7 @@ const handoffIcon = (view: HandoffStatus): React.JSX.Element => {
  *
  * @returns The handoff status card.
  */
-export default function AuthDesktopRoute(): React.JSX.Element {
+function LegacyDesktopHandoff(): React.JSX.Element {
   const location = useLocation();
   const target = useMemo(() => parseDesktopHandoffTarget(location.search), [location.search]);
   // Redirects to /auth/sign-in?redirectTo=<this URL> when signed out, so every

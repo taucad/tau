@@ -14,6 +14,7 @@ import type {
   OpenAIResponsesOptions,
 } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
+import { recordHostTiming } from '#timing.js';
 import { isClearedToolResult, isCompactionSummaryRow } from '#harness/compaction.js';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
 import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
@@ -692,20 +693,37 @@ const anthropicLongCacheTtl = '1h';
 const cacheRetentionFor = (request: ModelStreamRequest): GatewayCacheRetention =>
   request.providerKind === 'anthropic' && request.invocationPurpose !== 'compaction' ? 'long' : 'short';
 
+const sha256Hex = async (text: string): Promise<string> => {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
 /**
- * The Responses `prompt_cache_key` for a chat: SHA-256 of its id, as 32 hex
- * characters. It routes a conversation's steps to one supplier server so its
- * prefix cache is found again, without handing a Tau identifier to the
- * supplier (I4).
- *
- * @param chatId - The chat the invocation belongs to.
- * @returns The hashed routing key.
+ * How many routing keys share one static prefix. OpenAI routes a key to one machine and spills it past about 15
+ * requests per minute, so the prefix's traffic is split across this many keys; raise it when one prefix's
+ * Responses traffic passes 15 times this per minute.
  */
-const promptCacheKeyFor = async (chatId: string): Promise<string> => {
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(chatId));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
-    .slice(0, 32);
+export const promptCacheKeyShards = 4;
+
+/**
+ * The Responses `prompt_cache_key` (chat performance WP-15, ruling O-5 "Free changes only"): the static prefix the
+ * supplier caches (model, tools, then the static system prompt, the first cached block) plus one of
+ * {@link promptCacheKeyShards} shards chosen by the chat. Every chat on a model then lands where the shared prefix
+ * is already cached, so a new chat's first step reads it; a chat stays on one shard, so its own history is found
+ * again on later steps. Keying by chat id alone sent each new chat to a machine without the prefix, and every
+ * OpenAI first step missed. Only hashes reach the supplier, never a Tau identifier (I4).
+ *
+ * @param request - The invocation being sent, with its chat.
+ * @param chatId - The chat the invocation belongs to.
+ * @returns The 32-hex routing key.
+ */
+const promptCacheKeyFor = async (request: ModelStreamRequest, chatId: string): Promise<string> => {
+  const staticPrompt = request.systemPromptBlocks?.[0]?.text ?? request.systemPrompt;
+  const prefix = await sha256Hex(JSON.stringify([request.modelId, request.tools, staticPrompt]));
+  const chat = await sha256Hex(chatId);
+  const shard = Number.parseInt(chat.slice(0, 8), 16) % promptCacheKeyShards;
+  const key = await sha256Hex(`${prefix}:${String(shard)}`);
+  return key.slice(0, 32);
 };
 
 /** Anthropic refuses a request with more `cache_control` breakpoints than this. */
@@ -791,6 +809,50 @@ const anthropicSystemBlocks = (options: {
 
 /* A label is sent only as printable ASCII within the gateway's bound; anything else would throw in `Headers#set`. */
 const headerLabel = /^[!-~]{1,128}$/u;
+
+/**
+ * API origins whose gateway has answered with `x-tau-accept-encoding: gzip` (chat performance WP-15 step 2). A body
+ * is sent gzip only to an origin in this set, so a host that runs ahead of the API's deploy, or an API that drops
+ * the decoder, keeps receiving identity bodies: the first step to an origin is always identity.
+ */
+const gzipOrigins = new Set<string>();
+
+/* Below this, gzip's header and the CPU cost outweigh the bytes saved. */
+const gzipMinimumBytes = 1024;
+
+const originOf = (input: RequestInfo | URL): string | undefined => {
+  try {
+    return new URL(typeof input === 'string' || input instanceof URL ? input.toString() : input.url).origin;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The request body gzip, when the origin advertised it and the body is large enough to gain.
+ *
+ * @param origin - The API origin, when known.
+ * @param body - The serialized request.
+ * @returns The compressed bytes, or undefined to send the body as it is.
+ */
+const gzipBodyFor = async (origin: string | undefined, body: unknown): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+  if (
+    origin === undefined ||
+    !gzipOrigins.has(origin) ||
+    typeof body !== 'string' ||
+    body.length < gzipMinimumBytes ||
+    typeof CompressionStream === 'undefined'
+  ) {
+    return undefined;
+  }
+  const compressed = new Blob([body]).stream().pipeThrough(new CompressionStream('gzip'));
+  return new Uint8Array(await new Response(compressed).arrayBuffer());
+};
+
+/** Forgets the origins that advertised gzip; for tests. */
+export const resetGatewayGzipOrigins = (): void => {
+  gzipOrigins.clear();
+};
 
 const authenticatedFetch =
   (options: {
@@ -891,12 +953,24 @@ const authenticatedFetch =
           body = JSON.stringify({ ...payload, system });
         }
       }
+      const origin = originOf(input);
+      const gzipped = await gzipBodyFor(origin, body);
+      if (gzipped !== undefined) {
+        headers.set('content-encoding', 'gzip');
+      }
+      recordHostTiming('model-request-sent', undefined, {
+        bytes: typeof body === 'string' ? body.length : 0,
+        ...(gzipped === undefined ? {} : { wireBytes: gzipped.byteLength }),
+      });
       const response = await options.fetch(withoutBetaMarker(input), {
         ...init,
-        body,
+        body: gzipped ?? body,
         credentials: 'include',
         headers,
       });
+      if (origin !== undefined && response.headers.get('x-tau-accept-encoding') === 'gzip') {
+        gzipOrigins.add(origin);
+      }
       if (!response.ok) {
         const failure = await gatewayResponseError(response);
         options.state.failure = failure;
@@ -1434,7 +1508,7 @@ const providerTransport = (options: GatewayModelTransportOptions): ModelTranspor
     // with no chat has nothing to route by.
     const promptCacheKey =
       isOpenAiResponsesProviderKind(request.providerKind) && request.chatId !== undefined
-        ? await promptCacheKeyFor(request.chatId)
+        ? await promptCacheKeyFor(request, request.chatId)
         : undefined;
     // Every adapter shares one request-construction step: Vertex signature echo,
     // then the document rewrite (D21, D25), then the Responses routing key. A

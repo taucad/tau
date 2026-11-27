@@ -10,6 +10,7 @@
  */
 import { mkdir, realpath } from 'node:fs/promises';
 
+import { nativeSandboxRefusal } from '@taucad/native-process-core';
 import { nativeKernelIdsSupportedOn, preparationPluginsOf } from '@taucad/native-process-core/store';
 import { createPreparationHost, detectHostIndicators, readManagedPreparation } from '@taucad/runtime/preparation/node';
 import type {
@@ -21,7 +22,7 @@ import type {
 
 import { desktopNativeDeployments } from '#desktop-native-deployments.js';
 import { nativeKernelsFrameType } from '#native-kernels-frame.js';
-import type { NativeKernelsFrame, NativeKernelSlot } from '#native-kernels-frame.js';
+import type { DesktopWindowsNativeSandbox, NativeKernelsFrame, NativeKernelSlot } from '#native-kernels-frame.js';
 
 /**
  * The native packages the desktop lists: each deployment's `tau-plugin.json` rows with its launch set, without its
@@ -60,6 +61,7 @@ export const openDesktopPreparationHost = (input: {
     hostPath: input.hostPath,
     ...(input.managed.seed === undefined ? {} : { seed: input.managed.seed }),
     selection: input.managed.selection,
+    nativeContainment: nativeSandboxRefusal,
   });
 
 /**
@@ -100,7 +102,7 @@ export type NativeStoreReport = {
  * once, with every kernel refused when the store cannot be opened, so no utility waits for ever), then collect the
  * store's garbage (D21). Never rejects.
  * @param input - The store root, this installation's path, the managed profile's environment, where to post the
- *   frame, a log and cancellation.
+ *   frame, a log, cancellation and, on Windows, the native sandbox the frame names.
  * @returns What happened.
  */
 export const startNativeStore = async (input: {
@@ -111,7 +113,10 @@ export const startNativeStore = async (input: {
   readonly log: (level: 'info' | 'warn' | 'error', event: string, detail: unknown) => void;
   readonly signal: AbortSignal;
   readonly plugins?: readonly PreparationPlugin[];
+  /** Windows: the sandbox helper every kernel utility contains its native workers through, named in the frame. */
+  readonly windowsSandbox?: DesktopWindowsNativeSandbox | undefined;
 }): Promise<NativeStoreReport | undefined> => {
+  const sandboxed = input.windowsSandbox === undefined ? {} : { windowsSandbox: input.windowsSandbox };
   const plugins = input.plugins ?? desktopNativePlugins;
   let host: PreparationHost | undefined;
   let posted = false;
@@ -126,7 +131,7 @@ export const startNativeStore = async (input: {
       plugins,
     });
     const frame = await composeDesktopNativeKernels({ host, store, plugins });
-    input.post(frame);
+    input.post({ ...frame, ...sandboxed });
     posted = true;
     const kernels = frame.kernels.map(({ kernel }) => kernel);
     input.log('info', 'native.store', { store, kernels });
@@ -149,6 +154,7 @@ export const startNativeStore = async (input: {
             refusal: message,
           })),
         ),
+        ...sandboxed,
       });
     }
     return undefined;

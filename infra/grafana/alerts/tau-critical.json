@@ -334,41 +334,7 @@
       "for": "15m",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/playbooks/ledger-drift.md",
-        "summary": "Tier T1: a spend-blocking financial case (dispute, orphan receipt, invalid grant cause, entitlement disagreement or journal drift; charter D11) that names an account has been open for more than 15 min. That customer gets 403 BILLING_ACCOUNT_RESTRICTED on every model step and cannot start a new purchase until an operator resolves it. Start with the billing lifecycle `list-cases` with `attributed: true`. An unattributed case pages as billing-case-unattributed instead; owed-money and bookkeeping kinds never block and are not in this rule. Grouped by Fly `app` and case kind."
-      },
-      "labels": {
-        "severity": "critical",
-        "service": "tau-api",
-        "component": "billing"
-      }
-    },
-    {
-      "uid": "billing-case-unattributed",
-      "title": "P0: Financial Case Without an Account",
-      "condition": "case_unattributed",
-      "data": [
-        {
-          "refId": "case_unattributed",
-          "queryType": "",
-          "relativeTimeRange": {
-            "from": 600,
-            "to": 0
-          },
-          "datasourceUid": "prometheus",
-          "model": {
-            "expr": "max by (app, kind) (tau_billing_open_financial_cases{app=~\".*\",service_name=\"tau-api\",attributed=\"false\",kind!~\"tax_registration_review|supplier_.+\"}) > 0",
-            "intervalMs": 15000,
-            "maxDataPoints": 20,
-            "refId": "case_unattributed"
-          }
-        }
-      ],
-      "noDataState": "OK",
-      "execErrState": "OK",
-      "for": "0s",
-      "annotations": {
-        "runbook_url": "docs/handbooks/cloud/operate/refunds-and-financial-cases.md",
-        "summary": "Tier U (billing collection gate blueprint D5): an open financial case names no Tau account, usually foreign cash (a payment with no Tau customer) or a Stripe read that could not attribute it. No customer is refused anything; it is operator work and pages at the first evaluation after the hourly gauge write. Run the billing lifecycle `list-cases` with `attributed: false`, then close each row with `resolve-case` (`resolved` for foreign cash). tax_registration_review and supplier_* cases never name an account, so they are left to billing-books-overdue-24h (and billing-supplier-invoice-mismatch) instead of paging here. Grouped by Fly `app` and case kind."
+        "summary": "Tier T1: a spend-blocking financial case (dispute, orphan receipt, invalid grant cause, entitlement disagreement or journal drift; charter D11) that names an account has been open for more than 15 min. That customer gets 403 BILLING_ACCOUNT_RESTRICTED on every model step and cannot start a new purchase until an operator resolves it. Start with the billing lifecycle `list-cases` with `attributed: true`. An unattributed case warns as billing-case-unattributed instead; owed-money and bookkeeping kinds never block and are not in this rule. Grouped by Fly `app` and case kind."
       },
       "labels": {
         "severity": "critical",

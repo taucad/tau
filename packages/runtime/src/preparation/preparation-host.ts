@@ -252,17 +252,6 @@ const defaultNativeContainment = (indicators: HostIndicators, packageName: strin
     : undefined;
 
 /**
- * Without a containment answer from the sandbox, a Windows host runs no native worker: none runs unsandboxed.
- * @param indicators - The host's indicators.
- * @param packageName - The package whose native variant is asked for.
- * @returns The refusal on Windows; `undefined` elsewhere.
- */
-const defaultNativeContainment = (indicators: HostIndicators, packageName: string): string | undefined =>
-  indicators.os === 'win32'
-    ? `Native kernels do not run on Windows in this Tau: it has no Windows sandbox, and no native worker runs unsandboxed. Use macOS or Linux (glibc) for ${packageName}.`
-    : undefined;
-
-/**
  * Create the preparation host (API 4) for a Node host: `tau mcp`, `tau export`, `tau prepare`, the daemon parent
  * and the desktop main process compose one each, over one shared store.
  *

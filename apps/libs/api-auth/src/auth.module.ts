@@ -31,6 +31,32 @@ import type {
 
 type AuthInstance = ReturnType<typeof betterAuth>;
 
+/**
+ * The body handed to Better Auth, in the encoding the request's `Content-Type` still declares. Fastify has already
+ * parsed it into an object; a form body (the OAuth token and revocation endpoints, RFC 6749 §4.1.3, RFC 7009 §2.1)
+ * goes back as form fields, never as JSON under a form content type.
+ *
+ * @param request - The parsed request.
+ * @returns The serialized body, or `undefined` when there is none.
+ */
+export const forwardedBody = (request: Pick<Request, 'body' | 'headers'>): string | undefined => {
+  const { body } = request;
+  if (body === undefined || body === null || body === '') {
+    return undefined;
+  }
+  const contentType = request.headers['content-type'] ?? '';
+  if (contentType.toLowerCase().startsWith('application/x-www-form-urlencoded') && typeof body === 'object') {
+    const form = new URLSearchParams();
+    for (const [name, value] of Object.entries(body as Record<string, unknown>)) {
+      for (const item of Array.isArray(value) ? value : [value]) {
+        form.append(name, String(item));
+      }
+    }
+    return form.toString();
+  }
+  return JSON.stringify(body);
+};
+
 const hooks = [
   { metadataKey: beforeHookKey, hookType: 'before' },
   { metadataKey: afterHookKey, hookType: 'after' },
@@ -151,7 +177,7 @@ export class AuthModule implements NestModule, OnModuleInit {
 
     // Configure the auth routes
     instance.all(`${basePath}/*`, async (request: Request, reply: Reply) => {
-      await this.forwardToAuth(request, reply, request.body ? JSON.stringify(request.body) : undefined);
+      await this.forwardToAuth(request, reply, forwardedBody(request));
     });
 
     this.logger.log(`AuthModule initialized at '${basePath}/*'`);

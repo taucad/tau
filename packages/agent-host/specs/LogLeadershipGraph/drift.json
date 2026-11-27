@@ -77,8 +77,8 @@
     "visibility"
   ],
   "specs": {
-    "LogLeadership.tla": "4989a2bacea60b47a42a2e1074f99c399a828142a95e149033143aefdd5c2867",
-    "LogLeadershipGraph.tla": "6c18bd15118e4f41caee0b890f54532a66ccb0873fd8ad7b2c14f31a2ef5566c"
+    "LogLeadership.tla": "0ce0f85d1359821adc1c50e3bd19cceb9baa1430ad28d4ebcedda75ff0d00b3e",
+    "LogLeadershipGraph.tla": "428db7fa847a15b63f2d76eea75137f9e90bf93520c208435ea65f6e13441d26"
   },
   "tables": {},
   "versions": {

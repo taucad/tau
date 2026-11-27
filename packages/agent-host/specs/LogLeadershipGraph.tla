@@ -53,6 +53,10 @@ Steps ==
         \/ L!GrantQueued(w) /\ A("GrantQueued", w)
         \/ L!Freeze(w) /\ A("Freeze", w)
         \/ L!Thaw(w) /\ A("Thaw", w)
+        \* HA4: enabled only with ClaimRefusal # "none", which the committed export leaves at "none".
+        \/ L!RefuseClaim(w) /\ A("RefuseClaim", w)
+        \/ L!OpenClaim(w) /\ A("OpenClaim", w)
+        \/ L!ReleaseRefused(w) /\ A("ReleaseRefused", w)
 GraphNext == Steps /\ m2' = M2View'
 
 GraphSpec == GraphInit /\ [][GraphNext]_<<L!vars, act, m2>>

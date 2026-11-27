@@ -219,8 +219,11 @@ ReleaseHandle(w) == IF handle = w THEN None ELSE handle
 Up(w) == alive[w] /\ ~frozen[w]   \* the worker runs code
 NoneQueued == \A x \in Workers : ~queued[x]
 Hb(e) == heard' = IF HeardRule THEN e ELSE heard   \* HeardRule: the grant callback posts a heartbeat
-Writes(w) == refusal[w] # "refused"   \* w's term has a writer: no refused claim is outstanding (HA4)
 Unrefused(w) == refusal' = [refusal EXCEPT ![w] = "none"]
+\* HA4 (review I2, 2026-11-27): an append of w's term proves its writer open: a command run here (a forwarded one, or a
+\* run's admission) opens the writer as its claim retry would, so a refused term becomes "opened".
+Opens(w) == refusal' = IF refusal[w] = "refused" THEN [refusal EXCEPT ![w] = "opened"] ELSE refusal
+scopeVarsButRefusal == <<frozen, freezes, reading, noticeDue, queued, nqueues, want, wants, drives, run, nruns, zombie>>
 
 \* Relinquish: no term, no run driven, no read in flight; the writer (and its OPFS handle) closes.
 StepDown(w) ==
@@ -351,16 +354,16 @@ Answered(k) == status' = [status EXCEPT ![k] = IF status[k] = "waiting" THEN "an
 Process(w, id) ==
     LET m == Frame(id) IN
     /\ Up(w) /\ ~noticeDue[w] /\ w \in m.to /\ id \notin done[w] /\ pending[w] = 0
-    /\ lead[w] = 0 \/ (claimed[w] /\ Writes(w))
+    /\ lead[w] = 0 \/ claimed[w]
     /\ done' = [done EXCEPT ![w] = @ \cup {id}]
     /\ IF lead[w] = 0
-         THEN UNCHANGED <<lead, claimed, view, vlen, pending, log, lockNotFence, status, refused>>   \* no leadership state: dropped
+         THEN UNCHANGED <<lead, claimed, view, vlen, pending, log, lockNotFence, status, refused, refusal>>   \* no leadership state: dropped
        ELSE IF m.g # 0 /\ m.g # lead[w]
          THEN /\ refused' = IF MustAnswer THEN [refused EXCEPT ![m.k] = TRUE] ELSE refused
-              /\ UNCHANGED <<lead, claimed, view, vlen, pending, log, lockNotFence, status>>        \* LEADER_GENERATION_STALE
+              /\ UNCHANGED <<lead, claimed, view, vlen, pending, log, lockNotFence, status, refusal>>        \* LEADER_GENERATION_STALE
        ELSE IF IdemKeys /\ m.k \in view[w]
          THEN /\ Answered(m.k)                                                   \* replayed outcome
-              /\ UNCHANGED <<lead, claimed, view, vlen, pending, log, lockNotFence, refused>>
+              /\ UNCHANGED <<lead, claimed, view, vlen, pending, log, lockNotFence, refused, refusal>>
        ELSE IF StoreAccepts(w)
          THEN /\ log' = log \o NewRows(w, m.k, 0, Follower)
               \* Storage fences stamp the log's epoch, never the lock's: the history is S4's.
@@ -368,17 +371,18 @@ Process(w, id) ==
               /\ view' = [view EXCEPT ![w] = @ \cup {m.k}]
               /\ vlen' = IF Fence \in S4Fences THEN vlen ELSE [vlen EXCEPT ![w] = @ + Len(NewRows(w, m.k, 0, Follower))]
               /\ pending' = [pending EXCEPT ![w] = id]
+              /\ Opens(w)
               /\ UNCHANGED <<lead, claimed, status, refused>>
        ELSE IF Fence \in S4Fences
          THEN /\ lead' = [lead EXCEPT ![w] = 0] /\ claimed' = [claimed EXCEPT ![w] = FALSE]
               /\ refused' = [refused EXCEPT ![m.k] = TRUE]                       \* LEADERSHIP_LOST, answered
-              /\ UNCHANGED <<view, vlen, pending, log, lockNotFence, status>>
+              /\ UNCHANGED <<view, vlen, pending, log, lockNotFence, status, refusal>>
          ELSE \* LOG_FENCED: nothing written, answered; the holder reads again
               /\ claimed' = [claimed EXCEPT ![w] = FALSE]
               /\ refused' = [refused EXCEPT ![m.k] = TRUE]
-              /\ UNCHANGED <<lead, view, vlen, pending, log, lockNotFence, status>>
+              /\ UNCHANGED <<lead, view, vlen, pending, log, lockNotFence, status, refusal>>
     /\ UNCHANGED <<lock, lockEpoch, epochs, alive, mine, fence, handle, frames, latest, heard, tries, crashes, sends,
-                   scopeVars>>
+                   scopeVarsButRefusal>>
 
 Answer(w) ==   \* the response frame for a command whose effect is already in the log
     /\ Up(w) /\ pending[w] # 0
@@ -464,7 +468,7 @@ Put(w, k, r, f) ==
 
 \* What an append leaves alone.
 AppendFrame == <<lock, lockEpoch, epochs, alive, lead, claimed, view, mine, pending, fence, handle, lockNotFence,
-                 done, followerVars, crashes, tabVars, reading, noticeDue, refusal>>
+                 done, followerVars, crashes, tabVars, reading, noticeDue>>
 
 Want(w) ==   \* a write that needs the writer: start a run
     /\ Up(w) /\ ~want[w] /\ wants < MaxWants
@@ -473,23 +477,23 @@ Want(w) ==   \* a write that needs the writer: start a run
                    tabVars, reading, noticeDue, drives, run, nruns, zombie, refusal>>
 
 Start(w, x) ==   \* admit a run for a requester of the writer's own build: its intent row
-    /\ Up(w) /\ claimed[w] /\ Writes(w) /\ ~noticeDue[w] /\ StoreAccepts(w) /\ drives[w] = 0 /\ run.s # "live"
+    /\ Up(w) /\ claimed[w] /\ ~noticeDue[w] /\ StoreAccepts(w) /\ drives[w] = 0 /\ run.s # "live"
     /\ want[x] /\ alive[x] /\ Build(x) = Build(w)
-    /\ Put(w, "admit", nruns + 1, x)
+    /\ Put(w, "admit", nruns + 1, x) /\ Opens(w)
     /\ run' = [id |-> nruns + 1, s |-> "live", d |-> w] /\ nruns' = nruns + 1
     /\ drives' = [drives EXCEPT ![w] = nruns + 1] /\ want' = [want EXCEPT ![x] = FALSE]
     /\ UNCHANGED <<AppendFrame, wants, zombie>>
 
 End(w) ==
-    /\ Up(w) /\ claimed[w] /\ Writes(w) /\ ~noticeDue[w] /\ drives[w] > 0 /\ StoreAccepts(w)
-    /\ Put(w, "end", drives[w], w)
+    /\ Up(w) /\ claimed[w] /\ ~noticeDue[w] /\ drives[w] > 0 /\ StoreAccepts(w)
+    /\ Put(w, "end", drives[w], w) /\ Opens(w)
     /\ run' = IF run.id = drives[w] /\ run.s = "live" THEN [run EXCEPT !.s = "ended"] ELSE run
     /\ drives' = [drives EXCEPT ![w] = 0]
     /\ UNCHANGED <<AppendFrame, want, wants, nruns, zombie>>
 
 Abandon(w) ==   \* M1's idle choice: a live run this writer does not drive (RH-R9)
-    /\ Up(w) /\ claimed[w] /\ Writes(w) /\ ~noticeDue[w] /\ StoreAccepts(w) /\ run.s = "live" /\ drives[w] # run.id
-    /\ Put(w, "abandon", run.id, w)
+    /\ Up(w) /\ claimed[w] /\ ~noticeDue[w] /\ StoreAccepts(w) /\ run.s = "live" /\ drives[w] # run.id
+    /\ Put(w, "abandon", run.id, w) /\ Opens(w)
     /\ run' = [run EXCEPT !.s = "abandoned"]
     /\ zombie' = (zombie \/ (lock # w /\ lock \in Workers /\ Up(lock) /\ drives[lock] = run.id))
     /\ UNCHANGED <<AppendFrame, drives, want, wants, nruns>>
@@ -548,7 +552,8 @@ Thaw(w) ==
 
 \* ---------------- HA4: a claim refused after the grant (H22, RC3, AR3-6) ----------------
 \* The read opened the view, but M1's claim was refused (a closing incarnation's WRITER_LOCKED, or another code),
-\* so w holds the lock with no writer: nothing it may append runs. Once per term, before the term's first append.
+\* so w holds the lock with no claim-opened writer. A command run here may still open it (Process, Start, End,
+\* Abandon: `Opens`), as the code's `runLocal` does. Once per term, before the term's first append.
 RefuseClaim(w) ==
     /\ ClaimRefusal # "none" /\ Fence \in {"lazy", "lazynocas"}
     /\ Up(w) /\ lock = w /\ lead[w] > 0 /\ claimed[w] /\ mine[w] > MaxE(log) /\ refusal[w] = "none"
@@ -563,9 +568,10 @@ OpenClaim(w) ==
     /\ UNCHANGED <<lock, lockEpoch, epochs, workerVars, fence, handle, log, lockNotFence, done, followerVars, crashes,
                    tabVars, reading, noticeDue, drives, runVars>>
 
-\* The bound passed with the claim still refused, or the refusal was not a closing one: the lock goes.
+\* The bound passed with the claim still refused, or the refusal was not a closing one: the lock goes, but only with
+\* nothing running here (review I1): no run driven, no forwarded command unanswered.
 ReleaseRefused(w) ==
-    /\ ClaimRefusal = "release" /\ Up(w) /\ lock = w /\ refusal[w] = "refused"
+    /\ ClaimRefusal = "release" /\ Up(w) /\ lock = w /\ refusal[w] = "refused" /\ drives[w] = 0 /\ pending[w] = 0
     /\ lock' = None /\ lockEpoch' = 0
     /\ StepDown(w) /\ Unrefused(w)
     /\ UNCHANGED <<epochs, alive, view, vlen, mine, pending, fence, log, lockNotFence, done, followerVars, crashes,
@@ -648,8 +654,12 @@ SameBuildWriter == \A i \in 1..Len(log) : log[i].k = "admit" => Build(log[i].w) 
 NoAbandonWithoutFault == run.s = "abandoned" => (crashes > 0 \/ freezes > 0)
 NoAbandonWithoutCrash == run.s = "abandoned" => crashes > 0
 NoZombieAbandon == ~zombie
-\* HA4 (H22): a term left with no writer by a refused claim ends: the lock is released, or a writer opens.
-WriterlessReleased == \A w \in Workers : refusal[w] = "refused" ~> (lock # w \/ refusal[w] # "refused" \/ ~alive[w])
+\* HA4 (H22): a term left with no writer by a refused claim ends: the lock is released, or a writer opens. Its
+\* fairness is ScopeFairness's WF_vars(ReleaseRefused(w)), on with MaxWants > 0. ReleaseRefused needs Up(w), and
+\* without FairThaw a frozen tab need never thaw, so a frozen holder is excused here: its lock is a stealer's
+\* (StealRule "silent", RH-R12), as `Served` excuses it. A crashed one is excused too (ReleaseDead).
+WriterlessReleased ==
+    \A w \in Workers : refusal[w] = "refused" ~> (lock # w \/ refusal[w] # "refused" \/ ~alive[w] \/ frozen[w])
 \* EQ4, no wedge: a running worker's write is eventually served.
 Served == \A w \in Workers : want[w] ~> (~want[w] \/ ~alive[w] \/ frozen[w])
 

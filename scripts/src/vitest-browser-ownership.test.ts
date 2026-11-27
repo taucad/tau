@@ -15,6 +15,7 @@ const repositoryFiles = (): readonly string[] => {
     cwd: root,
     encoding: 'utf8',
     env: gitEnvironment,
+    maxBuffer: 64 * 1024 * 1024,
   })
     .split('\0')
     .filter(

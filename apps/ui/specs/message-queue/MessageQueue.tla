@@ -326,6 +326,20 @@
 \* Send now spoken in flight (2026-11-27): the row the person sent with Send now keeps its live region while its
 \* durable steer is in flight, past `onSteer` settling, and an automatic send stays silent. Presentation only. No action
 \* or verdict changes.
+\* Host attachment HA2 (2026-11-27): a replayed or dispatched queued command's outcome follows its code's retry class
+\* (HA-I4). Every `wait` code, and an answer lost past the command's bound, holds the item to send again by its key,
+\* as an owner wait already did; `never`, `resume` and `reauth` still fail it with its card. Only a durable answer
+\* acknowledges. The wait's line shows after `outboxWaitLineMilliseconds`. Holding is stuttering, never `Acknowledge`
+\* or a second id. A head that re-sends is one cause the "Reconnecting…" cue reads (HA-I8). No action or verdict
+\* changes.
+\* HA2 review (2026-11-27): only a head that re-sends after a lost answer is a "Reconnecting…" cause; a coded wait
+\* shows its own line. A replayed answer that applied nothing is reported as before. No action or verdict changes.
+\* HA2 review round 2 (2026-11-27): the cue follows the HA5 table. A `wait` code with a line of its own shows that line
+\* after its bound and no cue; every other `wait` code and a lost answer show the cue and no line. No action or
+\* verdict changes.
+\* HA2 on WP-12 (2026-11-28): a local chat lends its live overlay's client to its commands while the overlay is
+\* subscribed, and an overlay loss drops it, so a command is a keyed send on a connection either way. Delivery and
+\* acknowledgement are unchanged. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

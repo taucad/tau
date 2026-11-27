@@ -18,7 +18,7 @@
  * branch can go.
  */
 
-import { lstatSync, readdirSync, watch } from 'node:fs';
+import { lstatSync, readdirSync, realpathSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join, sep } from 'node:path';
 
@@ -70,10 +70,13 @@ export type TreeWatchOptions = Readonly<{
  * @throws When `root` cannot be watched at all (it is missing, or the platform has no recursive watch).
  * @public
  */
-export const watchTree = (root: string, listener: TreeWatchListener, options: TreeWatchOptions = {}): TreeWatcher =>
-  process.platform === 'linux'
-    ? watchTreeByDirectory(root, listener, options.persistent ?? false)
-    : watchTreeNatively(root, listener, options.persistent ?? false);
+export const watchTree = (root: string, listener: TreeWatchListener, options: TreeWatchOptions = {}): TreeWatcher => {
+  /* The directory itself, not a link to it: every later look at the root is an `lstat`. */
+  const directory = realpathSync(root);
+  return process.platform === 'linux'
+    ? watchTreeByDirectory(directory, listener, options.persistent ?? false)
+    : watchTreeNatively(directory, listener, options.persistent ?? false);
+};
 
 /**
  * The platform's own recursive watch, where it has one.
@@ -177,6 +180,9 @@ const watchTreeByDirectory = (root: string, listener: TreeWatchListener, persist
    * may have landed before its own watch did.
    */
   const add = (relative: string, ino: number, announce: boolean): void => {
+    if (closed) {
+      return;
+    }
     const absolute = join(root, relative);
     let watcher: FSWatcher;
     try {
@@ -214,6 +220,10 @@ const watchTreeByDirectory = (root: string, listener: TreeWatchListener, persist
       const child = childOf(relative, entry.name);
       if (announce) {
         listener.change(child);
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- the listener may have closed the watch; open nothing more.
+        if (closed) {
+          return;
+        }
       }
       if (entry.isDirectory()) {
         const seen = lookAt(join(root, child));
@@ -247,6 +257,10 @@ const watchTreeByDirectory = (root: string, listener: TreeWatchListener, persist
     }
     const child = childOf(relative, filename);
     listener.change(child);
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- the listener may have closed the watch; open nothing more.
+    if (closed) {
+      return;
+    }
     const seen = lookAt(join(root, child));
     const watched = directories.get(child);
     if (watched !== undefined && (event === 'rename' || seen?.directory !== true || seen.ino !== watched.ino)) {

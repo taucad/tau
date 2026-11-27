@@ -91,7 +91,13 @@ describe('watchTree', () => {
     renameSync(staged, join(root, 'moved'));
     await watch.barrier();
 
-    expect(watch.changes).toEqual(expect.arrayContaining(['moved', 'moved/nested', 'moved/nested/a.ts']));
+    /*
+     * Every platform names the directory, which covers its subtree for every consumer. On Linux,
+     * where this module watches each directory itself, the entries the directory arrived with are
+     * named too; the platform's own recursive watch (macOS, Windows) reports only the move.
+     */
+    const expected = process.platform === 'linux' ? ['moved', 'moved/nested', 'moved/nested/a.ts'] : ['moved'];
+    expect(watch.changes).toEqual(expect.arrayContaining(expected));
   });
 
   it('should keep reporting writes in a directory that replaced a file, and in one that replaced that directory', async () => {

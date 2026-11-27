@@ -645,8 +645,10 @@ segments_only_grow() {
         A) [ "$now_mode" = "100644" ] && continue ;;
         M)
           if [ "$was_mode" = ":100644" ] && [ "$now_mode" = "100644" ]; then
-            size=$(git cat-file -s "$was")
-            if [ "$size" -eq 0 ] || [ "$(git cat-file blob "$now" 2>/dev/null | head -c "$size" | git hash-object --stdin)" = "$was" ]; then
+            size=$(git cat-file -s "$was" 2>/dev/null) || exit 2
+            git cat-file -e "$now" 2>/dev/null || exit 2
+            prefix=$(git cat-file blob "$now" 2>/dev/null | head -c "$size" | git hash-object --stdin) || exit 2
+            if [ "$size" -eq 0 ] || [ "$prefix" = "$was" ]; then
               continue
             fi
           fi

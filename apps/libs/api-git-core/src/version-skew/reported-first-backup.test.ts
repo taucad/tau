@@ -275,4 +275,10 @@ describe('E1: the reported first backup through receive-pack and the installed h
     expect(history.status, history.stderr).toBe(0);
     expect(git(remote, 'rev-list', '--count', 'refs/heads/main')).toBe('11');
   });
+
+  it('runs the installed hook: a push to a host-local ref is refused (positive control)', () => {
+    const refused = push('refs/heads/main:refs/tau/head');
+    expect(refused.status, refused.stderr).not.toBe(0);
+    expect(refused.stderr).toContain('Tau-Code: GIT_PUSH_REF_NOT_PUSHABLE 1');
+  });
 });

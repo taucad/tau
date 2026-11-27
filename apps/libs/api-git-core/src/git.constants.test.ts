@@ -532,6 +532,22 @@ describe('Tau Hosted Remote constants', () => {
           expect(refused.code, `${label}: ${refused.stderr}`).toBe(1);
           expect(refused.stderr).toContain(sentence);
         }
+
+        /* An old segment that cannot be read is a check that did not finish, retryable, never a rewrite. */
+        await git('reset', '--quiet', '--hard', appended);
+        const grown = await commit({
+          'device-a.jsonl': '{"n":1}\n{"n":2}\n{"n":4}\n',
+          'device-b.jsonl': '{"n":1}\n{"n":3}\n',
+          'device-c.jsonl': '{"n":1}\n',
+          'device-d.jsonl': '{"n":1}\n',
+        });
+        const lost = await git('rev-parse', `${appended}:events/device-a.jsonl`);
+        await rm(path.join(fixture, '.git', 'objects', lost.slice(0, 2), lost.slice(2)));
+        const unreadable = await push(appended, grown);
+        expect(unreadable.code, unreadable.stderr).toBe(1);
+        expect(unreadable.stderr).toContain(`${hookCodeLinePrefix}GIT_PUSH_CHECK_FAILED 1`);
+        expect(unreadable.stderr).not.toContain(sentence);
+        expect(unreadable.stderr, 'no transport text').not.toContain('fatal:');
       } finally {
         await rm(fixture, { recursive: true, force: true });
       }

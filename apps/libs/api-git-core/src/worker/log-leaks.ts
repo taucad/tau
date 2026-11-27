@@ -1,7 +1,9 @@
 /**
  * What a log sample must never hold (DC1; W9 review FR20): a storage grant or
  * receipt, by its signed-token shape or as the grant header's value, and a
- * presigned URL's `X-Amz-Signature`. `scripts/check-storage-log-sample.mts`
+ * presigned URL's `X-Amz-Signature`. On tau-api's `A push was refused` line
+ * (cloud backup admission D12), also any refusal detail: a hook sentence, a
+ * ref name, a commit id or an address; that line carries codes and counts only. `scripts/check-storage-log-sample.mts`
  * runs this over a captured staging sample; the worker's `JsonLineLogger` and
  * the API's pino redaction are what keep it empty.
  *
@@ -11,8 +13,13 @@
 /** One finding: where, and what kind. Never the value, so the report is itself safe to log. */
 export type LogLeak = {
   readonly line: number;
-  readonly kind: 'signed_token' | 'grant_header' | 'amz_signature' | 'amz_credential';
+  readonly kind: 'signed_token' | 'grant_header' | 'amz_signature' | 'amz_credential' | 'refusal_detail';
 };
+
+/** The hook-refusal line tau-api writes, and not the per-ref `A push was refused for some refs` line. */
+const refusalLine = /A push was refused(?! for)/u;
+/** A hook sentence, a ref name, a full commit id or an address. */
+const refusalDetail = /Tau: |refs\/|\b[\da-f]{40}\b|[\w.+-]+@[\w-]+(?:\.[\w-]+)+/iu;
 
 const checks: ReadonlyArray<readonly [LogLeak['kind'], RegExp]> = [
   /* `v.kid.payload.signature`: a contract version, a kid, and two base64url runs. */
@@ -29,8 +36,8 @@ const checks: ReadonlyArray<readonly [LogLeak['kind'], RegExp]> = [
  * @returns One entry per offending line and kind, in line order.
  */
 export const findLogLeaks = (sample: string): LogLeak[] =>
-  sample
-    .split('\n')
-    .flatMap((text, index) =>
-      checks.flatMap(([kind, pattern]) => (pattern.test(text) ? [{ line: index + 1, kind }] : [])),
-    );
+  sample.split('\n').flatMap((text, index): LogLeak[] => {
+    const detail: LogLeak[] =
+      refusalLine.test(text) && refusalDetail.test(text) ? [{ line: index + 1, kind: 'refusal_detail' }] : [];
+    return [...checks.flatMap(([kind, pattern]) => (pattern.test(text) ? [{ line: index + 1, kind }] : [])), ...detail];
+  });

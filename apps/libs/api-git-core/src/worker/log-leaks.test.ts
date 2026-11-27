@@ -82,4 +82,34 @@ describe('the storage log-sample check (DC1)', () => {
     expect(loggingRedactPaths).toContain(`req.headers["${grantHeader}"]`);
     expect(loggingRedactPaths).toContain('req.body.receipt');
   });
+
+  it('should find refusal detail on the hook-refusal line, and none in the fields tau-api logs', () => {
+    /* eslint-disable @typescript-eslint/naming-convention -- the log fields tau-api writes, by their names */
+    const clean = JSON.stringify({
+      level: 40,
+      projectId: 'proj_2KvFs3TQexvGq6xCY9GTC',
+      pusher: 'user_PusherAccountIdA12345',
+      codes: ['GIT_PUSH_FILE_TOO_LARGE'],
+      counts: { GIT_PUSH_FILE_TOO_LARGE: 1 },
+      terminal: true,
+      first_backup: 'true',
+      client_rules: 'none',
+      durationMs: 812,
+      client: 'git/2.43.0',
+      msg: 'A push was refused',
+    });
+    /* eslint-enable @typescript-eslint/naming-convention -- end of the log fields */
+    const leaky = [
+      clean.replace('"terminal"', '"sentence":"Tau: refused commit history on refs/heads/main","terminal"'),
+      clean.replace('"terminal"', `"tip":"${'a'.repeat(40)}","terminal"`),
+      clean.replace('"terminal"', '"author":"person@example.com","terminal"'),
+    ];
+    expect(
+      findLogLeaks([clean, ...leaky, '{"msg":"A push was refused for some refs","ref":"refs/heads/main"}'].join('\n')),
+    ).toEqual([
+      { line: 2, kind: 'refusal_detail' },
+      { line: 3, kind: 'refusal_detail' },
+      { line: 4, kind: 'refusal_detail' },
+    ]);
+  });
 });

@@ -63,6 +63,8 @@ import type { ImportStagingPort } from '#importer/staging.js';
 import type { HostImportSourcePort } from '#importer/sources.js';
 import type {
   ProjectAbsence,
+  ProjectDirectoryProbe,
+  ProjectDirectoryProbeRequest,
   ProjectDirectoryReading,
   ProjectDiscoveryResult,
   ProjectRouteVerification,
@@ -1325,6 +1327,18 @@ export class WorkspaceFileService {
    */
   public async verifyAbsent(projectId: string): Promise<ProjectAbsence> {
     return this._projectDirectories.verifyAbsent(projectId);
+  }
+
+  /**
+   * Read known locations of a project id from storage under its locks (fast-path FW3, `probe`): the caller's locators
+   * and the discovery index's, each answered `held`, `vacant` or `unknown`; and, with `root`, that root's child names
+   * listed afresh. The index only nominates.
+   *
+   * @param request - The id, its nominations and the location to leave out; the root whose names to list.
+   * @returns Each location's answer, and the root's names when they could be listed.
+   */
+  public async probeProjectDirectories(request: ProjectDirectoryProbeRequest): Promise<ProjectDirectoryProbe> {
+    return this._projectDirectories.probeProjectDirectories(request);
   }
 
   /**

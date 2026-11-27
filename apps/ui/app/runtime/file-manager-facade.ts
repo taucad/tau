@@ -353,6 +353,7 @@ export const createAuthorityClient = (getReadiedProxy: () => Promise<FileManager
     listProjectManifests: gated('listProjectManifests'),
     verifyProjectRoute: gated('verifyProjectRoute'),
     verifyAbsent: gated('verifyAbsent'),
+    probeProjectDirectories: gated('probeProjectDirectories'),
     commitPendingProjectDirectory: gated('commitPendingProjectDirectory'),
     permanentlyDeleteProjectDirectory: gated('permanentlyDeleteProjectDirectory'),
     adoptProjectDirectory: gated('adoptProjectDirectory'),

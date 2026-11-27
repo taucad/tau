@@ -14,6 +14,9 @@ import { Topic } from '@taucad/events';
 import type { Chat } from '@taucad/chat';
 import type {
   ProjectAbsence,
+  ProjectDirectoryProbe,
+  ProjectDirectoryProbeRequest,
+  ProjectProbeLocation,
   ProjectDiscoveryEntry,
   ProjectDiscoveryResult,
   ProjectLocator,
@@ -98,6 +101,13 @@ export type LibraryProfileCounts = Readonly<{
   sweeps: number;
   /** Targeted verifications: `verifyProjectRoute`, two file reads of one directory under its locks. */
   verifications: number;
+  /**
+   * Probed locations (FW3): one known location of an id read under its locks, two file reads, whether the library
+   * asked for it or the authority's delete read it under the project's lock.
+   */
+  probes: number;
+  /** Fresh listings of a root's child names (FW3): what allocating a new project's directory reads. */
+  listings: number;
   /** Root re-syncs (`syncProjectRoots`); not a discovery read, counted to show its share. */
   rootSyncs: number;
   /**
@@ -132,7 +142,7 @@ export type LibraryProfile = Readonly<{
   /** Remove a directory behind the library's back, as another program would: no event reaches the library. */
   removeDirectory: (root: 'home' | 'workspace', relativeDirectory: string) => void;
   /**
-   * Run `hook` as each route verification starts, before it reads the route: another tab or an ungated command acting
+   * Run `hook` as each route verification or probe starts, before it reads: another tab or an ungated command acting
    * between the library's own reads. `undefined` removes it.
    */
   onVerification: (hook: ((projectId: string) => void) | undefined) => void;
@@ -213,7 +223,16 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     states.set(projectId, { projectId, lastActivityAt: 1_600_000_000_000 + index });
   }
 
-  const noCounts = { scans: 0, directoryReads: 0, sweeps: 0, verifications: 0, rootSyncs: 0, recordReads: 0 };
+  const noCounts = {
+    scans: 0,
+    directoryReads: 0,
+    sweeps: 0,
+    verifications: 0,
+    probes: 0,
+    listings: 0,
+    rootSyncs: 0,
+    recordReads: 0,
+  };
   let counts = noCounts;
   const rootOf = (storage: Readonly<{ backend: string }>): 'home' | 'workspace' =>
     storage.backend === 'webaccess' ? 'workspace' : 'home';
@@ -320,24 +339,161 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     ) satisfies ProjectRouteVerification;
   };
 
+  /* Fast-path FW3: a probe reads one location now; the index only nominates. */
+  const rootOfLocator = (locator: Readonly<{ storageRootKey: string }>): 'home' | 'workspace' =>
+    locator.storageRootKey === homeKey ? 'home' : 'workspace';
+  const probeAt = (projectId: string, locator: ProjectLocator): ProjectProbeLocation => {
+    counts = { ...counts, probes: counts.probes + 1 };
+    const place = { root: rootOfLocator(locator), relativeDirectory: locator.relativeDirectory };
+    const directory = directories.find(
+      (candidate) => candidate.root === place.root && candidate.relativeDirectory === place.relativeDirectory,
+    );
+    const key = keyOf(place);
+    if (indexed?.has(key) === true && indexed.get(key)?.projectId !== directory?.projectId) {
+      /* A read that contradicts the index marks the directory (A2 i). */
+      marked.add(key);
+    }
+    return { locator, status: directory?.projectId === projectId ? 'held' : 'vacant' };
+  };
+  /* `K(P)`: the given locators and, with `known`, the index's directories carrying the id, `except` left out. */
+  const nominations = (
+    projectId: string,
+    {
+      locators,
+      known,
+      except,
+    }: Readonly<{
+      locators: readonly ProjectLocator[];
+      known: boolean;
+      except: Readonly<{ storageRootKey: string; relativeDirectory: string }> | undefined;
+    }>,
+  ): ProjectLocator[] => {
+    const seen = new Set<string>(except === undefined ? [] : [`${except.storageRootKey}\0${except.relativeDirectory}`]);
+    const indexedLocators = known
+      ? [...(indexed?.values() ?? [])]
+          .filter((directory) => directory.projectId === projectId)
+          .map((directory) => locatorOf(directory.root, directory.relativeDirectory))
+      : [];
+    return [...locators, ...indexedLocators].filter((locator) => {
+      const key = `${locator.storageRootKey}\0${locator.relativeDirectory}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  };
+  const probeProjectDirectories = async (request: ProjectDirectoryProbeRequest): Promise<ProjectDirectoryProbe> => {
+    if (request.projectId !== undefined) {
+      beforeVerification?.(request.projectId);
+    }
+    let names: string[] | undefined;
+    if (request.root !== undefined) {
+      counts = { ...counts, listings: counts.listings + 1 };
+      const root = rootOfLocator({ storageRootKey: request.root });
+      names = directories
+        .filter((directory) => directory.root === root)
+        .map((directory) => directory.relativeDirectory);
+    }
+    const { projectId } = request;
+    const locations =
+      projectId === undefined
+        ? []
+        : nominations(projectId, {
+            locators: request.locators ?? [],
+            known: request.known === true,
+            except: request.except,
+          })
+            .filter(
+              (locator) =>
+                !(request.exclude ?? []).some(
+                  (left) =>
+                    left.storageRootKey === locator.storageRootKey &&
+                    left.relativeDirectory === locator.relativeDirectory,
+                ),
+            )
+            .map((locator) => probeAt(projectId, locator));
+    return names === undefined ? { locations } : { locations, names };
+  };
+  /* What remains of the id once its directory went, read under the project's lock as the authority reads it. */
+  const remainingOf = async (
+    projectId: string,
+    others: readonly ProjectLocator[],
+  ): Promise<Readonly<{ remaining: ProjectLocator[]; absence?: 'absent' | 'unknown' }>> => {
+    const held = others.map((locator) => probeAt(projectId, locator)).filter((location) => location.status === 'held');
+    if (held.length > 0) {
+      return { remaining: held.map((location) => location.locator) };
+    }
+    const absence = await verifyAbsent(projectId);
+    return absence.status === 'present' ? { remaining: [...absence.locators] } : { remaining: [], absence: 'absent' };
+  };
+
   const permanentlyDeleteProjectDirectory = async ({
     projectId,
     providerBasePath,
     scope,
-  }: Readonly<{ projectId: string; providerBasePath: string; scope: Readonly<{ backend: string }> }>) => {
+    copy,
+    locations,
+    exclude,
+  }: Readonly<{
+    projectId: string;
+    providerBasePath: string;
+    scope: Readonly<{ backend: string }>;
+    copy?: boolean;
+    locations?: readonly ProjectLocator[];
+    exclude?: ReadonlyArray<Readonly<{ storageRootKey: string; relativeDirectory: string }>>;
+  }>) => {
+    const root = rootOf(scope);
+    const target = locatorOf(root, providerBasePath);
+    /* A directory under another pending delete proves nothing (FW3 review M2). */
+    const excluded = new Set((exclude ?? []).map((left) => `${left.storageRootKey}\0${left.relativeDirectory}`));
+    const others = nominations(projectId, { locators: locations ?? [], known: true, except: target }).filter(
+      (locator) => !excluded.has(`${locator.storageRootKey}\0${locator.relativeDirectory}`),
+    );
     const index = directories.findIndex(
       (directory) =>
-        directory.root === rootOf(scope) &&
+        directory.root === root &&
         directory.relativeDirectory === providerBasePath &&
         directory.projectId === projectId,
     );
     if (index === -1) {
-      return { status: 'absent' } as const;
+      return { status: 'absent', ...(await remainingOf(projectId, others)) } as const;
+    }
+    let proven: ProjectLocator[] | undefined;
+    if (copy === true) {
+      /* The waiver rests on a copy that holds the id now, under the project's lock. */
+      proven = others
+        .map((locator) => probeAt(projectId, locator))
+        .filter((location) => location.status === 'held')
+        .map((location) => location.locator);
+      /* A nominated copy in the target's own root counts once a fresh listing of that root names it (review M1); one in
+       * another root, or one the sweep found, needs no listing. */
+      if (proven.some((locator) => rootOfLocator(locator) === root)) {
+        counts = { ...counts, listings: counts.listings + 1 };
+      }
+      if (proven.length === 0) {
+        const absence = await verifyAbsent(projectId);
+        proven =
+          absence.status === 'present'
+            ? absence.locators
+                .filter((locator) => locator.relativeDirectory !== providerBasePath || rootOfLocator(locator) !== root)
+                .filter((locator) => !excluded.has(`${locator.storageRootKey}\0${locator.relativeDirectory}`))
+                .map((locator) => probeAt(projectId, locator))
+                .filter((location) => location.status === 'held')
+                .map((location) => location.locator)
+            : [];
+      }
+      if (proven.length === 0) {
+        return { status: 'copy-unproven', reason: excluded.size > 0 ? 'unknown' : 'absent' } as const;
+      }
     }
     const [removed] = directories.splice(index, 1);
     /* The delete installs what it verified: the directory is gone. */
     indexed?.delete(keyOf(removed!));
-    return { status: 'deleted' } as const;
+    return {
+      status: 'deleted',
+      ...(proven === undefined ? await remainingOf(projectId, others) : { remaining: proven }),
+    } as const;
   };
 
   const commitPendingProjectDirectory = async ({
@@ -404,6 +560,7 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
       listProjectManifests,
       verifyProjectRoute,
       verifyAbsent,
+      probeProjectDirectories,
       permanentlyDeleteProjectDirectory,
       commitPendingProjectDirectory,
       adoptProjectDirectory: async () => {
@@ -513,6 +670,10 @@ export const createLibraryProfile = (shape: LibraryProfileShape = operatorLibrar
     ) => {
       if (libraryOf(projectId).deletedAt === undefined && options?.copy !== true) {
         throw new Error('Permanent delete is available only for trashed projects');
+      }
+      /* One pending permanent delete per project, as the journal's transaction refuses a second. */
+      if (journal.some((operation) => operation.kind === 'permanent-delete' && operation.projectId === projectId)) {
+        throw new Error(`Permanent delete is already pending for ${projectId}`);
       }
       const operationId = nextOperationId();
       journal.push({

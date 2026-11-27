@@ -498,6 +498,13 @@
       "when": 1795079709962,
       "tag": "0071_project_share",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1795749877340,
+      "tag": "0072_desktop_oauth_provider",
+      "breakpoints": true
     }
   ]
 }

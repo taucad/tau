@@ -899,6 +899,14 @@
       "owner": "PERF-5"
     },
     {
+      "id": "D-UI-13",
+      "bound": "Chat projection frame clock: a live-only change is published from the next animation frame, or after 1 s while the document is hidden (16 ms where there are no frames)",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "const timer = setTimeout(callback, hidden ? hiddenLiveInterval : frameInterval)",
+      "class": "Presentation",
+      "owner": "chat performance WP-06"
+    },
+    {
       "id": "D19",
       "bound": "Host command retry delay (20 ms doubling to 250 ms within its 30 s deadline)",
       "site": "apps/ui/app/chat-clients/_internal/host-command.ts",

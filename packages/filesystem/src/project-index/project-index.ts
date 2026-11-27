@@ -197,6 +197,9 @@ type Node = {
   children?: Map<string, Node>;
 };
 
+/** What a stat row reads of an entry or a node: its size, mtime, facts and pending object. */
+type NodeFacts = Pick<Node, 'size' | 'mtimeMs' | 'facts' | 'factsAt' | 'pending'>;
+
 const defaultSearchMaxResults = 100;
 
 const segmentsOf = (path: string): string[] => path.split('/').filter(Boolean);
@@ -608,15 +611,30 @@ export class ProjectIndex {
     prefix: string,
     options?: { readonly admits?: IndexAdmits; readonly asObjects?: boolean },
   ): FileStatEntry[] {
-    const strip = prefix === '' ? 0 : prefix.length + 1;
-    const admits = options?.admits;
-    const relativeAdmits =
-      admits === undefined ? undefined : (path: string, kind: IndexEntryKind) => admits(path.slice(strip), kind);
     const rows: FileStatEntry[] = [];
-    for (const entry of this.walk(prefix, { admits: relativeAdmits, kinds: ['file'] })) {
-      const path = entry.path.slice(strip);
-      rows.push(this._fileRow(entry, path, options?.asObjects === true));
+    const start = this._resolve(segmentsOf(prefix));
+    if (start?.children === undefined) {
+      return rows;
     }
+    const admits = options?.admits;
+    const asObjects = options?.asObjects === true;
+    /* The warm row of EQ5 (6,265 files in 10 ms): one pass over the nodes, paths built relative to `prefix` and the
+     * name taken from the child's key, with no intermediate entry or generator step per file. */
+    const visit = (relative: string, node: Node): void => {
+      for (const [name, child] of node.children!) {
+        const path = relative === '' ? name : `${relative}/${name}`;
+        if (admits !== undefined && !admits(path, child.kind)) {
+          continue;
+        }
+        if (child.kind === 'file') {
+          rows.push(this._fileRow(child, { path, name }, asObjects));
+        }
+        if (child.children !== undefined) {
+          visit(path, child);
+        }
+      }
+    };
+    visit('', start);
     return rows;
   }
 
@@ -642,7 +660,7 @@ export class ProjectIndex {
         continue;
       }
       if (entry.kind === 'file') {
-        results.push(this._fileRow(entry, entry.path, options?.asObjects === true));
+        results.push(this._fileRow(entry, { path: entry.path, name }, options?.asObjects === true));
       } else if (options?.includeDirectories === true) {
         results.push({ path: entry.path, name, type: 'dir', size: 0, mtimeMs: entry.mtimeMs });
       }
@@ -1202,7 +1220,7 @@ export class ProjectIndex {
     return false;
   }
 
-  private _validFacts(entry: IndexEntry): ContentFacts | undefined {
+  private _validFacts(entry: NodeFacts): ContentFacts | undefined {
     const { facts, factsAt } = entry;
     if (facts === undefined || factsAt === undefined || factsAt.size !== entry.size) {
       return undefined;
@@ -1214,8 +1232,8 @@ export class ProjectIndex {
   }
 
   /* One file's stat row; a pending entry as its object when asked, whose facts are unknown until its bytes land (I7). */
-  private _fileRow(entry: IndexEntry, path: string, asObjects: boolean): FileStatEntry {
-    const row = { path, name: path.split('/').at(-1) ?? path, type: 'file', mtimeMs: entry.mtimeMs } as const;
+  private _fileRow(entry: NodeFacts, at: Readonly<{ path: string; name: string }>, asObjects: boolean): FileStatEntry {
+    const row = { path: at.path, name: at.name, type: 'file', mtimeMs: entry.mtimeMs } as const;
     return asObjects && entry.pending !== undefined
       ? { ...row, size: entry.pending.size, pending: true }
       : { ...row, size: entry.size, ...statFields(this._validFacts(entry)) };

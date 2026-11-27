@@ -34,6 +34,8 @@ import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
 import { toast } from '@taucad/ui/components/sonner';
+import { chatListShapeOf, readChatListShape, writeChatListShape } from '#components/nav/chat-list-shape.js';
+import type { ChatListRow } from '#components/nav/chat-list-shape.js';
 
 const chatsPerPage = 5;
 /** Joins chat ids into one effect key; ids never contain it. */
@@ -50,8 +52,11 @@ export const sortProjectChats = (chats: readonly ChatRecord[]): ChatRecord[] => 
 /** What a chat list needs of its project. */
 type ChatListProject = Pick<ProjectListItem, 'id' | 'slugs'>;
 
-/** Skeleton rows drawn while a project's chats are first listed. */
-const skeletonChatRowCount = 3;
+/** The loading frame of a project this device never listed: three chat rows. */
+const defaultChatListShape = 'ccc';
+const subscribeToNothing = (): (() => void) => () => undefined;
+/** The box each reserved row other than a chat takes: a day label, *Show more chats*, *No chats yet*. */
+const reservedRowClass: Readonly<Record<Exclude<ChatListRow, 'c'>, string>> = { l: 'h-6', m: 'h-6', e: 'h-7' };
 
 export function ProjectChatList({
   project,
@@ -140,6 +145,15 @@ export function ProjectChatList({
       groups.includes('Today') && groups.includes('Earlier') && group !== groups[index - 1] ? group : undefined,
     );
   }, [visibleChats]);
+  /* U6, H5: the loading frame reserves the rows this list last drew on this device. */
+  const isKnownEmpty = !isLoading && !isOpening && !isLoadingCloudChats && !error && chats.length === 0;
+  const rememberedShape = useRememberedChatListShape(project.id, {
+    isExpanded,
+    isSettled: !isAwaitingChats && error === undefined,
+    isKnownEmpty,
+    groupLabels,
+    hasMore: visibleCount < sortedChats.length,
+  });
   const activeChatId = isProjectActive ? projectChatIdFromSearch(location.search) : undefined;
   const listId = `project-chats-${project.id}`;
   const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
@@ -176,13 +190,7 @@ export function ProjectChatList({
       aria-busy={isAwaitingChats ? true : undefined}
       className='mt-0.5 mr-0 ml-3.5 translate-x-0 gap-0.5 border-l border-sidebar-border py-0 pr-0 pl-1.5'
     >
-      {isAwaitingChats
-        ? Array.from({ length: skeletonChatRowCount }, (_, index) => (
-            <SidebarMenuSubItem key={index} aria-hidden data-testid='project-chat-skeleton'>
-              <SidebarRowSkeleton />
-            </SidebarMenuSubItem>
-          ))
-        : null}
+      {isAwaitingChats ? <ReservedChatRows shape={rememberedShape ?? defaultChatListShape} /> : null}
       {error ? (
         <SidebarMenuSubItem>
           <SidebarFailureRow
@@ -193,7 +201,7 @@ export function ProjectChatList({
           />
         </SidebarMenuSubItem>
       ) : null}
-      {!isLoading && !isOpening && !isLoadingCloudChats && !error && chats.length === 0 ? (
+      {isKnownEmpty ? (
         <SidebarMenuSubItem>
           <div className='flex h-7 items-center pl-7.5 text-xs text-muted-foreground'>No chats yet</div>
         </SidebarMenuSubItem>
@@ -242,6 +250,59 @@ export function ProjectChatList({
         </SidebarMenuSubItem>
       ) : null}
     </SidebarMenuSub>
+  );
+}
+
+/**
+ * A list's state for its shape: whether it is expanded and its listing answered without an error, whether it is known
+ * empty, its day label before each visible chat, and whether more chats follow.
+ */
+type ChatListState = Readonly<{
+  isExpanded: boolean;
+  isSettled: boolean;
+  isKnownEmpty: boolean;
+  groupLabels: ReadonlyArray<string | undefined>;
+  hasMore: boolean;
+}>;
+
+/**
+ * U6, H5: the rows this project's list last drew on this device, which its loading frame reserves so nothing below it
+ * moves when the listing answers, and the remembering of what it draws once settled. The shape is read after
+ * hydration only: no chat list renders before the project listing.
+ *
+ * @param projectId - The project.
+ * @param list - The list's state.
+ * @returns The remembered shape, or undefined when this device never listed the project.
+ */
+const useRememberedChatListShape = (
+  projectId: string,
+  { isExpanded, isSettled, isKnownEmpty, groupLabels, hasMore }: ChatListState,
+): string | undefined => {
+  const remembered = useSyncExternalStore(
+    subscribeToNothing,
+    () => readChatListShape(projectId),
+    () => undefined,
+  );
+  const shape = isSettled ? chatListShapeOf({ isKnownEmpty, groupLabels, hasMore }) : undefined;
+  useEffect(() => {
+    if (isExpanded && shape !== undefined && shape !== '') {
+      writeChatListShape(projectId, shape);
+    }
+  }, [isExpanded, projectId, shape]);
+  return remembered;
+};
+
+/** The loading frame's rows, one per character of a remembered shape (`chat-list-shape.ts`). */
+function ReservedChatRows({ shape }: { readonly shape: string }): React.JSX.Element {
+  const rows = [...shape].map((row, index) => ({ row: row as ChatListRow, key: `${row}-${index}` }));
+  return (
+    <>
+      {rows.map(({ row, key }) => (
+        <SidebarMenuSubItem key={key} aria-hidden data-testid='project-chat-skeleton'>
+          {row === 'c' ? <SidebarRowSkeleton /> : <div className={reservedRowClass[row]} />}
+        </SidebarMenuSubItem>
+      ))}
+    </>
   );
 }
 

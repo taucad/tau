@@ -10,7 +10,14 @@ const corsMaxAge = 21_600; // 6 hours
  * CORS allowed headers. `sentry-trace` and `baggage` let a traced browser request continue its Sentry trace into
  * the error it causes here (SB17); the browser never sends `traceparent`, which would change OpenTelemetry sampling.
  */
-const corsAllowedHeaders = [...Object.values(httpHeader), 'x-tau-attempt-id', 'sentry-trace', 'baggage'];
+const corsAllowedHeaders = [
+  ...Object.values(httpHeader),
+  'x-tau-attempt-id',
+  'sentry-trace',
+  'baggage',
+  // A gateway request body sent gzip (chat performance WP-15 step 2).
+  'content-encoding',
+];
 
 /**
  * CORS allowed methods.
@@ -28,6 +35,8 @@ export const corsBaseConfiguration = {
   exposedHeaders: [
     'x-tau-chat-run-id',
     'x-tau-operation-id',
+    // The gateway inflates a gzip request body (chat performance WP-15 step 2).
+    'x-tau-accept-encoding',
     'set-auth-token',
     'retry-after',
     httpHeader.requestId,

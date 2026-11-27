@@ -1055,8 +1055,11 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
     setRenderFrame,
   ]);
 
+  /* The diagnostics panel is a workspace tool. A card or onboarding preview has no project, and at card size the panel
+   * covers the model it previews (#2295: a 39.5 px silhouette shift against the card's thumbnail). */
+  const isWorkspaceViewer = project !== undefined;
   useEffect(() => {
-    if (!isTauDebugEnabled) {
+    if (!isTauDebugEnabled || !isWorkspaceViewer) {
       return undefined;
     }
     const readBridge = (): SectionViewTestBridgeApi => {
@@ -1163,7 +1166,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       panel.remove();
       pendingCaptureRef.current = false;
     };
-  }, [get, isTauDebugEnabled]);
+  }, [get, isTauDebugEnabled, isWorkspaceViewer]);
 
   return undefined;
 }

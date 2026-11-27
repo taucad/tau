@@ -45,4 +45,16 @@ export type JointInputMaximum = {
   quantity: string;
 };
 
+/**
+ * The conversation prefix an operation's request carried, kept so the conversation's next step is held from the
+ * input tokens this one settled with (chat performance WP-15 step 6). Never part of the price.
+ */
+export type InputPrefix = {
+  version: 'input-prefix-v1';
+  /** `sha256:` hex digest of the request's non-conversation members chained over its conversation items. */
+  digest: string;
+  /** How many conversation items the digest covers. */
+  items: number;
+};
+
 export type BillingEnvironment = 'development' | 'staging' | 'prod-us' | 'prod-eu';

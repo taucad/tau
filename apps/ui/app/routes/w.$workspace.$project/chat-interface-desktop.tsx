@@ -4,6 +4,7 @@ import type { DockviewApi } from 'dockview-react';
 import { LayoutPriority } from 'allotment';
 import type { AllotmentHandle } from 'allotment';
 import { Allotment } from '#components/panes/allotment.js';
+import { DockviewStyles } from '#components/panes/dockview-styles.js';
 import { useSelector } from '@xstate/react';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
@@ -204,6 +205,11 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
 
   return (
     <ChatContextInsertionProvider>
+      {/* The docks' stylesheet, loaded with the layout: a sheet with a precedence holds its nearest boundary until it
+          loads. Each dock renders it too, inside its lane, where that boundary is the split view's per-pane one and its
+          fallback a spinner in place of the lane (Progressive Loading Policy rule 15). Here it holds this layout's
+          boundary instead, whose fallback draws nothing, so the frame's lanes stay until the docks can draw. */}
+      <DockviewStyles />
       <WorkspaceLanesContext.Provider value={lanes}>
         <div
           ref={containerRef}

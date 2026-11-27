@@ -135,7 +135,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
               "properties": {
                 "memory": {
                   "additionalProperties": {
-                    "maxLength": 25256,
+                    "maxLength": 33024,
                     "type": "string",
                   },
                   "propertyNames": {

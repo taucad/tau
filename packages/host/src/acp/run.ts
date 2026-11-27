@@ -32,6 +32,7 @@ import { isPersonsMessage, isResumableRunFailure, materializeAttachments, reduce
 import type {
   DocumentBlockBuilder,
   ExternalAgentPort,
+  ExternalAgentPrewarm,
   ExternalAgentTurn,
   JsonObject,
   JsonValue,
@@ -49,7 +50,7 @@ import { failureError } from '#acp/acp-session.machine.js';
 import type { AcpFailure, AcpTurnResult } from '#acp/acp-session.machine.js';
 import { provideAcpSession } from '#acp/acp-session-logic.js';
 import { acpSessionsMachine } from '#acp/acp-sessions.machine.js';
-import type { AcpAcquire } from '#acp/acp-sessions.machine.js';
+import type { AcpAcquire, AcpPrewarm } from '#acp/acp-sessions.machine.js';
 import { createAcpMediaStore } from '#acp/media.js';
 import type { AgentMediaTranscoder } from '#acp/media.js';
 import type { AcpLentSeams } from '#acp/acp-session-logic.js';
@@ -337,6 +338,11 @@ const contextBlock = (uri: string, mimeType: string, text: string): ContentBlock
  * first turn only. Current project facts still ride every turn so a session
  * resumed after another agent's edit cannot keep stale context (EQ8).
  *
+ * The project's own `AGENTS.md` is not among them: the agent runs in the
+ * project and reads that file from its working directory by its vendor's rule,
+ * so Tau does not re-send it. The client's `memory` record carries it for Tau's
+ * own agent only.
+ *
  * This content is transmitted to the vendor, exactly like the tree the agent
  * already reads.
  *
@@ -353,7 +359,6 @@ const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): 
     return [];
   }
   const skills = config.clientContext?.skills ?? [];
-  const memory = config.clientContext?.memory ?? {};
   return [
     ...(first ? [contextBlock('tau://agent-guidance', 'text/markdown', agentGuidance)] : []),
     ...(skills.length === 0
@@ -365,9 +370,6 @@ const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): 
             skills.map((skill) => `- ${skill.name}: ${skill.description}`).join('\n'),
           ),
         ]),
-    ...(Object.keys(memory).length === 0
-      ? []
-      : [contextBlock('tau://memory', 'application/json', JSON.stringify(memory))]),
     ...(config.snapshot === undefined
       ? []
       : [contextBlock('tau://snapshot', 'application/json', JSON.stringify(config.snapshot))]),
@@ -701,7 +703,7 @@ const limitField = (state: JsonObject | undefined): AcpLimitReset | undefined =>
 };
 
 /** The replaceable ACP session-state envelope already present in this chat. */
-const committedSessionMessageId = (turn: ExternalAgentTurn): string | undefined => {
+const committedSessionMessageId = (turn: Pick<ExternalAgentTurn, 'history' | 'agentId'>): string | undefined => {
   for (const message of reduceEventLog(turn.history).toReversed()) {
     if (
       message.role === 'assistant' &&
@@ -715,6 +717,31 @@ const committedSessionMessageId = (turn: ExternalAgentTurn): string | undefined 
   }
   return undefined;
 };
+
+/**
+ * The chat's vendor session as its record names it, for a turn or a prewarm that runs in `cwd`: the state this host
+ * owns, and the session to restore unless the record names another directory (r1 risk 7).
+ */
+const recordedSession = (
+  turn: Pick<ExternalAgentTurn, 'agent' | 'state'>,
+  cwd: string,
+): Readonly<{
+  hostId: string | undefined;
+  ownedState: JsonObject | undefined;
+  cwdMoved: boolean;
+  acpSessionId: string | undefined;
+}> => {
+  /* A vendor session and its permission selections belong to the admitted host. */
+  const hostId = typeof turn.agent['hostId'] === 'string' ? turn.agent['hostId'] : undefined;
+  const ownedState = hostId === undefined || turn.state?.['hostId'] === hostId ? turn.state : undefined;
+  const rememberedCwd = stringField(ownedState, 'cwd');
+  const cwdMoved = rememberedCwd !== undefined && rememberedCwd !== cwd;
+  return { hostId, ownedState, cwdMoved, acpSessionId: cwdMoved ? undefined : stringField(ownedState, 'acpSessionId') };
+};
+
+/* The parent's key for a chat's session with one agent on one host. */
+const sessionKeyOf = (hostId: string | undefined, agentId: string, chatId: string): string =>
+  hostId === undefined ? `${agentId}:${chatId}` : JSON.stringify([hostId, agentId, chatId]);
 
 /**
  * Build the external-agent port over a set of resolved ACP adapters.
@@ -733,7 +760,7 @@ const committedSessionMessageId = (turn: ExternalAgentTurn): string | undefined 
  * console.log(externalAgents.list?.());
  * ```
  */
-// oxlint-disable-next-line eslint/max-lines-per-function -- the facade turns three port calls into parent events and back; its helpers close over one parent.
+// oxlint-disable-next-line eslint/max-lines-per-function -- the facade turns four port calls into parent events and back; its helpers close over one parent.
 export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions): ExternalAgentPort => {
   const createId = options.createId ?? randomUUID;
   const now = options.now ?? Date.now;
@@ -824,6 +851,19 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
   });
   const sessionsLogic = acpSessionsMachine.provide({ actors: { acpSession: sessionLogic } });
 
+  /* WP-18: agents (by host and id) whose last session open said they are logged out. Prewarm never opens one: a
+   * prewarm is a process the person did not ask for, and only a turn may surface a sign-in. A turn that succeeds
+   * clears the mark. */
+  const signInNeeded = new Set<string>();
+  const warmAgents = new Map<string, string>();
+  const agentMark = (hostId: string | undefined, agentId: string): string => JSON.stringify([hostId ?? null, agentId]);
+  const noteOutcome = (mark: string, failure: AcpFailure | undefined): void => {
+    if (failure?.code === 'EXTERNAL_AGENT_AUTH_REQUIRED') {
+      signInNeeded.add(mark);
+    } else if (failure === undefined) {
+      signInNeeded.delete(mark);
+    }
+  };
   let parent: Actor<typeof acpSessionsMachine> | undefined;
   /* A stopped actor is never restarted (MC-R24): a failed parent is replaced on the next call. */
   const sessions = (): Actor<typeof acpSessionsMachine> => {
@@ -843,6 +883,13 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
     created.on('refused', (event) => {
       settlements.get(event.requestId)?.({ ok: false, failure: event.failure });
       closes.get(event.requestId)?.(event.failure);
+    });
+    created.on('warmClosed', (event) => {
+      const mark = warmAgents.get(event.key);
+      warmAgents.delete(event.key);
+      if (mark !== undefined && event.failure !== undefined) {
+        noteOutcome(mark, event.failure);
+      }
     });
     created.on('chatClosed', (event) => {
       closes.get(event.requestId)?.(undefined);
@@ -870,6 +917,50 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
         closes.delete(requestId);
       }
     },
+    prewarm: async (input: ExternalAgentPrewarm) => {
+      const adapter = options.agents.find((candidate) => candidate.id === input.agentId);
+      if (!adapter) {
+        return;
+      }
+      /* Where a direct turn runs: a placed or candidate turn runs elsewhere, so it closes this prewarm and opens its
+       * own session, as a turn with another tree always has (EA-R5). */
+      const cwd = options.workspaceRoot;
+      const { hostId, ownedState, cwdMoved, acpSessionId } = recordedSession(input, cwd);
+      const mark = agentMark(hostId, input.agentId);
+      if (signInNeeded.has(mark)) {
+        return;
+      }
+      /* A capability for the chat, bound to a run only when a turn is lent the session (EA-R6). */
+      const capability = options.mcp?.mint({ runId: `prewarm:${createId()}`, chatId: input.chatId });
+      const sessionMessageId = committedSessionMessageId(input);
+      const priorUsage = acpSessionId === undefined ? undefined : usageField(ownedState);
+      const limit = limitField(ownedState);
+      const prewarm: AcpPrewarm = {
+        key: sessionKeyOf(hostId, input.agentId, input.chatId),
+        chatId: input.chatId,
+        cwd,
+        at: now(),
+        ...(capability === undefined ? {} : { capabilityExpiresAt: Date.parse(capability.expiresAt) }),
+        opening: {
+          adapter,
+          ...(hostId === undefined ? {} : { hostId }),
+          cwd,
+          mcpServers: tauMcpServers(capability),
+          ...(acpSessionId === undefined ? {} : { acpSessionId }),
+          ...(priorUsage === undefined ? {} : { priorUsage }),
+          ...(limit === undefined ? {} : { limit }),
+          sessionMessageId: sessionMessageId ?? createId(),
+          sessionCommitted: sessionMessageId !== undefined,
+          cwdMoved,
+          /* The checkout word a direct turn's record carries, where this host has a revision tree. */
+          ...(options.checkouts === undefined ? {} : { mode: 'direct' }),
+          notices: true,
+          ...(capability === undefined ? {} : { capabilityToken: capability.token }),
+        },
+      };
+      warmAgents.set(prewarm.key, mark);
+      sessions().send({ type: 'prewarm', prewarm });
+    },
     run: async (turn: PlacedExternalAgentTurn) => {
       const adapter = options.agents.find((candidate) => candidate.id === turn.agentId);
       if (!adapter) {
@@ -877,14 +968,6 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
           code: 'EXTERNAL_AGENT_UNAVAILABLE',
         });
       }
-      /* A vendor session and its permission selections belong to the admitted host. */
-      const hostId = typeof turn.agent['hostId'] === 'string' ? turn.agent['hostId'] : undefined;
-      const ownedState = hostId === undefined || turn.state?.['hostId'] === hostId ? turn.state : undefined;
-      /* This turn's own selection first, then what the chat's record remembered.
-       * Neither: the adapter runs its own current model (V5 deleted the pin's
-       * hard-coded default, so Tau never names a model the user did not pick). */
-      const model =
-        (typeof turn.agent['model'] === 'string' ? turn.agent['model'] : undefined) ?? stringField(ownedState, 'model');
       /* V19: direct mode is the workspace root, candidate mode the checkout the
        * host materialized for *this* run. The mode is read off the host's own
        * record of the prepared turn, never off what the agent claims. */
@@ -895,9 +978,12 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       /* A record naming a directory this turn does not run in — a pre-V2 per-run
        * copy, or the previous turn's candidate checkout — names a vendor session
        * about files this one cannot see; it starts fresh instead (r1 risk 7). */
-      const rememberedCwd = stringField(ownedState, 'cwd');
-      const cwdMoved = rememberedCwd !== undefined && rememberedCwd !== cwd;
-      const acpSessionId = cwdMoved ? undefined : stringField(ownedState, 'acpSessionId');
+      const { hostId, ownedState, cwdMoved, acpSessionId } = recordedSession(turn, cwd);
+      /* This turn's own selection first, then what the chat's record remembered.
+       * Neither: the adapter runs its own current model (V5 deleted the pin's
+       * hard-coded default, so Tau never names a model the user did not pick). */
+      const model =
+        (typeof turn.agent['model'] === 'string' ? turn.agent['model'] : undefined) ?? stringField(ownedState, 'model');
       if (turn.message === undefined && acpSessionId === undefined) {
         throw Object.assign(new Error('The stopped agent session is unavailable. Try the turn again.'), {
           code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN',
@@ -929,8 +1015,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       const requestId = `${turn.runId}:${String(turn.attempt)}`;
       const acquire: AcpAcquire = {
         requestId,
-        key:
-          hostId === undefined ? `${turn.agentId}:${turn.chatId}` : JSON.stringify([hostId, turn.agentId, turn.chatId]),
+        key: sessionKeyOf(hostId, turn.agentId, turn.chatId),
         chatId: turn.chatId,
         cwd,
         at: now(),
@@ -993,6 +1078,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
           onAbort();
         }
         const result = await outcome;
+        noteOutcome(agentMark(hostId, turn.agentId), result.ok ? undefined : result.failure);
         if (!result.ok) {
           throw failureError(result.failure);
         }

@@ -216,10 +216,13 @@ describe('the conformance table', () => {
 });
 
 const conformance = (adapter: Adapter): void => {
-  /* One store per adapter, built once: each case reads the tags, refs and
-   * checkouts the cases before it left, so the suite runs in source order even
-   * under `--sequence.shuffle` (burn-in on tau#2909). */
-  describe.runIf(adapter.enabled)(`RevisionPort conformance — ${adapter.name}`, { shuffle: false }, () => {
+  /* Every row holds in any order (testing policy; burn-in runs this file
+   * shuffled). The store built in `beforeAll` holds two revisions and nothing a
+   * row asserts on as a whole: a row that reads store-wide state (the versions,
+   * HEAD) runs `onItsOwnStore`, and every other row writes only refs, tags and
+   * checkouts under names of its own and asserts on those, or relative to what it
+   * found (tau#2909 pinned this suite's order to hide the opposite). */
+  describe.runIf(adapter.enabled)(`RevisionPort conformance — ${adapter.name}`, () => {
     let harness: Harness;
     let port: RevisionPort;
     let base: RevisionId;
@@ -1615,8 +1618,7 @@ describe.runIf(gitToolchainOnPath)('native-git store isolation (review 4 R2)', (
  */
 describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture', () => {
   for (const adapter of adapters) {
-    /* One remote fixture per adapter, whose refs each case moves: source order, as above. */
-    describe.runIf(adapter.enabled)(adapter.name, { shuffle: false }, () => {
+    describe.runIf(adapter.enabled)(adapter.name, () => {
       let harness: Harness;
       let port: RevisionPort;
       let fixture: Awaited<ReturnType<typeof startGitHttpBackend>>;

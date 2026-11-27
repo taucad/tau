@@ -113,6 +113,7 @@ export const acpDrainTimeout = 10_000;
 
 /** The `AcpSessions.tla` action a transition refines (MC-R27). */
 export type AcpSessionsAction =
+  | 'Prewarm'
   | 'Acquire'
   | 'Opened'
   | 'Bound'
@@ -1344,7 +1345,7 @@ const machineDefinition = setup({
 
 const acpSessionMachineDefinition = machineDefinition.createMachine({
   id: 'acpSession',
-  version: '4',
+  version: '5',
   context: ({ input }: Readonly<{ input: AcpSessionInput }>) => ({
     key: input.key,
     parentRef: input.parentRef,
@@ -1471,6 +1472,21 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
     opening: {
       id: 'opening',
       on: {
+        /* WP-18: a prewarm, opened with no turn, adopts the turn that arrives while it opens; that turn prompts once
+         * the session is open. A child opened for a turn already holds one. */
+        lend: refines('Acquire', ({ context, event }: On<'lend'>, enq: Enqueue) => {
+          if (context.opening === undefined) {
+            return { context: { opening: event.lend } };
+          }
+          tell(context, enq, {
+            type: 'turnEnded',
+            key: context.key,
+            requestId: event.lend.requestId,
+            outcome: failed({ code: 'CHAT_RUN_LIVE', message: 'This chat already has a turn in its ACP session.' }),
+            resting: true,
+          });
+          return {};
+        }),
         cancel: refines('Cancel', ({ context }: On<'cancel'>, enq: Enqueue) => abandonOpen(context, enq, cancelled)),
         close: refines('Cancel', ({ context }: On<'close'>, enq: Enqueue) => abandonOpen(context, enq, cancelled)),
         adapterExited: refines('AdapterExited', ({ context, event }: On<'adapterExited'>, enq: Enqueue) =>

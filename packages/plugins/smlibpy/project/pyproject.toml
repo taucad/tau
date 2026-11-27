@@ -16,6 +16,7 @@ environments = [
   "sys_platform == 'darwin' and platform_machine == 'x86_64' and implementation_name == 'cpython'",
   "sys_platform == 'linux' and platform_machine == 'aarch64' and implementation_name == 'cpython'",
   "sys_platform == 'linux' and platform_machine == 'x86_64' and implementation_name == 'cpython'",
+  "sys_platform == 'win32' and platform_machine == 'AMD64' and implementation_name == 'cpython'",
 ]
 constraint-dependencies = [
   "numpy==2.5.2",

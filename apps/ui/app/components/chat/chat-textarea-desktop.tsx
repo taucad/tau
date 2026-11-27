@@ -13,6 +13,7 @@ import {
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import { queuedSendCancelledStatus } from '#components/hand-off/hand-off.js';
 import type { Editor, JSONContent } from '@tiptap/core';
 import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
@@ -147,7 +148,12 @@ type ChatTextareaDesktopProperties = {
   readonly addContextReferencesRef: React.RefObject<((references: ChatContextReference[]) => void) | undefined>;
 
   // Handlers (all must be stable references to prevent tooltip re-render loops)
-  readonly handleSubmit: (finalizedText?: string, references?: readonly CadReference[]) => Promise<void>;
+  readonly handleSubmit: (
+    finalizedText?: string,
+    references?: readonly CadReference[],
+    /** `signal` aborts a send not yet handed to the chat (a replayed queued send the person cancels). */
+    options?: Readonly<{ signal?: AbortSignal }>,
+  ) => Promise<void>;
   readonly handleCancelClick: () => void;
   readonly handleDragOver: (event: ChatDragEvent) => void;
   readonly handleDragLeave: () => void;
@@ -393,6 +399,8 @@ export const ChatTextareaDesktop = memo(function ({
   /* P4: Enter pressed in the native input before this existed is one send, made once the editor holds the adopted
    * text and sending is permitted (below). Any edit cancels it, as one in the native input would. */
   const queuedSubmitRef = useRef(earlyInput?.submitQueued === true);
+  /* The replay of that send while it is on its way to the chat; aborting it cancels the send. */
+  const replayingRef = useRef<AbortController | undefined>(undefined);
   /* A15d (C10, the operator's ruling of 2026-11-13T13:14Z, item 5): the queued send is visible until it is sent or
    * cancelled — Send shows it pending and its status says so — and Escape cancels it, as an edit does. */
   const [isQueuedSubmitShown, setIsQueuedSubmitShown] = useState(earlyInput?.submitQueued === true);
@@ -400,6 +408,8 @@ export const ChatTextareaDesktop = memo(function ({
     queuedSubmitRef.current = false;
     setIsQueuedSubmitShown(false);
   }, []);
+  /* Escape cancelled the queued send: its status says so once (an emptied status says nothing), until the next edit. */
+  const [isQueuedSendCancelled, setIsQueuedSendCancelled] = useState(false);
   /* A painted draft that changed under its queued Enter before the send could go (Home's record read after adoption
    * with another text or an attachment): the Enter was not for this draft, so it is cancelled, and says so. */
   const [isPaintedDraftReplaced, setIsPaintedDraftReplaced] = useState(false);
@@ -410,6 +420,7 @@ export const ChatTextareaDesktop = memo(function ({
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
       cancelQueuedSubmit();
+      setIsQueuedSendCancelled(false);
       unconfirmedTextsRef.current.push(content.text);
       setDraftText(content.text);
     },
@@ -446,8 +457,12 @@ export const ChatTextareaDesktop = memo(function ({
   const dictation = useDictation(insertTranscript, draftActorRef);
   /* The chips' structured references travel beside the text only when the draft has some. */
   const submitWithReferences = useCallback(
-    async (text: string | undefined, references: readonly CadReference[]): Promise<void> =>
-      references.length === 0 ? handleSubmit(text) : handleSubmit(text, references),
+    async (text: string | undefined, references: readonly CadReference[], signal?: AbortSignal): Promise<void> =>
+      signal === undefined
+        ? references.length === 0
+          ? handleSubmit(text)
+          : handleSubmit(text, references)
+        : handleSubmit(text, references.length === 0 ? undefined : references, { signal }),
     [handleSubmit],
   );
   const submitWithDictation = useCallback(async (): Promise<void> => {
@@ -774,11 +789,17 @@ export const ChatTextareaDesktop = memo(function ({
       return;
     }
     queuedSubmitRef.current = false;
-    /* Shown as queued until the send it replays has gone: Send's own pending state follows it. */
+    /* Shown as queued until the send it replays has gone: Send's own pending state follows it. Until the chat has
+     * taken it (an opening project can hold it for seconds), Escape still cancels it, through its signal. */
+    const replaying = new AbortController();
+    replayingRef.current = replaying;
     const replay = async (): Promise<void> => {
       try {
-        await submitWithReferences(content.text, cadReferencesOfChips(content.contextChips));
+        await submitWithReferences(content.text, cadReferencesOfChips(content.contextChips), replaying.signal);
       } finally {
+        if (replayingRef.current === replaying) {
+          replayingRef.current = undefined;
+        }
         setIsQueuedSubmitShown(false);
       }
     };
@@ -796,8 +817,15 @@ export const ChatTextareaDesktop = memo(function ({
 
   const cancelQueuedSubmitOnEscape = useCallback(
     (event: React.KeyboardEvent): void => {
-      if (event.key === 'Escape' && queuedSubmitRef.current) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      const replaying = replayingRef.current;
+      if (queuedSubmitRef.current || replaying !== undefined) {
+        replayingRef.current = undefined;
+        replaying?.abort();
         cancelQueuedSubmit();
+        setIsQueuedSendCancelled(true);
       }
     },
     [cancelQueuedSubmit],
@@ -981,7 +1009,11 @@ export const ChatTextareaDesktop = memo(function ({
             again, and Send's pending state shows it. Only a cancellation is new. */}
         {earlyInput?.submitQueued === true ? (
           <span role='status' className='sr-only'>
-            {isPaintedSendCancelled ? paintedSendCancelledStatus : ''}
+            {isPaintedSendCancelled
+              ? paintedSendCancelledStatus
+              : isQueuedSendCancelled
+                ? queuedSendCancelledStatus
+                : ''}
           </span>
         ) : null}
         <ChatTextareaBar

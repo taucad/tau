@@ -33,6 +33,8 @@ export type CadChatSubmitInput = {
   readonly references?: readonly CadReference[];
   /** The draft's comments and annotated pictures; images with pins or marks are flattened before sending. */
   readonly annotations?: MessageAnnotations;
+  /** Aborts the send until the chat has taken it: nothing is queued once it has aborted. */
+  readonly signal?: AbortSignal;
 };
 
 /**
@@ -221,7 +223,7 @@ export const useCadChatClient = (): CadChatClient => {
       const queueIntent = store.captureMessageQueueIntent(activeChatId);
       // A message without annotations takes no step, and no tick, before it is sent.
       const send = input.annotations === undefined ? plainSend(input) : await prepareSend(input);
-      if (send === undefined) {
+      if (send === undefined || input.signal?.aborted === true) {
         return;
       }
       const attachments = input.attachments === undefined ? undefined : send.attachments;
@@ -237,6 +239,7 @@ export const useCadChatClient = (): CadChatClient => {
           execution: agent.execution,
           queueIntent,
           ...(attachments === undefined ? {} : { attachments }),
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
         }),
       );
     },

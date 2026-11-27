@@ -16,6 +16,7 @@ import {
   removeWindowsUninstallerRemainder,
   readWindowsConsumerResponse,
   windowsQualificationInstallationPath,
+  setUpWindowsQualificationSandbox,
 } from './qualification-windows.mjs';
 import { createQualificationReinstallGuard, QualificationUnavailable } from './qualification-platform-types.mjs';
 import {
@@ -25,6 +26,46 @@ import {
 } from './qualification-evidence.mjs';
 /* oxlint-enable no-restricted-imports */
 const main = async (): Promise<void> => {
+  {
+    /* The hosted runner sets the sandbox up before Build123d (run 44709543167 timed out on its kernel option). */
+    const installationPath = String.raw`C:\Users\runner\AppData\Local\Programs\tau-q`;
+    const helper = win32.join(installationPath, 'resources', 'windows-sandbox', 'win32-x64', 'tau-windows-sandbox.exe');
+    const calls: Array<readonly [string, readonly string[], number]> = [];
+    const answers = (status: string) => (file: string, arguments_: readonly string[], timeoutMilliseconds: number) => {
+      calls.push([file, arguments_, timeoutMilliseconds]);
+      if (file.endsWith('whoami.exe')) {
+        return {
+          status: 0,
+          stdout: '"runner\\me","S-1-5-21-1-2-3-1001"\r\n',
+          stderr: '',
+        };
+      }
+      return arguments_[0] === 'setup'
+        ? { status: 0, stdout: '{}', stderr: '' }
+        : { status: 0, stdout: status, stderr: '' };
+    };
+    setUpWindowsQualificationSandbox(installationPath, {
+      systemRoot: String.raw`C:\Windows`,
+      run: answers('{"installed":true}'),
+    });
+    assert.deepEqual(calls, [
+      [String.raw`C:\Windows\System32\whoami.exe`, ['/user', '/fo', 'csv', '/nh'], 10_000],
+      [helper, ['setup', '--for-user', 'S-1-5-21-1-2-3-1001'], 600_000],
+      [helper, ['status', '--quick'], 10_000],
+    ]);
+    assert.throws(() => {
+      setUpWindowsQualificationSandbox(installationPath, {
+        systemRoot: 'C:/W',
+        run: answers('{"installed":false}'),
+      });
+    }, /does not read installed/u);
+    assert.throws(() => {
+      setUpWindowsQualificationSandbox(installationPath, {
+        systemRoot: 'C:/W',
+        run: () => ({ status: 1, stdout: '', stderr: 'Access is denied.' }),
+      });
+    }, /account lookup failed: 1 Access is denied/u);
+  }
   {
     /* Run 44537033055: the 52-character `tau-qualification-<uuid>` directory put sharp's addon at 278 characters, and
      * its kernel host failed with ERR_DLOPEN_FAILED on the runner alone. */

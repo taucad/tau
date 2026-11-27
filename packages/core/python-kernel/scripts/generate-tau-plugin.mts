@@ -43,6 +43,7 @@ import {
   targetKey,
 } from '@taucad/runtime/preparation/node';
 import type { DependencyFile, DependencyVariant, PluginDeployment } from '@taucad/runtime/preparation/node';
+import { nativeSandboxRefusal } from '@taucad/native-process-core';
 
 import { compactLock, normalizeName, parseRequirementsLock, renderPylock, variantFloor } from '#generator.js';
 import type { IndexFile, LockPin, SelectedWheel, TargetConfig } from '#generator.js';
@@ -52,9 +53,13 @@ import { pythonKernelModules } from '#python-kernel.js';
 import { coreRoot, readPythonKernelPackage, takePackageArgument } from './python-kernel-package.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The scripts' shared package reader; scripts have no `#` alias.
 import type { PythonKernelPackage } from './python-kernel-package.mjs';
+// oxlint-disable-next-line no-restricted-imports -- The scripts' shared Windows sandbox setup; scripts have no `#` alias.
+import { configureScriptWindowsSandbox } from './windows-sandbox.mjs';
 
 const dependencyName = 'engine';
-const sitePackages = 'python/lib/python3.13/site-packages';
+/** Where wheels unpack: python-build-standalone's `install_only` layout puts site-packages at `Lib` on Windows. */
+const sitePackagesOf = (target: TargetConfig): string =>
+  target.os === 'win32' ? 'python/Lib/site-packages' : 'python/lib/python3.13/site-packages';
 const workerDirectory = 'tau-worker';
 const downloadConcurrency = 6;
 const metadataConcurrency = 8;
@@ -297,7 +302,7 @@ const unpackedBytes = async (format: 'tar.gz' | 'wheel', bytes: Uint8Array<Array
 const nativeTarget = (target: TargetConfig, floor: string): DependencyVariant['target'] =>
   target.os === 'linux'
     ? { runtime: 'native', os: 'linux', arch: target.arch, libc: 'glibc', minimumLibcVersion: floor }
-    : { runtime: 'native', os: 'darwin', arch: target.arch, minimumOsVersion: floor };
+    : { runtime: 'native', os: target.os, arch: target.arch, minimumOsVersion: floor };
 
 /** The kernel's `python/interpreter.json`, else the core's, which every Python kernel shares (D3). */
 const readInterpreter = async (paths: Paths): Promise<InterpreterFile> => {
@@ -431,7 +436,7 @@ const generate = async (kernel: PythonKernelPackage, paths: Paths, seed: string)
         byteLength: file.size,
         format: 'wheel',
         origin: { kind: 'url', urls: [file.url] },
-        destination: sitePackages,
+        destination: sitePackagesOf(target),
         unpackedByteLength: unpackedOf(file.sha256),
       }),
     );
@@ -691,6 +696,7 @@ const runGolden = async ({ kernel, paths, seed }: Context, storeOption?: string)
   const deployment = await readManifest(kernel, paths);
   const variant = hostVariant(kernel, deployment);
   const store = storeOption ?? (await mkdtemp(join(tmpdir(), `tau-${kernel.adopter.worker.kernelId}-golden-`)));
+  configureScriptWindowsSandbox(store);
   try {
     const host = createPreparationHost({
       plugins: [
@@ -704,6 +710,7 @@ const runGolden = async ({ kernel, paths, seed }: Context, storeOption?: string)
       ],
       store,
       seed,
+      nativeContainment: nativeSandboxRefusal,
     });
     const outcome = await host.prepare({
       package: kernel.packageName,

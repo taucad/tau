@@ -131,6 +131,31 @@ describe('rooted change-set watches (D6)', () => {
 
   it('resets the root when its mount goes', async () => {
     const context = await createWorkspaceFileService();
+    const preview = {
+      class: 'authored',
+      backend: 'memory',
+      storageRootKey: 'memory:preview:sets',
+    } as const;
+    await context.service.mount('/previews/sets', preview);
+    const rooted = context.service.createRootedFileSystem('/previews/sets');
+    const handler = vi.fn();
+    const stop = rooted.watchChangeSets!({ paths: [''], recursive: true }, handler);
+    try {
+      context.service.unmount('/previews/sets');
+      const last = handler.mock.lastCall?.[0] as ChangeSet | undefined;
+      expect(last?.entries).toEqual([]);
+      expect(last?.reset?.prefix).toBe('');
+    } finally {
+      stop();
+      context.service.dispose();
+    }
+  });
+
+  /* Fast-path FW5: a rooted view reads through the one mount it captured, with no overlay of the mounts below it, so
+   * a mount added below its root changes nothing it can see and resets none of its watches (review m3); before FW5
+   * every topology change reset the whole root. */
+  it('resets nothing when a mount is added below the root', async () => {
+    const context = await createWorkspaceFileService();
     const rooted = context.service.createRootedFileSystem('/');
     const handler = vi.fn();
     const stop = rooted.watchChangeSets!({ paths: [''], recursive: true }, handler);
@@ -140,9 +165,8 @@ describe('rooted change-set watches (D6)', () => {
         backend: 'memory',
         storageRootKey: 'memory:preview:sets',
       });
-      const last = handler.mock.lastCall?.[0] as ChangeSet | undefined;
-      expect(last?.entries).toEqual([]);
-      expect(last?.reset?.prefix).toBe('');
+      expect(handler).not.toHaveBeenCalled();
+      await expect(rooted.exists('previews/sets')).resolves.toBe(false);
     } finally {
       stop();
       context.service.dispose();

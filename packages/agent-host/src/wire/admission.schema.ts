@@ -90,6 +90,9 @@ export const agentChannelRunKindSchema = z.strictObject({
   config: z.record(nonEmptyString, z.union([z.string(), z.boolean()])).optional(),
 });
 
+/** One external agent selector. @public */
+export type AgentChannelRunKind = z.infer<typeof agentChannelRunKindSchema>;
+
 /** Per-admission model, prompt, tool and client context, identical on both legs (drift items 2, 3). @public */
 export const agentChannelAdmissionConfigSchema = z.strictObject({
   agent: agentChannelRunKindSchema.optional(),

@@ -4,10 +4,10 @@ import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
 /*
- * The Python kernels' macOS golden targets run on ready pull request heads only (Wave 0M, AF-7).
- * The shared workflow seals the darwin targets on a pull request only for a caller that sets
- * `test-python`; on a draft its matrix keeps the two Linux targets and requests no macOS runner,
- * never a workflow-level filter. Each such caller re-runs on `ready_for_review`, so the darwin
+ * The Python kernels' macOS and Windows golden targets run on ready pull request heads only (Wave 0M, AF-7).
+ * The shared workflow seals the darwin and win32 targets on a pull request only for a caller that sets
+ * `test-python`; on a draft its matrix keeps the two Linux targets and requests no macOS or Windows runner,
+ * never a workflow-level filter. Each such caller re-runs on `ready_for_review`, so the darwin and win32
  * targets run once the draft is ready, and a newer push to the head branch cancels the outdated
  * pull request run; a dispatch, which records the golden receipts, is never cancelled by it.
  */
@@ -57,6 +57,7 @@ const darwin: readonly Target[] = [
   { target: 'darwin-arm64', runner: 'macos-26' },
   { target: 'darwin-x64', runner: 'macos-26-intel' },
 ];
+const win32: readonly Target[] = [{ target: 'win32-x64', runner: 'windows-2025' }];
 
 /** Every workflow that calls the shared Python kernel workflow, with the `test-python` it passes. */
 const callers = readdirSync(directory)
@@ -74,9 +75,12 @@ describe('the shared Python kernel golden targets', () => {
     expect(golden?.['runs-on']).toBe(expression('matrix.runner'));
   });
 
-  it('should seal the Linux targets only on a draft and all four once ready', () => {
+  it('should seal the Linux targets only on a draft and all five once ready', () => {
     const { golden } = workflow(shared).jobs;
-    expect(draftBranches(golden?.strategy?.matrix?.include)).toEqual({ draft: linux, ready: [...linux, ...darwin] });
+    expect(draftBranches(golden?.strategy?.matrix?.include)).toEqual({
+      draft: linux,
+      ready: [...linux, ...darwin, ...win32],
+    });
   });
 
   it('should keep the generator check on every pull request, draft or not', () => {
@@ -88,7 +92,7 @@ describe('the shared Python kernel golden targets', () => {
 
 describe('the Python kernel callers', () => {
   it('should be the kernels this row reviewed', () => {
-    // A new caller that tests Python on pull requests requests macOS runners: it must join the
+    // A new caller that tests Python on pull requests requests macOS and Windows runners: it must join the
     // ready-for-review and cancellation checks below.
     expect(callers).toEqual([
       { file: 'build123d-tau-plugin.yml', testPython: false },

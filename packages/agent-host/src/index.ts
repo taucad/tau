@@ -208,6 +208,7 @@ export type { AttachmentReader, DocumentBlockBuilder, MaterializedAttachments } 
 export type {
   ExternalAgentLogEvent,
   ExternalAgentPort,
+  ExternalAgentPrewarm,
   ExternalAgentTurn,
   ExternalRunKind,
   ExternalSessionState,

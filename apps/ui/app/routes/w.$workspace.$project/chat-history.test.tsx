@@ -201,6 +201,7 @@ vi.mock('#routes/w.$workspace.$project/fork-divider.js', () => ({
 
 vi.mock('#routes/w.$workspace.$project/chat-error.js', () => ({
   ChatError: () => <div data-testid='chat-error-adornment' />,
+  ChatErrorAnnouncement: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-title-bar.js', () => ({

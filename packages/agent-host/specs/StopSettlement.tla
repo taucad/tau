@@ -44,6 +44,9 @@
 (***************************************************************************)
 \* Cloud and account naming (2026-11-18): `session.ts` and `tau-agent-host.ts` reword the funding refusals'
 \* sentences ("Another account funded …"); copy only. No action or correspondence changes.
+\* WP-11 (2026-11-26): `prepareInvocation` reads the chat's incrementally folded ledger, the host's (`ledgerOf`),
+\* instead of folding the log from empty. The fold is a left fold, so both ledgers are equal (`replayLog_append`,
+\* ChatLedgerProofs.lean); the corpus test compares them at every prefix. No action or correspondence changes.
 EXTENDS Integers
 
 CONSTANTS Notice, Budget, Due, ImmediateCut, StartWaits, ResumeWaits, SettlesBy

@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { GitHubError } from '#ci-github-client.js';
+import { GitHubError, workflowTokenLogin as automationLogin } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
 import { serializeState } from '#ci-flake-ledger-state.js';
 import { fileStore } from '#ci-flake-ledger-store.js';
@@ -21,14 +21,7 @@ import {
   stubProber,
 } from '#fixtures/flake-regression/seeded-history.js';
 import type { StubOptions } from '#fixtures/flake-regression/seeded-history.js';
-import {
-  automationLogin,
-  findIssue,
-  issueLabels,
-  reportRows,
-  reproProber,
-  runInvocation,
-} from '#flake-regression-cli.js';
+import { findIssue, issueLabels, reportRows, reproProber, runInvocation } from '#flake-regression-cli.js';
 import type { InvocationOptions, ReproDeps } from '#flake-regression-cli.js';
 import { bisectMarker, identityMarker } from '#flake-regression.js';
 import type { ReproIdentity } from '#flake-regression.js';
@@ -229,12 +222,15 @@ describe('flake regression invocation', () => {
     }
   });
 
-  it('should count bisect markers only from the workflow account', async () => {
-    const forged = [{ body: bisectMarker(323, 'done', '2026-11-19T22:00:00.000Z'), login: 'someone-else' }];
-    const { result, requests } = await invoke({}, { existing: true, comments: forged });
-    expect(result.bisected?.result).toMatchObject({ outcome: 'culprit', culprit: commitSha(culpritCommit) });
-    expect(requests.length).toBeGreaterThan(0);
-  });
+  it.each(['someone-else', 'coderabbitai[bot]'])(
+    'should count bisect markers only from the workflow and flake bot accounts, not %s',
+    async (login) => {
+      const forged = [{ body: bisectMarker(323, 'done', '2026-11-19T22:00:00.000Z'), login }];
+      const { result, requests } = await invoke({}, { existing: true, comments: forged });
+      expect(result.bisected?.result).toMatchObject({ outcome: 'culprit', culprit: commitSha(culpritCommit) });
+      expect(requests.length).toBeGreaterThan(0);
+    },
+  );
 
   it('should flag an existing issue of the identity instead of opening one', async () => {
     const { result, calls } = await invoke({}, { existing: true });
@@ -269,8 +265,10 @@ describe('flake regression invocation', () => {
       const match = /\/issues\/(\d+)\/(comments|labels)/u.exec(path);
       if (method === 'GET' && match?.[2] === 'comments') {
         const marker = [...issueOf].find(([, number]) => number === Number(match[1]))?.[0] ?? '';
+        // The workflow token's marker and the flake bot's both count (taucad/tau#2878).
+        const login = Number(match[1]) % 2 === 0 ? automationLogin : 'tau-flake-bot[bot]';
         return done.has(marker)
-          ? [{ body: bisectMarker(323, 'done', '2026-11-19T00:00:00.000Z'), user: { login: automationLogin } }]
+          ? [{ body: bisectMarker(323, 'done', '2026-11-19T00:00:00.000Z'), user: { login } }]
           : [];
       }
       if (method === 'GET' && /\/actions\/runs\/\d+$/u.test(path)) {

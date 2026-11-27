@@ -2,8 +2,8 @@
 /**
  * HA0 regression harness (Brain research/host-attachment-reliability-blueprint.md, "Regression harness (HA0)"). Each
  * row is one numbered harness row, written against T4, where this device's own `events.jsonl` reaches the transcript
- * only through a live host's read answers. A row is kept only while it is red on T4, so each is an `it.fails` naming
- * the defect: HA1–HA4 turn it green, and the marker then has to go. Rows green on T4, and rows this tier cannot
+ * only through a live host's read answers. A row was kept only while it was red on T4; HA1 (own segment from the file,
+ * HA-I1, and the `attach` settler, HA-I5) turned rows 1, 2 and 8a green. Rows green on T4, and rows this tier cannot
  * build, are inventoried in Brain `artifacts/host-attachment-reliability/ha0-results.md`.
  */
 import { readFileSync } from 'node:fs';
@@ -186,13 +186,10 @@ const coldBound = { timeout: 2000 };
 // Rows red on T4
 // ===========================================================================
 
-/* No retry: Vitest retries an `it.fails` body that failed, as expected, before inverting it, so a retry would record
- * every red row as a flake. */
-describe('host attachment regression harness (HA0, red on T4)', { retry: 0 }, () => {
+describe('host attachment regression harness (HA0 rows, green since HA1)', () => {
   /* Row 1 (U2), unit tier: the worker died mid-run and the page reloaded. The turn is on this device's disk, yet T4
    * shows it only once a host answers a read. HA1 (HA-I1) reads the own segment from the file. */
-  // Expected-failure: @rifont until 2026-12-15
-  it.fails('row 1: shows the own log cold while the host is gone', async () => {
+  it('row 1: shows the own log cold while the host is gone', async () => {
     const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), deadHost('PEER_GONE'));
     try {
       await vi.waitFor(() => {
@@ -204,8 +201,7 @@ describe('host attachment regression harness (HA0, red on T4)', { retry: 0 }, ()
   });
 
   /* Row 2 (U3): a chunk 404 leaves the host's code unloaded. The transcript is still readable from disk. HA1. */
-  // Expected-failure: @rifont until 2026-12-15
-  it.fails('row 2: shows the own log cold when the host code does not load', async () => {
+  it('row 2: shows the own log cold when the host code does not load', async () => {
     const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), deadHost('WORKER_LOAD_FAILED'));
     try {
       await vi.waitFor(() => {
@@ -218,8 +214,7 @@ describe('host attachment regression harness (HA0, red on T4)', { retry: 0 }, ()
 
   /* Row 8a: a run killed mid-turn is reopened. Its own segment shows it unsettled, so the page must send `attach`
    * (HA-I5); T4 never sends `attach` for a chat and settles only through a host read. HA1. */
-  // Expected-failure: @rifont until 2026-12-15
-  it.fails('row 8a: sends attach for an unsettled own run when no host read answers', async () => {
+  it('row 8a: sends attach for an unsettled own run when no host read answers', async () => {
     const commands: HostCommand[] = [];
     const disk = createDisk({ [ownLog]: unsettledLog });
     const chat = open(
@@ -269,7 +264,7 @@ describe('host attachment harness stand-ins (HA0 controls)', () => {
   });
 
   it.each(['PEER_GONE', 'WORKER_LOAD_FAILED'] as const)(
-    'should leave the read lost with nothing shown when the host fails %s',
+    'should leave the live connection lost when the host fails %s',
     async (code) => {
       const connect = vi.fn(deadHost(code));
       const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), connect);
@@ -278,28 +273,25 @@ describe('host attachment harness stand-ins (HA0 controls)', () => {
           expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');
         }, coldBound);
         expect(connect).toHaveBeenCalled();
-        expect(chat.text()).not.toContain(recordedText);
       } finally {
         chat.close();
       }
     },
   );
 
-  it('should connect a silent host whose read never answers, and send it no command', async () => {
-    const subscribed = vi.fn();
+  it('should connect a silent host whose read never answers, and send no command for a settled log', async () => {
     const commands: HostCommand[] = [];
-    const disk = createDisk({ [ownLog]: unsettledLog });
-    const chat = open(
-      createStore(disk),
+    const connect = vi.fn(
       silentHost((command) => {
         commands.push(command);
-      }, subscribed),
+      }),
     );
+    const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), connect);
     try {
       await vi.waitFor(() => {
-        expect(subscribed).toHaveBeenCalled();
+        expect(chat.text()).toContain(recordedText);
       }, coldBound);
-      expect(chat.store.getAttachmentStatus(chatId)).not.toBe('attached');
+      expect(connect).toHaveBeenCalled();
       expect(commands).toEqual([]);
     } finally {
       chat.close();
@@ -338,7 +330,8 @@ describe('host attachment reporting (HA0)', () => {
     const report = vi.spyOn(chatReadReporter, 'report');
     const coldHidden = (): unknown[] =>
       report.mock.calls.filter(([code]) => code === 'chat.read.cold-hidden').map(([, observation]) => observation);
-    const chat = open(createStore(createDisk({ [ownLog]: recordedTurn })), deadHost('PEER_GONE'));
+    /* Nothing of the chat on this device's disk, so it keeps the host read, which the dead host loses. */
+    const chat = open(createStore(createDisk({})), deadHost('PEER_GONE'));
     try {
       await vi.waitFor(() => {
         expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');

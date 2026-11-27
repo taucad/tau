@@ -15,18 +15,24 @@ import {
   DesktopAuthBridge,
   desktopAuthAction,
 } from '#providers/auth-provider.js';
-import type { TauDesktopAuthBridge } from '#providers/auth-provider.js';
+import type { DesktopSignInStatus, TauDesktopAuthBridge } from '#providers/auth-provider.js';
 import { FinancialSessionProvider } from '@taucad/billing-ui/providers/financial-session-provider';
 
 const mocks = vi.hoisted(() => ({
   routerLink: vi.fn(),
+  toast: vi.fn(),
   resolvedAuth: vi.fn(() => 'indeterminate' as 'authed' | 'anonymous' | 'indeterminate'),
   purgeSavedUsage: vi.fn(async () => undefined),
 }));
 const { routerLink } = mocks;
 
-vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: mocks.resolvedAuth }));
-vi.mock('@taucad/billing-ui/db/billing-snapshot-database', () => ({ purgeSavedUsage: mocks.purgeSavedUsage }));
+vi.mock('sonner', () => ({ toast: mocks.toast }));
+vi.mock('#hooks/use-resolved-auth.js', () => ({
+  useResolvedAuth: mocks.resolvedAuth,
+}));
+vi.mock('@taucad/billing-ui/db/billing-snapshot-database', () => ({
+  purgeSavedUsage: mocks.purgeSavedUsage,
+}));
 
 vi.mock('react-router', () => ({
   Link: ({ to, children, ...rest }: { readonly to: string } & React.ComponentProps<'a'>) => {
@@ -44,12 +50,15 @@ vi.mock('#lib/auth-client.js', () => ({
   authClient: {},
 }));
 
-const createBridge = () => {
+const createBridge = (status: DesktopSignInStatus = {}) => {
   const listeners: Array<() => void> = [];
   const unsubscribe = vi.fn();
   const bridge: TauDesktopAuthBridge = {
     signIn: vi.fn().mockResolvedValue(undefined),
     signOut: vi.fn().mockResolvedValue(undefined),
+    cancelSignIn: vi.fn().mockResolvedValue(undefined),
+    clearNotice: vi.fn().mockResolvedValue(undefined),
+    status: vi.fn().mockResolvedValue(status),
     onAuthChanged: vi.fn((listener: () => void) => {
       listeners.push(listener);
       return unsubscribe;
@@ -77,7 +86,9 @@ describe('DesktopAuthBridge', () => {
   let invalidate: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
     invalidate = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined);
   });
 
@@ -126,6 +137,73 @@ describe('DesktopAuthBridge', () => {
     expect(() => renderBridge(queryClient)).not.toThrow();
   });
 
+  it('says once that the update signed the person out, offers Sign in, and clears the notice', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const { bridge } = createBridge({
+      notice: { kind: 'signed-out-by-update', email: 'person@example.test' },
+    });
+    globalThis.window.tauAuth = bridge;
+
+    renderBridge(queryClient);
+
+    await vi.waitFor(() => {
+      expect(bridge.clearNotice).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.toast).toHaveBeenCalledWith(
+      'Sign in again',
+      expect.objectContaining({
+        // oxlint-disable-next-line typescript/no-unsafe-assignment -- asymmetric matchers are typed `any`
+        description: expect.stringContaining('person@example.test'),
+        // oxlint-disable-next-line typescript/no-unsafe-assignment -- asymmetric matchers are typed `any`
+        action: expect.objectContaining({ label: 'Sign in' }),
+      }),
+    );
+  });
+
+  it('says once that the sign-in ended when main reports it after a refused refresh, and refreshes the session', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const { bridge, emit } = createBridge();
+    globalThis.window.tauAuth = bridge;
+    renderBridge(queryClient);
+    await vi.waitFor(() => {
+      expect(bridge.status).toHaveBeenCalledTimes(1);
+    });
+
+    vi.mocked(bridge.status).mockResolvedValue({ notice: { kind: 'sign-in-ended', email: 'person@example.test' } });
+    emit();
+
+    await vi.waitFor(() => {
+      expect(mocks.toast).toHaveBeenCalledWith('Your sign-in ended', expect.anything());
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['auth'] });
+    expect(bridge.clearNotice).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns once, with Renew, when the sign-in ends within a week', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const endsSoon = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+    const { bridge, emit } = createBridge({
+      email: 'person@example.test',
+      signInEndsAt: endsSoon,
+    });
+    globalThis.window.tauAuth = bridge;
+
+    renderBridge(queryClient);
+    await vi.waitFor(() => {
+      expect(mocks.toast).toHaveBeenCalledWith('Your sign-in ends soon', expect.anything());
+    });
+    emit();
+    await Promise.resolve();
+
+    expect(mocks.toast.mock.calls.filter(([title]) => title === 'Your sign-in ends soon')).toHaveLength(1);
+    const options = mocks.toast.mock.calls[0]?.[1] as {
+      action: { label: string; onClick: () => void };
+    };
+    expect(options.action.label).toBe('Renew');
+    options.action.onClick();
+    expect(bridge.signIn).toHaveBeenCalledWith('consent');
+  });
+
   it('tolerates a focused mount outside a QueryClientProvider', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     const { bridge, emit } = createBridge();
@@ -171,7 +249,9 @@ describe('AnonymousSessionPurge', () => {
 
     renderPurge(queryClient);
 
-    expect(queryClient.getQueryData(['billing', 'usage'])).toEqual({ snapshot: 'kept' });
+    expect(queryClient.getQueryData(['billing', 'usage'])).toEqual({
+      snapshot: 'kept',
+    });
     expect(mocks.purgeSavedUsage).not.toHaveBeenCalled();
   });
 });
@@ -217,6 +297,11 @@ describe('desktopAuthAction', () => {
 });
 
 describe('AuthConfigLink', () => {
+  beforeEach(() => {
+    // Shuffled runs must not see another row's router link.
+    routerLink.mockClear();
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
     delete globalThis.window.tauAuth;

@@ -36,28 +36,21 @@ export type ChatEditorProps = {
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly slashKeydownRef: React.RefObject<((event: KeyboardEvent) => boolean) | undefined>;
   /**
-   * When true, paints the contenteditable text with the shared
-   * `animate-shiny-text` shimmer gradient (bg-clip-text +
-   * text-transparent) so the user's just-submitted message visibly reads
-   * as "in flight" while the chat status is `'submitted'`. Caller is
-   * responsible for also disabling Tiptap editing via
-   * `editor.setEditable(false)` so the text can't be mutated mid-flight.
+   * When true, the contenteditable text breathes with the shared `animate-shiny-text` opacity pulse so the
+   * user's just-submitted message visibly reads as "in flight" while the chat status is `'submitted'`. Caller is
+   * responsible for also disabling Tiptap editing via `editor.setEditable(false)` so the text can't be mutated
+   * mid-flight.
    */
   readonly isLoading?: boolean;
 };
 
-// Shimmer treatment applied to the inner `.tiptap` contenteditable while
-// `isLoading` is true. Mirrors the gradient stack used by
-// `AnimatedShinyText` so the composer text reads as live and matches the
-// `Planning next moves...` indicator from `chat-message-planning.tsx`.
+// In-flight treatment applied to the inner `.tiptap` contenteditable while `isLoading` is true. It is the same
+// opacity pulse as `AnimatedShinyText`, so the composer text reads as live and matches the planning indicator; a
+// pulse runs on the compositor, where the earlier `background-clip: text` gradient repainted every frame.
 const tiptapShimmerOverrides = cn(
-  '[&_.tiptap]:bg-clip-text [&_.tiptap]:text-transparent',
-  '[&_.tiptap]:animate-shiny-text [&_.tiptap]:bg-repeat [&_.tiptap]:[background-size:170%_100%]',
-  // F12: the shimmer holds still under reduced motion.
+  '[&_.tiptap]:animate-shiny-text',
+  // F12: the pulse holds still under reduced motion.
   'motion-reduce:[&_.tiptap]:animate-none',
-  // F21: chips keep their own colour and glyphs through the clipped gradient.
-  '[&_.tiptap_[data-node-view-wrapper]]:text-foreground',
-  '[&_.tiptap]:bg-gradient-to-r [&_.tiptap]:from-foreground/30 [&_.tiptap]:via-foreground [&_.tiptap]:via-25% [&_.tiptap]:to-foreground/30 [&_.tiptap]:to-50%',
 );
 
 export const ChatEditor = memo(function ChatEditor({

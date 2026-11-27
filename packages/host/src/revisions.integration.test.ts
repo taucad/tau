@@ -1453,7 +1453,7 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         execFileSync('git', ['-C', workspaceRoot, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(),
       ).toBe(await realpath(workspaceRoot));
       /* With the two generated, versioned files beside it (S16, S35, D24). */
-      expect(await readFile(join(workspaceRoot, '.gitignore'), 'utf8')).toContain('/.tau/runs/');
+      expect(await readFile(join(workspaceRoot, '.gitignore'), 'utf8')).toContain('/.tau/*');
       expect(await readFile(join(workspaceRoot, '.gitattributes'), 'utf8')).toContain(
         '*.step filter=lfs diff=lfs merge=lfs -text',
       );

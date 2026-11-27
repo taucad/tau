@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment names are SCREAMING_SNAKE */
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -192,7 +192,7 @@ describe('createServicesBroker', () => {
     });
     expect(connectGeometry.mock.calls[0]?.[0]).toMatchObject({
       root: '/projects/widget',
-      context: { projectRoot: '/projects/widget' },
+      context: { projectRoot: resolve('/projects/widget') },
     });
     expect(utility.postMessage).toHaveBeenLastCalledWith({ type: 'geometry-port', requestId: 'allowed' }, [
       expect.objectContaining({ id: 'geometry' }),
@@ -267,7 +267,11 @@ describe('createServicesBroker', () => {
     const { broker, connectGeometry, revokeGeometry, spawns } = brokerHarness();
     broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'project-widget', computeMode: 'durable' });
     const checkout = '/home/.tau/checkouts/project-widget/trun-1';
-    spawns[0]!.message({ type: 'runtime-context-register', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    spawns[0]!.message({
+      type: 'runtime-context-register',
+      workspaceRoot: checkout,
+      projectRoot: resolve('/home/widget'),
+    });
     spawns[0]!.message({
       type: 'geometry-port-request',
       requestId: 'suite',
@@ -276,7 +280,11 @@ describe('createServicesBroker', () => {
     const grant = connectGeometry.mock.calls[0]?.[0];
     expect(grant?.stillAuthorized()).toBe(true);
     revokeGeometry.mockClear();
-    spawns[0]!.message({ type: 'runtime-context-release', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    spawns[0]!.message({
+      type: 'runtime-context-release',
+      workspaceRoot: checkout,
+      projectRoot: resolve('/home/widget'),
+    });
     expect(grant?.stillAuthorized()).toBe(false);
     expect(revokeGeometry).toHaveBeenCalledOnce();
   });
@@ -658,7 +666,7 @@ describe('createServicesBroker', () => {
     const { broker, spawns } = brokerHarness();
     broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' });
     broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a', computeMode: 'durable' });
-    expect(broker.computeProjectRoot('/home/a')).toBe('/home/a');
+    expect(broker.computeProjectRoot('/home/a')).toBe(resolve('/home/a'));
 
     // The utility never answers this release.
     await expect(
@@ -719,8 +727,8 @@ describe('createServicesBroker', () => {
       message: 'The desktop shell has not admitted /home/other as a runtime root.',
     });
     expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
-      projectRoot: '/home/widget',
-      computeProjectRoot: '/home/widget',
+      projectRoot: resolve('/home/widget'),
+      computeProjectRoot: resolve('/home/widget'),
       computeMode: 'durable',
       definition: 'default',
     });
@@ -732,8 +740,8 @@ describe('createServicesBroker', () => {
     spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: '/home/widget' });
 
     expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
-      projectRoot: '/home/widget',
-      computeProjectRoot: '/home/widget',
+      projectRoot: resolve('/home/widget'),
+      computeProjectRoot: resolve('/home/widget'),
       computeMode: 'durable',
       definition: 'default',
     });
@@ -776,39 +784,43 @@ describe('createServicesBroker', () => {
     }
 
     expect(connectRuntime).toHaveBeenNthCalledWith(1, {
-      projectRoot: '/home/.tau/checkouts/project-a/one',
-      computeProjectRoot: '/home/a',
+      projectRoot: resolve('/home/.tau/checkouts/project-a/one'),
+      computeProjectRoot: resolve('/home/a'),
       computeMode: 'durable',
       definition: 'default',
     });
     expect(connectRuntime).toHaveBeenNthCalledWith(2, {
-      projectRoot: '/home/.tau/checkouts/project-a/two',
-      computeProjectRoot: '/home/a',
+      projectRoot: resolve('/home/.tau/checkouts/project-a/two'),
+      computeProjectRoot: resolve('/home/a'),
       computeMode: 'durable',
       definition: 'default',
     });
     expect(connectRuntime).toHaveBeenNthCalledWith(3, {
-      projectRoot: '/home/.tau/checkouts/project-b/one',
-      computeProjectRoot: '/home/b',
+      projectRoot: resolve('/home/.tau/checkouts/project-b/one'),
+      computeProjectRoot: resolve('/home/b'),
       computeMode: 'durable',
       definition: 'default',
     });
-    expect(broker.computeProjectRoot('/home/.tau/checkouts/project-a/one/.')).toBe('/home/a');
-    expect(broker.computeProjectRoot('/home/.tau/checkouts/project-b/one')).toBe('/home/b');
+    expect(broker.computeProjectRoot('/home/.tau/checkouts/project-a/one/.')).toBe(resolve('/home/a'));
+    expect(broker.computeProjectRoot('/home/.tau/checkouts/project-b/one')).toBe(resolve('/home/b'));
   });
 
   it('mints a runtime port for a candidate turn checkout while it is registered, and not after', () => {
     const { broker, connectRuntime, spawns } = brokerHarness();
     broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'project-widget', computeMode: 'durable' });
     const checkout = '/home/.tau/checkouts/project-widget/trun-1';
-    spawns[0]?.message({ type: 'runtime-context-register', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    spawns[0]?.message({
+      type: 'runtime-context-register',
+      workspaceRoot: checkout,
+      projectRoot: resolve('/home/widget'),
+    });
     spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: checkout });
 
     /* Rooted at the checkout, not the project: a candidate turn's kernel and
      * GeoSpec tools must read the tree its file tools write. */
     expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
-      projectRoot: checkout,
-      computeProjectRoot: '/home/widget',
+      projectRoot: resolve(checkout),
+      computeProjectRoot: resolve('/home/widget'),
       computeMode: 'durable',
       definition: 'default',
     });
@@ -816,7 +828,11 @@ describe('createServicesBroker', () => {
       { id: 'runtime' },
     ]);
 
-    spawns[0]?.message({ type: 'runtime-context-release', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    spawns[0]?.message({
+      type: 'runtime-context-release',
+      workspaceRoot: checkout,
+      projectRoot: resolve('/home/widget'),
+    });
     spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-2', workspaceRoot: checkout });
 
     expect(connectRuntime).toHaveBeenCalledOnce();
@@ -832,11 +848,15 @@ describe('createServicesBroker', () => {
     broker.connect('agentHost', { workspaceRoot: '/home/widget' });
     /* A checkout outside the granted project, and one under a project nobody
      * granted: the utility is trusted code, but the grant is main's fence. */
-    spawns[0]?.message({ type: 'runtime-context-register', workspaceRoot: '/etc', projectRoot: '/home/widget' });
+    spawns[0]?.message({
+      type: 'runtime-context-register',
+      workspaceRoot: '/etc',
+      projectRoot: resolve('/home/widget'),
+    });
     spawns[0]?.message({
       type: 'runtime-context-register',
       workspaceRoot: '/home/other/.tau/checkouts/t',
-      projectRoot: '/home/other',
+      projectRoot: resolve('/home/other'),
     });
     spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: '/etc' });
     spawns[0]?.message({
@@ -849,13 +869,13 @@ describe('createServicesBroker', () => {
     spawns[0]?.message({
       type: 'runtime-context-release',
       workspaceRoot: '/home/widget',
-      projectRoot: '/home/widget',
+      projectRoot: resolve('/home/widget'),
     });
     spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-3', workspaceRoot: '/home/widget' });
 
     expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
-      projectRoot: '/home/widget',
-      computeProjectRoot: '/home/widget',
+      projectRoot: resolve('/home/widget'),
+      computeProjectRoot: resolve('/home/widget'),
       computeMode: 'off',
       definition: 'default',
     });
@@ -865,7 +885,11 @@ describe('createServicesBroker', () => {
     const { broker, connectRuntime, spawns } = brokerHarness();
     broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'project-widget' });
     const checkout = '/home/.tau/checkouts/project-widget/trun-1';
-    spawns[0]?.message({ type: 'runtime-context-register', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    spawns[0]?.message({
+      type: 'runtime-context-register',
+      workspaceRoot: checkout,
+      projectRoot: resolve('/home/widget'),
+    });
     /* Only the utility that registered a checkout ever releases it, so one that
      * dies mid-turn would otherwise leave the root admissible for the life of
      * the app — over a tree the turn's release already deleted. */
@@ -882,8 +906,8 @@ describe('createServicesBroker', () => {
       message: `The desktop shell has not admitted ${checkout} as a runtime root.`,
     });
     expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
-      projectRoot: '/home/widget',
-      computeProjectRoot: '/home/widget',
+      projectRoot: resolve('/home/widget'),
+      computeProjectRoot: resolve('/home/widget'),
       computeMode: 'off',
       definition: 'default',
     });

@@ -63,6 +63,22 @@ describe('tlcCommand', () => {
       ]),
     );
   });
+
+  it('should raise the heap only when a configuration asks for it', () => {
+    const { args } = tlcCommand({
+      tools: {
+        java: { bin: 'java', major: 25 },
+        tlc: { jar: '/cache/tla2tools.jar', community: '/cache/CommunityModules-deps.jar' },
+      },
+      module: '/specs/GatewayInvocation.tla',
+      config: 'GatewayInvocation.target-three-attempts.cfg',
+      metadir: '/cache/tlc/run',
+      heapGigabytes: 4,
+    });
+
+    expect(args).toContain('-Xmx4g');
+    expect(args).not.toContain('-Xmx1g');
+  });
 });
 
 describe('compressTrace', () => {

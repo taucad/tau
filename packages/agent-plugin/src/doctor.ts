@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { probeServer } from '#doctor-probe.js';
-import { nodeFailure, npmPreflight, versionOf } from '#preflight.js';
+import { nodeFailure, npmPreflight, startable, versionOf } from '#preflight.js';
 import type { PreflightFailure } from '#preflight.js';
 import { resolveTauCli } from '#resolve-tau-cli.js';
 import type { TauCliCommand } from '#resolve-tau-cli.js';
@@ -61,11 +61,15 @@ const run = (
   args: readonly string[],
   killTimeout: number,
 ): { readonly ok: boolean; readonly stdout: string; readonly stderr: string } => {
-  /* Windows starts the hosts' and npm's `.cmd` shims only through a shell. */
-  const result = spawnSync(command, args, {
+  /* Windows finds the hosts and npm on `PATH` and starts their `.cmd` shims through `cmd.exe`. */
+  const start = startable(command, args);
+  if (start === undefined) {
+    return { ok: false, stdout: '', stderr: `${command} was not found on PATH` };
+  }
+  const result = spawnSync(start.file, start.args, {
     encoding: 'utf8',
     timeout: killTimeout,
-    shell: windows,
+    windowsVerbatimArguments: start.windowsVerbatimArguments,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   /* A command that could not start (not on `PATH`) has no output at all, whatever the types say. */

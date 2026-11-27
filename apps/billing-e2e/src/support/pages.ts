@@ -401,6 +401,8 @@ export type ChatCards = {
 /** The card titles a refused or paused turn shows (`chat-error*.tsx`). */
 const cardTitles = [
   'You’re out of credits',
+  'Add credits to send this',
+  'Credits added',
   'Tau paused this turn',
   'The model refused this request',
   'Tau could not send this request',
@@ -457,7 +459,7 @@ export const chatCards = (page: Page): ChatCards => {
 /** `/usage`: the account's metered usage, its summary and its rows. */
 export type UsagePage = {
   readonly open: () => Promise<void>;
-  /** The activity table's row whose text matches `pattern`; the "Reserved right now" holds table is not searched. */
+  /** The activity table's row whose text matches `pattern`. */
   readonly row: (pattern: RegExp) => Locator;
 };
 

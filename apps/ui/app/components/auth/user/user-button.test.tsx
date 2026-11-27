@@ -53,6 +53,39 @@ describe('UserButton', () => {
     expect(screen.queryByText('Sign in')).not.toBeInTheDocument();
   });
 
+  /* DSI-4 (blueprint A7): the desktop changes account from its Account menu; the browser chooses it. */
+  it('offers "Use a different account" in the desktop window, starting a sign-in on the account chooser', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const signIn = vi.fn(async (): Promise<'signed-in'> => 'signed-in');
+    globalThis.window.tauAuth = {
+      signIn,
+      signOut: vi.fn(async () => undefined),
+      cancelSignIn: vi.fn(async () => undefined),
+      clearNotice: vi.fn(async () => undefined),
+      status: vi.fn(async () => ({})),
+      onAuthChanged: () => () => undefined,
+    };
+    writeIdentityRecord({ id: 'user-1', name: 'Ada Lovelace', email: 'ada@example.test' });
+    render(<UserButton size='default' />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Ada Lovelace/u }));
+    await userEvent.click(await screen.findByText('Use a different account'));
+
+    expect(signIn).toHaveBeenCalledWith('different-account');
+    vi.unstubAllEnvs();
+    delete globalThis.window.tauAuth;
+  });
+
+  it('never offers "Use a different account" on the web', async () => {
+    writeIdentityRecord({ id: 'user-1', name: 'Ada Lovelace', email: 'ada@example.test' });
+    render(<UserButton size='default' />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Ada Lovelace/u }));
+
+    expect(await screen.findByText('Sign out')).toBeInTheDocument();
+    expect(screen.queryByText('Use a different account')).not.toBeInTheDocument();
+  });
+
   it('should keep the trigger named while the session loads', () => {
     render(<UserButton size='sm' />);
 

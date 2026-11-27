@@ -156,7 +156,9 @@
     },
     "ChatRunSlot.pipelined-nobarrier-NeverResendKnownAttempt.cfg": {
       "tier": "pr",
-      "expect": { "violated": "NeverResendKnownAttempt" },
+      "expect": {
+        "violated": "NeverResendKnownAttempt"
+      },
       "kind": "witness",
       "ref": "WP-10 step B (F-3): without the dispatch barrier a request leaves, a crash drops its prepared row, and the retry cannot know the attempt"
     },
@@ -666,14 +668,18 @@
     },
     "SeamCatchUp.today-CapturedHealth.cfg": {
       "tier": "pr",
-      "expect": { "violated": "SourceHealthTruth" },
+      "expect": {
+        "violated": "SourceHealthTruth"
+      },
       "kind": "defect",
       "ref": "Captured kept rows omit malformed-line health; atomic validated publication must retain captured host history integrity.",
       "fixedBy": "D20 compact projection source health"
     },
     "SeamCatchUp.today-ReadHealth.cfg": {
       "tier": "pr",
-      "expect": { "violated": "SourceHealthTruth" },
+      "expect": {
+        "violated": "SourceHealthTruth"
+      },
       "kind": "defect",
       "ref": "Appended malformed bytes preserve kept cursor but change host health; a matching health echo is required before parking.",
       "fixedBy": "D20 source health echo on ordinary reads"
@@ -743,27 +749,35 @@
     },
     "StopSettlement.before-851-StopNeverPauses.cfg": {
       "tier": "pr",
-      "expect": { "violated": "StopNeverPauses" },
+      "expect": {
+        "violated": "StopNeverPauses"
+      },
       "kind": "defect",
       "ref": "Send now cuts the live attempt and the successor's first lookup ends it RUN_ABANDONED (Chat paused)",
       "fixedBy": "taucad/tau#851"
     },
     "StopSettlement.cut-only-StopNeverPauses.cfg": {
       "tier": "pr",
-      "expect": { "violated": "StopNeverPauses" },
+      "expect": {
+        "violated": "StopNeverPauses"
+      },
       "kind": "witness",
       "ref": "StartWaits: Send now's lookup can beat the API noticing the cut"
     },
     "StopSettlement.no-settles-by-NoWaitEndBeforeSettlesBy.cfg": {
       "tier": "pr",
-      "expect": { "violated": "NoWaitEndBeforeSettlesBy" },
+      "expect": {
+        "violated": "NoWaitEndBeforeSettlesBy"
+      },
       "kind": "defect",
       "ref": "A lost reply's live retry ends RUN_ABANDONED{MODEL_ATTEMPT_PENDING} after the host's short waits while the gateway's settlesBy is minutes away",
       "fixedBy": "W2 (settlesBy)"
     },
     "StopSettlement.resume-no-wait-StopNeverRefuses.cfg": {
       "tier": "pr",
-      "expect": { "violated": "StopNeverRefuses" },
+      "expect": {
+        "violated": "StopNeverRefuses"
+      },
       "kind": "defect",
       "ref": "Resume right after Stop is refused MODEL_ATTEMPT_PENDING: resolveInvocations never waited",
       "fixedBy": "R1 (StopSettlement)"
@@ -775,7 +789,9 @@
     },
     "StopSettlement.wait-only-StopNeverPauses.cfg": {
       "tier": "pr",
-      "expect": { "violated": "StopNeverPauses" },
+      "expect": {
+        "violated": "StopNeverPauses"
+      },
       "kind": "witness",
       "ref": "ImmediateCut: the host's short waits alone (no settlesBy) cannot outlast the recovery sweep"
     },
@@ -1407,6 +1423,49 @@
         },
         "kind": "witness",
         "ref": "W3 CL-S9 PrepareOnlyWhenResolved (gateCode, EQ1, RV1-F3): the compaction prepare is exempt and history.compacted closes it, but the generation it interrupted is still unresolved, so the next generation prepare is refused"
+      },
+      "ChatLog/compact/compact-rows.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "WP-17: a context written once and named by digest, and a metadata-only rewrite (replacement.contentKept), resolve in the same file"
+      },
+      "ChatLog/compact/context-unresolved.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 3,
+            "rules": ["ContextResolves"]
+          }
+        },
+        "kind": "witness",
+        "ref": "ContextResolves: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/compact/content-kept-unresolved.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["ContentKeptResolves"]
+          }
+        },
+        "kind": "witness",
+        "ref": "ContentKeptResolves: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/compact/prompt-unresolved.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 3,
+            "rules": ["PromptResolves"]
+          }
+        },
+        "kind": "witness",
+        "ref": "PromptResolves: one seeded log per rule (FM-A6)"
+      },
+      "ChatLog/compact/compact-in-project-ping-pong-turn.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "WP-17: the recorded in-project-ping-pong-turn log as the writer encodes it (compactLogRow); compact-rows.test.ts restores it to the recorded rows; kept out of seeded/ so the UI parity corpus reads only logical rows"
       }
     },
     "SeamDeliveryTrace": {

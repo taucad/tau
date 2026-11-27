@@ -14,6 +14,7 @@ import type {
   OpenAIResponsesOptions,
 } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
+import { recordHostTiming } from '#timing.js';
 import { isClearedToolResult, isCompactionSummaryRow } from '#harness/compaction.js';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
 import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
@@ -806,6 +807,32 @@ const anthropicSystemBlocks = (options: {
   });
 };
 
+/**
+ * Anthropic can preserve SP-8's three cache breakpoints. OpenAI has no per-system-block cache-control wire shape and
+ * uses pi's blanket retention.
+ *
+ * @param payload - The request body pi built, before it is stringified.
+ * @param blocks - The request's system prompt blocks.
+ * @param cacheRetention - The request's one cache lifetime.
+ * @returns The body with its system blocks, or `undefined` when an all-empty block set leaves pi's own string prompt
+ * in place rather than posting `system: []`.
+ */
+const withAnthropicSystem = (
+  payload: unknown,
+  blocks: readonly ModelSystemPromptBlock[],
+  cacheRetention: GatewayCacheRetention,
+): Record<string, unknown> | undefined => {
+  if (!zodUtility.isObject(payload)) {
+    throw new TypeError('pi-ai produced a non-object Anthropic request body.');
+  }
+  const system = anthropicSystemBlocks({
+    blocks,
+    cacheRetention,
+    breakpointBudget: anthropicMaxCacheBreakpoints - cacheBreakpointCount([payload['tools'], payload['messages']]),
+  });
+  return system.length > 0 ? { ...payload, system } : undefined;
+};
+
 /* A label is sent only as printable ASCII within the gateway's bound; anything else would throw in `Headers#set`. */
 const headerLabel = /^[!-~]{1,128}$/u;
 
@@ -876,9 +903,6 @@ const authenticatedFetch =
     readonly host?: (GatewayHostLabels & { readonly model: string }) | undefined;
     readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
     readonly onInvocationBound?: ModelStreamRequest['onInvocationBound'];
-    readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
-    /** The request's one cache lifetime, from {@link cacheRetentionFor}. */
-    readonly cacheRetention: GatewayCacheRetention;
   }): typeof globalThis.fetch =>
   async (input, init) => {
     try {
@@ -932,31 +956,16 @@ const authenticatedFetch =
           }
         }
       }
-      let body = init?.body;
-      // Anthropic can preserve SP-8's three cache breakpoints. OpenAI has no
-      // per-system-block cache-control wire shape and uses pi's blanket retention.
-      if (options.providerKind === 'anthropic' && typeof body === 'string' && options.systemPromptBlocks) {
-        const payload: unknown = JSON.parse(body);
-        if (!zodUtility.isObject(payload)) {
-          throw new TypeError('pi-ai produced a non-object Anthropic request body.');
-        }
-        const system = anthropicSystemBlocks({
-          blocks: options.systemPromptBlocks,
-          cacheRetention: options.cacheRetention,
-          breakpointBudget:
-            anthropicMaxCacheBreakpoints - cacheBreakpointCount([payload['tools'], payload['messages']]),
-        });
-        // An all-empty block set leaves pi's own string prompt in place rather
-        // than posting `system: []`.
-        if (system.length > 0) {
-          body = JSON.stringify({ ...payload, system });
-        }
-      }
+      const body = init?.body;
       const origin = originOf(input);
       const gzipped = await gzipBodyFor(origin, body);
       if (gzipped !== undefined) {
         headers.set('content-encoding', 'gzip');
       }
+      recordHostTiming('model-request-sent', undefined, {
+        bytes: typeof body === 'string' ? body.length : 0,
+        ...(gzipped === undefined ? {} : { wireBytes: gzipped.byteLength }),
+      });
       const response = await options.fetch(withoutBetaMarker(input), {
         ...init,
         body: gzipped ?? body,
@@ -1514,10 +1523,15 @@ const providerTransport = (options: GatewayModelTransportOptions): ModelTranspor
       try {
         const echoed = echo?.(payload);
         const documented = rewrite(echoed ?? payload) ?? echoed;
-        const rewritten =
+        const bound =
           replayBinding !== undefined && zodUtility.isObject(documented ?? payload)
             ? withReplayBinding((documented ?? payload) as Record<string, unknown>, replayBinding)
             : documented;
+        /* Last, on the payload pi then stringifies once (WP-11 item 3): no parse and second stringify of the body. */
+        const rewritten =
+          request.providerKind === 'anthropic' && request.systemPromptBlocks
+            ? (withAnthropicSystem(bound ?? payload, request.systemPromptBlocks, cacheRetention) ?? bound)
+            : bound;
         if (promptCacheKey === undefined) {
           return rewritten;
         }
@@ -1566,8 +1580,6 @@ const providerTransport = (options: GatewayModelTransportOptions): ModelTranspor
       ...(options.fundedOperations && request.onInvocationBound
         ? { onInvocationBound: request.onInvocationBound }
         : {}),
-      systemPromptBlocks: request.systemPromptBlocks,
-      cacheRetention,
     });
     // Asked once per invocation, before anything is built or fetched. A seam
     // that fails answers nothing and the request proceeds untelemetered.

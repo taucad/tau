@@ -4815,6 +4815,37 @@ describe('reservation release and chat exclusivity (W0.5–W0.7)', () => {
     );
   }
 
+  // WP-11 item 4 (HP-04): the admission asks the client for its context, and the turn's first driver reuses it.
+  it('should ask the client for its context once in a turn', async () => {
+    const file = createMemoryLogFile();
+    let asked = 0;
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: okTransport,
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'context-once',
+      }),
+      clientContext: async () => {
+        asked++;
+        return {};
+      },
+    });
+
+    await host.admit({
+      chatId: 'chat-context-once',
+      runId: 'run-1',
+      trigger: 'submit',
+      message: { id: 'turn-1', role: 'user', content: 'First.' },
+    });
+    await vi.waitFor(async () => {
+      expect(await host.snapshot('chat-context-once')).toMatchObject({ state: 'completed' });
+    });
+
+    expect(asked).toBe(1);
+    await host.close();
+  });
+
   const externalAgent = { kind: 'acp', id: 'stub-agent' } as const;
 
   it.each([

@@ -270,7 +270,6 @@
   --color-markup-ink: var(--markup-ink);
 
   --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --animate-gradient: gradient 5s ease infinite;
   --animate-bounce-subtle: gentle-bounce 2s infinite;
   /* Dictation waveform scroll: the bar row glides one bar pitch (a 0.75 bar plus a 0.75 gap) left over each 100ms
      microphone batch. Each batch swaps to the other, identical glide, which restarts it as the levels shift one slot,
@@ -316,17 +315,6 @@
   --color-fd-diff-add: rgba(14, 180, 100, 0.1);
   --color-fd-diff-add-symbol: rgb(10, 200, 100);
 
-  @keyframes gradient {
-    0%,
-    100% {
-      background-position: 0% 50%;
-    }
-
-    50% {
-      background-position: 100% 50%;
-    }
-  }
-
   @keyframes pulse-subtle {
     0%,
     100% {
@@ -358,14 +346,6 @@
 
     100% {
       width: 100%;
-    }
-  }
-
-  --animate-gradient: gradient 8s linear infinite;
-
-  @keyframes gradient {
-    to {
-      background-position: var(--bg-size, 300%) 0;
     }
   }
 }

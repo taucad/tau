@@ -10,6 +10,7 @@ import { expectedTools } from '#doctor-probe.js';
 type Run = { readonly stdout: string; readonly stderr: string; readonly code: number | undefined };
 
 const version = '0.0.0-doctor-test';
+const windows = process.platform === 'win32';
 
 /** A `tau mcp` that answers `initialize`, `tools/list` and `resources/list` as the real server does. */
 const servingBody = String.raw`
@@ -45,7 +46,7 @@ process.stdin.setEncoding('utf8').on('data', (chunk) => {
  */
 const writeExecutable = async (path: string, source: string): Promise<string> => {
   await mkdir(dirname(path), { recursive: true });
-  if (process.platform === 'win32') {
+  if (windows) {
     await writeFile(`${path}.cjs`, source);
     await writeFile(`${path}.cmd`, `@"${process.execPath}" "%~dpn0.cjs" %*\r\n`);
     return `${path}.cmd`;
@@ -59,6 +60,8 @@ describe('doctor', () => {
   let directory: string;
   let entry: string;
   let tools: string;
+  /** The matching `tau` on `PATH`: `tau.cmd` on Windows. */
+  let tau: string;
 
   /** An executable stand-in, run by the current Node.js, that answers `--version` with `answer`. */
   const fakeExecutable = async (path: string, answer: string, body: string): Promise<string> => {
@@ -90,7 +93,7 @@ describe('doctor', () => {
       environment['PATH'] = tools;
       environment['HOME'] = directory;
       /* Windows processes, `cmd.exe` and Node.js among them, need the system root a host always passes. */
-      if (process.platform === 'win32') {
+      if (windows) {
         environment['SystemRoot'] = process.env['SystemRoot'];
       }
       const child = spawn(process.execPath, [entry, ...args], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -128,7 +131,7 @@ describe('doctor', () => {
     tools = join(directory, 'tools');
     await fakeNpm(join(directory, 'npm-cache'));
     await fakeClaude(true);
-    await fakeExecutable(join(tools, 'tau'), version, servingBody);
+    tau = await fakeExecutable(join(tools, 'tau'), version, servingBody);
   });
 
   afterEach(async () => {
@@ -156,7 +159,7 @@ describe('doctor', () => {
       node: { status: 'ok' },
       npm: { status: 'ok', version: '11.19.0', cache: join(directory, 'npm-cache') },
       hosts: { claude: { status: 'ok', version: '2.1.303' }, codex: { status: 'warn', detail: 'not on PATH' } },
-      cli: { status: 'ok', source: 'installed', path: join(tools, 'tau'), cliVersion: version },
+      cli: { status: 'ok', source: 'installed', path: tau, cliVersion: version },
       registry: { status: 'ok', version },
       server: { status: 'ok', tools: [...expectedTools], missingTools: [], viewer: 'ui://tau/viewer.html' },
       skills: { status: 'ok', names: ['tau'] },
@@ -170,7 +173,7 @@ describe('doctor', () => {
     expect(code).toBe(0);
     expect(stdout.split('\n')[0]).toBe(`tau doctor: plugin ${version} at ${join(directory, 'plugin')}`);
     expect(line(stdout, 'claude')).toBe(`ok    claude    2.1.303; tau@taucad ${version} enabled (user scope)`);
-    expect(line(stdout, 'cli')).toBe(`ok    cli       installed tau ${version} at ${join(tools, 'tau')}`);
+    expect(line(stdout, 'cli')).toBe(`ok    cli       installed tau ${version} at ${tau}`);
     expect(line(stdout, 'server')).toMatch(
       /^ok {4}server {4}initialize \d+\.\d s; @taucad\/mcp 0\.0\.0-doctor-test; 10 tools; viewer resource ui:\/\/tau\/viewer\.html$/u,
     );
@@ -195,7 +198,12 @@ describe('doctor', () => {
 
     expect(code).toBe(3);
     expect(line(stdout, 'npm')).toBe(`fail  npm       npm cache ${cache} is not writable`);
-    expect(stdout).toContain(`next  sudo chown -R ${process.getuid?.()}:${process.getgid?.()} "${cache}"\n`);
+    /* Windows has no owner for `chown` to restore, so no fix follows there. */
+    if (windows) {
+      expect(stdout).not.toContain('next  sudo chown');
+    } else {
+      expect(stdout).toContain(`next  sudo chown -R ${process.getuid?.()}:${process.getgid?.()} "${cache}"\n`);
+    }
   });
 
   it('should warn that npx will run, and name the install, when only an older tau is installed', async () => {

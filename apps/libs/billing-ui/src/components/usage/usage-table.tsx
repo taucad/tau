@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@tauc
 import { formatCredits } from '#utils/credits.utils.js';
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
-import { usageColumns, usageEventId, usageEventNetAtoms } from '#components/usage/columns.js';
+import { usageColumns, usageEventId, usageEventNetAtoms, usageEventStatus } from '#components/usage/columns.js';
 import { chatLabel, projectLabel } from '#components/usage/activity-names.js';
 import type { ProjectNames } from '#components/usage/activity-names.js';
 import { useChatName } from '#components/usage/use-chat-name.js';
@@ -100,11 +100,7 @@ function UsageEventDetail({
       {event.kind === 'base' ? (
         <>
           <dl className='flex flex-col gap-1'>
-            <DetailRow label='Status' value={`${event.executionStatus} · ${event.customerState}`} />
-            <DetailRow
-              label='Authorized maximum'
-              value={formatCreditAtomsDisplay(BigInt(event.authorizedMaxCreditAtoms))}
-            />
+            <DetailRow label='Status' value={usageEventStatus(event)} />
             <DetailRow label='Charged' value={formatCreditAtomsDisplay(BigInt(event.chargedCreditAtoms))} />
             <DetailRow label='Token evidence' value={event.tokens.status} />
             <DetailRow label='Uncached input' value={tokenValue(event.tokens.uncachedInput ?? undefined)} />

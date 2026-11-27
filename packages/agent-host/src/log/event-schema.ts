@@ -537,6 +537,17 @@ export const classifyLogJson = (text: string): ClassifiedRow => {
   } catch {
     return { class: 'quarantined' };
   }
+  return classifyLogValue(value);
+};
+
+/**
+ * Classify a value a line's JSON just produced (or that the parser restored from it, WP-17), as {@link classifyLogJson}
+ * does.
+ * @param value - A fresh JSON value no caller holds.
+ * @returns The tolerant row class.
+ * @internal
+ */
+export const classifyLogValue = (value: unknown): ClassifiedRow => {
   const envelope = rowEnvelopeSchema.safeParse(value);
   if (!envelope.success) {
     return { class: 'quarantined' };
@@ -630,8 +641,15 @@ const describeInvalidRow = (value: unknown, error: z.ZodError): string => {
   return `${type ?? 'a row with no valid envelope'} at ${shown}${more}`;
 };
 
-/** Validate one untrusted durable or broadcast event envelope. @public */
-export const parseLogEvent = (value: unknown): AgentLogEvent => {
+/**
+ * Validate one untrusted row, and say whether it is of a known type (folded) or carried opaque (CL-R1).
+ *
+ * @internal
+ * @param value - The row.
+ * @returns The validated row, and `known` when it parsed under one of this build's types: the passthrough branch
+ * refuses every known type, so a row it accepts is opaque.
+ */
+export const parseLogRow = (value: unknown): { readonly event: AgentLogEvent; readonly known: boolean } => {
   const result = agentLogEventSchema.safeParse(value);
   if (!result.success) {
     throw new EventLogError(
@@ -642,5 +660,9 @@ export const parseLogEvent = (value: unknown): AgentLogEvent => {
       },
     );
   }
-  return result.data as AgentLogEvent;
+  const event = result.data as AgentLogEvent;
+  return { event, known: knownEventTypes.has(event.type) };
 };
+
+/** Validate one untrusted durable or broadcast event envelope. @public */
+export const parseLogEvent = (value: unknown): AgentLogEvent => parseLogRow(value).event;

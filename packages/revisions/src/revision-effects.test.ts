@@ -34,7 +34,7 @@ import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
 import { remoteTrackingRef } from '#remotes.js';
 import type { Checkout, ConflictRecord, RemoteRef, RevisionPort, RevisionPushInput } from '#revision-port.js';
-import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
+import { fileHeavyTimeout, gitToolchainOnPath, nativeHarness, removalRetries } from '#test/native-git-harness.js';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
@@ -91,7 +91,7 @@ const settles: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   await Promise.all(settles.splice(0).map(async (settle) => settle()));
-  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true, ...removalRetries })));
 });
 
 const createRevisionActors: typeof createRevisionActorsUntracked = (options) => {
@@ -312,9 +312,15 @@ describe('close cancels background transfers', () => {
     });
     actor.start();
     try {
-      await vi.waitFor(() => {
-        expect(fetching).toBe(true);
-      });
+      /* The first transfer starts once the actor has opened the store on a real disk. These rows took 0.7-1.0 s on
+       * the hosted windows-2025 runner in runs 44012123071 and 44028941814 and 1.5-4.8 s in run 44033552647, where
+       * this wait outran `vi.waitFor`'s 1 s default. */
+      await vi.waitFor(
+        () => {
+          expect(fetching).toBe(true);
+        },
+        { timeout: fileHeavyTimeout(1000) },
+      );
       let settled = false;
       const quiesce = (async () => {
         await awaitSyncSettled(actor, persistence === 'stalled' ? 100 : 2100);
@@ -2242,11 +2248,25 @@ describe('restore, through the machine that owns it', () => {
           });
         }
       };
+      /*
+       * A check that throws arms its next step only after it has released what it held, a real disk write, so the
+       * clock waits for that: moved on first, the step would be armed late (a retried pass on the Node 24 floor, CI
+       * run 45982997323). `before` is the timers waiting before the check started.
+       */
+      const rearmed = async (before: number): Promise<void> => {
+        for (let turn = 0; turn < 200 && control.failReads > 0 && vi.getTimerCount() < before; turn += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- until the throwing check has armed its next step.
+          await settle();
+        }
+      };
       const advance = async (milliseconds: number): Promise<void> => {
         for (let elapsed = 0; elapsed < milliseconds; elapsed += 50) {
+          const waiting = vi.getTimerCount();
           vi.advanceTimersByTime(50);
           // oxlint-disable-next-line no-await-in-loop -- each step's checks finish before the next is due.
           await settle();
+          // oxlint-disable-next-line no-await-in-loop -- and a throwing one has armed its next step.
+          await rearmed(waiting);
         }
       };
       const press = async (): Promise<void> => {
@@ -2257,6 +2277,7 @@ describe('restore, through the machine that owns it', () => {
           await settle();
         }
         expect(control.failed).toBe(failed + 1);
+        await rearmed(1);
       };
       control.failReads = Number.POSITIVE_INFINITY;
       /* Three Try agains, 100 ms apart, each check throwing: each arms the first backoff step. */
@@ -7403,7 +7424,8 @@ describe("a cut honours the checkout's own Git ignore rules on both legs", () =>
           ['models/local.step', 'solid local\n'],
           ['models/deep/local.step', 'solid deep\n'],
           ['Upper.LOG', 'ignored only where case folds\n'],
-          ['Build/case.stl', 'solid\n'],
+          /* Beside no `build/` of its own: on a case-insensitive disk (Windows, macOS) `Build/` would be `build/`. */
+          ['models/Build/case.stl', 'solid\n'],
         ] as const) {
           // oxlint-disable-next-line no-await-in-loop -- parents first, one file at a time.
           await filesystem.writeFile(path, content);
@@ -7422,11 +7444,11 @@ describe("a cut honours the checkout's own Git ignore rules on both legs", () =>
       expect(legs[0]![1]).toStrictEqual([
         '.gitattributes',
         '.gitignore',
-        ...(ignoreCase ? [] : ['Build/case.stl']),
         ...(ignoreCase ? [] : ['Upper.LOG']),
         'keep.secret',
         'main.scad',
         'models/.gitignore',
+        ...(ignoreCase ? [] : ['models/Build/case.stl']),
         'models/deep/local.step',
         'notes.log',
       ]);

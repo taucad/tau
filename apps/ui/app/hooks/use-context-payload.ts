@@ -9,6 +9,9 @@ import { useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 const agentsMdPath = 'AGENTS.md';
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
+/* The kept head is decoded as-is: a default decoder would drop a leading U+FEFF, so the head would no longer be a prefix. */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- `ignoreBOM` is the TextDecoder option's own name.
+const headDecoder = new TextDecoder('utf-8', { ignoreBOM: true });
 const noSkills: NonNullable<ContextPayload['skills']> = [];
 
 /**
@@ -87,7 +90,7 @@ export function truncateMemoryHead(text: string): string {
   while (end > 0 && isContinuationByte(bytes[end])) {
     end -= 1;
   }
-  return `${decoder.decode(bytes.subarray(0, end))}\n[AGENTS.md truncated: first ${String(end)} bytes retained]`;
+  return `${headDecoder.decode(bytes.subarray(0, end))}\n[AGENTS.md truncated: first ${String(end)} bytes retained]`;
 }
 
 /**

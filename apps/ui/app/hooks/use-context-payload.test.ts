@@ -557,6 +557,16 @@ describe('CH-10 memory head truncation', () => {
     expect(head.endsWith(char)).toBe(true);
   });
 
+  it('should keep a leading byte order mark in the head of content over the cap', () => {
+    const text = '\uFEFF' + 'b'.repeat(contextMemoryMaxBytes);
+
+    const { head, retained } = splitNotice(truncateMemoryHead(text));
+
+    expect(head.startsWith('\uFEFF')).toBe(true);
+    expect(text.startsWith(head)).toBe(true);
+    expect(retained).toBe(byteLength(head));
+  });
+
   it('should cut multi-byte content to a value the context payload schema accepts', () => {
     const text = '€'.repeat(contextMemoryMaxBytes);
 

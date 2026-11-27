@@ -14,8 +14,9 @@ import { draftHintReaderSource } from '#lib/frame-hint-draft.js';
  *
  * A surface that queues a send can also draw it (A15d, C10): inside a box marked {@link handOffBoxAttribute} the
  * recorder marks the box while a send is queued ({@link queuedSendAttribute}) and while the input holds text
- * ({@link earlyTextAttribute}), writes {@link queuedSendStatus} into the box's status slot, and cancels the send on
- * Escape as on an edit. A box that also carries {@link draftHintAttribute} has the served input paint the stored draft
+ * ({@link earlyTextAttribute}), and cancels the send on Escape as on an edit, writing
+ * {@link queuedSendCancelledStatus} into the box's status slot. A queued send itself is not said: while a project opens
+ * only its cancellation is (Progressive Loading Policy rule 22); Send's pending state and the box's mark show it. A box that also carries {@link draftHintAttribute} has the served input paint the stored draft
  * (the draft hint) into an empty input before first paint, as prefilled text rather than an edit; only the served
  * script paints, since an input the bundle creates is past first paint. Outside such a box Escape still cancels a
  * queued send, and nothing is drawn.
@@ -83,10 +84,8 @@ export const queuedSendAttribute = 'data-queued-send';
 export const earlyTextAttribute = 'data-early-text';
 /** On the box: the served input paints the stored draft (the draft hint) into an empty input before first paint. */
 export const draftHintAttribute = 'data-draft-hint';
-/** The box's status slot, which says a queued send aloud. */
+/** The box's status slot, which says a queued send's cancellation aloud. */
 export const queuedSendStatusSlot = 'queued-send-status';
-/** What a queued send's status says, before and after adoption. */
-export const queuedSendStatus = 'Send queued. Press Escape to cancel.';
 /** What the status says once Escape cancels a queued send: an emptied status says nothing. The next edit clears it. */
 export const queuedSendCancelledStatus = 'Send cancelled.';
 
@@ -98,7 +97,7 @@ export const queuedSendCancelledStatus = 'Send cancelled.';
 const boxScript =
   `const bx=()=>input.closest('[${handOffBoxAttribute}]');const b0=bx();` +
   `if(b0&&b0.hasAttribute('${draftHintAttribute}')&&input.value===''){const h=(${draftHintReaderSource})(location);if(h.text!==''){input.value=h.text;state.prefill=h.text;state.prefillChat=h.chatId}}` +
-  `const q=(v,c)=>{state.submitQueued=v;const box=bx();if(!box)return;const st=box.querySelector('[data-slot=${queuedSendStatusSlot}]');if(st)st.textContent=v?${JSON.stringify(queuedSendStatus)}:c?${JSON.stringify(queuedSendCancelledStatus)}:'';if(v)box.setAttribute('${queuedSendAttribute}','');else box.removeAttribute('${queuedSendAttribute}')};` +
+  `const q=(v,c)=>{state.submitQueued=v;const box=bx();if(!box)return;const st=box.querySelector('[data-slot=${queuedSendStatusSlot}]');if(st)st.textContent=c?${JSON.stringify(queuedSendCancelledStatus)}:'';if(v)box.setAttribute('${queuedSendAttribute}','');else box.removeAttribute('${queuedSendAttribute}')};` +
   `const tx=()=>{const box=bx();if(!box)return;if(input.value.trim()==='')box.removeAttribute('${earlyTextAttribute}');else box.setAttribute('${earlyTextAttribute}','')};tx();` +
   `input.addEventListener('input',()=>{tx();if(bx())q(false)});`;
 
@@ -188,8 +187,8 @@ const markAcceptedNextFrame = (element: HTMLElement, state: HandOffState): void 
 };
 
 /**
- * Draw a queued send in its box, as the served script does: the box's mark and its status slot's words, which say a
- * cancellation once when Escape ended the send.
+ * Draw a queued send in its box, as the served script does: the box's mark, and its status slot's words, which say only
+ * a cancellation, once, when Escape ended the send.
  */
 const drawQueuedSend = (box: Element | undefined, isQueued: boolean, isCancelled = false): void => {
   if (box === undefined) {
@@ -197,7 +196,7 @@ const drawQueuedSend = (box: Element | undefined, isQueued: boolean, isCancelled
   }
   const status = box.querySelector(`[data-slot=${queuedSendStatusSlot}]`);
   if (status !== null) {
-    status.textContent = isQueued ? queuedSendStatus : isCancelled ? queuedSendCancelledStatus : '';
+    status.textContent = isCancelled ? queuedSendCancelledStatus : '';
   }
   box.toggleAttribute(queuedSendAttribute, isQueued);
 };

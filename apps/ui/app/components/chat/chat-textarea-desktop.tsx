@@ -981,9 +981,8 @@ export const ChatTextareaDesktop = memo(function ({
         <ChatDropFeedback dragKind={dragKind} dropZone={dropZone} className={radius} />
 
         <DictationFeedback transcript={dictation.transcript} />
-        {/* Present from mount for an input that queued a send, so the status is read when it changes. The queued send
-            itself was said by the input that queued it (the served or early input's status): adopting it says nothing
-            again, and Send's pending state shows it. Only a cancellation is new. */}
+        {/* Present from mount for an input that queued a send, so the status is read when it changes. A queued send is
+            never said (Progressive Loading Policy rule 22): Send's pending state shows it. Only a cancellation is. */}
         {earlyInput?.submitQueued === true ? (
           <span role='status' className='sr-only'>
             {isPaintedSendCancelled

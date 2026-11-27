@@ -198,6 +198,9 @@ export function WorkspaceFrame({
          * content is then the page being left, hidden, and an alert of its own is not the destination's. */
         '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
         '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
+        /* Literal for Tailwind: the phone workspace's `data-mobile-tab`. On a phone the composer box stays past the
+         * workspace's reveal until a composer adopts its input, but not once the live sheet shows another surface. */
+        'max-md:[&:has([data-mobile-workspace=ready]:not([data-mobile-tab=chat]))>[data-slot=workspace-frame-composer]]:hidden',
       )}
       style={
         wide === undefined || phone === undefined ? undefined : (frameVariables(wide, phone) as React.CSSProperties)
@@ -207,8 +210,8 @@ export function WorkspaceFrame({
        * over their bars (Progressive Loading Policy rule 16). */}
       <openWaitContext.Provider value={open}>
         {/* No hint yet (the server, the hydrating render) serves the input; the pre-paint script's variable hides a
-         * lane remembered closed, and the client then drops it. */}
-        <WorkspaceFrameLanes isChatServed={wide?.chatOpen !== false} pathname={pathname} />
+         * lane remembered closed, and the client then drops it unless a phone's chat sheet serves it. */}
+        <WorkspaceFrameLanes isChatServed={wide?.chatOpen !== false || phone?.tab === 'chat'} pathname={pathname} />
         {children}
       </openWaitContext.Provider>
     </div>
@@ -228,6 +231,10 @@ export function WorkspaceFrame({
  * are laid out: the chat lane may show a status instead of a composer for a while (chats loading, sync off, a failed
  * load), and the text stays where it can be seen and edited until a composer can take it. Where none can, under a
  * failure in the workspace's place or with the live chat lane closed, the box hides and the text waits in the store.
+ *
+ * On a phone the same box, with the same one input, is the chat sheet's foot above the tab bar, where the live chat
+ * composer rests, while the frame draws the chat sheet; the phone's chat composer adopts it when the workspace shows,
+ * and the box hides, keeping the text, while the live sheet shows another surface.
  *
  * @param props - Whether the chat lane serves the input (not when this project remembers the lane closed), and the
  *   destination's pathname when the frame is drawn ahead of the route.
@@ -274,10 +281,22 @@ function WorkspaceFrameLanes({
       </div>
       <div
         data-slot='workspace-frame-composer'
-        className='@container pointer-events-none absolute inset-0 z-10 flex max-md:hidden'
+        className={cn(
+          '@container pointer-events-none absolute inset-0 z-10 flex',
+          /* On a phone, the chat sheet's foot: shown while the frame draws the chat sheet (the tab the pre-paint script
+           * selected on `<html>`), above the tab bar, whose height it takes. */
+          'max-md:[:root:not([data-frame-tab=chat])_&]:hidden',
+          mobileWorkbenchNavigationHeight,
+        )}
       >
-        {/* The chat lane's box, border included, so the composer box lands on the lane frame's own. */}
-        <div className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 flex-col justify-end border-r border-transparent @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'>
+        {/* The chat lane's box, border included, so the composer box lands on the lane frame's own. On a phone, the live
+         * chat surface's box: it ends at the tab bar, and the composer rests at its foot. */}
+        <div
+          className={cn(
+            '[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 flex-col justify-end border-r border-transparent @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]',
+            'max-md:fixed max-md:inset-x-0 max-md:bottom-(--nav-offset) max-md:h-auto max-md:w-auto max-md:border-r-0 max-md:[display:flex]!',
+          )}
+        >
           {isChatServed && !isAdopted ? (
             <div className='pointer-events-auto mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
               <div className='flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md has-[textarea:focus-visible]:focus-outline'>

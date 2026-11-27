@@ -476,8 +476,6 @@ describe('hand-off contract (P4)', () => {
  * stored draft as prefilled text, never as an edit. Literal attributes: the rows read the served DOM.
  */
 describe('hand-off queued send and stored draft (A15d, C10)', () => {
-  const status = 'Send queued. Press Escape to cancel.';
-
   beforeEach(async () => {
     await nextFrame();
     stubPointer(false);
@@ -534,7 +532,9 @@ describe('hand-off queued send and stored draft (A15d, C10)', () => {
     expect(Object.hasOwn(box.dataset, 'earlyText')).toBe(true);
     play(input, [{ kind: 'key', init: { key: 'Enter' } }]);
     expect(Object.hasOwn(box.dataset, 'queuedSend')).toBe(true);
-    expect(statusOf(box)).toBe(status);
+    /* The operator's ruling (2026-11-27): a queued send is not said while a project opens; Send's pending state and
+     * the box's mark show it. Only its cancellation is said. */
+    expect(statusOf(box)).toBe('');
     expect(captureHandOff(input).submitQueued).toBe(true);
 
     /* Staging re-check 4: an emptied region says nothing, so Escape says the cancellation once. */
@@ -625,7 +625,7 @@ describe('hand-off queued send and stored draft (A15d, C10)', () => {
     input.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(true);
     expect(Object.hasOwn(box.dataset, 'queuedSend')).toBe(true);
-    expect(statusOf(box)).toBe(status);
+    expect(statusOf(box)).toBe('');
     expect(captureHandOff(input)).toMatchObject({ submitQueued: true, prefilled: true, edited: false });
 
     play(input, [{ kind: 'key', init: { key: 'Escape' } }]);

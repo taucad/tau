@@ -522,6 +522,37 @@ describe('WorkspaceFrame', () => {
     expect(document.documentElement.getAttribute(frameTabAttribute)).toBe('model');
   });
 
+  /* Staging QA 2026-11-27: the phone frame had no composer box, so a phone could not type until the live workspace
+   * showed, 4 to 5 s after Create. The one native input is served on a phone too, at the chat sheet's foot above the
+   * tab bar where the live composer rests (Progressive Loading Policy rule 20), and the live composer adopts it. */
+  it("serves the composer's one native input at the phone chat sheet's foot, above the tab bar", () => {
+    writePhoneFrameHint('home/one', 'chat');
+    const frame = renderFrame('/w/home/one');
+
+    expect(screen.getAllByRole('textbox', { name: 'Chat message' })).toHaveLength(1);
+    const layer = frame.querySelector<HTMLElement>('[data-slot=workspace-frame-composer]')!;
+    /* On a phone the layer shows only while the frame draws the chat sheet, and carries the tab bar's height. */
+    expect(layer.className).not.toMatch(/(?:^|\s)max-md:hidden(?:\s|$)/u);
+    expect(layer.className).toContain('max-md:[:root:not([data-frame-tab=chat])_&]:hidden');
+    expect(layer.className).toContain('[--nav-offset:');
+    /* Its column is the sheet's foot: the live surface ends at the tab bar, and the composer rests at its foot. */
+    const column = layer.firstElementChild!;
+    expect(column.className).toContain('max-md:fixed');
+    expect(column.className).toContain('max-md:bottom-(--nav-offset)');
+    /* Once the live phone workspace shows another surface, the box hides and its text waits in the store. */
+    expect(frame.className).toContain(
+      'max-md:[&:has([data-mobile-workspace=ready]:not([data-mobile-tab=chat]))>[data-slot=workspace-frame-composer]]:hidden',
+    );
+  });
+
+  it('serves the phone input for a phone chat sheet even where the wide layout remembers the chat lane closed', () => {
+    writeWideFrameHint('home/one', { ...workbenchOpen, chatOpen: false });
+    writePhoneFrameHint('home/one', 'chat');
+    renderFrame('/w/home/one');
+
+    expect(screen.getAllByRole('textbox', { name: 'Chat message' })).toHaveLength(1);
+  });
+
   it('gives each phone part way to the live one in its own box, and the whole phone frame to a failure or notice', () => {
     const frame = renderFrame('/w/home/one');
     const phone = frame.querySelector<HTMLElement>('[data-slot=workspace-frame-phone]')!;

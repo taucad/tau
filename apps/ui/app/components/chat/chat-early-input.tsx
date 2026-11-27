@@ -162,7 +162,7 @@ export function ChatEarlyInput({
         suppressHydrationWarning
         {...earlyInputBox}
       >
-        {/* Says a queued send aloud, as Send's pending state shows it; the served recorder writes it. */}
+        {/* Says a queued send's cancellation aloud (the send itself is shown by Send's pending state); the served recorder writes it. */}
         <span
           data-slot={queuedSendStatusSlot}
           role='status'

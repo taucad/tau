@@ -515,6 +515,75 @@ describe('leadership (M2)', () => {
       expect(leader.actor.getSnapshot().value).toEqual({ idle: 'ready' });
     });
 
+    /* Review round 2: an executed answer is always delivered and drains `running`, before and after the bound. */
+    describe('answering the commands a refused term runs', () => {
+      const runningCorrs = (leader: ReturnType<typeof harness>): string[] =>
+        (leader.actor.getSnapshot().context as { running: ReadonlyArray<{ corr: string }> }).running.map(
+          (entry) => entry.corr,
+        );
+      /** Lead a refused term running `ids`, past the bound when `bound` is set. */
+      const refusedRunning = async (ids: string[], bound: boolean): Promise<ReturnType<typeof harness>> => {
+        const leader = harness({ claimRefusalRetry: 3000 });
+        const corr = leading(leader);
+        leader.actor.send({ type: 'quiescent', quiescent: false });
+        leader.actor.send({ type: 'claimRefused', corr, epoch: 2, code: 'WRITER_LOCKED' });
+        for (const id of ids) {
+          leader.actor.send({ type: 'command', corr: id, command: command(id) });
+        }
+        if (bound) {
+          await leader.clock.advanceAsync(3000);
+        }
+        leader.effects.length = 0;
+        return leader;
+      };
+
+      it.each([false, true])(
+        'should answer the one running command, and keep leading on a durable answer (bound: %s)',
+        async (bound) => {
+          const leader = await refusedRunning(['c1'], bound);
+          leader.actor.send({ type: 'executed', corr: 'c1', answer: applied('c1', 2) });
+          expect(leader.of('answer')).toEqual([{ corr: 'c1', answer: applied('c1', 2) }]);
+          expect(runningCorrs(leader)).toEqual([]);
+          await leader.clock.advanceAsync(10_000);
+          expect(leader.of('relinquish')).toEqual([]);
+          expect(leader.actor.getSnapshot().value).toBe('leading');
+        },
+      );
+
+      it.each([false, true])('should answer both running commands as each ends (bound: %s)', async (bound) => {
+        const leader = await refusedRunning(['c1', 'c2'], bound);
+        leader.actor.send({ type: 'executed', corr: 'c1', answer: refusal('c1', 'RUN_NOT_FOUND', 2) });
+        expect(leader.of('answer')).toEqual([{ corr: 'c1', answer: refusal('c1', 'RUN_NOT_FOUND', 2) }]);
+        expect(runningCorrs(leader)).toEqual(['c2']);
+        expect(leader.of('relinquish')).toEqual([]);
+        leader.actor.send({ type: 'executed', corr: 'c2', answer: refusal('c2', 'RUN_NOT_FOUND', 2) });
+        expect(leader.of('answer')).toHaveLength(2);
+        if (bound) {
+          /* Past the bound, the last answer it waited on releases the refused term. */
+          expect(leader.of('relinquish')).toHaveLength(1);
+          expect(leader.actor.getSnapshot().value).toEqual({ idle: 'ready' });
+        } else {
+          expect(runningCorrs(leader)).toEqual([]);
+        }
+      });
+
+      it.each([false, true])(
+        'should answer both running commands when the first proves the writer open (bound: %s)',
+        async (bound) => {
+          const leader = await refusedRunning(['c1', 'c2'], bound);
+          leader.actor.send({ type: 'executed', corr: 'c1', answer: applied('c1', 2) });
+          expect(leader.of('answer')).toEqual([{ corr: 'c1', answer: applied('c1', 2) }]);
+          expect(runningCorrs(leader)).toEqual(['c2']);
+          leader.actor.send({ type: 'executed', corr: 'c2', answer: refusal('c2', 'RUN_NOT_FOUND', 2) });
+          expect(leader.of('answer')).toHaveLength(2);
+          expect(runningCorrs(leader)).toEqual([]);
+          await leader.clock.advanceAsync(10_000);
+          expect(leader.of('relinquish')).toEqual([]);
+          expect(leader.actor.getSnapshot().value).toBe('leading');
+        },
+      );
+    });
+
     it("should drop a refusal from an earlier term's claim", async () => {
       const leader = harness({ claimRefusalRetry: 3000 });
       const corr = leading(leader);

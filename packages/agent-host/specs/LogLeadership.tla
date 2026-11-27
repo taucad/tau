@@ -220,8 +220,10 @@ Up(w) == alive[w] /\ ~frozen[w]   \* the worker runs code
 NoneQueued == \A x \in Workers : ~queued[x]
 Hb(e) == heard' = IF HeardRule THEN e ELSE heard   \* HeardRule: the grant callback posts a heartbeat
 Unrefused(w) == refusal' = [refusal EXCEPT ![w] = "none"]
-\* HA4 (review I2, 2026-11-27): an append of w's term proves its writer open: a command run here (a forwarded one, or a
-\* run's admission) opens the writer as its claim retry would, so a refused term becomes "opened".
+\* HA4 (review I2, 2026-11-27): a command run here (a forwarded one, or a run's admission) opens the writer as its claim
+\* retry would. Review round 2 (2026-11-27): only a command's durable answer ends the refusal in the code, so only the
+\* command steps (Process, Start) open the term; End follows Start, and an Abandon inside a command's opening leaves the
+\* term refused until that command answers (here, never: a looser release, still checked against every invariant).
 Opens(w) == refusal' = IF refusal[w] = "refused" THEN [refusal EXCEPT ![w] = "opened"] ELSE refusal
 scopeVarsButRefusal == <<frozen, freezes, reading, noticeDue, queued, nqueues, want, wants, drives, run, nruns, zombie>>
 
@@ -486,17 +488,17 @@ Start(w, x) ==   \* admit a run for a requester of the writer's own build: its i
 
 End(w) ==
     /\ Up(w) /\ claimed[w] /\ ~noticeDue[w] /\ drives[w] > 0 /\ StoreAccepts(w)
-    /\ Put(w, "end", drives[w], w) /\ Opens(w)
+    /\ Put(w, "end", drives[w], w)
     /\ run' = IF run.id = drives[w] /\ run.s = "live" THEN [run EXCEPT !.s = "ended"] ELSE run
     /\ drives' = [drives EXCEPT ![w] = 0]
-    /\ UNCHANGED <<AppendFrame, want, wants, nruns, zombie>>
+    /\ UNCHANGED <<AppendFrame, want, wants, nruns, zombie, refusal>>
 
 Abandon(w) ==   \* M1's idle choice: a live run this writer does not drive (RH-R9)
     /\ Up(w) /\ claimed[w] /\ ~noticeDue[w] /\ StoreAccepts(w) /\ run.s = "live" /\ drives[w] # run.id
-    /\ Put(w, "abandon", run.id, w) /\ Opens(w)
+    /\ Put(w, "abandon", run.id, w)
     /\ run' = [run EXCEPT !.s = "abandoned"]
     /\ zombie' = (zombie \/ (lock # w /\ lock \in Workers /\ Up(lock) /\ drives[lock] = run.id))
-    /\ UNCHANGED <<AppendFrame, drives, want, wants, nruns>>
+    /\ UNCHANGED <<AppendFrame, drives, want, wants, nruns, refusal>>
 
 Refused(w) ==   \* LOG_FENCED: nothing written; M2 has had no notice, so it believes it holds the lock and reads again
     /\ Up(w) /\ claimed[w] /\ ~noticeDue[w] /\ ~StoreAccepts(w) /\ Busy(w)

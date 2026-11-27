@@ -1,7 +1,8 @@
 import type { ComponentProps, FunctionComponent, MouseEvent as ReactMouseEvent } from 'react';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
-import type { DockviewApi, DockviewReadyEvent, IDockviewHeaderActionsProps } from 'dockview-react';
+import type { DockviewApi, DockviewReadyEvent, IDockviewHeaderActionsProps, LiveRegionEvent } from 'dockview-react';
 import { DockviewReact } from 'dockview-react';
+import { tauDockviewAnnouncement } from '#components/panes/dockview-announcements.js';
 import { DockviewStyles } from '#components/panes/dockview-styles.js';
 import { DockviewTabOverflowPicker } from '#components/panes/dockview-tab-overflow-picker.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
@@ -12,7 +13,7 @@ import { useResizeHandles } from '@taucad/workbench-panes/paneview/use-resize-ha
 import { dockviewResizeHandle } from '@taucad/workbench-panes/paneview/resize-handle';
 import { dockviewStyleOverrides, tauDockviewTheme } from '@taucad/workbench-panes/paneview/dockview-theme';
 
-type DockviewProperties = Omit<ComponentProps<typeof DockviewReact>, 'scrollbars' | 'theme'> & {
+type DockviewProperties = Omit<ComponentProps<typeof DockviewReact>, 'scrollbars' | 'theme' | 'getAnnouncement'> & {
   readonly getTabIcon?: DockviewTabIconRenderer;
   readonly tabLeadingIcon?: DockviewTabProps['leadingIcon'];
 };
@@ -140,6 +141,9 @@ export function Dockview({
     [onReady],
   );
 
+  /* Never a raw id, and nothing for the app's own arrangement (`changeQuietly`): see `dockview-announcements.ts`. */
+  const getAnnouncement = useCallback((event: LiveRegionEvent) => tauDockviewAnnouncement(apiRef.current, event), []);
+
   const handleTabClick = useCallback((event: ReactMouseEvent<HTMLDivElement>): void => {
     const api = apiRef.current;
     if (!api || !(event.target instanceof Element)) {
@@ -195,6 +199,7 @@ export function Dockview({
         disableFloatingGroups
         disableAutoResizing
         disableTabsOverflowList
+        getAnnouncement={getAnnouncement}
         rightHeaderActionsComponent={RightHeaderActions}
         scrollbars='custom'
         theme={tauDockviewTheme}

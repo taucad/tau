@@ -14,7 +14,6 @@ vi.mock('#cloud/use-deployment-mode.js', async () => {
 
 const useUsageSnapshot = vi.hoisted(() => vi.fn());
 const useCredits = vi.hoisted(() => vi.fn());
-const useOpenHolds = vi.hoisted(() => vi.fn());
 const useSavedUsage = vi.hoisted(() => vi.fn());
 const useBillingRevisionMinimum = vi.hoisted(() => vi.fn());
 const usePersistSavedUsage = vi.hoisted(() => vi.fn());
@@ -29,7 +28,6 @@ vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
   useEntitlements: () => ({ tier: 'pro', isResolved: true }),
 }));
 vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits }));
-vi.mock('@taucad/billing/hooks/use-open-holds', () => ({ useOpenHolds }));
 vi.mock('@taucad/billing-ui/db/billing-snapshot-store', () => ({
   canonicalUsageQueryKey: () => 'key',
   useBillingRevisionMinimum,
@@ -148,38 +146,6 @@ const balance = {
   },
 };
 
-/** Two open holds: the first still running, the second past its release grace. */
-const openHolds = (): unknown => {
-  const now = Date.now();
-  const hold = (offsetMinutes: number) => new Date(now + offsetMinutes * 60_000).toISOString();
-  return {
-    environment: 'development',
-    ownerId: 'user',
-    holds: [
-      {
-        operationId: 'operation-running',
-        model: { id: 'gpt-6-astra', displayName: 'Astra', providerId: 'openai' },
-        heldCreditAtoms: '3084332',
-        admittedAt: hold(-2),
-        dueAt: hold(8),
-        releaseAfter: hold(13),
-        dispatchState: 'accepted',
-        customerState: 'pending',
-      },
-      {
-        operationId: 'operation-expired',
-        model: { id: 'gpt-5.6-luna', displayName: null, providerId: null },
-        heldCreditAtoms: '65947',
-        admittedAt: hold(-30),
-        dueAt: hold(-20),
-        releaseAfter: hold(-15),
-        dispatchState: 'recovery_required',
-        customerState: 'pending',
-      },
-    ],
-  };
-};
-
 /** One labelled row of the open credit explanation, by the term that names it. */
 const detailRow = (label: string): HTMLElement => {
   const term = screen.getByText(label, { selector: 'dt' });
@@ -202,7 +168,6 @@ const renderPage = (): void => {
 beforeEach(() => {
   vi.clearAllMocks();
   useCredits.mockReturnValue(balance);
-  useOpenHolds.mockReturnValue({ environment: 'development', ownerId: 'user', holds: [] });
   useUsageSnapshot.mockReturnValue({ status: 'ready', snapshot, retry: vi.fn() });
   useBillingRevisionMinimum.mockReturnValue(undefined);
   useSavedUsage.mockReturnValue(undefined);
@@ -226,13 +191,12 @@ describe('UsagePage', () => {
     expect(screen.getByText(/Usage through the Tau LLM provider/)).toBeInTheDocument();
     expect(screen.getByTestId('credits-used')).toHaveTextContent('1 credit used');
     expect(screen.getByText('Across 1 action in the selected range')).toBeInTheDocument();
-    expect(screen.getByTestId('purchased-balance')).toHaveTextContent('4 credits available');
-    expect(screen.getByText('<1% left')).toBeInTheDocument();
+    expect(screen.getByTestId('purchased-balance')).toHaveTextContent('5 credits available');
+    expect(screen.getByText('1% left')).toBeInTheDocument();
     expect(screen.getByText('Pending issuance: 1 credit')).toBeInTheDocument();
-    expect(screen.getByTestId('reserved-credits')).toHaveTextContent('Monthly credits: 3 credits');
-    expect(screen.getByTestId('reserved-credits')).toHaveTextContent('Purchased credits: 1 credit');
     expect(screen.queryByText('Available balance')).not.toBeInTheDocument();
-    expect(screen.getByText(/Held for work in flight/)).toBeInTheDocument();
+    /* Holds are the ledger's own: the page shows credits left, never what is reserved for work still running. */
+    expect(screen.queryByText(/held|hold|reserved/iu)).not.toBeInTheDocument();
     expect(screen.getByText('2026-09-01 to 2026-09-12 (UTC)')).toBeInTheDocument();
     expect(screen.getByText('Luna')).toBeInTheDocument();
     expect(screen.getByText('Showing all 1 actions in this range.')).toBeInTheDocument();
@@ -248,7 +212,7 @@ describe('UsagePage', () => {
     });
     renderPage();
     expect(screen.getByTestId('credits-used')).toHaveTextContent('<1 credit used');
-    expect(screen.getByTestId('purchased-balance')).toHaveTextContent('4 credits available');
+    expect(screen.getByTestId('purchased-balance')).toHaveTextContent('5 credits available');
   });
 
   it('opens the per-action credit explanation with whole credits, tokens and rates', async () => {
@@ -259,7 +223,8 @@ describe('UsagePage', () => {
 
     const detail = screen.getByTestId('usage-event-detail');
     expect(detail).toHaveTextContent('1 credit');
-    expect(detail).toHaveTextContent('Authorized maximum');
+    expect(detail).toHaveTextContent('Succeeded · charged');
+    expect(detail).not.toHaveTextContent('Authorized maximum');
     expect(detail).toHaveTextContent('Cache read');
     expect(detail).toHaveTextContent('Reasoning (of output)');
   });
@@ -462,43 +427,6 @@ describe('UsagePage', () => {
     renderPage();
 
     expect(screen.queryByTestId('purchased-balance')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('reserved-credits')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Balance unavailable')).toHaveLength(2);
-  });
-
-  it('lists each open hold with its age, and says a hold past its time to live is being released', () => {
-    useOpenHolds.mockReturnValue(openHolds());
-    renderPage();
-
-    const rows = screen.getAllByRole('row').filter((row) => row.closest('[data-testid="reserved-table"]') !== null);
-    expect(rows).toHaveLength(3);
-    expect(rows[1]).toHaveTextContent('Astra');
-    expect(rows[1]).toHaveTextContent('308');
-    expect(rows[1]).toHaveTextContent('2 minutes ago');
-    expect(rows[1]).toHaveTextContent('Running');
-    /* Past `releaseAfter`, the reserve is coming back whatever the dispatch state says. */
-    expect(rows[2]).toHaveTextContent('gpt-5.6-luna');
-    expect(rows[2]).toHaveTextContent('7');
-    expect(rows[2]).toHaveTextContent('Being released');
-  });
-
-  it.each([
-    { label: 'no hold is open', value: { environment: 'development', ownerId: 'user', holds: [] } },
-    { label: 'the holds read fails', value: undefined },
-  ])('renders no reserved table when $label', ({ value }) => {
-    useOpenHolds.mockReturnValue(value);
-    renderPage();
-
-    expect(screen.queryByTestId('reserved-table')).not.toBeInTheDocument();
-  });
-
-  it('reports nothing reserved rather than hiding the card when no hold is open', () => {
-    useCredits.mockReturnValue({
-      balance: { ...balance.balance, planHeldCreditAtoms: '0', purchasedHeldCreditAtoms: '0' },
-    });
-    renderPage();
-
-    expect(screen.getByTestId('reserved-credits')).toHaveTextContent('0 credits');
-    expect(screen.getByText('Nothing held for work in flight')).toBeInTheDocument();
+    expect(screen.getAllByText('Balance unavailable')).toHaveLength(1);
   });
 });

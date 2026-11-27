@@ -11,6 +11,26 @@ import { getUsageColor } from '#components/usage/provider-colors.js';
 export const usageEventId = (event: WireUsageEvent): string =>
   event.kind === 'base' ? event.baseTransactionId : event.transactionId;
 
+const executionLabels = {
+  succeeded: 'Succeeded',
+  cancelled: 'Cancelled',
+  failed: 'Failed',
+  rejected: 'Rejected',
+  unknown: 'Unknown',
+} as const satisfies Record<Extract<WireUsageEvent, { kind: 'base' }>['executionStatus'], string>;
+
+/**
+ * What an action's status reads as. The ledger's own terms (a hold `released` or `absorbed`) stay internal: a reader
+ * learns only whether the action ran and whether it was charged.
+ *
+ * @param event - The usage event.
+ * @returns The status, such as `Succeeded · charged`.
+ */
+export const usageEventStatus = (event: WireUsageEvent): string =>
+  event.kind === 'base'
+    ? `${executionLabels[event.executionStatus]} · ${event.customerState === 'settled' ? 'charged' : 'not charged'}`
+    : 'Correction';
+
 /** Credits the account actually spent on this event; a correction keeps its negative sign. */
 export const usageEventNetAtoms = (event: WireUsageEvent): bigint => -BigInt(event.accountDeltaCreditAtoms);
 
@@ -81,15 +101,11 @@ export const usageColumns: Array<ColumnDef<WireUsageEvent>> = [
   },
   {
     id: 'status',
-    accessorFn: (row) => (row.kind === 'base' ? row.executionStatus : 'correction'),
+    accessorFn: usageEventStatus,
     header: ({ column }) => <DataTableColumnHeader column={column} title='Status' />,
     cell({ row }: { readonly row: Row<WireUsageEvent> }): ReactNode {
       const event = row.original;
-      return (
-        <span className='text-sm'>
-          {event.kind === 'base' ? `${event.executionStatus} · ${event.customerState}` : 'correction'}
-        </span>
-      );
+      return <span className='text-sm'>{usageEventStatus(event)}</span>;
     },
     enableSorting: true,
     enableHiding: true,

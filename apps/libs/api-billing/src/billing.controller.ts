@@ -36,7 +36,6 @@ import type {
   WireUsageSnapshot,
   WireBalanceExplanation,
   WireModelEstimates,
-  WireOpenHolds,
   WireOperationReceipt,
   WireOperationReceiptBatch,
 } from '@taucad/billing';
@@ -88,12 +87,6 @@ export class BillingController {
   @Header('Cache-Control', 'private, no-store')
   public async getModelEstimates(@User() user: AuthUser): Promise<WireModelEstimates> {
     return this.estimatesService.getModelEstimates({ authUserId: user.id });
-  }
-
-  @Get('holds')
-  @Header('Cache-Control', 'private, no-store')
-  public async getOpenHolds(@User() user: AuthUser): Promise<WireOpenHolds> {
-    return this.usageService.getOpenHolds({ authUserId: user.id });
   }
 
   @Get('usage')

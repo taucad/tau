@@ -16,7 +16,6 @@ describe('package exports', () => {
       './hooks/use-entitlements': './src/hooks/use-entitlements.ts',
       './hooks/use-credits': './src/hooks/use-credits.ts',
       './hooks/use-model-estimates': './src/hooks/use-model-estimates.ts',
-      './hooks/use-open-holds': './src/hooks/use-open-holds.ts',
       './hooks/use-usage-snapshot': './src/hooks/use-usage-snapshot.ts',
       './training-consent': './src/training-consent.ts',
       './plan-catalog': './src/tau-plan-catalog.ts',

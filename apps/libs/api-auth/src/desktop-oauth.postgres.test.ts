@@ -11,12 +11,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import postgres from 'postgres';
 import * as schema from '@taucad/api-database/schema';
 import { staticAuthConfig } from '#config/auth-static.config.js';
 import { desktopClientId, desktopScopes } from '#config/desktop-oauth.js';
 import { revokeDesktopSignIns } from '#desktop-sign-ins.js';
+import { pruneDesktopRefreshTokens } from '#desktop-sign-in-retention.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -208,6 +209,113 @@ describe('Tau Desktop OAuth sign-in on PostgreSQL', () => {
       .where(eq(schema.oauthAccessToken.userId, userId));
     expect(refreshed.status).toBe(400);
     expect(accessRows).toEqual([]);
+  });
+
+  describe('pruning (DSI-10)', () => {
+    const day = 24 * 60 * 60 * 1000;
+    const refreshGrant = async (refreshToken: string) =>
+      call('/oauth2/token', {
+        method: 'POST',
+        form: { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: desktopClientId },
+      });
+    /** The rotated refresh token a refresh grant answers. */
+    const rotate = async (refreshToken: string): Promise<string> => {
+      const response = await refreshGrant(refreshToken);
+      const body = (await response.json()) as { refresh_token: string };
+      return body.refresh_token;
+    };
+    const familyOf = async (refreshToken: string): Promise<string> => {
+      const [row] = await database
+        .select({ family: schema.oauthRefreshToken.authorizationCodeId })
+        .from(schema.oauthRefreshToken)
+        .where(eq(schema.oauthRefreshToken.token, stored(refreshToken)));
+      return row?.family ?? '';
+    };
+    const familyRows = async (family: string) =>
+      database
+        .select()
+        .from(schema.oauthRefreshToken)
+        .where(eq(schema.oauthRefreshToken.authorizationCodeId, family))
+        .orderBy(schema.oauthRefreshToken.createdAt);
+    /** Moves one row's times by `days` (negative is into the past), as if it had been issued then. */
+    const age = async (id: string, createdDaysAgo: number, expiresInDays: number) => {
+      await database
+        .update(schema.oauthRefreshToken)
+        .set({
+          createdAt: new Date(Date.now() - createdDaysAgo * day),
+          expiresAt: new Date(Date.now() + expiresInDays * day),
+        })
+        .where(eq(schema.oauthRefreshToken.id, id));
+    };
+
+    it("should keep a live family's earliest row, so the 90-day cap still ends the sign-in on time", async () => {
+      // Three rotations: the earliest row, two rotated rows and the live one.
+      const first = await signInDesktop(cookie);
+      const second = await rotate(first.refresh_token);
+      const third = await rotate(second);
+      const live = await rotate(third);
+      const family = await familyOf(live);
+      const [earliest, rotatedA, rotatedB, current] = await familyRows(family);
+      // Signed in 85 days ago: the earliest and first rotated rows expired long since, the live row is fresh.
+      await age(earliest!.id, 85, -55);
+      await age(rotatedA!.id, 60, -30);
+      await age(rotatedB!.id, 20, 10);
+      await age(current!.id, 1, 29);
+
+      const pruned = await pruneDesktopRefreshTokens(database, { now: new Date(), limit: 1000 });
+
+      const remaining = await familyRows(family);
+      const left = remaining.map((row) => row.id);
+      expect(left).toEqual([earliest!.id, rotatedB!.id, current!.id]);
+      expect(pruned.expiredRows).toBeGreaterThanOrEqual(1);
+      // Six days on, the sign-in is 91 days old. Had the earliest row gone, the family would look 21 days old and
+      // this refresh would be granted.
+      await database
+        .update(schema.oauthRefreshToken)
+        .set({ createdAt: sql`${schema.oauthRefreshToken.createdAt} - interval '6 days'` })
+        .where(inArray(schema.oauthRefreshToken.id, left));
+      const refused = await refreshGrant(live);
+      const refusal = (await refused.json()) as { error_description?: string };
+      expect(refused.status).toBe(400);
+      expect(refusal.error_description).toContain('sign-in ended');
+    });
+
+    it('should delete a family past the cap, or dead for a day, whole, and leave a live one alone', async () => {
+      const capped = await signInDesktop(cookie);
+      const cappedFamily = await familyOf(capped.refresh_token);
+      const [cappedRow] = await familyRows(cappedFamily);
+      await age(cappedRow!.id, 91, 5);
+
+      const revoked = await signInDesktop(cookie);
+      const revokedFamily = await familyOf(revoked.refresh_token);
+      const [revokedRow] = await familyRows(revokedFamily);
+      await database
+        .update(schema.oauthRefreshToken)
+        .set({ revoked: new Date(Date.now() - 2 * day) })
+        .where(eq(schema.oauthRefreshToken.id, revokedRow!.id));
+      await age(revokedRow!.id, 3, 27);
+
+      const justRevoked = await signInDesktop(cookie);
+      const justRevokedFamily = await familyOf(justRevoked.refresh_token);
+      await database
+        .update(schema.oauthRefreshToken)
+        .set({ revoked: new Date() })
+        .where(eq(schema.oauthRefreshToken.authorizationCodeId, justRevokedFamily));
+
+      const healthy = await signInDesktop(cookie);
+      const healthyFamily = await familyOf(healthy.refresh_token);
+
+      const pruned = await pruneDesktopRefreshTokens(database, { now: new Date(), limit: 1000 });
+
+      expect(await familyRows(cappedFamily)).toEqual([]);
+      expect(await familyRows(revokedFamily)).toEqual([]);
+      expect(pruned.deadFamilies).toBeGreaterThanOrEqual(2);
+      // Revoked moments ago: a refresh may still be settling, so it waits a day.
+      expect(await familyRows(justRevokedFamily)).toHaveLength(1);
+      expect(await familyRows(healthyFamily)).toHaveLength(1);
+      const stillLive = await refreshGrant(healthy.refresh_token);
+      expect(stillLive.status).toBe(200);
+    });
   });
 
   it('should delete every token row with the account', async () => {

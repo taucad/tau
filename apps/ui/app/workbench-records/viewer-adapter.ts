@@ -28,6 +28,7 @@ import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/
 import type { projectMachine } from '#machines/project.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { fromDockview, mintViewRecordId, toDockview } from '#workbench-records/converters.js';
+import { changeQuietly } from '#components/panes/dockview-announcements.js';
 import { dockAdapterId } from '#workbench-records/workbench-adapter.js';
 import { setLocalInstanceChoice } from '#workbench-records/local-instance.js';
 import { readViewLevels } from '#workbench-records/view-levels.js';
@@ -379,7 +380,8 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
       isApplying = true;
       try {
-        const removed = adoptViewerRecordNode(api, node);
+        // The app's own arrangement: Dockview says nothing about the panels it lands (progressive-loading rule 22).
+        const removed = changeQuietly(api, () => adoptViewerRecordNode(api, node));
         // An apply clears and rebuilds the groups; an arrangement with none gets its group once that has finished.
         ensureViewerGroup(api);
         adopted = JSON.stringify(shownNode());

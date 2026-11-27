@@ -104,9 +104,6 @@ export const desktopAuthorizeUrl = (
 export const desktopContinuationPath = (authorization: DesktopAuthorization): string =>
   `/auth/desktop?${authorization.oauthQuery}&continue=1`;
 
-/** Where Tau Desktop sends the browser after it received the sign-in: `/auth/desktop?result=…`. */
-export const desktopSignInResults = ['signed-in', 'failed'] as const;
-
 /** Why a sign-in failed, as Tau Desktop reports it in `reason`. */
 export const desktopSignInFailureReasons = ['canceled', 'expired', 'error'] as const;
 

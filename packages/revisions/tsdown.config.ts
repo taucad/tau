@@ -22,6 +22,8 @@ const baseConfig: UserConfig = {
     'src/remote.machine.ts',
     'src/sync.machine.ts',
     'src/publish.machine.ts',
+    'src/provenance/index.ts',
+    'src/provenance/server.ts',
   ],
   sourcemap: false,
   clean: true,

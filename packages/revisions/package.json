@@ -50,7 +50,9 @@
     "./resolution-machine": "./src/resolution.machine.ts",
     "./remote-machine": "./src/remote.machine.ts",
     "./sync-machine": "./src/sync.machine.ts",
-    "./publish-machine": "./src/publish.machine.ts"
+    "./publish-machine": "./src/publish.machine.ts",
+    "./provenance": "./src/provenance/index.ts",
+    "./provenance/server": "./src/provenance/server.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -140,6 +142,16 @@
         "types": "./dist/publish.machine.d.mts",
         "import": "./dist/publish.machine.mjs",
         "default": "./dist/publish.machine.mjs"
+      },
+      "./provenance": {
+        "types": "./dist/provenance/index.d.mts",
+        "import": "./dist/provenance/index.mjs",
+        "default": "./dist/provenance/index.mjs"
+      },
+      "./provenance/server": {
+        "types": "./dist/provenance/server.d.mts",
+        "import": "./dist/provenance/server.mjs",
+        "default": "./dist/provenance/server.mjs"
       }
     },
     "imports": {}

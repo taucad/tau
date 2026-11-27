@@ -302,6 +302,29 @@ describe('serveAgentChannel', () => {
     expect(launcher.seen).toEqual([]);
   });
 
+  it('hands a prewarm to the launcher and answers it, with no command (WP-18)', async () => {
+    const prewarms: unknown[] = [];
+    const launcher = Object.assign(recordingLauncher(), {
+      prewarm: async (input: unknown) => {
+        prewarms.push(input);
+      },
+    });
+    const channel = new MessageChannel();
+    serveAgentChannel(channel.port1 as unknown as MessagePortLike, launcher, { build });
+    const portChannel = client(wrapMessagePort<unknown>(channel.port2 as unknown as MessagePortLike));
+    disposers.push(() => {
+      portChannel.close();
+      channel.port1.close();
+      channel.port2.close();
+    });
+
+    await expect(
+      portChannel.call('prewarm', { chatId: 'chat-1', agent: { kind: 'acp', id: 'claude', hostId: 'hst_1' } }),
+    ).resolves.toEqual({});
+    expect(prewarms).toEqual([{ chatId: 'chat-1', agent: { kind: 'acp', id: 'claude', hostId: 'hst_1' } }]);
+    expect(launcher.seen).toEqual([]);
+  });
+
   it('refuses revision requests when this host exposes no revision root', async () => {
     const channel = new MessageChannel();
     serveAgentChannel(channel.port1 as unknown as MessagePortLike, recordingLauncher(), { build });

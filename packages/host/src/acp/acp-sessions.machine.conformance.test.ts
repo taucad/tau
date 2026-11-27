@@ -144,10 +144,11 @@ describe('acpSessionsMachine conforms to AcpSessions.tla', () => {
     const reached = new Set(paths.map((path) => canonicalJson(path.steps.at(-1)!.view)));
 
     expect(walkPaths(graph, paths).slice(0, 3)).toEqual([]);
-    /* And the other way: with `Init`, the parent reaches all 1,059 states of the spec's projection: 915 before
-     * W6.r1's `bound` flag, which splits a lent run into before and after its prompt is sent. */
+    /* And the other way: with `Init`, the parent reaches all 1,867 states of the spec's projection: 915 before
+     * W6.r1's `bound` flag, which splits a lent run into before and after its prompt is sent, and 1,059 before
+     * WP-18's prewarm, whose `warming` slot and unbound resting session add the rest. */
     expect(reached.size + 1).toBe(specStates.size);
-    expect(specStates.size).toBe(1059);
+    expect(specStates.size).toBe(1867);
   }, 120_000);
 
   it('matches the committed drift manifest', () => {
@@ -170,6 +171,7 @@ describe('acpSessionsMachine conforms to AcpSessions.tla', () => {
         operators: specOperators(readFileSync(path.join(specs, 'AcpSessions.tla'), 'utf8')),
         /* CancelQueued is the parent `cancel`'s second branch, under its success-path label Cancel (spec header). */
         next: [
+          'Prewarm',
           'Acquire',
           'Opened',
           'Dequeued',

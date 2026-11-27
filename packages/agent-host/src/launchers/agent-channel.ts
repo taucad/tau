@@ -88,6 +88,10 @@ export const serveAgentChannel = (
       if (name === 'read') {
         return launcher.read({ ...(args as AgentWireProtocol['calls']['read']['args']), signal });
       }
+      if (name === 'prewarm') {
+        await launcher.prewarm(args as AgentWireProtocol['calls']['prewarm']['args']);
+        return {};
+      }
       if (name === 'revision') {
         if (options.revisions === undefined) {
           throw Object.assign(new Error('This agent host does not serve revisions.'), {

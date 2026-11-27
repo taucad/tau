@@ -18,6 +18,7 @@ import type { Channel, CloseInfo } from '@taucad/rpc';
 import { agentChannelPort } from '#channel/endpoint.js';
 import type { AgentChannelEndpoint } from '#channel/endpoint.js';
 import type { JsonValue } from '#log/event-types.js';
+import type { AgentChannelRunKind } from '#wire/admission.schema.js';
 import type { SourceLiveEvent } from '#waist/ports.js';
 import { agentWireVersion, sourceLiveEventSchema, catchUpFrameSchema } from '#wire/frames.schema.js';
 import type {
@@ -59,6 +60,11 @@ export type AgentChannelClient = {
   catchUp(input: CatchUpInput): AsyncIterable<CatchUpFrame>;
   /** Ephemeral model deltas for one chat. */
   liveEvents(input: Readonly<{ chatId: string; signal?: AbortSignal | undefined }>): AsyncIterable<SourceLiveEvent>;
+  /**
+   * Ask the owner to open an external agent's session for a chat ahead of its turn (WP-18). Best effort: an owner
+   * on the v1 wire, or one older than the call, opens nothing and this resolves all the same.
+   */
+  prewarm(input: Readonly<{ chatId: string; agent: AgentChannelRunKind }>, signal?: AbortSignal): Promise<void>;
   /** One request to the owner's revision root. */
   revision(request: JsonValue, signal?: AbortSignal): Promise<Readonly<{ result: JsonValue; status: JsonValue }>>;
   /** Host-authoritative revision projections and outcomes for this workspace. */
@@ -424,6 +430,17 @@ export const createAgentChannelClient = (options: AgentChannelClientOptions): Ag
           },
         );
       }),
+    prewarm: async (input, signal) => {
+      const current = await connection();
+      if (current.wire !== agentWireVersion) {
+        return;
+      }
+      try {
+        await current.channel.call('prewarm', input, signal);
+      } catch {
+        /* An owner that predates the call, or a prewarm it could not start: the turn opens its own session. */
+      }
+    },
     revision: async (request, signal) => {
       const current = await connection();
       if (current.wire === agentWireVersion) {

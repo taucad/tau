@@ -4912,10 +4912,36 @@ describe('ChatSessionStore', () => {
           } else {
             expect(hostCommand).not.toHaveBeenCalled();
             if (preparedOn !== undefined) {
-              expect(session.messageQueueRef.getSnapshot().context.error).toContain('original host');
+              expect(session.messageQueueRef.getSnapshot().context.error).toBe(
+                "The latest turns are on another computer. They'll appear here when it's back online.",
+              );
               expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
                 items: [{ commandPlacement: preparedOn, command: { commandId: 'req_new_host_message' } }],
               });
+              /* R1 (HA-I4): the pinned entry is offered Remove and Send here instead, never replayed here. */
+              expect(store.pinnedElsewhereOf(chatId)).toEqual({
+                queueId: 'new_host_message',
+                hostId: preparedOn.startsWith('host:') ? preparedOn.slice('host:'.length) : undefined,
+              });
+              hostCommand.mockImplementation(async (command) => ({
+                commandId: command.commandId,
+                generation: 1,
+                status: 'applied',
+                effect: 'durable',
+                cursor: 0,
+              }));
+              /* AR3-9: Send here instead sends under a new command id; the old one may have reached the other computer. */
+              await store.sendQueuedMessageHere(chatId, 'new_host_message', {
+                kind: 'tau',
+                model: 'openai-gpt-6-astra',
+              });
+              await vi.waitFor(() => {
+                expect(hostCommand).toHaveBeenCalled();
+              });
+              const [[sent]] = hostCommand.mock.calls as unknown as [[{ commandId: string; type: string }]];
+              expect(sent.type).toBe('start');
+              expect(sent.commandId).not.toBe('req_new_host_message');
+              expect(store.pinnedElsewhereOf(chatId)).toBeUndefined();
             }
           }
         } finally {
@@ -5794,7 +5820,8 @@ describe('ChatSessionStore', () => {
 
           await vi.advanceTimersByTimeAsync(outboxWaitLineMilliseconds / 2);
 
-          expect(store.hostWaitOf(chatId)).toMatch(/^Queued\. Another tab still has this chat open/u);
+          /* Q3: past the still-closing bound, the chat says where it runs (HA5 code table). */
+          expect(store.hostWaitOf(chatId)).toBe('This chat is running in Tau on this computer.');
         } finally {
           vi.useRealTimers();
           unadmit();

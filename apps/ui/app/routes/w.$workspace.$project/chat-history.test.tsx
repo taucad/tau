@@ -86,6 +86,8 @@ const emitDraftReturned = (): void => {
 };
 
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useOptionalChatSessionStore: () => fakeSessionStore }));
+/* The residual line reads the store's residual facts; its own suite covers it (`chat-residual.test.tsx`). */
+vi.mock('#routes/w.$workspace.$project/chat-residual.js', () => ({ ChatResidual: () => null }));
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: (selector: (state: unknown) => unknown) => {

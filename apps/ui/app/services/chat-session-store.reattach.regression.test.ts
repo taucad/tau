@@ -723,6 +723,8 @@ describe('remote read loop (HA3)', () => {
       host.closeWith({ code: 4003, reason: 'device revoked' });
 
       expect(chat.store.getRemoteResidual(chatId)).toBe('R6');
+      /* R6 outranks R1: the line asks for pairing, not for the computer to come back online. */
+      expect(chat.store.getUnreachableComputer(chatId)).toBeUndefined();
       /* The same attachment dials again on its backoff; the store starts no attachment of its own. */
       await vi.waitFor(() => {
         expect(host.connect.mock.calls.length).toBe(dials + 1);
@@ -747,6 +749,8 @@ describe('remote read loop (HA3)', () => {
 
       expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');
       expect(chat.store.getRemoteResidual(chatId)).toBeUndefined();
+      /* HA5 R1: the latest turns are on a computer this device cannot read now; no host id, so no name to give. */
+      expect(chat.store.getUnreachableComputer(chatId)).toEqual({ hostId: undefined });
     } finally {
       chat.close();
     }

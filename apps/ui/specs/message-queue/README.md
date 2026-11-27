@@ -72,6 +72,8 @@ An answer applied with nothing to do now ends the item (HA4, 2026-11-27, HA-I4):
 
 The HA4 review (2026-11-27) re-pins the drift after `chat-session-store.ts` began cancelling, rather than letting go, a Stop aimed at a run that an applied not-applied answer names live (`details.state` admitted or running). The item still ends as `End(noop)`; the Stop is outside this slice, so no action changes.
 
+A prepared command pinned to a computer this page cannot reach now holds with the R1 line (HA5, 2026-11-27, HA-I8): "The latest turns are on **<computer>**", with Remove and Send here instead. `chat-session-store.ts` records the pin, and `chat-message-queue.tsx` hides the queue's own error while it holds. Remove withdraws the item. Send here instead rewrites it unprepared, under a new command id, for this computer, so it is a new command and never a replay of A's id. When the message had been sent, the line says it may already have reached that computer. No action changes; the `QueuePlacement.tla` note records it and the drift is re-pinned. TLC was not run for this note.
+
 ## Final runtime guard reconciliation
 
 `Acknowledge` requires membership in `Accepted`, which represents durable acceptance. The service now explicitly checks `answer.effect === 'durable'` on both initial dispatch and prepared replay before deleting an item. An `applied` answer with `not-applied` effect retains the original prepared command; it corresponds to stuttering, not `Acknowledge`. Reconciliation from `ledger.applied` uses the authoritative durable log. The model does not equate a successful transport response with acceptance.

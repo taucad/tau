@@ -71,6 +71,10 @@ Retry == /\ s.prepared /\ s.pendingGrant = None /\ s.selected = s.observed
 End(o) == /\ s.prepared /\ s.pendingGrant = None /\ s.selected = s.observed
           /\ (~PinCommands \/ s.pin = s.selected) /\ s.selected \notin s.accepted
           /\ s' = [s EXCEPT !.prepared = FALSE, !.pin = None, !.ended = o]
+\* HA5 (2026-11-27, R1): a prepared command pinned to a host this page cannot reach waits, as `Retry` does, and the
+\* person may Remove it or Send here instead. Both are the person's withdraw of the pinned command: Send here queues
+\* the same message again under a new command id for the host chosen now, so no host replays A's id and these
+\* actions are unchanged. A message that may already have reached A says so before the person picks.
 \* The owner log can reconcile a retained command even without retransmission.
 Acknowledge == /\ s.prepared /\ s.observed \in s.accepted
                /\ s' = [s EXCEPT !.prepared = FALSE, !.pin = None,

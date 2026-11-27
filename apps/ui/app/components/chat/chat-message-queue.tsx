@@ -21,12 +21,17 @@ function ConnectedQueue({
   const subscribe = useCallback((listener: () => void) => store.subscribeChat(chatId, listener), [chatId, store]);
   const readUnqueued = useCallback(() => store.unqueuedSendOf(chatId), [chatId, store]);
   const unqueuedId = useSyncExternalStore(subscribe, readUnqueued, readUnqueued);
+  /* R1 (HA-I4): a message prepared for another computer is the residual line's, with Remove and Send here instead;
+   * the strip offers no Retry that would only meet the same pin. */
+  const readPinned = useCallback(() => store.pinnedElsewhereOf(chatId)?.queueId, [chatId, store]);
+  const pinnedId = useSyncExternalStore(subscribe, readPinned, readPinned);
   const { items, sendingId } = useMemo(() => selectQueueStrip(context, unqueuedId), [context, unqueuedId]);
+  const error = pinnedId === undefined ? context.error : undefined;
   return (
     <ChatMessageQueueView
       items={items}
       {...(sendingId === undefined ? {} : { sendingId })}
-      {...(context.error === undefined ? {} : { error: context.error })}
+      {...(error === undefined ? {} : { error })}
       onEdit={async (id, text) => store.editQueuedMessage(chatId, id, text)}
       onSteer={async (id) => store.steerQueuedMessage(chatId, id)}
       onMove={async (id, beforeId) => store.moveQueuedMessage(chatId, id, beforeId)}

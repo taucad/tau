@@ -87,6 +87,7 @@ import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store
 import { resizeImageActor } from '#hooks/attachment-image.actor.js';
 import { clearLedger } from '@taucad/chat-ui/services/rpc-ledger';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
+import { waitLineOf } from '@taucad/chat-ui/utils/chat-error-card';
 import { buildEditedUserMessage, composeDraftText } from '#utils/chat.utils.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { HostAttachmentStatus } from '#chat-clients/_internal/host-attachment.js';
@@ -747,6 +748,11 @@ type InternalSession = ChatSession & {
   offering: string | undefined;
   /** The prepared send the host last refused with an owner wait, sent again by its key once its backoff runs out. */
   hostWait: HostWait | undefined;
+  /**
+   * R1 (HA-I4): the queued entry whose command was prepared for another placement than the one this page reaches now,
+   * so it is never replayed here; it waits for the person's Remove or *Send here instead*.
+   */
+  pinnedElsewhere?: Readonly<{ queueId: string; placement: string }>;
   /** The live run this page saw before it had model text, so its first text can be timed (T10). */
   presentationWatch: string | undefined;
   /** The newest live run whose first model text this page has timed, or found already showing (T10). */
@@ -858,25 +864,12 @@ type HostWait = Readonly<{
   line: ReturnType<typeof setTimeout> | undefined;
 }>;
 
-/** What a send that waits for its host reads as: queued, with why and when it goes (PERF-5). */
 /**
- * The `wait` codes with a line of their own in the HA5 code table (blueprint, "HA5 code→copy table"): a queued command
- * held on one shows that line after {@link outboxWaitLineMilliseconds}, and never "Reconnecting…". Every other `wait`
+ * What a send that waits for its host reads as (PERF-5): a `wait` code with a line of its own in the HA5 code table
+ * (`waitLineOf`) says that line after {@link outboxWaitLineMilliseconds}, and never "Reconnecting…". Every other `wait`
  * code (the transport and handoff codes) and an answer lost past its bound show no line: the cue applies (HA-I8).
  */
-const linedWaitCodes: ReadonlySet<string> = new Set([
-  'WRITER_LOCKED',
-  'CHAT_RUN_LIVE',
-  'LEADER_VERSION_MISMATCH',
-  'RUN_ACTIVE_ON_ANOTHER_DEVICE',
-  'SEGMENTS_UNREADABLE',
-  'REVISIONS_UNAVAILABLE',
-]);
-
-const hostWaitSentence = (refusal: CommandRefusal): string =>
-  refusal.code === 'WRITER_LOCKED' || refusal.code === 'LEADER_VERSION_MISMATCH'
-    ? 'Queued. Another tab still has this chat open for writing. Your message is sent when that tab resumes or closes.'
-    : 'Queued. Your message is sent as soon as this chat can take it.';
+const hostWaitSentence = (refusal: CommandRefusal): string | undefined => waitLineOf(refusal.code);
 
 /**
  * A Stop this page is carrying out, from the press until nothing is left to wait for. One value, so letting go of it
@@ -1074,6 +1067,8 @@ type ObservedChat = {
   ownDecide?: (local: boolean) => void;
   /** A restart (a pick) of a chat whose own run was unsettled: it stays unsettled until the new start decides. */
   ownHeldUnsettled?: boolean;
+  /** The own source's last pass found this device's saved log missing under rows it had shown (R8). */
+  ownMissing?: boolean;
 };
 
 /** The run IDs a Close prompt can truthfully promise to stop, and the work it cannot. @public */
@@ -2129,6 +2124,49 @@ export class ChatSessionStore {
   }
 
   /**
+   * Residual R1: the computer a remote placement's latest turns are on, while this device cannot read them (its read
+   * was lost or refused). `undefined` for a local placement, before a first read, while attached, and under R6.
+   *
+   * @param chatId - The chat.
+   * @returns The computer (its host id when the connection named one), or `undefined`.
+   * @public
+   */
+  public getUnreachableComputer(chatId: string): Readonly<{ hostId: TauAgentHostId | undefined }> | undefined {
+    const observed = this.#observed.get(chatId);
+    if (
+      observed === undefined ||
+      observed.ownStart !== undefined ||
+      observed.residual !== undefined ||
+      (observed.status !== 'lost' && observed.status !== 'refused')
+    ) {
+      return undefined;
+    }
+    return { hostId: observed.placement?.hostId };
+  }
+
+  /**
+   * Residual R8: this device's saved log of a chat it had shown is missing while its record is present (HA-I3a).
+   *
+   * @param chatId - The chat.
+   * @returns `R8`, or `undefined`.
+   * @public
+   */
+  public getOwnResidual(chatId: string): 'R8' | undefined {
+    return this.#observed.get(chatId)?.ownMissing === true ? 'R8' : undefined;
+  }
+
+  /**
+   * Whether this device reads the chat from its own files (HA-I1), so reading it needs no other computer.
+   *
+   * @param chatId - The chat.
+   * @returns `true` for a local placement's own source.
+   * @public
+   */
+  public readsLocally(chatId: string): boolean {
+    return this.#observed.get(chatId)?.ownStart !== undefined;
+  }
+
+  /**
    * The host this chat's connection reaches: where its runs ran and its refusals came from, whatever the composer is
    * set to since, as the stored records route it (HA-I7). `undefined` before a connection, while a remote read is not
    * attached, or on this page's own host. ponytail: approvals and cancels route through the connector by those records,
@@ -2265,6 +2303,75 @@ export class ChatSessionStore {
       ),
     );
     session.messageQueueRef.send({ type: 'retry' });
+  }
+
+  /**
+   * Residual R1's *Send here instead* (HA-I4, AR3-9): the chat runs on this device's own Tau from now on, and the
+   * entry is sent here as a new command. Its prepared command, if any, may already have reached the computer it was
+   * pinned to, and that log is not this one, so the entry takes a new id rather than replaying the old one.
+   *
+   * @param chatId - The chat.
+   * @param id - The queued entry.
+   * @param execution - This device's own execution for the chat.
+   * @public
+   */
+  public async sendQueuedMessageHere(chatId: string, id: string, execution: CadAgentExecution): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution });
+    const record = await session.messageQueueStore.exclusive(async () =>
+      session.messageQueueStore.update((current) => ({
+        ...current,
+        items: current.items.map((item) =>
+          item.id === id ? { ...unprepared(item), requestId: generatePrefixedId(idPrefix.request), execution } : item,
+        ),
+      })),
+    );
+    this.#loadOutbox(session, record);
+    session.messageQueueRef.send({ type: 'retry' });
+  }
+
+  /**
+   * Residual R1's *Remove*: the entry leaves the outbox, prepared or not. A prepared one was pinned to a computer this
+   * page cannot reach, so nothing here is sending it; whether that computer applied it is that computer's log's.
+   *
+   * @param chatId - The chat.
+   * @param id - The queued entry.
+   * @public
+   */
+  public async discardQueuedMessage(chatId: string, id: string): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    const record = await session.messageQueueStore.exclusive(async () =>
+      session.messageQueueStore.update((current) => ({
+        ...current,
+        items: current.items.filter((item) => item.id !== id),
+      })),
+    );
+    this.#loadOutbox(session, record);
+    session.messageQueueRef.send({ type: 'retry' });
+  }
+
+  /**
+   * Residual R1 for a queued entry (HA-I4): the entry prepared for another placement than the one this page reaches,
+   * with that placement's host id (`undefined` when the placement is not a computer this page can name).
+   *
+   * @param chatId - The chat.
+   * @returns The entry and its computer, or `undefined`.
+   * @public
+   */
+  public pinnedElsewhereOf(chatId: string): Readonly<{ queueId: string; hostId: string | undefined }> | undefined {
+    const pinned = this.#sessions.get(chatId)?.pinnedElsewhere;
+    return pinned === undefined
+      ? undefined
+      : {
+          queueId: pinned.queueId,
+          hostId: pinned.placement.startsWith('host:') ? pinned.placement.slice('host:'.length) : undefined,
+        };
   }
 
   /** Move one unsent entry before another, or to the end, preserving its identity. */
@@ -2881,9 +2988,9 @@ export class ChatSessionStore {
           throw new Error('Queued message is no longer awaiting delivery.');
         }
         if (item.commandPlacement !== undefined && item.commandPlacement !== destination) {
-          throw new Error(
-            'This message may already have been sent on another host. Return to its original host to confirm delivery.',
-          );
+          /* R1 (HA-I4): the person removes it or sends it here under a new id; it is never replayed elsewhere. */
+          this.#pinElsewhere(session, { queueId, placement: item.commandPlacement });
+          throw new Error("The latest turns are on another computer. They'll appear here when it's back online.");
         }
         if (destination === undefined || item.commandPlacement === destination) {
           return record;
@@ -3084,6 +3191,19 @@ export class ChatSessionStore {
     });
   }
 
+  /** Record (or clear) the queued message the store holds because its computer cannot be reached (R1). */
+  #pinElsewhere(session: InternalSession, pinned: InternalSession['pinnedElsewhere']): void {
+    if (
+      session.pinnedElsewhere?.queueId === pinned?.queueId &&
+      session.pinnedElsewhere?.placement === pinned?.placement
+    ) {
+      return;
+    }
+    session.pinnedElsewhere = pinned;
+    this.#projectionTopics.get(session.chatId)?.emit();
+    this.#chatTopics.get(session.chatId)?.emit();
+  }
+
   /**
    * The outbox as this page just read it: the strip's rows and the record the gate reads its receipt from.
    *
@@ -3094,6 +3214,14 @@ export class ChatSessionStore {
    */
   #loadOutbox(session: InternalSession, record: ChatMessageQueueRecord, keepSending = true): void {
     session.outboxRecord = record;
+    const pinned = session.pinnedElsewhere;
+    if (
+      pinned !== undefined &&
+      !record.items.some((entry) => entry.id === pinned.queueId && entry.commandPlacement === pinned.placement)
+    ) {
+      /* Removed, sent here under a new id, or delivered where it was pinned: nothing is pinned elsewhere now. */
+      this.#pinElsewhere(session, undefined);
+    }
     const wait = session.hostWait;
     if (
       wait !== undefined &&
@@ -3184,7 +3312,8 @@ export class ChatSessionStore {
       },
       Math.min(hostWaitFirstDelay * 2 ** attempt, hostWaitLongestDelay),
     );
-    const lined = linedWaitCodes.has(refusal.code);
+    const sentence = hostWaitSentence(refusal);
+    const lined = sentence !== undefined;
     if (!lined) {
       clearTimeout(same?.line);
     }
@@ -3204,7 +3333,7 @@ export class ChatSessionStore {
       runId: command.payload.runId,
       attempt,
       due: false,
-      sentence: hostWaitSentence(refusal),
+      sentence: sentence ?? '',
       lineShown: lined && (same?.lineShown ?? false),
       cue: !lined,
       timer,
@@ -4171,6 +4300,10 @@ export class ChatSessionStore {
     if (this.#observed.get(chatId) !== observed) {
       return;
     }
+    if ((verdict === 'missing') !== (observed.ownMissing === true)) {
+      observed.ownMissing = verdict === 'missing' || undefined;
+      this.#projectionTopics.get(chatId)?.emit();
+    }
     /* `unreadable` keeps the authority it had: a failed read is retried, and the file still holds the chat. */
     if (verdict !== 'unreadable') {
       const wasCurrent = observed.ownCurrent === true;
@@ -4520,7 +4653,7 @@ export class ChatSessionStore {
 
   /**
    * HA-I8's cause facts: the outbox head re-sends after a lost answer or a `wait` code with no line of its own
-   * ({@link linedWaitCodes}), or a local
+   * (`waitLineOf`), or a local
    * chat's live overlay that was subscribed waits again for a transient cause while its own run is unsettled. Never in
    * a `paused` phase (an approval or a question), on a cold open's first connect, or over a coded terminal cause.
    */

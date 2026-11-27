@@ -73,6 +73,9 @@
 \* FW2 re-review (2026-11-26): a read repairs `lost` when no other read of the directory in flight holds an older
 \* capture, so overlapping audits that all read the disk as it is clear it, and `Quiescent` includes `lost = {}` again.
 \* `target-lost-wide` (nightly) checks `target-lost` with the own write and the repeated fact back in.
+\* Staging path (2026-11-27): `project-directories.ts` names the storage root's import staging `.tau/staging/` instead
+\* of `.tau-staging/` (taucad/tau#2909), in a comment only. Discovery still skips every dot-named root entry; no action
+\* or verdict changes.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

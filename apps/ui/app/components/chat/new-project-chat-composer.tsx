@@ -1,5 +1,6 @@
 import { holdFirstTurnBackup } from '#lib/first-turn-backup-gate.js';
 import { departFirstMessage } from '#lib/departing-first-message.js';
+import { frameHintKey, writePhoneFrameHint } from '#lib/frame-hint.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
@@ -156,8 +157,15 @@ export function NewProjectChatComposer({
         }
         /* The draft is consumed before the project route reads anything, and the navigation starts in the same task,
          * so Home's composer clears as the frame is drawn ahead of the route, not a beat before. */
+        const url = projectUrl(created.slugs);
+        /* The project opens on its chat (`mobileActiveTab`); a phone's frame draws that sheet, and the message in it,
+         * from its first paint rather than the default model tab with the sheet closed. */
+        const hintKey = frameHintKey(url);
+        if (hintKey !== undefined) {
+          writePhoneFrameHint(hintKey, 'chat');
+        }
         const consumed = consumeDraft();
-        const navigation = navigate(projectUrl(created.slugs));
+        const navigation = navigate(url);
         await consumed;
         await navigation;
       } catch (error) {

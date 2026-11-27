@@ -1,4 +1,5 @@
 import { arriveFirstMessage, departingFirstMessageOf } from '#lib/departing-first-message.js';
+import { readPhoneFrameHint } from '#lib/frame-hint.js';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useImperativeHandle } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -208,6 +209,8 @@ describe('NewProjectChatComposer', () => {
       await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
     });
     expect(departingFirstMessageOf('workshop/bracket')).toBe('Build a bracket');
+    /* A phone's frame opens on the chat sheet, where the message is drawn. */
+    expect(readPhoneFrameHint('workshop/bracket')?.tab).toBe('chat');
     arriveFirstMessage('workshop/bracket');
 
     draftAttachments = [{ hash: 'a'.repeat(64), mediaType: 'image/png', byteLength: 3 }];

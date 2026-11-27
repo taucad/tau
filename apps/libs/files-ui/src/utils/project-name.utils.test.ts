@@ -75,6 +75,8 @@ describe('projectNameFromPrompt', () => {
       'Make a 20 mm cube with',
     );
     expect(projectNameFromPrompt('\n  A bracket, please!\nWith two holes')).toBe('A bracket, please');
+    /* A supplementary-plane letter (Deseret) capitalises as one code point. */
+    expect(projectNameFromPrompt('\u{10428} bracket')).toBe('\u{10400} bracket');
   });
 
   it('should be empty for a prompt with no words, and fit a single overlong word', () => {

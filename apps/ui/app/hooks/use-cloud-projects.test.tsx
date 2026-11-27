@@ -423,6 +423,23 @@ describe('useTauCloudIntentConnection', () => {
     expect(tauCloudIntent.get(projectId)).toBe('connected');
   });
 
+  it('should queue no held first backup on a session that closed before the hold ended', async () => {
+    holdFirstTurnBackup(projectId);
+    tauCloudIntent.set(projectId, 'noticed');
+    const { rerender, unmount } = renderConnection(undefined);
+    rerender({ head: 'rev-1' });
+    expect(tauCloudIntent.get(projectId)).toBe('connected');
+
+    unmount();
+    await act(async () => {
+      releaseFirstTurnBackup(projectId);
+      await Promise.resolve();
+    });
+    /* The closed client would queue it for whoever opens the project next; the next session connects it instead. */
+    expect(connectRemote).not.toHaveBeenCalled();
+    expect(tauCloudIntent.get(projectId)).toBe('noticed');
+  });
+
   it('should not repeat a step another tab already took', () => {
     tauCloudIntent.set(projectId, 'connected');
 

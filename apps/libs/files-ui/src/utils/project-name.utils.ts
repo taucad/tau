@@ -52,5 +52,7 @@ export const projectNameFromPrompt = (prompt: string): string => {
   const words = firstLine.trim().split(/\s+/u).slice(0, promptNameWords).join(' ');
   const trimmed = words.replace(/[\s\p{P}]+$/u, '');
   /* Fitted after capitalising, since an upper-case letter can be longer than its lower case (`ß` is `SS`). */
-  return fitProjectName(trimmed.charAt(0).toLocaleUpperCase() + trimmed.slice(1));
+  /* The first code point, not the first UTF-16 unit: a supplementary-plane letter capitalises whole. */
+  const [first = ''] = trimmed;
+  return fitProjectName(first.toLocaleUpperCase() + trimmed.slice(first.length));
 };

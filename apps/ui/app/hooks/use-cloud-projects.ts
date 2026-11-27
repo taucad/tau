@@ -878,6 +878,16 @@ export const useTauCloudIntentConnection = ({
   const step =
     intent === 'open' && !canOpenCloudProject(projectId) ? 'wait' : nextTauCloudStep(intent, eligibility, status);
   const { connectRemote } = commands;
+  /* The session's connect verb while its session is open: a held first backup connects only through a live one. */
+  const liveConnectRemote = useRef<typeof connectRemote | undefined>(connectRemote);
+  useEffect(() => {
+    liveConnectRemote.current = connectRemote;
+    return () => {
+      if (liveConnectRemote.current === connectRemote) {
+        liveConnectRemote.current = undefined;
+      }
+    };
+  }, [connectRemote]);
   useEffect(() => {
     if (
       getCloudDeletionState(projectId) !== undefined ||
@@ -915,12 +925,13 @@ export const useTauCloudIntentConnection = ({
           if (getCloudDeletionState(projectId) !== undefined) {
             return;
           }
-          if (getRevisionSessionUser()?.id === account) {
+          /* A closed session's client would queue the connect for whoever opens it next, unchecked. */
+          if (getRevisionSessionUser()?.id === account && liveConnectRemote.current === connectRemote) {
             await connectRemote('tau');
             return;
           }
-          /* A different person signed in while the first turn held the backup: back to `noticed`, so the next account
-           * that may connect still does, once. */
+          /* A different person signed in, or the project closed, while the first turn held the backup: back to
+           * `noticed`, so the next session whose account may connect still does, once. */
           if (tauCloudIntent.get(projectId) === 'connected') {
             tauCloudIntent.set(projectId, 'noticed');
           }

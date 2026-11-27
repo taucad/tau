@@ -432,13 +432,24 @@ const ExpandedChatHistory = memo(function ({
 
   /* The first measured rows draw the message: the stand-in leaves in the same commit. */
   const { totalListHeightChanged: followTotalListHeight } = followLatestOutput;
+  /* The pending arrival's frame, cancelled on unmount: a lane that left must not clear the next lane's stand-in. */
+  const arrivalFrame = useRef<number | undefined>(undefined);
+  useEffect(
+    () => () => {
+      if (arrivalFrame.current !== undefined) {
+        cancelAnimationFrame(arrivalFrame.current);
+      }
+    },
+    [],
+  );
   const handleTotalListHeightChanged = useCallback(
     (height: number) => {
       followTotalListHeight();
-      if (height > 0) {
+      if (height > 0 && arrivalFrame.current === undefined) {
         /* Virtuoso shows a measured row a frame after it reports the height. */
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
+        arrivalFrame.current = requestAnimationFrame(() => {
+          arrivalFrame.current = requestAnimationFrame(() => {
+            arrivalFrame.current = undefined;
             arriveFirstMessage(departingScope);
           });
         });

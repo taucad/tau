@@ -22,7 +22,7 @@
     "withdrawTurn"
   ],
   "sources": {
-    "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx": "906912b6183fd14c754d80e5ca84b67daacdbf20d260bbb42335d1a7ea7d7db1",
+    "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx": "b44a781d3813b51d49b0af4fb70f7c07db3c323b255182dc86fc58c9fff1e2ac",
     "apps/libs/chat-ui/src/db/chat-message-queue-store.ts": "7f5887a1f65eea460b3463f445a3aef19dd7843ea1b379940e0273eebc1c32f7",
     "apps/libs/chat-ui/src/machines/chat-message-queue.machine.ts": "b8ff03658a2db816af1d7e34ad621d548653e48784d5c7b2ce7801a26bbfeb0f",
     "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "53443348c954ec1cb4656dda9569385dd0af65c39356e1cfadd5ddb44ded8d0a",
@@ -36,7 +36,7 @@
     "apps/ui/app/services/outbox-gate.ts": "c9d5a33f02c06d6bb45657f76e30a6c3a28b31bf6403d7dc0e9d3c840c4e357e"
   },
   "specs": {
-    "MessageQueue.tla": "934f36cfba2f858cb621da98ab8e37dfb944b5c5fcd3f78a686b3e32f77f7c55",
+    "MessageQueue.tla": "f6bd91ac1a0ea5714be948fdfd85d64ff7cdfe62804627643aae42856f00a0e3",
     "QueuePlacement.tla": "deb7d4f4fcd0de459b5c490eae7ec417bffb9ed99f7eca969e0141443648c952"
   },
   "tables": {

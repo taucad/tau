@@ -139,9 +139,9 @@ describe('listProjectManifests cost on the 386-directory profile', () => {
   });
 
   /* Fast-path FW3: the delete answers what remains of the id under the same hold of its lock, from reads of the known
-   * locations; no other directory is read unless no known location holds the id. The surviving copy counts only when a
-   * fresh listing of its root names it exactly (review M1): one listing of that root. */
-  it("should delete a copy with its own checks, one probe of the other copy and one listing of that copy's root", async () => {
+   * locations; no other directory is read unless no known location holds the id. A copy in another root than the
+   * target cannot be the target under another spelling, so its root is not listed (review M1, budget). */
+  it('should delete a copy with its own checks and one probe of the other copy in another root, listing no root', async () => {
     await profile.service.listProjectManifests();
     const projectId = discoveryProfileHomeId(0);
 
@@ -155,12 +155,12 @@ describe('listProjectManifests cost on the 386-directory profile', () => {
     );
 
     expect(result).toMatchObject({ status: 'deleted', remaining: [{ relativeDirectory: 'home-000' }] });
-    expect(cost.counters).toEqual({ 'discovery.probe': 1, 'discovery.listing': 1 });
+    expect(cost.counters).toEqual({ 'discovery.probe': 1 });
     /* The target's checks: its manifest and its identity, and whether it, its manifest and then nothing remains. */
     expect(cost.providers.workspace.kinds).toMatchObject({ manifestRead: 1, identityRead: 1, head: 0 });
     expect(cost.providers.workspace.fileReads).toBe(2);
-    /* The other copy: two reads, and its root listed once. */
-    expect(cost.providers.home).toMatchObject({ fileReads: 2, listings: 1 });
+    /* The other copy: two reads, no listing. */
+    expect(cost.providers.home).toMatchObject({ fileReads: 2, listings: 0 });
   });
 
   it('should delete a sole copy with its own checks and one identity sweep (until W5)', async () => {

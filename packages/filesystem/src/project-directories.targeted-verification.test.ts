@@ -662,7 +662,8 @@ describe('only a different, whole directory proves a copy (FW3 review M1, M2, m1
         copy: true,
         exclude: [{ storageRootKey: roots.workspace, relativeDirectory: 'copy-000' }],
       }),
-    ).resolves.toMatchObject({ status: 'copy-unproven', reason: 'absent' });
+      /* Review N2: a copy it was told to leave out is not proof of absence either: it could not be counted. */
+    ).resolves.toEqual({ status: 'copy-unproven', reason: 'unknown' });
     const { locations } = await profile.service.probeProjectDirectories({
       projectId: discoveryProfileHomeId(0),
       known: true,
@@ -685,6 +686,66 @@ describe('only a different, whole directory proves a copy (FW3 review M1, M2, m1
         copy: true,
       }),
     ).resolves.toEqual({ status: 'copy-unproven', reason: 'unknown', unavailable: [homeAt(roots, 'home-000')] });
+  });
+
+  /* Review N1: a folder in the permission prompt after a restart, with nothing in the index, cannot be swept, and no
+   * known location names it: the answer is unknown, never absent. */
+  it('should answer unknown, naming nothing, when the sweep cannot read a root and nothing was nominated', async () => {
+    const profile = await profileOf();
+    const roots = await rootsOf(profile);
+    loseRoot(roots.workspace);
+
+    await expect(
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId: discoveryProfileHomeId(1),
+        providerBasePath: 'home-001',
+        scope: { backend: 'opfs' },
+        copy: true,
+      }),
+    ).resolves.toEqual({ status: 'copy-unproven', reason: 'unknown' });
+  });
+
+  /* Review budget: the exact listing is paid only where an alias can be the target, a copy in the target's own root
+   * that a caller or the index nominated; a copy in another root, or one the sweep listed in the same hold, needs none. */
+  it("should list the root of a same-root nominated copy, and only that root's", async () => {
+    const profile = await profileOf();
+    await profile.service.listProjectManifests();
+    const roots = await rootsOf(profile);
+    await profile.writeBehind('home', 'home-000-copy/tau.json', manifest('Home 0 copy'));
+    await profile.writeBehind('home', `home-000-copy/${projectIdentityPath}`, identity(discoveryProfileHomeId(0)));
+
+    const { result, cost } = await profile.measure(async () =>
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId: discoveryProfileHomeId(0),
+        providerBasePath: 'home-000',
+        scope: { backend: 'opfs' },
+        copy: true,
+        locations: [homeAt(roots, 'home-000-copy')],
+      }),
+    );
+
+    expect(result).toMatchObject({ status: 'deleted' });
+    expect(cost.counters['discovery.listing']).toBe(1);
+    expect(cost.providers.home.listings).toBeGreaterThanOrEqual(1);
+    expect(cost.providers.workspace.listings).toBe(0);
+  });
+
+  it('should prove a copy the sweep found without listing its root again', async () => {
+    const profile = await profileOf();
+    const roots = await rootsOf(profile);
+
+    const { result, cost } = await profile.measure(async () =>
+      profile.service.permanentlyDeleteProjectDirectory({
+        projectId: discoveryProfileHomeId(0),
+        providerBasePath: 'copy-000',
+        scope: profile.workspaceScope,
+        copy: true,
+      }),
+    );
+
+    expect(result).toEqual({ status: 'deleted', remaining: [homeAt(roots, 'home-000')] });
+    /* The sweep's own listings, one per root, and no other. */
+    expect(cost.counters).toMatchObject({ 'discovery.identitySweep': 1, 'discovery.listing': 2 });
   });
 
   /* T2 / m1: an identity record with no manifest is a husk, not a copy to keep state for. */

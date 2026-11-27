@@ -209,6 +209,17 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
   }
 
   /**
+   * Whether the root's names hold `name`, spelled exactly: a probe installs only under a listed name (FW3 review N4).
+   *
+   * @param storageRootKey - The root.
+   * @param name - The directory.
+   * @returns Whether it is listed.
+   */
+  public hasName(storageRootKey: string, name: string): boolean {
+    return this._roots.get(storageRootKey)?.names.has(name) === true;
+  }
+
+  /**
    * The clean entry of one directory.
    *
    * @param storageRootKey - The root.

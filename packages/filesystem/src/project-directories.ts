@@ -93,6 +93,7 @@ import { isReservedImportPath } from '#importer/path-policy.js';
 import { directoryConcurrency, mapConcurrent } from '#concurrency.js';
 import { workerTimings } from '#worker-timings.js';
 import type { ProjectDirectoryIndex } from '#project-directory-index.js';
+import { foldPathSpelling } from '#path-fold.js';
 
 /** Declaration or generated-identity failure affecting one discovery entry. @public */
 export type ProjectDiscoveryIssue =
@@ -957,12 +958,17 @@ export class ProjectDirectories {
           target,
           excluded: new Set((input.exclude ?? []).map((left) => `${left.storageRootKey}\0${left.relativeDirectory}`)),
         };
-        /* A location under a pending delete of its own is not counted: its removal may already be under way (M2). */
-        const others = this._nominations(projectId, {
+        /* A location under a pending delete of its own is not counted: its removal may already be under way (M2). It is
+         * not counted as absent either: one left out makes a refusal `unknown` (review N2). */
+        const nominated = this._nominations(projectId, {
           locators: input.locations ?? [],
-          except: [{ storageRootKey, relativeDirectory: path }, ...(input.exclude ?? [])],
+          except: [{ storageRootKey, relativeDirectory: path }],
           known: true,
         });
+        const others = nominated.filter(
+          (other) => !leftOut.excluded.has(`${other.storageRootKey}\0${other.relativeDirectory}`),
+        );
+        const leftOutNominated = others.length < nominated.length;
         await provider.refresh?.([path]);
         if (!(await provider.exists(path))) {
           this._contradicted(storageRootKey, path, (reading) => reading.kind === 'not-a-project');
@@ -1012,7 +1018,7 @@ export class ProjectDirectories {
          * removal already began is no longer a copy anyone counts, so finishing it waives nothing. */
         let proven: readonly ProjectLocator[] | undefined;
         if (input.copy === true && removal.manifest !== undefined) {
-          const survivors = await this._survivors(projectId, others, leftOut);
+          const survivors = await this._survivors(projectId, others, { ...leftOut, leftOutNominated });
           if (survivors.status !== 'held') {
             return survivors.unavailable.length === 0
               ? { status: 'copy-unproven', reason: survivors.status }
@@ -1790,7 +1796,7 @@ export class ProjectDirectories {
     }
     /* Installed only under a name the root's listing holds exactly: on a volume that folds case, a locator spelled
      * another way reads a listed directory's bytes, and installing them would list it twice (review nit). */
-    if (read.success && this._index.view(storageRootKey)?.names.includes(directory) === true) {
+    if (read.success && this._index.hasName(storageRootKey, directory)) {
       this._index.install(storageRootKey, directory, {
         version,
         reading: {
@@ -1855,7 +1861,7 @@ export class ProjectDirectories {
   private async _survivors(
     projectId: string,
     targets: readonly ProbeTarget[],
-    leftOut: Readonly<{ target: PhysicalDirectory; excluded: ReadonlySet<string> }>,
+    leftOut: Readonly<{ target: PhysicalDirectory; excluded: ReadonlySet<string>; leftOutNominated: boolean }>,
   ): Promise<
     Readonly<
       | { status: 'held'; locators: readonly ProjectLocator[] }
@@ -1864,21 +1870,36 @@ export class ProjectDirectories {
   > {
     const { target, excluded } = leftOut;
     const probed = await this._probe(projectId, targets);
-    let held = probed.filter((location) => location.status === 'held');
     const unreadable = probed.filter((location) => location.status === 'unknown').map((location) => location.locator);
-    let unknown = unreadable.length > 0;
-    if (held.length === 0) {
-      const swept = await this._sweptCopies(projectId, { except: target, excluded, probed });
-      held = swept.held;
-      unreadable.push(...swept.unreadable);
-      unknown ||= swept.unknown;
-    }
-    const listed = await this._listedExactly(held, target);
+    let unknown = unreadable.length > 0 || leftOut.leftOutNominated;
+    /* Only a held copy in the target's own root can be the target under another spelling (review M1); one in another
+     * root needs no listing (review budget). */
+    const listed = await this._listedExactly(
+      probed.filter(
+        (location) => location.status === 'held' && location.locator.storageRootKey === target.storageRootKey,
+      ),
+      target,
+    );
     unreadable.push(...listed.unreadable);
-    if (listed.held.length > 0) {
-      return { status: 'held', locators: listed.held };
+    unknown ||= listed.unreadable.length > 0;
+    const held = [
+      ...probed
+        .filter((location) => location.status === 'held' && location.locator.storageRootKey !== target.storageRootKey)
+        .map((location) => location.locator),
+      ...listed.held,
+    ];
+    if (held.length === 0) {
+      /* The sweep listed each root's names in this same hold, so what it finds needs no listing again; a name it
+       * found is exact, and the target is left out of it by name. */
+      const swept = await this._sweptCopies(projectId, { except: target, excluded, probed });
+      held.push(...swept.held.map((location) => location.locator));
+      unreadable.push(...swept.unreadable);
+      unknown ||= swept.unknown || swept.leftOut;
     }
-    return { status: unknown || listed.unreadable.length > 0 ? 'unknown' : 'absent', unavailable: unreadable };
+    if (held.length > 0) {
+      return { status: 'held', locators: held };
+    }
+    return { status: unknown ? 'unknown' : 'absent', unavailable: unreadable };
   }
 
   /**
@@ -1897,12 +1918,18 @@ export class ProjectDirectories {
       probed: readonly ProjectProbeLocation[];
     }>,
   ): Promise<
-    Readonly<{ held: ProjectProbeLocation[]; unreadable: ProjectLocator[]; unknown: boolean; present: boolean }>
+    Readonly<{
+      held: ProjectProbeLocation[];
+      unreadable: ProjectLocator[];
+      unknown: boolean;
+      present: boolean;
+      leftOut: boolean;
+    }>
   > {
     const { except, excluded, probed } = leftOut;
     const absence = await this.verifyAbsent(projectId, { alreadyLocked: true, except });
     if (absence.status !== 'present') {
-      return { held: [], unreadable: [], unknown: absence.status === 'unknown', present: false };
+      return { held: [], unreadable: [], unknown: absence.status === 'unknown', present: false, leftOut: false };
     }
     const keyOf = (locator: Readonly<{ storageRootKey: string; relativeDirectory: string }>): string =>
       `${locator.storageRootKey}\0${locator.relativeDirectory}`;
@@ -1922,6 +1949,7 @@ export class ProjectDirectories {
       unreadable: swept.filter((location) => location.status === 'unknown').map((location) => location.locator),
       unknown: false,
       present: true,
+      leftOut: absence.locators.some((locator) => excluded.has(keyOf(locator))),
     };
   }
 
@@ -1937,7 +1965,6 @@ export class ProjectDirectories {
     held: readonly ProjectProbeLocation[],
     target: PhysicalDirectory,
   ): Promise<Readonly<{ held: ProjectLocator[]; unreadable: ProjectLocator[] }>> {
-    const fold = (name: string): string => name.normalize('NFC').toLowerCase();
     const roots = this._discoveryRoots();
     const byRoot = new Map<string, ProjectLocator[]>();
     for (const { locator } of held) {
@@ -1963,7 +1990,8 @@ export class ProjectDirectories {
       const listed = new Set(names);
       for (const locator of locators) {
         const isTarget =
-          storageRootKey === target.storageRootKey && fold(locator.relativeDirectory) === fold(target.providerBasePath);
+          storageRootKey === target.storageRootKey &&
+          foldPathSpelling(locator.relativeDirectory) === foldPathSpelling(target.providerBasePath);
         if (listed.has(locator.relativeDirectory) && !isTarget) {
           kept.push(locator);
         }

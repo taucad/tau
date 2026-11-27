@@ -84,6 +84,9 @@
 \* read); a surviving copy is checked against a fresh listing of its root, which compares and unlists as the sweep's
 \* does. The removal takes the manifest first and finishes a directory whose identity record names the id; no action
 \* models it. Every action and verdict is unchanged.
+\* FW3 re-review (2026-11-27): the probe's install guard asks the index whether the root's names hold the directory
+\* (`hasName`); a same-root surviving copy is listed, one in another root or found by the sweep is not. Reads only;
+\* every action and verdict is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

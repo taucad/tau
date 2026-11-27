@@ -11,4 +11,4 @@
  *
  * @public
  */
-export const provenanceRules = 2;
+export const provenanceRules = 3;

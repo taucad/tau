@@ -430,7 +430,7 @@ describe('attributionOf against the device-state rows', () => {
         }),
       ),
     ).toEqual({ kind: 'external', name: 'O', backedUpBy: { accountId: pusher } });
-    /* Recorded for another account but authored as the pusher: the record decides, not own git (M2 review m1). */
+    /* D4 step 5: recorded for another account but authored as the pusher; the record decides and own git never rescues it (Principal ruling 2026-11-27). */
     expect(
       row(
         commit({

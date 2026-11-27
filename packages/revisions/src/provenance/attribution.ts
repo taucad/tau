@@ -140,8 +140,8 @@ const joinedAttribution = (reading: CommitReading, join: Joined, viewer: Viewer)
   }
   /* Step 5: a Tau agent result for the pusher; any other falls to step 9 (R2-6). */
   if (reading.tauAgent !== undefined) {
-    /* The parsed record decides (a Tau agent result always has one): an own-git author under a record that names
-     * another account is that account's work, not the pusher's (M2 review m1). */
+    /* D4 step 5: the parsed record decides (a Tau agent result always has one). An own-git author under a record that
+     * names another account is never rescued, and falls to step 9 (R2-6; Principal ruling 2026-11-27, M2-fix review M2). */
     const forPusher = reading.person?.id === id || reading.onBehalfOf === id;
     return forPusher ? { kind: 'tauAgent', for: pusherRef(pusher), ...device(push) } : external(reading, pusher, push);
   }

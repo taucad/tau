@@ -2,6 +2,7 @@
   "$comment": "SHA-256 of the corpus's answers (expected.json) under each provenanceRules value. Append only: corpus.test.ts refuses to rewrite an entry, so changing an answer needs a bump (G1).",
   "rules": {
     "1": "61581c4658e25842de1f258d25db85a5b085700b10cff6e35a8fd4087f9737e5",
-    "2": "b4fc5ec9e85ed4885ee4d8557505bb5f7ece573246606e207d0b16d5b56c3209"
+    "2": "b4fc5ec9e85ed4885ee4d8557505bb5f7ece573246606e207d0b16d5b56c3209",
+    "3": "615fcfc8e040257600afc0c7c4a130bb07b55555892368b3fed3bdb2f34ea05d"
   }
 }

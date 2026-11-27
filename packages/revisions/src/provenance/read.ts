@@ -27,7 +27,7 @@ const pseudonymPrefix = 'anon:';
 const versionIdPattern = /^[\da-f]{32}$/u;
 const forgeAddress = /^(?:\d+\+)?[A-Za-z\d](?:[A-Za-z\d-]*[A-Za-z\d])?@users\.noreply\.github\.com$/u;
 const trailerKey = /^[A-Za-z][A-Za-z\d-]*$/u;
-/* Longer lines are never read as trailers, and only the message's tail is scanned for them (M2 review B1). */
+/* Longer lines are never read as trailers, and only the message's last 64 KiB outside `Tau-*` lines is scanned for them (M2 review B1). */
 const maxTrailerLineLength = 1024;
 const maxTrailerScanLength = 64 * 1024;
 const coAuthoredBy = 'co-authored-by';
@@ -118,17 +118,35 @@ const isNonEmptyString = (value: unknown): value is string => typeof value === '
 const isStringArray = (value: unknown): boolean =>
   Array.isArray(value) && value.every((item) => typeof item === 'string');
 
+/*
+ * An id a record may name a person by (M2-fix review M1): an account, a device pseudonym (`anon:` and a token), or the
+ * OS login a pre-A1 desktop wrote (corpus row 3, kept readable by I10). An id holding `@`, `<`, `>`, a control
+ * character or more than 128 characters makes the record unparsed, so the commit reads `tau/other` from its headers and
+ * no record field carries an address out of the module. An `anon:` id must be the pseudonym form.
+ */
+const pseudonymPattern = /^anon:[A-Za-z\d_-]{1,64}$/u;
+const isRecordIdentity = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value !== '' &&
+  value.length <= maxClaimableLength &&
+  !/[@<>\p{Cc}]/u.test(value) &&
+  (!value.startsWith(pseudonymPrefix) || pseudonymPattern.test(value));
+
+/* A record's display name, kept only when it holds no `@`, `<` or `>`: no address leaves through a name (I11). */
+const neutralRecordName = (name: string | undefined): string | undefined =>
+  name === undefined || /[@<>]/u.test(name) ? undefined : name;
+
 const parseUser = (value: unknown): Extract<RecordActor, { kind: 'user' }> | undefined => {
   if (
     !isRecord(value) ||
     value['kind'] !== 'user' ||
-    !isNonEmptyString(value['id']) ||
+    !isRecordIdentity(value['id']) ||
     !isOptional(value['name'], 'string') ||
     !isOptional(value['anonymous'], 'boolean')
   ) {
     return undefined;
   }
-  const name = value['name'] as string | undefined;
+  const name = neutralRecordName(value['name'] as string | undefined);
   const anonymous = value['anonymous'] as boolean | undefined;
   return {
     kind: 'user',
@@ -341,17 +359,31 @@ const trailerOf = (line: string): IdentityTrailer | undefined => {
   return { key: key.toLowerCase(), name, email: normalAddress(email) };
 };
 
-const identityTrailers = (message: string): IdentityTrailer[] =>
-  message
-    .slice(-maxTrailerScanLength)
-    .split('\n')
-    .flatMap((line) => {
-      const trailer = trailerOf(line);
-      return trailer === undefined ? [] : [trailer];
-    });
+/*
+ * The identity trailers of a message: its last lines up to 64 KiB, counted after the `Tau-*` lines are set aside, so a
+ * long record never pushes a real `Co-Authored-By` out of reach (M2-fix review m1). One trailing `\r` per line is
+ * dropped, so a CRLF message reads as git reads it (m2). Linear: one split, one pass from the end.
+ */
+const identityTrailers = (message: string): IdentityTrailer[] => {
+  const lines = message.split('\n');
+  const out: IdentityTrailer[] = [];
+  let scanned = 0;
+  for (let index = lines.length - 1; index >= 0 && scanned <= maxTrailerScanLength; index -= 1) {
+    const raw = lines[index] ?? '';
+    if (raw.startsWith('Tau-')) {
+      continue;
+    }
+    scanned += raw.length + 1;
+    const trailer = trailerOf(raw.endsWith('\r') ? raw.slice(0, -1) : raw);
+    if (trailer !== undefined) {
+      out.push(trailer);
+    }
+  }
+  return out.reverse();
+};
 
 const validClaimable = (identity: string | undefined): string | undefined =>
-  identity === undefined || identity === '' || identity.length > maxClaimableLength || /[<>\n\0]/u.test(identity)
+  identity === undefined || identity === '' || identity.length > maxClaimableLength || /[@<>\n\0]/u.test(identity)
     ? undefined
     : identity;
 
@@ -445,7 +477,8 @@ type IdentityFields = ReturnType<typeof identityFields>;
 
 /* The pseudonym the commit is recorded or authored as, if any. */
 const pseudonymOf = (actor: RecordActor | undefined, authorLocal: string | undefined): string | undefined => {
-  if (actor?.kind === 'user' && (actor.id.startsWith(pseudonymPrefix) || actor.anonymous === true)) {
+  /* Only the `anon:` form is a pseudonym: `anonymous: true` beside an account id names that account. */
+  if (actor?.kind === 'user' && actor.id.startsWith(pseudonymPrefix)) {
     return actor.id;
   }
   if (actor?.kind === 'agent' && actor.onBehalfOf.startsWith(pseudonymPrefix)) {

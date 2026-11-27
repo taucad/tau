@@ -34,7 +34,12 @@ import type {
 export type ProjectLibraryFileManager = Readonly<{
   client: Pick<
     FileSystemClient,
-    'listProjectManifests' | 'commitPendingProjectDirectory' | 'permanentlyDeleteProjectDirectory'
+    | 'listProjectManifests'
+    | 'commitPendingProjectDirectory'
+    | 'permanentlyDeleteProjectDirectory'
+    | 'verifyProjectRoute'
+    | 'verifyAbsent'
+    | 'probeProjectDirectories'
   >;
   recordFiles: Pick<RootedContentClient, 'readFile' | 'writeFile' | 'readdir' | 'stat' | 'exists' | 'unlink' | 'rmdir'>;
   workspace: Readonly<{ syncProjectRoots: () => Promise<void> }>;
@@ -62,6 +67,8 @@ export type ProjectLibraryObjectStore = Readonly<{
   setProjectDisclosure: (projectId: string, expanded: boolean | undefined) => Promise<unknown>;
   resumePendingProjectOperationResources: (operationId: string) => Promise<readonly Chat[]>;
   completePendingProjectOperation: (operationId: string) => Promise<void>;
+  /** The journal as it is now, every tab's rows: a delete leaves out the directories other deletes are removing. */
+  getPendingProjectOperations: () => Promise<PendingProjectOperation[]>;
 }>;
 
 /**
@@ -80,7 +87,14 @@ export type ProjectLibraryChatRecords = Readonly<{ putChatRecord: (chat: Chat) =
  */
 export type ProjectLibraryRootFacade = ProjectLibraryFileManager &
   Readonly<{
-    client: Pick<FileSystemClient, 'listProjectManifests' | 'verifyProjectRoute' | 'adoptProjectDirectory'>;
+    client: Pick<
+      FileSystemClient,
+      | 'listProjectManifests'
+      | 'verifyProjectRoute'
+      | 'verifyAbsent'
+      | 'probeProjectDirectories'
+      | 'adoptProjectDirectory'
+    >;
     scopedStorage: ScopedStorageClient;
     readDuplicateProjectFiles: (projectRoot: string) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;
   }>;

@@ -301,6 +301,14 @@ export class MetricsService {
     },
   );
 
+  public readonly billingFundedOperationAboveHold = this.apiMeter.createCounter(
+    TauMetrics.billingFundedOperationAboveHold.name,
+    {
+      description: TauMetrics.billingFundedOperationAboveHold.description,
+      unit: TauMetrics.billingFundedOperationAboveHold.unit,
+    },
+  );
+
   public readonly billingFundedOperationCurrent = this.apiMeter.createGauge(
     TauMetrics.billingFundedOperationCurrent.name,
     {

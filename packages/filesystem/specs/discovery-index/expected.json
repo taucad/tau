@@ -1,0 +1,59 @@
+{
+  "configs": {
+    "DiscoveryIndex.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Index-contract review A2: evidence armed before the first read, own writes tapped before they are issued and when they settle, reads installed under the directory's evidence counter, which no install lowers. 2 directories, 2 readers per directory, 2 changes, 1 own write, 1 repeated fact, no lost fact."
+    },
+    "DiscoveryIndex.target-lost.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "A2 and A4: one fact lost and the audit on, 2 readers per directory. CleanIsCurrent holds outside the lost directory, and EventuallyCurrent under LiveSpec (weak fairness of arming, delivery, the reads and the audit). Quiescence: Quiescent. 2 directories, 1 change, 1 lost change; no own write or repeated fact, which target covers, so the family stays within the pr budget."
+    },
+    "DiscoveryIndex.clear-unconditional.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CleanIsCurrent"
+      },
+      "kind": "witness",
+      "ref": "Index-contract review F5, A2(f): a read that clears its directory unconditionally loses the fact that arrived while it ran. 1 change."
+    },
+    "DiscoveryIndex.read-before-arm.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CleanIsCurrent"
+      },
+      "kind": "witness",
+      "ref": "Index-contract review F4, A2(e), A3: the first read runs before the observer, the notice subscription or the poll baseline is in place, so a change between them is in no fact. 1 change."
+    },
+    "DiscoveryIndex.tap-after-write.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CleanIsCurrent"
+      },
+      "kind": "witness",
+      "ref": "Index-contract review F2, A2(a): own writes heard only when they settle, as the change bus reports them, leave the directory clean while its bytes have changed. 1 own write."
+    },
+    "DiscoveryIndex.no-audit.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EventuallyCurrent"
+      },
+      "kind": "witness",
+      "ref": "Index-contract review F3, A4: a lost fact with no audit is never repaired; the audit is load-bearing. 1 lost change, audit off."
+    },
+    "DiscoveryIndex.reset-on-install.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CleanIsCurrent"
+      },
+      "kind": "witness",
+      "ref": "FW2 review M1: with two readers of one directory, an install that resets the directory's counter to its floor lets a slower reader that captured the floor install older bytes as clean after a faster reader installed newer ones. 1 change, no own write."
+    },
+    "DiscoveryIndex.target-lost-wide.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "target-lost with the own write and the repeated fact back in (2 directories, 2 readers per directory, 1 change, 1 lost change, 1 own write, 1 repeated fact): CleanIsCurrent and EventuallyCurrent under LiveSpec. Nightly: it took about 230 s, over the pull-request budget."
+    }
+  }
+}

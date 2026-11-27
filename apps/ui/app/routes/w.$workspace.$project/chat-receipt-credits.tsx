@@ -4,7 +4,12 @@ import type { ReactNode } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { formatCredits } from '@taucad/billing-ui/utils/credits.utils';
 import type { UsageData } from '@taucad/chat';
-import { formatCreditAtomsDisplay, wireOperationReceiptSchema } from '@taucad/billing';
+import {
+  formatCreditAtomsDisplay,
+  maximumOperationReceiptBatch,
+  wireOperationReceiptBatchSchema,
+  wireOperationReceiptSchema,
+} from '@taucad/billing';
 import type { WireOperationReceipt } from '@taucad/billing';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { recordBillingRevisionMinimum } from '@taucad/billing-ui/db/billing-snapshot-store';
@@ -69,6 +74,156 @@ export const usageOperationIds = (usageParts: readonly UsageData[]): string[] =>
   return [...ids].sort();
 };
 
+type ReceiptSession = Readonly<{ apiBaseUrl: string; userId: string; environment: string }>;
+
+/**
+ * Receipt reads in flight, by session and operation, so surfaces that mount together (the per-turn badge, the chat
+ * footer, the project total) share one batch instead of each asking again. A read is not tied to the surface that
+ * started it: an unmounting surface no longer aborts the read another surface is waiting on.
+ */
+const receiptReads = new Map<string, Promise<WireOperationReceipt | undefined>>();
+
+/** API base URLs that answered the batch route with 404 (an API older than it): those read one operation at a time. */
+const singleReadOnly = new Set<string>();
+
+const receiptReadKey = (session: ReceiptSession, operationId: string): string =>
+  JSON.stringify([session.apiBaseUrl, session.userId, session.environment, operationId]);
+
+/** Refuses a receipt that answers for another account, environment or operation (B4 R4/R5). */
+const checkedReceipt = (
+  session: ReceiptSession,
+  operationId: string,
+  receipt: WireOperationReceipt | undefined,
+): WireOperationReceipt | undefined =>
+  receipt !== undefined &&
+  receipt.ownerId === session.userId &&
+  receipt.environment === session.environment &&
+  receipt.operationId === operationId
+    ? receipt
+    : undefined;
+
+const readOneReceipt = async (session: ReceiptSession, operationId: string): Promise<WireOperationReceipt> => {
+  const response = await fetch(`${session.apiBaseUrl}/v1/billing/operations/${encodeURIComponent(operationId)}`, {
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    throw recordApiRequestId(new Error(`Operation receipt request failed with ${response.status}`), response);
+  }
+  return wireOperationReceiptSchema.parse(await response.json());
+};
+
+/** One batch request for up to {@link maximumOperationReceiptBatch} operations, by operation id. */
+const readReceiptBatch = async (
+  session: ReceiptSession,
+  operationIds: readonly string[],
+): Promise<ReadonlyMap<string, WireOperationReceipt>> => {
+  if (!singleReadOnly.has(session.apiBaseUrl)) {
+    const query = operationIds.map((operationId) => `operationIds=${encodeURIComponent(operationId)}`).join('&');
+    const response = await fetch(`${session.apiBaseUrl}/v1/billing/operations?${query}`, { credentials: 'include' });
+    if (response.ok) {
+      const { receipts } = wireOperationReceiptBatchSchema.parse(await response.json());
+      return new Map(receipts.map((receipt) => [receipt.operationId, receipt]));
+    }
+    if (response.status !== 404) {
+      throw recordApiRequestId(new Error(`Operation receipt batch failed with ${response.status}`), response);
+    }
+    singleReadOnly.add(session.apiBaseUrl);
+  }
+  const read = await Promise.all(
+    operationIds.map(async (operationId) => {
+      try {
+        return [operationId, await readOneReceipt(session, operationId)] as const;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  return new Map(read.filter((entry) => entry !== undefined));
+};
+
+/**
+ * One batch read, keeping only the receipts that answer for this session and operation, and recording the highest
+ * snapshot revision per billing subject once. A failed read or record yields no receipts (each reads "checking", then
+ * "Can't check"). The chunk's in-flight entries are released when it settles; none can be replaced before that,
+ * because a read starts only for an operation with no entry.
+ */
+const readAcceptedReceipts = async (
+  session: ReceiptSession,
+  chunk: readonly string[],
+): Promise<ReadonlyMap<string, WireOperationReceipt>> => {
+  try {
+    const received = await readReceiptBatch(session, chunk);
+    const accepted = new Map<string, WireOperationReceipt>();
+    const minimums = new Map<string, WireOperationReceipt>();
+    for (const operationId of chunk) {
+      const receipt = checkedReceipt(session, operationId, received.get(operationId));
+      if (receipt !== undefined) {
+        accepted.set(operationId, receipt);
+        const highest = minimums.get(receipt.subjectId);
+        if (highest === undefined || BigInt(receipt.snapshotRevision) > BigInt(highest.snapshotRevision)) {
+          minimums.set(receipt.subjectId, receipt);
+        }
+      }
+    }
+    await Promise.all(
+      [...minimums.values()].map(async (receipt) =>
+        recordBillingRevisionMinimum({
+          environment: receipt.environment,
+          ownerId: receipt.ownerId,
+          subjectId: receipt.subjectId,
+          revision: receipt.snapshotRevision,
+        }),
+      ),
+    );
+    return accepted;
+  } catch {
+    return new Map();
+  } finally {
+    for (const operationId of chunk) {
+      receiptReads.delete(receiptReadKey(session, operationId));
+    }
+  }
+};
+
+const answerFrom = async (
+  batch: Promise<ReadonlyMap<string, WireOperationReceipt>>,
+  operationId: string,
+): Promise<WireOperationReceipt | undefined> => {
+  const accepted = await batch;
+  return accepted.get(operationId);
+};
+
+/**
+ * Reads the receipts of the named operations in as few requests as the batch bound allows, sharing any read already
+ * in flight. An operation with no valid answer (a failed request, a receipt for another account, environment or
+ * operation) resolves to `undefined`. The highest snapshot revision seen per billing subject is recorded once.
+ */
+const readReceipts = (
+  session: ReceiptSession,
+  operationIds: readonly string[],
+): Map<string, Promise<WireOperationReceipt | undefined>> => {
+  const answers = new Map<string, Promise<WireOperationReceipt | undefined>>();
+  const unread: string[] = [];
+  for (const operationId of operationIds) {
+    const inFlight = receiptReads.get(receiptReadKey(session, operationId));
+    if (inFlight === undefined) {
+      unread.push(operationId);
+    } else {
+      answers.set(operationId, inFlight);
+    }
+  }
+  for (let start = 0; start < unread.length; start += maximumOperationReceiptBatch) {
+    const chunk = unread.slice(start, start + maximumOperationReceiptBatch);
+    const batch = readAcceptedReceipts(session, chunk);
+    for (const operationId of chunk) {
+      const answer = answerFrom(batch, operationId);
+      receiptReads.set(receiptReadKey(session, operationId), answer);
+      answers.set(operationId, answer);
+    }
+  }
+  return answers;
+};
+
 /**
  * Reads the authoritative receipt for every named operation.
  *
@@ -82,9 +237,10 @@ export const usageOperationIds = (usageParts: readonly UsageData[]): string[] =>
  * zero, never a locally multiplied figure (B4 R2) and never an open-ended
  * "Pending" (I15). Only the API's own pending answer reads "Pending".
  *
- * ponytail: one GET per distinct unsettled operation. A batch
- * receipt endpoint is the upgrade path if a project's operation count ever
- * makes the fan-out visible.
+ * The operations without a settled receipt are read in one batch request per
+ * {@link maximumOperationReceiptBatch} operations (chat performance WP-13 step
+ * 6), shared with any surface already reading them; an API without the batch
+ * route is read one operation at a time.
  *
  * @param operationIds - Operations to resolve; duplicates are collapsed.
  * @returns Credits by operation id, one for every operation, and the Retry.
@@ -95,29 +251,6 @@ export const useReceiptCredits = (operationIds: readonly string[]): ReceiptCredi
   const queryClient = useQueryClient();
   const ids = [...new Set(operationIds)].sort();
   const signedIn = userId !== undefined && apiBaseUrl !== undefined && environment !== undefined;
-  const readReceipt = async (operationId: string, signal: AbortSignal): Promise<WireOperationReceipt> => {
-    const response = await fetch(`${apiBaseUrl}/v1/billing/operations/${encodeURIComponent(operationId)}`, {
-      credentials: 'include',
-      signal,
-    });
-    if (!response.ok) {
-      throw recordApiRequestId(new Error(`Operation receipt request failed with ${response.status}`), response);
-    }
-    const receipt = wireOperationReceiptSchema.parse(await response.json());
-    if (receipt.ownerId !== userId || receipt.environment !== environment) {
-      throw new Error('Receipt belongs to a different billing session');
-    }
-    if (receipt.operationId !== operationId) {
-      throw new Error('Receipt answers for a different operation');
-    }
-    await recordBillingRevisionMinimum({
-      environment: receipt.environment,
-      ownerId: receipt.ownerId,
-      subjectId: receipt.subjectId,
-      revision: receipt.snapshotRevision,
-    });
-    return receipt;
-  };
   /* One query for the set, each receipt cached under its own key: a terminal receipt is immutable and read from the
    * cache, and only a pending or unread one is fetched again (`useQueries` is not used, so the Cloud chunk shares no
    * query module with a route chunk, gate G1). */
@@ -126,27 +259,33 @@ export const useReceiptCredits = (operationIds: readonly string[]): ReceiptCredi
     enabled: signedIn && ids.length > 0,
     refetchInterval: ({ state }) =>
       state.data === undefined || ids.some((id) => state.data?.get(id)?.state !== 'terminal') ? 5000 : false,
-    queryFn: async ({ signal }): Promise<ReadonlyMap<string, WireOperationReceipt>> => {
+    queryFn: async (): Promise<ReadonlyMap<string, WireOperationReceipt>> => {
+      if (!signedIn) {
+        return new Map();
+      }
+      const session: ReceiptSession = { apiBaseUrl, userId, environment };
+      const keyOf = (operationId: string) => ['billing', 'operation', apiBaseUrl, userId, environment, operationId];
+      const settled = new Map<string, WireOperationReceipt>();
+      const unsettled: string[] = [];
+      for (const operationId of ids) {
+        const cached = queryClient.getQueryData<WireOperationReceipt>(keyOf(operationId));
+        if (cached?.state === 'terminal') {
+          settled.set(operationId, cached);
+        } else {
+          unsettled.push(operationId);
+        }
+      }
+      const answers = readReceipts(session, unsettled);
       const read = await Promise.all(
-        ids.map(async (operationId) => {
-          const key = ['billing', 'operation', apiBaseUrl, userId, environment, operationId];
-          const cached = queryClient.getQueryData<WireOperationReceipt>(key);
-          if (cached?.state === 'terminal') {
-            return [operationId, cached] as const;
-          }
-          try {
-            const receipt = await queryClient.query({
-              queryKey: key,
-              staleTime: 0,
-              queryFn: async () => readReceipt(operationId, signal),
-            });
-            return [operationId, receipt] as const;
-          } catch {
-            return undefined;
-          }
-        }),
+        [...answers.entries()].map(async ([operationId, answer]) => [operationId, await answer] as const),
       );
-      return new Map(read.filter((entry) => entry !== undefined));
+      for (const [operationId, receipt] of read) {
+        if (receipt !== undefined) {
+          queryClient.setQueryData(keyOf(operationId), receipt);
+          settled.set(operationId, receipt);
+        }
+      }
+      return settled;
     },
   });
   /* The operations with no answer wait one deadline each; the timers live in the module store, and the layout effect

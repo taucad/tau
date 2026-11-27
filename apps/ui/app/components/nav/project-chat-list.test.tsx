@@ -200,6 +200,7 @@ const { ProjectChatList, sortProjectChats } = await import('#components/nav/proj
 
 describe('ProjectChatList', () => {
   beforeEach(() => {
+    globalThis.localStorage.clear();
     vi.clearAllMocks();
     cloudOpening.pending = false;
     cloudOpening.loadingChats = false;
@@ -648,6 +649,25 @@ describe('ProjectChatList', () => {
       expect(screen.queryAllByTestId('project-chat-skeleton')).toHaveLength(0);
       expect(screen.getAllByRole('link')).toHaveLength(2);
       expect(document.querySelector(`#project-chats-${project.id}`)).not.toHaveAttribute('aria-busy');
+    });
+
+    it('U6, H5: reserves the rows the list last drew on this device, so nothing below it moves when it answers', () => {
+      for (const listed of [[chat(1)], [chat(1), chat(2), chat(3), chat(4), chat(5), chat(6), chat(7)], []]) {
+        mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: listed });
+        const settled = render(<ProjectChatList project={project} isProjectActive={false} />);
+        const settledRows = chatListRowCount();
+        settled.unmount();
+
+        mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
+        const view = render(<ProjectChatList project={project} isProjectActive={false} />);
+        expect(chatListRowCount()).toBe(settledRows);
+        expect(screen.queryAllByRole('link')).toHaveLength(0);
+
+        mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: listed });
+        view.rerender(<ProjectChatList project={project} isProjectActive={false} />);
+        expect(chatListRowCount()).toBe(settledRows);
+        view.unmount();
+      }
     });
 
     it('draws no skeleton rows over chats already listed during a refresh', () => {

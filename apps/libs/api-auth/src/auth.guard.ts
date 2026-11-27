@@ -1,9 +1,10 @@
 import type { IncomingMessage } from 'node:http';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
-import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { isAuthoritativeSession, isOptionalAuth, isPublicAuth } from '#auth.constant.js';
+import { isAuthoritativeSession, isOptionalAuth, isPublicAuth, isWebSessionRequired } from '#auth.constant.js';
+import type { AuthClientKind } from '#desktop-grant.js';
 import { hasAuthorizationHeader, SessionResolver } from '#session-resolver.js';
 import { issuedOversizeSnapshot, sessionCookiePolicy } from '#session-cookie-policy.js';
 import type { SessionResolution } from '#session-resolver.js';
@@ -50,6 +51,21 @@ export const hostDeviceOf = (rawRequest: IncomingMessage): HostDevicePrincipal |
  * the host principals above.
  */
 const resolutions = new WeakMap<IncomingMessage, SessionResolution>();
+
+/** Which client a request authenticated as, written by the guard; keyed by the raw request like the maps above. */
+const authClients = new WeakMap<IncomingMessage, AuthClientKind>();
+
+/**
+ * Which kind of client the guard admitted a request as.
+ *
+ * @param rawRequest - The Node request (`FastifyRequest.raw`).
+ * @returns `desktop` for Tau Desktop's OAuth access token; `web` for a session, a cloud host or no credential.
+ */
+export const authClientOf = (rawRequest: IncomingMessage): AuthClientKind => authClients.get(rawRequest) ?? 'web';
+
+/** The refusal a desktop access token gets on a route that governs the account (ruling D1=A). */
+export const webSessionRequired = (): ForbiddenException =>
+  new ForbiddenException({ code: 'WEB_SESSION_REQUIRED', message: 'This needs Tau on the web.' });
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -98,6 +114,21 @@ export class AuthGuard implements CanActivate {
     request.session = session;
     // @ts-expect-error -- request.user is not typed
     request.user = session?.user ?? null;
+    const raw = request.raw as IncomingMessage | undefined;
+    if (raw !== undefined) {
+      authClients.set(raw, resolution.client);
+    }
+
+    if (
+      session !== null &&
+      resolution.client === 'desktop' &&
+      this.reflector.getAllAndOverride<boolean | undefined>(isWebSessionRequired, [
+        context.getHandler(),
+        context.getClass(),
+      ]) === true
+    ) {
+      throw webSessionRequired();
+    }
 
     // For optional auth, allow requests without sessions
     const isAuthOptional = this.reflector.getAllAndOverride<boolean>(isOptionalAuth, [

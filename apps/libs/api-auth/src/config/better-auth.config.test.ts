@@ -30,6 +30,8 @@ const createConfig = (
 ) => {
   const writes: RecordedWrite[] = [];
   const order: string[] = [];
+  /** Tau Desktop sign-ins ended by a password change: the tables written, in order. */
+  const desktopRevocations: Array<{ readonly table: unknown; readonly kind: 'update' | 'delete' }> = [];
   const emailService = {
     sendMagicLink: vi.fn<EmailService['sendMagicLink']>().mockResolvedValue(undefined),
     sendResetPassword: vi.fn<EmailService['sendResetPassword']>().mockResolvedValue(undefined),
@@ -58,6 +60,18 @@ const createConfig = (
             order.push('tombstone');
           },
         }),
+      }),
+      update: (table: unknown) => ({
+        set: () => ({
+          where: async (): Promise<void> => {
+            desktopRevocations.push({ table, kind: 'update' });
+          },
+        }),
+      }),
+      delete: (table: unknown) => ({
+        where: async (): Promise<void> => {
+          desktopRevocations.push({ table, kind: 'delete' });
+        },
       }),
     },
   } as unknown as DatabaseService;
@@ -116,7 +130,7 @@ const createConfig = (
     rateLimitStore,
   });
 
-  return { config, emailService, closure, cloudHosts, writes, order };
+  return { config, emailService, closure, cloudHosts, writes, order, desktopRevocations };
 };
 
 type TestEmailCallbackArgs = {
@@ -436,7 +450,15 @@ describe('getBetterAuthConfig abuse gates', () => {
   it('pins the same plugin order in both lockstep plugin lists', async () => {
     const { config } = createConfig();
     const { staticAuthConfig } = await import('#config/auth-static.config.js');
-    const expected = ['api-key', 'magic-link', 'one-time-token', 'device-authorization', 'bearer'];
+    const expected = [
+      'api-key',
+      'magic-link',
+      'one-time-token',
+      'device-authorization',
+      'oauth-provider',
+      'tau-desktop-token-policy',
+      'bearer',
+    ];
 
     expect(config.plugins?.map((plugin) => plugin.id)).toEqual(expected);
     expect(staticAuthConfig.plugins.map((plugin) => plugin.id)).toEqual(expected);
@@ -828,11 +850,12 @@ describe('getBetterAuthConfig sign-up readiness', () => {
       apikey: [],
       subscription: [],
     };
-    const { config, emailService } = createConfig('http://localhost:4000', {}, { rateLimitStore });
+    const { config, emailService, desktopRevocations } = createConfig('http://localhost:4000', {}, { rateLimitStore });
     return {
       config,
       store,
       emailService,
+      desktopRevocations,
       auth: betterAuth({ ...config, database: memoryAdapter(store) }),
     };
   };
@@ -930,7 +953,7 @@ describe('getBetterAuthConfig sign-up readiness', () => {
   });
 
   it('sends the password-changed notice for a change made from settings', async () => {
-    const { auth, store, emailService } = createAuth();
+    const { auth, store, emailService, desktopRevocations } = createAuth();
     const email = 'settings@example.test';
 
     await post(auth, 'sign-up/email', { email, name: 'Settings', password });
@@ -962,6 +985,23 @@ describe('getBetterAuthConfig sign-up readiness', () => {
         url: 'http://localhost:3000/auth/forgot-password',
       }),
     );
+    // A new password signs Tau Desktop out as well: its sign-ins are not sessions (DSI-2).
+    expect(desktopRevocations.map(({ kind }) => kind)).toEqual(['update', 'delete']);
+  });
+
+  it('signs every Tau Desktop out when a password is reset', async () => {
+    const { config, desktopRevocations } = createConfig();
+    const onPasswordReset = config.emailAndPassword?.onPasswordReset;
+    if (!onPasswordReset) {
+      throw new Error('onPasswordReset is not configured');
+    }
+
+    await onPasswordReset(
+      { user: { id: 'user_1', email: 'reset@example.test' } } as unknown as Parameters<typeof onPasswordReset>[0],
+      undefined,
+    );
+
+    expect(desktopRevocations.map(({ kind }) => kind)).toEqual(['update', 'delete']);
   });
 
   it('counts rate limits in the shared store and lets requests through when it fails', async () => {
@@ -1043,5 +1083,27 @@ describe('getBetterAuthConfig session cookie cache', () => {
 
   it('should default AUTH_SESSION_CACHE_MAX_AGE_SECONDS to 0', () => {
     expect(environmentSchemaBase.shape.AUTH_SESSION_CACHE_MAX_AGE_SECONDS.parse(undefined)).toBe(0);
+  });
+});
+
+describe('getBetterAuthConfig prefixed ids for the OAuth provider models', () => {
+  it.each([
+    ['oauthClient', 'oac_'],
+    ['oauthRefreshToken', 'ort_'],
+    ['oauthAccessToken', 'oat_'],
+    ['oauthConsent', 'ocs_'],
+    ['oauthResource', 'ores_'],
+    ['oauthClientResource', 'ocr_'],
+    ['oauthClientAssertion', 'oca_'],
+    ['deviceCode', 'ver_'],
+    ['session', 'sess_'],
+  ])('should give a %s row an id starting %s', (model, prefix) => {
+    const { config } = createConfig();
+    const generateId = config.advanced?.database?.generateId;
+    if (typeof generateId !== 'function') {
+      throw new TypeError('generateId is not configured');
+    }
+
+    expect(generateId({ model } as unknown as Parameters<typeof generateId>[0])).toMatch(new RegExp(`^${prefix}`, 'u'));
   });
 });

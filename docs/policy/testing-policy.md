@@ -419,7 +419,7 @@ An agent reproduces, classifies and fixes the flake through the normal merge que
 | Test-only, reproduced, with the stress proof and a green `validate-flake-fix`                                     | Auto-merges through the queue   |
 | Touches product code, widens a tolerance (including a raised timeout) or loosens a matcher, or was not reproduced | Waits for the operator's review |
 
-A flake fix never skips or disables a test (`skip`, `todo`, `fails`, a false `runIf`), deletes a test or assertions, raises `retry` or any other retry count, pins test order (§ 16.7), adds a fixed sleep instead of awaiting the condition, or edits `quarantine.json`, the ledger, the reporter, the validators or a workflow. `validate-flake-fix` rejects each of these but the pin, which lint rejects. A fix may raise a test or hook timeout only when its pull request states the measured p99 that justifies the new value on a `Timeout-budget:` line; such a fix is classed tolerance, never auto-merges and needs the operator's review.
+A flake fix never skips or disables a test (`skip`, `todo`, `fails`, a false `runIf`), deletes a test or assertions, raises `retry` or any other retry count, pins test order (§ 16.7), adds a fixed sleep instead of awaiting the condition, or edits `quarantine.json`, the ledger, the reporter, the validators or a workflow. `validate-flake-fix` rejects each of these but the pin, which lint rejects in test options and in config. A fix may raise a test or hook timeout only when its pull request states the measured p99 that justifies the new value on a `Timeout-budget:` line; such a fix is classed tolerance, never auto-merges and needs the operator's review.
 
 Release is mechanical, by the ledger job: 100 consecutive executions without a failure after a linked fix lands, over at least two days, or 300 without a fix. A failure during verification returns the test to quarantine.
 
@@ -455,10 +455,10 @@ Make every test pass alone and in any order. Never let a test depend on state an
 
 **Why**: An order dependence is a failure waiting for a different order; burn-in shuffles changed files (§ 16.2) to find it on the pull request, not on `main` later.
 
-**Enforced by**: `tau-lint/no-pinned-test-order` (flags `shuffle: false` in Vitest test and suite options)
+**Enforced by**: `tau-lint/no-pinned-test-order` (flags `shuffle: false` in Vitest test and suite options, and `sequence.shuffle: false` or `sequence.shuffle.tests: false` in Vitest config)
 
 - **Shared fixtures are read-only.** Treat what `beforeAll` builds as read-only. Create whatever a test mutates (stores, refs, tags, remotes, files, module state, globals, timers) per test, in `beforeEach` or as a per-test copy of a template built once. Otherwise write only under names the test owns, and assert on those names or relative to the state the test found.
-- **Never pin order.** `{ shuffle: false }` on `describe`, `it` or `test`, `sequence.shuffle: false` in a config, or a raised retry count never fixes an order dependence; each only switches off the check that reports it.
+- **Never pin order.** `{ shuffle: false }` on `describe`, `it` or `test`, `sequence.shuffle: false` or `sequence.shuffle: { tests: false }` in a config, or a raised retry count never fixes an order dependence; each only switches off the check that reports it.
 - **Fix it before merge.** Fix a shuffled burn-in failure at the fixture, in that pull request or a linked one, before merge. This includes a failure that predates the pull request and that its change only exposed.
 
 Motivating case: `packages/revisions/src/revision-port.conformance.test.ts` built one store per adapter in `beforeAll` (the transport suite, one git http-backend remote), and its tests read and moved that store's tags, refs and checkouts. "The first version after Start is V2" held only because earlier tests ran first and cleaned up. Shuffled with no retry, 17 tests failed, on `main` too; nobody saw it until taucad/tau#2909 touched the file and burn-in selected it. The suites were then pinned with `{ shuffle: false }` to unblock that pull request, which hid the dependence. taucad/tau#2523 fixed the fixtures as below and the pins were removed.
@@ -521,4 +521,4 @@ Before merging a test:
 - [ ] Test names follow `should <verb> <outcome>` pattern
 - [ ] Structured data assertions check shape, not just existence
 - [ ] A flaky test is fixed at its cause, not skipped, slept on or given more retries, and any longer timeout carries a measured `Timeout-budget:`
-- [ ] The test passes alone and in any order: shared `beforeAll` fixtures are only read, and no order is pinned (§ 16.7)
+- [ ] The test passes alone and in any order: a shared `beforeAll` fixture is read-only or written only under names the test owns, and no order is pinned (§ 16.7)

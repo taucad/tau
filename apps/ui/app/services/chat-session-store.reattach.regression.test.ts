@@ -327,8 +327,9 @@ describe('host attachment regression harness (HA2 rows)', () => {
       host.push(delta('after', 'writer-b'));
       await vi.waitFor(() => {
         expect(chat.text()).toContain('after');
+        // WP-06 publishes a live-only change from the next frame, after the text is readable.
+        expect(seen.length).toBeGreaterThan(0);
       }, coldBound);
-      expect(seen.length).toBeGreaterThan(0);
       expect(seen.every((entry) => entry[0] === 'attached' && entry[1] && entry[2] === 'desktop')).toBe(true);
     } finally {
       unsubscribe();

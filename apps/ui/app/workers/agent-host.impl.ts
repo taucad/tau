@@ -74,6 +74,7 @@ import type { HostEvidence, RunRating } from '@taucad/agent-observability/host-e
 import { readBuildRelease, unknownBuildRelease } from '#lib/build-identity.js';
 import { forwardOperations } from '#telemetry/worker-forwarding.js';
 import type { ForwardEntry, WorkerTelemetry } from '#telemetry/worker-forwarding.js';
+import type { ForwardedClaimRefusal } from '#lib/chat-read-reporting.js';
 import type { IdleRuntimeClient } from '#workers/idle-runtime-client.js';
 import { systemSkillsOverlay } from '@taucad/agent-host-ui/workers/system-skills-overlay';
 import { loadCode } from '@taucad/ui-core/lib/code-loading';
@@ -1151,6 +1152,19 @@ const composeProjectHost = async (
     },
     onChatQuiescent: (chatId, quiescent) => {
       evidence?.onChatQuiescent(chatId, quiescent);
+    },
+    /* HA4 (HA0's `claim.refused`): kept as local lifecycle evidence, and reported by the page's chat-read sink. */
+    onClaimRefused: (chatId, code) => {
+      recordChannelDiagnostic({
+        event: 'claim.refused',
+        tabId: worker.tabId,
+        hostId: provide.hostId,
+        projectId: provide.projectId,
+        visible: worker.visibility.visible(),
+        code,
+      });
+      const refusal: ForwardedClaimRefusal = { kind: 'claim.refused', chatId, code };
+      worker.forwardTelemetry?.(refusal as unknown as Parameters<ForwardEntry>[0]);
     },
     chats: createBrowserChatStore({
       projectId: provide.authority.projectId,

@@ -1,6 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { chatReadCodes, chatReadReportLimit, createChatReadReporter } from '#lib/chat-read-reporting.js';
+import {
+  chatReadCodes,
+  chatReadReportLimit,
+  createChatReadReporter,
+  reportForwardedClaimRefusal,
+} from '#lib/chat-read-reporting.js';
 
 vi.mock('#lib/error-reporting.js', () => ({ reportUiError: vi.fn() }));
 
@@ -60,5 +65,28 @@ describe('chat read reporting (HA0)', () => {
     sink.report('run.unsettled.own', { chatId: 'chat', occurrence: 'run_1' });
 
     expect(report).toHaveBeenCalledTimes(chatReadReportLimit + 1);
+  });
+});
+
+/* HA4: the agent host worker forwards each refused claim on its telemetry notify; the page reports it once each. */
+describe('forwarded claim refusals (HA4)', () => {
+  it('should report a forwarded claim refusal as claim.refused, and leave any other entry alone', () => {
+    const report = vi.fn();
+    const sink = createChatReadReporter(report);
+
+    expect(reportForwardedClaimRefusal({ kind: 'claim.refused', chatId: 'chat', code: 'WRITER_LOCKED' }, sink)).toBe(
+      true,
+    );
+    expect(reportForwardedClaimRefusal({ kind: 'claim.refused', chatId: 'chat', code: 'WRITER_LOCKED' }, sink)).toBe(
+      true,
+    );
+    expect(reportForwardedClaimRefusal({ name: 'agent.operation', detail: {} }, sink)).toBe(false);
+    expect(reportForwardedClaimRefusal(undefined, sink)).toBe(false);
+
+    expect(report).toHaveBeenCalledTimes(2);
+    expect(report.mock.calls[0]).toEqual([
+      expect.objectContaining({ name: 'ChatReadFailure', message: 'claim.refused' }),
+      expect.objectContaining({ tags: { 'chat.read': 'claim.refused', code: 'WRITER_LOCKED' } }),
+    ]);
   });
 });

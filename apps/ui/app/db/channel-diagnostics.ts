@@ -16,7 +16,8 @@ export type ChannelDiagnostic = {
     | 'page.shown'
     | 'host.opened'
     | 'host.released'
-    | 'host.closed';
+    | 'host.closed'
+    | 'claim.refused';
   tabId: string;
   hostId?: string;
   projectId?: string;

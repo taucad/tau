@@ -2,13 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import {
-  formatCreditAtoms,
-  wireEntitlementsSchema,
-  wireOpenHoldsSchema,
-  wirePaymentActionSchema,
-} from '@taucad/billing';
-import type { WireOpenHolds, WireOperationReceipt, WirePaymentAction } from '@taucad/billing';
+import { formatCreditAtoms, wireEntitlementsSchema, wirePaymentActionSchema } from '@taucad/billing';
+import type { WireOperationReceipt, WirePaymentAction } from '@taucad/billing';
 import { closeAccount, createAccount } from '#support/account.js';
 import type { Account } from '#support/account.js';
 import { baseUrl, failure, ok } from '#support/api.js';
@@ -55,6 +50,7 @@ import {
   availableAtoms,
   describeAction,
   describeReads,
+  heldAtoms,
   readAction,
   readCredits,
   returnPath,
@@ -112,9 +108,8 @@ const unsubmitted = async (
 const challenged = (attempts: readonly PayAttempt[]): boolean =>
   attempts.some((attempt) => attempt.outcome !== 'refused' && attempt.challenged);
 
-/** Open holds on the account. */
-const readHolds = async (account: Account): Promise<WireOpenHolds> =>
-  ok(await account.api.request('GET', '/v1/billing/holds'), wireOpenHoldsSchema);
+/** Atoms the ledger holds for the account's running work: an internal figure, read from the balance it already serves. */
+const readHeld = async (account: Account): Promise<bigint> => heldAtoms(await readCredits(account));
 
 /** Waits up to 90 s for the page's first gateway answer. */
 const firstGatewayRead = async (page: Page, reads: readonly GatewayRead[]): Promise<GatewayRead | undefined> => {
@@ -286,7 +281,7 @@ describe('funded journey', () => {
       const title = await cards.visibleTitle(90_000);
       const text = title === undefined ? await pageText(page) : await cards.text(title);
       const buttons = title === undefined ? [] : await cards.buttons(title);
-      const holds = await readHolds(account);
+      const held = await readHeld(account);
       evidence.push(
         `project ${projectUrl}`,
         `card "${title ?? 'none'}": ${text}`,
@@ -294,7 +289,7 @@ describe('funded journey', () => {
         gateway.length === 0
           ? 'no gateway call: the browser preflight refused before dispatch'
           : `gateway ${gateway.map((read) => `${read.status} ${read.refusal ?? ''}`).join(', ')}`,
-        `open holds ${holds.holds.length}`,
+        `held atoms ${held}`,
         await screenshot(page, 'fd-01-credits-card'),
       );
       expect(title).toBe('Add credits to send this');
@@ -303,7 +298,7 @@ describe('funded journey', () => {
       expect(text).toMatch(/\$10 adds 1,000 credits\./u);
       expect(text).not.toMatch(/needs \d+ more credit/u);
       expect(buttons).toEqual(['Add credits']);
-      expect(holds.holds).toHaveLength(0);
+      expect(held).toBe(0n);
       return { outcome: 'pass', evidence };
     }),
     paymentRowTimeout,
@@ -313,15 +308,15 @@ describe('funded journey', () => {
     'should refuse a gateway call with no credits with the typed shortfall [FD-03 P0]',
     matrixRow('FD-03', 'P0', async (evidence) => {
       const call = await callGateway(account.api, 'haiku');
-      const holds = await readHolds(account);
-      evidence.push(describeCall(call), `open holds afterwards ${holds.holds.length}`);
+      const held = await readHeld(account);
+      evidence.push(describeCall(call), `held atoms afterwards ${held}`);
       expect(call.status).toBe(402);
       expect(call.refusal?.error.type).toBe('INSUFFICIENT_CREDIT');
       const details = insufficientCreditDetailsSchema.parse(call.refusal?.error.details);
       expect(details.availableCreditAtoms).toBe('0');
       expect(details.routeId).toBe(gatewayRoutes.haiku.routeId);
       expect(BigInt(details.requiredCreditAtoms) > 0n).toBe(true);
-      expect(holds.holds).toHaveLength(0);
+      expect(held).toBe(0n);
       return { outcome: 'pass', evidence };
     }),
   );
@@ -485,7 +480,7 @@ describe('funded journey', () => {
       haiku = await callGateway(account.api, 'haiku', {
         prompt: designPrompt,
         maximumTokens: 400,
-        whileStreaming: async () => readHolds(account),
+        whileStreaming: async () => readHeld(account),
       });
       evidence.push(`Haiku 5.5: ${describeCall(haiku)}`);
       const isUpstreamRefused = haiku.refusal?.error.type === 'UPSTREAM_REJECTED';
@@ -496,18 +491,14 @@ describe('funded journey', () => {
         call = await callGateway(account.api, 'luna', {
           prompt: 'In about 300 words, explain how to model a parametric enclosure in OpenSCAD.',
           maximumTokens: 600,
-          whileStreaming: async () => readHolds(account),
+          whileStreaming: async () => readHeld(account),
         });
         evidence.push(`GPT-6 Luna: ${describeCall(call)}`);
       }
-      const holds = wireOpenHoldsSchema.safeParse(call.probe);
-      const held = holds.success
-        ? holds.data.holds.find(({ operationId }) => operationId === call.operationId)
-        : undefined;
       evidence.push(
-        held === undefined
-          ? 'hold not open by the time the mid-stream read answered'
-          : `hold ${held.heldCreditAtoms} atoms open mid-stream (${held.dispatchState})`,
+        typeof call.probe === 'bigint' && call.probe > 0n
+          ? `${call.probe} atoms held mid-stream`
+          : 'nothing held by the time the mid-stream read answered',
       );
       expect(call.status).toBe(200);
       expect(call.operationId).toBeDefined();
@@ -744,7 +735,7 @@ describe('funded journey', () => {
       await row.waitFor({ timeout: 60_000 });
       const text = await visibleText(row);
       evidence.push(`row "${text}"`, await screenshot(page, 'us-02-usage'));
-      expect(text).toContain('succeeded · settled');
+      expect(text).toContain('Succeeded · charged');
       return { outcome: 'pass', evidence };
     }),
   );

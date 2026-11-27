@@ -32,22 +32,22 @@ export type ChatActivitySpinnerProperties = Readonly<{
  * survives a row that comes and goes, so the walk carries on where the last row left it instead of replaying
  * the same opening. The fallback covers the initial renderer startup.
  *
- * The footer reserves a `size-[0.9rem]` slot so the metallic shape stays legible beside its activity label. The
+ * The footer reserves a `size-3.5` slot so the metallic shape stays legible beside its activity label. The
  * canvas is drawn at twice that, centred and overflowing, because the body only fills part of its frame.
  * The shared source supersamples every copy to keep its reflections crisp.
  */
 export function ChatActivitySpinner({ className }: ChatActivitySpinnerProperties): React.JSX.Element {
-  const flatSpinner = <Loader className='size-[0.9rem] shrink-0' />;
+  const flatSpinner = <Loader className='size-3.5 shrink-0' />;
 
   return (
     <span
       aria-hidden='true'
       data-slot='chat-activity-spinner'
-      className={cn('relative inline-flex size-[0.9rem] shrink-0', className)}
+      className={cn('relative inline-flex size-3.5 shrink-0', className)}
     >
       <Suspense fallback={flatSpinner}>
         <MetalMorphSpinnerLazy
-          className='pointer-events-none absolute top-1/2 left-1/2 size-[1.8rem] -translate-1/2'
+          className='pointer-events-none absolute top-1/2 left-1/2 size-7 -translate-1/2'
           fallback={flatSpinner}
         />
       </Suspense>

@@ -35,6 +35,21 @@ describe('authClient runtime environment', () => {
     expect(fetch).toHaveBeenCalledWith('https://api.host.test/v1/auth/get-session', expect.any(Object));
   });
 
+  it('asks Tau for the desktop identity, because no Better Auth route accepts the desktop token (DSI-4)', async () => {
+    vi.doMock('#lib/build-target.js', () => ({ isDesktopTarget: () => true }));
+    globalThis.window.ENV = {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- browser environment keys are uppercase by contract.
+      TAU_API_URL: 'https://api.host.test',
+    };
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ user: null, session: null }));
+    const { authClient } = await import('#lib/auth-client.js');
+
+    await authClient.getSession();
+
+    expect(fetch).toHaveBeenCalledWith('https://api.host.test/v1/account/session', expect.any(Object));
+    vi.doUnmock('#lib/build-target.js');
+  });
+
   it('sends nothing while the page reads offline, and asks again once it reads online (onboarding DT3)', async () => {
     globalThis.window.ENV = {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- browser environment keys are uppercase by contract.

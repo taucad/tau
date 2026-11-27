@@ -6,6 +6,7 @@
 // EVAL(geospec-first-testing): pending benchmark — replaces legacy requirement-file editing with GeoSpec files (`*.geospec.ts` / `*.geospec.js`) and browser-runner `test_model`. Validates the agent creates executable GeoSpec tests before implementation and no longer attempts legacy test-file edits.
 // EVAL(diagnose-before-switching): pending benchmark-2026-04-20 — replaces "stop after 1-2 retries" with claude-code's diagnose-before-switching guidance in <error_handling>. Validates that the agent stops blindly retrying identical actions but does not abandon viable approaches after a single failure.
 // EVAL(faithful-reporting): pending benchmark-2026-04-20 — adds faithful-reporting bullet to <constraints>. Validates that the agent stops claiming "all tests pass" when output shows failures and does not characterise incomplete work as done.
+// EVAL(step-economy): measured 2026-11-27 on staging (chat performance WP-16), "40 mm cube with a 10 mm hole", model requests per turn before → after a <tool_usage_policy> line asking for every file a step needs in one response and a <task_tracking> clause asking for list updates beside the next tool call: anthropic-claude-haiku-5.5 8 → 6, 6; google-gemini-4-hydrogen 7 → 8, 7 (files still one per response, and the turn began calling `update_todos`); openai-gpt-6-luna 10 → 13, 14 (still sent `update_todos` alone). Not adopted. Reads were already parallel on all three, so batched read tools would not help either; what remains is structural (a task-list update as its own round trip, and separate evaluate, test and screenshot calls).
 // EVAL(tool-usage-policy): pending benchmark-2026-04-20 — new <tool_usage_policy> static section codifies parallel-vs-sequential calls and bans placeholder values. Validates fewer wasted sequential reads and zero placeholder-arg tool calls.
 // EVAL(screenshot-cap): pending benchmark-2026-04-20 — caps screenshots at 2 per inspection cycle and bans chaining a single screenshot after multi_angle in <visual_inspection>. Validates lower screenshot tool-call counts per task.
 // EVAL(top-level-export-positive): pending benchmark-2026-04-20 — replaces the OpenSCAD-only "do not add module-only library files" warning with a kernel-aware <test_requirements> directive that pushes the agent to ADD a top-level export (via KernelConfig.topLevelExportExample) rather than skip a test. The block now states the requirement once with a single canonical example; the imperative "Add ..." recovery sentence is reserved for the test_model tool error so the system prompt no longer dual-states. Validates that the agent patches the source file with edit_file instead of dropping GeoSpec coverage. Follow-up 2026-04-21: removed the test_model tool description pre-warning that duplicated this block, single-source-of-truth fix.
@@ -174,6 +175,25 @@ ${sections.join('\n\n')}
 </system-reminder>`,
   };
 }
+
+/**
+ * The line naming one chat's conversation log. Tau's turns send it in the turn's context message rather than in the
+ * system prompt, so the system prompt, and the prefix a supplier caches, is the same for every chat.
+ *
+ * @param chatId - The chat whose log it names.
+ * @returns The note.
+ *
+ * @public
+ *
+ * @example <caption>The note for one chat</caption>
+ * ```typescript
+ * import { getConversationLogNote } from '@taucad/chat/prompts';
+ *
+ * getConversationLogNote('chat_1'); // 'Your conversation log: `.tau/chats/chat_1/events.jsonl`'
+ * ```
+ */
+export const getConversationLogNote = (chatId: string): string =>
+  `Your conversation log: \`.tau/chats/${chatId}/events.jsonl\``;
 
 /**
  * Generates the CAD system prompt for the specified kernel and mode.
@@ -489,10 +509,13 @@ For work with three or more steps, keep the person's task list at \`.tau/chats/<
     compute: () => renderPersonBlock(options.person),
   });
 
+  /* Only a caller that passes `chatId` (an external agent's embedded context) gets the path here. Tau's own turns carry
+   * it in the turn's context message (`getConversationLogNote`), because OpenAI renders the tools after the system
+   * text: one per-chat line there stops every new chat sharing the cached prefix (WP-15, measured 0 of 10). */
   registry.register({
     name: 'transcript_path',
     cacheBreak: true,
-    compute: () => `Your conversation log: \`.tau/chats/${options.chatId ?? '{chatId}'}/events.jsonl\``,
+    compute: () => (options.chatId === undefined ? '' : getConversationLogNote(options.chatId)),
   });
 
   /* Per-request block, like `workbench`: the behavioural core has no room for it, and it describes the project, not the

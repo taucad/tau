@@ -86,6 +86,7 @@ import { createToolResultBatchBudget } from '#harness/tool-result-budget.js';
 import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
 import { codedFailureDetail as codedFailure } from '#harness/coded-failure.js';
 import { emptyChatLedger, foldChatLedger, isForeignInvocation, unresolvedInvocations } from '#log/chat-ledger.js';
+import type { ChatLedger } from '#log/chat-ledger.js';
 import { turnLabelsOf } from '#harness/turn-labels.js';
 import { snapshotKernel } from '#log/snapshot-kernel.js';
 import type { GatewayTurnLabels, InvocationResolution } from '#wire/gateway.js';
@@ -1454,6 +1455,11 @@ export type CreateAgentSessionOptions = {
    * order fixed). A model request, a tool's start and the attempt's outcome each wait for it; a rejection fails them.
    */
   readonly durable?: (() => Promise<void>) | undefined;
+  /**
+   * WP-11: the owner's incrementally folded ledger of this chat, with every row its writer took. Given, a step reads it
+   * instead of folding the log from empty; the fold is a left fold, so both are the same ledger (`replayLog_append`).
+   */
+  readonly ledger?: (() => Promise<ChatLedger>) | undefined;
   readonly clientContext?: ClientContext | undefined;
   readonly recentSkills?: RecentSkillsPort | undefined;
   readonly substituteToolResult?: ToolResultSubstituter | undefined;
@@ -1907,6 +1913,11 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       prestartedToolResults.delete(toolCallId);
     }
   };
+  /** The chat's ledger after this session's own rows: the owner's (WP-11), else folded from the log. */
+  const ledgerNow = async (): Promise<ChatLedger> => {
+    const events = await record.events();
+    return options.ledger === undefined ? foldChatLedger(emptyChatLedger, events) : options.ledger();
+  };
   const bindInvocation = async (attemptId: string, metadata: ProviderMessageMetadata): Promise<void> => {
     const binding = metadata.tauInternal;
     if (binding?.['kind'] !== 'billing-invocation' || binding['attemptId'] !== attemptId) {
@@ -1916,15 +1927,13 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     if (typeof operationId !== 'string') {
       throw new TypeError('Tau gateway returned malformed invocation metadata.');
     }
-    const currentEvents = await record.events();
-    const prior = currentEvents.find(
-      (event) =>
-        event.runId === options.runId && event.type === 'model.invocation-bound' && event.attemptId === attemptId,
-    );
-    if (prior?.type === 'model.invocation-bound' && prior.operationId !== operationId) {
+    /* The ledger keeps the first binding of a prepared attempt, as the first bound row of this run's attempt id. */
+    const ledger = await ledgerNow();
+    const bound = ledger.invocations[attemptId]?.operationId;
+    if (bound !== undefined && bound !== operationId) {
       throw new Error(`Model invocation ${attemptId} has a conflicting operation binding.`);
     }
-    if (!prior) {
+    if (bound === undefined) {
       /* Bind is the only producer, and it always says `pending`; older readers still read the field (GI-R6). */
       await record.append({ type: 'model.invocation-bound', attemptId, operationId, status: 'pending' });
     }
@@ -1948,7 +1957,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     /* One compaction's summarizer calls are closed together by its `history.compacted` row: only a generation call
      * waits on the attempts before it (the gate's PrepareOnlyWhenResolved). */
     if (purpose === 'generation') {
-      const ledger = foldChatLedger(emptyChatLedger, await record.events());
+      const ledger = await ledgerNow();
       const unresolved = unresolvedInvocations(ledger);
       /* Every attempt is checked before any is recorded: another account's attempt leaves the log untouched (RV5-F2). */
       const foreign = unresolved.find((attemptId) => isForeignInvocation(ledger.invocations[attemptId]!, principal));

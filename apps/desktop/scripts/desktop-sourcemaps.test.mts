@@ -5,7 +5,7 @@
  * Exit codes: 0 on success; nonzero on regression.
  */
 import assert from 'node:assert/strict';
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -13,6 +13,8 @@ import { test } from 'node:test';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational script under test.
 import { uploadDesktopSourceMaps, uploadRendererSourceMaps } from './desktop-sourcemaps.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Test fixture beside the script under test.
+import { writeExecutableStub } from './executable-stub.mjs';
 
 await test('staged debug IDs and maps upload together without altering cached bundles', async () => {
   const root = await mkdtemp(join(tmpdir(), 'tau-desktop-maps-'));
@@ -25,11 +27,9 @@ await test('staged debug IDs and maps upload together without altering cached bu
     await writeFile(join(source, 'main/index.js.map'), '{}');
     await cp(source, staged, { recursive: true });
     await rm(join(staged, 'main/index.js.map'));
-    const cli = join(root, 'sentry-cli');
-    await writeFile(
-      cli,
-      `#!${process.execPath}
-const fs = require('node:fs');
+    const cli = await writeExecutableStub(
+      join(root, 'sentry-cli'),
+      `const fs = require('node:fs');
 const path = require('node:path');
 const stage = process.argv.at(-1);
 const bundle = path.join(stage, 'main/index.js');
@@ -40,7 +40,6 @@ else {
 }
 `,
     );
-    await chmod(cli, 0o700);
     delete process.env['SENTRY_AUTH_TOKEN'];
     await assert.rejects(uploadDesktopSourceMaps(source, staged, cli), /SENTRY_AUTH_TOKEN is required/u);
     assert.equal(await readFile(join(staged, 'main/index.js'), 'utf8'), 'original');
@@ -50,7 +49,7 @@ else {
     assert.match(await readFile(join(staged, 'main/index.js'), 'utf8'), /debugId fixture/u);
     assert.equal(await readFile(join(source, 'main/index.js'), 'utf8'), 'original');
     await assert.rejects(readFile(join(staged, 'main/index.js.map')), { code: 'ENOENT' });
-    await writeFile(cli, `#!${process.execPath}\nprocess.exit(1);\n`);
+    await writeExecutableStub(join(root, 'sentry-cli'), 'process.exit(1);\n');
     await assert.rejects(uploadDesktopSourceMaps(source, staged, cli));
     await assert.rejects(readFile(join(staged, 'main/index.js.map')), { code: 'ENOENT' });
   } finally {
@@ -79,11 +78,9 @@ await test('renderer chunks gain debug ids from a private copy while verbatim ho
     await rm(join(packaged, 'assets/root.js.map'));
     await rm(join(packaged, 'csharp-language/abc/dotnet.js.map'));
     const uploads = join(root, 'uploads');
-    const cli = join(root, 'sentry-cli');
-    await writeFile(
-      cli,
-      `#!${process.execPath}
-const fs = require('node:fs');
+    const cli = await writeExecutableStub(
+      join(root, 'sentry-cli'),
+      `const fs = require('node:fs');
 const path = require('node:path');
 const stage = process.argv.at(-1);
 const chunk = path.join(stage, 'assets/root.js');
@@ -95,7 +92,6 @@ else {
 }
 `,
     );
-    await chmod(cli, 0o700);
     delete process.env['SENTRY_AUTH_TOKEN'];
     await assert.rejects(uploadRendererSourceMaps(client, packaged, cli), /SENTRY_AUTH_TOKEN is required/u);
     process.env['SENTRY_AUTH_TOKEN'] = 'test-only';

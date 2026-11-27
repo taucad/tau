@@ -47,6 +47,7 @@ export default defineConfig({
       'src/graphics/three/shader-cache.browser.test.ts',
       'src/graphics/three/empty-viewer.browser.test.tsx',
       'src/graphics/three/node-frame-reference.browser.test.ts',
+      'src/graphics/three/render-on-demand.browser.test.ts',
       'src/graphics/three/webgpu-depth-sampling.browser.test.ts',
       'src/graphics/three/transmission-retirement.browser.test.ts',
       // Not post-processing-antialias.browser.test.tsx: it runs alone (post-processing-antialias.vitest.browser.config.ts).

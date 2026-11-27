@@ -25,17 +25,19 @@ export type TlcRun = {
   /** `StateDeque` for trace validation (depth-first), `MemStateQueue` otherwise. */
   readonly queue?: 'MemStateQueue' | 'StateDeque';
   readonly workers?: number;
+  /** Maximum heap in gigabytes (default 1); see `Expectation.heapGigabytes`. */
+  readonly heapGigabytes?: number;
   readonly extra?: readonly string[];
 };
 
 /**
- * TLC as S4 ran it (FM-R6): 1 GB heap, two workers, an in-memory queue, a private metadir and no
+ * TLC as S4 ran it (FM-R6): a 1 GB heap unless the configuration asks for more, two workers, an in-memory queue, a private metadir and no
  * trace-explorer spec. Never `-cleanup`, which deletes every `./states` directory.
  */
 export const tlcCommand = (run: TlcRun): { readonly command: string; readonly args: readonly string[] } => ({
   command: run.tools.java.bin,
   args: [
-    '-Xmx1g',
+    `-Xmx${String(run.heapGigabytes ?? 1)}g`,
     '-XX:+UseParallelGC',
     `-Dtlc2.tool.queue.IStateQueue=${run.queue ?? 'MemStateQueue'}`,
     '-cp',
@@ -218,6 +220,7 @@ export type TlcCase = {
   /** For trace specs: the sanitized trace, exported as FORMAL_TRACE and checked depth-first. */
   readonly traceFile?: string;
   readonly workers?: number;
+  readonly heapGigabytes?: number;
   readonly extra?: readonly string[];
 };
 
@@ -236,6 +239,7 @@ export const runTlcCase = async (
       ...(run.traceFile ? { queue: 'StateDeque' } : {}),
       ...(run.extra ? { extra: run.extra } : {}),
       ...(run.workers ? { workers: run.workers } : {}),
+      ...(run.heapGigabytes ? { heapGigabytes: run.heapGigabytes } : {}),
     });
     const result = await runJava({
       ...command,

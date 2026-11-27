@@ -35,6 +35,7 @@ import {
   isViewerPanelParameters,
   selectViewerDockAdapter,
 } from '#workbench-records/viewer-adapter.js';
+import { isChangingQuietly } from '#components/panes/dockview-announcements.js';
 import type { ViewerAdapterFacts, ViewerAdapterInput } from '#workbench-records/viewer-adapter.js';
 
 const group = (...views: string[]): ViewerNode => ({
@@ -707,6 +708,16 @@ describe('viewer adapter (A8d)', () => {
     const api = seeded!;
     api.layout(900, 600);
     const seededGroup = api.groups[0];
+    // Staging QA 2026-11-27: Dockview announced each landed view by its raw id ("v-xxxx opened").
+    const loudAdds: string[] = [];
+    const added = api.onDidAddPanel((panel) => {
+      if (!isChangingQuietly(api)) {
+        loudAdds.push(panel.id);
+      }
+    });
+    stops.push(() => {
+      added.dispose();
+    });
     const personViewerChanged = vi.spyOn(harness.controller, 'personViewerChanged');
     const project = mountProject();
     const facts = createViewerAdapterFactsPort(baseFacts());
@@ -724,6 +735,7 @@ describe('viewer adapter (A8d)', () => {
     expect(viewIds(api)).toEqual(['front', 'iso']);
     expect(api.groups[0]?.panels.map((panel) => panel.id)).toEqual(['front', 'iso']);
     expect(api.activePanel?.id).toBe('iso');
+    expect(loudAdds).toEqual([]);
     expect(api.groups).toHaveLength(1);
     expect(api.groups[0]).toBe(seededGroup);
     expect(headers.size).toBe(1);

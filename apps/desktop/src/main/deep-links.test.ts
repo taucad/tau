@@ -45,11 +45,6 @@ const admitted: ReadonlyArray<readonly [string, string, DeepLink]> = [
     'tau://i/github.com/taucad/tau-examples',
     { kind: 'import', route: '/import/github.com/taucad/tau-examples' },
   ],
-  [
-    'a sign-in callback',
-    'tau://auth/callback?ott=A1b2C3d4&state=dGhlLXN0YXRl',
-    { kind: 'auth-callback', oneTimeToken: 'A1b2C3d4', state: 'dGhlLXN0YXRl' },
-  ],
   /* The WHATWG parser resolves dot segments before this module sees a path, so
    * these are not traversals to refuse — they are the routes they normalise to.
    * The percent-encoded rows below prove nothing sneaks past that resolution. */
@@ -92,6 +87,8 @@ const refused: ReadonlyArray<readonly [string, string]> = [
   ['an unknown host', 'tau://projects/abc'],
   ['a bare host with no path', 'tau://auth'],
   ['an unknown auth path', 'tau://auth/token?ott=A1b2C3d4&state=dGhlLXN0YXRl'],
+  /* Share-link ruling R1: sign-in left the scheme with the loopback sign-in, so no auth link is admitted at all. */
+  ['the retired one-time-token sign-in callback', 'tau://auth/callback?ott=A1b2C3d4&state=dGhlLXN0YXRl'],
   ['a callback with no one-time token', 'tau://auth/callback?state=dGhlLXN0YXRl'],
   ['a callback with no state', 'tau://auth/callback?ott=A1b2C3d4'],
   ['a callback whose state is too short', 'tau://auth/callback?ott=A1b2C3d4&state=short'],
@@ -180,7 +177,7 @@ describe('parseDeepLink', () => {
   it('should only ever produce a route built from validated segments', () => {
     for (const [, value] of admitted) {
       const link = parseDeepLink(value);
-      if (link !== undefined && link.kind !== 'auth-callback' && link.kind !== 'host') {
+      if (link !== undefined && link.kind !== 'host') {
         expect(link.route.startsWith('/')).toBe(true);
         expect(new URL(link.route, 'app://tau/').href.startsWith('app://tau/')).toBe(true);
       }
@@ -230,13 +227,10 @@ describe('machine identity links', () => {
 
 describe('channel-specific desktop protocols', () => {
   it('accepts staging links only for the staging owner while preserving tau defaults', () => {
-    const staging = 'tau-staging://auth/callback?ott=token&state=abcdefgh';
+    const staging = 'tau-staging://invitations/abc';
     expect(parseDeepLink(staging)).toBeUndefined();
-    expect(parseDeepLink(staging, 'tau-staging:')).toEqual({
-      kind: 'auth-callback',
-      oneTimeToken: 'token',
-      state: 'abcdefgh',
-    });
+    expect(parseDeepLink(staging, 'tau-staging:')).toEqual({ kind: 'invitation', route: '/invitations/abc' });
+    expect(parseDeepLink('tau-staging://auth/callback?ott=token&state=abcdefgh', 'tau-staging:')).toBeUndefined();
     expect(parseDeepLink(staging.replace('tau-staging:', 'tau:'), 'tau-staging:')).toBeUndefined();
     expect(deepLinkArgument(['tau://machines', staging], 'tau-staging:')).toBe(staging);
   });

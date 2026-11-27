@@ -492,45 +492,60 @@ export type DraftState = {
   pendingEdit: readonly PendingDraftImage[];
 };
 
+/** The pending image lists per queue, so a keystroke, which keeps the queue, keeps the lists' identity. */
+const pendingByQueue = new WeakMap<
+  DraftContext['attachmentQueue'],
+  { activeEditMessageId: string | undefined; main: readonly PendingDraftImage[]; edit: readonly PendingDraftImage[] }
+>();
+/** One {@link DraftState} per draft context, shared by every selector reading the same snapshot. */
+const draftStateByContext = new WeakMap<DraftContext, DraftState>();
+
+const draftStateOf = (context: DraftContext): DraftState => {
+  const cached = draftStateByContext.get(context);
+  if (cached) {
+    return cached;
+  }
+  const { attachmentQueue, activeEditMessageId } = context;
+  let pending = pendingByQueue.get(attachmentQueue);
+  if (pending === undefined || pending.activeEditMessageId !== activeEditMessageId) {
+    pending = {
+      activeEditMessageId,
+      main: pendingDraftImages({ attachmentQueue, activeEditMessageId }, 'main'),
+      edit: pendingDraftImages({ attachmentQueue, activeEditMessageId }, 'edit'),
+    };
+    pendingByQueue.set(attachmentQueue, pending);
+  }
+  const state: DraftState = {
+    draftText: context.draftText,
+    draftAttachments: context.draftAttachments,
+    draftAnnotations: context.draftAnnotations,
+    draftToolChoice: context.draftToolChoice,
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
+    draftMode: context.draftMode as ChatMode,
+    messageEdits: context.messageEdits,
+    activeEditMessageId,
+    editDraftText: context.editDraftText,
+    editDraftAttachments: context.editDraftAttachments,
+    editDraftAnnotations: context.editDraftAnnotations,
+    attachingMain: attachmentQueue.some((entry) => entry.target === 'main'),
+    attachingEdit: attachmentQueue.some((entry) => entry.target === 'edit'),
+    pendingMain: pending.main,
+    pendingEdit: pending.edit,
+  };
+  draftStateByContext.set(context, state);
+  return state;
+};
+
 /**
  * Composer-required selector for draft-only state. Works under either
  * provider; safe to call from marketing-route composers.
+ *
+ * The selector runs inside the actor subscription, so a component re-renders only when the value it selects changes:
+ * a keystroke re-renders the readers of the draft's text, not those of its attachments or comments.
  */
 export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
   const { draftActorRef } = useChatComposer();
-  const draftContext = useSelector(draftActorRef, (state) => state.context);
-  /* Derived only when the queue or the open edit changes, so a keystroke keeps the lists' identity. */
-  const { attachmentQueue, activeEditMessageId } = draftContext;
-  const pending = useMemo(
-    () => ({
-      main: pendingDraftImages({ attachmentQueue, activeEditMessageId }, 'main'),
-      edit: pendingDraftImages({ attachmentQueue, activeEditMessageId }, 'edit'),
-    }),
-    [attachmentQueue, activeEditMessageId],
-  );
-
-  const draftState = useMemo<DraftState>(
-    () => ({
-      draftText: draftContext.draftText,
-      draftAttachments: draftContext.draftAttachments,
-      draftAnnotations: draftContext.draftAnnotations,
-      draftToolChoice: draftContext.draftToolChoice,
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
-      draftMode: draftContext.draftMode as ChatMode,
-      messageEdits: draftContext.messageEdits,
-      activeEditMessageId: draftContext.activeEditMessageId,
-      editDraftText: draftContext.editDraftText,
-      editDraftAttachments: draftContext.editDraftAttachments,
-      editDraftAnnotations: draftContext.editDraftAnnotations,
-      attachingMain: draftContext.attachmentQueue.some((entry) => entry.target === 'main'),
-      attachingEdit: draftContext.attachmentQueue.some((entry) => entry.target === 'edit'),
-      pendingMain: pending.main,
-      pendingEdit: pending.edit,
-    }),
-    [draftContext, pending],
-  );
-
-  return selector(draftState);
+  return useSelector(draftActorRef, (snapshot) => selector(draftStateOf(snapshot.context)));
 }
 
 /**

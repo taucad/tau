@@ -33,11 +33,20 @@
 # watchdog pages through its existing alert route. The automation never renews an entry. A test that meets the entry
 # rule within 30 days of its release re-enters as the same entry and goes to the operator.
 #
-# It uses no environment and no secret: `actions: read` lists runs and downloads artifacts, `contents: write` writes
-# the state branch and the entry branch (the `main` ruleset keeps `main` out of its reach), `issues: write` opens the
-# owner issues and `pull-requests: write` opens the entry pull request. Outcome rows come from pull-request code in
-# the queue: they are parsed as data, field by field, and never executed; test names and errors reach the issues only
-# as inert text.
+# The workflow token (`actions: read` lists runs and downloads artifacts, `contents: write` writes the state branch,
+# which the `flake-ledger-writer` ruleset keeps to `github-actions[bot]`) does the ingestion and the metrics. The entry
+# and the release/expiry steps write with a `tau-flake-bot` App token when the main-only `flake-bot` environment holds
+# the App's secrets (`FLAKE_BOT_APP_ID`, `FLAKE_BOT_APP_PRIVATE_KEY`; tau-cloud `stacks/repo/tau`): minted after the
+# ingestion for `tau` alone with `contents: write` (the `flake-*` branches; the `main` ruleset keeps `main` out of its
+# reach), `issues: write` (the owner issues) and `pull-requests: write` (the pull requests and their auto-merge). A
+# pull request the App opens starts CI, so an entry or removal that validates lands through the merge queue without a
+# person. The App never approves: the `main` ruleset requires no approval. Without the secrets the mint step is
+# skipped and both steps fall back to the workflow token, as before the App: the branch is pushed and each owner issue
+# names it with a compare link. Deleting either secret is the kill switch. Markers are read from issue comments only
+# when `FLAKE_BOT_LOGIN` (default `tau-flake-bot[bot]`) or `github-actions[bot]` wrote them. The environment admits
+# only `main`, the ref of every `workflow_run` and `schedule` run; a dispatch from another ref is refused. Outcome
+# rows come from pull-request code in the queue: they are parsed as data, field by field, and never executed; test
+# names and errors reach the issues only as inert text.
 #
 # Shadow rows (FQ-13): the suites a project lists in its `test:e2e:shadow` target are counted from the same outcome
 # rows, so every `project.json` is checked out too. The count against the Q1 bar (100 consecutive passing runs) is kept
@@ -80,11 +89,22 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Main only (tau-cloud `stacks/repo/tau`, `can_admins_bypass = false`): the `tau-flake-bot` key. No deployment
+    # record: the job only reads the environment's secrets.
+    environment:
+      name: flake-bot
+      deployment: false
+    # The workflow token stays the fallback, so it keeps every permission the entry and release steps write with.
     permissions:
       actions: read
       contents: write
       issues: write
       pull-requests: write
+    env:
+      # Whether the App's two secrets are set, without exposing either to a step that does not mint the token.
+      FLAKE_BOT_CONFIGURED: ${{ secrets.FLAKE_BOT_APP_ID != '' && secrets.FLAKE_BOT_APP_PRIVATE_KEY != '' }}
+      # The App's bot account, whose issue comments count as the automation's markers with `github-actions[bot]`'s.
+      FLAKE_BOT_LOGIN: ${{ vars.FLAKE_BOT_LOGIN || 'tau-flake-bot[bot]' }}
     steps:
       - name: Checkout the ledger scripts
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -134,6 +154,23 @@ jobs:
           RUNS: ${{ inputs.runs || '' }}
         run: node scripts/src/ci-flake-ledger-ingest-cli.ts --runs "$RUNS" --lookback-hours 72 --max-runs 30
 
+      # A `tau-flake-bot` token for the entry and release steps, minted after the ingestion so its hour covers them.
+      # Skipped while the `flake-bot` environment lacks the App's secrets: both steps then use the workflow token. A
+      # mint that fails (the App uninstalled, a revoked key) turns the job red, and both steps still run with the
+      # workflow token.
+      - name: Mint the tau-flake-bot token
+        id: flake-bot
+        if: ${{ !cancelled() && steps.ingest.outcome != 'skipped' && env.FLAKE_BOT_CONFIGURED == 'true' }}
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.FLAKE_BOT_APP_ID }}
+          private-key: ${{ secrets.FLAKE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: tau
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
       # The entry step reads the state the ingestion wrote, only after a complete ingestion: a partial one may lack a
       # newer failure of a test it would otherwise quarantine. The next ingestion that completes runs it again. The
       # checkout carries every `project.json` and `quarantine.json`; the test files an entry names are read at the
@@ -141,7 +178,7 @@ jobs:
       - name: Open quarantine entries
         if: ${{ steps.ingest.outcome == 'success' }}
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ steps.flake-bot.outputs.token || github.token }}
         run: node scripts/src/ci-flake-quarantine-entry-cli.ts
 
       # Release and expiry read the count the ingestion wrote. An expiry is due on its day, so neither a failed entry
@@ -151,7 +188,7 @@ jobs:
       - name: Release and expire quarantine entries
         if: ${{ !cancelled() && steps.ingest.outcome != 'skipped' }}
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ steps.flake-bot.outputs.token || github.token }}
           INGEST_COMPLETE: ${{ steps.ingest.outcome == 'success' && steps.ingest.outputs.complete == 'true' }}
         run: node scripts/src/ci-flake-quarantine-release-cli.ts --releases "$INGEST_COMPLETE"
 

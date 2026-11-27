@@ -96,6 +96,14 @@
       },
       "kind": "witness",
       "ref": "S32: deleting a legacy anchor lets a cancelled switch to B release the original A fence"
+    },
+    "MessageQueue.refuse-accepted.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ComposerExclusive"
+      },
+      "kind": "witness",
+      "ref": "RefuseOnlyUnapplied removed: a send the host accepted, then refused on a later try, must not go back to the composer"
     }
   }
 }

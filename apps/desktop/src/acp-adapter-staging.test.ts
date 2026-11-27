@@ -16,7 +16,7 @@
 
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
@@ -28,9 +28,15 @@ import { acpAgentProfiles, resolveAcpAdapters, spawnAcpAdapter } from '@taucad/h
 import type { AcpAdapter } from '@taucad/host';
 import { copyRuntimeClosure } from '@taucad/nx/runtime-closure';
 
+// oxlint-disable-next-line no-restricted-imports -- The executable-stub fixture has no package import mapping.
+import { writeExecutableStub } from '../scripts/executable-stub.mjs';
+
 const appRoot = join(import.meta.dirname, '..');
 const require = createRequire(join(appRoot, 'package.json'));
 const execFileAsync = promisify(execFile);
+/* A Windows user's PATH always holds System32, and the Codex adapter starts its CLI through `cmd.exe` there. */
+const windowsSystemPath =
+  process.platform === 'win32' ? [join(process.env['SystemRoot'] ?? String.raw`C:\Windows`, 'System32')] : [];
 const adapters = acpAgentProfiles.flatMap((profile) => (profile.package === undefined ? [] : [profile.package]));
 
 /**
@@ -148,20 +154,25 @@ describe('ACP adapter staging', () => {
   let modulesRoot: string;
   let path: string;
   let claudeCalls: string;
+  let claudeStub: string;
 
   beforeAll(async () => {
     stageRoot = await realpath(await mkdtemp(join(tmpdir(), 'tau-acp-stage-')));
     modulesRoot = resolve(stageRoot, 'node_modules');
-    /* A stub `claude` that records how it was started; no vendor login is read. */
+    /* A stub `claude` that records how it was started; no vendor login is read. Windows starts only a
+     * real `claude.exe`, so the stub is one there. */
     const stubDirectory = resolve(stageRoot, 'bin');
     claudeCalls = resolve(stageRoot, 'claude-calls.log');
-    await mkdir(stubDirectory);
-    await writeFile(
+    claudeStub = await writeExecutableStub(
       resolve(stubDirectory, 'claude'),
-      `#!/bin/sh\necho "$@" >> '${claudeCalls}'\necho '2.1.301 (stub)'\n`,
+      [
+        `require('node:fs').appendFileSync(${JSON.stringify(claudeCalls)}, process.argv.slice(2).join(' ') + '\\n');`,
+        `process.stdout.write('2.1.301 (stub)\\n');`,
+      ].join('\n'),
     );
-    await chmod(resolve(stubDirectory, 'claude'), 0o755);
-    path = [stubDirectory, await installedCodexDirectory(), dirname(process.execPath)].join(delimiter);
+    path = [stubDirectory, await installedCodexDirectory(), dirname(process.execPath), ...windowsSystemPath].join(
+      delimiter,
+    );
     for (const name of adapters) {
       // oxlint-disable-next-line no-await-in-loop -- The closure nests packages; staging is serial by construction.
       await copyRuntimeClosure({ name, source: dirname(require.resolve(`${name}/package.json`)), modulesRoot });
@@ -241,25 +252,21 @@ describe('ACP adapter staging', () => {
     60_000,
   );
 
-  it.skipIf(process.platform === 'win32')(
-    'opens a Claude session from the staged tree on the user’s own claude',
-    async () => {
-      /* Staging follows no optional dependency, so the Agent SDK's platform
-       * binary is absent; without `CLAUDE_CODE_EXECUTABLE` this fails "native
-       * binary not found" (blueprint C2). */
-      const vendor = resolve(modulesRoot, '@agentclientprotocol/claude-agent-acp/node_modules/@anthropic-ai');
-      expect(await readdir(vendor)).toEqual(['claude-agent-sdk']);
-      const adapter = stagedAdapter('@agentclientprotocol/claude-agent-acp');
-      expect(adapter.executablePath).toBe(resolve(stageRoot, 'bin', 'claude'));
-      const { stderr } = await handshake({ adapter, cwd: stageRoot, path, openSession: true });
+  it('opens a Claude session from the staged tree on the user’s own claude', async () => {
+    /* Staging follows no optional dependency, so the Agent SDK's platform
+     * binary is absent; without `CLAUDE_CODE_EXECUTABLE` this fails "native
+     * binary not found" (blueprint C2). */
+    const vendor = resolve(modulesRoot, '@agentclientprotocol/claude-agent-acp/node_modules/@anthropic-ai');
+    expect(await readdir(vendor)).toEqual(['claude-agent-sdk']);
+    const adapter = stagedAdapter('@agentclientprotocol/claude-agent-acp');
+    expect(adapter.executablePath).toBe(claudeStub);
+    const { stderr } = await handshake({ adapter, cwd: stageRoot, path, openSession: true });
 
-      await expect
-        .poll(async () => readFile(claudeCalls, 'utf8').catch(() => ''), { timeout: 20_000, interval: 100 })
-        .toContain('--output-format stream-json');
-      expect(stderr).not.toContain('native binary not found');
-    },
-    60_000,
-  );
+    await expect
+      .poll(async () => readFile(claudeCalls, 'utf8').catch(() => ''), { timeout: 20_000, interval: 100 })
+      .toContain('--output-format stream-json');
+    expect(stderr).not.toContain('native binary not found');
+  }, 60_000);
 });
 
 describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')('desktop native runtime staging', () => {

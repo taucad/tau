@@ -50,7 +50,6 @@ const state = vi.hoisted(() => ({
   authRestored: undefined as Promise<void> | undefined,
   authToken: undefined as string | undefined,
   headerOptions: undefined as TauHeaderInjectionOptions | undefined,
-  authHandleCallback: vi.fn(async () => undefined),
   protocolClient: [] as unknown[][],
   resolveFork: undefined as
     | undefined
@@ -268,6 +267,8 @@ const fakeWindow = {
     isDestroyed: vi.fn(() => false),
     on: vi.fn<(event: string, listener: (...args: unknown[]) => void) => void>(),
     setWindowOpenHandler: vi.fn(),
+    /* A probe launch polls the page for its save handler; this page always reports one. */
+    executeJavaScript: vi.fn(async (_code: string): Promise<unknown> => true),
   },
   isDestroyed: vi.fn(() => false),
   isMinimized: vi.fn(() => false),
@@ -412,6 +413,7 @@ vi.mock('#main/app-protocol.js', () => ({
   registerAppProtocol: vi.fn(),
 }));
 vi.mock('#main/auth-service.js', () => ({
+  SignInEndedError: class extends Error {},
   createAuthService: vi.fn(() => ({
     restore: vi.fn(async () => state.authRestored),
     token: vi.fn(() => state.authToken),
@@ -420,7 +422,6 @@ vi.mock('#main/auth-service.js', () => ({
     refresh: vi.fn(async () => undefined),
     onChange: vi.fn(),
     dispose: vi.fn(),
-    handleCallback: state.authHandleCallback,
     signIn: state.authSignIn,
     signOut: vi.fn(),
   })),
@@ -484,8 +485,11 @@ vi.mock('#main/services-broker.js', () => ({
       retainAgentHost: state.servicesRetainAgentHost,
       releaseAgentHost: state.servicesReleaseAgentHost,
       send: state.servicesSend,
-      computeProjectRoot: (root: string) =>
-        root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
+      computeProjectRoot: (root: string) => {
+        /* Main hands over resolved roots, so a checkout is spelled with the host separator. */
+        const checkouts = root.search(/[/\\]\.tau[/\\]checkouts[/\\]/u);
+        return checkouts === -1 ? undefined : root.slice(0, checkouts);
+      },
     };
   }),
 }));
@@ -571,7 +575,6 @@ afterEach(async () => {
   app.isPackaged = false;
   app.commandLine.hasSwitch.mockReturnValue(false);
   state.protocolClient.length = 0;
-  state.authHandleCallback.mockClear();
   state.resolveFork = undefined;
   state.servicesConnect.mockClear();
   state.geometryMeasurementConnect.mockClear();
@@ -614,7 +617,8 @@ describe('desktop main compute owner', () => {
   const bootMilliseconds = 30_000;
 
   const bootstrap = async (): Promise<string> => {
-    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-owner-'));
+    /* Main canonicalizes project roots natively, which spells out a Windows 8.3 temp directory (`RUNNER~1`). */
+    state.userData = await realpath(await mkdtemp(join(tmpdir(), 'tau-main-owner-')));
     await import('#main/main.js');
     await vi.waitFor(() => {
       expect(state.resolveFork).toBeDefined();
@@ -2227,19 +2231,17 @@ describe('desktop main deep links', () => {
   );
 
   it(
-    'should redeem a sign-in callback in main and never navigate the renderer to it',
+    /* Share-link ruling R1: sign-in returns over loopback (DSI-4), so the retired callback link does nothing. */
+    'should ignore the retired one-time-token sign-in link, neither signing in nor navigating',
     async () => {
       await bootAndWait();
 
       listener('open-url')({ preventDefault: vi.fn() }, 'tau://auth/callback?ott=A1b2C3d4&state=dGhlLXN0YXRl');
-
-      await vi.waitFor(() => {
-        expect(state.authHandleCallback).toHaveBeenCalledWith({
-          kind: 'auth-callback',
-          oneTimeToken: 'A1b2C3d4',
-          state: 'dGhlLXN0YXRl',
-        });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
       });
+
+      expect(state.authSignIn).not.toHaveBeenCalled();
       expect(fakeWindow.loadURL).not.toHaveBeenCalled();
     },
     bootMilliseconds,
@@ -2493,8 +2495,10 @@ describe('desktop main machine store', () => {
       const store = join(state.userData, 'config', 'machines');
       expect(additions['TAU_DESKTOP_MACHINES_DIR']).toBe(store);
       const { mode } = await stat(store);
+      /* Owner-only on macOS and Linux. Windows has no POSIX mode: Node reports 0o666 for any writable directory
+       * (measured on windows-2025, run 43999226627), and the store is fenced by the profile directory's ACL. */
       // oxlint-disable-next-line eslint/no-bitwise -- the POSIX mode is a bit field
-      expect(mode & 0o777).toBe(0o700);
+      expect(mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o700);
       expect(additions['TAU_DESKTOP_LEGACY_MACHINES_DIR']).toBe(join(state.userData, 'machines'));
 
       const postMessage = vi.fn();
@@ -2873,14 +2877,21 @@ describe('desktop main boot health and safe mode (WP6)', () => {
   it(
     'should neither read nor write the ledger in a probe launch (T-R12.4)',
     async () => {
+      const complete = vi.fn();
       vi.doMock('#main/ota-probe.js', () => ({
-        admitOtaProbe: vi.fn(() => ({ candidateTag: 'v0.0.0', complete: vi.fn() })),
+        admitOtaProbe: vi.fn(() => ({ candidateTag: 'v0.0.0', complete })),
       }));
       try {
         await booted(seedLedger(2));
+        /* Let the probe finish inside this case: a bootstrap still running would end in a later one. */
+        await vi.waitFor(() => {
+          expect(complete).toHaveBeenCalledOnce();
+          expect(state.prepareToInstall).toBeDefined();
+        });
       } finally {
         vi.doUnmock('#main/ota-probe.js');
       }
+      expect(state.log).not.toHaveBeenCalledWith('error', 'main.bootstrap-failed', expect.anything());
       expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
       const ledger = await readLedger();
       expect(ledger.last).toEqual(expect.objectContaining({ launchId: 'previous' }));

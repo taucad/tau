@@ -297,6 +297,11 @@ describe('desktopAuthAction', () => {
 });
 
 describe('AuthConfigLink', () => {
+  beforeEach(() => {
+    // Shuffled runs must not see another row's router link.
+    routerLink.mockClear();
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
     delete globalThis.window.tauAuth;

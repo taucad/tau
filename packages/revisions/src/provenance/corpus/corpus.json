@@ -1,0 +1,510 @@
+{
+  "$comment": "Golden corpus of the provenance module (cloud backup admission blueprint, Test plan; G1). Raw objects with placeholder tree and parent ids; oid is the id of these exact bytes. Expected answers are in expected.json; writer-leg pins (G2) are in writers/. Never edit an entry in place: add a new one.",
+  "pusher": "user_PusherAccountIdA12345",
+  "member": "user_MemberAccountIdB12345",
+  "tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "parent": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "coverage": {
+    "identities": ["LOCAL-HANDLE", "anon:5e1ea5ed", "Jordan Lee"],
+    "verifiedEmail": "pusher@example.com",
+    "forgeId": "583231"
+  },
+  "deviceIdentities": ["LOCAL-HANDLE", "anon:5e1ea5ed", "Jordan Lee"],
+  "entries": [
+    {
+      "id": "row01-signed-in",
+      "rows": "1",
+      "title": "Signed-in work, current build",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_PusherAccountIdA12345\",\"name\":\"Pusher\"},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: user Pusher\nTau-Trigger: save\n",
+      "oid": "0b4cfde483a321506f637c177d75ed69197e2812"
+    },
+    {
+      "id": "row02-v1-account",
+      "rows": "2",
+      "title": "Version 1 record naming the account",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"user_PusherAccountIdA12345\",\"actor\":{\"kind\":\"user\",\"id\":\"user_PusherAccountIdA12345\",\"name\":\"user_PusherAccountIdA12345\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user user_PusherAccountIdA12345\nTau-Trigger: idle\n",
+      "oid": "0efa220d86c7bf8fe68aa8147f3a7ac3b52e6b37"
+    },
+    {
+      "id": "row03-v1-os-login",
+      "rows": "3",
+      "title": "Pre-A1 desktop: version 1 record and author under the OS login",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor LOCAL-HANDLE <LOCAL-HANDLE@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"LOCAL-HANDLE\",\"actor\":{\"kind\":\"user\",\"id\":\"LOCAL-HANDLE\",\"name\":\"LOCAL-HANDLE\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user LOCAL-HANDLE\nTau-Trigger: idle\n",
+      "oid": "bd63d02be5231d83b5373b9045e018bdf3d198f4"
+    },
+    {
+      "id": "row03-v2-os-login",
+      "rows": "3",
+      "title": "Pre-A1 desktop: version 2 record naming the OS login",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor LOCAL-HANDLE <LOCAL-HANDLE@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"LOCAL-HANDLE\",\"name\":\"LOCAL-HANDLE\"},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: user LOCAL-HANDLE\nTau-Trigger: save\n",
+      "oid": "d2be80994bb56db5065b5db371768b610b2d0a77"
+    },
+    {
+      "id": "row03-evidence-f063a05",
+      "rows": "3",
+      "title": "Evidence f063a05 shape: autosave, version 1, LOCAL-HANDLE",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor LOCAL-HANDLE <LOCAL-HANDLE@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"LOCAL-HANDLE\",\"actor\":{\"kind\":\"user\",\"id\":\"LOCAL-HANDLE\",\"name\":\"LOCAL-HANDLE\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user LOCAL-HANDLE\nTau-Trigger: idle\n",
+      "oid": "bd63d02be5231d83b5373b9045e018bdf3d198f4"
+    },
+    {
+      "id": "row03-evidence-b1e2e34",
+      "rows": "3,8",
+      "title": "Evidence b1e2e34 shape: version 1 agent result for the OS login",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor LOCAL-HANDLE <LOCAL-HANDLE@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (turn)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"agent\",\"actorId\":\"agent\",\"runId\":\"req_wsUovSiowOmOVf8kSFKxK\",\"attempt\":1,\"turnCut\":\"result\",\"turnId\":\"msg_51KDSpXqQUf5YgosFPgEq\",\"actor\":{\"kind\":\"agent\",\"id\":\"agent\",\"runId\":\"req_wsUovSiowOmOVf8kSFKxK\",\"onBehalfOf\":{\"kind\":\"user\",\"id\":\"LOCAL-HANDLE\",\"name\":\"LOCAL-HANDLE\"}},\"trigger\":\"turn\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (turn)\"}}\nTau-Actor: agent agent run req_wsUovSiowOmOVf8kSFKxK for LOCAL-HANDLE\nTau-Trigger: turn\n",
+      "oid": "928baa1e6f34a59b23c2c0b88cbd172f66fe5eda"
+    },
+    {
+      "id": "row03-evidence-e36f491",
+      "rows": "3",
+      "title": "Evidence e36f491 shape: version 1 turn base under the OS login",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor LOCAL-HANDLE <LOCAL-HANDLE@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (turn)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"agent\",\"actorId\":\"LOCAL-HANDLE\",\"runId\":\"req_NrSRNvea1Ua45E2yCxnaH\",\"attempt\":1,\"turnCut\":\"base\",\"turnId\":\"msg_gUYKjg4eu9KCMerbusOpZ\",\"actor\":{\"kind\":\"user\",\"id\":\"LOCAL-HANDLE\",\"name\":\"LOCAL-HANDLE\"},\"trigger\":\"turn\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (turn)\"}}\nTau-Actor: user LOCAL-HANDLE\nTau-Trigger: turn\n",
+      "oid": "90c23b978ad12a22cd8373f1f701b079eed24f13"
+    },
+    {
+      "id": "row03-header-only",
+      "rows": "3",
+      "title": "Header-only evidence case: Tau-written, LOCAL-HANDLE author, record not shown",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor LOCAL-HANDLE <LOCAL-HANDLE@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"]}\n",
+      "oid": "8efbe1d0d29ed3840860fc1ef8d4d969f35ae441"
+    },
+    {
+      "id": "row04-mailbox-verified",
+      "rows": "4",
+      "title": "Pre-A1 desktop with the pusher's verified sign-in email as author",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor LOCAL-HANDLE <pusher@example.com> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"LOCAL-HANDLE\",\"actor\":{\"kind\":\"user\",\"id\":\"LOCAL-HANDLE\",\"name\":\"LOCAL-HANDLE\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user LOCAL-HANDLE\nTau-Trigger: idle\n",
+      "oid": "2c025f3d21b054c9477921989eec772332de6436"
+    },
+    {
+      "id": "row04-mailbox-other",
+      "rows": "4",
+      "title": "Pre-A1 desktop with another mailbox as author (claimable by author name)",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor LOCAL-HANDLE <pat@elsewhere.test> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"LOCAL-HANDLE\",\"actor\":{\"kind\":\"user\",\"id\":\"LOCAL-HANDLE\",\"name\":\"LOCAL-HANDLE\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user LOCAL-HANDLE\nTau-Trigger: idle\n",
+      "oid": "b758121b3253077cc83380e0f1a974d5bdb63ef6"
+    },
+    {
+      "id": "row05-other-account",
+      "rows": "5",
+      "title": "Account A recorded, account B backs up",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Other Person <user_OtherAccountIdC123456@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_OtherAccountIdC123456\",\"name\":\"Other Person\"},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: user Other Person\nTau-Trigger: save\n",
+      "oid": "adc6e4af3202e2c32b3648cd8e5010a28075bf7a"
+    },
+    {
+      "id": "row06-device-pseudonym",
+      "rows": "6",
+      "title": "Signed-out work under the device pseudonym",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Anonymous <anon:5e1ea5ed@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"anon:5e1ea5ed\",\"name\":\"Anonymous\",\"anonymous\":true},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: user Anonymous\nTau-Trigger: save\n",
+      "oid": "90e83852e964674126a4628190c87a568954250f"
+    },
+    {
+      "id": "row07-account-pseudonym",
+      "rows": "7",
+      "title": "Signed in with anonymity on (account pseudonym)",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Anonymous <anon:0ac5a17e@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"anon:0ac5a17e\",\"name\":\"Anonymous\",\"anonymous\":true},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: user Anonymous\nTau-Trigger: save\n",
+      "oid": "abe55dfee608dfc614c28cda86d6aeeb740b2435"
+    },
+    {
+      "id": "row08-agent-for-pusher",
+      "rows": "8",
+      "title": "Tau agent result for the pusher",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"agent\",\"actor\":{\"kind\":\"agent\",\"id\":\"claude\",\"runId\":\"run_corpus\",\"onBehalfOf\":{\"kind\":\"user\",\"id\":\"user_PusherAccountIdA12345\"}},\"capture\":\"turn\",\"via\":\"desktop\",\"runId\":\"run_corpus\",\"turnCut\":\"result\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: agent claude run run_corpus for user_PusherAccountIdA12345\nTau-Trigger: turn\n",
+      "oid": "d85a5f3988a8f5425dcf19838e0d210392bf8d99"
+    },
+    {
+      "id": "row08-agent-forged",
+      "rows": "8",
+      "title": "Tau agent record forged for another account (R2-6)",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Other Person <user_OtherAccountIdC123456@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"agent\",\"actor\":{\"kind\":\"agent\",\"id\":\"claude\",\"runId\":\"run_corpus\",\"onBehalfOf\":{\"kind\":\"user\",\"id\":\"user_OtherAccountIdC123456\"}},\"capture\":\"turn\",\"via\":\"desktop\",\"runId\":\"run_corpus\",\"turnCut\":\"result\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: agent claude run run_corpus for user_OtherAccountIdC123456\nTau-Trigger: turn\n",
+      "oid": "98ad17f7bfb880b34ba6de5c6c5e4921115369f7"
+    },
+    {
+      "id": "row08-agent-anonymous",
+      "rows": "7,8",
+      "title": "Tau agent result for an anonymous person",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Anonymous <anon:0ac5a17e@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"agent\",\"actor\":{\"kind\":\"agent\",\"id\":\"claude\",\"runId\":\"run_corpus\",\"onBehalfOf\":{\"kind\":\"user\",\"id\":\"anon:0ac5a17e\"}},\"capture\":\"turn\",\"via\":\"desktop\",\"runId\":\"run_corpus\",\"turnCut\":\"result\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: agent claude run run_corpus for anon:0ac5a17e\nTau-Trigger: turn\n",
+      "oid": "908b27ce32c414f10425e7ec439d04c5d06d51af"
+    },
+    {
+      "id": "row09-own-git",
+      "rows": "9",
+      "title": "git commit under the pusher's Tau no-reply address",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\n\nEdited with git\n",
+      "oid": "45540780482ad63adb937cd1861115b105f9e79b"
+    },
+    {
+      "id": "row10-verified-email",
+      "rows": "10",
+      "title": "git commit under the pusher's verified sign-in email",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <pusher@example.com> 1790000000 +0000\ncommitter Pusher <pusher@example.com> 1790000000 +0000\n\nEdited with git\n",
+      "oid": "61c6596963ab6193f9e9ebca89ad4937736f5698"
+    },
+    {
+      "id": "row10-personal-unverified",
+      "rows": "10",
+      "title": "git commit under a personal address that is not verified",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <p@elsewhere.test> 1790000000 +0000\ncommitter Pusher <p@elsewhere.test> 1790000000 +0000\n\nEdited with git\n",
+      "oid": "c5ddfb14003f762451f39fc42fd3c8771b98ee16"
+    },
+    {
+      "id": "row11-forge-own",
+      "rows": "11",
+      "title": "The pusher's own GitHub no-reply commit, matched on the numeric id",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor pusher-gh <583231+pusher-gh@users.noreply.github.com> 1790000000 +0000\ncommitter GitHub <noreply@github.com> 1790000000 +0000\n\nEdited on GitHub\n",
+      "oid": "df70935db4c923ff1f9ee6fd12e9abbb17114e3c"
+    },
+    {
+      "id": "row11-forge-login-only",
+      "rows": "11",
+      "title": "A GitHub no-reply address with the pusher's login and another id",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor pusher-gh <999+pusher-gh@users.noreply.github.com> 1790000000 +0000\ncommitter GitHub <noreply@github.com> 1790000000 +0000\n\nEdited on GitHub\n",
+      "oid": "d456154b9e1cf9796c64948c17debb1f025ac603"
+    },
+    {
+      "id": "row11-forge-other",
+      "rows": "11",
+      "title": "Another person's GitHub commit in a linked project",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor octocat <1+octocat@users.noreply.github.com> 1790000000 +0000\ncommitter GitHub <noreply@github.com> 1790000000 +0000\n\nEdited on GitHub\n",
+      "oid": "fba7929de7b13b73652e8aff926db6285c070457"
+    },
+    {
+      "id": "row11-linked-record",
+      "rows": "11",
+      "title": "Signed-in work in a linked project: record plus forge author",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor pusher-gh <583231+pusher-gh@users.noreply.github.com> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_PusherAccountIdA12345\",\"name\":\"pusher-gh\"},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: user pusher-gh\nTau-Trigger: save\n",
+      "oid": "fc1a499ee8b55eb35d4ae4b58f41d46b816b326f"
+    },
+    {
+      "id": "row11-ui09-forge-email",
+      "rows": "11",
+      "title": "ui@0.9.x record carrying the forge identity in the person",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor pusher-gh <583231+pusher-gh@users.noreply.github.com> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_PusherAccountIdA12345\",\"name\":\"pusher-gh\",\"email\":\"583231+pusher-gh@users.noreply.github.com\"},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: user pusher-gh\nTau-Trigger: save\n",
+      "oid": "7c4685bf0d832fc3c699e8ddbb6dbba0a090ae81"
+    },
+    {
+      "id": "row12-imported",
+      "rows": "12",
+      "title": "History imported from another Git host",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Ada <ada@gitlab.test> 1790000000 +0000\ncommitter Ada <ada@gitlab.test> 1790000000 +0000\n\nImport\n",
+      "oid": "c82453285c4db08700df76c16bf349bc80fbe222"
+    },
+    {
+      "id": "row13a-trailer",
+      "rows": "13a",
+      "title": "External agent in the Terminal, committing as the person with a trailer",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\n\nFix the bracket\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n",
+      "oid": "d6434316ca90d4fef5d7a02a5bbd2e18b40e0c33"
+    },
+    {
+      "id": "row13a-trailer-model",
+      "rows": "13a",
+      "title": "The same with the model named in the trailer (captured)",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\n\nFix the bracket\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n",
+      "oid": "2646e5bb6b63b8a187c754e227ca8b49f44d1e21"
+    },
+    {
+      "id": "row13b-agent-author",
+      "rows": "13b",
+      "title": "External agent committing as itself, committer the person",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Claude <noreply@anthropic.com> 1790000000 +0000\ncommitter Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\n\nFix the bracket\n",
+      "oid": "6b8bfde806aa35832a7a0c15b6a75fb401b422ac"
+    },
+    {
+      "id": "row13b-agent-author-email",
+      "rows": "13b",
+      "title": "External agent committing as itself, committer the pusher's verified email",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Claude <noreply@anthropic.com> 1790000000 +0000\ncommitter Pusher <pusher@example.com> 1790000000 +0000\n\nFix the bracket\n",
+      "oid": "69fbfee38035d7c3c35036cb471756149798e8e5"
+    },
+    {
+      "id": "row13c-agent-imported",
+      "rows": "13c",
+      "title": "Agent-authored and -committed commit (captured shape), committer not the pusher",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Claude <noreply@anthropic.com> 1790000000 +0000\ncommitter Claude <noreply@anthropic.com> 1790000000 +0000\n\nFix the bracket\n",
+      "oid": "e9f242fda765a9afd2c5cd37f1a3583bce57eea5"
+    },
+    {
+      "id": "row13-lookalike-address",
+      "rows": "13",
+      "title": "Look-alike trailer address",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\n\nFix\n\nCo-Authored-By: Claude <noreply@anthropic.co>\n",
+      "oid": "74d95c9786ae42b8ccc6572c7692cf7199ae2bd3"
+    },
+    {
+      "id": "row13-lookalike-author",
+      "rows": "13",
+      "title": "Look-alike agent author",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Claude <claude@anthropic.com.example> 1790000000 +0000\ncommitter Claude <claude@anthropic.com.example> 1790000000 +0000\n\nFix\n",
+      "oid": "90b0ee424a804a5eb4ca9d3fa88a1a9a282d7819"
+    },
+    {
+      "id": "row13-trailer-unverified",
+      "rows": "13",
+      "title": "Agent trailer on a commit that does not verify",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Ada <ada@gitlab.test> 1790000000 +0000\ncommitter Ada <ada@gitlab.test> 1790000000 +0000\n\nFix\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n",
+      "oid": "8a55ea8991771f76c250b8149a0d49790d7f9b49"
+    },
+    {
+      "id": "row15-newer-version",
+      "rows": "15",
+      "title": "Record written by a newer build (version 3)",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":3,\"provenance\":{\"actor\":{\"kind\":\"user\",\"id\":\"user_PusherAccountIdA12345\"}}}\n",
+      "oid": "8cd67f2e41b1d2ffe615b937b060131ae70315f9"
+    },
+    {
+      "id": "row16-malformed-json",
+      "rows": "16",
+      "title": "Corrupt record JSON",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor LOCAL-HANDLE <LOCAL-HANDLE@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\n",
+      "oid": "20572f0882a0fffb86c324bb849d863aaa2dfa18"
+    },
+    {
+      "id": "row16-truncated",
+      "rows": "16",
+      "title": "Truncated record, author the pusher",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2}\n",
+      "oid": "aa11db4b555b08338e7ed165e9e8c6ac006a5821"
+    },
+    {
+      "id": "two-record-lines",
+      "rows": "16",
+      "title": "Two Tau-Metadata lines, the last naming another account",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_PusherAccountIdA12345\"},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: user user_PusherAccountIdA12345\nTau-Trigger: save\nTau-Metadata: {\"version\":2,\"parents\":[],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_OtherAccountIdC123456\"},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1},\"summary\":{\"generated\":\"x\"}}\n",
+      "oid": "a8e5793b6ae5d591129fdf7aaaaa6a68317cff45"
+    },
+    {
+      "id": "v1-account-os-author",
+      "rows": "3",
+      "title": "Version 1 record naming an account id with an OS-login author (unclaimable)",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor LOCAL-HANDLE <LOCAL-HANDLE@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"Legacy32AccountId000000000000AB0\",\"actor\":{\"kind\":\"user\",\"id\":\"Legacy32AccountId000000000000AB0\",\"name\":\"Legacy32AccountId000000000000AB0\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user Legacy32AccountId000000000000AB0\nTau-Trigger: idle\n",
+      "oid": "e28171281075f776d55cdc6be2e4fba100703a6a"
+    },
+    {
+      "id": "windows-login-space",
+      "rows": "3",
+      "title": "Version 1 record under a Windows login with a space (claimable)",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Jordan Lee <Jordan Lee@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"Jordan Lee\",\"actor\":{\"kind\":\"user\",\"id\":\"Jordan Lee\",\"name\":\"Jordan Lee\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user Jordan Lee\nTau-Trigger: idle\n",
+      "oid": "ed926a5cb63d7918819dacd62055c47cf7e250d0"
+    },
+    {
+      "id": "conflicted",
+      "rows": "1",
+      "title": "Conflicted revision with jj:trees, by the pusher",
+      "type": "commit",
+      "ref": "refs/heads/conflicts/main/device-a",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\njj:trees aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\nSaved\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"merge\",\"actor\":{\"kind\":\"user\",\"id\":\"user_PusherAccountIdA12345\"},\"capture\":\"merge\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved\"}}\nTau-Actor: user user_PusherAccountIdA12345\nTau-Trigger: merge\n",
+      "oid": "80f3c818862b3b2548fd9605e63413e19085a7a7"
+    },
+    {
+      "id": "signed",
+      "rows": "9",
+      "title": "Signed git commit under the pusher's no-reply address",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ncommitter Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\ngpgsig -----BEGIN SSH SIGNATURE-----\n U1NIU0lHAAAAAQ==\n -----END SSH SIGNATURE-----\n\nSigned edit\n",
+      "oid": "7f461dea69292dd7cdb19466149b2e076c94b23b"
+    },
+    {
+      "id": "escaped-account",
+      "rows": "16",
+      "title": "Version 1 record hiding an account id behind JSON escapes",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor LOCAL-HANDLE <LOCAL-HANDLE@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved\n\nTau-Metadata: {\"version\":1,\"provenance\":{\"actorId\":\"\\u0075ser_PusherAccountIdA12345\"}}\n",
+      "oid": "a90182df81a0ce8809cb21d9f796fe66c0482c41"
+    },
+    {
+      "id": "shape-handle-5",
+      "rows": "3",
+      "title": "Account-id shape check: version 1 record and author handle-5",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor abcde <abcde@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"abcde\",\"actor\":{\"kind\":\"user\",\"id\":\"abcde\",\"name\":\"abcde\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user abcde\nTau-Trigger: idle\n",
+      "oid": "94b807bb7dc0a81f78d84dc5bb06507dd7ad8153"
+    },
+    {
+      "id": "shape-handle-21",
+      "rows": "3",
+      "title": "Account-id shape check: version 1 record and author handle-21",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor AAAAAAAAAAAAAAAAAAAAA <AAAAAAAAAAAAAAAAAAAAA@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"AAAAAAAAAAAAAAAAAAAAA\",\"actor\":{\"kind\":\"user\",\"id\":\"AAAAAAAAAAAAAAAAAAAAA\",\"name\":\"AAAAAAAAAAAAAAAAAAAAA\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user AAAAAAAAAAAAAAAAAAAAA\nTau-Trigger: idle\n",
+      "oid": "bf63066bed361ef1a6b435c942a088694a934f32"
+    },
+    {
+      "id": "shape-handle-31",
+      "rows": "3",
+      "title": "Account-id shape check: version 1 record and author handle-31",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA <AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"actor\":{\"kind\":\"user\",\"id\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"name\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nTau-Trigger: idle\n",
+      "oid": "3333f9b8e3445d2137310e2719bbf1d8ffeb3da0"
+    },
+    {
+      "id": "shape-handle-32-account",
+      "rows": "3",
+      "title": "Account-id shape check: version 1 record and author handle-32-account",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Legacy32AccountId000000000000AB0 <Legacy32AccountId000000000000AB0@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"Legacy32AccountId000000000000AB0\",\"actor\":{\"kind\":\"user\",\"id\":\"Legacy32AccountId000000000000AB0\",\"name\":\"Legacy32AccountId000000000000AB0\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user Legacy32AccountId000000000000AB0\nTau-Trigger: idle\n",
+      "oid": "fcba6eb1156c46441c3741cce331cf40a24178f4"
+    },
+    {
+      "id": "shape-handle-33",
+      "rows": "3",
+      "title": "Account-id shape check: version 1 record and author handle-33",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA <AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"actor\":{\"kind\":\"user\",\"id\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"name\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nTau-Trigger: idle\n",
+      "oid": "e037495ee10d6a9eea5cde600ca4f8100c91741f"
+    },
+    {
+      "id": "shape-user-20",
+      "rows": "3",
+      "title": "Account-id shape check: version 1 record and author user-20",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor user_aaaaaaaaaaaaaaaaaaaa <user_aaaaaaaaaaaaaaaaaaaa@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"user_aaaaaaaaaaaaaaaaaaaa\",\"actor\":{\"kind\":\"user\",\"id\":\"user_aaaaaaaaaaaaaaaaaaaa\",\"name\":\"user_aaaaaaaaaaaaaaaaaaaa\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user user_aaaaaaaaaaaaaaaaaaaa\nTau-Trigger: idle\n",
+      "oid": "9bdc74f38ca3e239e65442559cdce64fe4d39cc9"
+    },
+    {
+      "id": "shape-user-21-account",
+      "rows": "3",
+      "title": "Account-id shape check: version 1 record and author user-21-account",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor user_aaaaaaaaaaaaaaaaaaaaa <user_aaaaaaaaaaaaaaaaaaaaa@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"user_aaaaaaaaaaaaaaaaaaaaa\",\"actor\":{\"kind\":\"user\",\"id\":\"user_aaaaaaaaaaaaaaaaaaaaa\",\"name\":\"user_aaaaaaaaaaaaaaaaaaaaa\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user user_aaaaaaaaaaaaaaaaaaaaa\nTau-Trigger: idle\n",
+      "oid": "181893c384972dd77e97e393f18c43708b6b375e"
+    },
+    {
+      "id": "shape-user-22",
+      "rows": "3",
+      "title": "Account-id shape check: version 1 record and author user-22",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor user_aaaaaaaaaaaaaaaaaaaaaa <user_aaaaaaaaaaaaaaaaaaaaaa@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\n\nSaved changes (idle)\n\nTau-Metadata: {\"version\":1,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actorId\":\"user_aaaaaaaaaaaaaaaaaaaaaa\",\"actor\":{\"kind\":\"user\",\"id\":\"user_aaaaaaaaaaaaaaaaaaaaaa\",\"name\":\"user_aaaaaaaaaaaaaaaaaaaaaa\"},\"trigger\":\"idle\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved changes (idle)\"}}\nTau-Actor: user user_aaaaaaaaaaaaaaaaaaaaaa\nTau-Trigger: idle\n",
+      "oid": "1774fe89afcc1bb58826ab982f8778dd52704b83"
+    },
+    {
+      "id": "tag-current",
+      "rows": "14",
+      "title": "Version tag, current record",
+      "type": "tag",
+      "ref": "refs/tags/v2",
+      "body": "object bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ntype commit\ntag v2\ntagger Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\n\nReady\n\nTau-Tag: {\"version\":2,\"id\":\"0123456789abcdef0123456789abcdef\",\"name\":\"Ready\",\"actor\":{\"kind\":\"user\",\"id\":\"user_PusherAccountIdA12345\"}}\n",
+      "oid": "e38cd9e7ca1839b2a263ec6a7eee8e6c4c8a7fe1"
+    },
+    {
+      "id": "tag-additive",
+      "rows": "14",
+      "title": "Version tag with an additive field",
+      "type": "tag",
+      "ref": "refs/tags/v2",
+      "body": "object bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ntype commit\ntag v2\ntagger Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\n\nReady\n\nTau-Tag: {\"version\":2,\"id\":\"0123456789abcdef0123456789abcdef\",\"name\":\"Ready\",\"colour\":\"red\"}\n",
+      "oid": "a885e5ad624f186600bf2b40402010eb5d32ae50"
+    },
+    {
+      "id": "tag-no-id",
+      "rows": "14",
+      "title": "Version tag from an older build: record without id",
+      "type": "tag",
+      "ref": "refs/tags/v2",
+      "body": "object bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ntype commit\ntag v2\ntagger Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\n\nReady\n\nTau-Tag: {\"version\":2,\"name\":\"Ready\"}\n",
+      "oid": "b8b0622ae2c5ebd61a012a4adb4141388655fa78"
+    },
+    {
+      "id": "tag-malformed",
+      "rows": "14",
+      "title": "Version tag with corrupt record",
+      "type": "tag",
+      "ref": "refs/tags/v2",
+      "body": "object bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ntype commit\ntag v2\ntagger Pusher <user_PusherAccountIdA12345@users.noreply.tau.new> 1790000000 +0000\n\nReady\n\nTau-Tag: {\"version\":2,\n",
+      "oid": "5d51db30b0dfe1f21aceb6050aa512ee1e15082a"
+    },
+    {
+      "id": "tag-no-record",
+      "rows": "14",
+      "title": "Annotated tag another tool wrote",
+      "type": "tag",
+      "ref": "refs/tags/v2",
+      "body": "object bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ntype commit\ntag v2\ntagger Ada <ada@gitlab.test> 1790000000 +0000\n\nRelease\n",
+      "oid": "19f52e22bdc048b0fca8d80bb92dca596cc9ba83"
+    }
+  ]
+}

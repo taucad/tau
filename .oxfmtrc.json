@@ -66,6 +66,8 @@
     // Project templates as uv and dotnet write them: generate-project-template.mts --check and `dotnet restore
     // --locked-mode` compare their bytes or content.
     "/packages/plugins/{build123d,picogk,smlibpy}/project/**",
+    // The provenance golden corpus, written by pin-writer-corpus.ts (its --check compares bytes) and corpus.test.ts.
+    "/packages/revisions/src/provenance/corpus/{writers/*.json,expected.json,rules-ledger.json}",
     // Warehouse projects and byte modules are materialized by scripts/generate.mts; --check verifies exact bytes.
     "/packages/warehouse/parts/**",
     "/packages/warehouse/src/projects/**",

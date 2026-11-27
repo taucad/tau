@@ -1,0 +1,177 @@
+{
+  "release": "desktop@0.3.0",
+  "commit": "4984238085813385b912a6d7f4303de46309aa25",
+  "pusher": "user_ReleasedWriter0000001",
+  "tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "parent": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "objects": [
+    {
+      "scenario": "Start version of a new project",
+      "leg": "browser",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id rvmkuxslkpqrktrwslolpqtyxvyvpowp\n\nStart version of a new project\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"create\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Start version of a new project\"}}\nTau-Actor: user Released Writer\nTau-Trigger: create\n"
+    },
+    {
+      "scenario": "Saved in the browser",
+      "leg": "browser",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id quqwppkuzxzpposrntxuptzklnzwzrlq\n\nSaved in the browser\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"save\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved in the browser\"}}\nTau-Actor: user Released Writer\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Saved when the tab was hidden",
+      "leg": "browser",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id svvowltmyyzzoqxlnlnkylksvwrworsr\n\nSaved when the tab was hidden\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"hidden\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved when the tab was hidden\"}}\nTau-Actor: user Released Writer\nTau-Trigger: hidden\n"
+    },
+    {
+      "scenario": "Agent turn base",
+      "leg": "browser",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id ntvqxrynkkotlkwrzzvlypomsmupruvy\n\nAgent turn base\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"agent\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"turn\",\"via\":\"browser\",\"runId\":\"run_released\",\"attempt\":1,\"turnCut\":\"base\",\"turnId\":\"turn_released\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Agent turn base\"}}\nTau-Actor: user Released Writer\nTau-Trigger: turn\n"
+    },
+    {
+      "scenario": "Agent turn result on the signed-in person’s behalf",
+      "leg": "browser",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id zuzwzmqxqspylqpkvusunowrywkkmxko\n\nAgent turn result on the signed-in person’s behalf\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"agent\",\"actor\":{\"kind\":\"agent\",\"id\":\"claude\",\"runId\":\"run_released\",\"onBehalfOf\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"}},\"capture\":\"turn\",\"via\":\"browser\",\"runId\":\"run_released\",\"attempt\":1,\"turnCut\":\"result\",\"turnId\":\"turn_released\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Agent turn result on the signed-in person’s behalf\"}}\nTau-Actor: agent claude run run_released for Released Writer\nTau-Trigger: turn\n"
+    },
+    {
+      "scenario": "Restored an earlier version",
+      "leg": "browser",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id mprzyqqlqonpyrtpxvsynzuquuqvyxll\n\nRestored an earlier version\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"restore\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"restore\",\"via\":\"browser\",\"restoredFrom\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Restored an earlier version\"}}\nTau-Actor: user Released Writer\nTau-Trigger: restore\n"
+    },
+    {
+      "scenario": "Saved signed out (device pseudonym)",
+      "leg": "browser",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Anonymous <anon:5e1ea5ed@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id mwnwsoplszpwuyrqrmzwqqvmqsrpmvlm\n\nSaved signed out (device pseudonym)\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"anon:5e1ea5ed\",\"name\":\"Anonymous\",\"anonymous\":true},\"capture\":\"save\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved signed out (device pseudonym)\"}}\nTau-Actor: user Anonymous\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Saved with anonymity on (account pseudonym)",
+      "leg": "browser",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Anonymous <anon:0ac5a17e@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id mlwkqtnwotpvqxurrvzpzznmuuvmvwtp\n\nSaved with anonymity on (account pseudonym)\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"anon:0ac5a17e\",\"name\":\"Anonymous\",\"anonymous\":true},\"capture\":\"save\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved with anonymity on (account pseudonym)\"}}\nTau-Actor: user Anonymous\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Saved in a project linked to GitHub",
+      "leg": "browser",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id orkwzqnymxmvnztmqmktolkylyykllxx\n\nSaved in a project linked to GitHub\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"save\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved in a project linked to GitHub\"}}\nTau-Actor: user Released Writer\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Saved in a project linked to GitHub, forge identity in the actor (ui@0.9.x resolver)",
+      "leg": "browser",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor released-writer <1234567+released-writer@users.noreply.github.com> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id nzwxnnlyllwswslorquvxusuplvvuklt\n\nSaved in a project linked to GitHub, forge identity in the actor (ui@0.9.x resolver)\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"released-writer\",\"email\":\"1234567+released-writer@users.noreply.github.com\"},\"capture\":\"save\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved in a project linked to GitHub, forge identity in the actor (ui@0.9.x resolver)\"}}\nTau-Actor: user released-writer\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Saved on the desktop",
+      "leg": "desktop",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id ypwkttqkqvzvonvxptwwztvonryykqwk\n\nSaved on the desktop\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved on the desktop\"}}\nTau-Actor: user Released Writer\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Saved on idle on the desktop",
+      "leg": "desktop",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id qzxqyzoyqyswkurovzukkqtkqlmlwmxt\n\nSaved on idle on the desktop\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"idle\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved on idle on the desktop\"}}\nTau-Actor: user Released Writer\nTau-Trigger: idle\n"
+    },
+    {
+      "scenario": "Saved on close on the desktop",
+      "leg": "desktop",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id pomlrtpoutortqvxstpukzslrkxoyymm\n\nSaved on close on the desktop\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"close\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved on close on the desktop\"}}\nTau-Actor: user Released Writer\nTau-Trigger: close\n"
+    },
+    {
+      "scenario": "Merged a branch on the desktop",
+      "leg": "desktop",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id uutpqmrlzzoypvmsurypztsqxqwyxtqy\n\nMerged a branch on the desktop\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"merge\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"merge\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Merged a branch on the desktop\"}}\nTau-Actor: user Released Writer\nTau-Trigger: merge\n"
+    },
+    {
+      "scenario": "Agent turn result on the desktop",
+      "leg": "desktop",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id ntkrvuxlpuvxtzwxvytxmwpxmmtpsmwz\n\nAgent turn result on the desktop\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"agent\",\"actor\":{\"kind\":\"agent\",\"id\":\"claude\",\"runId\":\"run_released\",\"onBehalfOf\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"}},\"capture\":\"turn\",\"via\":\"desktop\",\"runId\":\"run_released\",\"attempt\":1,\"turnCut\":\"result\",\"turnId\":\"turn_released\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Agent turn result on the desktop\"}}\nTau-Actor: agent claude run run_released for Released Writer\nTau-Trigger: turn\n"
+    },
+    {
+      "scenario": "Saved signed out on the desktop (device pseudonym)",
+      "leg": "desktop",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Anonymous <anon:5e1ea5ed@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id zqwtyuoylxtqvvototyolwtsylrqtunw\n\nSaved signed out on the desktop (device pseudonym)\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"anon:5e1ea5ed\",\"name\":\"Anonymous\",\"anonymous\":true},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved signed out on the desktop (device pseudonym)\"}}\nTau-Actor: user Anonymous\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Saved on the desktop in a project linked to GitHub",
+      "leg": "desktop",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id zrpuqlrotprvppnmnwrqnpkqpztospok\n\nSaved on the desktop in a project linked to GitHub\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"save\",\"via\":\"desktop\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved on the desktop in a project linked to GitHub\"}}\nTau-Actor: user Released Writer\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Saved with tau revisions save",
+      "leg": "cli",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id rlrsqutqlkxtmouvvrkpwkprklxmzulu\n\nSaved with tau revisions save\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"save\",\"via\":\"cli\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved with tau revisions save\"}}\nTau-Actor: user Released Writer\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Saved by tau serve signed out (device pseudonym)",
+      "leg": "serve",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Anonymous <anon:5e1ea5ed@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id ovwzttwznrnrnwozwuowuownxmpzmtxm\n\nSaved by tau serve signed out (device pseudonym)\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"anon:5e1ea5ed\",\"name\":\"Anonymous\",\"anonymous\":true},\"capture\":\"save\",\"via\":\"serve\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved by tau serve signed out (device pseudonym)\"}}\nTau-Actor: user Anonymous\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Agent turn result through tau serve",
+      "leg": "serve",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id lvynwkrlxwnnqyrqrvptorlsrztwnwrw\n\nAgent turn result through tau serve\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"agent\",\"actor\":{\"kind\":\"agent\",\"id\":\"claude\",\"runId\":\"run_released\",\"onBehalfOf\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"}},\"capture\":\"turn\",\"via\":\"serve\",\"runId\":\"run_released\",\"attempt\":1,\"turnCut\":\"result\",\"turnId\":\"turn_released\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Agent turn result through tau serve\"}}\nTau-Actor: agent claude run run_released for Released Writer\nTau-Trigger: turn\n"
+    },
+    {
+      "scenario": "Saved by a cloud agent host for the owner",
+      "leg": "cloud",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id mrynnzzsluopqxpytqvmrqrkwqxoqmlk\n\nSaved by a cloud agent host for the owner\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"},\"capture\":\"save\",\"via\":\"cloud\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved by a cloud agent host for the owner\"}}\nTau-Actor: user Released Writer\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Agent turn result on a cloud agent host",
+      "leg": "cloud",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id wksszlzykkxlrznppxzomkxqtkuzxkmo\n\nAgent turn result on a cloud agent host\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"agent\",\"actor\":{\"kind\":\"agent\",\"id\":\"claude\",\"runId\":\"run_released\",\"onBehalfOf\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"}},\"capture\":\"turn\",\"via\":\"cloud\",\"runId\":\"run_released\",\"attempt\":1,\"turnCut\":\"result\",\"turnId\":\"turn_released\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Agent turn result on a cloud agent host\"}}\nTau-Actor: agent claude run run_released for Released Writer\nTau-Trigger: turn\n"
+    },
+    {
+      "scenario": "Named a version in the browser",
+      "leg": "browser",
+      "type": "tag",
+      "ref": "refs/tags/v2",
+      "body": "object bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ntype commit\ntag v2\ntagger Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\n\nReady for print (browser)\n\nTau-Tag: {\"version\":2,\"id\":\"0123456789abcdef0123456789abcdef\",\"name\":\"Ready for print (browser)\",\"actor\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"}}\n"
+    },
+    {
+      "scenario": "Named a version on the desktop by an agent",
+      "leg": "desktop",
+      "type": "tag",
+      "ref": "refs/tags/v2",
+      "body": "object bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ntype commit\ntag v2\ntagger Released Writer <user_ReleasedWriter0000001@users.noreply.tau.new> 1790000000 +0000\n\nReady for print (desktop)\n\nTau-Tag: {\"version\":2,\"id\":\"0123456789abcdef0123456789abcdef\",\"name\":\"Ready for print (desktop)\",\"actor\":{\"kind\":\"agent\",\"id\":\"claude\",\"runId\":\"run_released\",\"onBehalfOf\":{\"kind\":\"user\",\"id\":\"user_ReleasedWriter0000001\",\"name\":\"Released Writer\"}}}\n"
+    }
+  ]
+}

@@ -125,6 +125,11 @@
     "reason": "test fixture read from another project"
   },
   {
+    "file": "apps/libs/api-git-core/src/version-skew/provenance-corpus.test.ts",
+    "target": "packages/revisions/src/provenance/corpus/**",
+    "reason": "pushes the provenance golden corpus, which the revisions package owns, through the pre-receive hook (P8)"
+  },
+  {
     "file": "apps/ui/app/runtime/attachment-transcode-sources.test.ts",
     "target": "packages/plugins/heif/src/fixtures/small.heic",
     "reason": "test fixture read from another project: the heif package owns the HEIC fixtures its parity tests share"

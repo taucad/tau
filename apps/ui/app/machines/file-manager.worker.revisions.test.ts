@@ -3346,6 +3346,22 @@ describe('readiness liveness over every writer (INV)', () => {
           },
           { timeout: settleBound },
         );
+        /*
+         * The files land before the restore's own cut (restore.machine: apply, then mint): the restore is done once
+         * that cut is the line's head. The pull builds another device's revision on this head, so a cut still in
+         * flight would move main under the pull, which then refuses or conflicts with the stale tip.
+         */
+        await vi.waitFor(
+          () => {
+            if (lost() > asked) {
+              asked = lost();
+              alpha.send({ command: 'restore', revisionId: saved ?? '' });
+            }
+            expect(root.status().restore.busy).toBe(false);
+            expect(root.status().restore.undoable).toBe(true);
+          },
+          { timeout: settleBound },
+        );
       },
       true,
     );

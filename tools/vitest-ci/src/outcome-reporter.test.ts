@@ -39,9 +39,11 @@ const fakeCase = (options: {
   projectName?: string;
   browser?: { enabled?: boolean; name?: string };
   noDiagnostic?: boolean;
+  fails?: boolean;
 }): FakeCase => ({
   fullName: options.fullName,
   module: { moduleId: options.moduleId },
+  options: { fails: options.fails },
   project: { name: options.projectName ?? '', config: { browser: options.browser } },
   result: () => ({ state: options.state, errors: options.errors }),
   diagnostic: () =>
@@ -229,6 +231,33 @@ describe('OutcomeReporter', () => {
     expect(rows[3]).toMatchObject({ file: 'virtual:relative.test.ts', retryCount: 0, flaky: false, durationMs: 0 });
   });
 
+  it('records an expected failure by its final, inverted outcome, never as a retried pass, and keeps an ordinary retried pass a flake event', () => {
+    const reporter = new OutcomeReporter({ env: nxEnvironment() });
+    reporter.onInit(vitestAt(join(projectRoot, 'vitest.config.ts')));
+    const moduleId = join(projectRoot, 'src', 'a.test.ts');
+
+    run(reporter, [
+      // `it.fails` whose body failed both attempts: Vitest flips it to a pass after the retry loop and calls it flaky.
+      fakeCase({ moduleId, fullName: 'fails as expected', state: 'passed', retryCount: 1, flaky: true, fails: true }),
+      // `it.fails` whose body passed its first attempt: no retry, flipped to a failure.
+      fakeCase({
+        moduleId,
+        fullName: 'passes unexpectedly',
+        state: 'failed',
+        fails: true,
+        errors: [{ name: 'Error', message: 'Expect test to fail' }],
+      }),
+      fakeCase({ moduleId, fullName: 'retried', state: 'passed', retryCount: 1, flaky: true, fails: false }),
+    ]);
+
+    const rows = readRows(join(workspace, 'out', 'test-results', 'example', 'test-shard-2.outcomes.jsonl'));
+    expect(rows.map(({ name, state, retryCount, flaky }) => ({ name, state, retryCount, flaky }))).toEqual([
+      { name: 'fails as expected', state: 'passed', retryCount: 1, flaky: false },
+      { name: 'passes unexpectedly', state: 'failed', retryCount: 0, flaky: false },
+      { name: 'retried', state: 'passed', retryCount: 1, flaky: true },
+    ]);
+  });
+
   it('records a module that failed outside its tests and the run’s unhandled errors', () => {
     const reporter = new OutcomeReporter({ env: nxEnvironment() });
     reporter.onInit(vitestAt(join(projectRoot, 'vitest.config.ts')));
@@ -349,7 +378,7 @@ describe('OutcomeReporter in a real Vitest run', () => {
     rmSync(workspace, { recursive: true, force: true });
   });
 
-  it('records a pass, a retried pass, a failure and a module error, and skips the skipped test', () => {
+  it('records a pass, a retried pass, a failure, expected failures and a module error, and skips the skipped test', () => {
     const require = createRequire(import.meta.url);
     const vitestBin = join(dirname(require.resolve('vitest/package.json')), 'vitest.mjs');
     const env: Record<string, string> = {};
@@ -373,6 +402,8 @@ describe('OutcomeReporter in a real Vitest run', () => {
     const byName = new Map(rows.map((row) => [`${row.kind}:${row.file}:${row.name}`, row]));
     expect([...byName.keys()].toSorted()).toEqual([
       'module:fixtures/retry/broken.fixture.ts:',
+      'test:fixtures/retry/expected-failures.fixture.ts:expected failures > fails every attempt, as expected',
+      'test:fixtures/retry/expected-failures.fixture.ts:expected failures > passes unexpectedly',
       'test:fixtures/retry/outcomes.fixture.ts:outcomes > fails every attempt',
       'test:fixtures/retry/outcomes.fixture.ts:outcomes > passes first time',
       'test:fixtures/retry/outcomes.fixture.ts:outcomes > passes on the retry',
@@ -402,6 +433,17 @@ describe('OutcomeReporter in a real Vitest run', () => {
         'AssertionError: expected 1 to be 2 // Object.is equality',
       ],
     });
+    // Vitest 4 inverts `it.fails` after its retry loop: the body failed both attempts, so the row is a pass with one
+    // retry, which Vitest's own diagnostic calls flaky. The recorder classifies it by that final outcome only.
+    expect(
+      byName.get(
+        'test:fixtures/retry/expected-failures.fixture.ts:expected failures > fails every attempt, as expected',
+      ),
+    ).toMatchObject({ state: 'passed', retryCount: 1, flaky: false, errors: [] });
+    // A raw pass ends the retry loop at once and is flipped to a failure.
+    expect(
+      byName.get('test:fixtures/retry/expected-failures.fixture.ts:expected failures > passes unexpectedly'),
+    ).toMatchObject({ state: 'failed', retryCount: 0, flaky: false, errors: ['Error: Expect test to fail'] });
     expect(byName.get('module:fixtures/retry/broken.fixture.ts:')?.errors).toEqual(['Error: broken on import']);
   }, 60_000);
 });

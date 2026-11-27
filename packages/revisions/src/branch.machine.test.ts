@@ -707,6 +707,23 @@ describe('branchMachine', () => {
     parent.stop();
   });
 
+  /* RM-R5: the checkout a merge wrote re-reads before the verb is idle, not when the registry's re-read answers. */
+  it('reports the checkout a landed merge moved before its branchMerged fact', async () => {
+    const { actor, promises, parent } = start();
+    promises.script('checkBranch', cleanCheck);
+    promises.script('merge', { output: { status: 'merged', revisionId: 'rev-13', checkoutId: 'checkout-live' } });
+
+    actor.send({ type: 'merge', requestId: 'req-1', branch: 'bracket-fillet' });
+    await flush();
+
+    expect(parent.events.filter((event) => event.type === 'checkoutChanged' || event.type === 'branchMerged')).toEqual([
+      { type: 'checkoutChanged', checkoutId: 'checkout-live', revisionId: 'rev-13' },
+      { type: 'branchMerged', branch: 'bracket-fillet', into: 'main', revisionId: 'rev-13' },
+    ]);
+    actor.stop();
+    parent.stop();
+  });
+
   /* I11: the Merged toast's Undo needs the entry the merge landed and the head it moved `<current>` from. */
   it('carries what a merge moved the current branch from and to on its toast, for its Undo', async () => {
     const { actor, promises, parent, emitted } = start();

@@ -5,9 +5,12 @@ import * as Cookies from 'es-cookie';
 import { gunzipSync } from 'node:zlib';
 import { StrictMode, useState } from 'react';
 import type { ReactNode } from 'react';
+import type { PostHog } from 'posthog-js';
+import type { useAnalytics as useAnalyticsHook } from '#hooks/use-analytics.js';
+import type { WebAnalyticsProvider as WebAnalyticsProviderComponent } from '#providers/web-analytics-provider.js';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterAll, describe, expect, it, vi } from 'vitest';
-import { useAnalytics } from '#hooks/use-analytics.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { requestUrl, restoreSdkPlatform, stubSdkPlatform } from '#providers/posthog-sdk.test-utils.js';
 
 /*
  * Runs the installed PostHog SDK, not a mock: the defects this suite guards
@@ -39,48 +42,67 @@ vi.mock('@better-auth-ui/react', () => ({
 const userA: TestUser = { id: 'user-a', email: 'a@example.invalid', name: 'A', image: '' };
 const userB: TestUser = { id: 'user-b', email: 'b@example.invalid', name: 'B', image: '' };
 
-const transport = {
-  requests: [] as string[],
-  bodies: [] as Array<{ url: string; body: BodyInit | undefined }>,
-  pendingFlags: [] as Array<() => void>,
-  holdFlags: false as boolean,
+type Transport = {
+  requests: string[];
+  bodies: Array<{ url: string; body: BodyInit | undefined }>;
+  pendingFlags: Array<() => void>;
+  holdFlags: boolean;
 };
 
-vi.spyOn(XMLHttpRequest.prototype, 'open').mockImplementation((_method, url) => {
-  transport.requests.push(String(url));
-});
-vi.spyOn(XMLHttpRequest.prototype, 'send').mockImplementation(() => undefined);
-vi.stubGlobal(
-  'fetch',
-  vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    transport.requests.push(url);
-    transport.bodies.push({ url, body: init?.body ?? undefined });
-    if (url.includes('/flags/') && transport.holdFlags) {
-      await new Promise<void>((resolve) => {
-        transport.pendingFlags.push(resolve);
+/** This test's transport; each test's SDK instance is bound to its own. */
+let transport: Transport;
+
+const createTransport = (): Transport => {
+  const created: Transport = { requests: [], bodies: [], pendingFlags: [], holdFlags: false };
+  stubSdkPlatform({
+    open: (url) => {
+      created.requests.push(url);
+    },
+    fetch: async (input, init) => {
+      const url = requestUrl(input);
+      created.requests.push(url);
+      created.bodies.push({ url, body: init?.body ?? undefined });
+      if (url.includes('/flags/') && created.holdFlags) {
+        await new Promise<void>((resolve) => {
+          created.pendingFlags.push(resolve);
+        });
+      }
+      return new Response('{"flags":{},"sessionRecording":{"sampleRate":1,"minimumDurationMilliseconds":0}}', {
+        status: 200,
       });
-    }
-    return new Response('{"flags":{},"sessionRecording":{"sampleRate":1,"minimumDurationMilliseconds":0}}', {
-      status: 200,
-    });
-  }),
-);
-vi.stubGlobal('requestIdleCallback', (callback: () => void) => setTimeout(callback, 0));
-vi.stubGlobal('cancelIdleCallback', (id: ReturnType<typeof setTimeout>) => {
-  clearTimeout(id);
-});
-Object.defineProperty(navigator, 'sendBeacon', {
-  configurable: true,
-  value: vi.fn((url: string, body: BodyInit) => {
-    transport.requests.push(url);
-    transport.bodies.push({ url, body });
-    return true;
-  }),
+    },
+    sendBeacon: (url, body) => {
+      created.requests.push(url);
+      created.bodies.push({ url, body });
+      return true;
+    },
+  });
+  return created;
+};
+
+// Transform the module graph once, outside any hook's timeout; each test evaluates its own copy below.
+await import('#providers/web-analytics-provider.js');
+await import('posthog-js');
+
+let posthog: PostHog;
+let WebAnalyticsProvider: typeof WebAnalyticsProviderComponent;
+let useAnalytics: typeof useAnalyticsHook;
+
+// Each test gets its own SDK instance, transport and document.
+beforeEach(async () => {
+  state.consent = 'unknown';
+  state.isPending = true;
+  state.user = undefined;
+  transport = createTransport();
+  ({ posthog } = await import('posthog-js'));
+  ({ WebAnalyticsProvider } = await import('#providers/web-analytics-provider.js'));
+  ({ useAnalytics } = await import('#hooks/use-analytics.js'));
 });
 
-const { posthog } = await import('posthog-js');
-const { WebAnalyticsProvider } = await import('#providers/web-analytics-provider.js');
+afterEach(() => {
+  cleanup();
+  restoreSdkPlatform(posthog);
+});
 
 type TransmittedEvent = {
   event: string;
@@ -139,12 +161,6 @@ const transmittedEvents = async (): Promise<TransmittedEvent[]> => {
   return batches.flat();
 };
 
-afterAll(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
-
 const Draft = (): React.JSX.Element => {
   const [draft, setDraft] = useState('');
   const analytics = useAnalytics();
@@ -188,9 +204,7 @@ const settle = async (): Promise<void> => {
 const pageviews = (calls: ReadonlyArray<readonly unknown[]>): number =>
   calls.filter((call) => call[0] === '$pageview').length;
 
-// The SDK singleton is loaded once per module graph, so these run in order.
-describe('WebAnalyticsProvider', { shuffle: false }, () => {
-  // Must run first: the SDK singleton is loaded once per module graph.
+describe('WebAnalyticsProvider', () => {
   it('should clear stale PostHog storage on a declined cold load without starting the SDK', async () => {
     localStorage.setItem('ph_phc_test_key_posthog', '{"distinct_id":"stale"}');
     localStorage.setItem('tau-sidebar', 'true');

@@ -67,6 +67,8 @@ export type ChatTextareaSubmitPayload = {
   readonly references?: readonly CadReference[];
   /** The draft's comments and annotated pictures; present only when there are some. */
   readonly annotations?: MessageAnnotations;
+  /** Aborts a send not yet handed to the chat: a replayed queued send the person cancelled. */
+  readonly signal?: AbortSignal;
 };
 
 /** Count a file intake refused and say so, naming its format and the next step. */
@@ -279,7 +281,11 @@ export function useChatTextareaLogic({
   containerReference: React.RefObject<HTMLDivElement | null>;
 
   // Handlers
-  handleSubmit: (finalizedText?: string, references?: readonly CadReference[]) => Promise<void>;
+  handleSubmit: (
+    finalizedText?: string,
+    references?: readonly CadReference[],
+    options?: Readonly<{ signal?: AbortSignal }>,
+  ) => Promise<void>;
   handleCancelClick: () => void;
   handleTextareaKeyDown: (event: React.KeyboardEvent) => void;
   handleDragOver: (event: ChatDragEvent) => void;
@@ -523,7 +529,11 @@ export function useChatTextareaLogic({
   ]);
 
   const handleSubmit = useCallback(
-    async (finalizedText?: string, references?: readonly CadReference[]): Promise<void> => {
+    async (
+      finalizedText?: string,
+      references?: readonly CadReference[],
+      options?: Readonly<{ signal?: AbortSignal }>,
+    ): Promise<void> => {
       if (
         isSubmittingRef.current ||
         submitInFlightRef.current ||
@@ -548,6 +558,7 @@ export function useChatTextareaLogic({
           attachments: attachmentsRef.current,
           ...(references === undefined || references.length === 0 ? {} : { references }),
           ...(annotationsRef.current === undefined ? {} : { annotations: annotationsRef.current }),
+          ...(options?.signal === undefined ? {} : { signal: options.signal }),
         });
       } finally {
         submitInFlightRef.current = false;

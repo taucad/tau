@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandAnswer, HostCommand, ReadAnswer } from '@taucad/agent-host/wire';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { chunksOf } from '#machines/chat-projection.logic.js';
@@ -16,6 +16,13 @@ const unusedHostCommand = async (): Promise<never> => {
 };
 
 describe('ChatSessionStore.observe', () => {
+  /* The remote read retry draws full jitter (HA3); pin it to its ceiling so the delays these rows count are exact. */
+  beforeEach(() => {
+    vi.spyOn(Math, 'random').mockReturnValue(1);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   for (const { ending, sameTurn } of [
     { ending: 'live-ended', sameTurn: false },
     { ending: 'unreadable', sameTurn: false },
@@ -61,8 +68,7 @@ describe('ChatSessionStore.observe', () => {
           answer?.({ status: 'refused', chatId: 'chat_retry_owner', reason: 'unreadable' });
         }
         await Promise.resolve();
-        await vi.advanceTimersByTimeAsync(250);
-        expect(connect).toHaveBeenCalledOnce();
+        // HA3: the redial is the retry's first step (250 ms at the jitter's ceiling); a fenced reread does not dial.
         await vi.advanceTimersByTimeAsync(250);
         expect(connect).toHaveBeenCalledTimes(ending === 'live-ended' ? 2 : 1);
         await vi.advanceTimersByTimeAsync(1000);

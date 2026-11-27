@@ -87,6 +87,8 @@ export const draftHintAttribute = 'data-draft-hint';
 export const queuedSendStatusSlot = 'queued-send-status';
 /** What a queued send's status says, before and after adoption. */
 export const queuedSendStatus = 'Send queued. Press Escape to cancel.';
+/** What the status says once Escape cancels a queued send: an emptied status says nothing. The next edit clears it. */
+export const queuedSendCancelledStatus = 'Send cancelled.';
 
 /*
  * The box's part of a queuing recorder (A15d), in the served spelling: `bx` finds the marked box where the input is
@@ -96,7 +98,7 @@ export const queuedSendStatus = 'Send queued. Press Escape to cancel.';
 const boxScript =
   `const bx=()=>input.closest('[${handOffBoxAttribute}]');const b0=bx();` +
   `if(b0&&b0.hasAttribute('${draftHintAttribute}')&&input.value===''){const h=(${draftHintReaderSource})(location);if(h.text!==''){input.value=h.text;state.prefill=h.text;state.prefillChat=h.chatId}}` +
-  `const q=(v)=>{state.submitQueued=v;const box=bx();if(!box)return;const st=box.querySelector('[data-slot=${queuedSendStatusSlot}]');if(st)st.textContent=v?${JSON.stringify(queuedSendStatus)}:'';if(v)box.setAttribute('${queuedSendAttribute}','');else box.removeAttribute('${queuedSendAttribute}')};` +
+  `const q=(v,c)=>{state.submitQueued=v;const box=bx();if(!box)return;const st=box.querySelector('[data-slot=${queuedSendStatusSlot}]');if(st)st.textContent=v?${JSON.stringify(queuedSendStatus)}:c?${JSON.stringify(queuedSendCancelledStatus)}:'';if(v)box.setAttribute('${queuedSendAttribute}','');else box.removeAttribute('${queuedSendAttribute}')};` +
   `const tx=()=>{const box=bx();if(!box)return;if(input.value.trim()==='')box.removeAttribute('${earlyTextAttribute}');else box.setAttribute('${earlyTextAttribute}','')};tx();` +
   `input.addEventListener('input',()=>{tx();if(bx())q(false)});`;
 
@@ -114,7 +116,7 @@ const scriptBody = (target: string, queueSubmit: boolean): string =>
   `input.addEventListener('compositionend',()=>{state.composing=false});` +
   (queueSubmit
     ? boxScript +
-      `input.addEventListener('keydown',(event)=>{if(event.key==='Escape'){if(state.submitQueued)q(false);return}if(event.key!=='Enter'||event.shiftKey||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.keyCode===229||(typeof matchMedia==='function'&&matchMedia('(pointer: coarse)').matches))return;event.preventDefault();` +
+      `input.addEventListener('keydown',(event)=>{if(event.key==='Escape'){if(state.submitQueued)q(false,true);return}if(event.key!=='Enter'||event.shiftKey||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.keyCode===229||(typeof matchMedia==='function'&&matchMedia('(pointer: coarse)').matches))return;event.preventDefault();` +
       `q(input.value.trim()!=='')});`
     : '') +
   `const mark=()=>{if(input.getClientRects().length===0)return false;const time=performance.now();state.acceptedAt=time;try{if(performance.getEntriesByName('${inputAcceptedMarkName}','mark').length===0)performance.mark('${inputAcceptedMarkName}',{startTime:time})}catch{}return true};` +
@@ -185,14 +187,17 @@ const markAcceptedNextFrame = (element: HTMLElement, state: HandOffState): void 
   });
 };
 
-/** Draw a queued send in its box, as the served script does: the box's mark and its status slot's words. */
-const drawQueuedSend = (box: Element | undefined, isQueued: boolean): void => {
+/**
+ * Draw a queued send in its box, as the served script does: the box's mark and its status slot's words, which say a
+ * cancellation once when Escape ended the send.
+ */
+const drawQueuedSend = (box: Element | undefined, isQueued: boolean, isCancelled = false): void => {
   if (box === undefined) {
     return;
   }
   const status = box.querySelector(`[data-slot=${queuedSendStatusSlot}]`);
   if (status !== null) {
-    status.textContent = isQueued ? queuedSendStatus : '';
+    status.textContent = isQueued ? queuedSendStatus : isCancelled ? queuedSendCancelledStatus : '';
   }
   box.toggleAttribute(queuedSendAttribute, isQueued);
 };
@@ -229,9 +234,9 @@ export const installHandOffTracker = (element: HandOffElement, options: HandOffO
   if (options.queueSubmit) {
     /* Found where the input is now: a slot can move it to another placeholder's box. */
     const boxOf = (): Element | undefined => element.closest(`[${handOffBoxAttribute}]`) ?? undefined;
-    const setQueued = (isQueued: boolean): void => {
+    const setQueued = (isQueued: boolean, isCancelled = false): void => {
       state.submitQueued = isQueued;
-      drawQueuedSend(boxOf(), isQueued);
+      drawQueuedSend(boxOf(), isQueued, isCancelled);
     };
     markText(element, boxOf());
     element.addEventListener('input', () => {
@@ -243,7 +248,7 @@ export const installHandOffTracker = (element: HandOffElement, options: HandOffO
     element.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         if (state.submitQueued) {
-          setQueued(false);
+          setQueued(false, true);
         }
         return;
       }

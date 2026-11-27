@@ -43,6 +43,7 @@ import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
+import type { ChatTurnGesture } from '#machines/chat-session.machine.js';
 import type { MessageAnnotations } from '@taucad/chat/annotations';
 import type { ChatError } from '@taucad/types';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
@@ -676,6 +677,8 @@ export type ChatActions = DraftActions & {
       attachments?: readonly StoredAttachmentRef[];
       execution?: CadAgentExecution;
       queueIntent?: ChatMessageQueueIntent;
+      /** Aborts the send until the chat has queued it. */
+      signal?: AbortSignal;
     },
   ) => Promise<void>;
   regenerate: () => void;
@@ -755,13 +758,16 @@ export function useChatActions(chatId?: string): ChatActions {
          * displaced or refused. Clearing here first meant the last two deleted
          * what the person wrote; releasing here afterwards
          * deleted the files of the very message it had just handed back. */
-        await store.requestTurn(resolvedChatId, {
+        const gesture: ChatTurnGesture = {
           kind: 'send',
           message: outgoingMessage,
           ...(options?.queueIntent === undefined ? {} : { queueIntent: options.queueIntent }),
           ...(options?.execution === undefined ? {} : { execution: options.execution }),
           ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
-        });
+        };
+        await (options?.signal === undefined
+          ? store.requestTurn(resolvedChatId, gesture)
+          : store.requestTurn(resolvedChatId, gesture, { signal: options.signal }));
       },
       regenerate() {
         if (!requireSession('regenerate')) {

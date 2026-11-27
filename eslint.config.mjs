@@ -1194,6 +1194,8 @@ const config = [
       'apps/runtime-e2e/src/benchmarks/**/*.{ts,tsx,mts,cts}',
       // The worker entry of replicad-handle-ledger.test.ts: test-only code that runs the ledger in the kernel's thread.
       'apps/runtime-e2e/src/fixtures/replicad-ledger-worker.ts',
+      // Shared by the replicad-handle-epochs test files only; excluded from the library build (tsconfig.lib.json).
+      'packages/plugins/replicad/src/replicad-handle-epochs.test-utils.ts',
     ],
     rules: {
       'no-restricted-imports': 'off',

@@ -75,11 +75,14 @@ export type WorkerTimingSpan = (typeof workerTimingSpans)[number];
  * - `discovery.listing`: listings made to learn what a root or a project directory holds.
  * - `discovery.identitySweep`: sweeps that read every directory's identity record to prove no directory carries an id.
  * - `discovery.auditRead` / `discovery.auditMismatch`: directories the discovery index's audit re-read from content,
- *   and those whose reading differed from the index's entry.
+ *   and those whose reading differed from the index's entry; each mismatch also moves its root kind's counter,
+ *   `discovery.auditMismatch.<kind>`. On an `exclusive` root, which only Tau writes, any count is a defect in a tap.
+ * - `discovery.unretained`: directories the discovery index did not retain, past its bounds (a root with more than
+ *   20,000 children, or past the retained-manifest budget); they are read again on each pass.
  * - `discovery.rootCold`: discovery roots whose index went cold, every directory unknown; each also moves its reason's
  *   counter, `discovery.rootCold.<reason>` (see {@link discoveryRootColdReasons}).
  *
- * The discovery index (fast-path blueprint FW2) moves the sweep, audit and cold counters; until it lands they stay 0.
+ * The discovery index (fast-path blueprint FW2) moves the sweep, audit, cold and unretained counters.
  *
  * @public
  */
@@ -109,6 +112,10 @@ export const workerTimingCounters = [
   'discovery.identitySweep',
   'discovery.auditRead',
   'discovery.auditMismatch',
+  'discovery.auditMismatch.exclusive',
+  'discovery.auditMismatch.observed',
+  'discovery.auditMismatch.polled',
+  'discovery.unretained',
   'discovery.rootCold',
   'discovery.rootCold.reset',
   'discovery.rootCold.gap',
@@ -152,15 +159,34 @@ export const countDiscoveryRootCold = (
   timings.count(`discovery.rootCold.${reason}`);
 };
 
+/** The kinds of warm discovery root an audit mismatch is counted under. @public */
+export type DiscoveryAuditRootKind = 'exclusive' | 'observed' | 'polled';
+
+/**
+ * Count one audit mismatch, in total and under its root's kind.
+ *
+ * @param kind - The kind of root the audited directory is in.
+ * @param timings - The recorder; this realm's by default.
+ * @public
+ */
+export const countDiscoveryAuditMismatch = (
+  kind: DiscoveryAuditRootKind,
+  timings: Pick<WorkerTimings, 'count'> = workerTimings,
+): void => {
+  timings.count('discovery.auditMismatch');
+  timings.count(`discovery.auditMismatch.${kind}`);
+};
+
 /**
  * The gauges, summarised as their highest value.
  *
  * - `capture.inflight`: comparison captures running at once.
  * - `bridge.pending`: page requests the worker's filesystem bridge has not answered yet.
+ * - `discovery.indexBytes`: what the discovery index's retained readings hold, estimated by their serialized size.
  *
  * @public
  */
-export const workerTimingGauges = ['capture.inflight', 'bridge.pending'] as const;
+export const workerTimingGauges = ['capture.inflight', 'bridge.pending', 'discovery.indexBytes'] as const;
 
 /** One gauge's name. @public */
 export type WorkerTimingGauge = (typeof workerTimingGauges)[number];

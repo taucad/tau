@@ -49,6 +49,7 @@ import { isWorkerCodeLoadFailure } from '@taucad/ui-core/lib/worker-factory';
 import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import { waitUnlessGone } from '@taucad/ui-core/lib/xstate.lib';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { chatReadReporter } from '#lib/chat-read-reporting.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type {
   ChatRequest,
@@ -856,6 +857,12 @@ const endsHere = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>, runI
 
 /** The two phases that OPEN a run and keep its project busy (I24); every other phase settles one. */
 const opensRun = (phase: ProjectedRunPhase): boolean => phase === 'admitted' || phase === 'running';
+
+/** How long a lost or refused host read may last before HA0 reports what it leaves the person with. Milliseconds. */
+export const chatReadLossBoundMilliseconds = 10_000;
+
+/** The connection failures `sendHostCommand` retries; one thrown past its bound leaves a command's effect unknown. */
+const peerLossCodes: ReadonlySet<string> = new Set(['PEER_UNRESPONSIVE', 'PEER_GONE', 'PEER_CLOSED', 'CHANNEL_CLOSED']);
 const retainsLiveRun = (phase: ProjectedRunPhase): boolean => opensRun(phase) || phase === 'paused';
 
 /* The `revision` region's three facts, as the project's route last reported them. */
@@ -935,6 +942,8 @@ type ObservedChat = {
   placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
   status: 'unknown' | 'attached' | 'lost' | 'refused';
   retry?: ReturnType<typeof setTimeout>;
+  /** Armed by a loss that is not a leadership handoff; reports it if it outlasts {@link chatReadLossBoundMilliseconds}. */
+  lossReport?: ReturnType<typeof setTimeout>;
   attempts: number;
   /**
    * The agent host's code failed to load past the page's worker bound when this chat's read last met it (FP10). It
@@ -1919,7 +1928,7 @@ export class ChatSessionStore {
         this.#releaseRefusedRun(session);
       }
     }
-    this.#projectionOf(chatId).send({ type: 'batch', answer });
+    this.#foldHostAnswer(chatId, answer);
     this.#latchIfForeignScanLost(chatId);
     // A verified empty batch can leave the reducer unchanged while establishing read authority.
     if (answer.status === 'batch' && answer.events.length === 0) {
@@ -2747,20 +2756,42 @@ export class ChatSessionStore {
         session.queueHold = undefined;
         session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
         let acceptingPlacement: string | undefined;
+        const { commandId } = item.command;
+        const unknownEffect = (tags: Readonly<Record<string, string>>): void => {
+          chatReadReporter.report('outbox.unknown-effect', { chatId: session.chatId, occurrence: commandId, tags });
+        };
         try {
-          const answer = await sendHostCommand(
-            async () => {
-              const client = await this.#connectQueuedCommand(session, connector, { queueId: item.id, signal });
-              acceptingPlacement = connectionPlacement(client.placement);
-              return client;
-            },
-            item.command,
-            { signal },
-          );
+          let answer: Awaited<ReturnType<typeof sendHostCommand>>;
+          try {
+            answer = await sendHostCommand(
+              async () => {
+                const client = await this.#connectQueuedCommand(session, connector, { queueId: item.id, signal });
+                acceptingPlacement = connectionPlacement(client.placement);
+                return client;
+              },
+              item.command,
+              { signal },
+            );
+          } catch (error) {
+            /* U21: the connection kept failing past the command's bound, so whether it was applied is unknown. */
+            const code = getErrno(error);
+            if (code !== undefined && peerLossCodes.has(code)) {
+              unknownEffect({ reason: 'peer-lost', code });
+            }
+            throw error;
+          }
           const wait = ownerWaitOf(answer);
           if (wait !== undefined) {
+            /* A wait-class refusal holds the item for its host; its effect is not unknown. */
             this.#holdForHost(session, { queueId: item.id, command: item.command, refusal: wait });
             return this.#holdQueue(session, record.items, 'host-wait');
+          }
+          if (answer.effect === 'unknown') {
+            /* U8: the bounded re-send ran out with the effect still unknown. */
+            unknownEffect({ reason: 'unknown-effect', code: answer.code });
+          } else if (answer.status !== 'refused' && answer.effect !== 'durable') {
+            /* U20: applied, but not as a durable row. */
+            unknownEffect({ reason: 'not-durable', code: answer.status });
           }
           if (answer.status === 'refused') {
             throw new Error(`Delivery could not be confirmed: ${answer.message}`);
@@ -3746,6 +3777,8 @@ export class ChatSessionStore {
   }
 
   #stopObservedAttachment(chatId: string, observed: ObservedChat): void {
+    clearTimeout(observed.lossReport);
+    observed.lossReport = undefined;
     this.#answeredLogReads.delete(chatId);
     const session = this.#sessions.get(chatId);
     if (session !== undefined) {
@@ -3760,6 +3793,72 @@ export class ChatSessionStore {
     observed.attachment = undefined;
     observed.placement = undefined;
     observed.status = 'unknown';
+  }
+
+  /**
+   * Fold one host read answer, reporting `own.rewrite` when the fold resets the own projection (HA0): the host said
+   * the reader is ahead or of another identity, or a version-1 host clamped. Every host read answer reaches the
+   * projection here (facts pages fold inside the attachment's capture, which keeps the reset version); a reset the
+   * store sends itself does not pass here, so it is not reported.
+   *
+   * @param chatId - The chat the answer is for.
+   * @param answer - The host's read answer.
+   */
+  #foldHostAnswer(chatId: string, answer: ChatProjectionReadAnswer): void {
+    const before = this.#projectionContext(chatId);
+    this.#projectionOf(chatId).send({ type: 'batch', answer });
+    const after = this.#projectionContext(chatId);
+    if (before === undefined || after === undefined || after.resetVersion === before.resetVersion) {
+      return;
+    }
+    const reason =
+      answer.status === 'refused'
+        ? answer.reason
+        : before.ledger.position.sourceGeneration !== undefined &&
+            'sourceGeneration' in answer &&
+            answer.sourceGeneration !== before.ledger.position.sourceGeneration
+          ? 'identity-mismatch'
+          : 'clamped';
+    chatReadReporter.report('own.rewrite', {
+      chatId,
+      occurrence: `${chatId}:${String(after.resetVersion)}`,
+      tags: { reason },
+    });
+  }
+
+  /**
+   * HA0: report what a lost or refused host read leaves the person with, once the loss has lasted
+   * {@link chatReadLossBoundMilliseconds}; the caller passes no leadership handoff (`owner-fenced`). A session that never
+   * displayed its own segment is a cold, hidden transcript (once per session); a caught-up own run still open is an
+   * unsettled orphan candidate (once per run). Reporting only: nothing here changes what the store does.
+   *
+   * @param chatId - The chat whose host read was lost or refused.
+   * @param observed - Its observation, whose attachment met the loss.
+   * @param reason - Why the read ended, as a bounded tag.
+   */
+  #armLossReport(chatId: string, observed: ObservedChat, reason: string): void {
+    if (observed.lossReport !== undefined) {
+      return;
+    }
+    const tags = { reason };
+    observed.lossReport = setTimeout(() => {
+      observed.lossReport = undefined;
+      if (this.#observed.get(chatId) !== observed || (observed.status !== 'lost' && observed.status !== 'refused')) {
+        return;
+      }
+      const session = this.#sessions.get(chatId);
+      if (session !== undefined && session.displayedOwn === undefined) {
+        chatReadReporter.report('chat.read.cold-hidden', { chatId, occurrence: session, tags });
+      }
+      const projection = this.#projectionContext(chatId);
+      const run =
+        projection !== undefined && selectCaughtUp(projection) && opensRun(selectRunPhase(projection))
+          ? selectCurrentRun(projection)
+          : undefined;
+      if (run !== undefined) {
+        chatReadReporter.report('run.unsettled.own', { chatId, occurrence: run.runId, tags });
+      }
+    }, chatReadLossBoundMilliseconds); // Bound: chatReadLossBoundMilliseconds.
   }
 
   /**
@@ -3832,12 +3931,22 @@ export class ChatSessionStore {
           }
           this.#projectionTopics.get(chatId)?.emit();
           if (event.type === 'attachment.attached') {
+            clearTimeout(observed.lossReport);
+            observed.lossReport = undefined;
             observed.attempts = 0;
             observed.hostLoadFailure = undefined;
             this.#syncProjection(chatId, 'none');
             return;
           }
           const session = this.#sessions.get(chatId);
+          if (event.reason !== 'owner-fenced') {
+            /* A bounded tag: a refusal's reason, a failure's code, or a fixed sentence; never an error's message. */
+            const reason =
+              event.type === 'attachment.refused'
+                ? `refused:${event.reason ?? 'unknown'}`
+                : (getErrno(event.error) ?? (event.error === undefined ? (event.reason ?? 'lost') : 'error'));
+            this.#armLossReport(chatId, observed, reason);
+          }
           if (event.type === 'attachment.lost' && isWorkerCodeLoadFailure(event.error)) {
             observed.hostLoadFailure = event.error;
             if (session !== undefined) {

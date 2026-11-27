@@ -171,6 +171,99 @@ describe('createTauAgentHost', () => {
     await host.close();
   });
 
+  // WP-10 step B: a driver's rows answer once ordered; the request and the run's end wait for them to be durable.
+  it('should send no request and settle no run until the driver rows are durable', async () => {
+    const file = createMemoryLogFile();
+    const flush = Promise.withResolvers<void>();
+    let waits = 0;
+    const stream = vi.fn(async function* (): AsyncGenerator<ModelStreamEvent> {
+      yield { type: 'text-delta', text: 'hello' };
+      yield { type: 'completed', stopReason: 'stop' };
+    });
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          const log = await file.open();
+          return {
+            ...log,
+            appendOrdered: log.appendMany!,
+            durable: async () => {
+              waits += 1;
+              await flush.promise;
+            },
+          };
+        },
+        transport: { funding: fundedFacet(), stream },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'barrier',
+      }),
+    );
+    /* Its answer waits for the committed turn, so for the flush too. */
+    const admitted = host.admit({
+      chatId: 'chat-barrier',
+      runId: 'run-barrier',
+      trigger: 'submit',
+      message: { id: 'turn-barrier', role: 'user', content: 'Go.' },
+    });
+    await vi.waitFor(() => {
+      expect(waits).toBeGreaterThan(0);
+    });
+    await expect(readLog(file)).resolves.toContainEqual(expect.objectContaining({ type: 'model.invocation-prepared' }));
+    expect(stream).not.toHaveBeenCalled();
+    await expect(host.snapshot('chat-barrier')).resolves.toMatchObject({ state: 'running' });
+
+    flush.resolve();
+    await admitted;
+    await vi.waitFor(async () => {
+      await expect(host.snapshot('chat-barrier')).resolves.toMatchObject({ state: 'completed' });
+    });
+    expect(stream).toHaveBeenCalledTimes(1);
+    await host.close();
+  });
+
+  it('should fail the run when its rows cannot be made durable', async () => {
+    const file = createMemoryLogFile();
+    let waits = 0;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          const log = await file.open();
+          return {
+            ...log,
+            appendOrdered: log.appendMany!,
+            /* The request's barrier passes; every flush after the reply fails. */
+            durable: async () => {
+              waits += 1;
+              if (waits > 2) {
+                throw Object.assign(new Error('flush failed'), { code: 'LOG_POISONED' });
+              }
+            },
+          };
+        },
+        transport: {
+          funding: fundedFacet(),
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'text-delta', text: 'hello' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'undurable',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-undurable',
+      runId: 'run-undurable',
+      trigger: 'submit',
+      message: { id: 'turn-undurable', role: 'user', content: 'Go.' },
+    });
+    await vi.waitFor(async () => {
+      await expect(host.snapshot('chat-undurable')).resolves.not.toMatchObject({ state: 'running' });
+    });
+    await expect(host.snapshot('chat-undurable')).resolves.not.toMatchObject({ state: 'completed' });
+    await host.close();
+  });
+
   it('publishes live deltas before their durable assistant completion', async () => {
     const order: string[] = [];
     const file = createMemoryLogFile();

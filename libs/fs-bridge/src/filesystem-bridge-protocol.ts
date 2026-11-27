@@ -427,6 +427,7 @@ type WorkspaceBridgeMethodName =
   | 'recheckRoots'
   | 'listProjectManifests'
   | 'verifyProjectRoute'
+  | 'verifyAbsent'
   | 'commitPendingProjectDirectory'
   | 'adoptProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
@@ -1598,6 +1599,14 @@ const callSchemas = {
       z.object({ status: z.literal('discovery-required') }),
       z.object({ status: z.literal('unavailable') }),
       z.object({ status: z.literal('superseded') }),
+    ]),
+  },
+  verifyAbsent: {
+    args: z.tuple([projectIdSchema]),
+    result: discriminatedResultUnion('status', [
+      z.looseObject({ status: z.literal('absent') }),
+      z.looseObject({ status: z.literal('present'), locators: z.array(projectLocatorSchema) }),
+      z.looseObject({ status: z.literal('unknown'), reason: z.string() }),
     ]),
   },
   commitPendingProjectDirectory: {

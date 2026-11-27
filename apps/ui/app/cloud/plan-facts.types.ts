@@ -47,6 +47,8 @@ export type CreditFacts = Readonly<{
   /** The floor hold per route, by route id. */
   minimumHoldAtoms: Readonly<Record<string, string>>;
   autoReloadEnabled: boolean;
+  /** Credits one US dollar buys, for the price line a zero balance shows; absent where the chunk publishes none. */
+  creditsPerUsd?: number;
 }>;
 
 /** Every fact the bridge publishes; a missing one is unresolved. @public */

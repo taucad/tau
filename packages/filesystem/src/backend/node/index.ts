@@ -35,5 +35,5 @@ export { toNodeFsPort } from '#backend/node/port.js';
 export type { EmitterPort, NodeFsPort } from '#backend/node/port.js';
 export { nodeFsProtocolVersion } from '#backend/node/protocol.js';
 export { watchTree } from '#backend/node/watch-tree.js';
-export type { TreeWatcher, WatchTreeOptions } from '#backend/node/watch-tree.js';
+export type { TreeWatcher, TreeWatchListener, TreeWatchOptions } from '#backend/node/watch-tree.js';
 export type { NodeFsHostDescription, NodeFsWatchEvent } from '#backend/node/protocol.js';

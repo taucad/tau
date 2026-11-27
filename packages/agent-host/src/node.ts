@@ -564,34 +564,37 @@ export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore =>
       if (observer === undefined) {
         try {
           // One binding-owned watch also sees creation of a missing chat's ancestors.
-          const watching = watchTree(options.workspaceRoot, {
-            onChange: (filename) => {
-              if (observer !== watching) {
-                return;
-              }
-              for (const subscription of subscriptions.values()) {
-                if (
-                  filename === undefined ||
-                  filename === subscription.path ||
-                  subscription.path.startsWith(`${filename}/`)
-                ) {
-                  subscription.onChange();
+          const watching = watchTree(
+            options.workspaceRoot,
+            {
+              change: (filename) => {
+                if (observer !== watching) {
+                  return;
                 }
-              }
+                for (const subscription of subscriptions.values()) {
+                  if (
+                    filename === undefined ||
+                    filename === subscription.path ||
+                    subscription.path.startsWith(`${filename}/`)
+                  ) {
+                    subscription.onChange();
+                  }
+                }
+              },
+              error: (error) => {
+                if (observer !== watching) {
+                  return;
+                }
+                /* The watch closed itself; the next subscription arms a fresh one. */
+                observer = undefined;
+                // oxlint-disable-next-line unicorn/no-useless-spread -- callbacks can release or replace subscriptions.
+                for (const subscription of [...subscriptions.values()]) {
+                  subscription.onError(error);
+                }
+              },
             },
-            onError: (error) => {
-              if (observer !== watching) {
-                return;
-              }
-              observer = undefined;
-              watching.close();
-              // oxlint-disable-next-line unicorn/no-useless-spread -- callbacks can release or replace subscriptions.
-              for (const subscription of [...subscriptions.values()]) {
-                subscription.onError(error);
-              }
-            },
-            persistent: true,
-          });
+            { persistent: true },
+          );
           observer = watching;
         } catch (error) {
           subscriptions.delete(key);

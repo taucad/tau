@@ -32,6 +32,7 @@ import {
 import type { DeletionReceipt, TauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 import { holdCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
+import { firstTurnBackupHold, subscribeFirstTurnBackupHolds } from '#lib/first-turn-backup-gate.js';
 import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 
@@ -877,6 +878,12 @@ export const useTauCloudIntentConnection = ({
   const step =
     intent === 'open' && !canOpenCloudProject(projectId) ? 'wait' : nextTauCloudStep(intent, eligibility, status);
   const { connectRemote } = commands;
+  /* WP-12 step 5: whether a Home-created project's first backup is still held; its end runs the connect step again. */
+  const isBackupHeld = useSyncExternalStore(
+    subscribeFirstTurnBackupHolds,
+    () => firstTurnBackupHold(projectId) !== undefined,
+    () => false,
+  );
   useEffect(() => {
     if (
       getCloudDeletionState(projectId) !== undefined ||
@@ -895,22 +902,28 @@ export const useTauCloudIntentConnection = ({
         return;
       }
       case 'connect': {
+        /* WP-12 step 5: a project created from Home backs up once its first turn streams, or 5 s on. The intent stays
+         * `noticed` meanwhile, so this connector stays mounted while the project is open, and the hold's end runs this
+         * step again with every check above, through the session open at that moment. */
+        if (intent === 'noticed' && isBackupHeld) {
+          break;
+        }
         /* `open` is kept until the connection lands; `noticed` becomes `connected` first, so it connects once. */
         if (intent === 'noticed') {
           tauCloudIntent.set(projectId, 'connected');
         }
         if (intent === 'open') {
           void continueCloudOpen({ projectId, account, connect: async () => connectRemote('tau') });
-        } else {
-          void connectRemote('tau');
+          break;
         }
+        void connectRemote('tau');
         break;
       }
       case 'wait': {
         break;
       }
     }
-  }, [account, connectRemote, intent, projectId, step]);
+  }, [account, connectRemote, intent, isBackupHeld, projectId, step]);
 };
 
 /**

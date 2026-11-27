@@ -1209,7 +1209,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     watchedRoots.set(key, root);
     try {
       const watcher = watchTree(root, {
-        onChange: (path) => {
+        change: (path) => {
           if (path === undefined) {
             lose(key);
             return;
@@ -1227,9 +1227,8 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           }
           reportWrite(key, path);
         },
-        onError: () => {
+        error: () => {
           lose(key);
-          watcher.close();
           watchers.set(key, undefined);
         },
       });

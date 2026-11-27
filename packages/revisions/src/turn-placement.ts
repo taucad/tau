@@ -175,11 +175,16 @@ export type TurnAdmissionActivitySource = 'git' | 'bridge';
 export type TurnAdmissionActivity = Readonly<{ count: number; totalMilliseconds: number; longestMilliseconds: number }>;
 
 /**
- * A meter an admission opens a window on: `gitCommandActivity`, `fileSystemBridgeActivity`, or a host's own.
+ * A meter an admission opens a window on: `gitCommandActivity`, `fileSystemBridgeActivity`, or a host's own. One
+ * with `during` is also told that the admission is the span its work runs in, which `gitCommandActivity` names on
+ * each slow Git process.
  *
  * @public
  */
-export type TurnAdmissionActivityMeter = Readonly<{ open: () => Readonly<{ close: () => TurnAdmissionActivity }> }>;
+export type TurnAdmissionActivityMeter = Readonly<{
+  open: () => Readonly<{ close: () => TurnAdmissionActivity }>;
+  during?: <Result>(phase: 'admission', run: () => Promise<Result>) => Promise<Result>;
+}>;
 
 /**
  * One admission's timing, reported when the placement answers it (W8 diagnostics). Ids and milliseconds only: no
@@ -246,8 +251,10 @@ const timedAdmission = async <Tools>(
   const phases: AdmissionPhases = {};
   const start = performance.now();
   let answer: AdmitAnswer<Tools> | undefined;
+  const attempt = async (): Promise<AdmitAnswer<Tools>> => admitAttempt(input, phases);
+  const scoped = Object.values(timing.activity ?? {}).find((meter) => meter.during !== undefined);
   try {
-    answer = await admitAttempt(input, phases);
+    answer = await (scoped?.during === undefined ? attempt() : scoped.during('admission', attempt));
     return answer;
   } finally {
     const totalMilliseconds = performance.now() - start;

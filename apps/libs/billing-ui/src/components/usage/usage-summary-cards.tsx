@@ -1,4 +1,4 @@
-import { Bot, Coins, Lock } from 'lucide-react';
+import { Bot, Coins } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { monthlyCreditsFromBalance } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
@@ -31,12 +31,7 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
   const purchased = categories
     ? BigInt(categories.debtCreditAtoms) > 0n
       ? 0n
-      : BigInt(categories.purchasedCreditAtoms) - BigInt(categories.purchasedHeldCreditAtoms)
-    : undefined;
-  const reserved = categories
-    ? BigInt(categories.planHeldCreditAtoms) +
-      BigInt(categories.purchasedHeldCreditAtoms) +
-      BigInt(categories.promoHeldCreditAtoms)
+      : BigInt(categories.purchasedCreditAtoms)
     : undefined;
 
   return (
@@ -50,7 +45,6 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
             <CardContent>
               <MonthlyCreditsMeter
                 className='p-0 text-sm'
-                monthlyHeldCreditAtoms={BigInt(categories?.planHeldCreditAtoms ?? '0')}
                 state={monthly ? { status: 'ready', monthly } : { status: isResolved ? 'unavailable' : 'loading' }}
               />
             </CardContent>
@@ -81,7 +75,7 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
               label='Promotional credits available'
               atoms={(BigInt(categories.debtCreditAtoms) > 0n
                 ? 0n
-                : BigInt(categories.promoGrantCreditAtoms) - BigInt(categories.promoHeldCreditAtoms)
+                : BigInt(categories.promoGrantCreditAtoms)
               ).toString()}
             />
           ) : undefined}
@@ -93,7 +87,7 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
           ) : undefined}
         </div>
       ) : undefined}
-      <div className='grid gap-4 md:grid-cols-3'>
+      <div className='grid gap-4 md:grid-cols-2'>
         <Card>
           <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
             <CardTitle variant='label'>Credits used</CardTitle>
@@ -111,30 +105,6 @@ export function UsageSummaryCards({ snapshot, balance }: UsageSummaryCardsProps)
               </>
             ) : (
               <div className='text-sm text-muted-foreground'>Usage unavailable for this range</div>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-            <CardTitle variant='label'>Reserved</CardTitle>
-            <Lock className='size-4 text-muted-foreground' />
-          </CardHeader>
-          <CardContent>
-            {categories && reserved !== undefined ? (
-              <div className='flex flex-col gap-1 text-sm tabular-nums' data-testid='reserved-credits'>
-                <BalanceLine label='Monthly credits' atoms={categories.planHeldCreditAtoms} />
-                <BalanceLine label='Purchased credits' atoms={categories.purchasedHeldCreditAtoms} />
-                {BigInt(categories.promoHeldCreditAtoms) > 0n ? (
-                  <BalanceLine label='Promotional credits' atoms={categories.promoHeldCreditAtoms} />
-                ) : undefined}
-                <p className='mt-1 text-xs text-muted-foreground'>
-                  {reserved === 0n
-                    ? 'Nothing held for work in flight'
-                    : 'Held for work in flight; released when each turn settles'}
-                </p>
-              </div>
-            ) : (
-              <div className='text-sm text-muted-foreground'>Balance unavailable</div>
             )}
           </CardContent>
         </Card>

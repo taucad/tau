@@ -130,6 +130,20 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 });
 
 /**
+ * The sandbox runtime's next reset, which the last released lease starts. A test awaits this signal itself instead of
+ * polling for the call under a timer: the release runs after the worker's end on its own task, and a busy runner can
+ * hold it past `vi.waitFor`'s second (burn-in seed 978889614, job on #2527: 1043 ms against a 55 ms local run).
+ *
+ * @returns Settles when `SandboxManager.reset` is next called.
+ */
+const nextReset = async (): Promise<void> =>
+  new Promise((resolve) => {
+    sandbox.reset.mockImplementationOnce(async () => {
+      resolve();
+    });
+  });
+
+/**
  * Whether Tau's sandbox layer starts on this host at all, asked of the product rather than read off the platform.
  *
  * The runtime underneath is the double above, so this is not about prerequisites: it is whether the layer refuses the
@@ -693,6 +707,7 @@ ${keepAlive}`;
         launches.push(launch);
         return startNativeWorker(launch);
       });
+      const reset = nextReset();
       try {
         await expect(request(value.session)).resolves.toEqual({ value: 'brokered' });
         expect(launches).toEqual([
@@ -713,9 +728,8 @@ ${keepAlive}`;
         await value.session.cleanup();
       }
       /* The worker's own lease ended with it; the session took none, so its cleanup stops nothing twice. */
-      await vi.waitFor(() => {
-        expect(sandbox.reset).toHaveBeenCalledOnce();
-      });
+      await reset;
+      expect(sandbox.reset).toHaveBeenCalledOnce();
     },
   );
 
@@ -758,11 +772,11 @@ ${keepAlive}`;
       });
       expect(firstLine).toBe('{"protocolVersion":1,"type":"ready"}\n');
       expect(sandbox.reset).not.toHaveBeenCalled();
+      const reset = nextReset();
       await worker.terminate();
       await expect(worker.ended).resolves.toEqual({ signal: 'SIGTERM' });
-      await vi.waitFor(() => {
-        expect(sandbox.reset).toHaveBeenCalledOnce();
-      });
+      await reset;
+      expect(sandbox.reset).toHaveBeenCalledOnce();
     },
   );
 

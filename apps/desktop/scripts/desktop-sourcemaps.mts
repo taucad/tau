@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { cp, glob, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import process from 'node:process';
 
 const requireAuthToken = (): void => {
@@ -38,7 +38,8 @@ export const uploadDesktopSourceMaps = async (source: string, staged: string, cl
   requireAuthToken();
   const maps: string[] = [];
   for await (const map of glob('**/*.map', { cwd: source })) {
-    maps.push(map);
+    /* `glob` answers with the platform separator; the main map is named the same way on every host. */
+    maps.push(map.split(sep).join('/'));
   }
   if (!maps.includes('main/index.js.map')) {
     throw new Error('Desktop main source map is missing');

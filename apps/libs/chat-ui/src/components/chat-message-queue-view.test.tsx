@@ -111,6 +111,13 @@ describe('queued message adornment', () => {
       expect(props.onEdit).toHaveBeenCalledWith('one', 'Make the gear stronger');
     });
   });
+  it("should show an automatic send's words without a live region, which only the person's own Send now has", async () => {
+    // The queue sends its next item by itself (when a turn ends, or a project open releases a queued send): that is not
+    // the person's action, so the row adds no live region of its own.
+    render(<ChatMessageQueueView {...fixture({ sendingId: 'one' })} />);
+    expect(screen.getByRole('button', { name: 'Send now' })).toHaveTextContent('Sending…');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
   it('should make uncertain deliveries immutable and expose a retry action', async () => {
     const user = userEvent.setup();
     const props = fixture({ sendingId: 'one', error: 'Waiting for acknowledgement' });

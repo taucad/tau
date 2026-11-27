@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment names are SCREAMING_SNAKE */
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
@@ -124,13 +124,13 @@ describe('compileCacheEnvironment', () => {
 
   it('should put the compile cache under the app data root', () => {
     expect(compileCacheEnvironment(userData)).toEqual({
-      TAU_COMPILE_CACHE_DIR: '/Users/someone/Library/Application Support/Tau/compile-cache',
+      TAU_COMPILE_CACHE_DIR: join(userData, 'compile-cache'),
     });
   });
 
   it('should keep the compile cache out of the signed bundle', () => {
     const { TAU_COMPILE_CACHE_DIR: directory } = compileCacheEnvironment(userData);
-    expect(directory.startsWith(`${userData}/`)).toBe(true);
+    expect(directory.startsWith(join(userData, sep))).toBe(true);
     expect(directory.startsWith(bundle)).toBe(false);
     expect(directory).not.toContain('app.asar');
   });
@@ -146,7 +146,7 @@ describe('compileCacheEnvironment', () => {
   it('should reach every utility fork through the allowlisted addition', () => {
     expect(utilityEnvironment({ PATH: '/usr/bin' }, compileCacheEnvironment(userData))).toEqual({
       PATH: '/usr/bin',
-      TAU_COMPILE_CACHE_DIR: '/Users/someone/Library/Application Support/Tau/compile-cache',
+      TAU_COMPILE_CACHE_DIR: join(userData, 'compile-cache'),
     });
   });
 });
@@ -159,8 +159,11 @@ describe('packagedEsbuildEnvironment', () => {
         platform: 'darwin',
       }),
     ).toEqual({
-      ESBUILD_BINARY_PATH:
-        '/Applications/Tau.app/Contents/Resources/app.asar.unpacked/node_modules/@esbuild/darwin-arm64/bin/esbuild',
+      ESBUILD_BINARY_PATH: join(
+        '/Applications/Tau.app/Contents/Resources',
+        'app.asar.unpacked/node_modules',
+        '@esbuild/darwin-arm64/bin/esbuild',
+      ),
     });
   });
 
@@ -171,8 +174,11 @@ describe('packagedEsbuildEnvironment', () => {
         platform: 'darwin',
       }),
     ).toEqual({
-      ESBUILD_BINARY_PATH:
-        '/Applications/Tau.app/Contents/Resources/app.asar.unpacked/node_modules/@esbuild/darwin-x64/bin/esbuild',
+      ESBUILD_BINARY_PATH: join(
+        '/Applications/Tau.app/Contents/Resources',
+        'app.asar.unpacked/node_modules',
+        '@esbuild/darwin-x64/bin/esbuild',
+      ),
     });
   });
 
@@ -182,7 +188,11 @@ describe('packagedEsbuildEnvironment', () => {
 
   it('should point packaged Linux and Windows utilities at their staged executables', () => {
     expect(packagedEsbuildEnvironment(true, '/opt/Tau/resources', { architecture: 'x64', platform: 'linux' })).toEqual({
-      ESBUILD_BINARY_PATH: '/opt/Tau/resources/app.asar.unpacked/node_modules/@esbuild/linux-x64/bin/esbuild',
+      ESBUILD_BINARY_PATH: join(
+        '/opt/Tau/resources',
+        'app.asar.unpacked/node_modules',
+        '@esbuild/linux-x64/bin/esbuild',
+      ),
     });
     expect(packagedEsbuildEnvironment(true, 'C:/Tau/resources', { architecture: 'x64', platform: 'win32' })).toEqual({
       ESBUILD_BINARY_PATH: join('C:/Tau/resources', 'app.asar.unpacked/node_modules', '@esbuild/win32-x64/esbuild.exe'),
@@ -229,6 +239,11 @@ describe('bundledGitEnvironment', () => {
 });
 
 describe('loginShellEnvironment', () => {
+  /* Windows gate, by design: Windows has no login shell whose rc files hold the user's PATH (the launcher's
+   * environment already is the user's), so `loginShellEnvironment` returns before starting any shell there
+   * (`utility-environment.ts`, the `win32` early return). These cases drive a POSIX `sh` through that import and
+   * cover macOS and Linux; the Windows case below proves what Windows does instead. */
+  const itWithLoginShell = it.skipIf(process.platform === 'win32');
   const roots: string[] = [];
   afterAll(async () => {
     await Promise.all(roots.map(async (root) => rm(root, { recursive: true, force: true })));
@@ -262,29 +277,26 @@ describe('loginShellEnvironment', () => {
     return shell;
   };
 
-  it.skipIf(process.platform === 'win32')(
-    'applies the login shell variables and puts its PATH entries first, once each',
-    async () => {
-      const shell = await fakeShell('/opt/homebrew/bin:/usr/bin:/Users/me/.local/bin');
-      const target: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' };
-      const result = await loginShellEnvironment({ target, shell });
-      expect(target['PATH']).toBe('/opt/homebrew/bin:/usr/bin:/Users/me/.local/bin:/bin:/usr/sbin:/sbin');
-      expect(target['CODEX_HOME']).toBe('/Users/me/.codex-custom');
-      /* A value spanning lines survives: the block, not one line, is the capture. */
-      expect(target['MULTI']).toBe('one\ntwo');
-      expect(result.added).toBe(2);
-      expect(result.applied).toBeGreaterThan(0);
-    },
-  );
+  itWithLoginShell('applies the login shell variables and puts its PATH entries first, once each', async () => {
+    const shell = await fakeShell('/opt/homebrew/bin:/usr/bin:/Users/me/.local/bin');
+    const target: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' };
+    const result = await loginShellEnvironment({ target, shell });
+    expect(target['PATH']).toBe('/opt/homebrew/bin:/usr/bin:/Users/me/.local/bin:/bin:/usr/sbin:/sbin');
+    expect(target['CODEX_HOME']).toBe('/Users/me/.codex-custom');
+    /* A value spanning lines survives: the block, not one line, is the capture. */
+    expect(target['MULTI']).toBe('one\ntwo');
+    expect(result.added).toBe(2);
+    expect(result.applied).toBeGreaterThan(0);
+  });
 
-  it.skipIf(process.platform === 'win32')('never overrides a variable the launcher already set', async () => {
+  itWithLoginShell('never overrides a variable the launcher already set', async () => {
     const shell = await fakeShell('/opt/homebrew/bin');
     const target: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin', CODEX_HOME: '/launcher/codex' };
     await loginShellEnvironment({ target, shell });
     expect(target['CODEX_HOME']).toBe('/launcher/codex');
   });
 
-  it.skipIf(process.platform === 'win32')(
+  itWithLoginShell(
     'never imports TAU_, ELECTRON_ or NODE_ names from rc files but keeps PATH and the locale',
     async () => {
       const shell = await fakeShell('/opt/homebrew/bin');
@@ -298,7 +310,7 @@ describe('loginShellEnvironment', () => {
     },
   );
 
-  it.skipIf(process.platform === 'win32')('skips shell bookkeeping', async () => {
+  itWithLoginShell('skips shell bookkeeping', async () => {
     const shell = await fakeShell('/opt/homebrew/bin');
     const target: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin' };
     await loginShellEnvironment({ target, shell });
@@ -307,7 +319,7 @@ describe('loginShellEnvironment', () => {
     }
   });
 
-  it.skipIf(process.platform === 'win32')('applies nothing under the e2e opt-out', async () => {
+  it('applies nothing under the e2e opt-out', async () => {
     const shell = await fakeShell('/opt/homebrew/bin');
     const target: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin', TAU_E2E_KEEP_PATH: '1' };
     await expect(loginShellEnvironment({ target, shell })).resolves.toEqual({
@@ -319,22 +331,30 @@ describe('loginShellEnvironment', () => {
     expect(target).toEqual({ PATH: '/usr/bin:/bin', TAU_E2E_KEEP_PATH: '1' });
   });
 
-  it.skipIf(process.platform === 'win32')(
-    'falls back to well-known PATH entries when the shell prints no sentinel',
-    async () => {
-      const root = await mkdtemp(join(tmpdir(), 'tau-login-shell-'));
-      roots.push(root);
-      const shell = join(root, 'sh');
-      await writeFile(shell, `#!/bin/sh\nprintf 'only rc noise\\n'\n`);
-      await chmod(shell, 0o755);
-      const target: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin' };
-      const result = await loginShellEnvironment({ target, shell, fallbackEntries: [root] });
-      expect(target).toEqual({ PATH: `${root}:/usr/bin:/bin` });
-      expect(result).toMatchObject({ added: 1, applied: 0, fallback: true });
-    },
-  );
+  /* What Windows does instead of the login-shell import: nothing, and no shell process at all (a started shell
+   * would fail and report `fallback: true`). */
+  it.runIf(process.platform === 'win32')('applies nothing on Windows and starts no shell', async () => {
+    const target: NodeJS.ProcessEnv = { PATH: String.raw`C:\Windows\System32;C:\Users\me\.local\bin` };
+    const before = { ...target };
+    await expect(
+      loginShellEnvironment({ target, shell: String.raw`C:\no\such\shell.exe`, shellTimeout: 1 }),
+    ).resolves.toEqual({ added: 0, applied: 0, elapsed: 0, fallback: false });
+    expect(target).toEqual(before);
+  });
 
-  it.skipIf(process.platform === 'win32')('falls back on a shell that ignores SIGTERM inside the budget', async () => {
+  itWithLoginShell('falls back to well-known PATH entries when the shell prints no sentinel', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-login-shell-'));
+    roots.push(root);
+    const shell = join(root, 'sh');
+    await writeFile(shell, `#!/bin/sh\nprintf 'only rc noise\\n'\n`);
+    await chmod(shell, 0o755);
+    const target: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin' };
+    const result = await loginShellEnvironment({ target, shell, fallbackEntries: [root] });
+    expect(target).toEqual({ PATH: `${root}:/usr/bin:/bin` });
+    expect(result).toMatchObject({ added: 1, applied: 0, fallback: true });
+  });
+
+  itWithLoginShell('falls back on a shell that ignores SIGTERM inside the budget', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-login-shell-'));
     roots.push(root);
     const shell = join(root, 'sh');
@@ -356,7 +376,7 @@ describe('loginShellEnvironment', () => {
     expect(result).toMatchObject({ added: 1, applied: 0, fallback: true });
   });
 
-  it.skipIf(process.platform === 'win32')('keeps the environment when the shell does not answer', async () => {
+  itWithLoginShell('keeps the environment when the shell does not answer', async () => {
     const target: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin' };
     await loginShellEnvironment({ target, shell: '/usr/bin/false', fallbackEntries: [] });
     await loginShellEnvironment({ target, shell: join(tmpdir(), 'no-such-shell'), fallbackEntries: [] });

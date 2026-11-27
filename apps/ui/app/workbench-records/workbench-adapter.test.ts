@@ -20,6 +20,7 @@ import {
   workbenchLayoutMachine,
 } from '#workbench-records/workbench-layout.machine.js';
 import { selectDockAdapter } from '#workbench-records/workbench-adapter.js';
+import { isChangingQuietly } from '#components/panes/dockview-announcements.js';
 import type {
   WorkbenchAdapterEditor,
   WorkbenchAdapterPorts,
@@ -154,7 +155,10 @@ function scriptedDock() {
       }
     }
   };
+  /* Whether Dockview's announcements were silenced for each `showNode` (`changeQuietly`). */
+  const quietShows: boolean[] = [];
   const api = {
+    id: 'dock-1',
     get panels() {
       return tabs;
     },
@@ -192,7 +196,8 @@ function scriptedDock() {
     launcherId: () => undefined,
     shownNode: () => ({ kind: 'group', tabs: [...tabs] }),
     // `fromJSON` with reused panels: the node's tabs, and every other panel removed.
-    showNode: (_api, node) => {
+    showNode: (shownOn, node) => {
+      quietShows.push(isChangingQuietly(shownOn));
       const next = node.kind === 'group' ? [...node.tabs] : [];
       const keys = new Set(next.map((tab) => tabKey(tab)));
       const gone = tabs.filter((tab) => !keys.has(tabKey(tab)));
@@ -200,7 +205,12 @@ function scriptedDock() {
       remove(gone);
     },
   };
-  return { api, operations, paths: () => tabs.map((tab) => (tab.kind === 'file' ? tab.path : tabKey(tab))) };
+  return {
+    api,
+    operations,
+    quietShows,
+    paths: () => tabs.map((tab) => (tab.kind === 'file' ? tab.path : tabKey(tab))),
+  };
 }
 
 /** A ready layout over `record`, its shim, and a Dockview that hands its adapter to the layout. */
@@ -255,6 +265,16 @@ function hosted(record: WorkbenchLayout, open: readonly string[], options: Reado
 }
 
 describe('workbench adapter hosted by the layout (A8c)', () => {
+  // Staging QA 2026-11-27: Dockview announced each panel an apply opened ("New tab opened") beside the open's own voice.
+  it("should land a record's arrangement without Dockview announcing its panels", () => {
+    const { dock, mountDock } = hosted(recordOf('a.ts'), ['a.ts']);
+
+    mountDock();
+
+    expect(dock.quietShows.length).toBeGreaterThan(0);
+    expect(dock.quietShows.every(Boolean)).toBe(true);
+  });
+
   // D21 round 1, A1: the adapter starts inside the layout's `dockReady` step, and the layout hears its attach only after
   // that step. A reconcile run at start put every open file on the Dockview first, and the attach's apply then removed
   // the files the arrangement lacks, closing them in the editor. On main the attach applied first and the reconcile

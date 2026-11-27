@@ -1,4 +1,5 @@
 /* oxlint-disable no-await-in-loop, max-lines, complexity -- financial mutations execute sequentially in one lock order */
+import { isBilledStop } from '#billable-stop-charge.js';
 import { turnStepTokenType } from '#turn-step-telemetry.js';
 import { spendBlockingFinancialCaseKinds } from '#billing-cash-reconciliation.service.js';
 import {
@@ -1626,7 +1627,7 @@ export class CreditLedgerService {
       const customerState =
         input.evidence.kind === 'provider_rejected'
           ? 'released'
-          : input.evidence.kind === 'absorbed_unknown'
+          : input.evidence.kind === 'absorbed_unknown' && charge === 0n
             ? 'absorbed'
             : 'settled';
       const supplierCost = supplierCostOf(operation, input.evidence);
@@ -2932,7 +2933,9 @@ export class CreditLedgerService {
     overrun: boolean;
     inputOverflow?: { observed: bigint; maximum: bigint };
   } {
-    if (evidence.kind !== 'final_usage' && evidence.kind !== 'authorized_exhausted') {
+    // A stop the person chose is billed for what it used (D-3); every other absorbed end stays free.
+    const billedStop = isBilledStop(evidence);
+    if (evidence.kind !== 'final_usage' && evidence.kind !== 'authorized_exhausted' && !billedStop) {
       return { chargedAtoms: 0n, actualRetailAtoms: null, reportedRetailAtoms: 0n, overrun: false };
     }
     const meterItems = evidence.meterItems ?? [];
@@ -2947,6 +2950,10 @@ export class CreditLedgerService {
        * authorization here would bill the maximum for a truncated answer on the wires that report
        * usage only in their final event, so the customer pays what the stream proved: nothing.
        * The operator's case (opened by the terminalizer) is where a mis-sized ceiling surfaces. */
+      return { chargedAtoms: 0n, actualRetailAtoms: null, reportedRetailAtoms: 0n, overrun: false };
+    }
+    if (billedStop && !priceable) {
+      // The collector prices a stop over the supplier's meters; one the customer tariff does not match stays free.
       return { chargedAtoms: 0n, actualRetailAtoms: null, reportedRetailAtoms: 0n, overrun: false };
     }
     if (!sized) {
@@ -2974,7 +2981,7 @@ export class CreditLedgerService {
         : undefined;
     const chargedAtoms =
       computedRetailAtoms < operation.authorizedAtoms ? computedRetailAtoms : operation.authorizedAtoms;
-    if (evidence.kind === 'authorized_exhausted') {
+    if (evidence.kind === 'authorized_exhausted' || billedStop) {
       // Usage the provider reported before the cut only ever lowers the charge; the cut itself is
       // the authorization being spent, so it raises no exception and pauses no route.
       return {
@@ -3267,7 +3274,7 @@ const supplierCostOf = (
   if (evidence.kind === 'provider_rejected' || operation.dispatchIntentAt === null) {
     return { picoUsd: 0n, unpricedReason: null };
   }
-  const meterItems = evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
+  const meterItems = evidence.kind === 'absorbed_unknown' && !isBilledStop(evidence) ? [] : (evidence.meterItems ?? []);
   if (meterItems.length === 0) {
     return { picoUsd: null, unpricedReason: 'absorbed' };
   }

@@ -347,7 +347,7 @@ const writeEngineFixture = async (directory: string, platformVersion = '0.0.1'):
 
 describe('GeoSpec engine staging', () => {
   it('should preserve published manifests, loader, platform addon and licenses', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'tau-native-packaging-'));
+    const directory = await realpath(await mkdtemp(join(tmpdir(), 'tau-native-packaging-')));
     try {
       const { desktopRoot, archive } = await writeEngineFixture(directory);
       const modulesRoot = join(directory, 'stage/node_modules');
@@ -395,7 +395,7 @@ describe('GeoSpec engine staging', () => {
   });
 
   it.each(['missing', 'corrupt'])('should reject a %s source/relink archive before co-delivery', async (condition) => {
-    const directory = await mkdtemp(join(tmpdir(), 'tau-native-packaging-'));
+    const directory = await realpath(await mkdtemp(join(tmpdir(), 'tau-native-packaging-')));
     try {
       const { desktopRoot, archive } = await writeEngineFixture(directory);
       const modulesRoot = join(directory, 'stage/node_modules');
@@ -422,7 +422,7 @@ describe('GeoSpec engine staging', () => {
   });
 
   it('should co-deliver regular archive bytes when the selected source is a symlink', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'tau-native-packaging-'));
+    const directory = await realpath(await mkdtemp(join(tmpdir(), 'tau-native-packaging-')));
     try {
       const { desktopRoot, archive } = await writeEngineFixture(directory);
       const modulesRoot = join(directory, 'stage/node_modules');
@@ -448,7 +448,7 @@ describe('GeoSpec engine staging', () => {
   });
 
   it('should reject mismatched root/platform versions without substituting another platform', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'tau-native-packaging-'));
+    const directory = await realpath(await mkdtemp(join(tmpdir(), 'tau-native-packaging-')));
     try {
       const { desktopRoot } = await writeEngineFixture(directory, '0.0.0');
       await expect(copyGeoSpecEngine(desktopRoot, join(directory, 'stage/node_modules'))).rejects.toThrow(
@@ -460,7 +460,7 @@ describe('GeoSpec engine staging', () => {
   });
 
   it('should stop when the Darwin arm64 platform package is not installed', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'tau-native-packaging-'));
+    const directory = await realpath(await mkdtemp(join(tmpdir(), 'tau-native-packaging-')));
     try {
       const { desktopRoot } = await writeEngineFixture(directory);
       await rm(join(desktopRoot, 'node_modules/geospec-engine-darwin-arm64'), { recursive: true });
@@ -489,7 +489,7 @@ describe('GeoSpec engine staging', () => {
   });
 
   it.each(['LICENSE', platformAddon])('should stop when the platform %s is absent', async (missingPath) => {
-    const directory = await mkdtemp(join(tmpdir(), 'tau-native-packaging-'));
+    const directory = await realpath(await mkdtemp(join(tmpdir(), 'tau-native-packaging-')));
     try {
       const { desktopRoot } = await writeEngineFixture(directory);
       await rm(join(desktopRoot, 'node_modules/geospec-engine-darwin-arm64', missingPath));
@@ -500,7 +500,7 @@ describe('GeoSpec engine staging', () => {
   });
 
   it('should stop when the root package carries no dependency licenses', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'tau-native-packaging-'));
+    const directory = await realpath(await mkdtemp(join(tmpdir(), 'tau-native-packaging-')));
     try {
       const { desktopRoot } = await writeEngineFixture(directory);
       await rm(join(desktopRoot, 'node_modules/geospec-engine/licenses'), { recursive: true });

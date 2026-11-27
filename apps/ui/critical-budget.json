@@ -12,14 +12,14 @@
     "adaptive": {
       "project": {
         "brotliBytes": 2013000,
-        "requests": 311,
+        "requests": 316,
         "largestChunkBrotliBytes": 167234,
         "knownHeavy": {}
       },
       "home": {
-        "brotliBytes": 1275412,
+        "brotliBytes": 1281000,
         "requests": 228,
-        "largestChunkBrotliBytes": 143390,
+        "largestChunkBrotliBytes": 131229,
         "knownHeavy": {}
       }
     }

@@ -105,7 +105,7 @@ vi.doMock('#routes/w.$workspace.$project/chat-revision-marker.js', () => ({ Chat
 vi.doMock('#routes/w.$workspace.$project/chat-error.js', () => ({
   ChatError: () => null,
   // The lane's failure region adds no box of its own: the row measures the trays.
-  ChatErrorAnnouncement: ({ children }: { readonly children: ReactNode }) => children,
+  ChatErrorAnnouncement: ({ children }: { readonly children: ReactNode }): ReactNode => children,
 }));
 // The zero-balance note has its own suite and reads the account's plan; the row measures the trays.
 vi.doMock('#components/chat/chat-credits-notice.js', () => ({ ChatCreditsNotice: () => null }));

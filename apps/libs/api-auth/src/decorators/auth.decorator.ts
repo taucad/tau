@@ -3,8 +3,9 @@
 import { applyDecorators, createParamDecorator, SetMetadata, UseGuards } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import { isAuthoritativeSession, isPublicAuth, isOptionalAuth } from '#auth.constant.js';
-import { AuthGuard } from '#auth.guard.js';
+import { isAuthoritativeSession, isPublicAuth, isOptionalAuth, isWebSessionRequired } from '#auth.constant.js';
+import { AuthGuard, authClientOf } from '#auth.guard.js';
+import type { AuthClientKind } from '#desktop-grant.js';
 import type { AuthUser } from '#auth.type.js';
 
 /**
@@ -37,6 +38,35 @@ export const OptionalAuth = (): ReturnType<typeof SetMetadata> => SetMetadata(is
  * outliving the request: a signed link, a presigned URL or a token.
  */
 export const AuthoritativeSession = (): ReturnType<typeof SetMetadata> => SetMetadata(isAuthoritativeSession, true);
+
+/**
+ * Marks a route or controller that governs the account: it refuses Tau Desktop's OAuth access token with 403
+ * `WEB_SESSION_REQUIRED` and answers web sessions as before (operator ruling D1=A: the desktop uses the account, and
+ * account governance opens the web). Use it on routes that manage payment methods or standing payment consent, or
+ * close the account.
+ */
+export const RequireWebSession = (): ReturnType<typeof SetMetadata> => SetMetadata(isWebSessionRequired, true);
+
+/**
+ * Parameter decorator for which kind of client the request authenticated as: `web` or `desktop`. For routes whose
+ * answer differs for the desktop without refusing it outright.
+ */
+export const AuthClient = createParamDecorator(
+  (_data: unknown, context: ExecutionContext): AuthClientKind =>
+    authClientOf(context.switchToHttp().getRequest<FastifyRequest>().raw),
+);
+
+/** The authenticated user and the kind of client it signed in with. */
+export type AuthCaller = { readonly user: AuthUser; readonly client: AuthClientKind };
+
+/**
+ * Parameter decorator for {@link AuthCaller}: `@User()` and `@AuthClient()` in one parameter, for handlers that need
+ * both. Must be used with `@UseAuth()`.
+ */
+export const Caller = createParamDecorator((_data: unknown, context: ExecutionContext): AuthCaller => {
+  const request = context.switchToHttp().getRequest<FastifyRequest & { user: AuthUser }>();
+  return { user: request.user, client: authClientOf(request.raw) };
+});
 
 /**
  * Parameter decorator to extract the authenticated user from the request.

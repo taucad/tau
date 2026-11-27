@@ -5,7 +5,7 @@
 
 import sharp from 'sharp';
 import { asKnownArtifact } from '@taucad/runtime';
-import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
+import { buildViewerCaptureImageOptions, createIsometricCaptureCamera } from '@taucad/agent-tools/capture';
 import type { createExampleRuntimeClient, createWorkspaceRuntimeClient } from '#scripts/runtime.js';
 
 /* The example or the workspace runtime client: they differ only in the kernels they list. */
@@ -15,7 +15,8 @@ type ThumbnailClient = Awaited<ReturnType<typeof createExampleRuntimeClient | ty
 export const thumbnailOptions = { width: 1536, height: 1152 } as const;
 /** WebP quality for every generated thumbnail. */
 export const thumbnailQuality = 0.95;
-const thumbnailMargin = 0.1;
+/* A drawing keeps the same margin as a model's bounds framing. */
+const thumbnailMargin = createIsometricCaptureCamera().margin;
 /** A card thumbnail is shown at a third of its width (512 CSS px); a featured card at two thirds. */
 export const cardDisplayWidth = 512;
 export const featuredCardDisplayWidth = 1024;
@@ -114,13 +115,7 @@ export async function renderThumbnails(
           mode: 'single',
           ...thumbnailOptions,
           ...cardLook(displayWidth),
-          camera: {
-            framing: 'bounds',
-            direction: [0.6123724357, -0.6123724357, 0.5],
-            up: [0, 0, 1],
-            margin: thumbnailMargin,
-            projection: { kind: 'perspective', verticalFieldOfView: 45 },
-          },
+          camera: createIsometricCaptureCamera(),
           quality: thumbnailQuality,
         },
       });

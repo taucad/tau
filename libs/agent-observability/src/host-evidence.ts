@@ -89,6 +89,24 @@ const presentedLimit = 256;
 /** How far ahead of the host's clock the UI's may be; anything later is not a time this device saw. */
 const clockSlackMilliseconds = 5000;
 
+/**
+ * How long an answer serves later reads by the same account (chat performance plan WP-02).
+ * Long enough to cover one turn's start and end; short enough that a withdrawal purges what is held soon after.
+ * Milliseconds.
+ */
+const answerReuseMilliseconds = 10_000;
+
+/**
+ * Whether an answer may serve later reads: not one that refuses because the project is not yet this account's, which a
+ * new project's first answer does until the API registers it.
+ *
+ * @param answer - The server's answer.
+ * @returns Whether it is reused.
+ */
+const reusableAnswer = (answer: EffectivePurposesAnswer): boolean =>
+  Array.isArray(answer.purposes) &&
+  !answer.purposes.some((state) => (state as { refusal?: unknown }).refusal === 'project-not-owned');
+
 /** The server's answer for this account and project, dated on this host's clock; `undefined` when signed out. */
 type PurposesRead = Readonly<{ answer: EffectivePurposesAnswer; principal: string; receivedAt: number }> | undefined;
 
@@ -154,15 +172,35 @@ const grantOf = (
 export const createHostEvidence = (options: HostEvidenceOptions): HostEvidence => {
   const now = options.now ?? Date.now;
   const transport = { fetch: options.fetch, baseUrl: options.apiBaseUrl };
-  /* One answer serves both purposes: the summary and feedback reporters read the grant at the same moments (a run's
-   * start, each quiescence), and asked the same question twice, two requests per moment (chat performance plan WP-02).
-   * A read joins the request in flight; the next read after it settles asks again, so a withdrawal is seen as soon as
-   * before. */
+  /* One answer serves both purposes and every moment close together (chat performance plan WP-02). The summary and
+   * feedback reporters read the grant at the same moments (a run's start, each quiescence, a rating), and one turn
+   * brings several such moments within a second or two: each asked again, about six requests per turn. A read joins
+   * the request in flight, and its answer serves the same account for `answerReuseMilliseconds`.
+   *
+   * A refusal is reused too: most accounts have not decided, and their every moment asked again. A grant given meanwhile
+   * binds at most that late and loses nothing, since the reporter dates a grant from the account's decision. The one
+   * refusal never reused is a project the API does not yet know as this account's: a new project's host opens before
+   * the API registers it, and its first run must bind as soon as it is. A withdrawal purges what this host holds within
+   * the window; the server refuses evidence under a withheld purpose or a stale policy epoch meanwhile, so nothing
+   * withdrawn is admitted. */
   let reading: Promise<PurposesRead> | undefined;
+  let reusable: PurposesRead;
   const readShared = async (): Promise<PurposesRead> => {
+    if (
+      reusable !== undefined &&
+      reusable.principal === options.principal() &&
+      now() - reusable.receivedAt < answerReuseMilliseconds
+    ) {
+      return reusable;
+    }
     reading ??= (async () => {
       try {
-        return await readPurposes(options);
+        const read = await readPurposes(options);
+        reusable = read !== undefined && reusableAnswer(read.answer) ? read : undefined;
+        return read;
+      } catch (error) {
+        reusable = undefined;
+        throw error;
       } finally {
         reading = undefined;
       }

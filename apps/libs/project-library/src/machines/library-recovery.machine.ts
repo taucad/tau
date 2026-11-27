@@ -7,8 +7,10 @@
  *
  * 4. A mutation on a project waits while this tab holds a waiting or replaying row for it, or another admitted
  *    mutation of the same project. A failed, recovered or discarded row does not gate.
- * 5. Every row this tab has read from the journal has one state: `waiting`, `replaying`, `recovered`, `failed` or
- *    `discarded`. A row fails at once on a terminal reason (`identity-conflict`, `filesystem-error`,
+ * 5. Every row this tab has read from the journal has one state: `waiting`, `replaying`, `recovered`, `cancelled`,
+ *    `failed` or `discarded`. A permanent delete the authority cancelled because no other copy holds the id (FW3, the
+ *    operator's "cancel and say so") settles `cancelled`: its journal row is gone, it holds and hides nothing, and the
+ *    service tells the person (`rowCancelled`). A row fails at once on a terminal reason (`identity-conflict`, `filesystem-error`,
  *    `local-state-error`) and is never replayed again in this tab; only the replay loop counts attempts, one before
  *    each replay and no fourth; a mutation's own row starts with none. Only the person discards, and only a failed row.
  * 6. A row that fails with `workspace-unavailable` keeps its attempts and is replayed again only when its workspace
@@ -31,7 +33,11 @@
 import { createActor, createAsyncLogic, setup, types } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, SnapshotFrom } from 'xstate';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
-import type { PendingProjectRecovery, PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
+import type {
+  PendingProjectRecovery,
+  PendingProjectRecoveryReason,
+  SoleCopyCancellation,
+} from '#types/pending-project-operation.types.js';
 
 /** The `LibraryCatalog.tla` action a transition refines (MC-R27); `Unmodelled` is outside the spec. */
 export type LibraryRecoveryAction =
@@ -70,7 +76,7 @@ type RowBase = RecoveryRowInput &
 
 /** One row's state (rule 5). */
 export type RecoveryRow =
-  | (RowBase & Readonly<{ status: 'waiting' | 'replaying' | 'recovered' | 'discarded' }>)
+  | (RowBase & Readonly<{ status: 'waiting' | 'replaying' | 'recovered' | 'cancelled' | 'discarded' }>)
   | (RowBase & Readonly<{ status: 'failed'; reason: PendingProjectRecoveryReason; discarding: boolean }>);
 
 /**
@@ -80,6 +86,8 @@ export type RecoveryRow =
  */
 export type ReplayOutcome =
   | Readonly<{ status: 'recovered' }>
+  /** FW3: a delete that removed nothing because no other copy holds the id; its row was completed. */
+  | Readonly<{ status: 'cancelled'; cancellation: SoleCopyCancellation }>
   | Readonly<{ status: 'failed'; reason: PendingProjectRecoveryReason }>
   | Readonly<{ status: 'absent' }>;
 
@@ -155,6 +163,17 @@ export type LibraryRecoveryEmitted =
   | { type: 'discoveryWanted' }
   /** A row for `projectId` started a replay or a mutation's apply: the access fence's `rs`. */
   | { type: 'rowStarted'; operationId: string; projectId: string }
+  /**
+   * FW3: a permanent delete was cancelled because no other copy holds the id; nothing was removed. `via` says whose
+   * replay it was: a mutation's own (its caller is told) or the loop's or the person's after a reload.
+   */
+  | {
+      type: 'rowCancelled';
+      operationId: string;
+      projectId: string;
+      via: 'journal' | 'mutation' | 'person';
+      cancellation: SoleCopyCancellation;
+    }
   /** A row settled or was discarded: storage may have changed, so the listing owes a pass. */
   | { type: 'rowSettled'; operationId: string; projectId: string }
   /** What this tab holds changed: the recovery projection the library shows and route access reads. */
@@ -324,7 +343,18 @@ const settleRow = (
   const next: RecoveryRow =
     outcome.status === 'failed'
       ? { ...row, status: 'failed', reason: outcome.reason, discarding: false }
-      : { ...row, status: 'recovered' };
+      : outcome.status === 'cancelled'
+        ? { ...row, status: 'cancelled' }
+        : { ...row, status: 'recovered' };
+  if (outcome.status === 'cancelled') {
+    enq.emit({
+      type: 'rowCancelled',
+      operationId: row.operationId,
+      projectId: row.projectId,
+      via: row.via,
+      cancellation: outcome.cancellation,
+    });
+  }
   // Storage may have changed either way, so the listing owes a pass (the model's `Bump`).
   enq.emit({ type: 'rowSettled', operationId: row.operationId, projectId: row.projectId });
   const settled = { ...context, rows: { ...context.rows, [row.operationId]: next } };
@@ -621,6 +651,7 @@ export const libraryRecoveryMachine = setup({
                 // `settleRecovery`: a terminal row, or one with its third attempt made, is not replayed again.
                 if (
                   row.status === 'recovered' ||
+                  row.status === 'cancelled' ||
                   row.status === 'discarded' ||
                   row.status === 'replaying' ||
                   row.attempts >= maxRecoveryAttempts ||

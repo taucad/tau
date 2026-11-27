@@ -152,22 +152,21 @@ describe('createWorkerEvidence', () => {
     expect(urls.every((url) => url.includes('/v1/telemetry-purposes'))).toBe(true);
   });
 
-  it('should only re-read the grants, and send nothing, when a chat starts a run', async () => {
-    /* The summaries' and ratings' grants share one read (chat performance plan WP-02). */
+  it('should send nothing when a chat starts a run, and reuse a recent grant', async () => {
+    /* The summaries' and ratings' grants share one read, which a run starting soon after reuses (chat performance
+     * plan WP-02). */
     const { evidence, fetchMock, sent, urls } = setup(['summary']);
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     evidence.onChatQuiescent('chat-1', false);
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-    });
+    await evidence.reporter.refresh();
     await new Promise((resolve) => {
       setTimeout(resolve, 10);
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(urls.every((url) => url.includes('/v1/telemetry-purposes'))).toBe(true);
     expect(sent).toEqual([]);
   });

@@ -5,6 +5,7 @@ import type { Rendering } from '@taucad/runtime';
 import {
   buildViewerCaptureImageOptions,
   canonicalCaptureViews,
+  createIsometricCaptureCamera,
   captureFilesToDataUrls as encodeCaptureDataUrls,
 } from '@taucad/agent-tools/capture';
 import type { ExportFile } from '@taucad/types';
@@ -338,13 +339,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
   } else {
     let camera: SingleGlbCamera | undefined;
     if (recipe.mode === 'isometric') {
-      camera = {
-        framing: 'bounds',
-        direction: [0.6123724357, -0.6123724357, 0.5],
-        up: [0, 0, 1],
-        margin: 0.1,
-        projection: { kind: 'perspective', verticalFieldOfView: 45 },
-      };
+      camera = createIsometricCaptureCamera();
     } else if (cameraState) {
       const fixed = toNanorasterCamera({ cameraState });
       if (fixed.framing !== 'fixed') {

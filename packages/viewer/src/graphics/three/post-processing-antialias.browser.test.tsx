@@ -1110,6 +1110,10 @@ eachWithHardwareClaims(
       }),
       {
         input: {
+          // Graphics owns the world up (the canvas's `upDirection` prop is not read). This oblique view's `up` is +Y,
+          // so the world up must be +Y too: with the default +Z, Turntable straightens the view as a rolled pose (#2686)
+          // and the probes no longer look at the cut.
+          upDirection: 'y',
           camera: {
             cameraFovAngle: 0,
             cameraView: {

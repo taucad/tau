@@ -165,6 +165,8 @@ const parseFileDragPaths = (raw: string): string[] => {
 
 export type ChatTextareaHandle = {
   focus: () => void;
+  /** Send the draft as the composer's own Send would; nothing happens when the composer cannot send it. */
+  submit: () => Promise<void>;
 };
 
 export type ChatTextareaProperties = {
@@ -708,8 +710,11 @@ export function useChatTextareaLogic({
     }
   }, [textareaReference]);
 
-  // Expose focus method via ref
-  useImperativeHandle(ref, () => ({ focus: focusInput }), [focusInput]);
+  // Expose focus and Send via ref
+  useImperativeHandle(ref, () => ({ focus: focusInput, submit: async () => handleSubmit() }), [
+    focusInput,
+    handleSubmit,
+  ]);
 
   const handlePaste = useCallback(
     (event: ClipboardPasteEvent): boolean => {

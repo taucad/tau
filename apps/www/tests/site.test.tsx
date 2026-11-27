@@ -240,7 +240,7 @@ test('should render download CTAs and every archive before JavaScript', () => {
       `<div class="download-title"><a\\b[^>]*data-download-platform="${platform}"[^>]*>.*?</a>(<span data-slot="badge"[^>]*>Beta</span>)</div>`,
       'u',
     ).exec(downloads);
-    const intelBadge = /<div data-beta-route="macIntel">.*?(<span data-slot="badge"[^>]*>Beta<\/span>)/u.exec(
+    const intelBadge = /<p [^>]*data-beta-route="macIntel">.*?(<span data-slot="badge"[^>]*>Beta<\/span>)/u.exec(
       downloads,
     );
     expect(entry?.[1]).toBeDefined();
@@ -250,13 +250,23 @@ test('should render download CTAs and every archive before JavaScript', () => {
   expect(downloads).toContain('data-mac-route="macIntel" data-mac-hero="true" hidden=""');
   expect(downloads).toContain('data-mac-route="mac" hidden=""');
   expect(downloads).toContain('data-mac-route="macIntel" hidden=""');
-  // The only Mac file before JavaScript is the Intel beta ZIP, listed beside its beta badge and never as a qualified DMG.
-  expect(downloads.match(/Tau-macos[^"]*/gu)).toEqual(['Tau-macos-x64.zip']);
-  const intelBeta = /<div data-beta-route="macIntel">.*?<\/div><p class="fine">[^<]*<\/p><\/div>/u.exec(downloads)?.[0];
+  // The only Mac file before JavaScript is the Intel beta DMG: one quiet line with its beta badge directly under the
+  // hidden Apple silicon entry, never a peer download and never a qualified route.
+  expect(downloads.match(/Tau-macos[^"]*/gu)).toEqual(['Tau-macos-x64.dmg']);
+  const intelBeta = /<p class="fine download-variant" data-beta-route="macIntel">.*?<\/p>/u.exec(downloads)?.[0];
+  expect(downloads).toMatch(
+    /<div><div data-mac-route="mac" hidden="">.*?<\/div><p class="fine download-variant" data-beta-route="macIntel">/u,
+  );
   expect(intelBeta).toContain(`href="${betaDownloadHref('macIntel')}"`);
-  expect(intelBeta).toContain('<span>Download ZIP for Intel Mac</span>');
+  expect(intelBeta).toMatch(
+    /^<p [^>]*>Intel Mac\? <a\b[^>]*>Download the Intel beta DMG<\/a> <span data-slot="badge"/u,
+  );
+  expect(intelBeta).not.toContain('<svg');
+  expect(intelBeta).not.toContain('data-download-platform');
   expect(intelBeta).toMatch(/<span data-slot="badge"[^>]*>Beta<\/span>/u);
-  expect(downloads.match(/ZIP for/gu)).toHaveLength(1);
+  expect(betaDownloadHref('macIntel')).toBe('https://downloads.tau.new/latest/Tau-macos-x64.dmg');
+  expect(betaDownloadHref('macIntel', 'fallback')).toBe('https://downloads.tau.new/latest/Tau-macos-x64.zip');
+  expect(downloads).not.toContain('ZIP for');
   // The icon is the link's own child, as the client renders the Apple silicon button, so both get the same padding.
   expect(downloads).toMatch(/<a\b[^>]*data-download-platform="macIntel"[^>]*><svg/u);
   expect(downloads).toContain('Download for Windows');
@@ -264,9 +274,10 @@ test('should render download CTAs and every archive before JavaScript', () => {
   const badged = [...downloads.matchAll(/<div class="download-title">(.*?)<\/div>/gu)]
     .filter(([row]) => /data-slot="badge"[^>]*>Beta</u.test(row))
     .map(([row]) => /<span>(Download [^<]+)<\/span>/u.exec(row)?.[1]);
-  expect(badged).toEqual(['Download ZIP for Intel Mac', 'Download for Windows', 'Download for Linux']);
+  expect(badged).toEqual(['Download for Windows', 'Download for Linux']);
   expect(downloads).toContain('Download for Linux');
-  expect(downloads).not.toContain('DMG');
+  // Outside the Intel beta line no DMG is named until a qualified catalog publishes one.
+  expect(downloads.replace(intelBeta ?? '', '')).not.toContain('DMG');
   expect(downloads).not.toContain('No installer is published');
 });
 

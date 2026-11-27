@@ -166,6 +166,10 @@
 \* `session-failed` rather than `closed`, so its notice says the open failed (offline, while the page reads offline)
 \* instead of "closed", with a reload as its one action. Both are this model's `closed` view (not the editor, a
 \* notice with a recovery); the derivation of editor and non-editor is unchanged. No action or verdict changes.
+\* A failed workspace import settles once (2026-11-27): `project-route.tsx` reads the workspace shell through
+\* `useProjectWorkspace`, which draws nothing once the import failed instead of importing again on each render; the
+\* route's notice (the model's `closed` view) and its reload are unchanged. Mount mechanics only. No action or verdict
+\* changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

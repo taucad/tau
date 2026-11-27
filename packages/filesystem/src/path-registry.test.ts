@@ -51,7 +51,7 @@ describe('path registry', () => {
   });
 
   it('should fold generated control-plane spellings at any depth', () => {
-    const rows = pathRegistry.filter((row) => row.class === 'control-plane');
+    const rows = pathRegistry.filter((row) => row.class === 'control-plane' && row.match === 'segment');
     fc.assert(
       fc.property(
         fc.record({
@@ -129,8 +129,12 @@ describe('path registry', () => {
      * own rows, which is what re-opens them above the reserved `.tau` default. */
     '.tau/parameters/main.json',
     '.tau/machines/printer.json',
-    '.tau/skills/cad/SKILL.md',
-    '.tau/AGENTS.md',
+    /* The project's agent files sit at the paths every agent reads, outside
+     * `.tau`: no row names them, so they are the user's like any source. */
+    'AGENTS.md',
+    'lib/gears/AGENTS.md',
+    '.agents/skills/cad/SKILL.md',
+    '.agents/plugins/installed.json',
     /* No project-level `.cache` directory exists anywhere in the tree; the
      * project machine's exclusion named nothing, so it is authored like any
      * other unlisted path. */
@@ -149,7 +153,7 @@ describe('path registry', () => {
    * a submodule, a second Tau project — is the control plane wherever it sits.
    * A `.git` with no children is a worktree or submodule pointer file, which
    * names the real store somewhere else, so it is covered by the same row. */
-  it.each(['vendor/lib/.git/hooks/pre-commit', 'a/b/.jj/x', 'sub/.git', 'packages/kernel/.tau/binding.json'])(
+  it.each(['vendor/lib/.git/hooks/pre-commit', 'a/b/.jj/x', 'sub/.git'])(
     'should keep %s in the control plane whatever its depth',
     (path) => {
       expect(classify(path)).toStrictEqual({
@@ -163,12 +167,12 @@ describe('path registry', () => {
 
   /* G0-3: `classify` takes the first matching row, so a row that matched at the
    * project root used to claim a control plane nested inside it — the cache row
-   * for `node_modules`, and the authored `.tau/skills` and `.tau/parameters`
+   * for `node_modules`, and the authored `.tau/machines` and `.tau/parameters`
    * rows, which made a vendored store *versioned* and captured into every
    * revision. The control plane answers before the family it sits inside. */
   it.each([
     'node_modules/pkg/.git/hooks/pre-commit',
-    '.tau/skills/x/.git/config',
+    '.tau/machines/x/.git/config',
     '.tau/parameters/x/.git/config',
     'exports/x/.git/config',
     '.tau/chats/x/.git/config',
@@ -206,7 +210,6 @@ describe('path registry', () => {
     /* `.tau/binding.json` names the store this project is bound to, so a
      * spelling the filesystem folds onto it is the same control file. */
     '.TAU/Binding.JSON',
-    'packages/kernel/.Tau/binding.json',
   ])('should fold %s onto the control plane on every filesystem', (path) => {
     expect(classify(path)).toStrictEqual(controlPlane);
   });
@@ -229,9 +232,7 @@ describe('path registry', () => {
 
   it('should keep a folded `.tau` control writable and a folded generated one unversioned', () => {
     expect(classify('.TAU/parameters/main.json')).toStrictEqual(unlistedPathClassification);
-    /* The row whose own prefix is not lowercase: its prefix is folded too, so
-     * every spelling of it answers the same. */
-    expect(classify('.TAU/AGENTS.md')).toStrictEqual(unlistedPathClassification);
+    expect(classify('.TAU/Machines/printer.json')).toStrictEqual(unlistedPathClassification);
     expect(classify('.tau./types/kernel.d.ts')).toMatchObject({ versioned: false, agentAccess: 'read-write' });
   });
 
@@ -247,20 +248,25 @@ describe('path registry', () => {
   /* G0b-8, G0b-9: one rule, every row. `portable-tree` has always refused a
    * revision tree carrying a case alias of a reserved path, so a spelling the
    * filesystem folds onto a row was never the user's content — calling it
-   * authored only hid `.tau/AGENTS.md` behind its own spelling and wedged the
-   * next commit. `.TAU/Chats/c1.json` answered the reserved default before this
+   * authored only hid the row behind its own spelling and wedged the next
+   * commit. `.TAU/Chats/c1.json` answered the reserved default before this
    * (fail-closed either way); it answers the chats row now. */
   it('should fold every row, not only the control plane', () => {
     expect(classify('Exports/model.step')).toMatchObject({ class: 'records', versioned: false });
     expect(classify('Thumbnail.webp')).toMatchObject({ class: 'records', versioned: false });
     expect(classify('Node_Modules/replicad/index.d.ts')).toMatchObject({ class: 'cache', versioned: false });
     expect(classify('.TAU/Chats/c1.json')).toMatchObject({ class: 'records', agentAccess: 'read-only' });
-    /* G0b-8: the one row whose prefix is not lowercase. Whether the agent may
-     * read and write its own instructions file must not depend on how the
-     * caller spelled it. */
-    expect(classify('.tau/agents.md')).toStrictEqual(unlistedPathClassification);
-    expect(classify('.TAU/Agents.MD')).toStrictEqual(unlistedPathClassification);
   });
+
+  /* The agent files moved to the conventional paths (`AGENTS.md`, `.agents/skills`). Their old `.tau` paths have
+   * no row any more, so whatever a project still keeps there is a reserved `.tau` member: unversioned, and the
+   * agent's to read and move, under every spelling. */
+  it.each(['.tau/AGENTS.md', '.tau/agents.md', '.TAU/Agents.MD', '.tau/skills/cad/SKILL.md', '.tau/skills'])(
+    'should give the retired agent path %s the reserved `.tau` answer',
+    (path) => {
+      expect(classify(path)).toStrictEqual(reservedTauPathClassification);
+    },
+  );
 
   /* Q11/3h C3: full Unicode case folding, as ext4 casefold, APFS and NTFS
    * approximate it, maps the long s (U+017F) onto `s` and the Kelvin sign
@@ -269,7 +275,7 @@ describe('path registry', () => {
   it('should fold the long s and the Kelvin sign as full case folding does', () => {
     expect(classify('exportſ/model.step')).toStrictEqual(classify('exports/model.step'));
     expect(classify('.tau/chatſ/c1.json')).toStrictEqual(classify('.tau/chats/c1.json'));
-    expect(classify('.tau/ſkills/x.md')).toStrictEqual(classify('.tau/skills/x.md'));
+    expect(classify('.tau/machineſ/printer.json')).toStrictEqual(classify('.tau/machines/printer.json'));
     expect(classify('.tau/loc\u212Afile.json')).toStrictEqual(classify('.tau/lockfile.json'));
     expect(classify('ſrc/part.ts')).toStrictEqual(unlistedPathClassification);
   });
@@ -325,12 +331,15 @@ describe('path registry', () => {
     expect(classify(path)).toStrictEqual(unlistedPathClassification);
   });
 
-  /* PP3: a control-plane row matches a path segment, never a root, so its answer
-   * cannot depend on how deep the repository sits. */
-  it('should match every control-plane row by segment, never by root', () => {
+  /* PP3: a repository store's row matches a path segment, never a root, so its
+   * answer cannot depend on how deep the repository sits. Tau's own control
+   * files live in a root's `.tau/` and match there only, like every `.tau` row. */
+  it('should match every repository store by segment and every .tau control file by root', () => {
     const controlPlane = pathRegistry.filter((row) => row.class === 'control-plane');
 
-    expect(controlPlane.filter((row) => row.match !== 'segment')).toStrictEqual([]);
+    expect(
+      controlPlane.filter((row) => row.match !== (row.prefix.startsWith('.tau/') ? 'root' : 'segment')),
+    ).toStrictEqual([]);
   });
 
   /* PP2: hidden is inherited. The mask relies on it for every descent and
@@ -352,8 +361,18 @@ describe('path registry', () => {
       '.tau/binding.json',
       '.jj',
       '.git',
-      '.tau-staging',
+      '.tau/staging',
     ]);
+  });
+
+  /* Project Git policy: the `.tau` control rows are root-only, like every other
+   * `.tau` member, so the generated block's `/.tau/*` head excludes them with no
+   * line of their own. Nothing writes either below a project root: the binding
+   * belongs to a workspace's own `.tau/` and staging to the storage root's. */
+  it('should keep the .tau control rows at the root only', () => {
+    expect(classify('.tau/staging/import-x/intent.json')).toStrictEqual(controlPlane);
+    expect(classify('packages/kernel/.tau/binding.json')).toStrictEqual(unlistedPathClassification);
+    expect(classify('vendor/.tau-staging/x')).toStrictEqual(unlistedPathClassification);
   });
 
   /* D5: an agent that lists or greps the project never walks into the Project

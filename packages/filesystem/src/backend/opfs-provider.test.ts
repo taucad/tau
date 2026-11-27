@@ -79,7 +79,8 @@ describe('OPFSProvider lifecycle', () => {
 
   it('should sweep a dead owner, keep one that started while the sweep asked for locks, and keep an import staging', async () => {
     const root = createMockRootHandle() as unknown as FileSystemDirectoryHandle;
-    const staging = await root.getDirectoryHandle('.tau-staging', { create: true });
+    const tau = await root.getDirectoryHandle('.tau', { create: true });
+    const staging = await tau.getDirectoryHandle('staging', { create: true });
     await staging.getDirectoryHandle('dead-owner', { create: true });
     /* An import's staging is its journal, not a dead writer's leftovers (D12). */
     await staging.getDirectoryHandle('import-req_abc', { create: true });

@@ -130,15 +130,28 @@ export { ResourceQueue } from '#resource-queue.js';
 export type { ResourceQueueClaim } from '#resource-queue.js';
 export {
   createWorkerTimings,
+  formatMeasureBreakdown,
   formatWorkerTimingSummary,
+  forwardWorkerTimings,
+  isWorkerTimingsMessage,
+  receiveWorkerTimings,
+  recordWorkerTimings,
+  summarizeMeasures,
   workerTimingCounters,
   workerTimingGauges,
+  workerTimingMeasurePrefix,
   workerTimingSpans,
   workerTimings,
+  workerTimingsMessageType,
 } from '#worker-timings.js';
 export type {
+  MeasureBreakdownRow,
+  TimedEntry,
   WorkerTimingCounter,
   WorkerTimingCounterSummary,
+  WorkerTimingListener,
+  WorkerTimingMeasureDetail,
+  WorkerTimingsMessage,
   WorkerTimingGauge,
   WorkerTimingSpan,
   WorkerTimingSpanSummary,

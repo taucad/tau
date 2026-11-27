@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import type { ChildProcess, ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { lstat, readFile, realpath, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path';
@@ -11,6 +11,7 @@ import type { RuntimeLogger } from '@taucad/runtime/kernel';
 
 import {
   acquireNativeSandbox,
+  isWindowsSandboxedChild,
   launchInNativeSandbox,
   releaseNativeSandbox,
   sampleLinuxResident,
@@ -197,6 +198,12 @@ export const processEnvironment = (artifactPath: string): NodeJS.ProcessEnv => {
   environment['TEMP'] = artifactPath;
   environment['TMP'] = artifactPath;
   if (process.platform === 'win32') {
+    // Windows programs find the home and per-user folders through these, not HOME: Python's `Path.home()` reads
+    // USERPROFILE and fails without it (ezdxf resolves its config folder at import). Point them all at the artifact
+    // folder, as HOME is, so a worker never looks for the person's own profile, which its AppContainer cannot read.
+    environment['USERPROFILE'] = artifactPath;
+    environment['APPDATA'] = artifactPath;
+    environment['LOCALAPPDATA'] = artifactPath;
     if (process.env['SystemRoot']) {
       environment['SystemRoot'] = process.env['SystemRoot'];
     }
@@ -212,6 +219,20 @@ export const terminateProcessTree = async (child: ChildProcessWithoutNullStreams
   if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) {
     return;
   }
+  if (process.platform === 'win32' && isWindowsSandboxedChild(child)) {
+    // The sandbox helper ends its job on `terminate` and restores folder permissions before it reports the exit; a
+    // process-tree kill of the helper would leave them for the next start's recovery.
+    await new Promise<void>((resolve) => {
+      child.once('exit', () => {
+        resolve();
+      });
+      child.once('error', () => {
+        resolve();
+      });
+      child.kill();
+    });
+    return;
+  }
   if (process.platform === 'win32') {
     const systemRoot = process.env['SystemRoot'];
     if (!systemRoot) {
@@ -219,18 +240,37 @@ export const terminateProcessTree = async (child: ChildProcessWithoutNullStreams
       return;
     }
     await new Promise<void>((resolve) => {
-      const killer = spawn(
-        resolvePath(systemRoot, 'System32', 'taskkill.exe'),
-        ['/pid', String(child.pid), '/T', '/F'],
-        {
+      const fallback = (): void => {
+        child.kill('SIGKILL');
+        resolve();
+      };
+      let killer: ChildProcess;
+      try {
+        killer = spawn(resolvePath(systemRoot, 'System32', 'taskkill.exe'), ['/pid', String(child.pid), '/T', '/F'], {
           shell: false,
           windowsHide: true,
           stdio: 'ignore',
-        },
-      );
+        });
+      } catch {
+        /* Windows reports some launch failures (a file that is not a Win32 executable: `spawn UNKNOWN`) by throwing
+         * here rather than through `'error'`; the tree must still end. */
+        fallback();
+        return;
+      }
       killer.once('close', resolve);
-      killer.once('error', () => {
-        child.kill('SIGKILL');
+      killer.once('error', fallback);
+    });
+    /* `taskkill` returns once the tree is told to end, not once it has: until the worker is gone it still holds its
+     * working directory, which then cannot be removed. Settle on its exit, within the same bound as the POSIX path. */
+    await new Promise<void>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(resolve, terminationGraceMilliseconds);
+      timer.unref();
+      child.once('exit', () => {
+        clearTimeout(timer);
         resolve();
       });
     });
@@ -437,14 +477,32 @@ const verifyResources = async (launch: NativeWorkerLaunch): Promise<void> => {
   }
 };
 
-/* POSIX process groups of the workers this process started and that have not exited yet. */
+/* Workers this process started that have not exited yet: POSIX process-group leaders, or Windows process-tree roots. */
 const liveProcessGroups = new Set<number>();
 let exitHookInstalled = false;
 
 /* Synchronous, because nothing asynchronous runs in `'exit'`: a session's graceful `cleanup()` cannot finish there, and
- * a worker held inside a long native call would not see its parent watchdog fire until the call returned. */
+ * a worker held inside a long native call would not see its parent watchdog fire until the call returned. Windows has
+ * no process groups and does not end a child with its parent, so each tree is ended with `taskkill /T /F`, synchronously. */
 const killLiveProcessGroups = (): void => {
+  const systemRoot = process.env['SystemRoot'];
   for (const pid of liveProcessGroups) {
+    if (process.platform === 'win32') {
+      if (systemRoot) {
+        spawnSync(resolvePath(systemRoot, 'System32', 'taskkill.exe'), ['/pid', String(pid), '/T', '/F'], {
+          shell: false,
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+      } else {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // The worker exited already.
+        }
+      }
+      continue;
+    }
     try {
       process.kill(-pid, 'SIGKILL');
     } catch {
@@ -456,7 +514,7 @@ const killLiveProcessGroups = (): void => {
 
 const trackProcessGroup = (child: ChildProcessWithoutNullStreams): void => {
   const { pid } = child;
-  if (process.platform === 'win32' || pid === undefined) {
+  if (pid === undefined) {
     return;
   }
   if (!exitHookInstalled) {
@@ -478,6 +536,7 @@ const spawnContained = async (launch: NativeWorkerLaunch): Promise<NativeWorkerP
     writablePath: launch.sandboxRoot ?? launch.artifactPath,
     workingDirectory: launch.workspacePath,
     commandId: launch.commandId,
+    executableSha256: launch.executableSha256,
   });
   const child = spawnInNativeSandbox(vector, {
     cwd: launch.workspacePath,
@@ -499,7 +558,7 @@ const spawnContained = async (launch: NativeWorkerLaunch): Promise<NativeWorkerP
     stderr: child.stderr,
     ended,
     terminate: async () => terminateProcessTree(child),
-    /* Linux only. macOS has no reader until it is verified on a macOS runner; no native runtime starts on Windows. The
+    /* Linux only. macOS has no reader until it is verified on a macOS runner; Windows has none yet. The
      * wrapper leads its own process group (`detached`), so the tree's root and group are both its pid. */
     ...(process.platform === 'linux' && pid !== undefined
       ? {
@@ -646,8 +705,14 @@ export class NativeProcessSession<Issue> {
     if (!isDescendant(this.options.artifactPath, resolved)) {
       throw new Error(`${this.options.sessionName} returned an artifact outside its private directory.`);
     }
-    const [stats, physical] = await Promise.all([lstat(resolved), realpath(resolved)]);
-    if (!stats.isFile() || stats.isSymbolicLink() || !isDescendant(this.options.artifactPath, physical)) {
+    /* The physical path is compared with the physical root: on Windows a temporary root is often spelled with an 8.3
+     * short name (`C:\Users\RUNNER~1\…`) that `realpath` expands, so the spelled root never contains the physical file. */
+    const [stats, physical, physicalRoot] = await Promise.all([
+      lstat(resolved),
+      realpath(resolved),
+      realpath(this.options.artifactPath),
+    ]);
+    if (!stats.isFile() || stats.isSymbolicLink() || !isDescendant(physicalRoot, physical)) {
       throw new Error(`${this.options.sessionName} returned an invalid artifact file.`);
     }
     if (stats.size !== artifact.byteLength || stats.size > this.options.maxArtifactBytes) {

@@ -15,8 +15,14 @@
  * `can_approve_pull_request_reviews = false`); such a token still pushes the branch and opens the issues, and each
  * issue names the branch to open. Running CI on the pull request is another matter: events a `GITHUB_TOKEN` causes start
  * no workflow, or one that waits for approval, so landing it without a person needs a token whose pull requests start
- * CI. Either way the token needs the permissions listed under Env. A later run opens the pull request of any entry
- * branch left without one, unless its proposal has expired.
+ * CI. `flake-ledger.yml` therefore passes a `tau-flake-bot` App token when the main-only `flake-bot` environment holds
+ * the App's secrets, and falls back to the workflow token when it does not. Either way the token needs the
+ * permissions listed under Env. A later run opens the pull request of any entry branch left without one, unless its
+ * proposal has expired.
+ *
+ * Issue-comment markers count only when `FLAKE_BOT_LOGIN` (default `tau-flake-bot[bot]`) or `github-actions[bot]`
+ * wrote them ({@link automationComments}): the records written before the App, and on the fallback path, are the
+ * workflow token's.
  *
  * Writes start only when the checkout is the base branch's current commit: a checkout `main` has moved past, or one
  * of another ref, plans against stale `quarantine.json` files, so that run writes nothing and the next one catches up.
@@ -27,7 +33,7 @@
  * `--dry-run` writes nothing to GitHub; `--out` writes the proposed `quarantine.json` files under a directory.
  * `--offline` (with `--state-file`) reads nothing from GitHub either: no open entry branches, test files from disk.
  * Env: GITHUB_TOKEN (`contents: write`, `issues: write`, `pull-requests: write`; read-only for a dry run),
- * GITHUB_REPOSITORY (default taucad/tau), GITHUB_API_URL.
+ * FLAKE_BOT_LOGIN (default `tau-flake-bot[bot]`), GITHUB_REPOSITORY (default taucad/tau), GITHUB_API_URL.
  * Exit codes: 0 done, or nothing to enter; 1 API failure; 2 usage, or an invalid `flake-ledger.json`.
  */
 import { execFileSync } from 'node:child_process';
@@ -41,7 +47,7 @@ import { parseArgs } from 'node:util';
 
 import { dayNumber, parseQuarantine, quarantineBounds, splitTest, utcDay } from '@taucad/vitest-ci/quarantine';
 
-import { client, GitHubError } from '#ci-github-client.js';
+import { client, GitHubError, isMarkerAuthor, markerAuthors } from '#ci-github-client.js';
 import type { Client } from '#ci-github-client.js';
 import { ledgerProblems } from '#ci-flake-ledger.js';
 import type { Ledger } from '#ci-flake-ledger.js';
@@ -479,16 +485,21 @@ export const readPages = async <T>(github: Client, path: string): Promise<T[]> =
   throw new Error(`${path}: more than ${maximumPages * 100} items; not read in part`);
 };
 
-/** An issue comment; `user` is `null` for a deleted account. */
-type IssueComment = { readonly body?: string; readonly user?: { readonly type?: string } };
+/** An issue comment; `user` is `null` for a deleted account, which `?.` reads as no author. */
+type IssueComment = { readonly body?: string; readonly user?: { readonly login?: string } };
 
 /**
- * The comments of an issue that an app wrote, oldest first: the ledger's markers are read only from them, so a
- * person's comment cannot pose as the automation's record (a GitHub App acts as a `Bot` user).
+ * The comments of an issue that the flake automation wrote, oldest first: the ledger's markers are read only from
+ * them. Only the allowlisted accounts count ({@link markerAuthors}: `tau-flake-bot[bot]` and `github-actions[bot]`),
+ * so neither a person's comment nor another App's can pose as the automation's record.
  */
-export const automationComments = async (github: Client, issue: number): Promise<string[]> => {
+export const automationComments = async (
+  github: Client,
+  issue: number,
+  authors: ReadonlySet<string> = markerAuthors(),
+): Promise<string[]> => {
   const comments = await readPages<IssueComment>(github, `/repos/${github.repository}/issues/${issue}/comments`);
-  return comments.filter((entry) => entry.user?.type === 'Bot').map((entry) => entry.body ?? '');
+  return comments.filter((entry) => isMarkerAuthor(entry.user, authors)).map((entry) => entry.body ?? '');
 };
 
 type ReleasedIssue = {

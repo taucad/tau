@@ -5,7 +5,12 @@
   "projectType": "library",
   "tags": ["scope:api", "type:app-lib", "layer:feature", "api:billing"],
   "targets": {
-    "formal:nightly": {},
+    "formal:nightly": {
+      "options": {
+        "command": "node tools/formal/src/cli.ts nightly --without-check apps/libs/api-billing"
+      }
+    },
+    "formal:nightly:check": {},
     "test:billing-foundation": {
       "executor": "nx:run-commands",
       "cache": false,

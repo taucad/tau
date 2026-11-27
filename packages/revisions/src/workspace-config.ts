@@ -26,7 +26,7 @@ import type { PathClassification, PathPolicy } from '@taucad/filesystem';
  * @public
  */
 export type IgnoreRegistryRow = PathClassification &
-  Readonly<{ prefix: string; anchored: boolean; directory: boolean }>;
+  Readonly<{ prefix: string; anchored: boolean; directory: boolean; selfIgnored?: boolean }>;
 
 /**
  * What a generated ignore block is derived from (PP5): the layout's rows and,
@@ -74,51 +74,76 @@ const rowPattern = (row: IgnoreRegistryRow): string =>
   `${row.prefix}${row.directory && row.class !== 'control-plane' ? '/' : ''}`;
 
 /**
- * Paths never carried by a revision, as ignore patterns. The `.tau` families and
- * `exports` are anchored to the project root because that is the only place they
- * are Tau's; `node_modules` and the control plane are not, because a nested one
- * is derived or private too.
+ * How one row's pattern starts: `/` at the root, nothing where a bare name
+ * already matches at any depth, and `**\/` where an inner `/` would anchor it.
  *
- * An unanchored row is spelled `**\/` rather than bare: git anchors any pattern
- * that holds a slash to the directory of the ignore file, so a bare
- * `.tau/binding.json` would leave a nested one versioned and disagree with
- * `classify` (PP5).
+ * @param row - The registry row.
+ * @returns The pattern's leading anchor.
+ */
+const rowAnchor = (row: IgnoreRegistryRow): string => {
+  if (row.anchored) {
+    return '/';
+  }
+  return row.prefix.includes('/') ? '**/' : '';
+};
+
+/**
+ * Paths never carried by a revision, as the fewest ignore patterns stock Git
+ * needs to agree with `classify` (PP5; project Git policy).
  *
- * A control-plane directory row is spelled without the trailing `/` that every
- * other directory row carries. A trailing slash restricts the pattern to
- * directories, and the row also covers the one-line `.git` a worktree or
- * submodule leaves behind — unversioned by `classify`, so a directory-only
- * pattern breaks PP5 for exactly the shape the row exists to catch. The cache
- * keeps its slash: a file named `node_modules` is not the cache.
+ * A line exists only where Git would otherwise track an unversioned path:
  *
- * A reserved directory leads the block: `/<dir>/*` excludes its members rather
- * than the directory, so the `!` line after it can re-include each versioned
- * row inside it — which `/<dir>/` would make impossible. The rows it already
- * covers keep their own lines so the block still names each family.
+ * - The reserved directory leads: `/<dir>/*` excludes its members rather than
+ *   the directory, so the `!` line after it can re-include each versioned row
+ *   inside it — which `/<dir>/` would make impossible.
+ * - An unversioned row the head already covers (anchored, inside the reserved
+ *   directory, under no versioned row a `!` line re-includes) gets no line of
+ *   its own: `/.tau/*` excludes `.tau/chats` as surely as `/.tau/chats/` would.
+ * - A {@link IgnoreRegistryRow.selfIgnored} row gets no line: Git never walks
+ *   into `.git`.
+ * - Every other unversioned row is one line, anchored with a leading `/` when it
+ *   is Tau's only at the root. An unanchored prefix with no inner `/` already
+ *   matches at any depth; one with an inner `/` is spelled `**\/`, because git
+ *   anchors any pattern holding a slash to the ignore file's directory.
+ *
+ * A directory row takes the trailing `/` (a file named `node_modules` is not
+ * the cache); a control-plane row never does, since it also covers the pointer
+ * file a worktree or submodule leaves behind.
  *
  * @param layout - The layout's rows and reserved directory; every unversioned
  *   path is excluded (PP5), so this must be the layout of the policy this
  *   project classifies with.
- * @returns The reserved directory's head, then one ignore pattern per
- *   unversioned row, in registry order.
+ * @returns The reserved directory's head and re-includes, then one pattern per
+ *   unversioned row nothing else covers, in registry order.
  * @public
  */
-export const generatedIgnoreEntries = ({ rows, reservedDirectory }: IgnoreLayout): readonly string[] => [
-  /* ponytail: one negation re-includes a direct member only; a versioned row
-   * nested deeper (`.tau/a/b`) needs a `!/.tau/a/` + `/.tau/a/*` chain. The
-   * unit test pins that Tau's layout has none. */
-  ...(reservedDirectory === undefined
-    ? []
-    : [
-        `/${reservedDirectory}/*`,
-        ...rows
-          .filter((row) => row.versioned && row.prefix.startsWith(`${reservedDirectory}/`))
-          /* No trailing `/`: a directory row classifies its bare path too, so a
-           * file named `.tau/skills` is versioned and must be re-included. */
-          .map((row) => `!/${row.prefix}`),
-      ]),
-  ...rows.filter((row) => !row.versioned).map((row) => `${row.anchored ? '/' : '**/'}${rowPattern(row)}`),
-];
+export const generatedIgnoreEntries = ({ rows, reservedDirectory }: IgnoreLayout): readonly string[] => {
+  const inReserved = (row: IgnoreRegistryRow): boolean =>
+    reservedDirectory !== undefined && row.prefix.startsWith(`${reservedDirectory}/`);
+  /* A `!` line re-includes its row's whole subtree, so a row beneath one is no longer under the head. */
+  const coveredByHead = (row: IgnoreRegistryRow): boolean =>
+    row.anchored &&
+    inReserved(row) &&
+    !rows.some((other) => other.versioned && inReserved(other) && row.prefix.startsWith(`${other.prefix}/`));
+  return [
+    /* ponytail: one negation re-includes a direct member only; a versioned row
+     * nested deeper (`.tau/a/b`) needs a `!/.tau/a/` + `/.tau/a/*` chain. The
+     * unit test pins that Tau's layout has none. */
+    ...(reservedDirectory === undefined
+      ? []
+      : [
+          `/${reservedDirectory}/*`,
+          ...rows
+            .filter((row) => row.versioned && inReserved(row))
+            /* No trailing `/`: a directory row classifies its bare path too, so a
+             * file named `.tau/parameters` is versioned and must be re-included. */
+            .map((row) => `!/${row.prefix}`),
+        ]),
+    ...rows
+      .filter((row) => !row.versioned && row.selfIgnored !== true && !coveredByHead(row))
+      .map((row) => `${rowAnchor(row)}${rowPattern(row)}`),
+  ];
+};
 
 /** Project-relative path of the generated ignore file. @public */
 export const generatedIgnorePath = '.gitignore';

@@ -34,7 +34,7 @@ import {
   projectLocationFullLabel,
 } from '@taucad/files-ui/utils/project-creation-location.utils';
 import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
-import { defaultWideFrameHint, frameHintKey, writeWideFrameHint } from '#lib/frame-hint.js';
+import { defaultWideFrameHint, frameHintKey, writePhoneFrameHint, writeWideFrameHint } from '#lib/frame-hint.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { focusProjectNameScript } from '#routes/projects_.new/focus-project-name-script.js';
 import { reportProjectCreationFailure } from '#lib/project-creation-failure-reporting.js';
@@ -99,6 +99,7 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
  * the new project paints the phone layout without it (D13, T8).
  */
 const newProjectDesktopLayout = { workbenchOpen: true, compactAuxiliary: 'workbench' } as const;
+const newProjectPhoneTab = 'chat';
 
 function useProjectCreation() {
   const navigate = useNavigate();
@@ -137,7 +138,7 @@ function useProjectCreation() {
           editorState: {
             panelState: {
               desktopLayout: newProjectDesktopLayout,
-              mobileActiveTab: 'chat',
+              mobileActiveTab: newProjectPhoneTab,
             },
           },
         });
@@ -146,10 +147,12 @@ function useProjectCreation() {
         /* The workspace frame draws a project's lanes from its hint until the live layout takes over (A15b). A new
          * project has none, so the frame would draw the default lanes: at a compact width the chat lane and its
          * composer box, which the live layout then replaces with the Workbench, taking a draft typed there out of
-         * sight. The frame draws the lanes the project opens with instead. */
+         * sight. The frame draws the lanes the project opens with instead. On a phone it draws the sheet the project
+         * opens on (Chat, with the composer box), not the default's closed sheet. */
         const hintKey = frameHintKey(url);
         if (hintKey !== undefined) {
           writeWideFrameHint(hintKey, { ...defaultWideFrameHint, ...newProjectDesktopLayout });
+          writePhoneFrameHint(hintKey, newProjectPhoneTab);
         }
         await navigate(url);
       } catch (error) {

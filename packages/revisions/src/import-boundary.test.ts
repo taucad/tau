@@ -13,10 +13,12 @@
  * import; a stale allow-list entry fails as loudly as an unlisted violation.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const sourceDirectory = new URL('.', import.meta.url).pathname;
+/* A path, not a URL's pathname: on Windows that is `/D:/…`, which `join` makes `D:\D:\…`. */
+const sourceDirectory = fileURLToPath(new URL('.', import.meta.url));
 
 const sourceFiles = (directory: string): string[] =>
   readdirSync(directory).flatMap((entry) => {
@@ -40,7 +42,10 @@ const registryOwner = 'workspace-config.ts';
 
 describe('@taucad/revisions path policy boundary', () => {
   const violations = sourceFiles(sourceDirectory)
-    .map((file) => ({ file: file.slice(sourceDirectory.length), code: withoutComments(readFileSync(file, 'utf8')) }))
+    .map((file) => ({
+      file: file.slice(sourceDirectory.length).replaceAll(sep, '/'),
+      code: withoutComments(readFileSync(file, 'utf8')),
+    }))
     .filter(({ file }) => !file.endsWith('.test.ts') && !file.endsWith('.test-d.ts') && !file.startsWith('test/'))
     .filter(({ file }) => file !== registryOwner)
     .filter(({ code }) => /['"][^'"]*path-registry[^'"]*['"]/u.test(code))

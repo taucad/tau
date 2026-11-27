@@ -19,7 +19,12 @@ import {
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { chatComposerSubmitContext } from '#hooks/chat-composer-submit.js';
+import { ChatCreditsNotice } from '#components/chat/chat-credits-notice.js';
+import { selectVisibleChatErrorEntry } from '#utils/run-auto-resume-plan.js';
 import { useProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
+import { DepartingFirstMessage } from '#components/chat/departing-first-message.js';
+import { arriveFirstMessage, useDepartingFirstMessage } from '#lib/departing-first-message.js';
 import { useTourAnchors } from '#components/tour/tour-anchors.js';
 import { ChatTodoList } from '#components/chat/chat-todo-list.js';
 import type { ChatTranscriptState } from '#services/chat-session-store.js';
@@ -336,6 +341,9 @@ const ExpandedChatHistory = memo(function ({
   const focusComposer = useCallback(() => {
     chatTextareaRef.current?.focus();
   }, []);
+  const submitComposer = useCallback(async () => {
+    await chatTextareaRef.current?.submit();
+  }, []);
   const location = useLocation();
   /* A same-project switch keeps the previous chat on screen, inert, until the new chat is prepared, so a focus given
    * when the navigation commits lands on an inert composer and is dropped. It is given once per navigation, once the
@@ -393,6 +401,13 @@ const ExpandedChatHistory = memo(function ({
 
   const groups = useChatSelector((state) => state.turnGroups);
   const transcript = useChatSelector((state) => state.transcript);
+  /* A new project's first message on its way from Home (WP-12 with WP-07 step 5) holds the first row's place until
+   * the transcript draws a measured row: through the load, an empty answer before the seed, and Virtuoso's probe. */
+  const departingScope = composerHandOff.scope;
+  const departing = useDepartingFirstMessage(departingScope);
+  const isDepartingShown = departing !== undefined;
+  // A visible card (a refused send's credits card among them) already speaks for the chat; the credits note waits.
+  const hasVisibleError = useChatSelector((state) => selectVisibleChatErrorEntry(state) !== undefined);
   const transcriptWait = useTranscriptWaitStart(transcript === 'loading');
   const reservesTaskList = useChatSelector((state) => state.rememberedComposerTrays.includes('todo'));
 
@@ -415,6 +430,34 @@ const ExpandedChatHistory = memo(function ({
   // otherwise leave the scroll position alone so they can read earlier messages.
   const followLatestOutput = useFollowLatestOutput(virtuosoRef);
 
+  /* The first measured rows draw the message: the stand-in leaves in the same commit. */
+  const { totalListHeightChanged: followTotalListHeight } = followLatestOutput;
+  /* The pending arrival's frame, cancelled on unmount: a lane that left must not clear the next lane's stand-in. */
+  const arrivalFrame = useRef<number | undefined>(undefined);
+  useEffect(
+    () => () => {
+      if (arrivalFrame.current !== undefined) {
+        cancelAnimationFrame(arrivalFrame.current);
+      }
+    },
+    [],
+  );
+  const handleTotalListHeightChanged = useCallback(
+    (height: number) => {
+      followTotalListHeight();
+      if (height > 0 && arrivalFrame.current === undefined) {
+        /* Virtuoso shows a measured row a frame after it reports the height. */
+        arrivalFrame.current = requestAnimationFrame(() => {
+          arrivalFrame.current = requestAnimationFrame(() => {
+            arrivalFrame.current = undefined;
+            arriveFirstMessage(departingScope);
+          });
+        });
+      }
+    },
+    [departingScope, followTotalListHeight],
+  );
+
   // Handler to scroll to the bottom of the chat
   const scrollToBottom = useCallback(() => {
     if (virtuosoRef.current) {
@@ -428,76 +471,82 @@ const ExpandedChatHistory = memo(function ({
 
   return (
     <ChatAttachmentDirectoriesContext.Provider value={attachmentDirectories}>
-      <ChatQuestionsProvider>
-        <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
-          <FloatingPanelContent
-            className={cn('min-h-0 overflow-hidden [container-type:size]', !isExpanded && 'hidden')}
-            errorFallback={(errorProps) => (
-              <FloatingPanelErrorContent
-                {...errorProps}
-                title='Chat Unavailable'
-                description='Something went wrong while loading the chat.'
-              />
-            )}
-          >
-            {/* The whole pane takes files and Tau drags for its composer (`useChatDropZone`): dropping on the
-                transcript attaches exactly what dropping on the composer does. */}
-            <div data-chat-drop-zone='' className='relative flex min-h-0 flex-1 flex-col'>
-              {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
-              {/* The one header row: name, rename in place, chat menu, close. */}
-              <FloatingPanelContentHeader className={cn('gap-1', headerClassName)}>
-                <ChatTitleBar
-                  closeButton={
-                    <FloatingPanelClose
-                      label='Close Chat'
-                      icon={XIcon}
-                      tooltipContent={(isOpen) => (
-                        <div className='flex items-center gap-2'>
-                          {isOpen ? 'Close' : 'Open'} Chat
-                          <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
-                        </div>
-                      )}
-                    />
-                  }
+      <chatComposerSubmitContext.Provider value={submitComposer}>
+        <ChatQuestionsProvider>
+          <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
+            <FloatingPanelContent
+              className={cn('min-h-0 overflow-hidden [container-type:size]', !isExpanded && 'hidden')}
+              errorFallback={(errorProps) => (
+                <FloatingPanelErrorContent
+                  {...errorProps}
+                  title='Chat Unavailable'
+                  description='Something went wrong while loading the chat.'
                 />
-              </FloatingPanelContentHeader>
-
-              {/* Main chat content area */}
-              <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
-                {/* The feed's own box, between the header and the composer region. */}
-                <div className='relative mt-1 flex min-h-0 min-w-0 flex-1 flex-col'>
-                  {/* While the transcript loads the feed draws its shape (Progressive Loading Policy rules 15 and 17):
-                   * the bars lie over the empty feed, take no layout, end where the feed does (never behind the
-                   * composer, as a short phone sheet showed), and appear from 300 ms into the wait on its own clock,
-                   * which a lane mounted during the open shares with the open. No words: the viewer is the open's one
-                   * status, and the feed carries `aria-busy`. */}
-                  {transcript === 'loading' ? (
-                    <div className='pointer-events-none absolute inset-0 z-10'>
-                      <WaitSkeleton isActive startedAt={transcriptWait.startedAt} shape='transcript' label='Chat' />
-                    </div>
-                  ) : null}
-                  <Virtuoso
-                    ref={virtuosoRef}
-                    data={groups}
-                    context={transcript}
-                    initialTopMostItemIndex={initialChatTurn}
-                    itemContent={renderItem}
-                    computeItemKey={computeItemKey}
-                    scrollerRef={followLatestOutput.scrollerRef}
-                    followOutput={followLatestOutput.followOutput}
-                    /* A turn appended at the end starts at the viewport's foot, outside the rendered range: Virtuoso
-                     * follows it only once it is measured, so render a little past the foot. Without this a turn sent
-                     * from a short viewport (the phone sheet at half) is never followed, and its reply or failure stays
-                     * folded away below (I5). */
-                    increaseViewportBy={appendedTurnOverscan}
-                    totalListHeightChanged={followLatestOutput.totalListHeightChanged}
-                    className='min-h-0 min-w-0 flex-1'
-                    atBottomStateChange={handleAtBottomStateChange}
-                    components={virtuosoComponents}
+              )}
+            >
+              {/* The whole pane takes files and Tau drags for its composer (`useChatDropZone`): dropping on the
+                transcript attaches exactly what dropping on the composer does. */}
+              <div data-chat-drop-zone='' className='relative flex min-h-0 flex-1 flex-col'>
+                {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
+                {/* The one header row: name, rename in place, chat menu, close. */}
+                <FloatingPanelContentHeader className={cn('gap-1', headerClassName)}>
+                  <ChatTitleBar
+                    closeButton={
+                      <FloatingPanelClose
+                        label='Close Chat'
+                        icon={XIcon}
+                        tooltipContent={(isOpen) => (
+                          <div className='flex items-center gap-2'>
+                            {isOpen ? 'Close' : 'Open'} Chat
+                            <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
+                          </div>
+                        )}
+                      />
+                    }
                   />
-                </div>
-              </AtReferenceProvider>
-              {/*
+                </FloatingPanelContentHeader>
+
+                {/* Main chat content area */}
+                <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
+                  {/* The feed's own box, between the header and the composer region. */}
+                  <div className='relative mt-1 flex min-h-0 min-w-0 flex-1 flex-col'>
+                    {/* While the transcript loads the feed draws its shape (Progressive Loading Policy rules 15 and 17):
+                     * the bars lie over the empty feed, take no layout, end where the feed does (never behind the
+                     * composer, as a short phone sheet showed), and appear from 300 ms into the wait on its own clock,
+                     * which a lane mounted during the open shares with the open. No words: the viewer is the open's one
+                     * status, and the feed carries `aria-busy`. */}
+                    {isDepartingShown ? (
+                      <div className='pointer-events-none absolute inset-0 z-10'>
+                        <DepartingFirstMessage text={departing} />
+                      </div>
+                    ) : transcript === 'loading' ? (
+                      <div className='pointer-events-none absolute inset-0 z-10'>
+                        <WaitSkeleton isActive startedAt={transcriptWait.startedAt} shape='transcript' label='Chat' />
+                      </div>
+                    ) : null}
+                    <Virtuoso
+                      ref={virtuosoRef}
+                      data={groups}
+                      /* While the first message is on its way, the feed is still waiting for it: busy, no empty state. */
+                      context={isDepartingShown && groups.length === 0 ? 'loading' : transcript}
+                      initialTopMostItemIndex={initialChatTurn}
+                      itemContent={renderItem}
+                      computeItemKey={computeItemKey}
+                      scrollerRef={followLatestOutput.scrollerRef}
+                      followOutput={followLatestOutput.followOutput}
+                      /* A turn appended at the end starts at the viewport's foot, outside the rendered range: Virtuoso
+                       * follows it only once it is measured, so render a little past the foot. Without this a turn sent
+                       * from a short viewport (the phone sheet at half) is never followed, and its reply or failure stays
+                       * folded away below (I5). */
+                      increaseViewportBy={appendedTurnOverscan}
+                      totalListHeightChanged={handleTotalListHeightChanged}
+                      className='min-h-0 min-w-0 flex-1'
+                      atBottomStateChange={handleAtBottomStateChange}
+                      components={virtuosoComponents}
+                    />
+                  </div>
+                </AtReferenceProvider>
+                {/*
             A refusal on an empty chat has to land somewhere (I12, W19-b).
 
             `ChatError` rides the last `TurnGroup`, and a submit that fails before
@@ -506,45 +555,47 @@ const ExpandedChatHistory = memo(function ({
             all: their text still in the composer, no row, no banner. One banner
             at a time: while there are turns, the group above owns it.
           */}
-              {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
-              {/* Chat input area. The agent's task list and its questions share one
+                {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
+                {/* Chat input area. The agent's task list and its questions share one
                 tray directly above the composer; the task list is keyed by chat so
                 its fold never carries across chats (D8, agent questions D8). */}
-              <div
-                ref={composerAnchor}
-                role='region'
-                aria-label='Chat composer'
-                className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'
-              >
-                <ScrollDownButton
-                  hasContent={messageIds.length > 0}
-                  isVisible={!atBottom}
-                  onScrollToBottom={scrollToBottom}
-                />
-                <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
-                <div className={cn(chatComposerTrayClassName, reservedTrayClassName)}>
-                  <ChatTodoList
-                    key={activeChatId}
-                    reserveHeight={reservesTaskList}
-                    isTranscriptLoading={transcript === 'loading'}
+                <div
+                  ref={composerAnchor}
+                  role='region'
+                  aria-label='Chat composer'
+                  className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'
+                >
+                  <ScrollDownButton
+                    hasContent={messageIds.length > 0}
+                    isVisible={!atBottom}
+                    onScrollToBottom={scrollToBottom}
                   />
-                  <ChatMessageQueue key={`${activeChatId}:messages`} />
-                  <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
+                  <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
+                  <div className={cn(chatComposerTrayClassName, reservedTrayClassName)}>
+                    <ChatTodoList
+                      key={activeChatId}
+                      reserveHeight={reservesTaskList}
+                      isTranscriptLoading={transcript === 'loading'}
+                    />
+                    <ChatMessageQueue key={`${activeChatId}:messages`} />
+                    <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
+                  </div>
+                  <ChatCreditsNotice className='mb-1.5' isCovered={hasVisibleError} />
+                  <ChatTextarea
+                    ref={chatTextareaRef}
+                    enableMobileCollapse={isMobile}
+                    mode='main'
+                    enableAutoFocus={false}
+                    /* The workspace frame served this composer's native input; adopt it at the reveal (PL6). */
+                    handOff={composerHandOff}
+                    onSubmit={onSubmit}
+                  />
                 </div>
-                <ChatTextarea
-                  ref={chatTextareaRef}
-                  enableMobileCollapse={isMobile}
-                  mode='main'
-                  enableAutoFocus={false}
-                  /* The workspace frame served this composer's native input; adopt it at the reveal (PL6). */
-                  handOff={composerHandOff}
-                  onSubmit={onSubmit}
-                />
               </div>
-            </div>
-          </FloatingPanelContent>
-        </FloatingPanel>
-      </ChatQuestionsProvider>
+            </FloatingPanelContent>
+          </FloatingPanel>
+        </ChatQuestionsProvider>
+      </chatComposerSubmitContext.Provider>
     </ChatAttachmentDirectoriesContext.Provider>
   );
 });

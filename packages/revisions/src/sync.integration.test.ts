@@ -1806,9 +1806,10 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       await vi.waitFor(() => {
         expect(stream).toBeDefined();
       });
-      /* The gap: B's open has begun and the stream has not read its tail yet. */
-      await new Promise((resolve) => {
-        setTimeout(resolve, 300);
+      /* The gap: B's open pull has begun and the stream has not read its tail yet. However long A's push takes
+       * (seconds on a loaded Windows runner, past the pull's wait for the tail), B ends on it. */
+      await vi.waitFor(() => {
+        expect(scheduler.getSnapshot().matches({ opening: 'fetching' })).toBe(true);
       });
       const pushed = await record({
         device: one,
@@ -1818,6 +1819,57 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       });
       await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }] });
       /* The tail now includes the push, so the stream will never announce it. */
+      stream?.watching?.();
+
+      await vi.waitFor(
+        async () => {
+          expect(await two.port.readRef(mainRef)).toBe(pushed);
+          expect(scheduler.getSnapshot().matches('backedUp')).toBe(true);
+        },
+        { timeout: 30_000 },
+      );
+      scheduler.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  it('row 17 (D13): a tail read after the open pull stopped waiting for it pulls again, so the push between is not missed', async () => {
+    const remoteRoot = await temporaryRoot('remote-late-tail');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({ leg, label: 'a-late-tail', remoteUrl: remote.url, files: { 'a.scad': 'cube(1);\n' } });
+      const base = await record({ device: one, files: { 'a.scad': 'cube(1);\n' }, summary: 'Base' });
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }] });
+
+      let stream: RevisionStreamHandlers | undefined;
+      const two = await device({
+        leg,
+        label: 'b-late-tail',
+        remoteUrl: remote.url,
+        remoteMoves: (_input, handlers) => {
+          stream = handlers;
+          return () => undefined;
+        },
+      });
+      const scheduler = two.scheduler();
+      scheduler.start();
+      /* The ordering a slow host or stream gives: the open pull stops waiting for the tail at its bound, reads the
+       * remote and settles, and only then does A push and the stream's tail read, which includes the push, settle. */
+      await vi.waitFor(
+        async () => {
+          expect(scheduler.getSnapshot().matches('backedUp')).toBe(true);
+          expect(await two.port.readRef(mainRef)).toBe(base);
+        },
+        { timeout: 30_000 },
+      );
+      const pushed = await record({
+        device: one,
+        files: { 'a.scad': 'cube(2);\n' },
+        summary: 'A pushes before the tail is read',
+        parent: base,
+      });
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }] });
       stream?.watching?.();
 
       await vi.waitFor(

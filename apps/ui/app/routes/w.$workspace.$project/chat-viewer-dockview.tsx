@@ -46,6 +46,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { chooseProjection } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { Dockview } from '#components/panes/dockview.js';
+import { changeQuietly } from '#components/panes/dockview-announcements.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
 import { getViewerTabIcon, ViewerDockviewTab } from '#components/panes/viewer-tab-context-menu.js';
@@ -1015,11 +1016,14 @@ export const ViewerDockview = memo(function ({
       setApi(dockApi);
       if (profile === 'shared') {
         const viewId = mintViewRecordId();
-        dockApi.addPanel({
-          id: viewId,
-          component: 'viewer',
-          title: mainEntryPath || 'Viewer',
-          params: { viewId, entryPath: mainEntryPath || undefined },
+        // The shared page's seed is the app's, not the person's: Dockview does not announce it.
+        changeQuietly(dockApi, () => {
+          dockApi.addPanel({
+            id: viewId,
+            component: 'viewer',
+            title: mainEntryPath || 'Viewer',
+            params: { viewId, entryPath: mainEntryPath || undefined },
+          });
         });
       }
       ensureViewerGroup(dockApi);

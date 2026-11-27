@@ -10,6 +10,10 @@
 \* dropping outside the queue and unsaved inline edits further restrict Reorder.
 \* Failed steering retains its durable cancel identity; a removed item's view-only
 \* action error cannot offer a retry. Admission bridge hashing fences Prepare inputs.
+\* Letting a new project's first cloud backup go on its first live frame (WP-12
+\* step 5) reads the frame only; delivery, admission and persistence are unchanged.
+\* A command that borrows the chat's attached client goes through the same answer
+\* wrapper as a dialled one, so a cursor wake is the only effect; delivery is unchanged.
 \* The executable queue event alphabet comes from its schemas; removing an unused
 \* duplicate TypeScript event union does not change these transitions or guards.
 \* Grok config discovery and host-owned session selection affect composer controls;
@@ -269,6 +273,9 @@
 \* re-retained with its parts and the draft bytes reader falls back to the chat's directory (`chat-session-store.ts`);
 \* the edit composer shows its comment list (`chat-textarea.tsx`). A send without annotations still takes no tick
 \* before it is sent. No action or verdict changes.
+\* Chat performance WP-04 review (2026-11-26): the composer's draft hint is held and written when the page hides instead of
+\* written per keystroke (`chat-textarea.tsx`), and `useDraftSelector` selects inside the draft actor's subscription
+\* (`use-chat.tsx`, beside WP-06's live view). Neither touches the outbox, a send or a turn request. No action or verdict changes.
 \* Chat performance WP-06a (2026-11-26): `useChatSelector` (`use-chat.tsx`) reads each field on demand and wakes a
 \* selector only for the sources its last evaluation read; it sends nothing to the queue. No action or verdict changes.
 \* Its per-evaluation view is a class instance (`ChatStateView`), not an object literal of accessors. No action or verdict
@@ -286,10 +293,39 @@
 \* (`s.observed # s.selected`); before, it restarted a reader already on the selected host and dropped the live text
 \* of the run under way. The grant, the prepared-command marking and delivery are unchanged. No action or verdict
 \* changes.
+\* H-1 (2026-11-27): a prepared send its host refused on the only try of a fresh command, with a code that never clears
+\* by itself, was pinned to that command for good: Delete, Edit and reorder stayed locked and every later send queued
+\* behind it. `chat-session-store.ts` now drops that command (`Refuse`): a lone send returns to the composer, and one
+\* with others behind it keeps its place for a new command. A `wait` refusal still yields, and a replay still keeps
+\* its pin.
+\* A-1 (2026-11-27): `chat-session-store.ts` shows the end of the log's current run to a chat machine that holds no
+\* turn and is not admitting its own gesture, whatever run it presents, so a read that folds a run's `running` with
+\* its end, or ends a later run too, no longer leaves the machine live and the queue waiting for good. This is the
+\* model's `Observe` of a terminal phase; no action or verdict changes.
+\* H-1 review (2026-11-27): `Deliver` may now be refused on any try, including a fresh key on an idle host, so `Refuse`
+\* is reached from the state the runtime meets. `RefuseOnlyUnapplied` gates `Refuse`'s `m \notin Accepted`; the
+\* `refuse-accepted` witness (pinned with the other tables) drops it and must violate `ComposerExclusive`.
+\* One voice during an open (2026-11-27): `chat-message-queue-view.tsx` makes a queued row's busy label a live region
+\* only for the person's own Send now or a failed send; an automatic send shows the same words without speaking.
+\* Presentation only. No action or verdict changes.
+\* Host attachment HA1 (2026-11-27): a composer pick made while the chat's own run is unsettled waits, whole, for
+\* the run to settle (HA-I7); the outbox holds its head with a `pick-deferred` reason meanwhile, and the queue wakes
+\* only after the pick's writes and route restart. A chat this device holds reads its own segment from the file, and
+\* `attach` and the in-page route are new host commands. Dispatch, acknowledgement and the gate are untouched; the
+\* new hold refines `Ready`, as the gate's other holds do. No action or verdict changes.
+\* HA1 review (2026-11-27): the hold is lifted only by the pick that set it, so a newer pick that supersedes a deferred
+\* one keeps the queue held until its own writes are done. Only a chat whose own run the file shows defers a pick.
+\* The pick's mark is a symbol of its own. No action or verdict changes.
+\* HA1 review round 3 (2026-11-27): an applied pick decides again whether the chat is read from the file before its
+\* observer restarts, so a chat moved to a paired computer reads that host, and the own watch follows new
+\* dependencies. No action or verdict changes.
+\* HA1 review round 4 (2026-11-27): overlapping picks start one own source, the newest; while it decides, a chat whose
+\* own run was unsettled keeps deferring picks; an older start stands down. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,
-          RequireTerminalIntent, CaptureTerminalAtSubmit, HoldBehindWithdraw
+          RequireTerminalIntent, CaptureTerminalAtSubmit, HoldBehindWithdraw,
+          RefuseOnlyUnapplied
 VARIABLE s
 vars == <<s>>
 None == "none"
@@ -383,10 +419,12 @@ Prepare(t) == /\ t \in s.alive /\ s.owner = None /\ Len(s.queue) > 0
               /\ s' = [s EXCEPT !.owner = t, !.prepared = Chosen]
 Recover(t) == /\ t \in s.alive /\ s.owner = None /\ s.prepared # None
               /\ s' = [s EXCEPT !.owner = t]
-Deliver(t) == LET m == s.prepared
+\* The host may refuse any delivery (`refused`, effect `not-applied`): it is counted and accepts nothing.
+Deliver(t) == \E refused \in BOOLEAN :
+              LET m == s.prepared
                   key == <<m, IF StableIdentity THEN 1 ELSE s.counts[m] + 1>>
                   fresh == key \notin s.accepted
-                  accept == fresh /\ Terminal(s.phase[s.active])
+                  accept == ~refused /\ fresh /\ Terminal(s.phase[s.active])
               IN /\ t = s.owner /\ m # None /\ s.counts[m] < 2
                  /\ s' = [s EXCEPT
                     !.counts[m] = @ + 1,
@@ -403,7 +441,7 @@ Deliver(t) == LET m == s.prepared
                     !.phase[m] = IF accept THEN "running" ELSE @,
                     !.known = IF accept THEN @ \cup {m} ELSE @]
 \* Accepted means durable host acceptance, not merely an applied response.
-\* A refused/not-applied response leaves the prepared item intact (stuttering).
+\* A refused/not-applied response leaves the prepared item intact (stuttering), except `Refuse` below (H-1).
 \* Local actor-live, abort and in-lock session guards further restrict runtime
 \* sends; deletion and optional filesystem watch availability are outside this
 \* retained-session safety model. See README for the runtime conformance slice.
@@ -451,6 +489,23 @@ LoseAck(t) == /\ t = s.owner /\ s.prepared \in Accepted
 \* Recover sends it again by the same key after the backoff.
 Yield(t) == /\ t = s.owner /\ s.prepared # None /\ s.prepared \notin Accepted /\ s.counts[s.prepared] > 0
             /\ s' = [s EXCEPT !.owner = None]
+\* H-1 (2026-11-27): a fresh command its host refused on its only try, with a code that never clears by itself
+\* (`not-applied`, retry class not `wait`), wrote nothing. The send is no longer pinned to that command: the delivery
+\* lets go of the lock and drops it. A lone send goes back to the composer, as an admission refusal's does; otherwise
+\* it keeps its place, unprepared, and a later preparation mints a new command for it.
+Refuse(t) == LET m == s.prepared
+             IN /\ t = s.owner /\ m # None /\ (~RefuseOnlyUnapplied \/ m \notin Accepted) /\ s.counts[m] = 1
+                /\ \/ /\ Len(s.queue) = 1
+                      /\ s' = [s EXCEPT !.queue = Remove(@, m), !.prepared = None, !.owner = None,
+                           !.steerItem = IF @ = m THEN None ELSE @,
+                           !.target = IF s.steerItem = m THEN None ELSE @,
+                           !.saved = IF Durable THEN Remove(@, m) ELSE @,
+                           !.submitted = @ \ {m}, !.counts[m] = 0,
+                           !.capturedTerminal[m] = None, !.afterTerminal[m] = None,
+                           !.composer = @ \cup {m}, !.held = @ \ {m}]
+                   \/ s' = [s EXCEPT !.prepared = None, !.owner = None, !.counts[m] = 0,
+                        !.steerItem = IF @ = m THEN None ELSE @,
+                        !.target = IF s.steerItem = m THEN None ELSE @]
 \* The finite crash scenario begins only after a queue save has answered.
 Crash(t) == /\ t \in s.alive /\ s.pending = None
             /\ s' = [s EXCEPT !.alive = @ \ {t},
@@ -460,7 +515,7 @@ Crash(t) == /\ t \in s.alive /\ s.pending = None
 Reopen(t) == /\ t \notin s.alive /\ s' = [s EXCEPT !.alive = @ \cup {t}]
 Next == Persist \/ Complete \/ Pause \/ Resume \/ Stop \/ Fail
         \/ (\E t \in Tabs : Observe(t) \/ Prepare(t) \/ Recover(t) \/ Deliver(t)
-             \/ Acknowledge(t) \/ LoseAck(t) \/ Yield(t) \/ Crash(t) \/ Reopen(t) \/ Cancel(t)
+             \/ Acknowledge(t) \/ LoseAck(t) \/ Yield(t) \/ Refuse(t) \/ Crash(t) \/ Reopen(t) \/ Cancel(t)
              \/ (\E m \in Messages : Submit(t, m) \/ Steer(t, m) \/ Withdraw(t, m)
                  \/ (\E n \in Messages \cup {None} : Reorder(t, m, n))))
         \/ (\E r \in Runs : FinishCancel(r))

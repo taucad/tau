@@ -4,6 +4,7 @@ import { isAbandonedTurn } from '#log/event-types.js';
 import type { AgentLogEvent, RowKey, RunLifecycleState, UserProviderMessage } from '#log/event-types.js';
 import { parseLogSegments } from '#log/segments.js';
 import { parseEventLogBytes } from '#log/serialization.js';
+import type { LogFileDictionary } from '#log/compact-rows.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
 
 /**
@@ -282,6 +283,8 @@ export type SegmentParse = Readonly<{
   bytes: Uint8Array<ArrayBuffer>;
   events: readonly AgentLogEvent[];
   validByteLength: number;
+  /** What the parsed lines wrote that a later line may name (WP-17); absent on a parse made before it existed. */
+  dictionary?: LogFileDictionary;
 }>;
 
 /** Whether `next` is `prior`'s parsed bytes with more appended after them. */
@@ -312,16 +315,21 @@ export const parseSegmentFrom = (prior: SegmentParse | undefined, bytes: Uint8Ar
   if (prior?.bytes === bytes) {
     return prior;
   }
-  if (prior !== undefined && grewFrom(prior.bytes, prior.validByteLength, bytes)) {
-    const tail = parseEventLogBytes(bytes.slice(prior.validByteLength));
+  if (prior?.dictionary !== undefined && grewFrom(prior.bytes, prior.validByteLength, bytes)) {
+    const tail = parseEventLogBytes(bytes.slice(prior.validByteLength), prior.dictionary);
     const events = tail.events.length === 0 ? prior.events : [...prior.events, ...tail.events];
     if (events !== prior.events) {
       noteGrownRows(events, prior.events);
     }
-    return { bytes, events, validByteLength: prior.validByteLength + tail.validByteLength };
+    return {
+      bytes,
+      events,
+      validByteLength: prior.validByteLength + tail.validByteLength,
+      dictionary: tail.dictionary,
+    };
   }
   const whole = parseEventLogBytes(bytes);
-  return { bytes, events: whole.events, validByteLength: whole.validByteLength };
+  return { bytes, events: whole.events, validByteLength: whole.validByteLength, dictionary: whole.dictionary };
 };
 
 const runFoldOf = (segment: ParsedLogSegment): RunFold => {

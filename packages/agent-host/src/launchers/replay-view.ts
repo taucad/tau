@@ -8,6 +8,7 @@ import { createEventLogReducer } from '#log/reducer.js';
 import { projectLogRow } from '#log/projection-facts.js';
 import type { ProjectionBatch, ProjectionFact, ProjectionSourceHealth } from '#log/projection-facts.js';
 import { parseReplayEventLogBytes } from '#log/serialization.js';
+import type { LogFileDictionary } from '#log/compact-rows.js';
 
 /** Immutable published view over a privately maintained tolerant replay. @internal */
 export type ReplayView = Readonly<{
@@ -23,11 +24,28 @@ export type ReplayView = Readonly<{
 }>;
 
 /**
+ * A read-only replay of one log's bytes as projection facts (HA-I1): the pages a host read would send, its source
+ * health, and `extend` for bytes that keep the held bytes as a prefix (HA-I3). No writer, lock, ledger or history.
+ *
+ * @public
+ */
+export type ReplayFacts = Readonly<{
+  bytes: Uint8Array<ArrayBuffer>;
+  generation: string;
+  sourceHealth: ProjectionSourceHealth;
+  projectionBatch(
+    input: Readonly<{ chatId: string; cursor: number; limit: number; maxBytes: number }>,
+  ): ProjectionBatch;
+  /** Fold the bytes past the held ones; the caller checks {@link isBytePrefix} first, as the launcher does. */
+  extend(bytes: Uint8Array<ArrayBuffer>): ReplayFacts;
+}>;
+
+/**
  * Compare current authoritative bytes before reusing any decoded history.
  * @param prefix - Previously acquired bytes.
  * @param bytes - Current authoritative bytes.
  * @returns Whether every prior byte is unchanged.
- * @internal
+ * @public
  */
 export const isBytePrefix = (prefix: Uint8Array<ArrayBuffer>, bytes: Uint8Array<ArrayBuffer>): boolean => {
   if (prefix === bytes) {
@@ -72,11 +90,14 @@ export const createReplayView = (bytes: Uint8Array<ArrayBuffer>, generation: str
   let factBytes: readonly number[] = [];
   const encoder = new TextEncoder();
   let offset = 0;
+  /* What the lines read so far wrote that a later line may name (WP-17). */
+  let dictionary: LogFileDictionary | undefined;
   let quarantined = false;
   let unterminated = false;
 
   const extend = (current: Uint8Array<ArrayBuffer>): ReplayView => {
-    const parsed = parseReplayEventLogBytes(current.subarray(offset));
+    const parsed = parseReplayEventLogBytes(current.subarray(offset), dictionary);
+    dictionary = parsed.dictionary;
     for (const row of parsed.rows) {
       if (row.opaque) {
         opaque.add(row.event);
@@ -158,3 +179,13 @@ export const createReplayView = (bytes: Uint8Array<ArrayBuffer>, generation: str
   };
   return extend(bytes);
 };
+
+/**
+ * Replay a log's bytes as projection facts, as a page reads its own segment from the file (HA-I1).
+ *
+ * @param bytes - The log's bytes.
+ * @param generation - Opaque identity of this reader's view.
+ * @returns The facts view.
+ * @public
+ */
+export const createReplayFacts: (bytes: Uint8Array<ArrayBuffer>, generation: string) => ReplayFacts = createReplayView;

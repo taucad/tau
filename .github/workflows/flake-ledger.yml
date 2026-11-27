@@ -1,0 +1,163 @@
+# Flake ledger v2 ingestion (CI flake quarantine blueprint, FQ-2; Brain research/ci-flake-quarantine-blueprint.md,
+# D2 and D3).
+#
+# When a `ci.yml` run of the merge queue or of a push to `main` completes, this reads the `test-outcomes-*` artifacts
+# FQ-1's test lanes upload and counts every test execution into the ledger state: executions, failures, retried
+# passes and flake events per test identity and variant (a pass and a failure of one test on one Nx task hash, inside
+# one task or across runs; or on the next run of the same unchanged pull request). A row a cache replay restored
+# carries the ids of the run that executed it and is counted once.
+#
+# The state is `ledger.json` on the `flake-ledger` branch, which only this workflow writes, through the Git data API:
+# each ingestion is one commit on the state it read, and the ref moves fast-forward only. It is evidence for the
+# weekly report (`ci-queue-health.yml`) and the quarantine entry rule below; nothing gates on it. Renamed tests are
+# joined through `aliases` in `scripts/src/flake-ledger.json` on `main`.
+#
+# Each invocation catches up on every completed run of the last 72 hours it has not ingested, so a run the
+# concurrency group dropped (a pending run is replaced by a newer one) is ingested by the next, and the daily schedule
+# covers a quiet day.
+#
+# Then it applies the entry rule (FQ-6, testing policy § 16.3): every test with two flake events in its last 80
+# executions, or three in 230, whose newest execution did not fail every attempt, outside the never-quarantine set and
+# inside the caps (8 a project, 20 in the workspace), gets an owner issue (label `flake`; an open one is linked) and
+# an entry in its project's `quarantine.json`, for 14 days. The entries go on one `flake-quarantine/*` branch that
+# changes only `quarantine.json` files; its pull request auto-merges through the queue when the proposed tree passes
+# `validate-quarantine`. A never-quarantine offender gets the owner issue and keeps gating. If the token may not open
+# pull requests (the repository does not let Actions create them), the issues name the branch to open instead.
+#
+# Then it releases and expires entries (FQ-9, testing policy § 16.3 and § 16.5). The ingestion counts each quarantined
+# test's gating executions (shadow rows excluded) toward the release bar: 100 consecutive passes after a linked fix
+# lands (a merged `flake/<issue>` pull request, or one labelled `flake` that references the owner issue), or 300
+# without one, over at least two days. An entry that meets it is removed on a `flake-release/*` branch and its owner
+# issue closes once the removal lands; one at or past its `expires` day (14, or 28 after the one operator renewal) is
+# removed on a `flake-expiry/*` branch, the test gates again and its issue goes to the operator, whom the nightly
+# watchdog pages through its existing alert route. The automation never renews an entry. A test that meets the entry
+# rule within 30 days of its release re-enters as the same entry and goes to the operator.
+#
+# It uses no environment and no secret: `actions: read` lists runs and downloads artifacts, `contents: write` writes
+# the state branch and the entry branch (the `main` ruleset keeps `main` out of its reach), `issues: write` opens the
+# owner issues and `pull-requests: write` opens the entry pull request. Outcome rows come from pull-request code in
+# the queue: they are parsed as data, field by field, and never executed; test names and errors reach the issues only
+# as inert text.
+#
+# Shadow rows (FQ-13): the suites a project lists in its `test:e2e:shadow` target are counted from the same outcome
+# rows, so every `project.json` is checked out too. The count against the Q1 bar (100 consecutive passing runs) is kept
+# in the state, and `shadow-row-promotion.yml` proposes the promotion of a row that meets it. A test's flake events in
+# a shadow row never count toward the quarantine entry rule: the row gates nothing.
+#
+# Last, it writes the flake quarantine metrics table (FQ-11, blueprint D9) to the job summary on every run: the rows
+# the ledger state, the `quarantine.json` files and the owner issues give. The rows that need every merge-group run's
+# jobs are the weekly `ci-queue-health.yml` report's, which shows them all; the nightly watchdog alerts on a red run of
+# this job, an expired entry, a full debt and a never-quarantine flake.
+name: Flake ledger
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: CI run ids to ingest, space-separated; empty catches up on the last 72 hours
+        type: string
+        default: ''
+
+permissions: {}
+
+jobs:
+  ingest:
+    name: Ingest test outcomes
+    # Only the merge queue and `main` feed the ledger; a pull request's run is skipped before a runner starts.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.event == 'merge_group' ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')
+    # On the job, not the workflow: a pull request's run, skipped by the condition above, then never takes the place
+    # of a pending ingestion in the group.
+    concurrency:
+      group: flake-ledger
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout the ledger scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            scripts/package.json
+            scripts/src/ci-flake-ledger.ts
+            scripts/src/ci-flake-ledger-state.ts
+            scripts/src/ci-flake-ledger-ingest-cli.ts
+            scripts/src/ci-flake-ledger-store.ts
+            scripts/src/ci-github-client.ts
+            scripts/src/ci-queue-health.ts
+            scripts/src/ci-shadow-rows.ts
+            scripts/src/flake-ledger.json
+            scripts/src/ci-flake-quarantine-entry.ts
+            scripts/src/ci-flake-quarantine-entry-cli.ts
+            scripts/src/ci-flake-quarantine-release.ts
+            scripts/src/ci-flake-quarantine-release-cli.ts
+            scripts/src/ci-flake-metrics.ts
+            scripts/src/ci-flake-metrics-cli.ts
+            scripts/src/validate-quarantine.ts
+            scripts/src/flake-regression.ts
+            scripts/src/flake-repro.ts
+            tools/vitest-ci/package.json
+            tools/vitest-ci/src/quarantine.ts
+            project.json
+            quarantine.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '26.13.1'
+
+      # `@taucad/vitest-ci/quarantine` imports only `node:` modules, so it is linked as pnpm links it, without an
+      # install. The ingestion reads the entries on `main` with it to count their release bar.
+      - name: Link the quarantine module
+        run: |
+          mkdir -p node_modules/@taucad
+          ln -sfn ../../tools/vitest-ci node_modules/@taucad/vitest-ci
+
+      - name: Ingest test outcomes
+        id: ingest
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUNS: ${{ inputs.runs || '' }}
+        run: node scripts/src/ci-flake-ledger-ingest-cli.ts --runs "$RUNS" --lookback-hours 72 --max-runs 30
+
+      # The entry step reads the state the ingestion wrote, only after a complete ingestion: a partial one may lack a
+      # newer failure of a test it would otherwise quarantine. The next ingestion that completes runs it again. The
+      # checkout carries every `project.json` and `quarantine.json`; the test files an entry names are read at the
+      # checkout's commit through the API.
+      - name: Open quarantine entries
+        if: ${{ steps.ingest.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/src/ci-flake-quarantine-entry-cli.ts
+
+      # Release and expiry read the count the ingestion wrote. An expiry is due on its day, so neither a failed entry
+      # step nor a failed or partial ingestion holds it back (the failed step still turns the job red). A test is
+      # released only when the ingestion succeeded and counted every pending run (`complete`): a run it did not count
+      # may hold a failure.
+      - name: Release and expire quarantine entries
+        if: ${{ !cancelled() && steps.ingest.outcome != 'skipped' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INGEST_COMPLETE: ${{ steps.ingest.outcome == 'success' && steps.ingest.outputs.complete == 'true' }}
+        run: node scripts/src/ci-flake-quarantine-release-cli.ts --releases "$INGEST_COMPLETE"
+
+      # The D9 table (FQ-11), whatever the steps before it did: it reads the state as it now stands.
+      - name: Report the flake quarantine metrics
+        if: ${{ !cancelled() && steps.ingest.outcome != 'skipped' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/src/ci-flake-metrics-cli.ts

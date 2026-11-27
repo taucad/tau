@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- the AI SDK `Chat` stand-in mirrors the SDK's own `~`-prefixed subscriber method names verbatim. */
 /**
  * Seeded first turn — execution provenance (integration)
  *
@@ -11,8 +10,7 @@
  * `ChatSessionStore` over a chat row that carries both an `activeExecution`
  * and a pending startup request, and asserts on the one durable host command.
  */
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import type * as CadAgentConfigModuleShape from '#hooks/use-cad-agent-config.js';
@@ -37,17 +35,6 @@ const liveSessions = projectSessionsStandIn();
 const cookieModelId = 'openai-gpt-5.6-luna';
 
 const harness = vi.hoisted(() => {
-  type FakeChat = {
-    id: string;
-    status: string;
-    error: Error | undefined;
-    messages: unknown[];
-    regenerate: ReturnType<typeof vi.fn>;
-    sendMessage: ReturnType<typeof vi.fn>;
-    resumeStream: ReturnType<typeof vi.fn>;
-    stop: ReturnType<typeof vi.fn>;
-    makeRequest: ReturnType<typeof vi.fn>;
-  };
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
   const noop = (): void => undefined;
   const resolveModel = (
@@ -65,7 +52,6 @@ const harness = vi.hoisted(() => {
   });
   return {
     files,
-    chats: new Map<string, FakeChat>(),
     commands: [] as HostCommand[],
     store: undefined as unknown as ChatSessionStore,
     projectSession: undefined as { stop: () => void } | undefined,
@@ -110,28 +96,9 @@ const harness = vi.hoisted(() => {
   };
 });
 
-// The store's own `Chat` instance, minus the AI SDK and its transport: this
-// scope asserts on the host command, never on a stream.
-vi.mock('@taucad/chat-ui/chat-clients/_internal/shared-chat-transport', () => ({
-  createChatInstance: ({ chatId }: { chatId: string }) => {
-    const chat = {
-      id: chatId,
-      status: 'ready',
-      error: undefined,
-      messages: [] as unknown[],
-      regenerate: vi.fn().mockResolvedValue(undefined),
-      sendMessage: vi.fn().mockResolvedValue(undefined),
-      resumeStream: vi.fn().mockResolvedValue(undefined),
-      stop: vi.fn().mockResolvedValue(undefined),
-      makeRequest: vi.fn().mockResolvedValue(undefined),
-      '~registerMessagesCallback': () => () => undefined,
-      '~registerStatusCallback': () => () => undefined,
-      '~registerErrorCallback': () => () => undefined,
-    };
-    harness.chats.set(chatId, chat);
-    return chat;
-  },
-}));
+/* The routing plan the turn reads at admission (adaptive app deployment mode C6): every kernel allowed here. */
+vi.mock('#cloud/kernel-commerce.js', () => ({ useKernelRoutingPlan: () => () => true }));
+
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => harness.store }));
 vi.mock('#hooks/use-chat.js', () => ({
@@ -159,7 +126,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 /* The turn-start pre-flight (R9) is proved in `use-credit-preflight.test.tsx` and
  * `use-cad-chat-client.test.tsx`; this scope funds every turn. */
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
-vi.mock('#hooks/use-draft-image-error-toast.js', () => ({ useDraftImageErrorToast: () => undefined }));
+vi.mock('@taucad/chat-ui/hooks/use-draft-image-error-toast', () => ({ useDraftImageErrorToast: () => undefined }));
 /* ChatTurnHost reads the telemetry consent through the session and react-query; this scope has neither. */
 vi.mock('#hooks/use-telemetry-consent.js', () => ({ useTelemetryConsent: () => ({ consent: 'unknown' }) }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
@@ -282,19 +249,12 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution | undefined
 };
 
 beforeEach(() => {
-  harness.chats.clear();
   harness.commands.length = 0;
   harness.projectSession?.stop();
   harness.projectSession = undefined;
   harness.files.clear();
   resetChatTurnServices();
   vi.clearAllMocks();
-});
-
-/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
- * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
-beforeAll(async () => {
-  await loadChatSdk();
 });
 
 describe('seeded first turn execution', () => {

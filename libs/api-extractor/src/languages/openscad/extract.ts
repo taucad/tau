@@ -3,8 +3,10 @@
  *
  * The one permitted source is `repos/openrscad/crates/openrscad-lsp/src/builtins.rs`,
  * which is reconstructed from public OpenSCAD documentation and scoped to what
- * the OpenRSCAD engine implements. `apps/ui/app/lib/openscad-language/openscad-builtins.ts`
- * is Google LLC GPL2+ and must never be read, copied or derived from here.
+ * the OpenRSCAD engine implements. The editor's builtin declarations,
+ * `apps/libs/openscad-language/rust/src/builtins.scad`, are a separate source and are not
+ * read here. The Google LLC GPL2+ `openscad-builtins.ts` they replaced (deleted in #1152)
+ * must never be read, copied or derived from.
  *
  * `repos/openrscad` is an optional checkout, so generation parses the table and
  * writes `src/generated/openscad/openscad-corpus.json`; consumers read that

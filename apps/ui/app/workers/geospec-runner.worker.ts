@@ -39,6 +39,7 @@ workerScope.addEventListener('message', (event) => {
 });
 
 try {
+  // oxlint-disable-next-line tau-lint/code-loading-owner -- the entry imports nothing statically, so it can listen before anything loads; it reports its own load failure on every request below.
   ({ handleGeoSpecRunnerRequest: handleRequest } = await import('#workers/geospec-runner.impl.js'));
 } catch (error) {
   const message = `GeoSpec worker failed to load: ${error instanceof Error ? error.message : String(error)}`;

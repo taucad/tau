@@ -255,7 +255,8 @@ export const v1RequestFor = (command: HostCommand): V1Request => {
       return { ...command.payload, type: 'steer' };
     }
     case 'cancel': {
-      return { ...command.payload, type: 'cancel' };
+      // ponytail: a v1 owner records no reason with its cancel, so a withdrawn request's row says nothing more.
+      return { type: 'cancel', chatId: command.payload.chatId, runId: command.payload.runId };
     }
     case 'interrupt': {
       return { ...command.payload, type: 'interrupt' };

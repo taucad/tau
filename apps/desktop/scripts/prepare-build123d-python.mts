@@ -14,8 +14,11 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+
+import { integrityFromHex, unattendedFetchRetry } from '@taucad/archive-core';
+import { fetchVerifiedFile } from '@taucad/archive-core/node';
 // oxlint-disable-next-line no-restricted-imports -- this private script helper has no package import mapping.
 import { replaceResourceDirectory, verifyOcpWheel } from './build123d-wheel-integrity.mjs';
 
@@ -109,28 +112,17 @@ const produceSeed = (targets: readonly string[], seed: string): void => {
   }
 };
 
+// Retried on the shared unattended schedule (a GitHub Releases name-resolution failure of about two minutes costs
+// retries, merge-queue job 138868659888), verified against the pin, and renamed into the cache only when it matched.
 const downloadArchive = async (target: Target): Promise<string> => {
-  await mkdir(cacheRoot, { recursive: true });
   const path = resolve(cacheRoot, target.archive);
-  try {
-    if ((await digest(path)) === target.sha256) {
-      return path;
-    }
-  } catch {
-    // Download below.
-  }
-  const url = `https://github.com/astral-sh/python-build-standalone/releases/download/${sourceManifest.pythonBuildStandaloneRelease}/${encodeURIComponent(target.archive)}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Python download failed with HTTP ${String(response.status)}`);
-  }
-  const temporary = `${path}.${String(process.pid)}.tmp`;
-  await writeFile(temporary, new Uint8Array(await response.arrayBuffer()));
-  if ((await digest(temporary)) !== target.sha256) {
-    await rm(temporary, { force: true });
-    throw new Error(`Python archive integrity mismatch: ${target.archive}`);
-  }
-  await rename(temporary, path);
+  await fetchVerifiedFile({
+    url: `https://github.com/astral-sh/python-build-standalone/releases/download/${sourceManifest.pythonBuildStandaloneRelease}/${encodeURIComponent(target.archive)}`,
+    path,
+    integrity: integrityFromHex('sha256', target.sha256),
+    retry: unattendedFetchRetry,
+    signal: AbortSignal.timeout(30 * 60 * 1000),
+  });
   return path;
 };
 

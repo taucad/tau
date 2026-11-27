@@ -81,6 +81,35 @@ const registry = (options?: Parameters<typeof createProjectHosts>[1]) => {
 };
 
 describe('createProjectHosts', () => {
+  /* STO-25 SP6: a connect sent behind its provide waits for that provide in the project's order, not a page round trip. */
+  it('should answer a connect sent behind its provide with the host that provide opened', async () => {
+    const { hosts, settleOpen } = registry();
+    const provide = hosts.provide(provideOf('host-1'));
+    const connect = hosts.connectable({ projectId: 'project-1', hostId: 'host-1' });
+    await settleOpen('open');
+
+    await expect(provide).resolves.toEqual({});
+    await expect(connect).resolves.toMatchObject({ hostId: 'host-1' });
+  });
+
+  it('should answer no host to a connect behind a provide that failed or opened another host', async () => {
+    const { hosts, settleOpen } = registry();
+    const failed = hosts.provide(provideOf('host-1'));
+    const orphan = hosts.connectable({ projectId: 'project-1', hostId: 'host-1' });
+    await settleOpen('fail');
+    await expect(failed).rejects.toMatchObject({ code: 'STORAGE_NOT_WRITABLE' });
+    await expect(orphan).resolves.toBeUndefined();
+
+    const first = hosts.provide(provideOf('host-2'));
+    await settleOpen('open');
+    await first;
+    const replacing = hosts.provide(provideOf('host-3'));
+    const stale = hosts.connectable({ projectId: 'project-1', hostId: 'host-2' });
+    await settleOpen('open');
+    await replacing;
+    await expect(stale).resolves.toBeUndefined();
+  });
+
   it('should keep the previous host registered and open when a new host fails to open', async () => {
     const { hosts, opened, settleOpen } = registry();
     const first = hosts.provide(provideOf('host-1'));

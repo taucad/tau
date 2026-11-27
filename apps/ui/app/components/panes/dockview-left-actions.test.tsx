@@ -9,7 +9,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const fileSelectorSpy = vi.hoisted(() => vi.fn());
 
-vi.mock('#components/files/file-selector.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-selector', () => ({
   FileSelector: ({ children, ...properties }: { children: ReactNode }): React.JSX.Element => {
     fileSelectorSpy(properties);
     return Children.only(children) as React.JSX.Element;

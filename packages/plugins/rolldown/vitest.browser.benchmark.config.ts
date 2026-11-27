@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -36,6 +37,8 @@ export default defineConfig({
     },
   },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     include: ['src/bundler-engine.benchmark.test.ts'],
     testTimeout: 900_000,
     fileParallelism: false,

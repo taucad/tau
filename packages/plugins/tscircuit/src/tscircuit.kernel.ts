@@ -789,6 +789,8 @@ export const tscircuitKernel = defineKernel({
   id: 'tscircuit',
   extensions: ['tsx', 'jsx'],
   builtinModuleNames: ['tscircuit', '@tscircuit/core'],
+  // Resolves through the bundler and reads model sources only as bundle output.
+  sourceIdentity: 'bundle',
   builtinPackages: {
     tscircuit: corePackage,
     '@tscircuit/core': corePackage,

@@ -3,7 +3,7 @@ import type { Environment } from '@taucad/api-core';
 
 /**
  * The form every stored address takes: `email_event.recipient`, `email_address_state.address` and
- * `publication_access.recipient_email` all hold it trimmed and lower-cased.
+ * `project_share_access.recipient_email` all hold it trimmed and lower-cased.
  *
  * @param address - An email address as written.
  * @returns The address trimmed and lower-cased.

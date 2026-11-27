@@ -182,6 +182,9 @@ export const utilityEnvironmentNames = [
   'TAU_ELECTRON_DEBUG',
   /* Opt-in debug logging across main and utility processes. */
   'TAU_DEBUG',
+  /* Environment telemetry opt-outs: the services utility's runtime reporter reads them before the config file. */
+  'TAU_TELEMETRY',
+  'DO_NOT_TRACK',
   'TAU_MACHINES_ENABLED',
   /* Where the person's Bambu Studio lives when it is not at the platform default;
    * the kernel utility slices with it, main reads its presets (blueprint D12). */

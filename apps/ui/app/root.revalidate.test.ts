@@ -21,8 +21,18 @@ describe('root shouldRevalidate', () => {
     expect(shouldRevalidate(navigation('/community', '/projects'))).toBe(false);
   });
 
-  it('should keep the default for an explicit revalidation and a submission', () => {
-    expect(shouldRevalidate(navigation('/community?q=gear', '/community?q=gear'))).toBe(true);
+  /* A navigation to the URL the router already holds is a revalidation to React Router. On a project URL it was the
+   * only thing that asked for the root's `.data`, which the static-shell rewrite answers with the shell's HTML: the
+   * page could not decode it and the root error boundary replaced the app (launch audit N-3, Sentry TAU-UI-1X). */
+  it.each([
+    ['a project URL', '/w/home/bracket-v2?chat=chat_1'],
+    ['a server-rendered page', '/community?q=gear'],
+  ])('should skip the root loader for a navigation to the URL already shown, on %s', (_name, url) => {
+    expect(shouldRevalidate(navigation(url, url))).toBe(false);
+  });
+
+  it('should keep the default for a submission', () => {
     expect(shouldRevalidate(navigation('/community', '/community?q=gear', 'POST'))).toBe(true);
+    expect(shouldRevalidate(navigation('/community', '/community', 'POST'))).toBe(true);
   });
 });

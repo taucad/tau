@@ -1,6 +1,11 @@
-import { useLayoutEffect, useSyncExternalStore } from 'react';
+import { useContext, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { PanelLeft, Share2 } from 'lucide-react';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
 import { cn } from '@taucad/ui/utils/cn';
+import { openWaitContext } from '#hooks/use-wait-start.js';
+import type { OpenWait } from '#hooks/use-wait-start.js';
+import { WaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { ProjectComposerHandOff, useProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
 import { useHandOffAdopted } from '#components/hand-off/hand-off-store.js';
 import {
@@ -15,6 +20,7 @@ import {
   readWideFrameHint,
 } from '#lib/frame-hint.js';
 import type { FrameHintVariables, PhoneFrameHint, PhoneFrameHintVariables, WideFrameHint } from '#lib/frame-hint.js';
+import { projectOpenCopy } from '#lib/project-open-copy.js';
 import {
   MobileWorkbenchNavigationFrame,
   mobileWorkbenchNavigationHeight,
@@ -52,6 +58,47 @@ const readDocumentPhoneFrameHint = (pathname = globalThis.location.pathname): Ph
 
 /** The phone server render has no hint either: the pre-paint script's values on `<html>` stand. */
 const noPhoneHintOnServer = (): undefined => undefined;
+
+const isClient = (): boolean => true;
+const isServer = (): boolean => false;
+
+/** One project open as the frame times it. */
+type TrackedOpen = Readonly<{ isDrawn: boolean; key: string | undefined; startedAt: number }>;
+
+/**
+ * When the open of the frame's project started, on the wait clock (Progressive Loading Policy rule 16; one clock per
+ * wait): navigation start (0) for the project the document opened with, and the frame's first render on the client for
+ * a project reached later, which is the click, since the shell draws the frame ahead of the route. Read in render with
+ * React's "information from previous renders" pattern: no effect, no timer.
+ *
+ * @param isDrawn - Whether the frame is drawn.
+ * @param pathname - The project's pathname when the shell passes one.
+ * @returns The open's start.
+ */
+function useFrameOpenStart(isDrawn: boolean, pathname: string | undefined): number {
+  const clock = useWaitClockSource();
+  const isOnClient = useSyncExternalStore(subscribeToNothing, isClient, isServer);
+  const key = useSyncExternalStore(
+    subscribeToNothing,
+    () => (isDrawn ? frameHintKey(pathname ?? globalThis.location.pathname) : undefined),
+    () => undefined,
+  );
+  const [tracked, setTracked] = useState<TrackedOpen>(() => ({
+    isDrawn,
+    key,
+    startedAt: isOnClient ? clock.now() : 0,
+  }));
+  /* A frame drawn anew, or moved to another project, is a new open. The hydration pass reads no key; its first client
+   * render reading one is the same open. */
+  const isNewOpen =
+    (isDrawn && !tracked.isDrawn) || (tracked.key !== undefined && key !== undefined && key !== tracked.key);
+  if (isNewOpen || tracked.isDrawn !== isDrawn || tracked.key !== key) {
+    const next = { isDrawn, key, startedAt: isNewOpen ? clock.now() : tracked.startedAt };
+    setTracked(next);
+    return next.startedAt;
+  }
+  return tracked.startedAt;
+}
 
 /**
  * The attribute the desktop workspace sets once its split view has sized its panes. The frame's lanes hide on that
@@ -99,6 +146,8 @@ export function WorkspaceFrame({
    */
   readonly pathname?: string;
 }): React.JSX.Element {
+  const openStartedAt = useFrameOpenStart(isDrawn, pathname);
+  const open = useMemo<OpenWait>(() => ({ startedAt: openStartedAt, isRevealed: false }), [openStartedAt]);
   const wide = useSyncExternalStore(subscribeToNothing, () => readDocumentFrameHint(pathname), noHintOnServer);
   const phone = useSyncExternalStore(
     subscribeToNothing,
@@ -118,9 +167,12 @@ export function WorkspaceFrame({
   if (!isDrawn) {
     return (
       <div className='contents'>
-        {/* The drawn frame's own nodes take this one slot, so the content keeps its position either way. */}
-        {null}
-        {children}
+        {/* The same provider and the same two slots as the drawn frame, so the content keeps its position either way:
+         * the drawn frame's own nodes take the first. No open runs off a project route. */}
+        <openWaitContext.Provider value={undefined}>
+          {null}
+          {children}
+        </openWaitContext.Provider>
       </div>
     );
   }
@@ -149,10 +201,14 @@ export function WorkspaceFrame({
         wide === undefined || phone === undefined ? undefined : (frameVariables(wide, phone) as React.CSSProperties)
       }
     >
-      {/* No hint yet (the server, the hydrating render) serves the input; the pre-paint script's variable hides a lane
-       * remembered closed, and the client then drops it. */}
-      <WorkspaceFrameLanes isChatServed={wide?.chatOpen !== false} pathname={pathname} />
-      {children}
+      {/* The open's clock, which every waiting region below reads: the frame's own lanes, and the live panes that take
+       * over their bars (Progressive Loading Policy rule 16). */}
+      <openWaitContext.Provider value={open}>
+        {/* No hint yet (the server, the hydrating render) serves the input; the pre-paint script's variable hides a
+         * lane remembered closed, and the client then drops it. */}
+        <WorkspaceFrameLanes isChatServed={wide?.chatOpen !== false} pathname={pathname} />
+        {children}
+      </openWaitContext.Provider>
     </div>
   );
 }
@@ -196,15 +252,23 @@ function WorkspaceFrameLanes({
           data-lane='chat'
           className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 border-r border-border @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'
         >
-          <ChatLaneFrame />
+          <ChatLaneFrame>
+            <FrameWaitSkeleton shape='transcript' label='Chat' />
+          </ChatLaneFrame>
         </div>
-        <div data-slot='workspace-lane' data-lane='viewer' className='h-full min-w-0 flex-1' />
+        <div data-slot='workspace-lane' data-lane='viewer' className='flex h-full min-w-0 flex-1 flex-col'>
+          <FrameTabStrip label='Viewer tabs' />
+          <FrameViewerStatus />
+        </div>
         <div
           /* `@max-[1120px]` is below `compactWorkspaceWidth` (1120px) in `chat-interface-desktop.tsx`; Tailwind needs the literal. */
           data-slot='workspace-lane'
           data-lane='workbench'
-          className='[display:var(--frame-workbench-display,flex)] h-full w-(--frame-workbench-width,420px) shrink-0 border-l border-border @max-[1120px]:[display:var(--frame-workbench-compact-display,none)]'
-        />
+          className='[display:var(--frame-workbench-display,flex)] h-full w-(--frame-workbench-width,420px) shrink-0 flex-col border-l border-border @max-[1120px]:[display:var(--frame-workbench-compact-display,none)]'
+        >
+          <FrameTabStrip label='Workbench tabs' />
+          <FrameWaitSkeleton shape='fields' label='Workbench' />
+        </div>
       </div>
       <div
         data-slot='workspace-frame-composer'
@@ -276,8 +340,10 @@ function PhoneFrame(): React.JSX.Element {
       <div className='relative min-h-0 flex-1 pb-[max(var(--frame-sheet-height,0px),var(--nav-offset))]'>
         <div
           data-frame-part='viewer'
-          className='size-full [[data-slot=workspace-frame]:has([data-mobile-workspace=ready]_[data-slot=viewer-stage])_&]:hidden'
-        />
+          className='flex size-full flex-col [[data-slot=workspace-frame]:has([data-mobile-workspace=ready]_[data-slot=viewer-stage])_&]:hidden'
+        >
+          <FrameViewerStatus />
+        </div>
       </div>
       <div
         data-frame-part='sheet'
@@ -291,6 +357,14 @@ function PhoneFrame(): React.JSX.Element {
         <div className='relative h-2 shrink-0'>
           <div className='absolute inset-x-0 bottom-0 mx-auto h-1 w-15 rounded-full bg-sidebar-primary/15' />
         </div>
+        {/* The remembered surface's shape, chosen by the tab the pre-paint script selected on `<html>`. */}
+        <FrameWaitSkeleton shape='transcript' label='Chat' className='hidden flex-1 [[data-frame-tab=chat]_&]:block' />
+        <FrameWaitSkeleton
+          shape='fields'
+          label='Parameters'
+          className='hidden flex-1 [[data-frame-tab=parameters]_&]:block'
+        />
+        <FrameWaitSkeleton shape='list' label='Workbench' className='hidden flex-1 [[data-frame-tab=all]_&]:block' />
       </div>
       <MobileWorkbenchNavigationFrame className='fixed inset-x-0 bottom-0 [[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden' />
     </div>
@@ -298,27 +372,89 @@ function PhoneFrame(): React.JSX.Element {
 }
 
 /**
- * The chat lane's own frame: its background, its header bar and the composer's resting box (the empty composer's
- * 82 px frame), empty. Nothing in it stands for content. The workspace frame draws it in the chat lane, and the chat
- * gate shows it while the focused chat is re-established, so the lane keeps its frame in both waits.
+ * A frame region's content shape on the open's clock: bars from the ladder's skeleton mark (300 ms after the open
+ * began), so an open of a project already here draws the frame alone (Progressive Loading Policy rules 15 and 16).
  *
- * @param props - When the lane is waiting inside a live workspace, the label of its busy state.
+ * @param props - The shape, the region's name and extra classes.
+ * @returns The region's waiting body.
+ */
+function FrameWaitSkeleton({
+  shape,
+  label,
+  className,
+}: {
+  readonly shape: React.ComponentProps<typeof WaitSkeleton>['shape'];
+  readonly label: string;
+  readonly className?: string;
+}): React.JSX.Element {
+  const open = useContext(openWaitContext);
+  return <WaitSkeleton isActive startedAt={open?.startedAt} shape={shape} label={label} className={className} />;
+}
+
+/**
+ * A lane's tab strip, as the live dock draws it (its height and its bottom border), with its tabs' shape.
+ *
+ * @param props - The strip's name.
+ * @returns The tab strip.
+ */
+function FrameTabStrip({ label }: { readonly label: string }): React.JSX.Element {
+  return (
+    <div className='h-9 shrink-0 border-b border-border'>
+      <FrameWaitSkeleton shape='tabs' label={label} />
+    </div>
+  );
+}
+
+/**
+ * The viewer's status slot in the frame: the open's one status (Progressive Loading Policy rule 17), the viewer pill
+ * with the open's label from 1,000 ms after the open began, centred where the live stage places its status before a
+ * model is drawn. It is not live: the route's busy state and announcement speak for the open (rule 22).
+ *
+ * @returns The status slot.
+ */
+function FrameViewerStatus(): React.JSX.Element {
+  const open = useContext(openWaitContext);
+  return (
+    <div className='relative min-h-0 flex-1'>
+      <div
+        data-slot='frame-viewer-status'
+        className='absolute top-1/2 right-2 left-2 mx-auto flex w-fit max-w-full -translate-y-1/2'
+      >
+        <WaitIndicator active variant='pill' live={false} label={projectOpenCopy.label} startedAt={open?.startedAt} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The chat lane's own frame: its background, its header bar and the composer's resting box (the empty composer's
+ * 82 px frame). The workspace frame draws it empty in the chat lane, and the chat gate keeps it while the project opens
+ * (its feed then draws the transcript's shape) and while the focused chat is re-established, so the lane keeps one
+ * frame through every wait (Progressive Loading Policy rule 15). In a phone sheet its header is the sheet's bar height.
+ *
+ * @param props - What its feed draws while the lane waits, and a status for its header's trailing slot.
  * @returns The chat lane frame.
  */
-export function ChatLaneFrame({ busyLabel }: { readonly busyLabel?: string }): React.JSX.Element {
+export function ChatLaneFrame({
+  children,
+  headerStatus,
+}: {
+  /** The feed's content while the lane waits, such as the transcript's shape. Empty by default. */
+  readonly children?: React.ReactNode;
+  /** The header's trailing slot, such as the open's status where the lane covers the viewer. */
+  readonly headerStatus?: React.ReactNode;
+}): React.JSX.Element {
   return (
     <div
       className='flex size-full flex-col bg-sidebar/50'
       /* The chat pane's slot, so the lane inherits the chat pane's chrome wherever it stands in for it. */
       data-slot='floating-panel'
       data-testid='chat-lane-frame'
-      /* A named busy state is a status, so its label is exposed rather than dropped from a generic element. */
-      role={busyLabel === undefined ? undefined : 'status'}
-      aria-busy={busyLabel === undefined ? undefined : true}
-      aria-label={busyLabel}
     >
-      <div className='h-9 shrink-0 border-b bg-sidebar' />
-      <div className='min-h-0 flex-1' />
+      <div className='flex h-9 shrink-0 items-center justify-end border-b bg-sidebar px-2 [[data-slot=drawer-content]_&]:h-(--drawer-bar-height) [[data-slot=drawer-content]_&]:px-4'>
+        {headerStatus}
+      </div>
+      <div className='relative min-h-0 flex-1'>{children}</div>
       <div className='mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
         <div
           data-testid='chat-lane-frame-composer'
@@ -340,7 +476,7 @@ export function WorkspaceOpening(): React.JSX.Element {
     <span
       role='status'
       aria-busy='true'
-      aria-label='Opening project'
+      aria-label={projectOpenCopy.label}
       data-testid='workspace-opening'
       className='sr-only'
     />

@@ -8,22 +8,22 @@ import { Bot } from 'lucide-react';
 import { useLocation } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
-import type { GraphRow } from '#components/revisions/revision-graph-layout.js';
-import { BranchSwatch } from '#components/revisions/revision-graph-view.js';
-import { timelineRow } from '#components/revisions/revision-timeline.js';
+import type { GraphRow } from '@taucad/revisions-ui/components/revisions/revision-graph-layout';
+import { BranchSwatch } from '@taucad/revisions-ui/components/revisions/revision-graph-view';
+import { timelineRow } from '@taucad/revisions-ui/components/revisions/revision-timeline';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useRevisions } from '#hooks/use-revisions.js';
 import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
-import type { HistoryLanes, PendingMerge } from '#routes/w.$workspace.$project/history-lanes.js';
+import type { HistoryLanes, PendingMerge } from '@taucad/revisions-ui/lib/history-lanes';
 import { BranchMenu, renameRefusalOf } from '#routes/w.$workspace.$project/revision-branches.js';
 import {
   agentWorkingTitle,
   pendingMergeNote,
   pendingMergeTitle,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
-import { projectChatIdFromSearch } from '#utils/project-url.utils.js';
+import { projectChatIdFromSearch } from '@taucad/files-ui/utils/project-url.utils';
 
 /** A row the lanes add: a branch's chip, a merge waiting on a decision, or the agent's work in progress. */
 export type LaneStep =

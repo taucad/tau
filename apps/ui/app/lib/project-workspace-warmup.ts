@@ -1,4 +1,5 @@
 import type * as ProjectWorkspace from '#routes/w.$workspace.$project/project-live-sessions.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 type ProjectWorkspaceModule = typeof ProjectWorkspace;
 
@@ -18,7 +19,7 @@ type ProjectWorkspaceLoad = Promise<ProjectWorkspaceModule> & {
 let load: ProjectWorkspaceLoad | undefined;
 
 const importProjectWorkspace = async (): Promise<ProjectWorkspaceModule> =>
-  import('#routes/w.$workspace.$project/project-live-sessions.js');
+  loadCode(async () => import('#routes/w.$workspace.$project/project-live-sessions.js'));
 
 const tagSettlement = async (pending: ProjectWorkspaceLoad): Promise<void> => {
   try {

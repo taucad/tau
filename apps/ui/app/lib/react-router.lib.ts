@@ -1,44 +1,4 @@
 import { redirect } from 'react-router';
-import {
-  browserRevalidateCacheControl,
-  cacheTagResponseHeader,
-  cdnCacheControlResponseHeader,
-  cdnVaryQueryEmptyAllowlist,
-  cdnVaryQueryResponseHeader,
-  edgeDurableSsrRouteCacheControl,
-  edgeShortLivedSsrRouteCacheControl,
-} from '@taucad/ui-core/constants/cache.constants';
-
-/**
- * Application-defined cache tags identifying SSR route classes for
- * {@link cdnBackedSsrRouteHeaders}. These are semantic identifiers (not
- * CDN-vendor strings) used for granular purge APIs — adding a new prerendered
- * route class is a one-line addition here.
- */
-export const cacheTag = {
-  homepage: 'homepage',
-  publicationViewer: 'publication-viewer',
-} as const;
-
-type CacheTagValue = (typeof cacheTag)[keyof typeof cacheTag];
-
-export type CdnBackedSsrTtl = 'short' | 'long';
-
-/**
- * HTTP headers for SSR routes that are safe to store in the edge CDN with a
- * long `s-maxage` while the browser keeps `must-revalidate`. Centralizes
- * provider-specific header names (today Netlify) so a hosting change is a
- * single-file remap.
- */
-export function cdnBackedSsrRouteHeaders(tag: CacheTagValue, ttl: CdnBackedSsrTtl = 'long'): Record<string, string> {
-  const edgeCacheControl = ttl === 'short' ? edgeShortLivedSsrRouteCacheControl : edgeDurableSsrRouteCacheControl;
-  return {
-    'Cache-Control': browserRevalidateCacheControl,
-    [cdnCacheControlResponseHeader]: edgeCacheControl,
-    [cacheTagResponseHeader]: tag,
-    [cdnVaryQueryResponseHeader]: cdnVaryQueryEmptyAllowlist,
-  };
-}
 
 /**
  * Redirects requests from a subdomain to the apex domain if the subdomain matches.

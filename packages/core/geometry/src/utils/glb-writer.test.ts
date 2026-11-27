@@ -470,6 +470,48 @@ describe('writeGlb', () => {
     expect(nodes[2]!.getName()).toBe('Writer Node 3');
   });
 
+  it('calls the checkpoint before each node and before serializing, and writes the same bytes', () => {
+    const plain = writeGlb(createMultiNodeInput());
+    let calls = 0;
+    const checked = writeGlb({
+      ...createMultiNodeInput(),
+      checkpoint: () => {
+        calls += 1;
+      },
+    });
+
+    expect(calls).toBe(4);
+    expect(checked).toEqual(plain);
+
+    let jsonCalls = 0;
+    const checkedJson = writeGltfJson({
+      ...createMultiNodeInput(),
+      checkpoint: () => {
+        jsonCalls += 1;
+      },
+    });
+    expect(jsonCalls).toBe(4);
+    expect(checkedJson).toEqual(writeGltfJson(createMultiNodeInput()));
+  });
+
+  it('stops a write at the checkpoint that throws', () => {
+    const stop = new Error('stopped');
+    let calls = 0;
+    const throwAt = (call: number) => () => {
+      calls += 1;
+      if (calls === call) {
+        throw stop;
+      }
+    };
+
+    expect(() => writeGlb({ ...createMultiNodeInput(), checkpoint: throwAt(2) })).toThrow(stop);
+    expect(calls).toBe(2);
+    calls = 0;
+    // The last call comes after the layout, before serializing.
+    expect(() => writeGlb({ ...createMultiNodeInput(), checkpoint: throwAt(4) })).toThrow(stop);
+    expect(calls).toBe(4);
+  });
+
   it('should produce empty scene for input with no nodes', async () => {
     const input: GlbInput = { nodes: [] };
     const glb = writeGlb(input);
@@ -931,5 +973,52 @@ describe('writeGlb single-copy layout', () => {
   it.each(layoutFixtures)('should keep the recorded bytes for %s', (name, create) => {
     const { json, bin } = splitGlb(writeGlb(create()));
     expect({ json: sha256(new TextEncoder().encode(json)), bin: sha256(bin) }).toEqual(recorded[name]);
+  });
+});
+
+describe('writeGlb with trusted geometry', () => {
+  const sceneOf = (
+    primitive: GlbInput['nodes'][number]['primitives'][number],
+    trustedGeometry?: boolean,
+  ): GlbInput => ({
+    nodes: [{ name: 'part', primitives: [primitive] }],
+    ...(trustedGeometry === undefined ? {} : { trustedGeometry }),
+  });
+
+  it('should write the same bytes as a validated write for valid geometry', () => {
+    const primitive = {
+      ...createTrianglePrimitive(),
+      tangents: new Float32Array([1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, -1]),
+    };
+
+    expect(writeGlb(sceneOf(primitive, true))).toEqual(writeGlb(sceneOf(primitive)));
+  });
+
+  it('should skip scanning attribute values a validated write refuses', () => {
+    const nonFiniteNormal = {
+      ...createTrianglePrimitive(),
+      normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, Number.NaN]),
+    };
+    const longTangent = {
+      ...createTrianglePrimitive(),
+      tangents: new Float32Array([2, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1]),
+    };
+
+    expect(() => writeGlb(sceneOf(nonFiniteNormal))).toThrow('Attribute must contain finite components');
+    expect(() => writeGlb(sceneOf(longTangent))).toThrow('TANGENT must contain unit XYZ vectors');
+    expect(() => writeGlb(sceneOf(nonFiniteNormal, true))).not.toThrow();
+    expect(() => writeGlb(sceneOf(longTangent, true))).not.toThrow();
+  });
+
+  it('should still validate index range, placements and vector completeness', () => {
+    const outOfRange = { ...createTrianglePrimitive(), indices: new Uint32Array([0, 1, 3]) };
+    const sheared = [1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
+    const incomplete = { ...createTrianglePrimitive(), positions: new Float32Array([0, 0, 0, 1]) };
+
+    expect(() => writeGlb(sceneOf(outOfRange, true))).toThrow('Index must be less than POSITION count');
+    expect(() =>
+      writeGlb({ nodes: [{ primitives: [createTrianglePrimitive()], matrix: sheared }], trustedGeometry: true }),
+    ).toThrow('without shear');
+    expect(() => writeGlb(sceneOf(incomplete, true))).toThrow('complete nonempty FLOAT vectors');
   });
 });

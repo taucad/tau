@@ -78,6 +78,24 @@ const viewOffer = z
 const exportOffer = z
   .object({ id, title: z.string(), mimeType: mediaType, extension: id, options: options.optional() })
   .strip();
+const count = z.number().int().nonnegative();
+/** What a kernel may report about a build (`EvaluateOutput.build`); the worker admits it with this schema. */
+export const kernelBuildReportSchema = z.object({
+  reused: z.boolean().optional(),
+  operations: z.object({ reused: count, computed: count }).optional(),
+  costliest: z
+    .array(
+      z.object({
+        operation: z.string().min(1).max(128),
+        elapsed: z.number().nonnegative(),
+        calls: z.number().int().positive(),
+      }),
+    )
+    .max(3)
+    .readonly()
+    .optional(),
+});
+const buildReport = kernelBuildReportSchema.extend({ reused: z.boolean(), elapsed: z.number().nonnegative() });
 const evaluation = discriminatedWireUnion('success', [
   z
     .object({
@@ -89,9 +107,18 @@ const evaluation = discriminatedWireUnion('success', [
       evaluateOptions: options.optional(),
       issues,
       ...provenance,
+      build: buildReport.optional(),
     })
     .strip(),
-  z.object({ success: z.literal(false), id, transient: z.boolean(), issues, ...provenance }).strip(),
+  z
+    .object({
+      success: z.literal(false),
+      id,
+      transient: z.boolean(),
+      issues,
+      ...provenance,
+    })
+    .strip(),
 ]);
 const description = discriminatedWireUnion('success', [
   z
@@ -116,7 +143,6 @@ const description = discriminatedWireUnion('success', [
     })
     .strip(),
 ]);
-const count = z.number().int().nonnegative();
 const tessellationReport = z
   .object({
     triangles: count,
@@ -129,6 +155,7 @@ const tessellationReport = z
     requested: z.enum(['low', 'medium', 'high', 'extra-high', 'explicit']).optional(),
     linearTolerance: z.number().positive().optional(),
     angularTolerance: z.number().positive().optional(),
+    meshes: z.object({ reused: count, computed: count }).strip().optional(),
   })
   .strip();
 const artifact = z

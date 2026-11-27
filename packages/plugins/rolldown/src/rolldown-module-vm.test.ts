@@ -235,6 +235,36 @@ describe('native Rolldown lifecycle', () => {
     }
   });
 
+  it('binds only the named globals, in name order, whatever else was registered first', async () => {
+    const builtin = (globalName: string) => ({
+      version: '1.0.0',
+      code: 'export default {};',
+      globalName,
+      registryExpression: `globalThis.__rolldownKeyHistory_${globalName}`,
+    });
+    const source = { 'main.ts': 'export const result = [typeof alpha, typeof beta, typeof other];' };
+    const fresh = await createRolldownModuleVm({ filesystem: fileSystem(source) });
+    fresh.registerModule('beta-lib', builtin('beta'));
+    fresh.registerModule('alpha-lib', builtin('alpha'));
+    const warm = await createRolldownModuleVm({ filesystem: fileSystem(source) });
+    warm.registerModule('other-lib', builtin('other'));
+    warm.registerModule('alpha-lib', builtin('alpha'));
+    warm.registerModule('beta-lib', builtin('beta'));
+    try {
+      const globals = ['alpha-lib', 'beta-lib'];
+      const [freshBundle, warmBundle] = await Promise.all([
+        fresh.bundle('main.ts', undefined, globals),
+        warm.bundle('main.ts', undefined, globals),
+      ]);
+      expect(freshBundle.success).toBe(true);
+      expect(warmBundle.code).toBe(freshBundle.code);
+      expect(warmBundle.code).not.toContain('__rolldownKeyHistory_other');
+    } finally {
+      fresh.dispose();
+      warm.dispose();
+    }
+  });
+
   it('provides an actionable stable native capability error', () => {
     const error = new NativeRolldownCapabilityError(new Error('missing binding'));
     expect(error).toMatchObject({

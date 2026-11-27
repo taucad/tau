@@ -3,5 +3,5 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/libs/converter",
   "projectType": "library",
-  "tags": ["scope:ui", "type:app-lib", "layer:feature"]
+  "tags": ["scope:ui", "type:app-lib", "layer:feature", "ui:unlayered"]
 }

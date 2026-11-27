@@ -24,6 +24,14 @@
     "nx-release-publish": {
       "executor": "@nx/js:release-publish",
       "dependsOn": ["^nx-release-publish", "tscircuit:pkgcheck", "tscircuit:check-vendored-licenses"]
+    },
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/libs/tau-examples/src/kernels/tscircuit/led-board/main.tsx"
+      ]
     }
   },
   "tags": ["scope:shared", "type:package"]

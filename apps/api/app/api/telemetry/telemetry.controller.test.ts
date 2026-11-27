@@ -17,6 +17,9 @@ function createMockMetrics() {
     agentTurnDuration: { record: vi.fn() },
     agentTimeToFirstUpdate: { record: vi.fn() },
     agentToolCalls: { add: vi.fn() },
+    agentToolResults: { add: vi.fn() },
+    agentToolResultDelay: { record: vi.fn() },
+    agentAdmissionDelay: { record: vi.fn() },
     agentTokens: { add: vi.fn() },
     agentErrors: { add: vi.fn() },
     agentSafeguardInterventions: { add: vi.fn() },
@@ -511,6 +514,82 @@ describe('TelemetryController', () => {
         [AttributeKey.AGENT_PLACEMENT]: 'daemon',
         [AttributeKey.AGENT_OUTCOME]: 'started',
       });
+    });
+  });
+
+  /* B4, C3: a synthetic turn with every delivery and admission field passes the ingest pipe and maps to its series. */
+  describe('tool-result delivery and admission phases', () => {
+    const pipe = new ZodValidationPipe();
+    const browser = { [AttributeKey.AGENT_ID]: 'tau', [AttributeKey.AGENT_PLACEMENT]: 'browser' };
+    const turnWith = (detail: Record<string, unknown>) => ({
+      entries: [
+        {
+          name: IngestEntryName.AGENT_TURN,
+          duration: 4000,
+          detail: { agentId: 'tau', placement: 'browser', outcome: 'completed', ...detail },
+        },
+      ],
+    });
+    const delivered = {
+      toolResults: 3,
+      toolResultsExcluded: 2,
+      toolResultsUnsettled: 1,
+      toolResultDelayMax: 1.25,
+      admissionDelay: { create: 1.5, page: 0.05, dispatch: 0.03, host: 0.08, delivery: 0.02 },
+      hostStart: 'cold',
+      chatState: 'reopened',
+      deploymentRefetched: true,
+    };
+    const validated = (body: unknown): IngestPayloadDto =>
+      // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- pipe.transform return type is any from NestJS ValidationPipe
+      pipe.transform(body, { type: 'body', metatype: IngestPayloadDto });
+
+    it('should record every field of a synthetic turn on its series', () => {
+      ingestSignedIn(validated(turnWith(delivered)));
+
+      expect(mockMetrics.agentToolResults.add.mock.calls).toEqual([
+        [3, { ...browser, [AttributeKey.AGENT_TOOL_RESULT_DELIVERY]: 'timed' }],
+        [2, { ...browser, [AttributeKey.AGENT_TOOL_RESULT_DELIVERY]: 'excluded' }],
+        [1, { ...browser, [AttributeKey.AGENT_TOOL_RESULT_DELIVERY]: 'unsettled' }],
+      ]);
+      expect(mockMetrics.agentToolResultDelay.record).toHaveBeenCalledWith(1.25, browser);
+      const labels = {
+        ...browser,
+        [AttributeKey.AGENT_HOST_START]: 'cold',
+        [AttributeKey.AGENT_CHAT_STATE]: 'reopened',
+        [AttributeKey.AGENT_DEPLOYMENT_REFETCHED]: 'true',
+      };
+      expect(mockMetrics.agentAdmissionDelay.record.mock.calls).toEqual(
+        Object.entries(delivered.admissionDelay).map(([phase, seconds]) => [
+          seconds,
+          { ...labels, [AttributeKey.AGENT_ADMISSION_PHASE]: phase },
+        ]),
+      );
+    });
+
+    it('should label an unreported admission fact as unreported and record no delay without a timed result', () => {
+      ingestSignedIn(
+        validated(turnWith({ toolResultsExcluded: 1, toolResultDelayMax: 9, admissionDelay: { host: 0.1 } })),
+      );
+
+      expect(mockMetrics.agentToolResults.add).toHaveBeenCalledTimes(1);
+      expect(mockMetrics.agentToolResultDelay.record).not.toHaveBeenCalled();
+      expect(mockMetrics.agentAdmissionDelay.record).toHaveBeenCalledWith(0.1, {
+        ...browser,
+        [AttributeKey.AGENT_HOST_START]: 'unreported',
+        [AttributeKey.AGENT_CHAT_STATE]: 'unreported',
+        [AttributeKey.AGENT_DEPLOYMENT_REFETCHED]: 'unreported',
+        [AttributeKey.AGENT_ADMISSION_PHASE]: 'host',
+      });
+    });
+
+    it('should still reject a field outside the allowlist: dropped from the detail, or refused in a phase', () => {
+      const parsed = validated(turnWith({ ...delivered, chatId: 'chat_1', prompt: 'a bracket' }));
+
+      expect(parsed.entries[0]).toMatchObject({ detail: { agentId: 'tau', ...delivered } });
+      expect(parsed.entries[0]).not.toHaveProperty('detail.chatId');
+      expect(parsed.entries[0]).not.toHaveProperty('detail.prompt');
+      expect(() => validated(turnWith({ admissionDelay: { model: 1 } }))).toThrow();
     });
   });
 

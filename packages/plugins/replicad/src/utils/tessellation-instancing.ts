@@ -1,7 +1,6 @@
 import type { GlbMaterial } from '@taucad/geometry-core';
 import type { AnyShape } from 'replicad';
 import type { OpenCascadeInstance, TopoDS_Shape } from 'replicad-opencascadejs';
-import type { SetRequired } from 'type-fest';
 import type { GeometryReplicad } from '#replicad.types.js';
 
 /* oxlint-disable new-cap -- OCJS embind exposes C++ PascalCase methods as callable JavaScript functions. */
@@ -15,7 +14,9 @@ export type Tessellation = {
 
 /**
  */
-export type Meshable = SetRequired<AnyShape, 'mesh' | 'meshEdges'>;
+// Spelled without `type-fest`: the kernel's context type reaches this, and a `type-fest` type in it would make the
+// declaration bundler ship a copy of `type-fest` in `dist/node_modules`.
+export type Meshable = AnyShape & Required<Pick<AnyShape, 'mesh' | 'meshEdges'>>;
 
 /**
  * Where one occurrence of a shape sits: the key shared by its OCCT partners (same `TShape`), its orientation and its
@@ -70,8 +71,6 @@ export type ReplicadTessellationInstance = {
   material?: GlbMaterial;
   locationMatrix: ReplicadShapeIdentityInfo['locationMatrix'];
   determinant: number;
-  faceIds?: number[];
-  edgeIds?: number[];
 };
 
 type ReplicadInstancingOc = OpenCascadeInstance & {
@@ -90,8 +89,6 @@ type ReplicadInstancingBindings = {
   ReplicadPrototypeMeshExtractor?: {
     ExtractFaces(shape: unknown, tolerance: number, angularTolerance: number, skipNormals: boolean): NativeFaceMesh;
     ExtractEdges(shape: unknown, tolerance: number, angularTolerance: number): NativeEdgeMesh;
-    ExtractFaceIds(shape: unknown): NativeIdArray;
-    ExtractEdgeIds(shape: unknown, tolerance: number, angularTolerance: number): NativeIdArray;
   };
 };
 
@@ -127,12 +124,6 @@ type NativeEdgeMesh = {
   delete(): void;
 };
 
-type NativeIdArray = {
-  getIdsPtr(): number;
-  getIdsSize(): number;
-  delete(): void;
-};
-
 type ReplicadInstancingOrientations = {
   TopAbs_Orientation: {
     TopAbs_FORWARD: unknown;
@@ -159,19 +150,12 @@ type ExtractPrototypeEdgesOptions = {
   tessellation: Tessellation;
 };
 
-type ExtractTopologyIdsOptions = {
-  openCascade: OpenCascadeInstance;
-  shape: Meshable;
-  tessellation?: Tessellation;
-};
-
 type TransformReplicadGeometryInstanceOptions = {
   prototype: GeometryReplicad;
   instance: ReplicadTessellationInstance;
 };
 
 type Point3 = readonly [number, number, number];
-type MatrixTransform = (matrix: readonly number[], point: Point3) => [number, number, number];
 
 const angularToleranceToRad = (tessellation: Tessellation): number => tessellation.angularTolerance * (Math.PI / 180);
 
@@ -336,16 +320,34 @@ function vectorialDeterminant(matrix: ReplicadShapeOccurrenceInfo['locationMatri
 }
 
 /**
- * Creates a reader of occurrence identity for one render. Partners are found by hashing each shape at the identity
- * location (`TShape` only; the hasher ignores orientation) and confirming with `IsPartner` against the first shape seen
- * with that hash, so a hash collision gets its own key. No BRep is serialized. The reader holds the shapes it has seen
- * as partner representatives, so drop it before those shapes are deleted.
+ * Partner keys of native shapes: equal exactly when two shapes share a `TShape`. Each shape is hashed at the identity
+ * location (`TShape` only; the hasher ignores orientation) and confirmed with `IsPartner` against the representatives
+ * seen with that hash, so a hash collision gets its own key. No BRep is serialized.
+ */
+export type ReplicadPartnerTable = {
+  /** The partner key of a non-null handle. */
+  keyOf(handle: TopoDS_Shape): string;
+  /** Forgets a partner, deleting its representative when the table owns it. */
+  forget(key: string): void;
+  /** Forgets every partner. */
+  dispose(): void;
+};
+
+/**
+ * Creates a partner table. A borrowing table keeps the shapes it was shown as representatives, so drop it before those
+ * shapes are deleted. An owning table keeps its own alias of each representative (the same `TShape` at the identity
+ * location), so a key stays valid across renders: the `TShape` cannot be freed and its address reused while the table
+ * holds it.
  *
  * @param openCascade - The OpenCascade instance whose Replicad identity bindings to use.
- * @returns A reader whose partner keys are equal exactly when two shapes share a `TShape`.
+ * @param options - `owned`: keep an alias of each representative instead of borrowing the shape.
+ * @returns The table.
  * @throws When the Replicad identity bindings are missing.
  */
-export function createReplicadOccurrenceReader(openCascade: OpenCascadeInstance): ReplicadOccurrenceReader {
+export function createReplicadPartnerTable(
+  openCascade: OpenCascadeInstance,
+  { owned }: { owned: boolean },
+): ReplicadPartnerTable {
   const { ReplicadShapeHasher: hasher, ReplicadShapeIdentity: identity } = asInstancingBindings(openCascade);
   if (!hasher) {
     throw new Error('Replicad tessellation instancing bindings are unavailable: ReplicadShapeHasher is missing');
@@ -354,34 +356,82 @@ export function createReplicadOccurrenceReader(openCascade: OpenCascadeInstance)
     throw new Error('Replicad tessellation instancing bindings are unavailable: ReplicadShapeIdentity is missing');
   }
 
-  const representatives = new Map<number, TopoDS_Shape[]>();
+  type Representative = { readonly key: string; readonly shape: TopoDS_Shape };
+  const buckets = new Map<number, { serial: number; representatives: Representative[] }>();
+  const hashOfKey = new Map<string, number>();
 
-  const partnerKey = (handle: TopoDS_Shape): string => {
-    const identityLocation = new openCascade.TopLoc_Location();
-    let hash: number;
-    try {
-      const located = handle.Located(identityLocation, false);
+  return {
+    keyOf(handle) {
+      const identityLocation = new openCascade.TopLoc_Location();
+      let located: TopoDS_Shape | undefined;
+      let hash: number;
       try {
+        located = handle.Located(identityLocation, false);
         hash = hasher.HashCode(located, partnerHashUpperBound);
+      } catch (error) {
+        located?.delete();
+        throw error;
       } finally {
-        located.delete();
+        identityLocation.delete();
       }
-    } finally {
-      identityLocation.delete();
-    }
 
-    let bucket = representatives.get(hash);
-    if (!bucket) {
-      bucket = [];
-      representatives.set(hash, bucket);
-    }
-    let slot = bucket.findIndex((representative) => identity.IsPartner(representative, handle));
-    if (slot === -1) {
-      slot = bucket.push(handle) - 1;
-    }
-    return `${hash.toString(16)}.${String(slot)}`;
+      let bucket = buckets.get(hash);
+      if (!bucket) {
+        bucket = { serial: 0, representatives: [] };
+        buckets.set(hash, bucket);
+      }
+      const found = bucket.representatives.find((representative) => identity.IsPartner(representative.shape, handle));
+      if (found) {
+        located.delete();
+        return found.key;
+      }
+      const key = `${hash.toString(16)}.${String(bucket.serial++)}`;
+      if (owned) {
+        bucket.representatives.push({ key, shape: located });
+      } else {
+        located.delete();
+        bucket.representatives.push({ key, shape: handle });
+      }
+      hashOfKey.set(key, hash);
+      return key;
+    },
+    forget(key) {
+      const hash = hashOfKey.get(key);
+      if (hash === undefined) {
+        return;
+      }
+      hashOfKey.delete(key);
+      const bucket = buckets.get(hash)!;
+      const index = bucket.representatives.findIndex((representative) => representative.key === key);
+      const [removed] = bucket.representatives.splice(index, 1);
+      if (owned) {
+        removed?.shape.delete();
+      }
+      if (bucket.representatives.length === 0) {
+        buckets.delete(hash);
+      }
+    },
+    dispose() {
+      for (const key of hashOfKey.keys()) {
+        this.forget(key);
+      }
+    },
   };
+}
 
+/**
+ * Creates a reader of occurrence identity. Without a partner table it borrows the shapes it reads as partner
+ * representatives for one render, so drop it before those shapes are deleted.
+ *
+ * @param openCascade - The OpenCascade instance whose Replicad identity bindings to use.
+ * @param partners - The partner table keys come from; by default a borrowing table of this reader's own.
+ * @returns A reader whose partner keys are equal exactly when two shapes share a `TShape`.
+ * @throws When the Replicad identity bindings are missing.
+ */
+export function createReplicadOccurrenceReader(
+  openCascade: OpenCascadeInstance,
+  partners: ReplicadPartnerTable = createReplicadPartnerTable(openCascade, { owned: false }),
+): ReplicadOccurrenceReader {
   return (shape) => {
     const handle = shapeHandle(shape) as TopoDS_Shape;
     if (handle.IsNull()) {
@@ -390,7 +440,7 @@ export function createReplicadOccurrenceReader(openCascade: OpenCascadeInstance)
 
     const locationMatrix = readLocationMatrix(handle);
     return {
-      partnerKey: partnerKey(handle),
+      partnerKey: partners.keyOf(handle),
       orientation: orientationName(openCascade, handle.Orientation()),
       locationMatrix,
       determinant: vectorialDeterminant(locationMatrix),
@@ -463,57 +513,25 @@ export function extractPrototypeEdges({
 }
 
 /**
+ * Points placed by a location matrix, rounded once to single precision. The products are summed in the order OCCT's
+ * `gp_Trsf` value matrix is applied, `((m0 x + m1 y) + m2 z) + m3`, so a placement gives the same values a world-space
+ * mesh does; the loop allocates nothing per point.
+ * @param values - Points as x, y, z triplets.
+ * @param matrix - Row-major 3x4 (or 4x4) location matrix.
+ * @returns The placed points.
  */
-export function extractInstanceFaceIds({ openCascade, shape }: ExtractTopologyIdsOptions): number[] {
-  const oc = asInstancingOc(openCascade);
-  const extractor = asInstancingBindings(openCascade).ReplicadPrototypeMeshExtractor;
-  if (!extractor) {
-    throw new Error(
-      'Replicad tessellation instancing bindings are unavailable: ReplicadPrototypeMeshExtractor is missing',
-    );
+function transformPoints(values: ArrayLike<number>, matrix: readonly number[]): Float32Array {
+  const [m0 = 0, m1 = 0, m2 = 0, m3 = 0, m4 = 0, m5 = 0, m6 = 0, m7 = 0, m8 = 0, m9 = 0, m10 = 0, m11 = 0] = matrix;
+  const transformed = new Float32Array(values.length - (values.length % 3));
+  for (let index = 0; index < transformed.length; index += 3) {
+    const x = values[index]!;
+    const y = values[index + 1]!;
+    const z = values[index + 2]!;
+    transformed[index] = m0 * x + m1 * y + m2 * z + m3;
+    transformed[index + 1] = m4 * x + m5 * y + m6 * z + m7;
+    transformed[index + 2] = m8 * x + m9 * y + m10 * z + m11;
   }
-
-  const raw = extractor.ExtractFaceIds(shapeHandle(shape));
-  try {
-    return readInt32Array(oc, raw.getIdsPtr(), raw.getIdsSize());
-  } finally {
-    raw.delete();
-  }
-}
-
-/**
- */
-export function extractInstanceEdgeIds({ openCascade, shape, tessellation }: ExtractTopologyIdsOptions): number[] {
-  if (!tessellation) {
-    return [];
-  }
-
-  const oc = asInstancingOc(openCascade);
-  const extractor = asInstancingBindings(openCascade).ReplicadPrototypeMeshExtractor;
-  if (!extractor) {
-    throw new Error(
-      'Replicad tessellation instancing bindings are unavailable: ReplicadPrototypeMeshExtractor is missing',
-    );
-  }
-
-  const raw = extractor.ExtractEdgeIds(
-    shapeHandle(shape),
-    tessellation.linearTolerance,
-    angularToleranceToRad(tessellation),
-  );
-  try {
-    return readInt32Array(oc, raw.getIdsPtr(), raw.getIdsSize());
-  } finally {
-    raw.delete();
-  }
-}
-
-function transformPoint(matrix: readonly number[], [x, y, z]: Point3): [number, number, number] {
-  return [
-    (matrix[0] ?? 0) * x + (matrix[1] ?? 0) * y + (matrix[2] ?? 0) * z + (matrix[3] ?? 0),
-    (matrix[4] ?? 0) * x + (matrix[5] ?? 0) * y + (matrix[6] ?? 0) * z + (matrix[7] ?? 0),
-    (matrix[8] ?? 0) * x + (matrix[9] ?? 0) * y + (matrix[10] ?? 0) * z + (matrix[11] ?? 0),
-  ];
+  return transformed;
 }
 
 function normalMatrix(matrix: readonly number[]): readonly number[] {
@@ -556,17 +574,33 @@ function transformVector(matrix: readonly number[], [x, y, z]: Point3): [number,
   return [nx / length, ny / length, nz / length];
 }
 
-function transformTriplets(
-  values: ArrayLike<number>,
-  matrix: readonly number[],
-  transform: MatrixTransform,
-): Float32Array {
+/**
+ * Unit vectors transformed by a 3x3 matrix and normalized, rounded once to single precision; a vector that vanishes
+ * becomes +Z. The loop allocates nothing per vector.
+ * @param values - Vectors as x, y, z triplets.
+ * @param matrix - Row-major 3x3 matrix.
+ * @returns The transformed vectors.
+ */
+function transformVectors(values: ArrayLike<number>, matrix: readonly number[]): Float32Array {
+  const [m0 = 0, m1 = 0, m2 = 0, m3 = 0, m4 = 0, m5 = 0, m6 = 0, m7 = 0, m8 = 0] = matrix;
   const transformed = new Float32Array(values.length - (values.length % 3));
   for (let index = 0; index < transformed.length; index += 3) {
-    const [x, y, z] = transform(matrix, [values[index]!, values[index + 1]!, values[index + 2]!]);
-    transformed[index] = x;
-    transformed[index + 1] = y;
-    transformed[index + 2] = z;
+    const x = values[index]!;
+    const y = values[index + 1]!;
+    const z = values[index + 2]!;
+    const nx = m0 * x + m1 * y + m2 * z;
+    const ny = m3 * x + m4 * y + m5 * z;
+    const nz = m6 * x + m7 * y + m8 * z;
+    const length = Math.hypot(nx, ny, nz);
+    if (length === 0) {
+      transformed[index] = 0;
+      transformed[index + 1] = 0;
+      transformed[index + 2] = 1;
+      continue;
+    }
+    transformed[index] = nx / length;
+    transformed[index + 1] = ny / length;
+    transformed[index + 2] = nz / length;
   }
   return transformed;
 }
@@ -587,7 +621,7 @@ function transformNormals(values: ArrayLike<number>, matrix: readonly number[]):
     return Float32Array.from(values);
   }
 
-  return transformTriplets(values, normals, transformVector);
+  return transformVectors(values, normals);
 }
 
 function transformTangents(values: number[] | undefined, instance: ReplicadTessellationInstance): number[] | undefined {
@@ -617,47 +651,10 @@ function transformTriangles(triangles: Uint32Array, determinant: number): Uint32
   return transformed;
 }
 
-function applyFaceIds(
-  groups: GeometryReplicad['faces']['faceGroups'],
-  ids: number[] | undefined,
-): GeometryReplicad['faces']['faceGroups'] {
-  if (!ids) {
-    return groups.map((group) => ({ ...group }));
-  }
-
-  if (ids.length !== groups.length) {
-    throw new Error(
-      `Replicad tessellation instancing face ID count mismatch: expected ${groups.length}, received ${ids.length}`,
-    );
-  }
-
-  return groups.map((group, index) => ({
-    ...group,
-    faceId: ids[index]!,
-  }));
-}
-
-function applyEdgeIds(
-  groups: GeometryReplicad['edges']['edgeGroups'],
-  ids: number[] | undefined,
-): GeometryReplicad['edges']['edgeGroups'] {
-  if (!ids) {
-    return groups.map((group) => ({ ...group }));
-  }
-
-  if (ids.length !== groups.length) {
-    throw new Error(
-      `Replicad tessellation instancing edge ID count mismatch: expected ${groups.length}, received ${ids.length}`,
-    );
-  }
-
-  return groups.map((group, index) => ({
-    ...group,
-    edgeId: ids[index]!,
-  }));
-}
-
 /**
+ * One instance of a prototype: the prototype's mesh at the instance's placement. Face and edge groups are the
+ * prototype's own (shared, never written downstream): the glTF packer numbers groups by index, so an instance needs no
+ * labels of its own (catalogue N5).
  */
 export function transformReplicadGeometryInstance({
   prototype,
@@ -674,14 +671,14 @@ export function transformReplicadGeometryInstance({
     faces: {
       texCoords: prototype.faces.texCoords,
       tangents: transformTangents(prototype.faces.tangents, instance),
-      vertices: transformTriplets(prototype.faces.vertices, instance.locationMatrix, transformPoint),
+      vertices: transformPoints(prototype.faces.vertices, instance.locationMatrix),
       normals: transformNormals(prototype.faces.normals, instance.locationMatrix),
       triangles: transformTriangles(prototype.faces.triangles, instance.determinant),
-      faceGroups: applyFaceIds(prototype.faces.faceGroups, instance.faceIds),
+      faceGroups: prototype.faces.faceGroups,
     },
     edges: {
-      lines: transformTriplets(prototype.edges.lines, instance.locationMatrix, transformPoint),
-      edgeGroups: applyEdgeIds(prototype.edges.edgeGroups, instance.edgeIds),
+      lines: transformPoints(prototype.edges.lines, instance.locationMatrix),
+      edgeGroups: prototype.edges.edgeGroups,
     },
   };
 }

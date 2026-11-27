@@ -46,8 +46,8 @@ describe('cloud deletion confirmation browser acceptance', () => {
       expect(bounds.width).toBeGreaterThanOrEqual(24);
       expect(bounds.height).toBeGreaterThanOrEqual(24);
       await page.getByRole('button', { name: 'Actions for Precision bracket' }).click();
-      await page.getByRole('menuitem', { name: 'Delete from Tau Cloud…' }).click();
-      const dialog = page.getByRole('alertdialog', { name: 'Delete “Precision bracket” from Tau Cloud?' });
+      await page.getByRole('menuitem', { name: 'Delete cloud copy…' }).click();
+      const dialog = page.getByRole('alertdialog', { name: 'Delete the cloud copy of “Precision bracket”?' });
       await expect.element(dialog).toBeVisible();
       expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
       const content = screen.getByRole('alertdialog').getBoundingClientRect();

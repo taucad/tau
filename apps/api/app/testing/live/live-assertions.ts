@@ -77,8 +77,14 @@ export const expectPairedToolMessages = (snapshot: HostRunSnapshot): void => {
 export type StepUsage = Readonly<{
   /** Assistant rows (model steps) counted. */
   steps: number;
+  /** Uncached input tokens. */
+  inputTokens: number;
   /** Output tokens, reasoning included: the provider bills thinking as output. */
   outputTokens: number;
+  /** The share of output the provider reports as reasoning; zero where it reports none. */
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   /** The provider-priced cost of those steps, in US dollars. */
   costUsd: number;
 }>;
@@ -87,7 +93,11 @@ const sumUsage = (messages: readonly ProviderMessage[]): StepUsage => {
   const steps = messages.filter((message) => message.role === 'assistant');
   return {
     steps: steps.length,
+    inputTokens: steps.reduce((total, message) => total + (message.metadata?.usage?.input ?? 0), 0),
     outputTokens: steps.reduce((total, message) => total + (message.metadata?.usage?.output ?? 0), 0),
+    reasoningTokens: steps.reduce((total, message) => total + (message.metadata?.usage?.reasoning ?? 0), 0),
+    cacheReadTokens: steps.reduce((total, message) => total + (message.metadata?.usage?.cacheRead ?? 0), 0),
+    cacheWriteTokens: steps.reduce((total, message) => total + (message.metadata?.usage?.cacheWrite ?? 0), 0),
     costUsd: steps.reduce((total, message) => total + (message.metadata?.usage?.cost.total ?? 0), 0),
   };
 };

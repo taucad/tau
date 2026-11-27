@@ -1,22 +1,25 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { Workspace, WorkspaceEntry } from '@taucad/files-ui/filesystem/handle-store';
-import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 import FilesRoute from '#routes/files/route.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import type { RootStatus } from '@taucad/filesystem';
 
 type ToastSuccessOptions = {
   readonly action: { readonly label: string; readonly onClick: () => void | Promise<void> };
 };
 
 const {
+  desktop,
   catalogState,
   connectionState,
   mockAssertWorkspaceMutationAllowed,
   mockDisconnectWorkspace,
   mockGetWorkspace,
+  mockReadShallowDirectory,
   mockRefreshWorkspaceCatalog,
   mockRestoreWorkspaceHandle,
   mockToastSuccess,
@@ -25,11 +28,19 @@ const {
 } = vi.hoisted(() => {
   const workspaceConnectionState: { current: WorkspaceConnectionState } = { current: { phase: 'idle' } };
   return {
+    desktop: {
+      grants: [] as string[],
+      rootStatuses: [] as RootStatus[],
+      workspaces: undefined as Workspace[] | undefined,
+    },
     catalogState: { extraWorkspaces: [] as Workspace[] },
     connectionState: { connected: true },
     mockAssertWorkspaceMutationAllowed: vi.fn(),
     mockDisconnectWorkspace: vi.fn<(workspaceId: string) => Promise<WorkspaceEntry | undefined>>(),
     mockGetWorkspace: vi.fn<(workspaceId: string) => Promise<WorkspaceEntry | undefined>>(),
+    mockReadShallowDirectory: vi.fn<(path: string, options: { scope: { backend: string } }) => Promise<unknown[]>>(
+      async () => [],
+    ),
     mockRefreshWorkspaceCatalog: vi.fn(),
     mockRestoreWorkspaceHandle: vi.fn<(workspaceId: string, handle: FileSystemDirectoryHandle) => Promise<boolean>>(),
     mockToastSuccess: vi.fn<(message: string, options?: ToastSuccessOptions) => void>(),
@@ -48,11 +59,26 @@ const handle = mock<FileSystemDirectoryHandle>({ name: 'Workshop' });
 const entry: WorkspaceEntry = { workspace, handle };
 
 vi.mock('#hooks/use-file-manager.js', () => {
+  const fileManagerRef = {
+    getSnapshot: () => ({
+      status: 'active',
+      matches: () => false,
+      context: { rootStatuses: desktop.rootStatuses },
+    }),
+    subscribe: () => ({ unsubscribe: () => undefined }),
+    send: vi.fn(),
+  };
   const value = {
+    fileManagerRef,
     client: {
       getZippedDirectory: vi.fn(),
       readFile: vi.fn(),
       readShallowDirectory: vi.fn(async () => []),
+    },
+    scopedStorage: {
+      readShallowDirectory: mockReadShallowDirectory,
+      readFile: vi.fn(),
+      getZippedDirectory: vi.fn(),
     },
     workspace: {
       disconnectWorkspace: mockDisconnectWorkspace,
@@ -81,7 +107,16 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   checkHandlePermission: vi.fn(async () => 'granted'),
   getWorkspace: mockGetWorkspace,
-  listWorkspaces: vi.fn(async () => [workspace, ...catalogState.extraWorkspaces]),
+  listWorkspaces: vi.fn(async () => desktop.workspaces ?? [workspace, ...catalogState.extraWorkspaces]),
+  listProjectsForWorkspace: vi.fn(async () => []),
+  removeWorkspace: vi.fn(async () => true),
+  requestHandlePermission: vi.fn(async () => true),
+  subscribeProjectRootConfigurationChanges: () => () => undefined,
+}));
+
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
+  desktopBridge: () => ({ directories: { list: async () => desktop.grants, disconnect: vi.fn() } }),
+  nodeHomeRoot: () => '/Users/tester/Library/Application Support/Tau/home',
 }));
 
 vi.mock('#utils/workspace-telemetry.utils.js', () => ({
@@ -232,5 +267,101 @@ describe('FilesRoute layout', () => {
       expect(tree.className).toMatch(/(?:^|\s)max-h-\S+/);
       expect(tree).toHaveClass('overflow-auto');
     }
+  });
+});
+
+describe('FilesRoute folders that are not found', () => {
+  const nodeWorkspace = (name: string): Workspace => ({
+    workspaceId: `wsp_${name.toLowerCase()}`,
+    name,
+    slug: name.toLowerCase(),
+    lastConnectedAt: 1,
+    path: `/Users/tester/${name}`,
+  });
+  const connected = nodeWorkspace('Workshop');
+  const lostA = nodeWorkspace('Scratch');
+  const lostB = nodeWorkspace('Archive');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    workspaceConnectionState.current = { phase: 'idle' };
+    desktop.workspaces = [lostA, connected, lostB];
+    desktop.grants = [connected.path!, lostA.path!, lostB.path!];
+    desktop.rootStatuses = [
+      { storageRootKey: `node:${connected.path!}`, backend: 'node', state: 'available' },
+      { storageRootKey: `node:${lostA.path!}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+      { storageRootKey: `node:${lostB.path!}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    desktop.workspaces = undefined;
+  });
+
+  it('should collapse the not-found rows into one group with Remove all below the working rows', async () => {
+    render(
+      <TooltipProvider>
+        <FilesRoute />
+      </TooltipProvider>,
+    );
+
+    const group = await screen.findByRole('button', { name: 'Folders not found (2)' });
+    expect(group).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Remove all' })).toBeEnabled();
+    const ordered = [...document.body.querySelectorAll('span, button')];
+    expect(ordered.indexOf(screen.getByText('Workshop'))).toBeLessThan(ordered.indexOf(group));
+    expect(screen.queryByText('Scratch')).not.toBeInTheDocument();
+    expect(screen.queryByText('Archive')).not.toBeInTheDocument();
+
+    fireEvent.click(group);
+
+    expect(group).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Scratch')).toBeInTheDocument();
+    expect(screen.getByText('Archive')).toBeInTheDocument();
+  });
+});
+
+describe('FilesRoute listing failures (R2)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    connectionState.connected = true;
+    workspaceConnectionState.current = { phase: 'idle' };
+    catalogState.extraWorkspaces = [];
+    mockReadShallowDirectory.mockImplementation(async () => []);
+  });
+
+  it('should show why a root could not be listed instead of an empty column', async () => {
+    mockReadShallowDirectory.mockImplementation(async (_path, { scope }) => {
+      if (scope.backend === 'indexeddb') {
+        throw new Error('Call result failed validation');
+      }
+      return [];
+    });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    render(
+      <TooltipProvider>
+        <FilesRoute />
+      </TooltipProvider>,
+    );
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Couldn’t list this folder');
+    expect(alert).toHaveTextContent('Call result failed validation');
+    expect(screen.queryByText('No files found')).not.toBeInTheDocument();
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
+  });
+
+  it('should keep the empty hint for a root that lists nothing', async () => {
+    render(
+      <TooltipProvider>
+        <FilesRoute />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByText('No files found')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

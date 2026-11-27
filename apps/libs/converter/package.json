@@ -26,6 +26,7 @@
   "dependencies": {
     "@taucad/assimp": "workspace:*",
     "@taucad/brep": "workspace:*",
+    "@taucad/cadmpeg": "workspace:*",
     "@taucad/gltf": "workspace:*",
     "@taucad/image": "workspace:*"
   },

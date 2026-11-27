@@ -54,8 +54,12 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 /** The attributes file is text a person may have hand-written; never fatal. */
 const decoder = new TextDecoder();
-/** A pointer is three short lines; anything longer is content. */
-const maximumPointerBytes = 1024;
+/**
+ * A pointer is three short lines; anything longer is content.
+ *
+ * @internal
+ */
+export const maximumPointerBytes = 1024;
 
 /**
  * The pointer bytes for one blob's content.

@@ -19,6 +19,11 @@ const layout = vi.hoisted(() => (name: string, label: string) => () => {
   return { [name]: () => <main aria-label={label} /> };
 });
 
+/* The replay foreign-content mark reads the project role, which needs a ProjectProvider these tests do not mount. */
+vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useProjectRole: () => undefined,
+}));
 vi.mock('#providers/part-thumbnail-provider.js', () => ({
   PartThumbnailProvider: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
 }));

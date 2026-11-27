@@ -31,6 +31,7 @@ export type {
 } from '#job-attempt-host.js';
 export type { HostCredential } from '#credential-store.js';
 export { defaultConfigDirectory, defaultDependencyStore } from '#credential-store.js';
+export { computeStoreWorkspace } from '#compute-workspace.js';
 export {
   handOffMintPath,
   handOffSessionPath,
@@ -72,7 +73,7 @@ export type {
 } from '#revisions.js';
 export type { RevisionEngineFailure, RevisionEngineFailureCode } from '#revision-engine-failures.js';
 export { isolationHeaders, serveStaticUi } from '#static-ui.js';
-export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
+export type { StaticUiHandler, StaticUiOptions, StaticUiWasmMount } from '#static-ui.js';
 export { createProjectHost, createProjectHostActor } from '#project-host.js';
 export type {
   ChatObservationSources,
@@ -101,7 +102,12 @@ export {
   readProjectId,
 } from '#machine-host.js';
 export type { CreateNodeMachineRuntimeOptions, MachineHostIdentity, MachineSecretStore } from '#machine-host.js';
-export { agentMachineFacet, openLocalMachines, openSharedMachineHost } from '#local-machines.js';
+export {
+  agentMachineFacet,
+  observeAdmissionRefusals,
+  openLocalMachines,
+  openSharedMachineHost,
+} from '#local-machines.js';
 export type {
   AdmissionRefusalReport,
   LocalMachines,
@@ -140,6 +146,7 @@ export {
   acpEnvironmentAllowlist,
   acpEnvironmentPrefixAllowlist,
   acpLiveSessionLimit,
+  acpLoginLaunch,
   acpModelProbeTimeout,
   acpNativeToolNamePaths,
   acpSessionIdleTimeout,
@@ -165,6 +172,7 @@ export type {
   AcpPromptTurn,
   AcpAgentFacts,
   AcpLimitReset,
+  AcpLoginLaunch,
   AcpSession,
   AcpShellCommand,
   AcpSupportedPlatform,

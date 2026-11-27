@@ -9,13 +9,17 @@ import { DatabaseService } from '#database.service.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- fixtures mirror process.env UPPER_SNAKE keys and postgres.js option names */
 
-const { mockAssertCompatibility, mockExecute, mockEnd, mockPostgres } = vi.hoisted(() => {
+const { mockAssertCompatibility, mockExecute, mockEnd, mockPostgres, mockQuery } = vi.hoisted(() => {
   const mockAssertCompatibility = vi.fn().mockResolvedValue(undefined);
   // The probe reads the session's role and deadlines (database connection audit R1).
   const mockExecute = vi.fn();
   const mockEnd = vi.fn().mockResolvedValue(undefined);
-  const mockPostgres = vi.fn((_url: string, _options: Record<string, unknown>) => ({ end: mockEnd }));
-  return { mockAssertCompatibility, mockExecute, mockEnd, mockPostgres };
+  // A postgres.js client is a tagged template function with methods; the warmer calls it directly.
+  const mockQuery = vi.fn().mockResolvedValue([{ '?column?': 1 }]);
+  const mockPostgres = vi.fn((_url: string, _options: Record<string, unknown>) =>
+    Object.assign(async (...args: unknown[]): Promise<unknown> => mockQuery(...args), { end: mockEnd }),
+  );
+  return { mockAssertCompatibility, mockExecute, mockEnd, mockPostgres, mockQuery };
 });
 
 vi.mock('#database-migration.js', () => ({
@@ -63,6 +67,7 @@ describe('DatabaseService', () => {
     vi.clearAllMocks();
     configuration['DATABASE_URL'] = 'postgres://test:test@db.example.com:5432/test';
     configuration['DATABASE_RUNTIME_ROLE'] = 'tau_api_runtime';
+    delete configuration['DATABASE_POOL_WARM_CONNECTIONS'];
     mockExecute.mockResolvedValue([session]);
     mockAssertCompatibility.mockResolvedValue(undefined);
 
@@ -237,6 +242,49 @@ describe('DatabaseService', () => {
       const malformedCall = vi.mocked(logger.error).mock.calls[0]!;
       const malformedPayload = malformedCall[0] as Record<string, unknown>;
       expect(malformedPayload).toMatchObject({ err: probeError, host: undefined, port: undefined });
+    });
+  });
+
+  /* Chat performance WP-05 (server audit S-04): the request pool keeps connections open between turns. */
+  describe('warm connections', () => {
+    it('should keep none by default', async () => {
+      await service.onModuleInit();
+
+      expect(mockQuery).not.toHaveBeenCalled();
+    });
+
+    it('should run one cheap statement per warm connection at once, every half idle timeout, on the request pool', async () => {
+      vi.useFakeTimers();
+      try {
+        configuration['DATABASE_POOL_WARM_CONNECTIONS'] = 2;
+        await service.onModuleInit();
+        expect(mockQuery).toHaveBeenCalledTimes(2);
+
+        await vi.advanceTimersByTimeAsync(11_000);
+        expect(mockQuery).toHaveBeenCalledTimes(4);
+
+        await service.onModuleDestroy();
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(mockQuery).toHaveBeenCalledTimes(4);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should never keep more connections than the pool may open', async () => {
+      configuration['DATABASE_POOL_WARM_CONNECTIONS'] = 9;
+      await service.onModuleInit();
+
+      expect(mockQuery).toHaveBeenCalledTimes(7);
+    });
+
+    it('should swallow a failed keep-alive', async () => {
+      configuration['DATABASE_POOL_WARM_CONNECTIONS'] = 1;
+      mockQuery.mockRejectedValueOnce(new Error('pooler down'));
+      await service.onModuleInit();
+      await vi.waitFor(() => {
+        expect(logger.debug).toHaveBeenCalledWith(expect.anything(), 'Request pool keep-alive failed');
+      });
     });
   });
 

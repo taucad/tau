@@ -10,7 +10,7 @@ import { useCameraRig, useGraphics, useGraphicsSelector } from '#hooks/use-graph
 
 type ToolToggleProps = Readonly<{
   /** Names this toggle (`data-tool`) after the tool whose row it opens (`data-tool-bar`). */
-  tool: 'section' | 'measure';
+  tool: 'section' | 'measure' | 'comment';
   /** The fixed accessible name. */
   name: string;
   /** The visible label, shown from 520 px of viewer width. */

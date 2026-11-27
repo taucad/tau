@@ -13,16 +13,37 @@
  *  3. otherwise the registry default.
  * A flag with `requires` is then off whenever the flag it names is off.
  *
- * Usage (non-React):
- *   import { isFeatureEnabled } from '#flags/feature-flags.js';
- *   if (isFeatureEnabled('tauDebug')) { … }
+ * Three-valued state: a PostHog-backed flag (and one that `requires` it) is `unknown` until the remote source has
+ * answered or the host decided no answer will come (`readRemoteFlagStatus`). A failed flag load stays `unknown`: it
+ * decided nothing. Such a flag has no boolean reader, so "not known yet" can never be read as "off": read it with
+ * `readFeatureState` (or `useFeatureState`) and decide what `unknown` means at the call site, or wait with
+ * `whenFeatureKnown`. A redirect, a persisted write or a one-shot decision must not act on `unknown`; a gate that must
+ * stop waiting when the load fails uses `useFeatureGate`, which fails open.
  *
- * For React components prefer the `useFeature` hook instead.
+ * Usage (non-React):
+ *   import { isFeatureEnabled, readFeatureState } from '#flags/feature-flags.js';
+ *   if (isFeatureEnabled('tauDebug')) { … }
+ *   if (readFeatureState('onboarding') === 'on') { … }
+ *
+ * For React components prefer the `useFeature` / `useFeatureState` hooks instead.
  */
 
-import type { FeatureFlagName, FeatureFlags, FlagDefinition } from '#flags/flag.constants.js';
+import type {
+  FeatureFlagAnswer,
+  FeatureFlagName,
+  FeatureFlags,
+  FeatureFlagState,
+  FlagDefinition,
+  LocalFeatureFlagName,
+  LocalFeatureFlags,
+} from '#flags/flag.constants.js';
 import type { RemoteFlagValues } from '#flags/remote-flags.js';
-import { isSeededFlagSourceAllowed, readRemoteFlagValues } from '#flags/remote-flags.js';
+import {
+  isSeededFlagSourceAllowed,
+  readRemoteFlagStatus,
+  readRemoteFlagValues,
+  subscribeRemoteFlags,
+} from '#flags/remote-flags.js';
 import {
   featureFlagsSchema,
   featureFlagDefaults,
@@ -123,16 +144,83 @@ function getFlags(storage?: MinimalReadStorage): FeatureFlags {
 }
 
 /**
- * Check whether a single feature flag is enabled.
+ * Check whether a single local feature flag is enabled. A PostHog-backed flag (`RemoteFeatureFlagName`) is not
+ * accepted: its value may not be known yet, so read it with {@link readFeatureState}.
  */
-export function isFeatureEnabled(flag: FeatureFlagName, storage?: MinimalReadStorage): boolean {
+export function isFeatureEnabled(flag: LocalFeatureFlagName, storage?: MinimalReadStorage): boolean {
   return getFlags(storage)[flag];
 }
 
 /**
- * Return the full resolved flag map.
+ * Why one flag is or is not known now: `on` or `off` once answered (or decided), `pending` while a PostHog-backed flag
+ * (or the flag it `requires`) waits for PostHog, `failed` when that load failed. For a gate that has to stop waiting
+ * (`useFeatureGate`); any other reader uses {@link readFeatureState}, where both are `unknown`.
+ *
+ * @param flag - The flag.
+ * @returns Its answer.
  */
-export function getAllFlags(storage?: MinimalReadStorage): FeatureFlags {
+export function readFeatureAnswer(flag: FeatureFlagName): FeatureFlagAnswer {
+  const { posthogKey, requires }: FlagDefinition = flagRegistry[flag];
+  if (posthogKey !== undefined) {
+    const status = readRemoteFlagStatus();
+    if (status === 'pending' || status === 'failed') {
+      return status;
+    }
+  }
+  if (requires !== undefined) {
+    const required = readFeatureAnswer(requires as FeatureFlagName);
+    if (required === 'pending' || required === 'failed') {
+      return required;
+    }
+  }
+  return getFlags()[flag] ? 'on' : 'off';
+}
+
+/**
+ * One flag's state now, outside React: `on`, `off`, or `unknown` while its value has not arrived. A PostHog-backed
+ * flag is `unknown` while the remote source is `pending` or its load `failed`, and a flag that `requires` an unknown
+ * flag is `unknown` too.
+ *
+ * @param flag - The flag.
+ * @returns Its state.
+ */
+export function readFeatureState(flag: FeatureFlagName): FeatureFlagState {
+  const answer = readFeatureAnswer(flag);
+  return answer === 'pending' || answer === 'failed' ? 'unknown' : answer;
+}
+
+/**
+ * Wait until a flag is known, for a decision that cannot be taken again later (a one-shot write). A failed load is not
+ * known: the wait continues until PostHog's next refresh answers.
+ *
+ * @param flag - The flag.
+ * @returns Whether it is on, once it is `on` or `off`; at once when it already is.
+ */
+export async function whenFeatureKnown(flag: FeatureFlagName): Promise<boolean> {
+  return new Promise((resolve) => {
+    let unsubscribe: (() => void) | undefined;
+    const settle = (): boolean => {
+      const state = readFeatureState(flag);
+      if (state === 'unknown') {
+        return false;
+      }
+      unsubscribe?.();
+      resolve(state === 'on');
+      return true;
+    };
+    if (!settle()) {
+      unsubscribe = subscribeRemoteFlags(() => {
+        settle();
+      });
+    }
+  });
+}
+
+/**
+ * Return the resolved values of the local flags. The PostHog-backed flags are left out of the type: read them with
+ * {@link readFeatureState}.
+ */
+export function getAllFlags(storage?: MinimalReadStorage): LocalFeatureFlags {
   return getFlags(storage);
 }
 
@@ -161,5 +249,5 @@ export const flagProbeGlobal = '__tauFeatureFlags';
 
 /* Undeployed debug builds only (the e2e suites and local development), and only in a document. */
 if (isSeededFlagSourceAllowed && typeof document !== 'undefined') {
-  Object.defineProperty(globalThis, flagProbeGlobal, { configurable: true, value: () => getAllFlags() });
+  Object.defineProperty(globalThis, flagProbeGlobal, { configurable: true, value: () => getFlags() });
 }

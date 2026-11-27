@@ -1,7 +1,7 @@
 import { File as FileIcon } from 'lucide-react';
 import type { FileExtension } from '@taucad/types';
 import { fileExtensionSet } from '@taucad/types/constants';
-import { FormatBadge } from '@taucad/workbench-panes/components/format-badge';
+import { FormatBadge } from '@taucad/ui/components/format-badge';
 import { SvgIcon } from '#icons/svg-icon.js';
 import type { SvgIcons } from '#icons/generated/svg-icons.js';
 

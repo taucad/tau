@@ -10,7 +10,8 @@ NX_NO_CLOUD = "true"
 WWW_LAUNCH = "false"
 WWW_ORIGIN = "https://tau.new"
 
-# The adapter creates this SSR function, which imports the server build.
+# The adapter (4.x) creates this SSR function, which imports the server build
+# `build/server/index.js` and the adapter's `serverless` request handler.
 # Declare it explicitly so the CLI bundles from its real package directory.
 [functions]
 directory = ".netlify/v1/functions"

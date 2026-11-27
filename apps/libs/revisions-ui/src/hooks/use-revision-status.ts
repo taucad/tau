@@ -1,0 +1,1901 @@
+/**
+ * The page's client of the worker revision root (architecture A38).
+ *
+ * The page holds no revision actor. It opens one `MessagePort` per project
+ * route to the file-manager worker, reads the `RevisionStatus` projection off
+ * it, and sends the machine's own verbs back down it. Everything stateful —
+ * `projectRevisionsMachine`, its checkout, turn, restore and registry children,
+ * the `isomorphic-git` port and the `.tau/runs` leases — lives in the worker.
+ *
+ * What only the app can reach — the API origin, the GitHub connections API, the
+ * desktop agent host, error reporting and the page's telemetry consent — is
+ * handed in as {@link RevisionStatusServices}; the app binds them once.
+ */
+
+import { useCallback, useSyncExternalStore } from 'react';
+import { Topic } from '@taucad/events';
+import type {
+  GitRemoteCredential,
+  PublishDraft,
+  RemoteFacet,
+  RevisionDiffEntry,
+  RevisionDivergence,
+  RevisionGraph,
+  RevisionRow,
+  RevisionStatusProjection,
+  RevisionTag,
+} from '@taucad/revisions';
+import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
+import type { CheckoutCutsOutcome, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
+import { isGithubRemoteUrl, tauRemoteUrl } from '@taucad/revisions';
+import { githubNoreplyAuthor, githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
+import type { GithubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
+import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
+import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
+import type {
+  ReportingConsent,
+  RevisionToast,
+  WorkerRevisionCommand,
+  WorkerRevisionEvent,
+  WorkerRevisionRequest,
+  WorkerRevisionResponse,
+  WorkerRevisionResult,
+  BranchCreated,
+} from '#types/revision-worker-protocol.js';
+import type { RevisionClient, RevisionCredentialSource, RevisionSessionUser } from '#types/revision-client.types.js';
+import { revisionClients } from '#services/revision-client-registry.js';
+
+type ConnectionOperation = 'connect' | 'status' | 'open' | 'subscribe' | 'stream';
+
+/**
+ * A client's connection half: everything but the identity commands, which
+ * {@link withRevisionIdentity} adds the same way to every host's connection.
+ *
+ * @public
+ */
+export type RevisionClientConnection = Omit<RevisionClient, 'setUser' | 'setCredential'>;
+
+/** One failed attachment shared by every caller waiting for its initialization. */
+class RevisionConnectionError extends Error {
+  public readonly code: string;
+  public readonly operation: ConnectionOperation;
+  public readonly generation: number;
+
+  public constructor(cause: unknown, operation: ConnectionOperation, generation: number) {
+    super(cause instanceof Error ? cause.message : 'The revision connection failed.', { cause });
+    this.name = 'RevisionConnectionError';
+    this.code =
+      typeof cause === 'object' && cause !== null && 'code' in cause && typeof cause.code === 'string'
+        ? cause.code
+        : 'REVISION_CONNECTION_FAILED';
+    this.operation = operation;
+    this.generation = generation;
+  }
+}
+
+const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Whether the host's answer to a graph read has the graph's shape: every
+ * branch a name and a head, every row an entry id and the line it is on.
+ *
+ * @param value - What the host's `graph` answered.
+ * @returns Whether it is a {@link RevisionGraph}.
+ */
+export const isRevisionGraph = (value: unknown): value is RevisionGraph =>
+  isObject(value) &&
+  Array.isArray(value['branches']) &&
+  value['branches'].every(
+    (branch) => isObject(branch) && typeof branch['name'] === 'string' && typeof branch['head'] === 'string',
+  ) &&
+  Array.isArray(value['rows']) &&
+  value['rows'].every(
+    (row) =>
+      isObject(row) &&
+      typeof row['revisionId'] === 'string' &&
+      typeof row['line'] === 'string' &&
+      typeof row['createdAt'] === 'number',
+  );
+
+/**
+ * Read the host's answer to one *New branch* (P4): the checkout the registry made for it.
+ *
+ * @param answer - What the host's `createBranch` answered.
+ * @param name - The branch being made.
+ * @returns The branch and its checkout.
+ */
+/* What a host's `saveRevision` answer says its cut came to (A7e); a host that answers nothing did not wait for it. */
+const saveOutcomeOf = (answer: unknown): CheckoutCutsOutcome => {
+  const outcome = isObject(answer) ? answer['outcome'] : undefined;
+  return outcome === 'recorded' || outcome === 'nothingToRecord' ? outcome : 'refused';
+};
+
+const branchCreatedOf = (answer: unknown, name: string): BranchCreated => {
+  const { checkoutId, checkoutRoot } = (answer ?? {}) as { checkoutId?: unknown; checkoutRoot?: unknown };
+  if (typeof checkoutId !== 'string' || typeof checkoutRoot !== 'string') {
+    /* A branch with no checkout named is no placement: `''` used to reach
+     * `Chat.checkoutId` and leave the chat nothing to run on (finding 5). */
+    throw Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', { branch: name }).description), {
+      code: 'BRANCH_UNPLACED',
+    });
+  }
+  return { branch: name, checkoutId, checkoutRoot };
+};
+
+/**
+ * The origin a credential would be minted for, or `undefined` for no remote.
+ *
+ * @param url - The remote URL the person gave, if any.
+ * @returns Its origin.
+ */
+const remoteOrigin = (url: string | undefined): string | undefined => {
+  if (url === undefined) {
+    return undefined;
+  }
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
+};
+/** Re-mint a GitHub credential this long before it expires (D2). */
+const githubRenewWindowMilliseconds = 5 * 60_000;
+/**
+ * The next attempt when a re-mint could not move the deadline.
+ *
+ * The API hands back the stored token until its last minute, so a re-mint
+ * inside the window can return the same one; and a failed renewal leaves the
+ * held token working until it expires. Either way: ask again in a minute.
+ */
+const githubRenewRetryMilliseconds = 60_000;
+/** `setTimeout` fires at once past this, which would turn a far deadline into a loop. */
+const longestTimerMilliseconds = 2_147_483_647;
+
+/**
+ * How long until this project's GitHub credential is re-minted (D2).
+ *
+ * @param expiresAt - The credential's expiry, as the API reported it.
+ * @param now - The current time, in epoch milliseconds.
+ * @returns Milliseconds to wait before minting again.
+ * @internal
+ */
+export const githubCredentialRenewDelay = (expiresAt: string, now: number): number => {
+  const remaining = Date.parse(expiresAt) - now;
+  return Number.isFinite(remaining) && remaining > githubRenewWindowMilliseconds
+    ? Math.min(remaining - githubRenewWindowMilliseconds, longestTimerMilliseconds)
+    : githubRenewRetryMilliseconds;
+};
+
+/** A remote pick, in the terms `remote.machine` compares destinations in. */
+type RemotePick = Readonly<{
+  kind: 'none' | 'tau' | 'git';
+  url: string | undefined;
+  provider: 'github' | undefined;
+  repositoryId: string | undefined;
+}>;
+
+/**
+ * Whether `remote` is the pick's destination, as `remote.machine`'s `isSameDestination` decides it.
+ *
+ * @param remote - A recorded remote.
+ * @param pick - The pick.
+ * @returns Whether they are the same destination.
+ */
+const isSameDestination = (remote: RemoteFacet, pick: RemotePick): boolean =>
+  remote.kind === pick.kind &&
+  (pick.kind === 'tau' ||
+    (remote.url === pick.url && remote.provider === pick.provider && remote.repositoryId === pick.repositoryId));
+
+/**
+ * Whether a pick replaces a remote that backs this project up, which `remote.machine` probes first (R2).
+ *
+ * @param recorded - What the projection records now.
+ * @param pick - The pick.
+ * @returns Whether the pick waits on the new remote's answer.
+ */
+const replacesRecordedRemote = (recorded: RemoteFacet | undefined, pick: RemotePick): recorded is RemoteFacet =>
+  pick.kind !== 'none' &&
+  recorded !== undefined &&
+  recorded.kind !== 'none' &&
+  (recorded.phase === 'connected' || recorded.phase === 'reconnectRequired') &&
+  !isSameDestination(recorded, pick);
+/** The sentence a GitHub-bound project's Sync region shows while nobody is signed in to Tau. */
+const signedOutGithubReason = 'Sign in to Tau to back up to GitHub.';
+/** The verbs the page sends to its revision root. @public */
+export type RevisionCommands = Readonly<{
+  restore: (revisionId: string) => void;
+  /** *Undo restore* (D2). */
+  undo: () => void;
+  /** *Undo*: reverse this device's newest operation on the line (D15). */
+  undoOperation: () => void;
+  /** The *Merged* toast's *Undo*: return `<current>` to `before` while `revisionId` is still its head (I11). */
+  undoMerge: (revisionId: string, before: string) => void;
+  switchTo: (branch: string) => void;
+  followChat: (chatId: string) => void;
+  pinTo: (checkoutId: string) => void;
+  /** The *Branches* region's verbs; each one is `branch.machine`'s own event. */
+  /** Resolves with the checkout the branch was made on; rejects with its code (P4). */
+  createBranch: (name: string, from?: string) => Promise<BranchCreated>;
+  discardBranch: (branch: string, checkoutId?: string) => void;
+  mergeBranch: (branch: string) => void;
+  renameBranch: (branch: string, name: string) => void;
+  /**
+   * The *Needs resolution* card's verbs (S33, W10).
+   *
+   * Each names the conflicted revision, because a project can hold more than
+   * one conflicted branch and each has its own resolution actor.
+   */
+  resolveFile: (revisionId: string, path: string, side: 'mine' | 'theirs') => void;
+  /** Ask for the marker text; it arrives on the toast channel as `conflictText`. */
+  openConflictInEditor: (revisionId: string, path: string) => void;
+  /** Hand back the file as the person resolved it. */
+  resolveFileInEditor: (revisionId: string, path: string, content: string) => void;
+  finishResolution: (revisionId: string) => void;
+  abandonResolution: (revisionId: string) => void;
+  askChatToResolve: (revisionId: string) => void;
+  /**
+   * Pick this project's remote (S34).
+   *
+   * The Tau Cloud URL is resolved here rather than in the worker: only the page
+   * has `window.ENV`, and the URL is the whole of what *Tau Cloud* means to the
+   * port. No credential travels with it (I8).
+   *
+   * `url` is therefore optional for *Tau Cloud* — this hook is the one call
+   * site that knows where it is — and required for W12's third-party remotes,
+   * which the person names themselves.
+   */
+  connectRemote: (
+    kind: 'none' | 'tau' | 'git',
+    url?: string,
+    options?: Readonly<{
+      authorization?: string;
+      provider?: 'github';
+      repositoryId?: string;
+      connectionId?: string;
+      generation?: number;
+      /** When `authorization` expires; the page re-mints before then (D2). */
+      expiresAt?: string;
+      fetchOnly?: boolean;
+    }>,
+  ) => Promise<void>;
+  disconnectRemote: () => void;
+  cancelRemote: () => void;
+  /** Ask the existing project scheduler to fetch and push now. */
+  syncNow: () => void;
+  /** Mint and use one repository-scoped write credential for this gesture only. */
+  pushGithub: () => Promise<void>;
+  /**
+   * Record what is on disk now (S30, AC12).
+   *
+   * `Mod+S`, the palette's *Save revision*, the tab going hidden and the page
+   * unloading are the same wish with different triggers; the checkout's I5 gate
+   * decides whether a revision is minted at all, so a save on an unchanged tree
+   * costs a tree hash and records nothing.
+   */
+  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
+  /** Make a version of one revision, or with `number` rename that version at its own ref (S31, B6). */
+  tag: (
+    input: Readonly<{ name: string; revisionId: string; note?: string; number?: number }>,
+  ) => Promise<RevisionTag | undefined>;
+  /**
+   * Open the Publish dialog on this project's own names (S32, W8).
+   *
+   * The API origin goes with it for the same reason it goes with `connectRemote`:
+   * publishing pushes to this project's Tau Cloud repository and records the
+   * publication there, and only the page knows which API it is signed in to.
+   * `revisionId` opens it on an older revision (a History row's *Publish*).
+   */
+  publishProject: (tag?: string, revisionId?: string) => void;
+  /** Publish the chosen name, with everything only a person decides. */
+  confirmPublish: (draft: PublishDraft) => void;
+  cancelPublish: () => void;
+  /** Close the dialog back to `idle` after the link has been handled. */
+  resetPublish: () => void;
+}>;
+/**
+ * What the page's revision clients need from the app that hosts them.
+ *
+ * Each is read when it is used, never when the clients are made, so a value
+ * the page resolves later (the deployment's origin, the telemetry consent) is
+ * read as it stands.
+ *
+ * @public
+ */
+export type RevisionStatusServices = Readonly<{
+  /** Whether a native host, not the file-manager worker, serves this build's revision roots (the desktop build). */
+  hostServesRevisions: () => boolean;
+  /** The Tau API origin this page is signed in to (`TAU_API_URL`). */
+  apiBaseUrl: () => string;
+  /** The signed-in person's GitHub connections (D2, D33). */
+  github: Readonly<{
+    /** Mint a repository-scoped credential. */
+    token: (
+      connectionId: string,
+      input: Readonly<{ repositoryId: number; operation: 'read' | 'write' }>,
+    ) => Promise<Readonly<{ accessToken: string; expiresAt: string; generation: number }>>;
+    /** The person's connections, for the no-reply author a binding records. */
+    connections: () => Promise<ReadonlyArray<Readonly<{ id: string; subject: number; login: string }>>>;
+    /** The HTTP status a GitHub API refusal answered, or `undefined` for anything else that was thrown. */
+    failureStatus: (error: unknown) => number | undefined;
+    /** The sentence the Sync region shows for a failed mint. */
+    errorMessage: (error: unknown) => string;
+  }>;
+  /** Open the desktop agent host's channel for one project's on-disk root. */
+  openDesktopChannel: (projectId: string) => Promise<AgentChannelClient>;
+  /** Every client's toasts reach this, whichever page surface shows them (SB4). */
+  reportToast: (toast: RevisionToast) => void;
+  /** The page's telemetry consent (PR-7), or `undefined` with no page composition (SSR). */
+  telemetry: () =>
+    | Readonly<{
+        consent: () => ReportingConsent;
+        onConsentChange: (listener: (consent: ReportingConsent) => void) => () => void;
+      }>
+    | undefined;
+}>;
+
+/**
+ * The page's revision clients, bound to one app's services.
+ *
+ * @public
+ */
+export type RevisionClients = Readonly<{
+  /** Build the renderer half of a host-owned native revision root. */
+  createHostRevisionClient: (input: {
+    readonly projectId: string;
+    readonly connect?: () => Promise<AgentChannelClient>;
+  }) => RevisionClientConnection;
+  /** Open (or reuse) this project's connection to the worker revision root. */
+  getRevisionClient: (input: { readonly projectId: string; readonly worker: Worker }) => RevisionClient;
+  /** The commands one project's revision root accepts, over its client. */
+  revisionCommands: (client: RevisionClient | undefined, projectId: string) => RevisionCommands;
+  /** Test-only access to the module's client table; not exported from a barrel. @internal */
+  revisionClientTestApi: Readonly<{
+    adopt: (projectId: string, worker: Worker, client: RevisionClient) => void;
+    identity: (
+      projectId: string,
+      client: RevisionClient,
+    ) => Readonly<{
+      setUser: RevisionClient['setUser'];
+      setCredential: RevisionClient['setCredential'];
+      release: () => void;
+    }>;
+    reset: () => void;
+  }>;
+}>;
+
+/**
+ * Make the page's revision clients over the app's services.
+ *
+ * The app makes one, for the life of the document: the client table is the
+ * module's own (`revision-client-registry`), and the GitHub credential leases
+ * and pending replacements live with it.
+ *
+ * @param services - What only the app can reach.
+ * @returns The client factory, the command surface and the test seam.
+ * @public
+ */
+export const createRevisionClients = (services: RevisionStatusServices): RevisionClients => {
+  /** Build the renderer half of a host-owned native revision root. */
+  const createHostRevisionClient = (input: {
+    readonly projectId: string;
+    readonly connect?: () => Promise<AgentChannelClient>;
+  }): RevisionClientConnection => {
+    const listeners = new Topic<void>({ name: 'HostRevisionClient' });
+    const events = new Topic<WorkerRevisionEvent>({
+      name: 'HostRevisionClientEvents',
+    });
+    const toasts = new Topic<RevisionToast>({ name: 'HostRevisionClientToasts' });
+    // SB4: every client's error toasts reach error reporting, whichever page surface shows them.
+    toasts.subscribe(services.reportToast);
+    const projectedChatIds = new Set<string>();
+    let status: RevisionStatusProjection | undefined;
+    let channel: AgentChannelClient | undefined;
+    let opening: Promise<AgentChannelClient> | undefined;
+    let streamAbort: AbortController | undefined;
+    let retireOpening: (() => void) | undefined;
+    let connectionGeneration = 0;
+
+    const staleConnection = (): Error & { readonly code: string } =>
+      Object.assign(new Error('The revision connection was closed.'), {
+        code: 'STALE_REVISION_CONNECTION',
+      });
+    const isStaleConnection = (error: unknown): boolean =>
+      typeof error === 'object' && error !== null && 'code' in error && error.code === 'STALE_REVISION_CONNECTION';
+
+    const applyStatus = (value: JsonValue): void => {
+      if (
+        value === null ||
+        typeof value !== 'object' ||
+        Array.isArray(value) ||
+        !('projectId' in value) ||
+        value['projectId'] !== input.projectId
+      ) {
+        throw Object.assign(new Error('The host returned an invalid revision projection.'), {
+          code: 'INVALID_REVISION_RESPONSE',
+        });
+      }
+      status = value as unknown as RevisionStatusProjection;
+      listeners.emit();
+    };
+    const connect =
+      input.connect ?? (async (): Promise<AgentChannelClient> => services.openDesktopChannel(input.projectId));
+    const opened = async (): Promise<AgentChannelClient> => {
+      if (opening !== undefined) {
+        return opening;
+      }
+      if (channel !== undefined) {
+        return channel;
+      }
+      const generation = ++connectionGeneration;
+      const abort = new AbortController();
+      const retired = Promise.withResolvers<never>();
+      let candidate: AgentChannelClient | undefined;
+      let closedCandidate: AgentChannelClient | undefined;
+      let iterator:
+        | ReturnType<ReturnType<AgentChannelClient['revisionEvents']>[typeof Symbol.asyncIterator]>
+        | undefined;
+      let operation: ConnectionOperation = 'connect';
+      const dispose = (): void => {
+        abort.abort();
+        if (candidate !== undefined && closedCandidate !== candidate) {
+          closedCandidate = candidate;
+          candidate.close();
+        }
+        // oxlint-disable-next-line promise/prefer-await-to-then -- Best-effort stream teardown must not delay settling the shared opening.
+        void iterator?.return?.().catch(() => undefined);
+      };
+      const retire = (): void => {
+        retired.reject(staleConnection());
+        dispose();
+      };
+      retireOpening = retire;
+      const checkCurrent = (): void => {
+        if (generation !== connectionGeneration) {
+          dispose();
+          throw staleConnection();
+        }
+      };
+      const report = (error: RevisionConnectionError): void => {
+        toasts.emit({
+          type: 'error',
+          subject: 'connection',
+          code: error.code,
+          message: error.message,
+          generation: error.generation,
+          connectionOperation: error.operation,
+        });
+      };
+      const initialize = async (): Promise<AgentChannelClient> => {
+        const next = await connect();
+        candidate = next;
+        checkCurrent();
+        operation = 'status';
+        const initial = await next.revision({ command: 'status' }, abort.signal);
+        checkCurrent();
+        /* The desktop host keeps this project's root alive across renderer
+         * reloads. Reattaching is therefore the open signal that makes the
+         * retained scheduler fetch again before the client reads remote work. */
+        operation = 'open';
+        await next.revision({ command: 'open' }, abort.signal);
+        checkCurrent();
+        operation = 'subscribe';
+        iterator = next.revisionEvents(abort.signal)[Symbol.asyncIterator]();
+        /* The host replays its current status as its first event, acknowledging subscription even on an idle project. */
+        const first = await iterator.next();
+        checkCurrent();
+        if (first.done) {
+          throw new Error('The revision connection ended before its first projection.');
+        }
+        applyStatus(initial.status);
+        channel = next;
+        streamAbort = abort;
+        const receive = (event: typeof first.value): void => {
+          if (event.kind === 'status') {
+            applyStatus(event.value);
+          } else if (event.kind === 'event') {
+            const projected = event.value as unknown as WorkerRevisionEvent;
+            if (projected.type === 'chats.projected') {
+              for (const chatId of projected.chatIds) {
+                projectedChatIds.add(chatId);
+              }
+            }
+            events.emit(projected);
+          } else {
+            toasts.emit(event.value as unknown as RevisionToast);
+          }
+        };
+        receive(first.value);
+        const stream = iterator;
+        // async-iife: bootstrap -- the stream lives for the connection and reports through Topics.
+        void (async (): Promise<void> => {
+          try {
+            for await (const event of { [Symbol.asyncIterator]: () => stream }) {
+              if (generation !== connectionGeneration) {
+                break;
+              }
+              receive(event);
+            }
+          } catch (error) {
+            if (!abort.signal.aborted && generation === connectionGeneration) {
+              dispose();
+              channel = undefined;
+              status = undefined;
+              projectedChatIds.clear();
+              listeners.emit();
+              report(new RevisionConnectionError(error, 'stream', generation));
+            }
+          }
+        })();
+        return next;
+      };
+      const pending = (async (): Promise<AgentChannelClient> => {
+        try {
+          return await Promise.race([initialize(), retired.promise]);
+        } catch (error) {
+          dispose();
+          if (generation !== connectionGeneration) {
+            throw staleConnection();
+          }
+          channel = undefined;
+          status = undefined;
+          projectedChatIds.clear();
+          listeners.emit();
+          const failure = new RevisionConnectionError(error, operation, generation);
+          report(failure);
+          throw failure;
+        } finally {
+          if (generation === connectionGeneration) {
+            opening = undefined;
+            retireOpening = undefined;
+          }
+        }
+      })();
+      opening = pending;
+      return pending;
+    };
+    const ask = async (request: JsonValue): Promise<JsonValue> => {
+      const connected = await opened();
+      const generation = connectionGeneration;
+      try {
+        if (connected !== channel) {
+          throw staleConnection();
+        }
+        const response = await connected.revision(request);
+        if (generation !== connectionGeneration) {
+          throw staleConnection();
+        }
+        applyStatus(response.status);
+        return response.result;
+      } catch (error) {
+        if (generation !== connectionGeneration) {
+          throw staleConnection();
+        }
+        throw error;
+      }
+    };
+    const send = (request: WorkerRevisionCommand): void => {
+      // async-iife: bootstrap -- a machine verb reports its settled state on the revision stream.
+      void (async (): Promise<void> => {
+        try {
+          await ask(request as unknown as JsonValue);
+        } catch (error) {
+          if (isStaleConnection(error) || error instanceof RevisionConnectionError) {
+            return;
+          }
+          toasts.emit({
+            type: 'error',
+            subject: 'save',
+            message: error instanceof Error ? error.message : 'The revision request failed.',
+          });
+        }
+      })();
+    };
+    const close = (): void => {
+      connectionGeneration += 1;
+      retireOpening?.();
+      retireOpening = undefined;
+      opening = undefined;
+      streamAbort?.abort();
+      streamAbort = undefined;
+      channel?.close();
+      channel = undefined;
+      status = undefined;
+      projectedChatIds.clear();
+      listeners.emit();
+    };
+
+    return {
+      status: () => status,
+      pushGithub: async (credential) => {
+        await ask({ command: 'pushGithub', ...credential });
+      },
+      remoteCredential: (credential) => {
+        // async-iife: bootstrap -- credential updates report through the same toast topic.
+        void (async (): Promise<void> => {
+          try {
+            await ask({ command: 'remoteCredential', ...credential });
+          } catch (error) {
+            if (isStaleConnection(error) || error instanceof RevisionConnectionError) {
+              return;
+            }
+            toasts.emit({
+              type: 'error',
+              subject: 'save',
+              message: error instanceof Error ? error.message : 'The revision credential could not be updated.',
+            });
+          }
+        })();
+      },
+      subscribe: (listener) => listeners.subscribe(listener),
+      subscribeEvents: (listener) => {
+        const unsubscribe = events.subscribe(listener);
+        if (projectedChatIds.size > 0) {
+          try {
+            listener({
+              type: 'chats.projected',
+              projectId: input.projectId,
+              chatIds: [...projectedChatIds],
+            });
+          } catch {
+            /* Match Topic fan-out: one failed observer cannot break the client. */
+          }
+        }
+        return unsubscribe;
+      },
+      subscribeToasts: (listener) => toasts.subscribe(listener),
+      log: async (request) =>
+        (await ask({
+          command: 'log',
+          ...(request?.branch === undefined ? {} : { branch: request.branch }),
+          ...(request?.limit === undefined ? {} : { limit: request.limit }),
+          ...(request?.from === undefined ? {} : { from: request.from }),
+        })) as unknown as readonly RevisionRow[],
+      graph: async (request) => {
+        const value = await ask({
+          command: 'graph',
+          ...(request?.branches === undefined ? {} : { branches: [...request.branches] }),
+          ...(request?.limit === undefined ? {} : { limit: request.limit }),
+        });
+        if (!isRevisionGraph(value)) {
+          throw Object.assign(new Error('The host answered a graph read with something else.'), {
+            code: 'INVALID_REVISION_RESPONSE',
+          });
+        }
+        return value;
+      },
+      divergence: async (head, base) =>
+        (await ask({ command: 'divergence', head, base })) as unknown as RevisionDivergence,
+      diff: async (revisionId, from, options) =>
+        (await ask({
+          command: 'diff',
+          revisionId,
+          ...(options?.against === undefined ? {} : { against: options.against }),
+          ...(from === undefined ? {} : { from }),
+        })) as unknown as readonly RevisionDiffEntry[],
+      tag: async (tagInput) => (await ask({ command: 'tag', ...tagInput })) as unknown as RevisionTag | undefined,
+      compare: async (revisionId, path, options) =>
+        (await ask({
+          command: 'compare',
+          revisionId,
+          path,
+          ...(options?.from === undefined ? {} : { from: options.from }),
+          ...(options?.against === undefined ? {} : { against: options.against }),
+        })) as unknown as RevisionFileComparison,
+      send,
+      pullRemote: async (chatId) => {
+        /* An older host answers nothing: taken to pull. */
+        const { pulls } = ((await ask({ command: 'pullRemote', chatId })) ?? {}) as { pulls?: unknown };
+        return pulls !== false;
+      },
+      saveRevision: async (trigger) => {
+        const answer = await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+        return saveOutcomeOf(answer);
+      },
+      sessionChanged: async () => {
+        await ask({ command: 'sessionChanged' });
+      },
+      recordEditorConflict: async (conflict) =>
+        (await ask({ command: 'recordEditorConflict', ...conflict })) as unknown as EditorConflictOutcome,
+      /* The host answers the verb with the checkout the registry made, or its refusal (B7: an answer, never a bound). */
+      createBranch: async (name, from) =>
+        branchCreatedOf(await ask({ command: 'createBranch', name, ...(from === undefined ? {} : { from }) }), name),
+      open: () => {
+        // async-iife: bootstrap -- project lifecycle owns this connection and errors surface as toasts.
+        void (async (): Promise<void> => {
+          try {
+            await opened();
+          } catch (error) {
+            if (isStaleConnection(error) || error instanceof RevisionConnectionError) {
+              return;
+            }
+            toasts.emit({
+              type: 'error',
+              subject: 'save',
+              message: error instanceof Error ? error.message : 'The revision connection could not be opened.',
+            });
+          }
+        })();
+      },
+      close,
+      quiesce: async () => {
+        await ask({ command: 'quiesce' });
+        close();
+      },
+    };
+  };
+
+  /**
+   * One project's pending re-mint; `epoch` retires every mint already in flight.
+   * `withdrawn` is set while the root holds an `unavailable` frame from a failed
+   * mint, so the retry that succeeds also has the refused remote try again.
+   */
+  type GithubCredentialLease = {
+    timer: ReturnType<typeof setTimeout> | undefined;
+    epoch: number;
+    withdrawn: boolean;
+  };
+  const githubCredentialLeases = new Map<string, GithubCredentialLease>();
+
+  const githubCredentialLease = (projectId: string): GithubCredentialLease => {
+    const held = githubCredentialLeases.get(projectId);
+    if (held !== undefined) {
+      return held;
+    }
+    const lease: GithubCredentialLease = { timer: undefined, epoch: 0, withdrawn: false };
+    githubCredentialLeases.set(projectId, lease);
+    return lease;
+  };
+
+  /**
+   * Stop re-minting this project's GitHub credential, and drop any mint in flight.
+   *
+   * @param projectId - The project whose remote changed or closed.
+   */
+  const stopGithubCredential = (projectId: string): void => {
+    const lease = githubCredentialLeases.get(projectId);
+    if (lease === undefined) {
+      return;
+    }
+    globalThis.clearTimeout(lease.timer);
+    lease.timer = undefined;
+    lease.epoch += 1;
+    lease.withdrawn = false;
+  };
+
+  /**
+   * The frame that tells a revision root why this GitHub repository has no credential.
+   *
+   * @param repositoryUrl - The bound repository.
+   * @param reason - The sentence the Sync region shows.
+   * @returns The `unavailable` frame.
+   */
+  const githubUnavailableFrame = (repositoryUrl: string, reason: string): GitRemoteCredential => ({
+    apiBaseUrl: services.apiBaseUrl(),
+    origin: 'https://github.com',
+    repositoryUrl,
+    unavailable: reason,
+  });
+
+  /**
+   * The frame that withdraws this project's credential (review R-U2).
+   *
+   * While the project is bound to a GitHub repository it is `unavailable` for
+   * that repository rather than a bare frame: a bare frame clears the held
+   * credential, and the desktop host then reaches the repository with the
+   * person's own Git credential helper, which a GitHub-bound project never uses.
+   *
+   * @param projectId - The project.
+   * @param reason - Why there is no credential.
+   * @returns The frame to send.
+   */
+  const withdrawnGithubCredential = (projectId: string, reason: string): GitRemoteCredential => {
+    const binding = githubProjectBinding.get(projectId);
+    return binding === undefined
+      ? { apiBaseUrl: services.apiBaseUrl() }
+      : githubUnavailableFrame(binding.repositoryUrl, reason);
+  };
+
+  /**
+   * Whether a failed mint may succeed when asked again (reviews R-U3, R-U5).
+   *
+   * A rate limit, a server error and an unreachable network pass; every other
+   * refusal (the grant disconnected or revoked, a stale generation) needs the
+   * person, so asking every minute would only repeat it.
+   *
+   * @param error - What the mint threw.
+   * @returns Whether to retry.
+   */
+  const isTransientGithubFailure = (error: unknown): boolean => {
+    const status = services.github.failureStatus(error);
+    return status === undefined ? error instanceof TypeError : status === 429 || status >= 500;
+  };
+
+  /**
+   * Have a remote refused while there was no credential try the fresh one.
+   *
+   * @param client - The project's revision client.
+   */
+  const resumeRefusedRemote = (client: RevisionClient): void => {
+    const status = client.status();
+    if (status?.remote.phase === 'reconnectRequired') {
+      client.send({ command: 'authorizeRemote' });
+    } else if (status?.sync.state === 'failed' && status.sync.reason === 'unauthorized') {
+      client.send({ command: 'syncNow' });
+    }
+  };
+
+  /**
+   * Mint this project's GitHub credential and hand it to its revision root (D2).
+   *
+   * Reads the binding when it runs rather than when it was scheduled: a project
+   * that has connected another repository since must never be sent the last
+   * one's frame (review R1).
+   *
+   * @param client - The project's revision client.
+   * @param projectId - The project.
+   * @param onFailure - `unavailable` tells the root why there is no credential,
+   *   for an open or a recovery with nothing usable held; `retry` keeps the held
+   *   credential, which still works until it expires. Either way a transient
+   *   failure is asked again shortly, and a terminal one is sent as `unavailable`.
+   * @returns Whether a fresh credential was sent.
+   */
+  const mintGithubCredential = async (
+    client: RevisionClient,
+    projectId: string,
+    onFailure: 'unavailable' | 'retry',
+  ): Promise<boolean> => {
+    const binding = githubProjectBinding.get(projectId);
+    if (binding === undefined) {
+      return false;
+    }
+    const lease = githubCredentialLease(projectId);
+    const { epoch } = lease;
+    const current = (): boolean =>
+      lease.epoch === epoch && githubProjectBinding.get(projectId)?.repositoryUrl === binding.repositoryUrl;
+    try {
+      const token = await services.github.token(binding.connectionId, {
+        repositoryId: Number(binding.repositoryId),
+        operation: 'read',
+      });
+      if (!current()) {
+        return false;
+      }
+      if (token.generation < binding.generation) {
+        throw Object.assign(new Error('The GitHub connection is stale.'), { code: 'GITHUB_RECONNECT_REQUIRED' });
+      }
+      client.remoteCredential({
+        apiBaseUrl: services.apiBaseUrl(),
+        origin: 'https://github.com',
+        repositoryUrl: binding.repositoryUrl,
+        authorization: `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`,
+        expiresAt: token.expiresAt,
+      });
+      lease.withdrawn = false;
+      scheduleGithubCredential(client, projectId, githubCredentialRenewDelay(token.expiresAt, Date.now()));
+      return true;
+    } catch (error) {
+      if (!current()) {
+        return false;
+      }
+      const transient = isTransientGithubFailure(error);
+      if (onFailure === 'unavailable' || !transient) {
+        client.remoteCredential(githubUnavailableFrame(binding.repositoryUrl, services.github.errorMessage(error)));
+        lease.withdrawn = true;
+      }
+      if (transient) {
+        scheduleGithubCredential(client, projectId, githubRenewRetryMilliseconds);
+      }
+      return false;
+    }
+  };
+
+  /**
+   * Re-mint this project's GitHub credential after `renewDelay` (D2).
+   *
+   * @param client - The project's revision client.
+   * @param projectId - The project.
+   * @param renewDelay - Milliseconds to wait.
+   */
+  function scheduleGithubCredential(client: RevisionClient, projectId: string, renewDelay: number): void {
+    const lease = githubCredentialLease(projectId);
+    globalThis.clearTimeout(lease.timer);
+    lease.timer = globalThis.setTimeout(() => {
+      lease.timer = undefined;
+      const { withdrawn } = lease;
+      // async-iife: bootstrap -- a renewal reports through the frame it sends, or retries.
+      void (async (): Promise<void> => {
+        if ((await mintGithubCredential(client, projectId, 'retry')) && withdrawn) {
+          resumeRefusedRemote(client);
+        }
+      })();
+    }, renewDelay);
+  }
+
+  /**
+   * Each project's *Change backup* that is waiting for the new remote's answer (R2).
+   *
+   * Kept by project rather than by the surface that asked: the answer can
+   * arrive after the Sync region that sent the pick has unmounted.
+   */
+  const pendingReplacements = new Map<string, () => void>();
+
+  /**
+   * Stop waiting for a replacement's answer; a newer pick or a disconnect supersedes it.
+   *
+   * @param projectId - The project.
+   */
+  const stopPendingReplacement = (projectId: string): void => {
+    pendingReplacements.get(projectId)?.();
+    pendingReplacements.delete(projectId);
+  };
+
+  /**
+   * Hand the remote that stayed this project's backup its own credential again (R2).
+   *
+   * The probe of the new remote needed the new remote's credential, so the
+   * worker was sent it before the probe. The binding was never touched, so a
+   * GitHub-bound project re-mints from it, the way an open does; any other
+   * remote gets the frame `connectRemote` sends it, which carries no credential.
+   *
+   * @param client - The project's revision client.
+   * @param projectId - The project.
+   * @param kept - The remote that stayed.
+   */
+  const restoreKeptRemote = async (client: RevisionClient, projectId: string, kept: RemoteFacet): Promise<void> => {
+    if (githubProjectBinding.get(projectId) === undefined) {
+      const origin = kept.kind === 'git' ? remoteOrigin(kept.url) : undefined;
+      client.remoteCredential({
+        apiBaseUrl: services.apiBaseUrl(),
+        ...(origin === undefined ? {} : { origin }),
+      });
+      return;
+    }
+    /* A queue the probe paused may have met the refused repository's credential: push it again with this one. */
+    if (
+      (await mintGithubCredential(client, projectId, 'unavailable')) &&
+      client.status()?.remote.phase === 'connected'
+    ) {
+      client.send({ command: 'syncNow' });
+    }
+  };
+
+  /**
+   * The binding a GitHub repository pick records (D33).
+   *
+   * @param url - The resolved remote address.
+   * @param options - The pick's GitHub fields.
+   * @returns The binding; `undefined` for a pick that is not a GitHub repository,
+   *   whose binding is removed; `unchanged` for an id GitHub never issues.
+   */
+  const githubBindingOf = async (
+    url: string | undefined,
+    options:
+      | Readonly<{ provider?: 'github'; repositoryId?: string; connectionId?: string; generation?: number }>
+      | undefined,
+  ): Promise<GithubProjectBinding | 'unchanged' | undefined> => {
+    if (
+      options?.provider !== 'github' ||
+      url === undefined ||
+      options.repositoryId === undefined ||
+      options.connectionId === undefined ||
+      options.generation === undefined
+    ) {
+      return undefined;
+    }
+    const repositoryId = Number(options.repositoryId);
+    if (!Number.isSafeInteger(repositoryId) || repositoryId <= 0) {
+      return 'unchanged';
+    }
+    const { connectionId, generation } = options;
+    const connections = await services.github.connections();
+    const connection = connections.find((candidate) => candidate.id === connectionId);
+    return {
+      connectionId,
+      repositoryId,
+      repositoryUrl: url,
+      generation,
+      ...(connection === undefined ? {} : { author: githubNoreplyAuthor(connection.subject, connection.login) }),
+    };
+  };
+
+  /**
+   * Rebind the project only once the new remote has answered (R2).
+   *
+   * `remote.machine` asks a replacing remote for its advertisement before it
+   * records it. Until then the old remote is the backup, so the binding (which
+   * decides the credential every open mints and who the next revision is
+   * authored as) stays the old one. A refusal, or a cancel, settles back to the
+   * old remote and hands it its credential again; the new remote recorded and
+   * answering settles to `bind`.
+   *
+   * @param input - The client, the project, what was recorded when the pick was sent, the pick, and its binding.
+   */
+  const awaitReplacementAnswer = (
+    input: Readonly<{
+      client: RevisionClient;
+      projectId: string;
+      previous: RemoteFacet;
+      isReplacement: (remote: RemoteFacet) => boolean;
+      bind: () => Promise<void>;
+    }>,
+  ): void => {
+    const { client, projectId, previous, isReplacement, bind } = input;
+    /* A projection posted before the worker took the pick still shows the old
+     * remote and its last refusal: only a new refusal, or a return after the
+     * probe was seen, is this pick's answer. */
+    const previousAttempt = previous.refusedReplacement?.attempt;
+    let probed = false;
+    const settle = (): void => {
+      const remote = client.status()?.remote;
+      if (remote === undefined) {
+        return;
+      }
+      const refused = remote.refusedReplacement !== undefined && remote.refusedReplacement.attempt !== previousAttempt;
+      const settled = remote.phase === 'connected' || remote.phase === 'reconnectRequired';
+      const kept = probed && settled && remote.kind === previous.kind && remote.url === previous.url;
+      if (refused || kept) {
+        stopPendingReplacement(projectId);
+        // async-iife: bootstrap -- a failed re-mint reports through the `unavailable` frame it sends.
+        void restoreKeptRemote(client, projectId, remote);
+        return;
+      }
+      if (settled && isReplacement(remote)) {
+        stopPendingReplacement(projectId);
+        // async-iife: bootstrap -- a failed account lookup already rejected the `connectRemote` that started this wait.
+        void (async (): Promise<void> => {
+          try {
+            await bind();
+          } catch {
+            /* Reported to the surface that picked. */
+          }
+        })();
+        return;
+      }
+      probed ||= remote.phase === 'connecting';
+    };
+    const unsubscribe = client.subscribe(settle);
+    pendingReplacements.set(projectId, unsubscribe);
+    settle();
+  };
+
+  /**
+   * The identity half of one revision client (audit R6).
+   *
+   * Who is signed in and where the GitHub credential comes from are facts the
+   * open client is told, not reasons to reopen it: a sign-in, a sign-out or an
+   * account switch mints or withdraws the credential on the connection that is
+   * already up, and the root, its tree and its port stay as they are. The one
+   * automatic re-mint a refused credential gets (D2) lives here too, so only a
+   * real identity change re-arms it.
+   *
+   * @param projectId - The project the client serves.
+   * @param client - The client these commands belong to.
+   * @returns The two commands, and the release its `close` calls.
+   */
+  const revisionIdentityCommands = (
+    projectId: string,
+    client: () => RevisionClient,
+  ): Readonly<{
+    setUser: RevisionClient['setUser'];
+    setCredential: RevisionClient['setCredential'];
+    release: () => void;
+  }> => {
+    /* Whether this connection has been told who is signed in since it opened. */
+    let told = false;
+    let user: RevisionSessionUser | undefined;
+    /* Retires an answer that arrives after the identity it was for has changed or closed. */
+    let generation = 0;
+    /*
+     * One automatic re-mint per refusal (D2): a GitHub remote the provider
+     * answered 401 for re-mints, re-sends its frame and retries exactly once.
+     * The latch opens again only once the project is backed up, so a revoked
+     * grant still settles in *Reconnect GitHub* instead of looping. Closed
+     * until an identity's own mint has answered: that mint is the first attempt.
+     */
+    let recovered = true;
+    /*
+     * Set when a session change is announced: until the root answers it, the
+     * projection still shows the last session's refusal, which is no refusal of
+     * the credential just sent and must not spend the one retry.
+     */
+    let awaitingAnswer = false;
+    let unsubscribe: (() => void) | undefined;
+
+    const setCredential = async (source: RevisionCredentialSource): Promise<boolean> => {
+      if (source.kind === 'github') {
+        return mintGithubCredential(client(), projectId, 'unavailable');
+      }
+      stopGithubCredential(projectId);
+      client().remoteCredential(withdrawnGithubCredential(projectId, source.reason));
+      return false;
+    };
+
+    const recover = (): void => {
+      const status = client().status();
+      if (status === undefined) {
+        return;
+      }
+      const refused =
+        status.remote.kind === 'git' &&
+        (status.remote.phase === 'reconnectRequired' ||
+          (status.sync.state === 'failed' && status.sync.reason === 'unauthorized'));
+      if (awaitingAnswer) {
+        return;
+      }
+      if (status.sync.state === 'backedUp') {
+        recovered = false;
+        return;
+      }
+      if (
+        !refused ||
+        recovered ||
+        user === undefined ||
+        githubProjectBinding.get(projectId)?.repositoryUrl !== status.remote.url
+      ) {
+        return;
+      }
+      recovered = true;
+      const retry = status.remote.phase === 'reconnectRequired' ? 'authorizeRemote' : 'syncNow';
+      const asked = generation;
+      // async-iife: bootstrap -- the retry settles on the projection this listener reads.
+      void (async (): Promise<void> => {
+        if ((await setCredential({ kind: 'github' })) && asked === generation) {
+          client().send({ command: retry });
+        }
+      })();
+    };
+
+    /*
+     * What a fresh root did implicitly when an identity change reopened it: the
+     * remote is read afresh under the new session (a Tau Cloud remote and its
+     * move stream are reached with the session cookie, not a frame), and a
+     * remote waiting on a credential takes the one just sent.
+     */
+    const announceSession = (): void => {
+      /* Taken by the root before the change, so its answer follows it too. */
+      const reauthorized = client().status()?.remote.phase === 'reconnectRequired';
+      if (reauthorized) {
+        client().send({ command: 'authorizeRemote' });
+      }
+      awaitingAnswer = true;
+      const asked = generation;
+      // async-iife: bootstrap -- the root's answer arrives on the projection; this only ends the wait for it.
+      void (async (): Promise<void> => {
+        try {
+          await client().sessionChanged();
+        } catch {
+          /* The connection closed: `release` has already ended the wait. */
+        }
+        if (asked !== generation) {
+          return;
+        }
+        awaitingAnswer = false;
+        /* A refusal that reached `reconnectRequired` after the change was sent,
+         * but before the root took it, was the last credential's: try the new one. */
+        if (!reauthorized && client().status()?.remote.phase === 'reconnectRequired') {
+          client().send({ command: 'authorizeRemote' });
+        }
+      })();
+    };
+
+    const say = async (next: RevisionSessionUser | undefined): Promise<void> => {
+      const opening = !told;
+      const previous = user;
+      told = true;
+      user = next;
+      generation += 1;
+      const asked = generation;
+      recovered = true;
+      unsubscribe ??= client().subscribe(recover);
+      const bound = githubProjectBinding.get(projectId) !== undefined;
+      if (next === undefined || !bound) {
+        /* A bound project's credential depends on who is signed in. An unbound
+         * one is withdrawn too when a person leaves, since a *Connect* still
+         * waiting to bind may have handed the root that person's credential. */
+        if (opening || bound || previous !== undefined) {
+          await setCredential({ kind: 'withdrawn', reason: signedOutGithubReason });
+        }
+        if (!opening && asked === generation) {
+          announceSession();
+        }
+        return;
+      }
+      if (!opening) {
+        if (previous === undefined) {
+          /* Retire any renewal and any mint still in flight for the signed-out session. */
+          stopGithubCredential(projectId);
+        } else {
+          /* An account switch: the last person's credential is withdrawn before the next one's is minted. */
+          await setCredential({ kind: 'withdrawn', reason: signedOutGithubReason });
+          if (asked !== generation) {
+            /* Superseded during the withdrawal: the newer identity mints its own. */
+            return;
+          }
+        }
+      }
+      const minted = await setCredential({ kind: 'github' });
+      if (asked !== generation) {
+        return;
+      }
+      recovered = !minted;
+      if (!opening) {
+        announceSession();
+      }
+    };
+
+    /*
+     * The newest identity's credential work. An open waits for that one, not
+     * its own (D36): a mint superseded while it is out stops being waited for
+     * the moment it is superseded, and its late answer is retired by the lease.
+     */
+    let latest: Promise<void> = Promise.resolve();
+    let superseded = Promise.withResolvers<void>();
+    const settle = async (): Promise<void> => {
+      let awaited: Promise<void>;
+      do {
+        awaited = latest;
+        // oxlint-disable-next-line no-await-in-loop -- each newer identity supersedes the one awaited.
+        await Promise.race([awaited, superseded.promise]);
+      } while (awaited !== latest);
+    };
+
+    const setUser = async (next: RevisionSessionUser | undefined): Promise<void> => {
+      if (told && next?.id === user?.id) {
+        /* The person already held: a refetch or a new display name. Nothing to mint, and the latch stays. */
+        user = next;
+        return settle();
+      }
+      latest = say(next);
+      superseded.resolve();
+      superseded = Promise.withResolvers<void>();
+      return settle();
+    };
+
+    const release = (): void => {
+      unsubscribe?.();
+      unsubscribe = undefined;
+      told = false;
+      user = undefined;
+      generation += 1;
+      recovered = true;
+      awaitingAnswer = false;
+    };
+
+    return { setUser, setCredential, release };
+  };
+
+  /**
+   * Give a client connection the identity commands (audit R6).
+   *
+   * @param projectId - The project the connection serves.
+   * @param connection - The worker or host connection.
+   * @returns The client; its `close` also forgets who it was told is signed in.
+   */
+  const withRevisionIdentity = (projectId: string, connection: RevisionClientConnection): RevisionClient => {
+    const identity = revisionIdentityCommands(projectId, () => client);
+    const client: RevisionClient = {
+      ...connection,
+      setUser: identity.setUser,
+      setCredential: identity.setCredential,
+      close: () => {
+        identity.release();
+        connection.close();
+      },
+    };
+    return client;
+  };
+
+  /**
+   * Open (or reuse) this project's connection to the worker revision root.
+   *
+   * @param input - The project and the worker serving it.
+   * @returns The project's client.
+   * @public
+   */
+  const getRevisionClient = (input: { readonly projectId: string; readonly worker: Worker }): RevisionClient => {
+    const existing = revisionClients.get(input.projectId);
+    if (existing !== undefined) {
+      if (existing.worker === input.worker) {
+        return existing.client;
+      }
+      /* The file-manager terminates and recreates its worker on a reconnect. The
+       * old channel died with it, so a client that kept it would post every
+       * command into a closed port and never see the projection move again. */
+      existing.client.close();
+    }
+    if (services.hostServesRevisions()) {
+      const client = withRevisionIdentity(input.projectId, createHostRevisionClient({ projectId: input.projectId }));
+      revisionClients.set(input.projectId, { client, worker: input.worker });
+      return client;
+    }
+    const listeners = new Topic<void>({ name: 'RevisionClient' });
+    const events = new Topic<WorkerRevisionEvent>({
+      name: 'RevisionClientEvents',
+    });
+    const toasts = new Topic<RevisionToast>({ name: 'RevisionClientToasts' });
+    // SB4: every client's error toasts reach error reporting, whichever page surface shows them.
+    toasts.subscribe(services.reportToast);
+    const projectedChatIds = new Set<string>();
+    const pending = new Map<number, PromiseWithResolvers<WorkerRevisionResult>>();
+    let status: RevisionStatusProjection | undefined;
+    let nextRequestId = 0;
+    let connectionGeneration = 0;
+    let channel: MessageChannel | undefined;
+    /** Stops telling the current port about consent changes (PR-7). */
+    let stopConsent: (() => void) | undefined;
+    /* Frames posted before the route opens this client (D36). Connecting starts the
+     * root and its opening fetch, so the connection waits for `open`, which the
+     * lifecycle calls once the GitHub credential is minted and queued first. */
+    let admitted = false;
+    const queued: WorkerRevisionRequest[] = [];
+    /* The page's last word on focus, re-said on every new port: a reopened root starts unfocused. */
+    let focused: boolean | undefined;
+    const receive = (generation: number, { data }: MessageEvent<WorkerRevisionResponse>): void => {
+      if (generation !== connectionGeneration) {
+        return;
+      }
+      if (data.type === 'status') {
+        status = data.status;
+        listeners.emit();
+        return;
+      }
+      if (data.type === 'event') {
+        if (data.event.type === 'chats.projected') {
+          for (const chatId of data.event.chatIds) {
+            projectedChatIds.add(chatId);
+          }
+        }
+        events.emit(data.event);
+        return;
+      }
+      if (data.type === 'toast') {
+        toasts.emit(data.toast);
+        return;
+      }
+      const request = pending.get(data.id);
+      pending.delete(data.id);
+      if (data.type === 'result') {
+        request?.resolve(data.result);
+        return;
+      }
+      request?.reject(
+        Object.assign(new Error(data.message), ...(data.code === undefined ? [] : [{ code: data.code }])),
+      );
+    };
+    const open = (): MessagePort => {
+      if (channel !== undefined) {
+        return channel.port2;
+      }
+      const opened = new MessageChannel();
+      connectionGeneration += 1;
+      const generation = connectionGeneration;
+      opened.port2.addEventListener('message', (event: MessageEvent<WorkerRevisionResponse>) => {
+        receive(generation, event);
+      });
+      opened.port2.start();
+      /* W19/R5: the frame carries who serves this project's revisions (P31). */
+      input.worker.postMessage(
+        {
+          type: 'revisionsConnect',
+          projectId: input.projectId,
+          port: opened.port1,
+          hostServesRevisions: services.hostServesRevisions(),
+        },
+        [opened.port1],
+      );
+      /* Routing, before anything is asked of a remote: the worker has no
+       * `window.ENV`, and telling Tau's own git server from a third-party remote
+       * is what decides which credential a request may carry (S34, W12). The
+       * credential itself arrives at *Connect*. */
+      opened.port2.postMessage({
+        command: 'remoteCredential',
+        apiBaseUrl: services.apiBaseUrl(),
+      } satisfies WorkerRevisionRequest);
+      /* PR-7 (AR-W6-02): the page's resolved consent, said on every new port and on every change, because the sync
+       * attempt reporter in the worker cannot resolve it. No page composition (SSR) says `unknown`, which sends nothing. */
+      const sayConsent = (consent: ReportingConsent): void => {
+        opened.port2.postMessage({ command: 'telemetryConsent', consent } satisfies WorkerRevisionRequest);
+      };
+      sayConsent(services.telemetry()?.consent() ?? 'unknown');
+      stopConsent?.();
+      stopConsent = services.telemetry()?.onConsentChange(sayConsent);
+      channel = opened;
+      return opened.port2;
+    };
+    const post = (request: WorkerRevisionRequest): void => {
+      if (!admitted) {
+        queued.push(request);
+        return;
+      }
+      open().postMessage(request);
+    };
+    /**
+     * Ask one question and wait for the frame that carries its answer.
+     *
+     * @param request - The verb, without its correlation id.
+     * @returns The answer's payload.
+     */
+    const ask = async (request: WorkerRevisionRequest): Promise<WorkerRevisionResult> => {
+      nextRequestId += 1;
+      const id = nextRequestId;
+      const answer = Promise.withResolvers<WorkerRevisionResult>();
+      pending.set(id, answer);
+      post({ ...request, id });
+      return answer.promise;
+    };
+    const cancelPendingRequests = (): void => {
+      const error = new DOMException('The revision connection closed before the request completed.', 'AbortError');
+      for (const request of pending.values()) {
+        request.reject(error);
+      }
+      pending.clear();
+    };
+    const connection: RevisionClientConnection = {
+      status: () => status,
+      pushGithub: async (credential) => {
+        await ask({ command: 'pushGithub', ...credential });
+      },
+      remoteCredential: (credential) => {
+        post({ command: 'remoteCredential', ...credential });
+      },
+      focus: (next) => {
+        focused = next;
+        /* Not queued: `open` says it once on every new port, including the first. */
+        if (admitted) {
+          open().postMessage({ command: 'focus', focused: next } satisfies WorkerRevisionRequest);
+        }
+      },
+      firstViewShown: () => {
+        post({ command: 'firstViewShown' });
+      },
+      subscribe: (listener) => listeners.subscribe(listener),
+      subscribeEvents: (listener) => {
+        const unsubscribe = events.subscribe(listener);
+        if (projectedChatIds.size > 0) {
+          try {
+            listener({
+              type: 'chats.projected',
+              projectId: input.projectId,
+              chatIds: [...projectedChatIds],
+            });
+          } catch {
+            /* Match Topic fan-out: one failed observer cannot break the client. */
+          }
+        }
+        return unsubscribe;
+      },
+      subscribeToasts: (listener) => toasts.subscribe(listener),
+      log: async (request) => {
+        const result = await ask({
+          command: 'log',
+          ...(request?.branch === undefined ? {} : { branch: request.branch }),
+          ...(request?.limit === undefined ? {} : { limit: request.limit }),
+          ...(request?.from === undefined ? {} : { from: request.from }),
+        });
+        return result.kind === 'log' ? result.rows : [];
+      },
+      graph: async (request) => {
+        const result = await ask({
+          command: 'graph',
+          ...(request?.branches === undefined ? {} : { branches: request.branches }),
+          ...(request?.limit === undefined ? {} : { limit: request.limit }),
+        });
+        if (result.kind !== 'graph') {
+          throw Object.assign(new Error('The revision root answered a graph read with something else.'), {
+            code: 'INVALID_REVISION_RESPONSE',
+          });
+        }
+        return result.graph;
+      },
+      divergence: async (head, base) => {
+        const result = await ask({ command: 'divergence', head, base });
+        if (result.kind !== 'divergence') {
+          throw Object.assign(new Error('The revision root answered a divergence with something else.'), {
+            code: 'INVALID_REVISION_RESPONSE',
+          });
+        }
+        return result.divergence;
+      },
+      diff: async (revisionId, from, options) => {
+        const result = await ask({
+          command: 'diff',
+          revisionId,
+          ...(options?.against === undefined ? {} : { against: options.against }),
+          ...(from === undefined ? {} : { from }),
+        });
+        return result.kind === 'diff' ? result.entries : [];
+      },
+      tag: async (input) => {
+        const result = await ask({ command: 'tag', ...input });
+        return result.kind === 'tag' ? result.tag : undefined;
+      },
+      compare: async (revisionId, path, options) => {
+        const result = await ask({
+          command: 'compare',
+          revisionId,
+          path,
+          ...(options?.from === undefined ? {} : { from: options.from }),
+          ...(options?.against === undefined ? {} : { against: options.against }),
+        });
+        if (result.kind !== 'comparison') {
+          throw Object.assign(new Error('The revision root answered a comparison with something else.'), {
+            code: 'INVALID_REVISION_RESPONSE',
+          });
+        }
+        return result.comparison;
+      },
+      send: (command) => {
+        post(command);
+      },
+      pullRemote: async (chatId) => {
+        const result = await ask({ command: 'pullRemote', chatId });
+        return result.kind !== 'pulled' || result.pulls;
+      },
+      saveRevision: async (trigger) => {
+        const result = await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+        return result.kind === 'saved' ? result.outcome : 'refused';
+      },
+      sessionChanged: async () => {
+        await ask({ command: 'sessionChanged' });
+      },
+      /* On the selected checkout, which is the one the page's files are rooted at. */
+      materialize: async (paths) => {
+        const checkoutId = status?.checkoutId;
+        await ask({ command: 'materialize', paths, ...(checkoutId === undefined ? {} : { checkoutId }) });
+      },
+      createBranch: async (name, from) => {
+        const result = await ask({ command: 'createBranch', name, ...(from === undefined ? {} : { from }) });
+        if (result.kind !== 'branch') {
+          throw new Error('The revision root answered the branch without the checkout it made.');
+        }
+        const { kind: _kind, ...created } = result;
+        return created;
+      },
+      recordEditorConflict: async (conflict) => {
+        const result = await ask({ command: 'recordEditorConflict', ...conflict });
+        if (result.kind !== 'editorConflict') {
+          throw new Error('The revision root answered an editor conflict with something else.');
+        }
+        return result.outcome;
+      },
+      open: () => {
+        admitted = true;
+        const port = open();
+        for (const request of queued.splice(0)) {
+          port.postMessage(request);
+        }
+        if (focused !== undefined) {
+          port.postMessage({ command: 'focus', focused } satisfies WorkerRevisionRequest);
+        }
+      },
+      close: () => {
+        admitted = false;
+        queued.length = 0;
+        if (channel === undefined) {
+          cancelPendingRequests();
+          return;
+        }
+        const closing = channel;
+        cancelPendingRequests();
+        channel = undefined;
+        stopConsent?.();
+        stopConsent = undefined;
+        connectionGeneration += 1;
+        status = undefined;
+        projectedChatIds.clear();
+        closing.port2.postMessage({
+          command: 'close',
+        } satisfies WorkerRevisionRequest);
+        closing.port2.close();
+        listeners.emit();
+      },
+      quiesce: async () => {
+        const closing = channel;
+        if (closing === undefined) {
+          return;
+        }
+        nextRequestId += 1;
+        const id = nextRequestId;
+        const answer = Promise.withResolvers<WorkerRevisionResult>();
+        const receiveClose = ({ data }: MessageEvent<WorkerRevisionResponse>): void => {
+          if ((data.type !== 'result' && data.type !== 'error') || data.id !== id) {
+            return;
+          }
+          if (data.type === 'result') {
+            answer.resolve(data.result);
+            return;
+          }
+          answer.reject(
+            Object.assign(new Error(data.message), ...(data.code === undefined ? [] : [{ code: data.code }])),
+          );
+        };
+        closing.port2.addEventListener('message', receiveClose);
+        closing.port2.postMessage({
+          command: 'close',
+          id,
+        } satisfies WorkerRevisionRequest);
+        try {
+          await answer.promise;
+          cancelPendingRequests();
+          if (channel === closing) {
+            channel = undefined;
+            stopConsent?.();
+            stopConsent = undefined;
+            connectionGeneration += 1;
+            status = undefined;
+            projectedChatIds.clear();
+          }
+          closing.port2.close();
+          listeners.emit();
+        } finally {
+          closing.port2.removeEventListener('message', receiveClose);
+        }
+      },
+    };
+    const client = withRevisionIdentity(input.projectId, connection);
+    revisionClients.set(input.projectId, { client, worker: input.worker });
+    return client;
+  };
+
+  /** Test-only access to the module's client table; not exported from a barrel. @internal */
+  const revisionClientTestApi = {
+    /** Serve `client` for `projectId` on `worker`, as `getRevisionClient` would have opened it. */
+    adopt: (projectId: string, worker: Worker, client: RevisionClient): void => {
+      revisionClients.set(projectId, { client, worker });
+    },
+    /** The identity commands a real client carries, over `client`'s own connection (audit R6). */
+    identity: (projectId: string, client: RevisionClient): ReturnType<typeof revisionIdentityCommands> =>
+      revisionIdentityCommands(projectId, () => client),
+    reset: (): void => {
+      revisionClients.clear();
+      for (const projectId of githubCredentialLeases.keys()) {
+        stopGithubCredential(projectId);
+      }
+      githubCredentialLeases.clear();
+      for (const projectId of pendingReplacements.keys()) {
+        stopPendingReplacement(projectId);
+      }
+    },
+  };
+
+  /**
+   * The commands one project's revision root accepts, over its client.
+   *
+   * One surface rather than one per verb: they are the same machine's events, and a
+   * caller that holds one holds them all.
+   *
+   * @param client - The project's client, or `undefined` before the worker is connected.
+   * @param projectId - The project.
+   * @returns The command surface; every verb is a no-op before the root connects.
+   */
+  const revisionCommands = (client: RevisionClient | undefined, projectId: string): RevisionCommands => ({
+    restore: (revisionId: string) => client?.send({ command: 'restore', revisionId }),
+    undo: () => client?.send({ command: 'undo' }),
+    undoOperation: () => client?.send({ command: 'undoOperation' }),
+    undoMerge: (revisionId: string, before: string) => client?.send({ command: 'undoMerge', revisionId, before }),
+    switchTo: (branch: string) => client?.send({ command: 'switch', branch }),
+    followChat: (chatId: string) => client?.send({ command: 'followChat', chatId }),
+    pinTo: (checkoutId: string) => client?.send({ command: 'pinTo', checkoutId }),
+    createBranch: async (name: string, from?: string) => {
+      if (client === undefined) {
+        throw new Error('This project has no revision root to make a branch in.');
+      }
+      return client.createBranch(name, from);
+    },
+    discardBranch: (branch: string, checkoutId?: string) =>
+      client?.send({
+        command: 'discardBranch',
+        branch,
+        ...(checkoutId === undefined ? {} : { checkoutId }),
+      }),
+    mergeBranch: (branch: string) => client?.send({ command: 'mergeBranch', branch }),
+    renameBranch: (branch: string, name: string) => client?.send({ command: 'renameBranch', branch, name }),
+    resolveFile: (revisionId: string, path: string, side: 'mine' | 'theirs') =>
+      client?.send({ command: 'resolve', revisionId, path, side }),
+    openConflictInEditor: (revisionId: string, path: string) =>
+      client?.send({ command: 'resolveInEditor', revisionId, path }),
+    resolveFileInEditor: (revisionId: string, path: string, content: string) =>
+      client?.send({
+        command: 'resolvedInEditor',
+        revisionId,
+        path,
+        content,
+      }),
+    finishResolution: (revisionId: string) => client?.send({ command: 'finishResolution', revisionId }),
+    abandonResolution: (revisionId: string) => client?.send({ command: 'abandonResolution', revisionId }),
+    askChatToResolve: (revisionId: string) => client?.send({ command: 'askChatToResolve', revisionId }),
+    connectRemote: async (
+      kind,
+      url?: string,
+      options?: Readonly<{
+        authorization?: string;
+        provider?: 'github';
+        repositoryId?: string;
+        connectionId?: string;
+        generation?: number;
+        expiresAt?: string;
+        fetchOnly?: boolean;
+      }>,
+    ) => {
+      /* Every surface that offers *Tau Cloud* — the palette, the Sync region,
+       * whatever W7 mounts — sends the same URL, because none of them has to
+       * know it. */
+      const apiBaseUrl = services.apiBaseUrl();
+      const resolved = url ?? (kind === 'tau' ? tauRemoteUrl(apiBaseUrl, projectId) : undefined);
+      /* A GitHub remote is reached with the GitHub sign-in on this session
+       * (S34). The token is minted here, where `authClient` lives, and handed
+       * to the worker for the requests it makes; a session that can no longer
+       * mint one says so, and the row asks for *Reconnect* rather than
+       * reporting a failed push (charter W12). */
+      const origin = kind === 'git' ? remoteOrigin(resolved) : undefined;
+      const github = origin !== undefined && resolved !== undefined && isGithubRemoteUrl(resolved);
+      const minted =
+        github && options?.authorization !== undefined
+          ? {
+              authorization: options.authorization,
+              repositoryUrl: resolved,
+              ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
+            }
+          : {};
+      /* Ruling G2 (D6): a github.com address with no App credential is an
+       * anonymous read, the Advanced form's own promise. It is linked
+       * read-only, because a push without the App credential is refused. */
+      const fetchOnly = options?.fetchOnly === true || (github && options?.authorization === undefined);
+      /* The last remote's renewals stop here: they would re-send its frame. A
+       * newer pick supersedes a replacement still waiting for its answer. */
+      stopGithubCredential(projectId);
+      stopPendingReplacement(projectId);
+      /* One frame on *every* connect, including *No remote* and Tau Cloud: the
+       * frame is how a credential minted for the last remote stops being
+       * offered to the next one (review R1). A host with no credential gets an
+       * origin alone, which is an anonymous read. */
+      client?.remoteCredential({
+        apiBaseUrl,
+        ...(origin === undefined ? {} : { origin }),
+        ...minted,
+      });
+      /* D3: the remote already recorded, picked again, is a re-grant rather
+       * than a new connection. The fresh frame is sent; `remote.machine`
+       * re-validates from `reconnectRequired`, and a refused sync retries. */
+      const recorded = client?.status()?.remote;
+      const regranted =
+        kind === 'git' &&
+        recorded?.kind === 'git' &&
+        recorded.url === resolved &&
+        recorded.provider === options?.provider &&
+        recorded.repositoryId === options?.repositoryId &&
+        /* Changed access is not a re-grant: the link must be re-sent with it (review R-U6). */
+        recorded.fetchOnly === fetchOnly &&
+        (recorded.phase === 'reconnectRequired' || recorded.phase === 'connected');
+      if (regranted) {
+        client?.send({ command: recorded.phase === 'reconnectRequired' ? 'authorizeRemote' : 'syncNow' });
+      } else {
+        client?.send({
+          command: 'connectRemote',
+          kind,
+          ...(resolved === undefined ? {} : { url: resolved }),
+          ...(options?.provider === undefined ? {} : { provider: options.provider }),
+          ...(options?.repositoryId === undefined ? {} : { repositoryId: options.repositoryId }),
+          ...(fetchOnly ? { fetchOnly: true } : {}),
+        });
+      }
+      /* Looked up now, so a failed lookup still rejects this call; recorded by `bind`. */
+      const binding = githubBindingOf(resolved, options);
+      const bind = async (): Promise<void> => {
+        const value = await binding;
+        if (value === 'unchanged') {
+          return;
+        }
+        if (value === undefined) {
+          githubProjectBinding.remove(projectId);
+          return;
+        }
+        githubProjectBinding.set(projectId, value);
+        if (client !== undefined && options?.expiresAt !== undefined) {
+          scheduleGithubCredential(client, projectId, githubCredentialRenewDelay(options.expiresAt, Date.now()));
+        }
+      };
+      /*
+       * R2: a different destination picked while a remote backs this project
+       * up is probed before it replaces anything (`remote.machine`'s
+       * `replaceOrReconnect`). The binding moves only once the new remote is
+       * recorded and answering; a refusal leaves the old binding as it was
+       * and hands the old remote its credential back. Waited on here, not in
+       * the Sync region, so the answer is kept when that region unmounts.
+       */
+      const pick = { kind, url: resolved, provider: options?.provider, repositoryId: options?.repositoryId };
+      if (client !== undefined && !regranted && replacesRecordedRemote(recorded, pick)) {
+        awaitReplacementAnswer({
+          client,
+          projectId,
+          previous: recorded,
+          isReplacement: (remote) => isSameDestination(remote, pick),
+          bind,
+        });
+        await binding;
+        return;
+      }
+      await bind();
+    },
+    disconnectRemote: () => {
+      /* The credential goes with the remote it was minted for (review R1). */
+      stopGithubCredential(projectId);
+      stopPendingReplacement(projectId);
+      client?.remoteCredential({
+        apiBaseUrl: services.apiBaseUrl(),
+      });
+      client?.send({ command: 'disconnectRemote' });
+      githubProjectBinding.remove(projectId);
+    },
+    cancelRemote: () => client?.send({ command: 'cancelRemote' }),
+    syncNow: () => client?.send({ command: 'syncNow' }),
+    pushGithub: async () => {
+      const binding = githubProjectBinding.get(projectId);
+      if (binding === undefined || client === undefined) {
+        throw new Error('Connect this repository before pushing.');
+      }
+      const token = await services.github.token(binding.connectionId, {
+        repositoryId: Number(binding.repositoryId),
+        operation: 'write',
+      });
+      if (
+        githubProjectBinding.get(projectId)?.repositoryUrl !== binding.repositoryUrl ||
+        githubProjectBinding.get(projectId)?.connectionId !== binding.connectionId
+      ) {
+        throw new Error('The repository connection changed. Try again.');
+      }
+      await client.pushGithub({
+        apiBaseUrl: services.apiBaseUrl(),
+        origin: 'https://github.com',
+        repositoryUrl: binding.repositoryUrl,
+        authorization: `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`,
+        expiresAt: token.expiresAt,
+      });
+    },
+    saveRevision: async (trigger?: 'save' | 'hidden' | 'close') => {
+      await client?.saveRevision(trigger);
+    },
+    tag: async (input) => client?.tag(input),
+    publishProject: (tag?: string, revisionId?: string) => {
+      /* The origin rides the command itself: it is how the worker names this
+       * project's Tau Cloud repository and reaches the publications route
+       * (I8 — no credential travels, the session is a cookie the worker's own
+       * request carries). Never a credential frame, which carries *no*
+       * credential here and would sign this project out of the remote it is
+       * connected to (review R4). */
+      client?.send({
+        command: 'publishProject',
+        apiBaseUrl: services.apiBaseUrl(),
+        ...(tag === undefined ? {} : { tag }),
+        ...(revisionId === undefined ? {} : { revisionId }),
+      });
+    },
+    confirmPublish: (draft) => client?.send({ command: 'confirmPublish', draft }),
+    cancelPublish: () => client?.send({ command: 'cancelPublish' }),
+    resetPublish: () => client?.send({ command: 'resetPublish' }),
+  });
+
+  return { createHostRevisionClient, getRevisionClient, revisionCommands, revisionClientTestApi };
+};
+
+/**
+ * The one projection the page reads about revisions.
+ *
+ * `Rev N` is not here: it is derived from the graph at read time (I3). The
+ * remote facet is (W11b); sync *progress* arrives with `sync.machine` (W13).
+ *
+ * @returns The projection, or `undefined` before the root has answered.
+ * @public
+ */
+export const useRevisionClientStatus = (client: RevisionClient | undefined): RevisionStatusProjection | undefined => {
+  const subscribe = useCallback(
+    (listener: () => void) => client?.subscribe(listener) ?? ((): void => undefined),
+    [client],
+  );
+  return useSyncExternalStore(
+    subscribe,
+    () => client?.status(),
+    () => undefined,
+  );
+};

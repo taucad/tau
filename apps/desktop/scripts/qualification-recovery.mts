@@ -23,6 +23,10 @@
 import { open, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
+/* oxlint-disable no-restricted-imports -- B's ledger identity must be derived exactly as the app derives it. */
+import { buildIdentity } from '../src/main/boot-health.js';
+import { desktopHostBuildOf } from '../src/shared/desktop-host-build.js';
+/* oxlint-enable no-restricted-imports */
 
 export type QualificationScenario = 'chain' | 'recovery';
 
@@ -188,9 +192,9 @@ export const autoInstallCountdownMilliseconds = 10_000;
 const countdownToleranceMilliseconds = 50;
 const readySchema = z.object({ version: z.string(), pid: z.number().int().positive() });
 
-/** Split `desktop.log` into launches at each `main.ready`, keeping each event's JSON detail. */
-const launchesOf = (log: string): Launch[] => {
-  const launches: Launch[] = [];
+/** Each line of `desktop.log` with its time, event name and JSON detail; lines that are not log records are skipped. */
+const eventsOf = (log: string): Array<LogEvent & { readonly time: string }> => {
+  const events: Array<LogEvent & { readonly time: string }> = [];
   for (const text of log.split('\n')) {
     const match = logLine.exec(text);
     if (!match) {
@@ -203,8 +207,15 @@ const launchesOf = (log: string): Launch[] => {
     } catch {
       /* A stack trace or other non-JSON detail: the event name is all the assessment reads. */
     }
-    const event = match[2]!;
-    const at = Date.parse(match[1]!);
+    events.push({ time: match[1]!, at: Date.parse(match[1]!), event: match[2]!, detail });
+  }
+  return events;
+};
+
+/** Split `desktop.log` into launches at each `main.ready`, keeping each event's JSON detail. */
+const launchesOf = (log: string): Launch[] => {
+  const launches: Launch[] = [];
+  for (const { at, event, detail } of eventsOf(log)) {
     if (event === 'main.ready') {
       const ready = readySchema.safeParse(detail);
       if (ready.success) {
@@ -215,6 +226,124 @@ const launchesOf = (log: string): Launch[] => {
     launches.at(-1)?.events.push({ at, event, detail });
   }
   return launches;
+};
+
+/** The detail fields a recovery trail keeps: versions, stages, triggers, modes, phases, counts and failure reasons. */
+const trailFields = new Set([
+  'version',
+  'pid',
+  'stage',
+  'trigger',
+  'mode',
+  'reason',
+  'targetVersion',
+  'phase',
+  'count',
+  'from',
+  'message',
+]);
+/** The most events a trail keeps, the latest ones. */
+const trailLength = 200;
+const pathLike = /(?:\\\\\?\\)?[A-Za-z]:\\[^\s"']*|\/(?:home|Users|tmp|var|root|private|opt|usr)\/[^\s"']*/gu;
+
+export type RecoveryTrailEntry = {
+  readonly at: string;
+  readonly event: string;
+  readonly detail: Readonly<Record<string, string | number | boolean>>;
+};
+
+/**
+ * What a recovery row keeps of the app's log when it fails: every `main.*` and `updater.*` event, with only the
+ * scalar fields that say how the launch, the recovery window and the updater went. A message has its paths replaced,
+ * so the trail carries no profile or installation directory and can be uploaded beside the row's other observations.
+ *
+ * @param log - `desktop.log` as text, oldest first.
+ * @returns The latest {@link trailLength} events.
+ */
+export const recoveryTrail = (log: string): RecoveryTrailEntry[] =>
+  eventsOf(log)
+    .filter(({ event }) => event.startsWith('main.') || event.startsWith('updater.'))
+    .slice(-trailLength)
+    .map(({ time, event, detail }) => ({
+      at: time,
+      event,
+      detail: Object.fromEntries(
+        Object.entries(detail).flatMap(([key, value]): Array<[string, string | number | boolean]> => {
+          if (!trailFields.has(key)) {
+            return [];
+          }
+          if (typeof value === 'string') {
+            return [[key, value.replaceAll(pathLike, '<path>').slice(0, 300)]];
+          }
+          return typeof value === 'number' || typeof value === 'boolean' ? [[key, value]] : [];
+        }),
+      ),
+    }));
+
+const ledgerSummarySchema = z.object({
+  build: z.string().optional(),
+  unhealthyCount: z.number().optional(),
+  last: z
+    .object({ stage: z.string().optional(), mode: z.string().optional(), deadlinePassed: z.boolean().optional() })
+    .optional(),
+  autoInstall: z.object({ targetVersion: z.string().optional() }).optional(),
+});
+export type RecoveryLedgerSummary = z.infer<typeof ledgerSummarySchema>;
+/**
+ * What a failed recovery row keeps of the boot-health ledger: the build, the count, the last launch's stage and mode,
+ * and the automatic-install target. Launch ids and anything else stay in the profile.
+ *
+ * @param ledger - The parsed `boot-health.json`, or `undefined`.
+ * @returns The summary, or `undefined` when there is no readable ledger.
+ */
+export const recoveryLedgerSummary = (ledger: unknown): RecoveryLedgerSummary | undefined =>
+  ledgerSummarySchema.safeParse(ledger).data;
+
+/**
+ * What a recovery row that ran out of time reports: the record it uploads beside its other observations, and an error
+ * that says in the job log whether A was still running, how far its ledger got, whether it asked the mirror for
+ * anything, and its last updater events.
+ *
+ * @param input - The verdict's last reason, `desktop.log` as text, `boot-health.json` as text (empty when absent),
+ * whether A's process was alive, and the mirror's requests.
+ * @returns The record and the error.
+ */
+export const recoveryFailure = (input: {
+  readonly reason: string;
+  readonly log: string;
+  readonly ledgerText: string;
+  readonly aAlive: boolean;
+  readonly mirrorRequests: readonly unknown[];
+}): { readonly record: Record<string, unknown>; readonly error: Error } => {
+  const trail = recoveryTrail(input.log);
+  let parsed: unknown;
+  try {
+    parsed = input.ledgerText === '' ? undefined : JSON.parse(input.ledgerText);
+  } catch {
+    parsed = undefined;
+  }
+  const ledger = recoveryLedgerSummary(parsed);
+  const updaterEvents = trail
+    .filter(({ event }) => event.startsWith('updater.'))
+    .slice(-5)
+    .map(({ event, detail }) => `${event} ${JSON.stringify(detail)}`);
+  return {
+    record: {
+      status: 'failed',
+      reason: input.reason,
+      aAlive: input.aAlive,
+      ledger,
+      trail,
+      mirrorRequests: input.mirrorRequests,
+    },
+    error: new Error(
+      `T-B22.4 recovery did not complete: ${input.reason} (A alive: ${String(input.aAlive)}; ledger stage: ${
+        ledger?.last?.stage ?? 'none'
+      }; mirror requests: ${input.mirrorRequests.length}; last updater events: ${
+        updaterEvents.length === 0 ? 'none' : updaterEvents.join('; ')
+      })`,
+    ),
+  };
 };
 
 const recoveryEvents = new Set(['main.recovery-opened', 'main.recovery-offered', 'main.recovery-shown']);
@@ -298,7 +427,12 @@ export const assessRecovery = (input: {
     throw new Error('The profile has no boot-health ledger');
   }
   const ledger = z.object({ build: z.string(), last: z.object({ stage: z.string() }).optional() }).parse(input.ledger);
-  const build = `${b.version}+${b.sourceCommit}+packaged`;
+  /* The app records packaging's 12-hex short commit (`host-build.json`), not the release's full source commit. */
+  const build = buildIdentity({
+    version: b.version,
+    sourceCommit: desktopHostBuildOf(() => b.sourceCommit),
+    packaged: true,
+  });
   if (ledger.build !== build) {
     throw new Error(`The boot-health ledger belongs to ${ledger.build}, not ${build}`);
   }

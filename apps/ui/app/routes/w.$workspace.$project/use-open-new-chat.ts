@@ -5,7 +5,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { projectChatUrl } from '#utils/project-url.utils.js';
+import { projectChatUrl } from '@taucad/files-ui/utils/project-url.utils';
 
 /**
  * Create an empty chat in the current project and open it with its composer focused.

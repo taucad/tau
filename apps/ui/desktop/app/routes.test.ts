@@ -22,7 +22,10 @@ describe('desktop route manifest', () => {
     expect(manifest).toContain('auth.$');
     expect(manifest).toContain('home-surface.desktop.tsx');
     expect(manifest).not.toContain('"file":"../../app/routes/_index/route.tsx"');
-    expect(manifest).not.toContain('../../app/routes/usage/');
+  });
+
+  it('should carry /usage, which guards itself by the display mode (D8)', () => {
+    expect(JSON.stringify(routes)).toContain('../../app/routes/usage/');
   });
 
   /* The `tau://` contract main loads against (R4). `/i/*` is a server redirect,
@@ -61,7 +64,7 @@ describe('desktop route manifest', () => {
   /* Windows: `path.relative` answers with backslashes. `flatRoutes` normalised a file's relative path but not a
      folder's, and this manifest's out-of-tree root makes it `..\\..\\app\\routes\\<folder>`, which the default
      dot-file ignore matches, so a Windows build dropped every folder route and served a blank Home
-     (tools/pnpm/patches/@react-router__fs-routes@7.18.5.patch). */
+     (tools/pnpm/patches/@react-router__fs-routes@8.5.1.patch). */
   it('should keep every route when paths are resolved with Windows separators', async () => {
     const posixRelative = path.relative;
     const relative = vi

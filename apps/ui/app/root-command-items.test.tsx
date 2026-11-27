@@ -13,7 +13,9 @@ vi.mock('#hooks/use-settings-dialog.js', () => ({
   useSettingsDialog: () => ({ isOpen: false, section: 'general', open: vi.fn(), close: vi.fn() }),
 }));
 const flags = vi.hoisted(() => ({ onboarding: false }));
-vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: string) => flag === 'onboarding' && flags.onboarding }));
+vi.mock('#flags/use-feature.js', () => ({
+  useFeatureState: (flag: string) => (flag === 'onboarding' && flags.onboarding ? 'on' : 'off'),
+}));
 vi.mock('#components/layout/command-palette.js', () => ({
   useCommandPaletteItems: (_id: string, factory: () => CommandPaletteItem[]) => {
     registered = factory();

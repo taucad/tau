@@ -13,6 +13,14 @@
 # unfinished merge-group runs before it lists the live queue branches, so a group
 # created while it runs is never mistaken for a dead one. Concurrency sits on the job,
 # so the skipped runs for ordinary CI requests never cancel a sweep in progress.
+#
+# A group that merged has no queue branch either, but it is not dead: its commit is on
+# `main`, its required gate passed, and what still runs is non-gating, the shadow rows
+# (`ci.yml` job `e2e-shadow`, CI flake quarantine blueprint FQ-13). A shadow row cancelled
+# there leaves its flake-ledger count as it was, and on 2026-11-26 the sweep cancelled 59
+# of the 213 shadow rows of merged groups, so the slow rows rarely counted at all. The
+# sweep leaves such a run to finish: its rows are bounded by their own timeout, and the
+# push that follows reuses its verdict without running them again (`queue-verdict`).
 name: Merge queue sweep
 
 on:
@@ -45,19 +53,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          BASE_BRANCH: main
         run: |
           set -euo pipefail
           runs=$(for status in queued in_progress waiting pending requested; do
             gh api --paginate "repos/${GH_REPO}/actions/runs?event=merge_group&status=${status}&per_page=100" \
-              --jq '.workflow_runs[] | "\(.id) \(.head_branch)"'
+              --jq '.workflow_runs[] | "\(.id) \(.head_branch) \(.head_sha)"'
           done | sort -u)
           live=$(gh api --paginate "repos/${GH_REPO}/git/matching-refs/heads/gh-readonly-queue" \
             --jq '.[].ref | select(startswith("refs/heads/gh-readonly-queue/")) | sub("^refs/heads/"; "")')
           cancelled=0
-          while read -r id branch; do
+          left=0
+          while read -r id branch sha; do
             [ -n "$id" ] || continue
             [ "$id" = "$GITHUB_RUN_ID" ] && continue
             if grep -qxF -- "$branch" <<< "$live"; then
+              continue
+            fi
+            # The group merged when its commit is on the base branch (`identical` or `ahead`, as
+            # `ci-queue-health.ts` reads a landed commit). A failed lookup cancels, as before.
+            landed=$(gh api "repos/${GH_REPO}/compare/${sha}...${BASE_BRANCH}?per_page=1" --jq '.status' 2> /dev/null || true)
+            if [ "$landed" = identical ] || [ "$landed" = ahead ]; then
+              echo "Left run ${id} of merged queue branch ${branch} to finish its non-gating rows"
+              left=$((left + 1))
               continue
             fi
             if gh api -X POST "repos/${GH_REPO}/actions/runs/${id}/cancel" > /dev/null; then
@@ -67,4 +85,4 @@ jobs:
               echo "::warning::Could not cancel run ${id} (${branch}); it may have just finished"
             fi
           done <<< "$runs"
-          echo "Cancelled ${cancelled} run(s) of deleted merge-queue groups."
+          echo "Cancelled ${cancelled} run(s) of deleted merge-queue groups; left ${left} run(s) of merged groups to finish."

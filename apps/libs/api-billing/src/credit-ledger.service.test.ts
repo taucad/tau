@@ -125,11 +125,12 @@ describe('CreditLedgerService.recordFundedWorkDenial', () => {
 describe('CreditLedgerService.admitOperation', () => {
   /** A ledger whose first database read is the account binding; reaching it means every input check passed. */
   const ledgerReachingDatabase = () => {
-    const transaction = vi.fn(async () => {
+    /* Admission's first statement is the binding read before its transaction (chat performance WP-14). */
+    const transaction = vi.fn(() => {
       throw new Error('database reached');
     });
     const ledger = new CreditLedgerService(
-      { database: { transaction } } as unknown as Pick<DatabaseService, 'database'>,
+      { database: { select: transaction, transaction } } as unknown as Pick<DatabaseService, 'database'>,
       {} as BillingPolicyService,
     );
     return { ledger, transaction };

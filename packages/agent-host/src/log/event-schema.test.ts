@@ -5,7 +5,7 @@ import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
-import { classifyLogRow, fileRefBlockSchema, userProviderMessageSchema } from '#log/event-schema.js';
+import { classifyLogRow, fileRefBlockSchema, parseLogEvent, userProviderMessageSchema } from '#log/event-schema.js';
 
 const hash = 'a'.repeat(64);
 
@@ -266,5 +266,67 @@ describe('generic classifier observable inputs', () => {
 
     expect(classifyLogRow(input).class).toBe('known');
     expect(reads).toBeGreaterThan(2);
+  });
+});
+
+describe('parseLogEvent failure report', () => {
+  const row = {
+    version: 1,
+    leaderEpoch: 'epoch',
+    sequence: 0,
+    recordedAt: 'now',
+    runId: 'run',
+  };
+  const messageOf = (value: unknown): string => {
+    try {
+      parseLogEvent(value);
+    } catch (error) {
+      return (error as Error).message;
+    }
+    throw new Error('expected the row to be refused');
+  };
+
+  it('names the row type and the nested field path, not "Invalid input"', () => {
+    const message = messageOf({
+      ...row,
+      type: 'message.appended',
+      message: {
+        id: 'message',
+        role: 'assistant',
+        content: [
+          {
+            type: 'acp-session',
+            commands: [{ name: 'secret-skill-text', input: undefined }],
+          },
+        ],
+      },
+    });
+    expect(message).toBe(
+      'Invalid agent event-log record: message.appended at message.content.0.commands.0.input (invalid_type, found undefined)',
+    );
+  });
+
+  it('never quotes a refused value', () => {
+    const message = messageOf({
+      ...row,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { message: '', code: 7 },
+    });
+    expect(message).toBe(
+      'Invalid agent event-log record: run.lifecycle at detail.message (too_small, found string); detail.code (invalid_type, found number)',
+    );
+  });
+
+  it('follows the variant the row meant when one type has several', () => {
+    expect(
+      messageOf({
+        ...row,
+        type: 'safeguard.recorded',
+        safeguardId: 'guard',
+        action: 'nudge',
+        reason: 'loop',
+      }),
+    ).toBe('Invalid agent event-log record: safeguard.recorded at message (invalid_type, found undefined)');
   });
 });

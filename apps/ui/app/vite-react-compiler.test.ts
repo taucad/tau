@@ -9,7 +9,10 @@ import { describe, expect, it } from 'vitest';
 import { build } from 'vite';
 // oxlint-disable-next-line no-restricted-imports -- exercises the production client compiler configuration.
 import { createUiReactCompilerPlugin, createUiSourceAliasPlugin } from '../vite.config.js';
-import type { MonthlyCreditsMeter, MonthlyCreditsMeterState } from '#components/billing/monthly-credits-meter.js';
+import type {
+  MonthlyCreditsMeter,
+  MonthlyCreditsMeterState,
+} from '@taucad/billing-ui/components/billing/monthly-credits-meter';
 
 const require = createRequire(import.meta.url);
 const appRoot = import.meta.dirname;
@@ -60,7 +63,7 @@ const buildClientModule = async <Props extends Record<string, unknown>>(
 describe('production React compiler', () => {
   it('should render the monthly credits meter with BigInt balances after a client build', async () => {
     const built = await buildClientModule<ComponentProps<typeof MonthlyCreditsMeter>>(
-      `import { MonthlyCreditsMeter as Meter } from '#components/billing/monthly-credits-meter.js';
+      `import { MonthlyCreditsMeter as Meter } from '@taucad/billing-ui/components/billing/monthly-credits-meter';
        import { TooltipProvider } from '@taucad/ui/components/tooltip';
        export function MonthlyCreditsMeter(props) {
          return <TooltipProvider><Meter {...props} /></TooltipProvider>;

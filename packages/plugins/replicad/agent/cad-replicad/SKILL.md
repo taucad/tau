@@ -56,15 +56,15 @@ The symbols real Tau models use most, as verbatim declarations. Anything not sho
 
 ```ts
 // Creates a drawing pen to programatically draw in 2D
-export declare function draw(initialPoint?: Point2D): DrawingPen;
+declare function draw(initialPoint?: Point2D): DrawingPen;
 
 Point2D: [number, number]
 
 // Creates the `Drawing` of a circle
-export declare function drawCircle(radius: number): Drawing;
+declare function drawCircle(radius: number): Drawing;
 
 // Creates the `Drawing` of a rectangle with (optional) rounded corners
-export declare function drawRoundedRectangle(width: number, height: number, r?: number | {
+declare function drawRoundedRectangle(width: number, height: number, r?: number | {
     rx?: number;
     ry?: number;
 }): Drawing;
@@ -86,9 +86,6 @@ AxisName: (typeof AXIS_NAMES)[number]
 
 // Creates a box with the given corner points
 export declare function makeBox(corner1: Point, corner2: Point): Solid;
-
-// Creates the `Drawing` of an polygon in a defined plane
-export declare function drawPolysides(radius: number, sidesCount: number, sagitta?: number): Drawing;
 ```
 
 ### Classes
@@ -113,6 +110,7 @@ export declare class Sketch implements SketchInterface
           defaultOrigin?: Point;
           defaultDirection?: Point;
       });
+  // Keeps a copy of `newFace`
   baseFace: Face | null | undefined
   delete(): void;
   clone(): Sketch;
@@ -121,7 +119,7 @@ export declare class Sketch implements SketchInterface
   wires(): Wire;
   faces(): Face;
   // Revolves the drawing on an axis (defined by its direction and an origin (defaults…
-  revolve(revolutionAxis?: Point, { origin, angle }?: {
+  revolve(revolutionAxis?: Point | AxisName, { origin, angle }?: {
           origin?: Point;
           angle?: number;
       }): Shape3D;
@@ -136,7 +134,7 @@ export declare class Sketch implements SketchInterface
   sweepSketch(sketchOnPlane: (plane: Plane, origin: Point) => this, sweepConfig?: GenericSweepConfig): Shape3D;
   // Loft between this sketch and another sketch (or an array of them)
   loftWith(otherSketches: this | this[], loftConfig?: LoftConfig, returnShell?: boolean): Shape3D;
-  // … 2 more members in the API reference: defaultOrigin, defaultDirection
+  // … 3 more members in the API reference: defaultOrigin, defaultDirection, extrudeUntil
 
 Shape3D: Shell | Solid | CompSolid | Compound
 
@@ -187,7 +185,7 @@ export declare class Drawing implements DrawingInterface
   toSVGPaths(): string[] | string[][];
   offset(distance: number, offsetConfig?: Offset2DConfig): Drawing;
   readonly blueprint: Blueprint
-  // … 7 more members in the API reference: serialize, stretch, repr, punchHole, toSVG, toSVGViewBox, approximate
+  // … 8 more members in the API reference: delete, serialize, stretch, repr, punchHole, toSVG, toSVGViewBox, approximate
 
 Shape2D: Blueprint | Blueprints | CompoundBlueprint | null
 
@@ -223,7 +221,7 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
   fuse(other: Shape3D, options?: BooleanOperationOptions): Shape3D;
   // Builds a new shape by fusing this shape with all provided shapes in one…
   fuseAll(others: readonly Shape3D[], options?: BooleanOperationOptions): Shape3D;
-  // Builds a new shape by removing the tool tape from this shape
+  // Builds a new shape by removing the tool shape from this shape
   cut(tool: Shape3D, options?: BooleanOperationOptions): Shape3D;
   // Builds a new shape by removing all provided tool shapes in one OCCT boolean…
   cutAll(tools: readonly Shape3D[], options?: BooleanOperationOptions): Shape3D;
@@ -245,6 +243,8 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
 
 export declare interface BooleanOperationOptions
   optimisation?: "none" | "commonFace" | "sameFace"
+  // Merge same-domain faces and edges after the Boolean operation
+  simplify?: boolean
 
 // A generic way to define radii for fillet or chamfer (the operation)
 RadiusConfig: ((e: Edge) => R | null) | R | {
@@ -292,7 +292,7 @@ export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type>
   readonly faces: Face[]
   readonly wires: Wire[]
   readonly boundingBox: BoundingBox
-  // … 11 more members in the API reference: serialize, hashCode, isNull, isSame, isEqual, edges, solids, mesh, meshEdges, blobSTEP, blobSTL
+  // … 15 more members in the API reference: serialize, hashCode, isNull, isSame, isEqual, edges, findEdge, findEdges, findFace, findFaces, solids, mesh, meshEdges, blobSTEP, blobSTL
 
 // Pieces grouped by their position relative to an oriented plane
 export declare interface PlaneSplitResult<T>
@@ -339,6 +339,8 @@ export declare class Sketches
   constructor(sketches: Array<Sketch | CompoundSketch>);
   wires(): AnyShape;
   faces(): AnyShape;
+  // Extrudes each sketch up to the same limiting face, returning only the extrusions
+  extrudeUntil(limitingFace: Face, extrusionConfig?: ExtrudeUntilOptions): Shape3D;
   // Extrudes the sketch to a certain distance.(along the default direction and origin of the…
   extrude(extrusionDistance: number, extrusionConfig?: {
           extrusionDirection?: Point;
@@ -347,10 +349,14 @@ export declare class Sketches
           origin?: Point;
       }): Shape3D;
   // Revolves the drawing on an axis (defined by its direction and an origin (defaults…
-  revolve(revolutionAxis?: Point, config?: {
+  revolve(revolutionAxis?: Point | AxisName, config?: {
           origin?: Point;
           angle?: number;
       }): Shape3D;
+
+export declare interface ExtrudeUntilOptions
+  // Defaults to the sketch's direction
+  extrusionDirection?: Point
 
 export declare class BoundingBox extends WrappingObj<Bnd_Box>
   constructor(wrapped?: Bnd_Box);
@@ -376,11 +382,6 @@ export declare class FaceFinder extends Finder3d<Face>
   // Check if a particular element should be filtered or not according to the current…
   shouldKeep(element: Face): boolean;
   protected applyFilter(shape: AnyShape): Face[];
-
-SurfaceType: "PLANE" | "CYLINDRE" | "CONE" | "SPHERE" | "TORUS" | "BEZIER_SURFACE" | "BSPLINE_SURFACE" | "REVOLUTION_SURFACE" | "EXTRUSION_SURFACE" | "OFFSET_SURFACE" | "OTHER_SURFACE"
-
-export declare class LinearPhysicalProperties extends PhysicalProperties
-  readonly length: number
 ```
 
 ### Types
@@ -416,7 +417,7 @@ ManifoldBox: Box
 
 ## API reference
 
-To read any other signature, find its name in `api-index.md`, which lists all 804 symbols by file with the lines that hold each, and read that range of the named file.
+To read any other signature, find its name in `api-index.md`, which lists all 862 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-functions.md` — Functions
 - `api-classes.md` — Classes

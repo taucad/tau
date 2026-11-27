@@ -3,5 +3,14 @@
   "description": "Web-based CAD editor with AI-assisted modeling",
   "icon": "lucide:box text-purple",
   "root": true,
-  "pages": ["index", "workbench-records", "packages", "terminal", "agent-tools", "external-agents", "agent-plugin"]
+  "pages": [
+    "index",
+    "workbench-records",
+    "native-cad-files",
+    "packages",
+    "terminal",
+    "agent-tools",
+    "external-agents",
+    "agent-plugin"
+  ]
 }

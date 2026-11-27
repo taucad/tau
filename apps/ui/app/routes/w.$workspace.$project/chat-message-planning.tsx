@@ -13,10 +13,14 @@ export function ChatMessagePlanning({ className }: { readonly className?: string
   const chatStatus = useChatSelector((state) => state.status);
   const trailing = useChatSelector((state) => state.messages.at(-1));
   const request = useChatSelector((state) => state.messages.findLast((message) => message.role === messageRole.user));
+  const sending = useChatSelector((state) => state.departingMessageId !== undefined);
+  const queued = useChatSelector((state) => state.hostWait);
   const cue = selectChatActivityCue({
     runState: run?.state,
     chatStatus,
     parts: trailing?.role === messageRole.assistant ? trailing.parts : undefined,
+    sending,
+    ...(queued === undefined ? {} : { queued }),
   });
   return cue ? (
     <ChatActivityStatus cue={cue} startedAt={request?.metadata?.createdAt} className={className} />

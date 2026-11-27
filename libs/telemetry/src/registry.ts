@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { defineCounter, defineHistogram, defineGauge, defineUpDownCounter } from '#define-metric.js';
 import {
+  admissionPhases,
   agentPlacements,
   agentCompactionLanes,
   agentCompactionOutcomes,
@@ -668,7 +669,16 @@ export const TauMetrics = {
     description: 'Invite notification emails suppressed before send, by reason',
     attributes: z.object({
       trigger: z.enum(['publish', 'invite']).optional(),
-      reason: z.enum(['cap_exceeded', 'limiter_unavailable', 'recipient_undeliverable']).optional(),
+      reason: z.enum(['cap_exceeded', 'limiter_unavailable', 'recipient_undeliverable', 'email_disabled']).optional(),
+    }),
+  }),
+
+  projectInviteEmailsTotal: defineCounter({
+    name: 'project.invite_emails',
+    unit: '{email}',
+    description: 'Collaborator invitation emails by outcome: sent, or why it was skipped',
+    attributes: z.object({
+      outcome: z.enum(['sent', 'email_disabled', 'undeliverable', 'send_failed']).optional(),
     }),
   }),
 
@@ -859,6 +869,7 @@ export const TauMetrics = {
         'recovery_in_progress',
         'recovery_failed',
         'operator_route_paused',
+        'route_rates_expired',
       ]),
     }),
   }),
@@ -976,6 +987,54 @@ export const TauMetrics = {
     attributes: z.object({
       'agent.id': z.string(),
       'agent.placement': z.enum(agentPlacements),
+    }),
+  }),
+
+  /**
+   * B4: a turn's tool results by how the admitting tab saw them. `timed`, `excluded` and `unsettled` are the
+   * denominators of `tau.agent.tool_result.delay`, so a result that never showed settled is counted, not dropped.
+   */
+  agentToolResults: defineCounter({
+    name: 'tau.agent.tool_results',
+    unit: '{result}',
+    description:
+      'Agent tool results by delivery: timed, excluded from timing, or not shown settled when the turn ended (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'agent.placement': z.enum(agentPlacements),
+      delivery: z.enum(['timed', 'excluded', 'unsettled']),
+    }),
+  }),
+
+  agentToolResultDelay: defineHistogram({
+    name: 'tau.agent.tool_result.delay',
+    unit: 's',
+    description:
+      "A turn's slowest timed tool result, from the host's output row to the page showing it settled (reported by client)",
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'agent.placement': z.enum(agentPlacements),
+    }),
+  }),
+
+  /**
+   * C3: one phase of a turn's submit to admitted. An unreported label reads `unreported`, so a turn from a page that
+   * did not measure it stays in the denominator.
+   */
+  agentAdmissionDelay: defineHistogram({
+    name: 'tau.agent.admission.delay',
+    unit: 's',
+    description:
+      'One phase of an agent turn from submit to admitted, by host start, chat state and deployment refetch (reported by client)',
+    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'agent.placement': z.enum(agentPlacements),
+      phase: z.enum(admissionPhases),
+      'host.start': z.enum(['cold', 'warm', 'unreported']),
+      'chat.state': z.enum(['open', 'reopened', 'unreported']),
+      'deployment.refetched': z.enum(['true', 'false', 'unreported']),
     }),
   }),
 
@@ -1629,9 +1688,11 @@ export const TauMetrics = {
 
   /*
    * STO-25: how long a hosted project takes to open in the browser, from its revision root opening.
-   * `first_view` is the repository checked out, so the editor and file tree are usable; `fully_fetched`
-   * is every large object local, so the viewer can render. `cache` is cold when the open fetched at
-   * least one large object from the network.
+   * `first_view` is the first view on screen: during a Tau Cloud open, when the page's route shows the
+   * file tree, editor and composer (since SP6; before, and when the page never says, the repository
+   * checked out). It is sent once the open's cache is known, so an open that fails before then sends
+   * none. `fully_fetched` is every large object local, so the viewer can render. `cache` is cold when
+   * the open fetched at least one large object from the network.
    */
   projectOpenDuration: defineHistogram({
     name: 'tau.project.open.duration',

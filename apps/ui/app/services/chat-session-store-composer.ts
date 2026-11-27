@@ -8,7 +8,7 @@
 import type { MyUIMessage } from '@taucad/chat';
 import type { RowKey } from '@taucad/agent-host';
 import type { Actor } from 'xstate';
-import type { composerRecordMachine } from '#machines/composer-record.machine.js';
+import type { composerRecordMachine } from '@taucad/chat-ui/machines/composer-record.machine';
 import type { ComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
 import type { AttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import { AgentHostWorkerError } from '#services/agent-host-client.js';

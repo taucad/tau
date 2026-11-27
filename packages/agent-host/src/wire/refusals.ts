@@ -93,6 +93,11 @@ export const refusals = {
   TOOL_RESULT_PERSISTENCE_FAILED: { owner: 'host', retry: 'resume' },
   /** A prepared model invocation has no recorded resolution; Resume reconciles it first (W3, RV1-F3). */
   INVOCATION_UNRESOLVED: { owner: 'host', retry: 'resume' },
+  /**
+   * The API's deployment answer for this run's model origin could not be had or read, so the run did not know whether
+   * its calls are funded and made none (I1). Resume once the API answers; the answer is then recorded with the run.
+   */
+  DEPLOYMENT_UNKNOWN: { owner: 'host', retry: 'resume' },
   /** The host is closing (was `LAUNCHER_CLOSED`); re-send to its successor. */
   HOST_CLOSED: { owner: 'host', retry: 'wait' },
   /** The host configures no model and the admission named none. */
@@ -295,6 +300,8 @@ export const refusals = {
   REMOTE_REAUTHORIZATION_REQUIRED: { owner: 'revisions', retry: 'never' },
   REMOTE_REF_CONFLICT: { owner: 'revisions', retry: 'never' },
   REMOTE_REJECTED: { owner: 'revisions', retry: 'never' },
+  /** Safe mode refuses Tau Cloud before any request; only a normal restart ends it (W9 R5). */
+  REMOTE_SAFE_MODE: { owner: 'revisions', retry: 'never' },
   REMOTE_UNAUTHORIZED: { owner: 'revisions', retry: 'never' },
   REMOTE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },
   UNKNOWN_REVISION: { owner: 'revisions', retry: 'never' },

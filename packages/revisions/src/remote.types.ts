@@ -87,6 +87,11 @@ export type RemoteFacet = Readonly<{
    * and by disconnecting.
    */
   refusedReplacement?: RemoteRefusedReplacement;
+  /**
+   * `true` while the remotes list is still being read, or its read is waiting to be asked again: whether a remote is
+   * recorded is not known yet, so {@link RemoteFacet.kind} `none` is not yet "no remote" (I7). Absent once it settles.
+   */
+  reading?: true;
 }>;
 
 /**

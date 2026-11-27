@@ -148,3 +148,5 @@ Programme control ruled on these five statements. A5a implements them as written
 ## Drift
 
 `project-focus.drift.test.ts` hashes `ProjectFocus.tla`, every config and `expected.json`, today's route code (`project-route.tsx`, `project-route-state.ts` and `project-live-sessions.tsx`) and the target's selector, `machines/focus.route-state.ts`. Its alphabet, version and `meta.tla` actions are `machines/focus.machine.ts`'s (A5a); `machines/focus.machine.conformance.test.ts` replays the covering suite on the machine and the selector. `sessions.machine.ts` is left out because the registry is environment here. Regenerate with `node tools/formal/src/cli.ts update apps/ui` after changing the spec, never by hand.
+
+DC-10 revisions-ui slice 2 re-pinned the drift after `project-live-sessions.tsx` began importing `RevisionCommands` from `@taucad/revisions-ui`; no action changed.

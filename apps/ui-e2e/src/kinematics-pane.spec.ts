@@ -25,11 +25,6 @@ type KinematicsBridgeWindow = Window & {
     getComponentWorldMatrix(unitId: string, componentId: string): number[] | undefined;
     projectComponent(unitId: string, componentId: string): ScreenPoint | undefined;
   };
-  __TAU_SECTION_VIEW_TEST__?: {
-    getCamera(): CameraPose;
-    getModelHoverState(): { hoveredComponentId: string | undefined };
-    projectModelComponent(componentId: string): Array<{ x: number; y: number; visible: boolean }>;
-  };
 };
 
 /** Every fixture's entry file is one model-interaction unit. */
@@ -61,8 +56,9 @@ const arm = {
   flangeOrigin: [350, 0, 580],
 } as const;
 
+/** The worm gear system's mechanism on stand-in shapes: the shipped wheel's hob cuts take longer than the framing budget. */
 const wormGear = {
-  locator: 'replicad.worm-gear-system',
+  locator: 'replicad.worm-mechanism-fixture',
   worm: 'component:single-start-worm',
   wheel: 'component:bronze-wheel-30-teeth',
   wheelTeeth: 30,
@@ -158,7 +154,7 @@ async function projectComponent(componentId: string): Promise<ScreenPoint> {
 
 async function readCamera(): Promise<CameraPose> {
   const camera = await target.evaluate(() => {
-    const pose = (globalThis as unknown as KinematicsBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getCamera();
+    const pose = globalThis.__TAU_SECTION_VIEW_TEST__?.getCamera();
     return pose ? { position: pose.position, quaternion: pose.quaternion } : null;
   });
   if (!camera) {
@@ -168,11 +164,7 @@ async function readCamera(): Promise<CameraPose> {
 }
 
 async function readHoveredComponentId(): Promise<string | undefined> {
-  return target.evaluate(
-    () =>
-      (globalThis as unknown as KinematicsBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getModelHoverState()
-        .hoveredComponentId,
-  );
+  return target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__?.getModelHoverState().hoveredComponentId);
 }
 
 /**
@@ -184,7 +176,7 @@ async function findSurfacePoint(componentId: string): Promise<ScreenPoint> {
     ([unit, component]) => {
       const bridgeWindow = globalThis as unknown as KinematicsBridgeWindow;
       const centre = bridgeWindow.__TAU_KINEMATICS_TEST__?.projectComponent(unit, component);
-      const samples = bridgeWindow.__TAU_SECTION_VIEW_TEST__?.projectModelComponent(component) ?? [];
+      const samples = globalThis.__TAU_SECTION_VIEW_TEST__?.projectModelComponent(component) ?? [];
       if (!centre) {
         return [];
       }

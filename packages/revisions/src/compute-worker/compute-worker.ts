@@ -43,6 +43,21 @@ import { applyDelta } from '#pack-reader/delta.js';
 export type ComputeWorker = Readonly<{
   /** Inflate one object's zlib stream. */
   inflate: (compressed: Uint8Array<ArrayBuffer>) => Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * One whole pack entry's zlib body inflated to exactly the size it declares
+   * and hashed as the object it frames (`<type> <size>\0<body>`): the object
+   * crosses back once, with the id its bytes hash to, for the caller to
+   * compare with the id it asked for. Inflating stops at the declared size.
+   *
+   * Optional: a compute without it is asked to `inflate` and then `sha1`.
+   *
+   * @throws CorruptBytesError when the body is not zlib or inflates to another size.
+   */
+  inflateObject?: (
+    type: 'commit' | 'tree' | 'blob' | 'tag',
+    compressed: Uint8Array<ArrayBuffer>,
+    declared: number,
+  ) => Promise<Readonly<{ data: Uint8Array<ArrayBuffer>; oid: string }>>;
   /** Deflate one object's framed or entry bytes into a zlib stream. */
   deflate: (raw: Uint8Array<ArrayBuffer>) => Promise<Uint8Array<ArrayBuffer>>;
   /** SHA-1 of the bytes, lowercase hex: WebCrypto where the origin has it. */
@@ -189,6 +204,119 @@ const memoryFiles = (pack: Uint8Array<ArrayBuffer>) => {
   };
 };
 
+const frameEncoder = new TextEncoder();
+
+/** The most a deflate stream inflates to per byte: a 258-byte match in as little as two bits. */
+const deflateMaximumRatio = 1032;
+
+/*
+ * One zlib stream inflated behind `head`, to exactly `declared` bytes. Nothing
+ * is allocated on the declared size alone: the chunks the stream produces are
+ * held until it ends, a stream that runs past `declared` is stopped there, and
+ * the frame is allocated only once the stream has produced exactly that much,
+ * so a size the body never reaches costs no more than the body. Every refusal
+ * is a CorruptBytesError, and the stream's write side is settled before it is
+ * thrown, so nothing rejects unobserved.
+ */
+const inflateFramed = async (
+  compressed: Uint8Array<ArrayBuffer>,
+  head: Uint8Array<ArrayBuffer>,
+  declared: number,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const transform = new DecompressionStream('deflate');
+  const writer = transform.writable.getWriter();
+  /* Settles with the write side's failure, never rejects: it is awaited on every path below. */
+  const writing = (async (): Promise<Error | undefined> => {
+    try {
+      await writer.write(compressed);
+      await writer.close();
+      return undefined;
+    } catch (error) {
+      return error instanceof Error ? error : new TypeError(String(error));
+    }
+  })();
+  const reader = transform.readable.getReader();
+  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+  let inflated = 0;
+  try {
+    // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk after another.
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      if (read.value.byteLength > declared - inflated) {
+        throw new CorruptBytesError('The entry inflates past the size it declares.');
+      }
+      chunks.push(read.value);
+      inflated += read.value.byteLength;
+    }
+    const failed = await writing;
+    if (failed !== undefined) {
+      throw failed;
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    await writing;
+    /* A decompression stream fails a stream that is not zlib with a TypeError; anything else is not about the bytes. */
+    throw error instanceof TypeError
+      ? new CorruptBytesError('The bytes are not a zlib stream.', { cause: error })
+      : error;
+  }
+  if (inflated !== declared) {
+    throw new CorruptBytesError('The entry inflates to a size other than the one it declares.');
+  }
+  const framed = new Uint8Array(head.byteLength + declared);
+  framed.set(head);
+  let at = head.byteLength;
+  for (const chunk of chunks) {
+    framed.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return framed;
+};
+
+/* A size no body this long can inflate to is refused before the body is inflated at all. */
+const refuseImpossibleSize = (compressed: Uint8Array<ArrayBuffer>, declared: number): void => {
+  if (!Number.isSafeInteger(declared) || declared < 0 || declared > compressed.byteLength * deflateMaximumRatio) {
+    throw new CorruptBytesError('The entry declares a size its body cannot inflate to.');
+  }
+};
+
+/**
+ * A compute with `inflateObject`, each of its methods bound to it: its own
+ * when it has one, else the same work from its own `inflate` and `sha1`, with the same refusals (an
+ * impossible declared size, a body that is not zlib, one that inflates to
+ * another size). For a supervisor's fallback built before the method was.
+ *
+ * @param compute - Any compute.
+ * @returns A compute whose `inflateObject` is there.
+ */
+export const withInflateObject = (
+  compute: ComputeWorker,
+): ComputeWorker & Required<Pick<ComputeWorker, 'inflateObject'>> => {
+  /* Each method bound to the compute it came from: a class instance keeps its prototype's methods and its `this`. */
+  const bound = Object.fromEntries(
+    computeMethods.flatMap((method) => {
+      const work = compute[method] as ((...input: readonly unknown[]) => Promise<unknown>) | undefined;
+      return typeof work === 'function' ? [[method, work.bind(compute)]] : [];
+    }),
+  ) as unknown as ComputeWorker;
+  return Object.freeze({
+    ...bound,
+    inflateObject:
+      bound.inflateObject ??
+      (async (type, compressed, declared) => {
+        refuseImpossibleSize(compressed, declared);
+        const data = await bound.inflate(compressed);
+        if (data.byteLength !== declared) {
+          throw new CorruptBytesError('The entry inflates to a size other than the one it declares.');
+        }
+        const head = frameEncoder.encode(`${type} ${String(declared)}\0`);
+        const framed = new Uint8Array(head.byteLength + declared);
+        framed.set(head);
+        framed.set(data, head.byteLength);
+        return { data, oid: await bound.sha1(framed) };
+      }),
+  });
+};
+
 /**
  * The compute contract run in the caller's own realm.
  *
@@ -208,6 +336,13 @@ export const createInlineCompute = (): ComputeWorker => {
   };
   return Object.freeze({
     inflate,
+    inflateObject: async (type, compressed, declared) => {
+      refuseImpossibleSize(compressed, declared);
+      /* Inflated behind its frame: hashed without a further copy, and handed back as a view past the frame. */
+      const head = frameEncoder.encode(`${type} ${String(declared)}\0`);
+      const framed = await inflateFramed(compressed, head, declared);
+      return { data: framed.subarray(head.byteLength), oid: await hashHex('sha1', framed) };
+    },
     deflate: async (raw) => through(new CompressionStream('deflate'), raw),
     sha1: async (bytes) => hashHex('sha1', bytes),
     sha256: async (bytes) => hashHex('sha256', bytes),
@@ -254,6 +389,7 @@ export const createInlineCompute = (): ComputeWorker => {
 /** The names of the contract, in one place for both halves of the seam. */
 export const computeMethods: ReadonlyArray<keyof ComputeWorker & ComputeMethod> = [
   'inflate',
+  'inflateObject',
   'deflate',
   'sha1',
   'sha256',

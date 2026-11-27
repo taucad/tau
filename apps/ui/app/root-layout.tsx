@@ -11,6 +11,8 @@ import {
   useNavigate,
   useRouteLoaderData,
   useLocation,
+  useRouteError,
+  isRouteErrorResponse,
 } from 'react-router';
 import { HydrationBoundary, QueryClientProvider } from '@tanstack/react-query';
 import type { DehydratedState } from '@tanstack/react-query';
@@ -20,7 +22,14 @@ import { ClientFactsHead, Theme, ThemeProvider, useTheme } from '#hooks/use-them
 import { ENV } from '#environment.config.js';
 import type { ClientEnvironment } from '#environment.config.js';
 import { buildClientEnvScript } from '#lib/client-env-script.js';
+import { buildDeploymentSeedScript } from '#cloud/deployment-seed.js';
+import type { DeploymentModeSnapshot } from '#cloud/deployment-mode.types.js';
 import { buildFrameHintScript } from '#lib/frame-hint.js';
+import { buildBootWatchdogScript, bootWatchdogStripHtml } from '#lib/boot-watchdog.js';
+import { safeModeHref } from '#lib/boot-signals.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { SafeModeNotice } from '#components/layout/safe-mode-bar.js';
+import { documentScrollClass } from '#components/layout/document-scroll.js';
 import { Page } from '#components/layout/page.js';
 import { useDocumentFact } from '#lib/client-facts.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -43,9 +52,13 @@ import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
 import { DocumentMemoryKillReporter } from '#components/memory-kill-reporter.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
-import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
+import { CloudPaymentReturn, CloudRootBoundary } from '#cloud/root-billing.js';
 import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
-import { selectRuntimeIdleFileManagers, selectRuntimeQueryClient } from '#runtime/app-runtime.js';
+import {
+  selectRuntimeIdleFileManagers,
+  selectRuntimeQueryClient,
+  selectRuntimeSafeMode,
+} from '#runtime/app-runtime.js';
 import { useAppRuntime, useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import { publishRoute } from '#lib/sentry-context.lib.js';
 
@@ -57,6 +70,11 @@ export type RootLoaderData = {
   readonly env: ClientEnvironment;
   /** Queries the server already answered (the model catalog), hydrated into the root `QueryClient`. */
   readonly queries?: DehydratedState;
+  /**
+   * The display mode the server rendered the document with, from its own ask of the page's API origin (adaptive app
+   * deployment mode W11). The same for every visitor of a deployment; none on a prerendered or static shell.
+   */
+  readonly deployment?: DeploymentModeSnapshot;
 };
 
 export function RootLayout({
@@ -69,40 +87,9 @@ export function RootLayout({
   readonly documentChrome?: ReactNode;
 }): React.JSX.Element {
   const data = useRouteLoaderData<RootLoaderData>('root');
-  const { pathname } = useLocation();
   /* D9 (A2): the runtime creates the browser `QueryClient`, above the billing fence, and the project library writes
    * into the same instance. Each server request's runtime has its own. */
   const queryClient = selectRuntimeQueryClient(useAppRuntime());
-
-  const managedChildren = (
-    <HeadlessImageProvider>
-      <ProjectManagerProvider>
-        <TooltipProvider>
-          <KeyboardProvider>
-            <UnloadProvider>
-              <ChatSessionStoreProvider>
-                {/* A35: liveness is owned by the registry, not by a route. */}
-                <SessionsProvider>
-                  <GlobalChatFlushGuard />
-                  <DocumentMemoryKillReporter />
-                  <RevisionActorIdentity />
-                  <RuntimeTelemetryIdentity />
-                  {children}
-                </SessionsProvider>
-              </ChatSessionStoreProvider>
-            </UnloadProvider>
-          </KeyboardProvider>
-        </TooltipProvider>
-      </ProjectManagerProvider>
-    </HeadlessImageProvider>
-  );
-  const isHarness = isRemoteHostHarness(data?.env.TAU_DEBUG, pathname);
-  const application = isHarness ? (
-    children
-  ) : (
-    /* The runtime's `rootFiles`: the file manager for `/`, read in the first render and on the server (A1b). */
-    <RootFileManagerProvider>{managedChildren}</RootFileManagerProvider>
-  );
 
   /*
    * `QueryClientProvider` is outermost so `AuthConfigProvider`'s own
@@ -124,9 +111,10 @@ export function RootLayout({
             <ThemeProvider>
               <ColorProvider>
                 <AppViewerEnvironment>
-                  <LayoutDocument env={data?.env ?? {}} documentChrome={documentChrome}>
+                  <LayoutDocument env={data?.env ?? {}} deployment={data?.deployment} documentChrome={documentChrome}>
                     <HarnessDocumentLoad />
-                    {application}
+                    {/* The error document's code block copies through a tooltip, so the tooltip host stays here. */}
+                    <TooltipProvider>{children}</TooltipProvider>
                   </LayoutDocument>
                 </AppViewerEnvironment>
               </ColorProvider>
@@ -140,10 +128,12 @@ export function RootLayout({
 
 function LayoutDocument({
   children,
+  deployment,
   documentChrome,
   env,
 }: {
   readonly children: ReactNode;
+  readonly deployment: DeploymentModeSnapshot | undefined;
   readonly documentChrome: ReactNode | undefined;
   readonly env: Partial<ClientEnvironment>;
 }): React.JSX.Element {
@@ -154,6 +144,12 @@ function LayoutDocument({
   const color = useColor();
   const { setFaviconColor } = useFavicon();
   const usePointerCursors = useDocumentFact('pointerCursors') === true;
+  /* D0 (B28): the watchdog's script and strip only matter in the server's document, which runs them without the
+   * bundle. The client renders the same elements with empty inner HTML, which hydration keeps as the server wrote it
+   * (React neither compares nor rewrites a hydrated element's `dangerouslySetInnerHTML`), so their source strings stay
+   * out of the client bundle. `undefined`: the desktop build emits neither. */
+  const bootWatchdogScript = import.meta.env.SSR ? buildBootWatchdogScript() : isDesktopTarget() ? undefined : '';
+  const bootWatchdogStrip = import.meta.env.SSR ? bootWatchdogStripHtml : '';
 
   useEffect(() => {
     setFaviconColor(color.serialized.hex);
@@ -194,6 +190,11 @@ function LayoutDocument({
         {/* A15b: the frame hint's variables and `--wait-offset` on <html> before first paint; before <Links />, so it never waits on a stylesheet. */}
         {/* oxlint-disable-next-line react/no-danger -- static inline script must run before first paint, as the client facts' does */}
         <script dangerouslySetInnerHTML={{ __html: buildFrameHintScript() }} suppressHydrationWarning />
+        {bootWatchdogScript === undefined ? undefined : (
+          /* D0 (B28): the web's boot watchdog, which works without the bundle; the desktop's lives in main. */
+          /* oxlint-disable-next-line react/no-danger -- static inline script must run without the bundle */
+          <script dangerouslySetInnerHTML={{ __html: bootWatchdogScript }} suppressHydrationWarning />
+        )}
         <Links />
       </head>
       <body>
@@ -203,8 +204,18 @@ function LayoutDocument({
             __html: buildClientEnvScript(env),
           }}
         />
+        {deployment === undefined ? undefined : (
+          /* W11: the server's deployment answer, read by the client entry before hydration (`#cloud/deployment-seed`). */
+          /* oxlint-disable-next-line react/no-danger -- the same `<`-escaped JSON injection as the environment's */
+          <script dangerouslySetInnerHTML={{ __html: buildDeploymentSeedScript(deployment) }} />
+        )}
         <ObservabilityHarnessHydrationProbe pathname={location.pathname} search={location.search} />
         <SvgSpriteMount />
+        {bootWatchdogScript === undefined ? undefined : (
+          /* The watchdog's strip, hidden until its script shows it; React never changes it after the server render. */
+          /* oxlint-disable-next-line react/no-danger -- static markup the inline watchdog reveals */
+          <div dangerouslySetInnerHTML={{ __html: bootWatchdogStrip }} suppressHydrationWarning />
+        )}
         {documentChrome}
         {children}
         <ScrollRestoration />
@@ -215,7 +226,59 @@ function LayoutDocument({
   );
 }
 
+/**
+ * The product providers (R17, B28): every provider the product needs and the error document does not. They mount
+ * inside the app component, never in `Layout`, so the root error boundary renders without them and a provider that
+ * throws on every render is not run again by the error page.
+ */
+function ProductProviders({ children }: { readonly children: ReactNode }): React.ReactNode {
+  return (
+    <HeadlessImageProvider>
+      <ProjectManagerProvider>
+        <KeyboardProvider>
+          <UnloadProvider>
+            <ChatSessionStoreProvider>
+              {/* A35: liveness is owned by the registry, not by a route. */}
+              <SessionsProvider>
+                <GlobalChatFlushGuard />
+                <DocumentMemoryKillReporter />
+                <RevisionActorIdentity />
+                <RuntimeTelemetryIdentity />
+                {children}
+              </SessionsProvider>
+            </ChatSessionStoreProvider>
+          </UnloadProvider>
+        </KeyboardProvider>
+      </ProjectManagerProvider>
+    </HeadlessImageProvider>
+  );
+}
+
 export function ProductApp(): React.JSX.Element {
+  const data = useRouteLoaderData<RootLoaderData>('root');
+  const { pathname } = useLocation();
+  const runtime = useOptionalAppRuntime();
+  const isSafeMode = runtime !== undefined && selectRuntimeSafeMode(runtime);
+  /* Desktop safe mode is main's, with its reason and the recovery window behind the bar (D0). Both are read in the
+   * browser only, so the bar mounts after hydration. */
+  const shell = (
+    <>
+      <ProductShell />
+      <SafeModeNotice isRequested={isSafeMode} />
+    </>
+  );
+  if (isRemoteHostHarness(data?.env.TAU_DEBUG, pathname)) {
+    return shell;
+  }
+  /* The runtime's `rootFiles`: the file manager for `/`, read in the first render and on the server (A1b). */
+  return (
+    <RootFileManagerProvider>
+      <ProductProviders>{shell}</ProductProviders>
+    </RootFileManagerProvider>
+  );
+}
+
+function ProductShell(): React.JSX.Element {
   const navigate = useNavigate();
   useEffect(
     () =>
@@ -236,12 +299,17 @@ export function ProductApp(): React.JSX.Element {
       }),
     [],
   );
-  useCloudPaymentActionReturn();
   const data = useRouteLoaderData<RootLoaderData>('root');
   const { pathname } = useLocation();
   /* D24, I19 (A11): the app shell, at one tree position on every route. The host renders it beside the live
    * projects, never inside one, so a project open, a move between projects or a Home visit never remounts it. */
-  const page = <Page />;
+  /* The payment and portal return, where the shell called its hook (adaptive app deployment mode W5). */
+  const page = (
+    <>
+      <CloudPaymentReturn />
+      <Page />
+    </>
+  );
   return isRemoteHostHarness(data?.env.TAU_DEBUG, pathname) ? page : <ProjectSessionsHost>{page}</ProjectSessionsHost>;
 }
 
@@ -264,6 +332,26 @@ function HarnessDocumentLoad(): React.ReactNode {
   return undefined;
 }
 
+/**
+ * The root error document (R17, B28): rendered inside `Layout`, which mounts no product provider, so it cannot re-run
+ * the provider that failed. It scrolls on its own (D4) and links to safe mode (D0), a document load that starts with
+ * Home only.
+ */
 export function RootErrorBoundary(): React.JSX.Element {
-  return <ErrorPage />;
+  const error = useRouteError();
+  /* A refusal or a missing page is not a failed start; safe mode would not help with it. */
+  const offersSafeMode = !isRouteErrorResponse(error) || error.status >= 500;
+  return (
+    <div data-slot='root-error-document' className={cn('flex flex-col', documentScrollClass)}>
+      <ErrorPage />
+      {offersSafeMode ? (
+        <p className='px-4 pb-8 text-center text-sm text-muted-foreground'>
+          Still not working?{' '}
+          <a href={safeModeHref} className='text-foreground underline underline-offset-2'>
+            Open in safe mode
+          </a>
+        </p>
+      ) : undefined}
+    </div>
+  );
 }

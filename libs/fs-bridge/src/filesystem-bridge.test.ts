@@ -2172,6 +2172,13 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       /* Absent, or any value but `'background'`, is the interactive lane: the connection is still served. */
       expect(Object.keys(contextOf(interactive))).toEqual(['originClientId']);
       expect(Object.keys(contextOf(unknown))).toEqual(['originClientId']);
+      /* A background connection's queued reads end with it: its context's signal aborts when the port closes. */
+      const signal = contextOf(background)['signal'] as AbortSignal;
+      expect(signal.aborted).toBe(false);
+      background.cleanup();
+      await vi.waitFor(() => {
+        expect(signal.aborted).toBe(true);
+      });
       expect(unknown.proxy.hello.payload).toMatchObject({ state: 'ready' });
     } finally {
       background.cleanup();

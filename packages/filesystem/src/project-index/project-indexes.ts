@@ -59,10 +59,11 @@ export const isReservedIndexPath = (relative: string): boolean =>
 export type IndexRootResolution = Readonly<{
   provider: FileSystemProvider;
   /**
-   * The same provider as a background caller sees it (fast path FW4): a poll's compare lists through it, so an
-   * interactive call waits behind at most the few listings its lane admitted. `provider` when absent.
+   * A background operation's view of the same provider (fast path FW4): a poll's compare lists through one, so an
+   * interactive call waits behind at most the few listings its lane admitted, and the compare ages once. `provider`
+   * when absent.
    */
-  background?: FileSystemProvider;
+  background?: () => FileSystemProvider;
   /** The root's provider-relative path. */
   path: string;
   /**
@@ -1795,7 +1796,9 @@ export class ProjectIndexes {
     let rows: ObservedRow[] | undefined;
     try {
       rows = await this._list(
-        lane === 'background' ? { ...resolution, provider: resolution.background ?? resolution.provider } : resolution,
+        lane === 'background'
+          ? { ...resolution, provider: resolution.background?.() ?? resolution.provider }
+          : resolution,
         prefix,
       );
     } catch (error) {

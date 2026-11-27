@@ -306,7 +306,7 @@ export class RootedViews {
   /** Where a read of a pending entry gets its object (D9). */
   private readonly _pendingSource: () => PendingObjectSource | undefined;
   private readonly _pendingStallMilliseconds: number | undefined;
-  private readonly _inLane: (provider: FileSystemProvider, lane: 'background') => FileSystemProvider;
+  private readonly _inBackground: (provider: FileSystemProvider, signal: AbortSignal | undefined) => FileSystemProvider;
 
   /**
    * Create the rooted-view factory over the authority's own collaborators.
@@ -320,8 +320,11 @@ export class RootedViews {
     projectIndexes: ProjectIndexes;
     pendingSource?: () => PendingObjectSource | undefined;
     pendingStallMilliseconds?: number;
-    /** A provider as a caller in a lane sees it (FW4): the registry's `inLane`. The provider itself when absent. */
-    inLane?: (provider: FileSystemProvider, lane: 'background') => FileSystemProvider;
+    /**
+     * A background view of a provider whose queued calls `signal` cancels (FW4): the registry's `backgroundCalls`. The
+     * provider itself when absent.
+     */
+    inBackground?: (provider: FileSystemProvider, signal: AbortSignal | undefined) => FileSystemProvider;
   }) {
     this._mountTable = options.mountTable;
     this._pipeline = options.pipeline;
@@ -329,7 +332,7 @@ export class RootedViews {
     this._projectIndexes = options.projectIndexes;
     this._pendingSource = options.pendingSource ?? (() => undefined);
     this._pendingStallMilliseconds = options.pendingStallMilliseconds;
-    this._inLane = options.inLane ?? ((provider) => provider);
+    this._inBackground = options.inBackground ?? ((provider) => provider);
   }
 
   /**
@@ -357,11 +360,14 @@ export class RootedViews {
     const projectIndexes = this._projectIndexes;
     /*
      * What this view reads through (fast path FW4): the root's provider, or, for a connection that declared itself
-     * background (`mutationContext.lane`), its gated view, so each read waits for the background lane. Writes go
-     * through the pipeline on the provider itself either way.
+     * background (`mutationContext.lane`), its gated view, so each read waits for the background lane and a read still
+     * queued when the connection closes (`mutationContext.signal`) is cancelled. A stream's open waits too; its chunks
+     * are pulled unranked. Writes go through the pipeline on the provider itself either way.
      */
     const readProvider =
-      mutationContext?.lane === 'background' ? this._inLane(captured.provider, 'background') : captured.provider;
+      mutationContext?.lane === 'background'
+        ? this._inBackground(captured.provider, mutationContext.signal)
+        : captured.provider;
     if (raw) {
       /*
        * A configured route is known already, and keeps what it is. A root a host mounted itself (a checkout the
@@ -608,7 +614,7 @@ export class RootedViews {
           return bufferToStream(answer, options).getReader();
         }
         return (
-          resolution.provider.readFileStream?.(resolution.path, options) ??
+          readProvider.readFileStream?.(resolution.path, options) ??
           bufferToStream(await readProvider.readFile(resolution.path), options)
         ).getReader();
       };

@@ -99,7 +99,11 @@ const countMethod = (
   name: string,
   tally: { calls: Map<string, number>; kinds: Map<ProviderCallKind, number> },
 ): void => {
-  const method: unknown = Reflect.get(target, name);
+  /* The provider's own method, not what a view of it answers: the registry hands out a counting view (FW4), whose
+   * wrapper would otherwise be installed on the provider and count the provider's calls on itself. */
+  const method: unknown =
+    Object.getOwnPropertyDescriptor(target, name)?.value ??
+    Reflect.get(Object.getPrototypeOf(target) as Record<string, unknown>, name);
   if (typeof method !== 'function') {
     return;
   }

@@ -1,14 +1,14 @@
 {
   "alphabet": [],
   "sources": {
-    "external-change-ingest.ts": "1dff064a15d930c4b02d6e778ee238dfc5bcbf1e9b341335cf9b9020d340e7c9",
-    "project-directories.ts": "3bff948a1c9bb940ab8581a73ce804ff60b861abccdafc038dfea8355f1f1fe6",
-    "project-directory-index.ts": "c3e209eddb3d3238e6977a5e8251a9a0ffd9b466e561812db8b863c4e705d5f0",
-    "provider-registry.ts": "27d9fcf3d217e4762c590b65741986b18da616452b8b09ab0e4dd9a7f5e0f1ee",
+    "external-change-ingest.ts": "247c172ab2ec2af89e016215246e49450d800b8a06d4a4b3378d8e7f2ea82b95",
+    "project-directories.ts": "231075d261b944f91e4bf407fc782142c66b2b7c35478f1d0e079f423065211b",
+    "project-directory-index.ts": "8e327d7e5c76394bf1e348e1967928431479daf9e94d65b4b3ceaf52223f1761",
+    "provider-registry.ts": "e8177e9033909624887342215af701ed8ad441d5a82f0bde2a80603d5d1f600e",
     "remote-changes.ts": "ebc68b16410668908d6db6ec1de960ce9be0f95f8943f8d3bc16793dc125538d"
   },
   "specs": {
-    "DiscoveryIndex.tla": "539782d081913734f4f2b205a33a0e73fca1b5b1734fa07eb7926620bed94e62"
+    "DiscoveryIndex.tla": "d4f7044182b7f406ff075c944dd952bfd95dbccfcb4d7b46dbe066f78d105ac6"
   },
   "tables": {
     "DiscoveryIndex.clear-unconditional.cfg": "ae5f8ccff48d6df9915b53466edc6f3ddd04d478ebbbf77950d9007feb3b82f2",

@@ -208,6 +208,55 @@ describe('WorkspaceFileService', () => {
       expect(decoder.decode(await provider.readFile('legacy/tau.json'))).not.toContain('"id"');
     });
 
+    /* FW4 review m4: what a background read leads to under the identity's locks is made at once, never queued. */
+    it('should make a cold read’s legacy conversion writes on the interactive provider while interactive work is in flight', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const legacy = {
+        ...manifestProject('proj_ddddddddddddddddddddd', 'Converted'),
+        $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      };
+      await provider.writeFile('legacy/tau.json', encoder.encode(JSON.stringify(legacy)));
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const rootKey = providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' });
+      /* Each write records the root's interactive count as it reaches the provider: counted only through the view. */
+      const counted: number[] = [];
+      const recordOnProvider = (name: string): void => {
+        const method = (Object.getOwnPropertyDescriptor(provider, name)?.value ??
+          Reflect.get(Object.getPrototypeOf(provider) as Record<string, unknown>, name)) as
+          | ((...arguments_: unknown[]) => unknown)
+          | undefined;
+        if (method !== undefined) {
+          /* Defined through the view, on the provider itself, under the view's count. */
+          Object.defineProperty(provider, name, {
+            configurable: true,
+            writable: true,
+            value(this: unknown, ...arguments_: unknown[]): unknown {
+              counted.push(providerRegistry.ioScheduler.interactiveInFlight(rootKey));
+              return Reflect.apply(method, this, arguments_);
+            },
+          });
+        }
+      };
+      for (const name of ['writeFile', 'writeFileChecked', 'deleteFileChecked', 'applyBatch', 'mkdir', 'rename']) {
+        recordOnProvider(name);
+      }
+      /* Interactive work elsewhere stays in flight: a write queued in the background lane would wait behind it. */
+      const settle = providerRegistry.ioScheduler.beginInteractive('elsewhere');
+      let discovery: Awaited<ReturnType<typeof service.listProjectManifests>>;
+      try {
+        discovery = await service.listProjectManifests();
+      } finally {
+        settle();
+      }
+
+      expect(discovery.entries).toMatchObject([{ status: 'valid', projectId: legacy.id }]);
+      expect(parseProjectIdentityBytes(await provider.readFile(`legacy/${projectIdentityPath}`)).projectId).toBe(
+        legacy.id,
+      );
+      expect(counted.length).toBeGreaterThan(0);
+      expect(counted.every((count) => count >= 1)).toBe(true);
+    });
+
     it('should refuse contradictory legacy and durable identity without rewriting either', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
       const legacy = {

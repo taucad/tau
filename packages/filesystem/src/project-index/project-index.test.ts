@@ -802,7 +802,7 @@ describe('ProjectIndexes', () => {
         property === 'readdirWithStats' ? listInBackground : (Reflect.get(target, property) as unknown),
     });
     const indexes = new ProjectIndexes({
-      resolve: () => ({ provider, background, path: 'project' }),
+      resolve: () => ({ provider, background: () => background, path: 'project' }),
       persistDelayMilliseconds: 60_000,
     });
     await indexes.ready('/picked');

@@ -1636,7 +1636,7 @@ const callSchemas = {
   verifyAbsent: {
     args: z.union([
       z.tuple([projectIdSchema]),
-      z.tuple([projectIdSchema, z.looseObject({ lane: z.enum(['interactive', 'background']).optional() })]),
+      z.tuple([projectIdSchema, z.looseObject({ lane: z.enum(['sweep', 'background']).optional() })]),
     ]),
     result: discriminatedResultUnion('status', [
       z.looseObject({ status: z.literal('absent') }),

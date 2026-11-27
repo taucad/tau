@@ -315,6 +315,8 @@ export type WorkspaceMutationContext = {
    * recovery). Absent is interactive. It orders reads only; writes are never deferred by it.
    */
   lane?: 'interactive' | 'background';
+  /** Aborted when the connection closes: a background read it still has queued is cancelled (FW4). */
+  signal?: AbortSignal;
 };
 
 /**

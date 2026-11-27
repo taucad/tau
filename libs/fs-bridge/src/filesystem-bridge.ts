@@ -1332,6 +1332,7 @@ function exposeFileSystemHandlers(
     /* Held here rather than read back from `serverHandles`, which a refused
      * connection is deliberately absent from. */
     let serverHandle: BridgeServerHandle | undefined = undefined;
+    const closed = new AbortController();
     const disconnectPort = (): void => {
       if (disconnected) {
         return;
@@ -1342,6 +1343,7 @@ function exposeFileSystemHandlers(
       portIds.delete(port);
       scopedPorts.delete(port);
       serverHandles.delete(port);
+      closed.abort();
       safeDispose(() => serverHandle?.dispose());
       safeDispose(() => {
         port.close();
@@ -1351,10 +1353,11 @@ function exposeFileSystemHandlers(
 
     const wrappedPort = wrapFileSystemBridgePort(port, 'expose-fs-bridge');
     const requestedRoot = typeof parsedEnvelope.data.root === 'string' ? parsedEnvelope.data.root : undefined;
-    /* Only a rooted connection declares a lane (FW4); any value but `'background'` is the interactive lane. */
+    /* Only a rooted connection declares a lane (FW4); any value but `'background'` is the interactive lane. A
+     * background connection's queued reads are cancelled when it closes (`closed`, aborted by `disconnectPort`). */
     const mutationContext: WorkspaceMutationContext =
       requestedRoot !== undefined && parsedEnvelope.data.lane === 'background'
-        ? { originClientId: portId, lane: 'background' }
+        ? { originClientId: portId, lane: 'background', signal: closed.signal }
         : { originClientId: portId };
     const { portHandlers, unavailableError } =
       requestedRoot === undefined

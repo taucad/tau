@@ -61,6 +61,8 @@ describe('identity sweep lanes (fast path FW4)', () => {
     expect(args.safeParse([projectId]).success).toBe(true);
     expect(args.safeParse([projectId, { lane: 'background' }]).success).toBe(true);
     expect(args.safeParse([projectId, {}]).success).toBe(true);
+    expect(args.safeParse([projectId, { lane: 'sweep' }]).success).toBe(true);
+    expect(args.safeParse([projectId, { lane: 'interactive' }]).success).toBe(false);
     expect(args.safeParse([projectId, { lane: 'urgent' }]).success).toBe(false);
   });
 });

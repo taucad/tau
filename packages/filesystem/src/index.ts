@@ -70,6 +70,7 @@ export type {
   ResolvedProjectManifest,
   ProjectRouteVerification,
   ProjectAbsence,
+  VerifyAbsentLane,
   ProjectDirectoryProbe,
   ProjectDirectoryProbeRequest,
   ProjectProbeLocation,

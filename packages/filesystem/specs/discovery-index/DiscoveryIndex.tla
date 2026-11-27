@@ -96,6 +96,13 @@
 \* FW4 stall deadline (2026-11-27, coordinator ruling): a background call in flight past 5 s releases its slot and a
 \* root with stalled calls is admitted one call at a time; the snapshot walk names its root to the lane. Timing only:
 \* every action and verdict is unchanged.
+\* FW4 review (2026-11-27): a background operation ages once, a lock-holding sweep is promoted, sweep and interactive
+\* calls stall too, a stalling root's deadline doubles and it holds at most four stalled calls; a read's writes under
+\* the identity's locks go through the interactive provider; a warm pass's evidence reads are 16 wide and its
+\* unretained re-reads background; the audit counts a names mismatch only for a listing it installed. Reads keep
+\* their capture before their first call and the tap still fires before a write. The index keeps which dirty
+\* directories are dirty only because the budget did not retain them (`unretained`), which evidence or an install
+\* clears; it moves no counter. Every action and verdict is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

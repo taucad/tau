@@ -10,7 +10,7 @@ import type { DiscoveryProfile } from '#testing/discovery-profile.js';
 import {
   backgroundIoAgingMilliseconds,
   backgroundIoConcurrency,
-  backgroundIoStallMilliseconds,
+  ioStallMilliseconds,
   sweepIoConcurrency,
 } from '#io-scheduler.js';
 import { resolveStorageRootKey } from '#storage-root-key.js';
@@ -236,11 +236,48 @@ describe('I/O lanes on the 386-directory profile', () => {
 
     expect(pass.value()?.entries).toHaveLength(directories);
     expect(loadedThroughout).toBe(true);
-    /* Each wave of queued reads ages once and then runs four at a time: never starved, though never ahead. */
+    /* Each root's full read is one operation: it ages once, then runs four calls at a time behind the load. Two roots,
+     * so two aging waits and the I/O, which the fixture answers at once; aged per call, it took over 1.5 s. */
     expect(took).toBeGreaterThanOrEqual(backgroundIoAgingMilliseconds);
+    expect(took).toBeLessThanOrEqual(2 * backgroundIoAgingMilliseconds + 50);
     loading.on = false;
     await advanceUntil(() => profile.ioScheduler.interactiveInFlight() === 0, 1000);
     await Promise.all(reads);
+  });
+
+  /* Review major 3: the discovery-wide snapshot walk ages once as an operation, not once per serial step. */
+  it('should walk the folder’s snapshot under steady interactive load in about one aging wait', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const loading = { on: true };
+    const settles: Array<() => void> = [];
+    const load = async (): Promise<void> => {
+      while (loading.on) {
+        const settle = profile.ioScheduler.beginInteractive('load');
+        settles.push(settle);
+        setTimeout(settle, 100);
+        // oxlint-disable-next-line no-await-in-loop -- The load is a sequence of overlapping calls.
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 50);
+        });
+      }
+    };
+    void load();
+    await flush();
+
+    const poll = track(profile.service.pollExternalChanges());
+    let loadedThroughout = true;
+    const took = await advanceUntil(() => {
+      loadedThroughout &&= poll.settled() || profile.ioScheduler.interactiveInFlight() > 0;
+      return poll.settled();
+    }, 60_000);
+
+    expect(loadedThroughout).toBe(true);
+    /* Aged per call, the walk's serial steps (a directory's handles, then its files) paid 250 ms each: about 20 s. */
+    expect(took).toBeLessThanOrEqual(backgroundIoAgingMilliseconds + 50);
+    loading.on = false;
+    for (const settle of settles) {
+      settle();
+    }
   });
 
   describe('a root whose background calls hang (stall deadline)', () => {
@@ -283,11 +320,12 @@ describe('I/O lanes on the 386-directory profile', () => {
       const took = await advanceUntil(() => {
         sample();
         return homeRead.settled();
-      }, 2 * backgroundIoStallMilliseconds);
+      }, 2 * ioStallMilliseconds);
       expect(homeRead.value()).toBe('notes');
-      expect(took).toBe(backgroundIoStallMilliseconds);
-      /* The folder claims one new call at a time while its stalled ones are in flight. */
-      expect(hung).toHaveLength(backgroundIoConcurrency + 1);
+      expect(took).toBe(ioStallMilliseconds);
+      /* With four calls stalled, the folder claims no new slot (review major 2): four real calls outstanding at most. */
+      expect(hung).toHaveLength(backgroundIoConcurrency);
+      expect(profile.ioScheduler.backgroundStalled()).toBe(backgroundIoConcurrency);
       expect((workerTimings.summarize(0).counters['io.background.stalled']?.total ?? 0) - stalledBefore).toBe(
         backgroundIoConcurrency,
       );
@@ -333,15 +371,14 @@ describe('I/O lanes on the 386-directory profile', () => {
       const sweep = track(profile.service.verifyAbsent(homeProjectId, { lane: 'background' }), () => {
         order.push('sweep');
       });
-      await flush();
-      expect(profile.ioScheduler.backgroundQueued()).toBeGreaterThan(0);
-      expect(sweep.settled()).toBe(false);
-
       /* An interactive operation on the same id waits for the lock the sweep holds. */
       const probed = track(profile.service.probeProjectDirectories({ projectId: homeProjectId, known: true }), () => {
         order.push('probe');
       });
-      await advanceUntil(sweep.settled, 30_000);
+      /* The sweep holds a lock other work waits on, so it is promoted: it never waits on aging, only for the lane's
+       * four slots (review minor 6). Aged per call it took about 2.5 s here; the fixture's I/O is instant. */
+      const took = await advanceUntil(sweep.settled, 30_000, 1);
+      expect(took).toBeLessThan(backgroundIoAgingMilliseconds);
       await advanceUntil(probed.settled, 1000);
 
       expect(sweep.value()).toEqual({

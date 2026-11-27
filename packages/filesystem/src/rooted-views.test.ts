@@ -791,4 +791,36 @@ describe('a rooted connection that declared the background lane (fast path FW4)'
     await expect(read).resolves.toBe('a');
     expect(ioScheduler.backgroundQueued()).toBe(0);
   });
+
+  /* FW4 review m10: a closed connection's queued reads are cancelled, never admitted. */
+  it('should reject a background connection’s queued read when the connection closes', async () => {
+    const providerRegistry = new ProviderRegistry();
+    const scope = { backend: 'memory', storageRootKey: 'memory:rooted-views-cancel' } as const;
+    const provider = await providerRegistry.getProvider(scope);
+    const mountTable = new MountTable();
+    mountTable.mount('/', provider, { class: 'authored', ...scope });
+    const owner = new WorkspaceFileService({
+      providerRegistry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable,
+    });
+    openServices.push(owner);
+    await owner.configureProjectRoots({ projects: [{ projectId, ...scope, providerBasePath: 'cancel' }], roots: [] });
+    await owner.createRootedFileSystem(projectRoute).writeFile('a.txt', 'a');
+    const closed = new AbortController();
+    const background = owner.createRootedFileSystem(projectRoute, { lane: 'background', signal: closed.signal });
+    const { ioScheduler } = providerRegistry;
+    const settleInteractive = ioScheduler.beginInteractive('elsewhere');
+
+    const read = background.readFile('a.txt', 'utf8');
+    await vi.waitFor(() => {
+      expect(ioScheduler.backgroundQueued()).toBe(1);
+    });
+    closed.abort();
+
+    await expect(read).rejects.toMatchObject({ name: 'AbortError' });
+    expect(ioScheduler.backgroundQueued()).toBe(0);
+    settleInteractive();
+  });
 });

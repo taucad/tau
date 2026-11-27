@@ -390,10 +390,10 @@ describe('I1 request prefix identity across consecutive user turns', () => {
   it('should keep the prefix when agent memory was edited between turns (S4)', async () => {
     expectIdentical(
       await runChat([
-        { ...turnOne, clientContext: { skills: skillsA, memory: { '.tau/AGENTS.md': 'prefers metric' } } },
+        { ...turnOne, clientContext: { skills: skillsA, memory: { 'AGENTS.md': 'prefers metric' } } },
         {
           ...turnTwo,
-          clientContext: { skills: skillsA, memory: { '.tau/AGENTS.md': 'prefers metric\nhex nuts are M8' } },
+          clientContext: { skills: skillsA, memory: { 'AGENTS.md': 'prefers metric\nhex nuts are M8' } },
         },
       ]),
     );
@@ -467,8 +467,8 @@ describe('I1 request prefix identity across consecutive user turns', () => {
 
   it('should spend at most four Anthropic cache breakpoints on every request', async () => {
     const run = await runChat([
-      { ...turnOne, clientContext: { skills: skillsA, memory: { '.tau/AGENTS.md': 'prefers metric' } } },
-      { ...turnTwo, clientContext: { skills: skillsA, memory: { '.tau/AGENTS.md': 'prefers metric' } } },
+      { ...turnOne, clientContext: { skills: skillsA, memory: { 'AGENTS.md': 'prefers metric' } } },
+      { ...turnTwo, clientContext: { skills: skillsA, memory: { 'AGENTS.md': 'prefers metric' } } },
     ]);
     for (const body of run.turns.flat()) {
       expect(canonicalize(body).breakpoints.length).toBeLessThanOrEqual(4);

@@ -78,6 +78,7 @@ vi.mock('@taucad/ui-core/utils/graphics-backend-override', () => ({
 
 const { createMetalMorphSpinnerService } = await import('#components/geometry/loader/metal-morph-spinner-service.js');
 const { resetShowcaseContextAvailability } = await import('#components/geometry/loader/showcase-backend.js');
+const { readGraphicsBackendQueryOverride } = await import('@taucad/ui-core/utils/graphics-backend-override');
 
 type FakeContext = {
   clearRect: ReturnType<typeof vi.fn>;
@@ -137,7 +138,7 @@ describe('metalMorphSpinnerService', () => {
   beforeEach(() => {
     hoisted.controllers.length = 0;
     hoisted.createOptions.length = 0;
-    hoisted.probeResult = false;
+    hoisted.probeResult = true;
     hoisted.loseNextWebGpuCanvas = false;
     hoisted.canvasLost = false;
     hoisted.nextStartFailure = undefined;
@@ -162,25 +163,50 @@ describe('metalMorphSpinnerService', () => {
     expect(service.getDiagnostics()).toMatchObject({ subscriberCount: 20, activeCount: 20, rendererCount: 1 });
   });
 
-  it('should open the renderer again on a fresh canvas on WebGL when its WebGPU canvas cannot present', async () => {
-    hoisted.probeResult = true;
+  it('should keep the flat stand-ins and open no renderer when the page has no WebGPU adapter', async () => {
+    hoisted.probeResult = false;
+    const service = createMetalMorphSpinnerService();
+    const target = createTarget();
+    service.subscribe(target);
+    await settle();
+    await service.warm('dark');
+    service.subscribe(createTarget());
+    await settle();
+
+    expect(hoisted.createOptions).toHaveLength(0);
+    expect(target.context.drawImage).not.toHaveBeenCalled();
+    expect(target.firstFrames).toBe(0);
+    expect(service.getDiagnostics()).toMatchObject({ rendererCount: 0, isLooping: false });
+  });
+
+  it('should still run the WebGL renderer when the page asks for WebGL', async () => {
+    vi.mocked(readGraphicsBackendQueryOverride).mockReturnValue('webgl');
+    try {
+      const service = createMetalMorphSpinnerService();
+      await service.warm('dark');
+
+      expect(hoisted.createOptions).toHaveLength(1);
+      expect(hoisted.createOptions[0]).toMatchObject({ backend: 'webgl' });
+    } finally {
+      vi.mocked(readGraphicsBackendQueryOverride).mockReturnValue(undefined);
+    }
+  });
+
+  it('should fall back to the flat stand-ins, not a WebGL copy, when its WebGPU canvas cannot present', async () => {
     hoisted.loseNextWebGpuCanvas = true;
     const service = createMetalMorphSpinnerService();
     await service.warm('dark');
 
-    const [lost, started] = hoisted.createOptions as Array<{ backend: string; canvas: HTMLCanvasElement }>;
-    expect(lost).toMatchObject({ backend: 'webgpu' });
-    expect(started).toMatchObject({ backend: 'webgl' });
-    expect(started?.canvas).not.toBe(lost?.canvas);
+    expect(hoisted.createOptions).toHaveLength(1);
+    expect(hoisted.createOptions[0]).toMatchObject({ backend: 'webgpu' });
     expect(hoisted.controllers[0]?.dispose).toHaveBeenCalledOnce();
-    expect(service.getDiagnostics().rendererCount).toBe(1);
+    expect(service.getDiagnostics().rendererCount).toBe(0);
 
-    // The renderer that opened is the WebGL one, and it is what spinners draw from.
     const target = createTarget();
     service.subscribe(target);
-    hoisted.createOptions[1]?.onFrame?.();
-    expect(hoisted.controllers).toHaveLength(2);
-    expect(target.firstFrames).toBe(1);
+    await settle();
+    expect(hoisted.controllers).toHaveLength(1);
+    expect(target.firstFrames).toBe(0);
   });
 
   it('should reuse the live renderer for a spinner that subscribes later', async () => {

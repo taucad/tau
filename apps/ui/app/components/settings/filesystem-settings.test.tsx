@@ -103,10 +103,12 @@ vi.mock('#utils/workspace-telemetry.utils.js', () => ({
   }),
 }));
 
+const folderAccess = vi.hoisted(() => ({ available: true }));
+
 vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: true,
   directoryPicker: () => ({
-    available: true,
+    available: folderAccess.available,
     backend: 'webaccess',
     pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) => {
       const handle = await globalThis.window.showDirectoryPicker({
@@ -332,5 +334,33 @@ describe('FileSystemSettings cloud projects', () => {
 
     expect(await screen.findByText('Browser storage')).toBeInTheDocument();
     expect(screen.queryByText('Cloud projects')).not.toBeInTheDocument();
+  });
+});
+
+describe('FileSystemSettings without folder access', () => {
+  afterEach(() => {
+    folderAccess.available = true;
+  });
+
+  it('should leave out the Workspaces section where folders cannot be connected (Safari, Brave)', async () => {
+    folderAccess.available = false;
+    render(
+      <TooltipProvider>
+        <FileSystemSettings />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByRole('region', { name: 'Browser storage' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Workspaces' })).not.toBeInTheDocument();
+  });
+
+  it('should keep the Workspaces section where folders can be connected', async () => {
+    render(
+      <TooltipProvider>
+        <FileSystemSettings />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByRole('region', { name: 'Workspaces' })).toBeInTheDocument();
   });
 });

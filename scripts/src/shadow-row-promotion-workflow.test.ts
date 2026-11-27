@@ -5,8 +5,9 @@ import { describe, expect, it } from 'vitest';
 
 /*
  * The shadow-row promotion (FQ-13) runs after each flake-ledger ingestion. Promotion changes the gate, so it only
- * proposes: it pushes a branch and opens a pull request, with no environment, no secret, no persisted checkout
- * credential and no merge.
+ * proposes: it pushes a branch and opens a pull request, with no persisted checkout credential and no merge. It writes
+ * with a `tau-flake-bot` App token from the main-only `flake-bot` environment when its secrets are set, and with the
+ * workflow token when they are not.
  */
 const text = readFileSync(resolve(import.meta.dirname, '../../.github/workflows/shadow-row-promotion.yml'), 'utf8');
 
@@ -44,14 +45,16 @@ describe('shadow-row promotion workflow', () => {
     expect(workflow.on.workflow_dispatch).toBeDefined();
   });
 
-  it('should propose one row at a time without a secret, an environment, a persisted credential or a merge', () => {
+  it('should propose one row at a time with the flake-bot environment, no persisted credential and no merge', () => {
     expect(workflow.permissions).toEqual({});
     for (const job of Object.values(workflow.jobs)) {
       expect(job.permissions).toEqual({ contents: 'write', 'pull-requests': 'write' });
-      expect(job.environment).toBeUndefined();
+      expect(job.environment).toEqual({ name: 'flake-bot', deployment: false });
       expect(job.concurrency).toEqual({ group: 'shadow-row-promotion', 'cancel-in-progress': false });
     }
-    expect(text).not.toMatch(/secrets\./u);
+    expect(new Set(text.match(/secrets\.\w+/gu))).toEqual(
+      new Set(['secrets.FLAKE_BOT_APP_ID', 'secrets.FLAKE_BOT_APP_PRIVATE_KEY']),
+    );
     const code = text
       .split('\n')
       .filter((line) => !line.trimStart().startsWith('#'))
@@ -65,6 +68,43 @@ describe('shadow-row promotion workflow', () => {
     }
     const source = readFileSync(resolve(import.meta.dirname, 'ci-shadow-rows-promote-cli.ts'), 'utf8');
     expect(source).not.toMatch(/auto_merge|\/merge'/u);
+  });
+
+  it('should open the proposal with a tau-flake-bot token, falling back to the workflow token without it', () => {
+    const mints = steps.filter((step) => step.uses?.startsWith('actions/create-github-app-token@')) as Array<
+      Step & { id?: string; if?: string }
+    >;
+    expect(mints).toHaveLength(1);
+    const [mint] = mints;
+    expect(mint?.uses).toBe('actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254');
+    expect(mint?.id).toBe('flake-bot');
+    expect(mint?.if).toBe(`\${{ env.FLAKE_BOT_CONFIGURED == 'true' }}`);
+    // No `issues` scope: the promotion opens no issue.
+    expect(mint?.with).toEqual({
+      'app-id': `\${{ secrets.FLAKE_BOT_APP_ID }}`,
+      'private-key': `\${{ secrets.FLAKE_BOT_APP_PRIVATE_KEY }}`,
+      owner: `\${{ github.repository_owner }}`,
+      repositories: 'tau',
+      'permission-contents': 'write',
+      'permission-pull-requests': 'write',
+    });
+    const job = Object.values(workflow.jobs)[0] as { env?: Record<string, string> } | undefined;
+    expect(job?.env).toEqual({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- an environment variable
+      FLAKE_BOT_CONFIGURED: `\${{ secrets.FLAKE_BOT_APP_ID != '' && secrets.FLAKE_BOT_APP_PRIVATE_KEY != '' }}`,
+    });
+    const propose = steps.find((step) => step.run?.startsWith('node scripts/src/ci-shadow-rows-promote-cli.ts')) as
+      | (Step & { if?: string; env?: Record<string, string> })
+      | undefined;
+    expect(steps.indexOf(propose ?? {})).toBeGreaterThan(steps.indexOf(mint ?? {}));
+    // A failed mint still proposes, with the workflow token, and the body says which token opened it.
+    expect(propose?.if).toBe(`\${{ !cancelled() }}`);
+    expect(propose?.env).toEqual({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- an environment variable
+      GITHUB_TOKEN: `\${{ steps.flake-bot.outputs.token || github.token }}`,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- an environment variable
+      PULL_REQUEST_STARTS_CI: `\${{ steps.flake-bot.outputs.token && 'true' || 'false' }}`,
+    });
   });
 
   it('should check out every module the promotion imports, and every project.json', () => {

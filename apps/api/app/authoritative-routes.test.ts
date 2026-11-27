@@ -24,6 +24,10 @@ import { apiRoot, moduleGraph, sourceFiles } from '#testing/module-graph.js';
  * `file#GET <route>`. Each reason was checked against the handler when it was added.
  */
 const cachedReadAllowlist: Readonly<Record<string, string>> = {
+  'app/api/account/account.controller.ts#GET session':
+    "Who is signed in, from the guard's resolution; mints nothing and answers no token",
+  'app/api/account/account.controller.ts#GET desktop-sign-ins':
+    'Desktop sign-ins, read from the database by user id; no credential',
   'app/api/durable-events/durable-events.controller.ts#GET :streamId/events':
     'Long-poll of stream events; mints nothing (its 25 s admission window is part of the documented bound)',
   'app/api/email-deliverability/email-deliverability.controller.ts#GET deliverability':
@@ -60,8 +64,8 @@ const cachedReadAllowlist: Readonly<Record<string, string>> = {
   '../libs/api-billing/src/billing.controller.ts#GET entitlements': 'Entitlements, read from the database on use',
   '../libs/api-billing/src/billing.controller.ts#GET credits': 'Credit balance read',
   '../libs/api-billing/src/billing.controller.ts#GET model-estimates': 'Price estimates read',
-  '../libs/api-billing/src/billing.controller.ts#GET holds': 'Credit holds read',
   '../libs/api-billing/src/billing.controller.ts#GET usage': 'Usage read',
+  '../libs/api-billing/src/billing.controller.ts#GET operations': 'Funded operation states read, as the single route',
   '../libs/api-billing/src/billing.controller.ts#GET operations/:operationId': 'Funded operation state read',
   '../libs/api-billing/src/billing.controller.ts#GET reload-consent': 'Reload consent read',
   '../libs/api-billing/src/billing.controller.ts#GET account-closure': 'Account closure state read',

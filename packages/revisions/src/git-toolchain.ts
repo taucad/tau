@@ -17,7 +17,7 @@
  * that git's `libexec`, and points `gitExecutable` at it.
  */
 
-import { runCommand } from '#git-command.js';
+import { meteredGitCommand, runCommand } from '#git-command.js';
 import { RevisionPortError } from '#revision-port.js';
 
 /** One binary a disk host records revisions with. @public */
@@ -66,14 +66,17 @@ const probeMilliseconds = 10_000;
  */
 const version = async (executable: string, args: readonly string[]): Promise<string | undefined> => {
   try {
-    const result = await runCommand({
-      executable,
-      /* The process's own directory: a version probe must not need a repository,
-       * and must not pick one up either. */
-      cwd: process.cwd(),
-      args: [...args],
-      deadline: probeMilliseconds,
-    });
+    /* Timed as the port's own Git is: on a host where spawning is slow, this probe is too (W8 diagnostics). */
+    const result = await meteredGitCommand(args, async () =>
+      runCommand({
+        executable,
+        /* The process's own directory: a version probe must not need a repository,
+         * and must not pick one up either. */
+        cwd: process.cwd(),
+        args: [...args],
+        deadline: probeMilliseconds,
+      }),
+    );
     return result.exitCode === 0 ? textDecoder.decode(result.stdout).trim() : undefined;
   } catch {
     return undefined;

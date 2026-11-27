@@ -98,6 +98,8 @@ jobs:
       - name: Detect and bisect
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # The bisect markers count only from `github-actions[bot]` (this token) and the flake bot's account.
+          FLAKE_BOT_LOGIN: ${{ vars.FLAKE_BOT_LOGIN || 'tau-flake-bot[bot]' }}
           ID: ${{ inputs.id || '' }}
           GOOD: ${{ inputs.good || '' }}
           BAD: ${{ inputs.bad || '' }}

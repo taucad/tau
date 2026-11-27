@@ -2,6 +2,7 @@ import type { InputCountCapability } from '#billable-model-input-count.js';
 import { HttpStatus } from '@nestjs/common';
 import {
   billableModelInputBound,
+  billableModelInputPrefix,
   billableModelOutputMaximum,
   billableModelRequestContainsImage,
   LlmGatewayError,
@@ -16,6 +17,8 @@ import type {
   BillableModelProviderAdapter,
   BillableModelQualificationResolver,
   BillableProviderWire,
+  InputHoldBasis,
+  PreviousSettledInput,
   QualifiedBillableInvocation,
 } from '#billable-model-invocation.types.js';
 import type { MeterQuantity } from '#credit-ledger.types.js';
@@ -570,7 +573,10 @@ const admitPriceHeaders = (
 export class CodeOwnedBillableModelQualificationResolver implements BillableModelQualificationResolver {
   public constructor(private readonly dependencies: BillableModelQualificationDependencies) {}
 
-  public resolve(intent: Omit<BillableInvocationIntent, 'authUserId' | 'signal'>): QualifiedBillableInvocation {
+  public resolve(
+    intent: Omit<BillableInvocationIntent, 'authUserId' | 'signal'>,
+    previous?: PreviousSettledInput,
+  ): QualifiedBillableInvocation {
     const transportHeaders = admitPriceHeaders(intent);
     const parsed = safeParseBillableModelRequest(intent.body, intent.providerWire);
     if (!parsed.success) {
@@ -613,22 +619,25 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
       throw invalidRequest('Output maximum exceeds the provider context');
     }
     /* The request's own bound, falling closed onto the provider context whenever an
-     * element carries no documented token bound. */
+     * element carries no documented token bound. WP-15 step 6 (O-6): a conversation whose prefix is the previous
+     * settled step's whole request is bounded from the input tokens that step settled with instead. */
     const requestBound = billableModelInputBound(parsed.data);
-    const maximumInput = requestBound === undefined || requestBound > contextBound ? contextBound : requestBound;
-    /* The threshold is priced against the bound, not the body, so the whole-context
-     * fallback still pins the premium tariff. */
-    const pinned = pinTariff(selected, selected.rates, maximumInput);
-    const quantities = pinned.rates.map(
-      (rateEntry): MeterQuantity => ({
-        dimension: rateEntry.dimension,
-        tier: rateEntry.tier,
-        quantity: rateEntry.dimension === 'output' ? maximumOutput : maximumInput,
-      }),
+    const own = billableModelInputPrefix(
+      parsed.data,
+      previous !== undefined && previous.modelId === selected.modelId && previous.providerId === selected.providerId
+        ? previous
+        : undefined,
     );
-    const jointInputMaximum: JointInputMaximum | undefined = jointInputProviders.has(selected.providerId)
-      ? { version: 'joint-input-v1', quantity: maximumInput.toString() }
-      : undefined;
+    let maximumInput = contextBound;
+    let holdBasis: InputHoldBasis = 'context';
+    if (requestBound !== undefined && requestBound < maximumInput) {
+      maximumInput = requestBound;
+      holdBasis = 'bytes';
+    }
+    if (own?.bound !== undefined && own.bound < maximumInput) {
+      maximumInput = own.bound;
+      holdBasis = 'prefix';
+    }
     const adapter = this.dependencies.adapters.get(selected.routeId);
     if (!adapter) {
       // Deployment fault, not a client one: the caller may retry once the provider is configured.
@@ -642,57 +651,82 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
     if (selectedCount && selected.providerId !== 'openai') {
       throw invalidRequest('Exact input counting is not qualified for this route');
     }
-    const contractId = contractRouteId(selected.routeId, pinned.longContext);
-    const meterContractId = `model-meter-v1:${contractId}`;
-    return {
-      ...(selectedCount
-        ? {
-            inputCount: {
-              capability: this.dependencies.inputCounters?.get(selected.routeId),
-            },
-          }
-        : {}),
-      routeId: selected.routeId,
-      surface: intent.surface,
-      providerWire: selected.wire,
-      modelId: selected.modelId,
-      modelDisplayName: selected.modelDisplayName,
-      providerId: selected.providerId,
-      sku: `model:${contractId}`,
-      meterContractId,
-      maximumQuantities: quantities,
-      // Streamed SSE costs 110-200 bytes per output token; 256 keeps a legitimate full-length answer
-      // under the authorized_exhausted ceiling (W9) while the provider's own max-output cap bounds tokens.
-      maximumResponseBytes: Number(maximumOutput) * 256 + 1_048_576,
-      replica: {
-        schemaVersion: 1,
-        meterContractIds: [...qualifiedMeterContracts.keys()],
-      },
-      invocation: {
-        contractVersion:
-          selected.validThrough === undefined ? 'model-route-v1' : `model-route-v1:through:${selected.validThrough}`,
-        supplierRatesValidUntil: selected.validThrough ?? null,
-
-        supplierRates: pinned.rates.map((rateEntry) => ({
+    const { rates } = selected;
+    const qualify = (inputMaximum: bigint): QualifiedBillableInvocation => {
+      /* The threshold is priced against the final input maximum: the prefix bound, a count, or the whole-context
+       * fallback, which still pins the premium tariff. */
+      const pinned = pinTariff(selected, rates, inputMaximum);
+      const quantities = pinned.rates.map(
+        (rateEntry): MeterQuantity => ({
           dimension: rateEntry.dimension,
           tier: rateEntry.tier,
-          numeratorPicoUsd: rateEntry.numeratorPicoUsd.toString(),
-          denominatorUnits: million.toString(),
-        })),
-        supplierValuation: pinned.valuation,
-        ...(jointInputMaximum === undefined ? {} : { jointInputMaximum }),
-        executionTimeout: this.dependencies.executionTimeout,
-      },
-      normalizedRequest: {
-        // The catalog route id is translated back to the supplier's own model id here; nothing downstream re-translates.
-        body: {
-          ...parsed.data,
-          model: selected.providerId === 'vertexai' ? `google/${selected.modelId}` : selected.modelId,
+          quantity: rateEntry.dimension === 'output' ? maximumOutput : inputMaximum,
+        }),
+      );
+      const jointInputMaximum: JointInputMaximum | undefined = jointInputProviders.has(selected.providerId)
+        ? { version: 'joint-input-v1', quantity: inputMaximum.toString() }
+        : undefined;
+      const contractId = contractRouteId(selected.routeId, pinned.longContext);
+      const meterContractId = `model-meter-v1:${contractId}`;
+      return {
+        ...(selectedCount
+          ? {
+              inputCount: {
+                capability: this.dependencies.inputCounters?.get(selected.routeId),
+              },
+            }
+          : {}),
+        routeId: selected.routeId,
+        surface: intent.surface,
+        providerWire: selected.wire,
+        modelId: selected.modelId,
+        modelDisplayName: selected.modelDisplayName,
+        providerId: selected.providerId,
+        sku: `model:${contractId}`,
+        meterContractId,
+        maximumQuantities: quantities,
+        // Streamed SSE costs 110-200 bytes per output token; 256 keeps a legitimate full-length answer
+        // under the authorized_exhausted ceiling (W9) while the provider's own max-output cap bounds tokens.
+        maximumResponseBytes: Number(maximumOutput) * 256 + 1_048_576,
+        replica: {
+          schemaVersion: 1,
+          meterContractIds: [...qualifiedMeterContracts.keys()],
         },
-        headers: transportHeaders,
-      },
-      adapter,
+        invocation: {
+          contractVersion:
+            selected.validThrough === undefined ? 'model-route-v1' : `model-route-v1:through:${selected.validThrough}`,
+          supplierRatesValidUntil: selected.validThrough ?? null,
+
+          supplierRates: pinned.rates.map((rateEntry) => ({
+            dimension: rateEntry.dimension,
+            tier: rateEntry.tier,
+            numeratorPicoUsd: rateEntry.numeratorPicoUsd.toString(),
+            denominatorUnits: million.toString(),
+          })),
+          supplierValuation: pinned.valuation,
+          ...(jointInputMaximum === undefined ? {} : { jointInputMaximum }),
+          ...(own === undefined ? {} : { inputPrefix: own.prefix }),
+          holdBasis,
+          executionTimeout: this.dependencies.executionTimeout,
+        },
+        normalizedRequest: {
+          // The catalog route id is translated back to the supplier's own model id here; nothing downstream re-translates.
+          body: {
+            ...parsed.data,
+            model: selected.providerId === 'vertexai' ? `google/${selected.modelId}` : selected.modelId,
+          },
+          headers: transportHeaders,
+        },
+        adapter,
+        withInputMaximum: (smaller) => {
+          if (smaller > inputMaximum) {
+            throw new RangeError('A qualification is held again only at a smaller input maximum');
+          }
+          return qualify(smaller);
+        },
+      };
     };
+    return qualify(maximumInput);
   }
 }
 
@@ -707,5 +741,12 @@ export const withBillableEvidenceCollector = (
       wire,
       new Set(qualification.invocation.supplierRates.map((rateEntry) => rateEntry.dimension)),
       qualification.providerId,
+      {
+        rates: qualification.invocation.supplierRates,
+        countedInputTokens:
+          qualification.invocation.inputCount === undefined
+            ? undefined
+            : BigInt(qualification.invocation.inputCount.inputTokens),
+      },
     ),
 });

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { classifyLogRow } from '#log/event-schema.js';
-import { parseEventLogBytes, parseReplayEventLogBytes } from '#log/serialization.js';
+import { classifyLogRow, parseLogRow } from '#log/event-schema.js';
+import { LogFileDictionary } from '#log/compact-rows.js';
+import {
+  parseEventLogBytes,
+  parseReplayEventLogBytes,
+  serializeLogEventBytes,
+  serializeParsedLogEventBytes,
+  serializedLogEventSize,
+} from '#log/serialization.js';
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
 const event = {
@@ -41,7 +48,8 @@ describe('byte log line boundaries', () => {
   });
 
   it('does not read a newline outside an empty view', () => {
-    const parsed = parseEventLogBytes(new Uint8Array([10, 10]).subarray(1, 1));
+    const { dictionary, ...parsed } = parseEventLogBytes(new Uint8Array([10, 10]).subarray(1, 1));
+    expect(dictionary).toBeInstanceOf(LogFileDictionary);
     expect(parsed).toEqual({
       rows: [],
       events: [],
@@ -110,4 +118,31 @@ describe('private replay parsing preserves physical boundaries', () => {
       expect(identity.canonical()).not.toContain('exposed mutation');
     },
   );
+});
+
+// WP-10 step A item 5: the appender parses a row once; the bytes it writes are the ones a second parse would give.
+describe('a row parsed once', () => {
+  const known = {
+    version: 1,
+    leaderEpoch: 'e',
+    sequence: 1,
+    recordedAt: '2026-10-08T00:00:00.000Z',
+    runId: 'r',
+    type: 'message.appended',
+    message: { id: 'm', role: 'user', content: [{ type: 'text', text: '😀é\nline' }] },
+  };
+
+  it.each([
+    ['known', known, true],
+    ['opaque', event, false],
+  ] as const)('should write a %s row as the strict serializer does and count its line once', (_, row, isKnown) => {
+    const parsed = parseLogRow(row);
+    expect(parsed.known).toBe(isKnown);
+    const decoder = new TextDecoder();
+
+    expect(decoder.decode(serializeParsedLogEventBytes(parsed.event, true))).toBe(
+      decoder.decode(serializeLogEventBytes(parsed.event, true)),
+    );
+    expect(serializedLogEventSize(parsed.event)).toBe(serializeLogEventBytes(parsed.event).byteLength);
+  });
 });

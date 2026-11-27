@@ -286,7 +286,9 @@ describe('T23: a native kernel that stops responding and ignores its cancel', ()
       },
       { timeout: 10_000 },
     );
-    // The child ignored SIGTERM (it logged it) and was then killed: it is gone, with no reply ever written.
+    // The child ignored SIGTERM (it logged it) and was then killed: it is gone, with no reply ever written. Windows
+    // has no catchable SIGTERM: the session ends the tree with TerminateProcess, so the child logs nothing more
+    // (measured on windows-2025, run 45922288926).
     await vi.waitFor(
       () => {
         expect(childLog(connection.logPath).map(({ event }) => event)).toEqual([
@@ -294,7 +296,7 @@ describe('T23: a native kernel that stops responding and ignores its cancel', ()
           'work',
           'work',
           'cancel',
-          'sigterm',
+          ...(process.platform === 'win32' ? [] : ['sigterm']),
         ]);
         expect(isAlive(pid)).toBe(false);
       },

@@ -42,7 +42,7 @@ describe('ImportPathAdmission', () => {
     expect(admit.admit('.git/HEAD')).toEqual({ kind: 'skip', path: '.git/HEAD', why: 'excluded' });
     expect(admit.admit('vendor/dep/.git/config').kind).toBe('skip');
     expect(admit.admit('node_modules/x/index.js').kind).toBe('skip');
-    expect(admit.admit('.tau-staging/import-x/tree/a').kind).toBe('skip');
+    expect(admit.admit('.tau/staging/import-x/tree/a').kind).toBe('skip');
   });
 
   it('should leave the manifest and identity to the commit', () => {

@@ -122,6 +122,78 @@ describe('createProviderEventLog', () => {
     await log.close();
   });
 
+  // WP-10 step B: a fencing authority's rows are held until `durable`, then sent as one fenced append.
+  it('holds ordered rows until durable and sends them as one fenced append', async () => {
+    const fixture = createFileSystem();
+    const filePath = '/.tau/chats/held/events.jsonl';
+    const fences: number[] = [];
+    const appendFileFenced = async (
+      path: string,
+      data: Uint8Array<ArrayBuffer> | string,
+      fence: { readonly expectedLength: number },
+    ): Promise<void> => {
+      fences.push(fence.expectedLength);
+      const size = fixture.files.get(path)?.byteLength ?? 0;
+      if (size !== fence.expectedLength) {
+        throw Object.assign(new Error('stale'), { code: 'EAPPENDSTALE' });
+      }
+      await fixture.fileSystem.appendFile(path, data);
+    };
+    const log = await createProviderEventLog({
+      fileSystem: { ...fixture.fileSystem, appendFileFenced },
+      filePath,
+      access: 'write',
+    });
+
+    await log.appendOrdered!([event(0)]);
+    await log.appendOrdered!([event(1), event(2)]);
+    expect(fences).toEqual([]);
+    expect(fixture.files.has(filePath)).toBe(false);
+    await expect(log.read()).resolves.toEqual([event(0), event(1), event(2)]);
+
+    await log.durable!();
+    expect(fences).toEqual([0]);
+    await log.appendOrdered!([event(3)]);
+    await log.durable!();
+    const first = fixture.files.get(filePath)!.byteLength;
+    expect(fences).toHaveLength(2);
+    expect(fences[1]).toBeLessThan(first);
+    await log.close();
+
+    const reopened = await createProviderEventLog({ fileSystem: fixture.fileSystem, filePath, access: 'write' });
+    await expect(reopened.read()).resolves.toEqual([event(0), event(1), event(2), event(3)]);
+    await reopened.close();
+  });
+
+  it("refuses held rows LOG_FENCED when a peer's append landed first, and keeps the peer's bytes", async () => {
+    const fixture = createFileSystem();
+    const filePath = '/.tau/chats/held-fenced/events.jsonl';
+    const peer = new TextEncoder().encode('{"peer":true}\n');
+    const appendFileFenced = async (
+      path: string,
+      data: Uint8Array<ArrayBuffer> | string,
+      fence: { readonly expectedLength: number },
+    ): Promise<void> => {
+      const size = fixture.files.get(path)?.byteLength ?? 0;
+      if (size !== fence.expectedLength) {
+        throw Object.assign(new Error('stale'), { code: 'EAPPENDSTALE' });
+      }
+      await fixture.fileSystem.appendFile(path, data);
+    };
+    const log = await createProviderEventLog({
+      fileSystem: { ...fixture.fileSystem, appendFileFenced },
+      filePath,
+      access: 'write',
+    });
+    await log.appendOrdered!([event(0)]);
+    await fixture.fileSystem.appendFile(filePath, new Uint8Array(peer));
+
+    await expect(log.durable!()).rejects.toMatchObject({ code: 'LOG_FENCED' });
+    expect(new TextDecoder().decode(fixture.files.get(filePath))).toBe('{"peer":true}\n');
+    await expect(log.append(event(1))).rejects.toMatchObject({ code: 'LOG_FENCED' });
+    await log.close();
+  });
+
   it("never rolls back a fenced append whose outcome is unknown, keeping its line and a peer's (D23)", async () => {
     const fixture = createFileSystem();
     const filePath = '/.tau/chats/unknown-outcome/events.jsonl';

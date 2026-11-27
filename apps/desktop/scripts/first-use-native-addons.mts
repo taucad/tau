@@ -17,8 +17,9 @@ registerHooks({
     const resolved = nextResolve(specifier, context);
     if (
       !resolved.url.startsWith('file:') ||
+      /* Matched `/`-separated, so a Windows checkout runs the same selection. */
       !/\/@img\/sharp-darwin-(?:arm64|x64)\/lib\/sharp-darwin-(?:arm64|x64)-[\d.]+\.node$/u.test(
-        fileURLToPath(resolved.url),
+        fileURLToPath(resolved.url).split(sep).join('/'),
       )
     ) {
       return resolved;

@@ -1,0 +1,24 @@
+{
+  "alphabet": [],
+  "sources": {
+    "external-change-ingest.ts": "d1b887df47ced9275fd7e7a92d76d57ba249d3c1bc8a515ba4264276b72ffa03",
+    "project-directories.ts": "d1e5c53daef52408afab217164eb7aee8be16bd39c6682c293862697b2cbd55e",
+    "project-directory-index.ts": "c3e209eddb3d3238e6977a5e8251a9a0ffd9b466e561812db8b863c4e705d5f0",
+    "provider-registry.ts": "08aeb205e7e582538eec44d178077b91395c7bf7c45b37162104cbe09dc726cd",
+    "remote-changes.ts": "ebc68b16410668908d6db6ec1de960ce9be0f95f8943f8d3bc16793dc125538d"
+  },
+  "specs": {
+    "DiscoveryIndex.tla": "88be18f4e3d5babefd4375a352467c5bb90f63fdc4047b332305e4f700738911"
+  },
+  "tables": {
+    "DiscoveryIndex.clear-unconditional.cfg": "ae5f8ccff48d6df9915b53466edc6f3ddd04d478ebbbf77950d9007feb3b82f2",
+    "DiscoveryIndex.no-audit.cfg": "93553bad917926ed21ea07369134f18f089d5e6c9806f4a099075c21fb41b500",
+    "DiscoveryIndex.read-before-arm.cfg": "fd7c540f3ec5869e5f419f2ee14d8a180012cf08a1e480aaa9576417c2679b4d",
+    "DiscoveryIndex.reset-on-install.cfg": "0c0904329886cce1b59b09dd50fa23352a80371b5efd3b68faf25089261891fa",
+    "DiscoveryIndex.tap-after-write.cfg": "25a15c3bad3fd0fdc243d83ba25c661b9394299cb7dc392f5b10b024deaa063a",
+    "DiscoveryIndex.target-lost-wide.cfg": "f879bfbaa6fc50791e859e0565a9729dfbd2ee69de0de0fdaa8d64847595bc97",
+    "DiscoveryIndex.target-lost.cfg": "8eceb896c7953809aa979c9e982983d8fd7c3c29b007d0f66ba8bd3e4e0fcb05",
+    "DiscoveryIndex.target.cfg": "a568ad95c6d58406d8fd744f503aeaada05b41059840ff174622325f3b67d662",
+    "expected.json": "ddbca25726ab97d64cdbdd7acee92fa1277feed348789951d24cb706a421438a"
+  }
+}

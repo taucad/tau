@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 2,
+  "channel": "staging",
+  "promoted": true,
+  "platforms": [
+    {
+      "lane": "macos",
+      "catalog": {
+        "schemaVersion": 1,
+        "tag": "desktop-staging@0.2.0-staging.1180",
+        "channel": "staging",
+        "version": "1.11.80",
+        "sourceCommit": "750ab16623f7b1a142b157b5e1cee45810c8f333",
+        "promoted": true,
+        "routes": [
+          {
+            "route": "macos-zip",
+            "target": "darwin-arm64",
+            "qualification": {
+              "ci": true,
+              "vm": "pending",
+              "trust": "release"
+            },
+            "artifacts": [
+              {
+                "kind": "macos-zip",
+                "name": "Tau-macos-arm64.zip",
+                "sha256": "586ab8f2d2ea538009551f19ea633043ec76f77e17c6760bf7af6454e118b5a7",
+                "size": 386920072
+              },
+              {
+                "kind": "macos-dmg",
+                "name": "Tau-macos-arm64.dmg",
+                "sha256": "9a6b1debd5fc0d06bd01293f3e40346b1b465d2e7cfb0472c7aea1465bbc3789",
+                "size": 421414775
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lane": "linux",
+      "catalog": {
+        "schemaVersion": 1,
+        "tag": "desktop-staging@0.4.0-staging.1372",
+        "channel": "staging",
+        "version": "1.13.72",
+        "sourceCommit": "2b896847d1ae951bcb49fc4d3c84dea9eab6c63a",
+        "promoted": true,
+        "routes": [
+          {
+            "route": "linux-apt",
+            "target": "linux-x64",
+            "qualification": { "ci": true, "vm": true, "trust": "release" },
+            "artifacts": [
+              {
+                "kind": "linux-tar",
+                "name": "Tau-linux-x64.tar.gz",
+                "sha256": "50489026f39fc3a107b5900349ba060662b5a8e3ebf9ef1783fb431d328c6459",
+                "size": 321842135
+              },
+              {
+                "kind": "linux-deb-runtime",
+                "name": "tau-staging-runtime-1.13.72_1.13.72_amd64.deb",
+                "sha256": "1f2c76ae5d39449d3471366d3d25db9adc22d75b1ed63a86595dd0396b47f1d9",
+                "size": 242533912
+              },
+              {
+                "kind": "linux-deb-selector",
+                "name": "tau-staging_1.13.72_amd64.deb",
+                "sha256": "2383aded34463094a3548bded279b9bfb72341d974a82721fdb6089526c54b52",
+                "size": 83172
+              }
+            ]
+          },
+          {
+            "route": "linux-appimage",
+            "target": "linux-x64",
+            "qualification": { "ci": true, "vm": true, "trust": "release" },
+            "artifacts": [
+              {
+                "kind": "linux-tar",
+                "name": "Tau-linux-x64.tar.gz",
+                "sha256": "50489026f39fc3a107b5900349ba060662b5a8e3ebf9ef1783fb431d328c6459",
+                "size": 321842135
+              },
+              {
+                "kind": "linux-appimage-deb-runtime",
+                "name": "tau-staging-appimage-runtime-1.13.72_1.13.72_amd64.deb",
+                "sha256": "7d30fd644d57f4499e72a004a3d71dc933fc805186dd8cbfc0e965bd6e3e0b23",
+                "size": 323028070
+              },
+              {
+                "kind": "linux-appimage-deb-selector",
+                "name": "tau-staging-appimage_1.13.72_amd64.deb",
+                "sha256": "180ed8be1533e7c675d208b01462c60f8322d8bcfaf3ae91507039abcdad1290",
+                "size": 83244
+              },
+              {
+                "kind": "linux-appimage",
+                "name": "Tau-linux-x64.AppImage",
+                "sha256": "11f01394db3de3b5fc91b5f91691aaf96817be589ff316ed927e490aecf192f8",
+                "size": 325009984
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

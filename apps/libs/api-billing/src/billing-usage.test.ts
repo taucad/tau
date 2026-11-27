@@ -226,121 +226,6 @@ describe('BillingUsageService query admission', () => {
   });
 });
 
-describe('BillingUsageService open holds', () => {
-  const holdRow = {
-    operation_id: 'operation_2',
-    model_id: 'gpt-6-astra',
-    model_display_name: 'Astra',
-    provider_id: 'openai',
-    dispatch_state: 'accepted',
-    held_atoms: '3084332',
-    admitted_at: '2026-09-12T08:00:00.000000Z',
-    due_at: '2026-09-12T08:10:00.000000Z',
-    release_after: '2026-09-12T08:15:00.000000Z',
-  };
-
-  it('publishes the caller-owned pending holds with the grace their release waits for', async () => {
-    const { databaseService, service } = createService();
-    const transaction = mockDeep<Tx>();
-    databaseService.database.transaction.mockImplementation(async (callback) => callback(transaction));
-    transaction.execute.mockResolvedValueOnce(queryRows([])).mockResolvedValueOnce(
-      queryRows([
-        holdRow,
-        {
-          ...holdRow,
-          operation_id: 'operation_1',
-          model_id: 'gpt-5.6-luna',
-          model_display_name: null,
-          provider_id: null,
-          dispatch_state: 'admitted',
-          held_atoms: '65947',
-          admitted_at: null,
-        },
-      ]),
-    );
-
-    const result = await service.getOpenHolds({ authUserId: 'user_1' });
-
-    expect(result).toEqual({
-      environment: 'staging',
-      ownerId: 'user_1',
-      holds: [
-        {
-          operationId: 'operation_2',
-          model: { id: 'gpt-6-astra', displayName: 'Astra', providerId: 'openai' },
-          heldCreditAtoms: '3084332',
-          admittedAt: '2026-09-12T08:00:00.000000Z',
-          dueAt: '2026-09-12T08:10:00.000000Z',
-          releaseAfter: '2026-09-12T08:15:00.000000Z',
-          dispatchState: 'accepted',
-          customerState: 'pending',
-        },
-        {
-          operationId: 'operation_1',
-          model: { id: 'gpt-5.6-luna', displayName: null, providerId: null },
-          heldCreditAtoms: '65947',
-          admittedAt: null,
-          dueAt: '2026-09-12T08:10:00.000000Z',
-          releaseAfter: '2026-09-12T08:15:00.000000Z',
-          dispatchState: 'admitted',
-          customerState: 'pending',
-        },
-      ],
-    });
-
-    const [query] = transaction.execute.mock.calls[1]!;
-    if (typeof query === 'string') {
-      throw new TypeError('Expected a parameterized open-holds query');
-    }
-    const compiled = new PgDialect().sqlToQuery(query.getSQL());
-    /* Ownership is the session's binding, never a caller-supplied account; only
-     * open holds are listed, and the page is bounded. */
-    expect(compiled.sql).toContain('b.auth_user_id = $3');
-    expect(compiled.sql).toContain("o.customer_state = 'pending'");
-    expect(compiled.sql).toContain('order by o.admitted_at desc nulls last, o.id desc limit $4');
-    expect(compiled.params).toEqual([5, 'staging', 'user_1', 200]);
-  });
-
-  it('should publish a pending Together hold under its namespaced supplier model id', async () => {
-    const { databaseService, service } = createService();
-    const transaction = mockDeep<Tx>();
-    databaseService.database.transaction.mockImplementation(async (callback) => callback(transaction));
-    transaction.execute.mockResolvedValueOnce(queryRows([])).mockResolvedValueOnce(
-      queryRows([
-        {
-          ...holdRow,
-          model_id: 'moonshotai/Kimi-K3.1-Pro',
-          model_display_name: 'Kimi K3.1 Pro',
-          provider_id: 'together',
-        },
-      ]),
-    );
-
-    const result = await service.getOpenHolds({ authUserId: 'user_1' });
-
-    expect(result.holds.map((hold) => hold.model)).toEqual([
-      { id: 'moonshotai/Kimi-K3.1-Pro', displayName: 'Kimi K3.1 Pro', providerId: 'together' },
-    ]);
-  });
-
-  it('refuses to publish a hold whose amount is not a canonical unsigned atom string', async () => {
-    const { databaseService, service } = createService();
-    const transaction = mockDeep<Tx>();
-    databaseService.database.transaction.mockImplementation(async (callback) => callback(transaction));
-    transaction.execute
-      .mockResolvedValueOnce(queryRows([]))
-      .mockResolvedValueOnce(queryRows([{ ...holdRow, held_atoms: '-1' }]));
-
-    await expect(service.getOpenHolds({ authUserId: 'user_1' })).rejects.toThrow();
-  });
-
-  it('fails closed when the server billing environment is invalid', async () => {
-    const { databaseService, service } = createService('invalid');
-    await expect(service.getOpenHolds({ authUserId: 'user_1' })).rejects.toBeInstanceOf(ServiceUnavailableException);
-    expect(databaseService.database.transaction).not.toHaveBeenCalled();
-  });
-});
-
 describe('BillingUsageService attempt receipts (W2)', () => {
   const authority = {
     binding_id: 'binding_1',
@@ -426,5 +311,43 @@ describe('BillingUsageService attempt receipts (W2)', () => {
 
     expect(receipt).toMatchObject({ state: 'pending', operationId: 'operation_1' });
     expect(receipt).not.toHaveProperty('settlesBy');
+  });
+
+  it('should answer a receipt batch with one receipt per distinct operation, in id order', async () => {
+    const { service, transaction } = pendingService();
+    const pendingRow = {
+      customer_state: 'pending',
+      admitted_at: admittedAt,
+      dispatch_state: 'accepted',
+      authorized_atoms: '900',
+      settles_by: settlesBy,
+    };
+    transaction.execute
+      .mockResolvedValueOnce(queryRows([]))
+      .mockResolvedValueOnce(queryRows([authority]))
+      .mockResolvedValueOnce(queryRows([pendingRow]));
+
+    const batch = await service.getOperationReceipts({
+      authUserId: 'user_1',
+      rawQuery: { operationIds: ['operation_2', 'operation_1', 'operation_2'] },
+    });
+
+    expect(batch.receipts.map((receipt) => [receipt.operationId, receipt.state])).toEqual([
+      ['operation_1', 'pending'],
+      ['operation_2', 'pending'],
+    ]);
+    expect(batch.receipts[0]).not.toHaveProperty('settlesBy');
+  });
+
+  it('should refuse an empty, oversized or unknown receipt batch before touching PostgreSQL', async () => {
+    const { service } = pendingService();
+    const tooMany = Array.from({ length: 33 }, (_, index) => `operation_${String(index)}`);
+
+    for (const rawQuery of [{}, { operationIds: tooMany }, { operationIds: 'operation_1', pageSize: '1' }]) {
+      // oxlint-disable-next-line no-await-in-loop -- each refusal is checked on its own.
+      await expect(service.getOperationReceipts({ authUserId: 'user_1', rawQuery })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    }
   });
 });

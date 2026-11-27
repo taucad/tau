@@ -7,6 +7,8 @@ DELETE /projects/:id/share | v1 | AuthGuard,AuthGuard | required | ProjectShareC
 DELETE /projects/:id/share/access/:accessId | v1 | AuthGuard,AuthGuard | required | ProjectShareController.revokeAccess
 DELETE /projects/:projectId | v1 | AuthGuard | required | ProjectDeletionController.delete
 DELETE /projects/:projectId/collaborators/:email | v1 | AuthGuard | required | CollaboratorsController.revoke
+GET /account/desktop-sign-ins | v1 | AuthGuard | required | AccountController.listDesktopSignIns
+GET /account/session | v1 | AuthGuard | required | AccountController.session
 GET /agents | v1 | AuthGuard | optional | HostsController.listDevices
 GET /agents/:id/runs | v1 | AuthGuard,AuthGuard | required | HostsController.listRuns
 GET /agents/worker-affinity | v1 | AuthGuard | public | HostsController.getWorkerAffinity
@@ -56,6 +58,7 @@ PATCH /privacy | v1 | AuthGuard | required | PrivacyController.updatePrivacyPref
 PATCH /projects/:id/share | v1 | AuthGuard,AuthGuard | required | ProjectShareController.updateProjectShare
 PATCH /projects/:projectId/collaborators/:email | v1 | AuthGuard | required | CollaboratorsController.setRole
 PATCH /publications/:id/views | v1 | AuthGuard | optional | PublicationsController.recordView
+POST /account/desktop-sign-ins/:signInId/revoke | v1 | AuthGuard | required | AccountController.revokeDesktopSignIn
 POST /agent-observability/evidence | v1 | CloudHostEvidenceGuard | required | EvidenceIngressController.admit
 POST /agents/:id/sessions | v1 | AuthGuard,AuthGuard | required | HostsController.createSession
 POST /agents/cloud | v1 | AuthGuard,AuthGuard | required | HostsController.provisionCloudHost

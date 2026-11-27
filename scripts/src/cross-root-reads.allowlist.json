@@ -565,9 +565,19 @@
     "reason": "conformance or recorded corpus read from another project's specs"
   },
   {
+    "file": "apps/ui/app/services/chat-session-store.reattach.regression.test.ts",
+    "target": "packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl",
+    "reason": "conformance or recorded corpus read from another project's specs"
+  },
+  {
     "file": "apps/ui/app/styles/global.test.ts",
     "target": "packages/ui/src/styles/**",
     "reason": "reads the design-system stylesheets from packages/ui"
+  },
+  {
+    "file": "apps/ui/app/styles/steady-state-animations.test.ts",
+    "target": "packages/ui/src/styles/**",
+    "reason": "checks that the design system's looping keyframes animate only compositor properties (UI Policy section 6)"
   },
   {
     "file": "apps/ui/app/styles/global.test.ts",

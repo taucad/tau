@@ -13,6 +13,7 @@ describe('package exports', () => {
       '.': './src/index.ts',
       './config/auth-static': './src/config/auth-static.config.ts',
       './config/better-auth': './src/config/better-auth.config.ts',
+      './desktop-sign-in-retention': './src/desktop-sign-in-retention.ts',
       './module': './src/auth.module.ts',
       './testing': './src/testing.ts',
       './testing/session-cache': './src/testing/session-cache.fixture.ts',

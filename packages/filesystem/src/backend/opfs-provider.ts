@@ -59,8 +59,25 @@ const writeAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>, offs
 /** Batch writes at or above this size stage through a sync handle and move into place (I1). */
 export const opfsLargeWriteBytes = 8 * 1024 * 1024;
 
-/** The root directory large writes stage in; dot-named, so never a project directory. */
-export const opfsStagingDirectory = '.tau-staging';
+/** The root directory large writes stage in: the storage root's own `.tau/`, so never a project directory. */
+export const opfsStagingDirectory = '.tau/staging';
+
+/**
+ * The staging directory's handle, one segment at a time: OPFS names a single
+ * entry per call.
+ *
+ * @param root - The storage root's handle.
+ * @param create - Whether to create the missing segments.
+ * @returns The staging directory's handle; rejects when absent and `create` is false.
+ */
+const stagingHandle = async (root: FileSystemDirectoryHandle, create: boolean): Promise<FileSystemDirectoryHandle> => {
+  let handle = root;
+  for (const name of opfsStagingDirectory.split('/')) {
+    // oxlint-disable-next-line no-await-in-loop -- each segment opens inside the last.
+    handle = await handle.getDirectoryHandle(name, { create });
+  }
+  return handle;
+};
 
 const readChunkBytes = 4 * 1024 * 1024;
 
@@ -355,7 +372,7 @@ export class OPFSProvider extends FileSystemAccessProvider {
   private async _recoverDeadOwners(): Promise<void> {
     let staging: FileSystemDirectoryHandle | undefined;
     try {
-      staging = await this._rootHandle.getDirectoryHandle(opfsStagingDirectory);
+      staging = await stagingHandle(this._rootHandle, false);
     } catch {
       staging = undefined;
     }
@@ -404,7 +421,7 @@ export class OPFSProvider extends FileSystemAccessProvider {
     destination: Readonly<{ directory: FileSystemDirectoryHandle; name: string }>,
   ): Promise<boolean> {
     let size = data instanceof Blob ? data.size : data instanceof ReadableStream ? 0 : data.byteLength;
-    const stagingRoot = await this._rootHandle.getDirectoryHandle(opfsStagingDirectory, { create: true });
+    const stagingRoot = await stagingHandle(this._rootHandle, true);
     const staging = await stagingRoot.getDirectoryHandle(realmOwnerId, { create: true });
     const stagedName = randomUuid();
     const staged = (await staging.getFileHandle(stagedName, { create: true })) as SyncAccessCapableFileHandle &

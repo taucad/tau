@@ -31,4 +31,19 @@ export type NativeKernelsFrame = {
    */
   readonly store: string;
   readonly kernels: readonly NativeKernelSlot[];
+  /**
+   * Windows only: the sandbox helper and journal directory main composed, present only when the Windows sandbox is
+   * enabled and its helper is bundled. The utility's environment carries no `TAU_` names, so main decides once and every
+   * kernel utility contains its native workers through the same helper. Absent, a native launch on Windows is
+   * unavailable.
+   */
+  readonly windowsSandbox?: DesktopWindowsNativeSandbox;
+};
+
+/** Where the Windows native sandbox's helper and launch journals are, as main resolved them. */
+export type DesktopWindowsNativeSandbox = {
+  /** `tau-windows-sandbox.exe`. */
+  readonly helperPath: string;
+  /** Main's per-installation directory for launch journals and receipts, outside every grant. */
+  readonly journalDirectory: string;
 };

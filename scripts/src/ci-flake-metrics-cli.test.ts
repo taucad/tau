@@ -55,15 +55,17 @@ describe('flake quarantine metrics readers (FQ-11)', () => {
       [
         '/repos/taucad/tau/issues/7/comments',
         [
-          { body: 'bot', user: { type: 'Bot' } },
-          { body: 'person', user: { type: 'User' } },
+          { body: 'bot', user: { login: 'tau-flake-bot[bot]', type: 'Bot' } },
+          { body: 'person', user: { login: 'someone', type: 'User' } },
+          { body: 'another app', user: { login: 'coderabbitai[bot]', type: 'Bot' } },
+          { body: 'workflow token', user: { login: 'github-actions[bot]', type: 'Bot' } },
         ],
       ],
       ['/repos/taucad/tau/issues/3/comments', []],
     ]);
     expect(await readOwnerIssues(github, '2026-11-26')).toEqual([
       { number: 3, labels: [], comments: [] },
-      { number: 7, labels: ['flake', 'flake:released'], comments: ['bot'] },
+      { number: 7, labels: ['flake', 'flake:released'], comments: ['bot', 'workflow token'] },
     ]);
   });
 

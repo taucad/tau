@@ -357,6 +357,12 @@ export type CreatePreparationHostOptions = {
   readonly seed?: string;
   /** Version recorded in receipts; a receipt from another version is re-verified before use. Default the runtime's. */
   readonly tauVersion?: string;
+  /**
+   * Why this host cannot contain a native worker for a package, or `undefined` when it can; a native variant is
+   * refused before anything downloads. The sandbox library answers it (`nativeSandboxRefusal`). Default: Windows
+   * cannot, because no native worker runs unsandboxed and this host names no Windows sandbox; every other OS can.
+   */
+  readonly nativeContainment?: (indicators: HostIndicators, packageName: string) => string | undefined;
 };
 
 /**

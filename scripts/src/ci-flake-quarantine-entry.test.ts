@@ -947,7 +947,8 @@ describe('the 30-day return (FQ-9)', () => {
 
   it('should read the releases of the last 30 days from the owner issues', async () => {
     const requests: string[] = [];
-    const bot = { type: 'Bot' };
+    // Records written by the workflow token before the flake bot existed still count.
+    const bot = { login: 'github-actions[bot]', type: 'Bot' };
     const answer = (path: string): unknown => {
       if (path.includes('/issues?')) {
         return [
@@ -966,6 +967,11 @@ describe('the 30-day return (FQ-9)', () => {
           : [
               { body: removalMarker('released', { ...record, released: '2026-11-14' }), user: bot },
               { body: removalMarker('released', { ...record, released: '2026-11-20' }), user: { type: 'User' } },
+              // Another App's bot is not the automation either.
+              {
+                body: removalMarker('released', { ...record, released: '2026-11-21' }),
+                user: { login: 'coderabbitai[bot]', type: 'Bot' },
+              },
             ];
       }
       if (path.includes('/issues/78/comments')) {

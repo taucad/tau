@@ -584,6 +584,16 @@ export const wireOperationReceiptSchema = z.union([
     .strict(),
 ]);
 export type WireOperationReceipt = z.infer<typeof wireOperationReceiptSchema>;
+/** The most operations one receipt batch may name (the usage filters' item bound). @public */
+export const maximumOperationReceiptBatch = 32;
+/**
+ * `GET /v1/billing/operations?operationIds=…`: the receipt for each distinct named operation, in id order, so a
+ * surface that shows many turns reads them in one request (chat performance WP-13 step 6). @public
+ */
+export const wireOperationReceiptBatchSchema = z
+  .object({ receipts: z.array(wireOperationReceiptSchema).max(maximumOperationReceiptBatch) })
+  .strict();
+export type WireOperationReceiptBatch = z.infer<typeof wireOperationReceiptBatchSchema>;
 
 const journalKindSchema = z.enum([
   'deferred_grant',
@@ -704,39 +714,3 @@ export const wireModelEstimatesSchema = z
   })
   .strict();
 export type WireModelEstimates = z.infer<typeof wireModelEstimatesSchema>;
-
-/** Bounded page of open customer holds; an account never has many turns in flight. @public */
-export const maximumOpenHolds = 200;
-/**
- * The customer holds still open on an account, newest first.
- *
- * Every row is a `pending` operation: its `heldCreditAtoms` are reserved against the
- * balance and no charge exists yet. `releaseAfter` is the instant recovery may resolve
- * the hold without further evidence (`dueAt` plus the recovery grace), so a reader can
- * tell a turn still running from one already being released.
- *
- * @public
- */
-export const wireOpenHoldsSchema = z
-  .object({
-    environment: financialEnvironmentSchema,
-    ownerId: financialIdentitySchema,
-    holds: z
-      .array(
-        z
-          .object({
-            operationId: financialIdentitySchema,
-            model: historicalModelSchema,
-            heldCreditAtoms: unsignedIntegerStringSchema,
-            admittedAt: timestampSchema.nullable(),
-            dueAt: timestampSchema,
-            releaseAfter: timestampSchema,
-            dispatchState: z.enum(['admitted', 'intent_recorded', 'accepted', 'recovery_required']),
-            customerState: z.literal('pending'),
-          })
-          .strict(),
-      )
-      .max(maximumOpenHolds),
-  })
-  .strict();
-export type WireOpenHolds = z.infer<typeof wireOpenHoldsSchema>;

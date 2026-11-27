@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -51,7 +51,7 @@ describe('Quick Look controller', () => {
     if (typeof generated !== 'string') {
       throw new TypeError('Quick Look did not pass a generated path to Electron');
     }
-    expect(generated.endsWith('/Bracket.usdz')).toBe(true);
+    expect(generated.endsWith(`${sep}Bracket.usdz`)).toBe(true);
     expect(readFileSync(generated)).toEqual(Buffer.from(bytes));
     controller.close();
     expect(() => statSync(generated)).toThrow();

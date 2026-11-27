@@ -2,6 +2,7 @@ import { createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
 import type { SourceLiveEvent } from '@taucad/agent-host';
 import { agentWireLimits } from '@taucad/agent-host/wire';
+import type { ReadAnswer } from '@taucad/agent-host/wire';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { markChatTiming } from '#chat-clients/_internal/chat-timing.js';
 import {
@@ -36,6 +37,16 @@ export type HostAttachmentInput = Readonly<{
   }>;
   onStatus?: (event: HostAttachmentStatus) => void;
 }>;
+
+/**
+ * Whether a followed read left more rows behind it than a fresh capture would read again. The ordinary reader takes one
+ * page per round trip and publishes every partial turn on the way (a log another writer grew by a thousand turns showed
+ * a run in progress for as long as it read); a capture streams the whole log as pipelined fact pages and publishes once.
+ * It starts from row 0, so it is taken only once the backlog outweighs the rows this projection already holds.
+ */
+const fallsBehind = (answer: ReadAnswer): boolean =>
+  answer.status === 'batch' &&
+  answer.endCursor - answer.nextCursor > Math.max(agentWireLimits.batchRows, answer.nextCursor);
 
 /** Follow the host's one log reader; an idle chat attaches without waiting on an empty read. @public */
 export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInput>(({ input, sendBack, receive }) => {
@@ -251,7 +262,9 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
             answer.sourceGeneration === basePosition.sourceGeneration &&
             answer.cursor === basePosition.cursor &&
             answer.nextCursor === basePosition.cursor + answer.events.length &&
-            answer.endCursor >= answer.nextCursor
+            answer.endCursor >= answer.nextCursor &&
+            // A retained cursor far behind its log is recaptured below rather than published a page at a time.
+            !fallsBehind(answer)
           ) {
             onAnswer(answer);
             const observed = input.projection.getSnapshot().context.ledger.position;
@@ -408,6 +421,12 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
           }
           if (answer.status === 'refused' && answer.reason === 'owner-fenced') {
             readerFenced = true;
+          }
+          if (!followCurrent && fallsBehind(answer)) {
+            // Retire this ordinary reader before it publishes the first page of a backlog it would replay a page at a
+            // time: that page can end inside a turn, which the chat would show as running until the next one came.
+            void beginRead();
+            return undefined;
           }
           const { resetVersion } = input.projection.getSnapshot().context;
           const last = onAnswer(answer);

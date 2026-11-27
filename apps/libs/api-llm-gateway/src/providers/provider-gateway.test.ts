@@ -2,6 +2,8 @@
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  supplierConnectionAgent,
+  supplierFetch,
   executeGatewayProviderRequest,
   fundedGatewayProviderIds,
   gatewayModelRoutes,
@@ -213,5 +215,26 @@ describe('provider targets', () => {
     expect(isGatewayProviderId('ollama')).toBe(false);
     expect(fundedGatewayProviderIds).not.toContain('ollama');
     expect(gatewayModelRoutes().map((route) => route.providerId)).not.toContain('ollama');
+  });
+});
+
+/* Chat performance WP-05 (server audit S-07): supplier sockets outlive the 4 s default between model steps. */
+describe('supplierFetch', () => {
+  it('sends every supplier request through the one keep-alive agent and keeps the caller options', async () => {
+    const fetchSpy = vi.fn(async () => new Response('ok'));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const { signal } = new AbortController();
+      await supplierFetch('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}', signal });
+
+      expect(fetchSpy).toHaveBeenCalledWith('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        body: '{}',
+        signal,
+        dispatcher: supplierConnectionAgent,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

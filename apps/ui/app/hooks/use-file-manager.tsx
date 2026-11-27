@@ -184,6 +184,8 @@ export type FileSystemClientFacade = Pick<
   FileSystemClient,
   | 'listProjectManifests'
   | 'verifyProjectRoute'
+  | 'verifyAbsent'
+  | 'probeProjectDirectories'
   | 'commitPendingProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
   | 'adoptProjectDirectory'

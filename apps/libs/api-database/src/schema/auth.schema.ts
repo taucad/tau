@@ -1,4 +1,4 @@
-import { boolean, index, integer, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 
 /* oxlint-disable @typescript-eslint/no-unsafe-return -- Drizzle `references(() => …)` FK factories defer table symbols */
 
@@ -121,5 +121,190 @@ export const apikey = pgTable(
     index('apikey_key_idx').on(table.key),
   ],
 );
+
+/*
+ * `@better-auth/oauth-provider` (desktop sign-in, execution plan DSI-1). Better Auth owns these rows; the
+ * columns follow the plugin's schema. Every user reference cascades so deleting an account is never blocked,
+ * and token rows keep a browser session reference only as `set null`: a desktop grant outlives the browser
+ * session that approved it. Token columns hold hashes, never the token.
+ */
+
+/** Registered OAuth clients. The public `tau-desktop` client is seeded by migration, one row per environment. */
+export const oauthClient = pgTable(
+  'oauth_client',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('client_id').notNull().unique(),
+    clientSecret: text('client_secret'),
+    clientDiscoveryId: text('client_discovery_id'),
+    disabled: boolean('disabled').default(false),
+    skipConsent: boolean('skip_consent'),
+    enableEndSession: boolean('enable_end_session'),
+    subjectType: text('subject_type'),
+    scopes: text('scopes').array(),
+    clientCredentialsScopes: text('client_credentials_scopes').array(),
+    userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at'),
+    updatedAt: timestamp('updated_at'),
+    name: text('name'),
+    uri: text('uri'),
+    icon: text('icon'),
+    contacts: text('contacts').array(),
+    tos: text('tos'),
+    policy: text('policy'),
+    softwareId: text('software_id'),
+    softwareVersion: text('software_version'),
+    softwareStatement: text('software_statement'),
+    redirectUris: text('redirect_uris').array().notNull(),
+    postLogoutRedirectUris: text('post_logout_redirect_uris').array(),
+    backchannelLogoutUri: text('backchannel_logout_uri'),
+    backchannelLogoutSessionRequired: boolean('backchannel_logout_session_required'),
+    tokenEndpointAuthMethod: text('token_endpoint_auth_method'),
+    applicationType: text('application_type'),
+    jwks: text('jwks'),
+    jwksUri: text('jwks_uri'),
+    grantTypes: text('grant_types').array(),
+    responseTypes: text('response_types').array(),
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- the provider's field name, which the Drizzle adapter maps by key
+    requirePKCE: boolean('require_pkce'),
+    dpopBoundAccessTokens: boolean('dpop_bound_access_tokens').default(false),
+    referenceId: text('reference_id'),
+    metadata: jsonb('metadata'),
+  },
+  (table) => [index('oauth_client_user_id_idx').on(table.userId)],
+);
+
+/** Protected resources (RFC 8707). Tau names none; the table exists because the plugin declares it. */
+export const oauthResource = pgTable('oauth_resource', {
+  id: text('id').primaryKey(),
+  identifier: text('identifier').notNull().unique(),
+  name: text('name').notNull(),
+  accessTokenTtl: integer('access_token_ttl'),
+  refreshTokenTtl: integer('refresh_token_ttl'),
+  signingAlgorithm: text('signing_algorithm'),
+  signingKeyId: text('signing_key_id'),
+  allowedScopes: text('allowed_scopes').array(),
+  customClaims: jsonb('custom_claims'),
+  dpopBoundAccessTokensRequired: boolean('dpop_bound_access_tokens_required').default(false),
+  disabled: boolean('disabled').default(false),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+  policyVersion: integer('policy_version').default(1),
+  metadata: jsonb('metadata'),
+});
+
+/** Which client may request which resource. Unused by Tau; declared by the plugin. */
+export const oauthClientResource = pgTable(
+  'oauth_client_resource',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    resourceId: text('resource_id')
+      .notNull()
+      .references(() => oauthResource.identifier, { onDelete: 'cascade' }),
+    metadata: jsonb('metadata'),
+    createdAt: timestamp('created_at'),
+  },
+  (table) => [
+    index('oauth_client_resource_client_id_idx').on(table.clientId),
+    index('oauth_client_resource_resource_id_idx').on(table.resourceId),
+  ],
+);
+
+/** Rotating refresh tokens. One family per desktop sign-in shares `authorization_code_id`. */
+export const oauthRefreshToken = pgTable(
+  'oauth_refresh_token',
+  {
+    id: text('id').primaryKey(),
+    token: text('token').notNull().unique(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    sessionId: text('session_id').references(() => session.id, { onDelete: 'set null' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    referenceId: text('reference_id'),
+    authorizationCodeId: text('authorization_code_id'),
+    resources: text('resources').array(),
+    requestedUserInfoClaims: text('requested_user_info_claims').array(),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
+    revoked: timestamp('revoked'),
+    rotatedAt: timestamp('rotated_at'),
+    rotationReplayResponse: text('rotation_replay_response'),
+    rotationReplayExpiresAt: timestamp('rotation_replay_expires_at'),
+    authTime: timestamp('auth_time'),
+    confirmation: jsonb('confirmation'),
+    scopes: text('scopes').array().notNull(),
+  },
+  (table) => [
+    index('oauth_refresh_token_client_id_idx').on(table.clientId),
+    index('oauth_refresh_token_session_id_idx').on(table.sessionId),
+    index('oauth_refresh_token_user_id_idx').on(table.userId),
+    index('oauth_refresh_token_authorization_code_id_idx').on(table.authorizationCodeId),
+  ],
+);
+
+/** Opaque access tokens (one hour). Read by `SessionResolver`'s desktop branch. */
+export const oauthAccessToken = pgTable(
+  'oauth_access_token',
+  {
+    id: text('id').primaryKey(),
+    token: text('token').notNull().unique(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    sessionId: text('session_id').references(() => session.id, { onDelete: 'set null' }),
+    userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
+    referenceId: text('reference_id'),
+    authorizationCodeId: text('authorization_code_id'),
+    resources: text('resources').array(),
+    requestedUserInfoClaims: text('requested_user_info_claims').array(),
+    refreshId: text('refresh_id').references(() => oauthRefreshToken.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').notNull(),
+    revoked: timestamp('revoked'),
+    confirmation: jsonb('confirmation'),
+    scopes: text('scopes').array().notNull(),
+  },
+  (table) => [
+    index('oauth_access_token_client_id_idx').on(table.clientId),
+    index('oauth_access_token_session_id_idx').on(table.sessionId),
+    index('oauth_access_token_user_id_idx').on(table.userId),
+    index('oauth_access_token_authorization_code_id_idx').on(table.authorizationCodeId),
+    index('oauth_access_token_refresh_id_idx').on(table.refreshId),
+  ],
+);
+
+/** A user's consent to a client; one row per account and client, not per device. */
+export const oauthConsent = pgTable(
+  'oauth_consent',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('client_id')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
+    referenceId: text('reference_id'),
+    resources: text('resources').array(),
+    requestedUserInfoClaims: text('requested_user_info_claims').array(),
+    scopes: text('scopes').array().notNull(),
+    createdAt: timestamp('created_at').notNull(),
+    updatedAt: timestamp('updated_at').notNull(),
+  },
+  (table) => [
+    index('oauth_consent_client_id_idx').on(table.clientId),
+    index('oauth_consent_user_id_idx').on(table.userId),
+  ],
+);
+
+/** Replay tombstones for `private_key_jwt` assertions. Unused by the public desktop client; declared by the plugin. */
+export const oauthClientAssertion = pgTable('oauth_client_assertion', {
+  id: text('id').primaryKey(),
+  expiresAt: timestamp('expires_at').notNull(),
+});
 
 /* oxlint-enable @typescript-eslint/no-unsafe-return -- see file-leading disable */

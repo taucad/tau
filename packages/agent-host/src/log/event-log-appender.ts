@@ -97,6 +97,19 @@ export type EventLogAppender = {
    */
   appendMany?(events: readonly AgentLogEvent[]): Promise<EventLogBatchOutcome>;
   /**
+   * Append a batch as {@link EventLogAppender.appendMany} does, but answer once the rows' order is fixed, before they
+   * are durable (WP-10 step B): every row is in this appender's view, and {@link EventLogAppender.durable} covers it.
+   * An effect that acts on a row awaits `durable` first; a crash before then leaves a prefix of the rows written since
+   * the last flush, which per-row flushes could also leave (`piped_crash_reachable` in ChatLedger.lean). Absent on an
+   * appender whose storage cannot defer a flush.
+   */
+  appendOrdered?(events: readonly AgentLogEvent[]): Promise<EventLogBatchOutcome>;
+  /**
+   * Resolve once every row appended so far is durable, sharing one flush with every caller waiting meanwhile (group
+   * commit). Rejects `LOG_POISONED` when a flush failed: those rows may be lost, and nothing more is written here.
+   */
+  durable?(): Promise<void>;
+  /**
    * Read this device's own records, opaque rows included: the rows this appender writes and its cursors count. Run
    * bookkeeping — run ids, sequences, leadership epochs, resume markers — reads these, never another device's.
    */
@@ -226,12 +239,15 @@ export type EventLogStorage = {
    */
   append(bytes: Uint8Array<ArrayBuffer>, expectedLength?: number): Promise<void>;
   /**
-   * Append `bytes` without making them durable, for a batch whose rows one {@link EventLogStorage.sync} covers (WP-10
-   * step A). Only a port whose `exclusive` is the authority's lock (it does not fence at the authority) offers it,
-   * with `sync`; without them a batch appends each row durably inside one `exclusive` section.
+   * Append `bytes` without making them durable, for rows a later {@link EventLogStorage.sync} covers (WP-10). Offered
+   * with `sync`; without them a batch appends each row durably inside one `exclusive` section. A port that fences at
+   * the authority offers it only by holding the bytes until `sync`, which fences them there.
    */
   write?(bytes: Uint8Array<ArrayBuffer>): Promise<void>;
-  /** Make every byte written so far durable: OPFS `flush`, Node `fsync`. */
+  /**
+   * Make every byte written before the call durable: OPFS `flush`, Node `fsync`, or one fenced append of the held bytes.
+   * It may run while later bytes are written; it need not cover those.
+   */
   sync?(): Promise<void>;
   truncate(size: number): Promise<void>;
   close(): Promise<void>;
@@ -1062,16 +1078,64 @@ export const createEventLogAppender = async (
   };
 
   /*
-   * WP-10 step A, group commit: the batch's rows in one `exclusive` section, the fence checked at its first write only
-   * (the appender's own writes keep its view current: `appendBatch_eq_appendSeq` in ChatLedger.lean), and one flush
-   * after the last. A crash inside the batch leaves a prefix of its rows, possibly torn, which per-row flushes could
-   * also leave (`batch_crash_reachable`). A port without `write` and `sync` appends each row durably in the section.
+   * WP-10 group commit: the batch's rows in one `exclusive` section, the fence checked at its first write only (the
+   * appender's own writes keep its view current: `appendBatch_eq_appendSeq` in ChatLedger.lean). With a port that
+   * defers its flush, the rows are written without one, and {@link durable} flushes every row written so far: a crash
+   * leaves a prefix of the rows since the last flush, possibly torn, which per-row flushes could also leave
+   * (`batch_crash_reachable`, `piped_crash_reachable`). A port without `write` and `sync` appends each row durably.
    */
+  const deferred = storage.write !== undefined && storage.sync !== undefined;
+  /* Rows written without a flush, and how many of them the last flush covered. */
+  let written = 0;
+  let synced = 0;
+  let flushing: Promise<void> | undefined;
+  let flushFailure: unknown;
+  const flushFailed = (): EventLogError =>
+    new EventLogError(
+      'LOG_POISONED',
+      'The event-log flush failed after rows were written; they may not be durable. Reopen the log to read what it holds.',
+      { cause: flushFailure },
+    );
+  const flushOnce = async (): Promise<void> => {
+    const upTo = written;
+    try {
+      const syncStarted = hostTimingNow();
+      await storage.sync!();
+      if (syncStarted !== undefined) {
+        recordHostTiming('log-flush', syncStarted, { rows: upTo - synced });
+      }
+      synced = Math.max(synced, upTo);
+    } catch (syncError) {
+      /* The rows are in this appender's view but their bytes may not be durable: nothing more is written here. A held
+       * port's fenced append refused at the authority wrote none of them: another writer's rows landed first. */
+      flushFailure = syncError;
+      if (isAuthorityFenceRefusal(syncError)) {
+        fenced = true;
+      } else {
+        poisoned = true;
+      }
+    } finally {
+      flushing = undefined;
+    }
+  };
+  const durable = async (): Promise<void> => {
+    const target = written;
+    const covered = (): boolean => synced >= target || flushFailure !== undefined;
+    while (!covered()) {
+      flushing ??= flushOnce();
+      // oxlint-disable-next-line no-await-in-loop -- a flush that began before the last row was written may not cover it.
+      await flushing;
+    }
+    if (flushFailure !== undefined) {
+      throw isAuthorityFenceRefusal(flushFailure)
+        ? Object.assign(fencedError(), { cause: flushFailure })
+        : flushFailed();
+    }
+  };
+
   const appendBatch = async (candidates: readonly AgentLogEvent[]): Promise<EventLogBatchOutcome> => {
     const outcomes: EventLogAppendOutcome[] = [];
-    const deferred = storage.write !== undefined && storage.sync !== undefined;
     let checked = false;
-    let unsynced = 0;
     let failure: unknown;
     const writeRow = async (bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
       if (!checked) {
@@ -1082,7 +1146,7 @@ export const createEventLogAppender = async (
         deferred ? storage.write!(line) : storage.append(line, expectedLength),
       );
       if (deferred) {
-        unsynced += 1;
+        written += 1;
       }
     };
     try {
@@ -1095,32 +1159,6 @@ export const createEventLogAppender = async (
     } catch (error) {
       failure = error;
     }
-    if (unsynced > 0) {
-      try {
-        const syncStarted = hostTimingNow();
-        await storage.sync!();
-        if (syncStarted !== undefined) {
-          recordHostTiming('log-flush', syncStarted, { rows: unsynced });
-        }
-      } catch (syncError) {
-        /* The rows are in this appender's view but their bytes may not be durable: nothing more is written here. */
-        poisoned = true;
-        return {
-          outcomes: [],
-          failure: new EventLogError(
-            'LOG_POISONED',
-            'The event-log flush failed after a batch was written; its rows may not be durable. Reopen the log to read what it holds.',
-            {
-              cause:
-                failure === undefined
-                  ? syncError
-                  : new AggregateError([failure, syncError], 'A batch row and the flush after it both failed.'),
-            },
-          ),
-          known: false,
-        };
-      }
-    }
     if (failure === undefined) {
       return { outcomes, known: true };
     }
@@ -1128,9 +1166,39 @@ export const createEventLogAppender = async (
     return { outcomes, failure, known: code !== 'LOG_POISONED' };
   };
 
+  /** A batch made durable before it answers: a failed flush makes every row's outcome unknown. */
+  const appendDurably = async (candidates: readonly AgentLogEvent[]): Promise<EventLogBatchOutcome> => {
+    const batch = await enqueue(async () => appendBatch(candidates));
+    try {
+      await durable();
+    } catch (error) {
+      /* Every row's durability is unknown now, the batch's and the unflushed rows before it. */
+      return {
+        outcomes: [],
+        failure:
+          batch.failure === undefined
+            ? error
+            : Object.assign(error as Error, {
+                cause: new AggregateError(
+                  [batch.failure, flushFailure],
+                  'A batch row and the flush after it both failed.',
+                ),
+              }),
+        known: false,
+      };
+    }
+    return batch;
+  };
+
   return {
     append: async (candidate) => enqueue(async () => appendRow(candidate, guardedAppend)),
-    appendMany: async (candidates) => enqueue(async () => appendBatch(candidates)),
+    appendMany: appendDurably,
+    ...(deferred
+      ? {
+          appendOrdered: async (candidates: readonly AgentLogEvent[]) => enqueue(async () => appendBatch(candidates)),
+          durable,
+        }
+      : {}),
     read: async () =>
       enqueue(async () => {
         assertOpen();
@@ -1233,6 +1301,9 @@ export const createEventLogAppender = async (
           return;
         }
         closed = true;
+        /* WP-10 step B: rows written since the last flush are made durable before the handle goes. A failed flush has
+         * poisoned the appender and is answered to whoever awaits `durable`; the handle closes either way. */
+        await durable().catch(() => undefined);
         await storage.close();
       }),
   };

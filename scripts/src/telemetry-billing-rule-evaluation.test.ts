@@ -13,7 +13,8 @@ type Series = ConstructorParameters<Oracle['SeriesStore']>[0][number];
 type Sample = Series['samples'][number];
 
 /**
- * Financial-case alert tiers (billing collection gate blueprint §4.5, W4): U pages on any unattributed case at once,
+ * Financial-case alert tiers (billing collection gate blueprint §4.5, W4): U warns on any unattributed case at once
+ * (a warning, not a page, since nothing is refused: billing unattributed case reopen blueprint D7),
  * T1 pages on a named spend-blocking case after 15 minutes, T2 warns on an owed customer after 2 h and pages after
  * 24 h, T3 sends a daily digest of Tau's bookkeeping cases older than 24 h. The rules read the hourly
  * `tau.billing.open_financial_cases` gauge and its oldest-age sibling, both labelled `kind` and `attributed`, and are
@@ -64,8 +65,8 @@ const age = 'tau_billing_open_financial_case_age_seconds';
 /** The tiers exactly as blueprint §4.5 writes them, before hosted provisioning binds `app`. */
 const tiers = {
   'billing-case-unattributed': {
-    group: 'tau-critical',
-    severity: 'critical',
+    group: 'tau-warning',
+    severity: 'warning',
     for: '0s',
     runbook: 'docs/handbooks/cloud/operate/refunds-and-financial-cases.md',
     expr: `max by (app, kind) (${cases}{app=~".*",service_name="tau-api",attributed="false",kind!~"${neverAttributedKinds}"}) > 0`,

@@ -1,6 +1,6 @@
 import type * as DeploymentModeModule from '#cloud/deployment-mode.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { searchSettings, settingsSections } from '#components/settings/settings-registry.js';
+import { availableSettingsSections, searchSettings, settingsSections } from '#components/settings/settings-registry.js';
 import { experimentalFeatureFlagNames } from '#flags/flag.constants.js';
 
 vi.mock('#cloud/deployment-mode.js', async () => ({
@@ -120,5 +120,18 @@ describe('searchSettings', () => {
   it('should keep API keys out of navigation and search', () => {
     expect(settingsSections.map(({ id }) => String(id))).not.toContain('api-keys');
     expect(searchSettings('API keys')).toEqual([]);
+  });
+
+  it('should offer Workspaces in navigation and search only where folders can be connected', () => {
+    const ids = (sections: ReturnType<typeof availableSettingsSections>): string[] =>
+      sections.flatMap(({ entries }) => entries.map(({ id }) => id));
+    const withoutFolders = availableSettingsSections(() => false, true, false);
+
+    expect(ids(availableSettingsSections(() => false, true, true))).toContain('workspaces');
+    expect(ids(withoutFolders)).not.toContain('workspaces');
+    expect(ids(withoutFolders)).toContain('browser-storage');
+    expect(
+      searchSettings('directory', withoutFolders).flatMap(({ entries }) => entries.map(({ id }) => id)),
+    ).not.toContain('workspaces');
   });
 });

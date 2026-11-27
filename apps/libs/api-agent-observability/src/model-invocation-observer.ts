@@ -1,7 +1,11 @@
 import { LlmGatewayError, resolveGatewayModelRoute } from '@taucad/api-llm-gateway';
 import type { ModelInvocationIntent, ModelInvocationResult, ModelInvocationService } from '@taucad/api-llm-gateway';
 import type { ObservedAttempt } from '#model-invocation-evidence.js';
-import type { CapturedContent, ModelInvocationEvidenceRecorder } from '#model-invocation-recorder.service.js';
+import type {
+  AttemptPermission,
+  CapturedContent,
+  ModelInvocationEvidenceRecorder,
+} from '#model-invocation-recorder.service.js';
 import { ProviderOutputCapture } from '#provider-content.js';
 import { ProviderStreamFacts } from '#provider-stream-facts.js';
 
@@ -93,9 +97,15 @@ export class ObservedModelInvocationService implements ModelInvocationService {
     const route = routeOf(intent, model);
     let operation: string | undefined;
     const { onAdmitted } = intent;
-    /* Started now and never awaited here; the first chunk reads it, the record reuses it. */
     const eligible = this.recorder.contentEligible(intent.authUserId) && intent.activity !== 'compaction';
-    const permission = this.recorder.permission(intent.authUserId, project);
+    /* Never awaited here; the first chunk reads it, the record reuses it. Chat performance WP-05 (server audit S-03):
+     * it starts once admission has committed, not before, because its six to seven parallel statements otherwise
+     * queue admission's first statement behind them on the four-connection request pool. The supplier's first
+     * byte is still hundreds of milliseconds away then. A call that never reaches admission has no permission,
+     * and the recorder asks for one itself in the background (`admit`). */
+    let permission: AttemptPermission | undefined = this.admits
+      ? undefined
+      : this.recorder.permission(intent.authUserId, project);
     let capture: ObservedAttempt['capture'];
     let captured: CapturedContent | undefined;
     const attempt = (ended: ObservedAttempt['ended'], stream: ObservedAttempt['stream']): ObservedAttempt => ({
@@ -124,6 +134,7 @@ export class ObservedModelInvocationService implements ModelInvocationService {
         ...intent,
         onAdmitted: (operationId) => {
           operation = operationId;
+          permission ??= this.recorder.permission(intent.authUserId, project);
           onAdmitted?.(operationId);
         },
       });
@@ -139,6 +150,7 @@ export class ObservedModelInvocationService implements ModelInvocationService {
       return result;
     }
     operation ??= result.operationId;
+    permission ??= this.recorder.permission(intent.authUserId, project);
 
     const facts = new ProviderStreamFacts(intent.providerWire, started, this.clock);
     if (route.provider !== undefined) {
@@ -152,7 +164,7 @@ export class ObservedModelInvocationService implements ModelInvocationService {
         return;
       }
       try {
-        const answer = permission.content();
+        const answer = permission?.content();
         if (answer === true) {
           const output = new ProviderOutputCapture(intent.providerWire);
           facts.capture(output);

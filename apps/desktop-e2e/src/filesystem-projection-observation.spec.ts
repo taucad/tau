@@ -99,7 +99,9 @@ test('projects independent native source, directory and skill mutations into the
     );
     const composer = page.locator('[aria-label="Ask Tau to build anything..."]').last();
     await expectVisible(composer);
-    await composer.fill('/native-observation-peer');
+    /* A query that is not yet a whole token: a token the person finished typing becomes its chip when the catalog
+     * that knows it settles after the keystroke (draft rehydration), so the open menu is the product signal here. */
+    await composer.fill('/native-observation-pe');
     await expectVisible(page.getByText('Native integration skill', { exact: true }));
     const acquiredValue5 = await controlWatch(page, 'close', '.agents');
     expect(acquiredValue5).toBeGreaterThan(0);
@@ -556,7 +558,9 @@ test('includes and withdraws settled native catalog skills in actual gateway sys
     );
     const composer = page.locator('[aria-label="Ask Tau to build anything..."]').last();
     await expectVisible(composer);
-    await composer.fill('/native-gateway-observation');
+    /* A query that is not yet a whole token: a token the person finished typing becomes its chip when the catalog
+     * that knows it settles after the keystroke (draft rehydration), so the open menu is the product signal here. */
+    await composer.fill('/native-gateway-obs');
     await expectVisible(page.getByText(description, { exact: true }));
     await selectChatModel(page, gatewayFixtureModelName);
     await submitPrompt(page, 'Describe the settled native skill catalog.');
@@ -571,9 +575,18 @@ test('includes and withdraws settled native catalog skills in actual gateway sys
     await expect
       .poll(async () => page.getByText('Native skill context received.', { exact: true }).count(), { timeout: 120_000 })
       .toBe(2);
-    const closed = fixture.gatewayRequests.at(-1) as { readonly system?: unknown } | undefined;
+    const closed = fixture.gatewayRequests.at(-1) as
+      | { readonly system?: unknown; readonly messages?: unknown }
+      | undefined;
     expect(closed).toBeDefined();
-    expect(JSON.stringify(closed?.system)).not.toContain(description);
+    /* The chat's first turn pinned its skills block in the cached system prefix (prompt-cache identity I1, 5fbe770fbb,
+     * #1629), so the system bytes keep it; the catalog this turn may use rides as the turn's skills note, and with the
+     * watch closed that catalog has no skill. */
+    expect(JSON.stringify(closed?.system)).toContain(description);
+    const skillsNotes =
+      JSON.stringify(closed?.messages ?? null).match(/The skills catalog changed after this chat began[^<]*/gu) ?? [];
+    expect(skillsNotes.at(-1)).toContain('empty: no skill can be activated.');
+    expect(skillsNotes.at(-1)).not.toContain(description);
     await session.capture('observation-native-gateway-skill-withdrawal');
   } finally {
     try {

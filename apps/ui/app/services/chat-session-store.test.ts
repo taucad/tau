@@ -5830,25 +5830,65 @@ describe('ChatSessionStore', () => {
         }
       });
 
-      it('should still show a refusal that is not a wait as undelivered, sent once', async () => {
+      it('should return a send its host refused without applying it to the composer, sent once (H-1)', async () => {
         const chatId = 'departing_host_refusal';
-        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
-        hostCommand.mockResolvedValueOnce({
-          commandId: 'req_refused_host',
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        hostCommand.mockImplementationOnce(async (command) => ({
+          commandId: command.commandId,
           generation: 1,
           status: 'refused',
           effect: 'not-applied',
-          code: 'HOST_MODEL_UNAVAILABLE',
-          message: 'No model is configured.',
-        });
+          code: 'HOST_NOT_PAIRED',
+          message: 'This host is not paired.',
+        }));
         const unadmit = queueAdmission(chatId);
         try {
           publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
           await store.requestTurn(chatId, queuedGesture('refused_host'));
           await vi.waitFor(() => {
-            expect(session.messageQueueRef.getSnapshot().context.error).toBeDefined();
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('refused_host');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
           });
+          expect(session.stateActorRef.getSnapshot().context.failureReason).toContain('HOST_NOT_PAIRED');
           expect(store.hostWaitOf(chatId)).toBeUndefined();
+          expect(hostCommand).toHaveBeenCalledOnce();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should leave a refused send editable in the outbox when the composer holds new text (H-1)', async () => {
+        const chatId = 'departing_host_refusal_kept';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        hostCommand.mockImplementationOnce(async (command) => {
+          session.draftActorRef.send({ type: 'setDraftText', text: 'a newer thought' });
+          return {
+            commandId: command.commandId,
+            generation: 1,
+            status: 'refused',
+            effect: 'not-applied',
+            code: 'EXTERNAL_AGENT_UNAVAILABLE',
+            message: 'That agent is not available on this host.',
+          };
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('kept'));
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.error).toContain('This message wasn’t sent');
+          });
+          const saved = deps.client.json(chatMessageQueuePath(projectId, chatId)) as {
+            items: ReadonlyArray<Record<string, unknown>>;
+          };
+          expect(saved.items).toHaveLength(1);
+          expect(saved.items[0]).not.toHaveProperty('command');
+          expect(saved.items[0]).not.toHaveProperty('commandPlacement');
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('a newer thought');
           expect(hostCommand).toHaveBeenCalledOnce();
         } finally {
           unadmit();

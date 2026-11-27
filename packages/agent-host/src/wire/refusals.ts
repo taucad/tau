@@ -100,6 +100,11 @@ export const refusals = {
   DEPLOYMENT_UNKNOWN: { owner: 'host', retry: 'resume' },
   /** The host is closing (was `LAUNCHER_CLOSED`); re-send to its successor. */
   HOST_CLOSED: { owner: 'host', retry: 'wait' },
+  /**
+   * An uncoded throw inside the host: a run that ended on one, a claim or a cancel that threw, or a chat's leadership
+   * that failed. A defect, never a condition that clears by itself, so the same command is not sent again on its own.
+   */
+  HOST_FAULT: { owner: 'host', retry: 'never' },
   /** The host configures no model and the admission named none. */
   HOST_MODEL_UNAVAILABLE: { owner: 'host', retry: 'never' },
   /** The interrupt is not awaiting a resolution (was `INTERRUPT_NOT_FOUND` on the worker leg). */

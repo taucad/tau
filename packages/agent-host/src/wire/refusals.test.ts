@@ -56,6 +56,12 @@ describe('the refusal registry (D11, I17)', () => {
     expect(isResumable('A_CODE_FROM_A_NEWER_BUILD')).toBe(false);
   });
 
+  /* AR3-11: a host defect (a throwing claim, cancel, leadership or run) is the host's own `never`, not an unknown code. */
+  it('should register HOST_FAULT as the host’s own code that is never sent again', () => {
+    expect(refusalOf('HOST_FAULT')).toEqual({ owner: 'host', retry: 'never' });
+    expect(isResumable('HOST_FAULT')).toBe(false);
+  });
+
   it('should retain the revision transfer limit owner without automatic retry', () => {
     expect(refusalOf('FETCH_LIMIT_EXCEEDED')).toEqual({ owner: 'revisions', retry: 'never' });
   });

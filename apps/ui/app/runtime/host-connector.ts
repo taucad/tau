@@ -28,13 +28,15 @@
  * @module
  */
 import { createCallbackLogic } from 'xstate';
+import { Topic } from '@taucad/events';
 import type { ActorRefFrom, CallbackActorLogic } from 'xstate';
 import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
 import { isKernelId, isKernelPreference } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { ENV } from '#environment.config.js';
-import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { daemonPlacementOf, onAgentHostSocketClose } from '#lib/agent-host-placement.js';
+import type { AgentHostSocketClose } from '#lib/agent-host-placement.js';
 import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { dialExecutionHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
 import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
@@ -124,11 +126,19 @@ export const hostConnectorCallback =
         const execution = stored?.activeExecution ?? choices.defaultExecution;
         const daemonHostId = daemonPlacementOf(execution);
         if (daemonHostId !== undefined) {
+          /* The daemon socket's own close codes, which the read loop maps to R6 (HA3). */
+          const closes = new Topic<AgentHostSocketClose>({ name: 'hostConnector.daemonSocketCloses' });
+          const dial = async () => {
+            const channel = await dialExecutionHost(execution, projectId);
+            onAgentHostSocketClose(channel, (info) => {
+              closes.emit(info);
+            });
+            return channel;
+          };
           return {
-            ...createAgentHostClient(
-              createDaemonAgentHostTransport(async () => dialExecutionHost(execution, projectId)),
-            ),
+            ...createAgentHostClient(createDaemonAgentHostTransport(dial)),
             placement: { hostId: daemonHostId },
+            onClose: (handler: (info: AgentHostSocketClose) => void) => closes.subscribe(handler),
           };
         }
         if (execution.kind !== 'tau') {

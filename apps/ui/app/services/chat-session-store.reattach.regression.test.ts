@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Chat as ChatEntity } from '@taucad/chat';
-import type { HostCommand } from '@taucad/agent-host/wire';
+import type { HostCommand, ReadAnswer } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { chatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
 import { lifecycleRow, logRow, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
@@ -697,6 +697,96 @@ describe('host attachment reporting (HA0)', () => {
       await vi.advanceTimersByTimeAsync(chatReadLossBoundMilliseconds * 2);
 
       expect(coldHidden()).toEqual([expect.objectContaining({ chatId, tags: { reason: 'PEER_GONE' } })]);
+    } finally {
+      chat.close();
+    }
+  });
+});
+
+// ===========================================================================
+// HA3: the remote read loop
+// ===========================================================================
+
+describe('remote read loop (HA3)', () => {
+  /** A remote host the test can close with a code; the read attaches on an empty batch. */
+  const closableHost = () => {
+    let close: ((info: { code: number; reason?: string }) => void) | undefined;
+    let ended: ((error?: unknown) => void) | undefined;
+    const emptyBatch: ReadAnswer = {
+      status: 'batch',
+      sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+      sourceGeneration: 'writer-1',
+      chatId,
+      cursor: 0,
+      nextCursor: 0,
+      endCursor: 0,
+      events: [],
+    };
+    const connect = vi.fn(
+      async (): Promise<AgentHostClient> =>
+        ({
+          hostCommand: vi.fn(),
+          catchUp: writerOwnedCatchUp,
+          read: vi.fn(async () => emptyBatch),
+          subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+            ended = parameters[2];
+            queueMicrotask(() => parameters[3]?.(emptyBatch));
+            return vi.fn();
+          },
+          onClose: (handler: (info: { code: number; reason?: string }) => void) => {
+            close = handler;
+            return () => undefined;
+          },
+          close: vi.fn(async () => undefined),
+        }) as unknown as AgentHostClient,
+    );
+    return {
+      connect,
+      closeWith: (info: { code: number; reason?: string }) => {
+        close?.(info);
+        ended?.(new Error('Channel closed'));
+      },
+    };
+  };
+
+  it('should hold R6 from a revocation until a read attaches, while the attachment keeps retrying', async () => {
+    const host = closableHost();
+    /* Nothing of the chat on this device's disk, so it keeps the host read. */
+    const chat = open(createStore(createDisk({})), host.connect);
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+      expect(chat.store.getRemoteResidual(chatId)).toBeUndefined();
+      const dials = host.connect.mock.calls.length;
+
+      host.closeWith({ code: 4003, reason: 'device revoked' });
+
+      expect(chat.store.getRemoteResidual(chatId)).toBe('R6');
+      /* The same attachment dials again on its backoff; the store starts no attachment of its own. */
+      await vi.waitFor(() => {
+        expect(host.connect.mock.calls.length).toBe(dials + 1);
+      }, coldBound);
+      await vi.waitFor(() => {
+        expect(chat.store.getRemoteResidual(chatId)).toBeUndefined();
+      }, coldBound);
+    } finally {
+      chat.close();
+    }
+  });
+
+  it('should keep the peerless reap transient: no R6', async () => {
+    const host = closableHost();
+    const chat = open(createStore(createDisk({})), host.connect);
+    try {
+      await vi.waitFor(() => {
+        expect(chat.store.getAttachmentStatus(chatId)).toBe('attached');
+      }, coldBound);
+
+      host.closeWith({ code: 1008, reason: 'route peer did not connect' });
+
+      expect(chat.store.getAttachmentStatus(chatId)).toBe('lost');
+      expect(chat.store.getRemoteResidual(chatId)).toBeUndefined();
     } finally {
       chat.close();
     }

@@ -340,6 +340,10 @@
 \* HA2 on WP-12 (2026-11-28): a local chat lends its live overlay's client to its commands while the overlay is
 \* subscribed, and an overlay loss drops it, so a command is a keyed send on a connection either way. Delivery and
 \* acknowledgement are unchanged. No action or verdict changes.
+\* HA3 (2026-11-27): a lost remote read is retried inside the host attachment (D17), not by the store, and R6 is
+\* held as a fact beside it; the queue's delivery and persistence seam is unchanged. No action or verdict changes.
+\* HA3 review (2026-11-27): R6 is a revocation (4003) or a computer no longer paired; a 1008 is transient. Comments
+\* only in the store. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

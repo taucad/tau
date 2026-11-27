@@ -1,0 +1,14 @@
+{
+  "$schema": "../../tools/vitest-ci/quarantine.schema.json",
+  "entries": [
+    {
+      "test": "app/machines/file-manager.worker.revisions.test.ts > readiness liveness over every writer (INV) > reaches filled after every writer that creates a write generation",
+      "owner": "rifont",
+      "issue": 2965,
+      "class": "unreproduced",
+      "created": "2026-11-27",
+      "expires": "2026-12-11",
+      "evidence": "2 flake events (retry 2) in its last 25 executions; runs 45920692538, 45967573359"
+    }
+  ]
+}

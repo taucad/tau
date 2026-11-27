@@ -193,6 +193,7 @@ const {
         };
       },
       isUnread: () => false,
+      isReconnecting: () => false,
       subscribeUnread: () => () => undefined,
     },
     revision: {

@@ -365,6 +365,7 @@ describe('useAgentProjections', () => {
       },
       subscribeMembership: () => () => undefined,
       isUnread: () => false,
+      isReconnecting: () => false,
       subscribeUnread: () => () => undefined,
       acquire: vi.fn(),
     } as unknown as ChatSessionStore;
@@ -403,6 +404,7 @@ describe('useAgentProjections', () => {
       },
       subscribeMembership: () => () => undefined,
       isUnread: () => false,
+      isReconnecting: () => false,
       subscribeUnread: () => () => undefined,
     } as unknown as ChatSessionStore;
     vi.mocked(useChatRecords).mockReturnValue({

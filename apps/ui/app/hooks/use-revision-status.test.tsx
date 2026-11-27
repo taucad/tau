@@ -840,6 +840,8 @@ describe('the page client of the worker revision root', () => {
 
   it("should say the page's resolved telemetry consent on every port and every change, and stop when closed (PR-7)", () => {
     telemetryConsent.set('denied');
+    /* Another test's client may still be listening (shuffled order): count this client's own subscription. */
+    const othersListening = telemetryConsent.listeners.size;
     const { worker, messages } = controlledWorker();
     const revisionClient = getRevisionClient({ projectId, worker });
     const consentFrames = (): unknown[] =>
@@ -855,11 +857,11 @@ describe('the page client of the worker revision root', () => {
     ]);
 
     revisionClient.close();
-    expect(telemetryConsent.listeners.size).toBe(0);
+    expect(telemetryConsent.listeners.size).toBe(othersListening);
     telemetryConsent.set('unknown');
     revisionClient.open();
     expect(consentFrames().at(-1)).toEqual({ command: 'telemetryConsent', consent: 'unknown' });
-    expect(telemetryConsent.listeners.size).toBe(1);
+    expect(telemetryConsent.listeners.size).toBe(othersListening + 1);
     revisionClient.close();
   });
 

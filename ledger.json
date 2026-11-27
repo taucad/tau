@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T16:59:48.773Z",
+  "updatedAt": "2026-11-27T17:01:55.786Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -6683,6 +6683,32 @@
       "counted": 0,
       "replayed": 0,
       "rejected": 0
+    },
+    {
+      "run": 46038052563,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2987",
+      "sha": "a4fffdad9b51b8e1d049ceb41e912984d364f18d",
+      "at": "2026-11-27T17:01:22Z",
+      "conclusion": "cancelled",
+      "artifacts": 3,
+      "counted": 51,
+      "replayed": 1734,
+      "rejected": 0
+    },
+    {
+      "run": 46038056180,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2990",
+      "sha": "4bf755b849bc6d02f5749112fafe23f46ad153e5",
+      "at": "2026-11-27T17:01:29Z",
+      "conclusion": "cancelled",
+      "artifacts": 2,
+      "counted": 162,
+      "replayed": 0,
+      "rejected": 0
     }
   ],
   "tasks": {
@@ -7069,14 +7095,14 @@
       }
     },
     "billing-e2e:test": {
-      "executions": 199,
-      "tests": 10149,
+      "executions": 200,
+      "tests": 10200,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:45:00Z",
+      "lastSeen": "2026-11-27T17:01:22Z",
       "targets": {
-        "test linux-x64": 170
+        "test linux-x64": 171
       }
     },
     "billing-ui:test": {
@@ -7188,14 +7214,14 @@
       }
     },
     "chat-surfaces:test": {
-      "executions": 124,
-      "tests": 7812,
+      "executions": 125,
+      "tests": 7875,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T16:35:47Z",
+      "lastSeen": "2026-11-27T17:01:29Z",
       "targets": {
-        "test linux-x64": 104
+        "test linux-x64": 105
       }
     },
     "chat-ui:test": {
@@ -8283,14 +8309,14 @@
       }
     },
     "ui-e2e:test": {
-      "executions": 188,
-      "tests": 18612,
+      "executions": 189,
+      "tests": 18711,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-27T16:59:34Z",
+      "lastSeen": "2026-11-27T17:01:29Z",
       "targets": {
-        "test linux-x64": 188
+        "test linux-x64": 189
       }
     },
     "ui-e2e:test:e2e:adaptive": {

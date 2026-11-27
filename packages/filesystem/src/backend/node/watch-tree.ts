@@ -18,13 +18,13 @@ import { lstatSync, readdirSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { join, sep } from 'node:path';
 
-/** A running tree watch. */
+/** A running tree watch. @public */
 export type TreeWatcher = {
   /** Stop watching; no callback is called afterwards. */
   close(): void;
 };
 
-/** What a tree watch reports. */
+/** What a tree watch reports. @public */
 export type TreeWatchListener = {
   /**
    * Something at `path` changed: its content, or its kind, or it appeared or went away.
@@ -48,6 +48,7 @@ export type TreeWatchListener = {
  * @param listener - Told of each change, and of the failure that ends the watch.
  * @returns The running watch.
  * @throws When `root` cannot be watched at all (it is missing, or the platform has no recursive watch).
+ * @public
  */
 export const watchTree = (root: string, listener: TreeWatchListener): TreeWatcher =>
   process.platform === 'linux' ? watchTreeByDirectory(root, listener) : watchTreeNatively(root, listener);

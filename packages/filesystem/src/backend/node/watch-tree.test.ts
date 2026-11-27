@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { watchTree } from '#watch-tree.js';
-import type { TreeWatcher } from '#watch-tree.js';
+import { watchTree } from '#backend/node/watch-tree.js';
+import type { TreeWatcher } from '#backend/node/watch-tree.js';
 
 /**
  * A watch over a fresh temporary root that records what it reports.

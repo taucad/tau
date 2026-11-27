@@ -96,7 +96,7 @@ import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-c
 import type { CommitCancelledDraftRestoreInput } from '@taucad/project-library/types/chat-storage.types';
 import { ENV } from '#environment.config.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
-import { autoResumePlanOf, autoResumeStillAnswers } from '#utils/run-auto-resume-plan.js';
+import { autoResumePlanOf, autoResumeStillAnswers, commandRefusalOf } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 import {
   canAutoResumeModelPending,
@@ -3109,11 +3109,14 @@ export class ChatSessionStore {
             const parsed = parseErrorForPersistence(refusalError(answer));
             session.persistenceActorRef.send({
               type: 'setPersistedError',
-              error: {
-                ...parsed,
-                details: { ...parsed.details, runId: item.command.payload.runId, commandType: item.command.type },
+              /* NEW-1: stamped with where the log stood, so only a later run retires it, not the run before it. */
+              error: commandRefusalOf(parsed, {
                 requestId: commandId,
-              },
+                runId: item.command.payload.runId,
+                commandType: item.command.type,
+                kind: 'send',
+                projection: this.#projectionContext(session.chatId),
+              }),
             });
             throw Object.assign(new Error('Your message wasn’t sent.'), { code: answer.code });
           }
@@ -5458,11 +5461,14 @@ export class ChatSessionStore {
       const parsed = parseErrorForPersistence(error instanceof Error ? error : new Error(String(error)));
       session.persistenceActorRef.send({
         type: 'setPersistedError',
-        error: {
-          ...parsed,
-          details: { ...parsed.details, runId: command.payload.runId, commandType: command.type },
+        /* NEW-1: stamped with where the log stood, so a refused Start shows over the run before it until a later run. */
+        error: commandRefusalOf(parsed, {
           requestId: command.commandId,
-        },
+          runId: command.payload.runId,
+          commandType: command.type,
+          kind: request.kind,
+          projection: this.#projectionContext(session.chatId),
+        }),
       });
       session.stateActorRef.send({
         type: 'runLifecycle',

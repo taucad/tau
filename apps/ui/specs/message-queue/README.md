@@ -76,6 +76,8 @@ A prepared command pinned to a computer this page cannot reach now holds with th
 
 The HA5 review (2026-11-27, I1) keeps a refused command's code. `chat-session-store.ts` throws the host's refusal as an error that carries its code, so the chat's card words it with its action. A queued command that ends on a `never`, `resume` or `reauth` code also records that card, and the queue strip says only that the message wasn't sent. `use-turn-admission.ts` rewords the placement reason. The item still ends as `End(never)`, so no action changes. The `QueuePlacement.tla` note records it, the drift is re-pinned, and TLC was not run for this note.
 
+The HA5 confirming review (2026-11-27, NEW-1) re-pins the drift after `chat-session-store.ts` began saving a command's refusal through `commandRefusalOf`. It is stamped with where the log stood, so only a later run retires the card and the run before it never does. This is a change to the chat's saved error only, so no action changes.
+
 ## Final runtime guard reconciliation
 
 `Acknowledge` requires membership in `Accepted`, which represents durable acceptance. The service now explicitly checks `answer.effect === 'durable'` on both initial dispatch and prepared replay before deleting an item. An `applied` answer with `not-applied` effect retains the original prepared command; it corresponds to stuttering, not `Acknowledge`. Reconciliation from `ledger.applied` uses the authoritative durable log. The model does not equate a successful transport response with acceptance.

@@ -18,7 +18,7 @@ import { useChatSelector } from '#hooks/use-chat.js';
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import { chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
-import { refusalOfGesture } from '#utils/run-auto-resume-plan.js';
+import { commandRefusalOf } from '#utils/run-auto-resume-plan.js';
 
 vi.mock('#cloud/use-deployment-mode.js', async () => {
   const fixture = await import('#cloud/funded-cloud.fixture.js');
@@ -201,21 +201,57 @@ const showFailedRun = (code: string): void => {
   vi.mocked(useChatSelector).mockImplementation((selector) => selector(state as unknown as CombinedChatState));
 };
 
-/** A gesture (a send, a Resume) the host refused with the code, on a caught-up chat with no run of its own. */
-const showRefusedGesture = (code: string): void => {
+/**
+ * Where the chat's log stands when the host refuses a gesture: no run yet, a run that completed before it, or the
+ * resumable run (failed on a `resume` code) that the refused gesture was the Resume of. A run Resume continues is a
+ * failed or stopped one (`isResumableRun`); a paused run waits on an approval, not on Resume.
+ */
+type RefusedOver = 'an empty log' | 'a completed run' | 'the run it resumed';
+
+const logRowsOf = (over: RefusedOver) =>
+  over === 'an empty log'
+    ? []
+    : over === 'a completed run'
+      ? [
+          lifecycleRow(0, 'admitted', 'req_prior'),
+          lifecycleRow(1, 'running', 'req_prior'),
+          lifecycleRow(2, 'completed', 'req_prior'),
+        ]
+      : [
+          lifecycleRow(0, 'admitted', 'req_prior'),
+          lifecycleRow(1, 'running', 'req_prior'),
+          logRow(2, {
+            runId: 'req_prior',
+            type: 'run.lifecycle',
+            state: 'failed',
+            attempt: 1,
+            detail: { code: 'RATE_LIMITED', message: rawMessageOf('RATE_LIMITED') },
+          }),
+        ];
+
+/**
+ * A gesture the host refused with the code, saved in the store's own shape (`commandRefusalOf`, which
+ * `chat-session-store.ts` saves every command refusal through): over a completed run it must still show (NEW-1).
+ */
+const showRefusal = (code: string, over: RefusedOver): void => {
   const projection = createActor(chatProjectionLogic).start();
-  projection.send({ type: 'batch', answer: { status: 'batch', cursor: 0, nextCursor: 0, endCursor: 0, events: [] } });
+  const events = logRowsOf(over);
+  projection.send({
+    type: 'batch',
+    answer: { status: 'batch', cursor: 0, nextCursor: events.length, endCursor: events.length, events },
+  });
   const { context } = projection.getSnapshot();
   projection.stop();
-  const error = refusalOfGesture(
+  const resume = over === 'the run it resumed';
+  const error = commandRefusalOf(
+    { code, title: 'Something went wrong', message: rawMessageOf(code), category: errorCategory.generic },
     {
-      code,
-      title: 'Something went wrong',
-      message: rawMessageOf(code),
-      category: errorCategory.generic,
-      requestId: `req_${code}`,
+      requestId: `cmd_${code}`,
+      runId: resume ? 'req_prior' : 'req_new',
+      commandType: resume ? 'resume' : 'start',
+      kind: resume ? 'continue' : 'send',
+      projection: context,
     },
-    { kind: 'send', projection: context, createId: () => code },
   );
   const state = { persistedError: error, projection: context, attachmentStatus: 'attached' };
   vi.mocked(useChatSelector).mockImplementation((selector) => selector(state as unknown as CombinedChatState));
@@ -225,11 +261,12 @@ const showRefusedGesture = (code: string): void => {
 const resending: ReadonlySet<string> = new Set(['Try again', 'Resume']);
 
 /**
- * Whether the rendered actions are the retry class's (AR3-3). A refused gesture has no run of its own, so a `resume`
- * code there offers no Resume: what it can offer is everything but one.
+ * Whether the rendered actions are the retry class's (AR3-3, HA-I4). A `resume` answer ends with Resume wherever a run
+ * exists to resume (a failed run, or the run a refused Resume was for). A refused Start over an empty log or a
+ * completed run has no run of its own to resume, so there, and only there, it offers no Resume.
  */
-const actionMatches = (retry: RetryClass, actions: readonly string[], gesture: boolean): boolean => {
-  switch (gesture && retry === 'resume' ? 'never' : retry) {
+const actionMatches = (retry: RetryClass, actions: readonly string[], resumable: boolean): boolean => {
+  switch (retry === 'resume' && !resumable ? 'never' : retry) {
     case 'wait': {
       /* Queued: the send goes by itself, so the chat offers nothing that would send it again. */
       return actions.every((action) => !resending.has(action));
@@ -259,24 +296,26 @@ describe('the refusal gate (HA5, AR3-3)', () => {
     });
   });
 
-  /* No owner is waved through: a code the registry gains later has neither a card nor a line until someone writes one. */
-  it('should fail a new code of any owner until it has a card or a reason', () => {
-    expect({ card: hasCard('ZZ_NEW_TRANSPORT'), excluded: notPersonFacing.has('ZZ_NEW_TRANSPORT') }).toEqual({
-      card: false,
-      excluded: false,
-    });
-  });
+  /* No owner is waved through: `notPersonFacing` names every exclusion, so a code the registry gains later fails the
+   * test above until someone writes it a card or a line. */
 
   it.each(
     codes.flatMap((code) =>
       notPersonFacing.has(code)
         ? []
         : [
-            { code, as: 'a failed run', show: showFailedRun, gesture: false },
-            { code, as: 'a refused gesture', show: showRefusedGesture, gesture: true },
+            { code, as: 'a failed run', show: showFailedRun, resumable: true },
+            ...(['an empty log', 'a completed run', 'the run it resumed'] as const).map((over) => ({
+              code,
+              as: `a refused gesture over ${over}`,
+              show: (refused: string) => {
+                showRefusal(refused, over);
+              },
+              resumable: over === 'the run it resumed',
+            })),
           ],
     ),
-  )('should offer for $code as $as the action its retry class names', ({ code, show, gesture }) => {
+  )('should offer for $code as $as the action its retry class names', ({ code, as, show, resumable }) => {
     show(code);
     const { container } = render(
       <MemoryRouter>
@@ -289,9 +328,16 @@ describe('the refusal gate (HA5, AR3-3)', () => {
       element.textContent.trim(),
     );
     const { retry } = refusalOf(code);
-    expect({ code, retry, actions, matches: actionMatches(retry, actions, gesture) }).toMatchObject({ matches: true });
-    /* A send that ends is told why, except one a Stop superseded, which ends quietly. */
     const quiet = cardOf(code, errorCategory.generic).category === 'quiet';
+    if (quiet && as.endsWith('the run it resumed')) {
+      /* I2: a quiet refusal says nothing, so the run it was the Resume of shows its own card, with Resume. */
+      expect(actions).toContain('Resume');
+      return;
+    }
+    expect({ code, retry, actions, matches: actionMatches(retry, actions, resumable) }).toMatchObject({
+      matches: true,
+    });
+    /* A send that ends is told why, except one a Stop superseded, which ends quietly. */
     expect(container.querySelector('[data-slot="chat-error-card"]') === null).toBe(quiet);
   });
 });

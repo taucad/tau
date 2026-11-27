@@ -112,6 +112,34 @@ export const refusalOfGesture = (
 };
 
 /**
+ * A host's refusal of one command, as the store saves it: the command's request, run and type, stamped as a refused
+ * gesture with where the log stood (NEW-1), so only a run that begins after it retires it, never the run before it.
+ *
+ * @param error - The parsed refusal.
+ * @param command - The refused command's request, run, type and gesture, and the chat's projection when it was refused.
+ * @returns The refusal to persist.
+ * @public
+ */
+export const commandRefusalOf = (
+  error: NormalizedChatError,
+  command: Readonly<{
+    requestId: string;
+    runId: string;
+    commandType: string;
+    kind: RefusedGesture;
+    projection: ChatProjection | undefined;
+  }>,
+): NormalizedChatError =>
+  refusalOfGesture(
+    {
+      ...error,
+      details: { ...error.details, runId: command.runId, commandType: command.commandType },
+      requestId: command.requestId,
+    },
+    { kind: command.kind, projection: command.projection, createId: () => command.requestId },
+  );
+
+/**
  * Whether a refusal recorded before the log was read is still newer than the log's current run. Its time is the only
  * order it has: a run admitted, or an attempt of one resumed, after it (on this page or another) retires it, as a later
  * run or attempt retires a caught-up refusal by its position. A refusal with no time (recorded before times were kept)
@@ -219,12 +247,25 @@ export const selectRunResumable = (projection: ChatProjection | undefined): bool
  */
 export const selectVisibleFailureResumable = (state: VisibleFailureSource): boolean => {
   const error = selectVisibleChatErrorEntry(state)?.error;
+  if (
+    error !== undefined &&
+    state.persistedError !== undefined &&
+    cardOf(error.code, error.category).category === 'quiet'
+  ) {
+    /* I2: a quiet refusal shows no card, so Resume is the card under it's to offer, as the chat shows that card. */
+    return selectVisibleFailureResumable({ ...state, persistedError: undefined });
+  }
   if (error === undefined || !selectRunResumable(state.projection)) {
     return false;
   }
-  const refusedGesture =
-    typeof error.details?.[refusedAtKey] === 'string' ? error.details[refusedGestureKey] : 'continue';
-  return refusedGesture === 'continue';
+  const refused = typeof error.details?.[refusedAtKey] === 'string';
+  const refusedGesture = refused ? error.details?.[refusedGestureKey] : 'continue';
+  /* HA-I4: a refused Resume offers Resume again only for a `resume` answer; a `never` or `reauth` one is not sent
+   * again by the same gesture. */
+  return (
+    refusedGesture === 'continue' &&
+    (!refused || error.code === undefined || cardOf(error.code, error.category).retry === 'resume')
+  );
 };
 
 /** The failed run attempt a failure resumes on its own. @public */

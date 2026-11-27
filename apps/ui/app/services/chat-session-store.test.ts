@@ -6020,6 +6020,14 @@ describe('ChatSessionStore', () => {
           });
           expect(cardOf(persisted[0]?.code, errorCategory.generic)).toMatchObject({ category: 'updateHost' });
           expect(persisted[0]?.title).not.toMatch(/host/iu);
+          /* NEW-1: the chat already holds a completed run, and the refusal still shows over it. */
+          expect(
+            selectVisibleChatError({
+              persistedError: persisted[0],
+              projection: store.getProjection(chatId),
+              attachmentStatus: 'attached',
+            })?.code,
+          ).toBe('WIRE_VERSION_UNSUPPORTED');
         } finally {
           unadmit();
           unpublish();

@@ -1,4 +1,4 @@
-import { contextMemoryMaxBytes, contextMemoryMaxLines } from '@taucad/chat/schemas';
+import { contextMemoryMaxBytes, contextPayloadSchema } from '@taucad/chat/schemas';
 import { truncateMemoryHead } from '#hooks/use-context-payload.js';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -489,23 +489,79 @@ describe('awaitContextPayload', () => {
 });
 
 describe('CH-10 memory head truncation', () => {
-  it('keeps the head and appends a notice past the line cap', () => {
-    const text = Array.from({ length: contextMemoryMaxLines + 50 }, (_, index) => `line ${String(index)}`).join('\n');
-    const out = truncateMemoryHead(text);
-    expect(out.startsWith('line 0\n')).toBe(true);
-    expect(out).toContain(`line ${String(contextMemoryMaxLines - 1)}`);
-    expect(out).not.toContain(`line ${String(contextMemoryMaxLines)}\n`);
-    expect(out).toContain('[AGENTS.md truncated');
+  const encoder = new TextEncoder();
+  const byteLength = (text: string): number => encoder.encode(text).length;
+  const notice = /\n\[AGENTS\.md truncated: first (\d+) bytes retained]$/;
+  /** Splits a truncated value into the kept head and the byte count its notice names. */
+  const splitNotice = (out: string): { head: string; retained: number } => {
+    const match = notice.exec(out);
+    if (!match) {
+      expect.fail(`expected a truncation notice at the end of the value`);
+    }
+    return { head: out.slice(0, match.index), retained: Number(match[1]) };
+  };
+
+  it('should return content under the cap unchanged however many lines it has', () => {
+    const text = Array.from({ length: 1000 }, (_, index) => `line ${String(index)}`).join('\n');
+    expect(byteLength(text)).toBeLessThan(contextMemoryMaxBytes);
+
+    expect(truncateMemoryHead(text)).toBe(text);
   });
 
-  it('enforces the byte ceiling', () => {
-    const text = 'y'.repeat(contextMemoryMaxBytes + 4096);
-    const out = truncateMemoryHead(text);
-    expect(out.length).toBeLessThanOrEqual(contextMemoryMaxBytes + 256);
-    expect(out).toContain('[AGENTS.md truncated');
+  it('should return content of exactly the cap unchanged', () => {
+    const text = 'y'.repeat(contextMemoryMaxBytes - 1) + '\n';
+    expect(byteLength(text)).toBe(contextMemoryMaxBytes);
+
+    expect(truncateMemoryHead(text)).toBe(text);
   });
 
-  it('returns short content unchanged', () => {
-    expect(truncateMemoryHead('short')).toBe('short');
+  it('should cut content one byte over the cap to the cap and mark it with one notice line', () => {
+    const text = 'y'.repeat(contextMemoryMaxBytes) + 'z';
+
+    const out = truncateMemoryHead(text);
+
+    const { head, retained } = splitNotice(out);
+    expect(head).toBe('y'.repeat(contextMemoryMaxBytes));
+    expect(retained).toBe(contextMemoryMaxBytes);
+    expect(out.split('\n')).toHaveLength(2);
+  });
+
+  it('should keep the head and drop the tail', () => {
+    const text = 'HEAD\n' + 'x'.repeat(contextMemoryMaxBytes) + '\nTAIL';
+
+    const { head } = splitNotice(truncateMemoryHead(text));
+
+    expect(head.startsWith('HEAD\nxxx')).toBe(true);
+    expect(text.startsWith(head)).toBe(true);
+    expect(head).not.toContain('TAIL');
+  });
+
+  it.each([
+    { name: '2-byte', char: 'é', bytes: 2 },
+    { name: '3-byte', char: '€', bytes: 3 },
+    { name: '4-byte surrogate-pair', char: '😀', bytes: 4 },
+  ])('should cut $name characters on a character boundary when the cap lands inside one', ({ char, bytes }) => {
+    expect(byteLength(char)).toBe(bytes);
+    /* One ASCII byte first, so the cap falls inside a character for every width above one byte. */
+    const text = 'a' + char.repeat(Math.ceil(contextMemoryMaxBytes / bytes) + 8);
+    expect((contextMemoryMaxBytes - 1) % bytes).not.toBe(0);
+
+    const { head, retained } = splitNotice(truncateMemoryHead(text));
+
+    const headBytes = byteLength(head);
+    expect(headBytes).toBe(retained);
+    expect(headBytes).toBeLessThanOrEqual(contextMemoryMaxBytes);
+    expect(headBytes).toBe(1 + Math.floor((contextMemoryMaxBytes - 1) / bytes) * bytes);
+    expect(head).not.toContain('\uFFFD');
+    expect(text.startsWith(head)).toBe(true);
+    expect(head.endsWith(char)).toBe(true);
+  });
+
+  it('should cut multi-byte content to a value the context payload schema accepts', () => {
+    const text = '€'.repeat(contextMemoryMaxBytes);
+
+    const out = truncateMemoryHead(text);
+
+    expect(contextPayloadSchema.safeParse({ memory: { 'AGENTS.md': out } }).success).toBe(true);
   });
 });

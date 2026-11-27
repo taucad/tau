@@ -3,7 +3,7 @@ title: 'Context Engineering Policy'
 description: 'Comprehensive guide to optimizing system prompts, tool definitions, and context pipelines for LLM agents. Covers foundational principles, placement framework, cache economics, compaction safety, subagent criteria, untrusted content, and eval discipline.'
 status: active
 created: '2026-03-09'
-updated: '2026-11-26'
+updated: '2026-11-27'
 related:
   - docs/policy/agent-observability-policy.md
   - docs/policy/filesystem-context-policy.md
@@ -528,7 +528,9 @@ House budgets (calibrated July 2026 against measured Tau prompts and the referen
 | Tool definitions (provider-facing belt)                                 | <10% of the smallest supported window   | Claude Code's threshold for deferring definitions (`claude-code-docs-2026-mcp-tool-search`) |
 | Skill metadata (always-on)                                              | name ≤64 chars, description ≤1024 chars | The only always-loaded skill content                                                        |
 | SKILL.md body                                                           | <500 lines                              | Split overflow into reference files                                                         |
-| Memory index (always-on)                                                | ≤200 lines / 25KB                       | Index + topic files; deterministic for cache hits (`claude-code-docs-2026-memory`)          |
+| Project `AGENTS.md` (per-request memory)                                | ≤32 KiB UTF-8, no line limit            | Codex's default `project_doc_max_bytes`: the same file reads whole in both (see below)      |
+
+**Project `AGENTS.md`**: the client reads the project's root `AGENTS.md` into the turn's memory message and keeps it whole up to 32,768 bytes of UTF-8 (`contextMemoryMaxBytes` in `libs/chat/src/schemas/context-payload.schema.ts`), however many lines it has. Past the cap it keeps the head, cuts on a character boundary and adds one notice line naming the bytes kept; the request schema admits the cap plus 256 code units for that notice. The number matches Codex's default so a file one agent reads whole the other does too. The message is per-request and uncached, so at the cap it costs about 8,000 tokens a turn; that cost is accepted (ruling U9 in `docs/research/project-agent-files-standard-paths.md`). It does not count toward the core or static pools.
 
 **Enforcement**: the two pool budgets (≤3,000 core, ≤4,500 static) regress in `libs/chat/src/prompts/cad-agent.prompt.test.ts`. The per-section rows and the tool-definition share are targets without a test: the per-section telemetry test on `onSectionResolved` is SP-11 in `docs/research/harness-system-prompt-rewrite-spec.md` and has not landed. Budget exceptions require an EVAL changelog entry with benchmark evidence (Part 11).
 

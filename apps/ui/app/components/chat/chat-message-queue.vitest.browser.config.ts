@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 const testEntries = [
@@ -16,13 +17,15 @@ export default defineConfig({
   // Vite's optimizer hash excludes entries; keep this suite's scan separate from other browser configs.
   cacheDir: fileURLToPath(new URL('../../../node_modules/.vite/chat-message-queue', import.meta.url)),
   plugins: [tailwindcss()],
-  define: { tauCloudBuildEnabled: 'false', tauTelemetryHostCloudBuild: 'false' },
+  define: { tauTelemetryHostCloudBuild: 'false' },
   server: {
     host: '127.0.0.1',
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   optimizeDeps: { entries: testEntries },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     include: testEntries,
     fileParallelism: false,
     browser: {

@@ -18,10 +18,12 @@ import { useFeatureFlags } from '#flags/use-feature.js';
 import { Commands } from '#components/layout/command-palette.js';
 import { BrowserUpdate, BrowserUpdateReveal } from '#components/nav/browser-update.js';
 import { DesktopUpdate } from '#components/nav/desktop-update.js';
+import { SidebarNotices } from '#components/nav/sidebar-notices.js';
+import { DesktopAppNotice } from '#components/desktop/desktop-app-notice.js';
 import { NavUser } from '#components/nav/nav-user.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { billingNavRoutes } from '#cloud/nav-billing.js';
+import { useBillingNavRoutes } from '#cloud/nav-billing.js';
 
 /**
  * The phone sheet header reads [close][wordmark → Home] … [Search] (D10). Wide screens keep search as
@@ -61,12 +63,13 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
   const desktopTarget = isDesktopTarget();
   const isCompact = desktopTarget && !isMobile;
   const isNonMobileCollapsed = !isMobile && state === 'collapsed';
+  const billingNavRoutes = useBillingNavRoutes();
   const navMoreItems = React.useMemo(
     () =>
       [...navRoutes.navMore, ...billingNavRoutes].filter(
         (item) => item.featureFlag === undefined || flags[item.featureFlag],
       ),
-    [flags],
+    [billingNavRoutes, flags],
   );
 
   return (
@@ -111,7 +114,10 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
             </div>
           </div>
         </SidebarContent>
-        {desktopTarget ? <DesktopUpdate /> : <BrowserUpdate />}
+        <SidebarNotices>
+          <DesktopAppNotice />
+          {desktopTarget ? <DesktopUpdate /> : <BrowserUpdate />}
+        </SidebarNotices>
         <SidebarFooter className='border-t p-1'>
           <NavUser />
         </SidebarFooter>

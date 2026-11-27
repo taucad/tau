@@ -1,34 +1,23 @@
-import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'electron-vite';
 import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
-// oxlint-disable-next-line no-restricted-imports -- The build config runs before the package's `#` imports resolve.
-import { desktopHostBuildOf } from './src/shared/desktop-host-build.js';
 
-const cloudValue = process.env['TAU_CLOUD_ENABLED'];
-if (cloudValue !== undefined && cloudValue !== 'true' && cloudValue !== 'false') {
-  throw new Error('TAU_CLOUD_ENABLED must be exactly true or false.');
-}
 /* Launch gate OBS-7: the release workflow passes the DSN from the `desktop` environment; other builds report nothing. */
+/* Main and preload carry no display mode (adaptive app deployment mode I12): the renderer reads its API's deployment
+ * answer, and the Zoo close-code map is one neutral map. */
 const define = {
-  tauCloudBuildEnabled: JSON.stringify(cloudValue === 'true'),
-  /* Runtime telemetry's own Cloud-host signal for main, never derived from the billing gate above. */
+  /* Runtime telemetry's own Cloud-host signal for main, independent of the display mode. */
   tauTelemetryHostCloudBuild: JSON.stringify(process.env['TAU_TELEMETRY_HOST'] === 'cloud'),
   tauSentryDsn: JSON.stringify(process.env['SENTRY_DSN'] ?? ''),
   /* The release workflow names one Sentry release per tag (`tau-desktop@<version>`); empty keeps the SDK default. */
   tauSentryRelease: JSON.stringify(process.env['SENTRY_RELEASE'] ?? ''),
   /* The release workflow passes the PostHog project key; without one the renderer's analytics stay inert. */
   tauPostHogClientKey: JSON.stringify(process.env['POSTHOG_CLIENT_KEY'] ?? ''),
-  /* LW8: agent observability's build id, the commit of the tree built; the release workflow checks out its tag. */
-  tauDesktopHostBuild: JSON.stringify(
-    desktopHostBuildOf(() =>
-      execFileSync('git', ['rev-parse', 'HEAD'], {
-        cwd: import.meta.dirname,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }),
-    ),
-  ),
+  /*
+   * LW8's build id (the commit) is not compiled in, so `desktop:build`'s cache key holds no commit (ST-9). Packaging
+   * records it beside the bundles instead (`src/shared/desktop-host-build.ts`).
+   */
 } as const;
 
 const bundledWorkspaceDependencies = [
@@ -40,6 +29,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/bambu',
   '@taucad/brep',
   '@taucad/build123d',
+  '@taucad/cadmpeg',
   '@taucad/carvera',
   '@taucad/converter',
   '@taucad/desktop-services-host',
@@ -49,6 +39,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/filesystem',
   '@taucad/gltf',
   '@taucad/grbl',
+  '@taucad/heif',
   '@taucad/host',
   '@taucad/image',
   '@taucad/jscad',
@@ -100,6 +91,8 @@ export const desktopExternalizedDependencies = [
   /* Resolves its vendored seccomp/srt-win helpers relative to its own module file. */
   '@anthropic-ai/sandbox-runtime',
   '@taulabs/openrscad-engine',
+  /* Its `node` condition loads a NAPI `.node` addon from its optional platform package. */
+  'cadmpeg-ts',
   'electron-updater',
   'esbuild',
   'geospec-engine',
@@ -109,10 +102,30 @@ export const desktopExternalizedDependencies = [
   'node-pty',
 ] as const;
 
+/*
+ * The recovery window's static page (D0, R12) ships beside `index.js` as `recovery/index.html`, inside the app's own
+ * files, so main loads it with `loadFile` and needs neither `app://`, the renderer bundle nor a packaging step of its
+ * own. Its source is `resources/recovery/index.html`.
+ */
+const recoveryPage = {
+  name: 'tau-recovery-page',
+  buildStart(this: { addWatchFile(path: string): void }): void {
+    this.addWatchFile(resolve(import.meta.dirname, 'resources/recovery/index.html'));
+  },
+  generateBundle(this: { emitFile(file: { type: 'asset'; fileName: string; source: string }): string }): void {
+    this.emitFile({
+      type: 'asset',
+      fileName: 'recovery/index.html',
+      source: readFileSync(resolve(import.meta.dirname, 'resources/recovery/index.html'), 'utf8'),
+    });
+  },
+};
+
 export default defineConfig(
   electronRuntimeConfig({
     main: {
       define,
+      plugins: [recoveryPage],
       build: {
         sourcemap: 'hidden',
         externalizeDeps: {
@@ -143,10 +156,14 @@ export default defineConfig(
         outDir: 'dist/preload',
         // Sandboxed preloads can require Electron, but cannot resolve application dependencies.
         externalizeDeps: false,
+        /* The app's preload, and the recovery window's minimal one (D0). */
         lib: {
-          entry: resolve(import.meta.dirname, 'src/preload/preload.ts'),
+          entry: {
+            preload: resolve(import.meta.dirname, 'src/preload/preload.ts'),
+            'recovery-preload': resolve(import.meta.dirname, 'src/preload/recovery-preload.ts'),
+          },
           formats: ['cjs'],
-          fileName: () => 'preload.cjs',
+          fileName: (_format, entryName) => `${entryName}.cjs`,
         },
       },
     },

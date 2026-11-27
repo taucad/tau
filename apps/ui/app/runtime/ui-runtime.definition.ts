@@ -2,8 +2,10 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { openrscad } from '@taucad/openrscad';
 import { assimp } from '@taucad/assimp';
 import { brep } from '@taucad/brep';
+import { cadmpeg } from '@taucad/cadmpeg';
 import { esbuild } from '@taucad/esbuild';
 import { gltf } from '@taucad/gltf';
+import { heif } from '@taucad/heif';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
@@ -21,6 +23,7 @@ import { runtimeRecycleHeapBytes } from '@taucad/ui-core/lib/device-memory-class
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type { UiRuntimeConfig } from '#runtime/ui-runtime.schema.js';
 
+import { cadmpegEngines } from '#runtime/cadmpeg-engines.js';
 import { picogkBrowserAssets } from '#runtime/picogk-browser-assets.js';
 
 type UiRuntimeOptions = {
@@ -69,15 +72,22 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     smlib(),
     gltf(),
     brep(),
+    /*
+     * One engine per opened format, fetched and verified by digest (cadmpeg engine delivery charter D2, D11, D12). The
+     * export transcoder is not selected here (the plugin's default preset), so only the kernel takes the option.
+     */
+    cadmpeg({ kernels: { import: { engines: cadmpegEngines() } } }),
     image(),
+    // HEIC/HEIF stills to JPEG, PNG and WebP (operator ruling O1); libheif loads only for a HEIC source.
+    heif(),
     slicer(),
     assimp({ preset: 'all' }),
     replicad({
       kernels: {
         default: {
           wasm: config.memoryConstrained ? 'single' : 'auto',
-          // D-RT-01: semantic reuse keeps serialized BRep per operation (measured ~10 MB per edit on the iPhone
-          // profile) up to its 64 MiB resident bound; a phone renders without it until that bound is qualified there.
+          // D-RT-01: the live operation tier keeps recent operation results live in the worker, up to its byte
+          // budget (`computeReuseBytes`, 256 MiB by default); a phone renders without it until a budget is qualified there.
           ...(config.memoryConstrained ? { computeReuse: false } : {}),
           withSourceMapping: options.withSourceMapping === true,
         },

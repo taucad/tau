@@ -1,30 +1,12 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import { z } from 'zod';
-import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
-import type { SettingId } from '#components/settings/settings-registry.js';
+import { useDeploymentMode } from '#cloud/use-deployment-mode.js';
+import type { SettingId } from '@taucad/settings-ui/components/settings/settings-catalogue';
+import { settingsSectionSchema } from '@taucad/settings-ui/components/settings/settings-section';
+import type { SettingsSection } from '@taucad/settings-ui/components/settings/settings-section';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { enumParameter, stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
-
-/** Sections the dialog can show, and the single source of truth for `?settings=`. */
-export const settingsSectionSchema = z.enum([
-  'general',
-  'browser',
-  'filesystem',
-  'account',
-  'security',
-  'repositories',
-  'billing',
-  'data-controls',
-  'viewer',
-  'compute',
-  'machines',
-  'models',
-  'agents',
-  'experimental',
-]);
-
-export type SettingsSection = z.infer<typeof settingsSectionSchema>;
 
 const defaultSection: SettingsSection = 'general';
 
@@ -63,6 +45,7 @@ export function useSettingsDialog(): SettingsDialogState {
   const [searchParameters, setSearchParameters] = useSearchParams();
   const value = settingsParameter.parse(searchParameters.get(searchParameterName.settings) ?? undefined);
   const target = targetParameter.parse(searchParameters.get(searchParameterName.settingsTarget) ?? undefined);
+  const mode = useDeploymentMode();
   /* One object per setter identity. React Router renews `setSearchParams` on
    * every URL change, so these are stable between navigations but not across
    * them — fine for handlers, not for an effect that must outlive its write. */
@@ -97,7 +80,9 @@ export function useSettingsDialog(): SettingsDialogState {
   }, [setSearchParameters]);
   return {
     isOpen: value !== '',
-    section: value === '' || (value === 'billing' && !tauCloudEnabled) ? defaultSection : value,
+    /* `?settings=billing` falls back only once the mode is known unfunded; while it is unknown the link keeps Billing,
+     * whose content says it is checking (adaptive app deployment mode BA19). */
+    section: value === '' || (value === 'billing' && mode.state === 'unfunded') ? defaultSection : value,
     target: value === '' || target === '' ? undefined : target,
     ...actions,
   };

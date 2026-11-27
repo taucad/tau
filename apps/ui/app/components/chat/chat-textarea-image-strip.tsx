@@ -5,14 +5,17 @@ import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
 import { cn } from '@taucad/ui/utils/cn';
 import { focusTrapAttribute } from '@taucad/chat-ui/components/use-composer-exit';
 import { AttachmentFileChip, AttachmentImage } from '#components/chat/attachment-preview.js';
-import type { DraftAttachment } from '#hooks/draft.machine.js';
-import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import type { DraftAttachment, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
+import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { attachmentKind, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 
 type ChatTextareaAttachmentRailSize = 'desktop' | 'mobile';
 
 type ChatTextareaAttachmentRailProperties = {
   readonly attachments: readonly DraftAttachment[];
+  /** Images still converting or storing, after the stored ones: each holds the slot its thumbnail will take. */
+  readonly pendingImages?: readonly PendingDraftImage[];
   /** The directories the draft's attachment references resolve against, in order. */
   readonly directory: AttachmentDirectories;
   /** Why Send is disabled for these attachments, shown under them (D20). */
@@ -41,6 +44,7 @@ const removeButtonClassName = cn(
  */
 export const ChatTextareaAttachmentRail = memo(function ({
   attachments,
+  pendingImages = [],
   directory,
   blockReason,
   blockReasonId,
@@ -72,7 +76,7 @@ export const ChatTextareaAttachmentRail = memo(function ({
     [images],
   );
 
-  if (attachments.length === 0) {
+  if (attachments.length === 0 && pendingImages.length === 0) {
     return undefined;
   }
 
@@ -134,7 +138,9 @@ export const ChatTextareaAttachmentRail = memo(function ({
                   type='button'
                   aria-label={`Open uploaded image ${imageIndex + 1}`}
                   className={cn(
-                    'overflow-hidden rounded-md border bg-background hover:bg-accent',
+                    // `block`: an inline-block button sits on the wrapper's text line, whose descender space would add
+                    // height under the thumbnail that the pending tile does not have, moving the composer as it lands.
+                    'block overflow-hidden rounded-md border bg-background hover:bg-accent',
                     'outline-none focus-visible:focus-outline',
                     thumbnailSize[size],
                   )}
@@ -171,6 +177,19 @@ export const ChatTextareaAttachmentRail = memo(function ({
               </div>
             );
           })}
+          {pendingImages.map((pending, index) => (
+            /* The thumbnail's own box, drawn as a skeleton until the stored image takes the slot (UI policy §5). */
+            <div
+              // oxlint-disable-next-line react/no-array-index-key -- a pending image has no identity until it is stored
+              key={`pending-${index}`}
+              role='status'
+              aria-busy='true'
+              className={cn('relative shrink-0 overflow-hidden rounded-md border', thumbnailSize[size])}
+            >
+              <Skeleton aria-hidden='true' className='size-full rounded-none' />
+              <span className='sr-only'>{pending.isConverting ? 'Converting image…' : 'Adding image…'}</span>
+            </div>
+          ))}
         </div>
       </OmniScroller>
       {blockReason === undefined ? null : (

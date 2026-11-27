@@ -49,16 +49,31 @@ export const viewerRenderProfile = {
   ambientOcclusion: {
     /** Visibility exponent applied to the GTAO estimate. */
     intensity: 0.75,
-    /** GTAO distance attenuation. */
-    distanceFalloff: 1,
+    /**
+     * Blend between full horizon rise (0) and three's step-index weight `2 / (j + 2)` (1). 0.5 is profile H2 of the AO
+     * thickness run (Tau Brain `research/artifacts/viewer-visual-quality-blueprint/runs/2026-11-16-ao-thickness/report.md`,
+     * § Halo target): with the smooth falloff it keeps a thin contact halo near Onshape's width.
+     */
+    distanceFalloff: 0.5,
     /** Sampling radius: `'viewport'` resolves through {@link resolveViewerAoRadiusCssPixels}. */
     radiusCssPixels: 'viewport',
     /** Fraction of the CSS viewport diagonal used as the `'viewport'` radius. */
     radiusViewportFraction: 0.01,
     /** Smallest `'viewport'` radius, in device pixels. */
     radiusMinimumDevicePixels: 4,
-    /** GTAO thickness as a multiple of the world-space radius. */
-    thicknessRatio: 1 / 0.09,
+    /**
+     * Where a GTAO horizon sample stops counting, as a multiple of the world-space radius, by its 3D distance from the
+     * pixel (XeGTAO's smooth falloff, replacing three's hard thickness slab, which cut flank shading off on a line).
+     * Profile H2 of the AO thickness run (Tau Brain
+     * `research/artifacts/viewer-visual-quality-blueprint/runs/2026-11-16-ao-thickness/report.md`, §§ Smooth falloff
+     * and full resolution, Halo target).
+     */
+    falloffEndRatio: 22,
+    /**
+     * Fraction of the falloff end over which a sample's weight falls linearly from 1 to 0: weight 1 up to
+     * `(1 - falloffRange) × falloffEndRatio` radii, 0 from `falloffEndRatio` radii. Profile H2 (same report).
+     */
+    falloffRange: 0.8,
     /** Denoise depth acceptance as a fraction of the world-space radius. */
     denoiseDepthTolerance: 0.1,
     /** GTAO samples per pixel. */

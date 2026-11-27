@@ -4,7 +4,7 @@
  */
 import type { GizmoStyleId, GoalId, LanguageId, MousePresetId, ToolId } from '@taucad/preferences';
 import type { CameraGesture } from '@taucad/viewer/graphics/three/controls/camera-presets';
-import { gizmoStyleCopy, mousePresetCopy } from '#components/settings/viewer/viewer-settings-copy.js';
+import { gizmoStyleCopy, mousePresetCopy } from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
 
 /** The setup steps, in order. `viewer` is left out while `viewerControls` is off. */
 export const setupStepIds = ['goals', 'background', 'viewer', 'how'] as const;
@@ -239,6 +239,7 @@ export const gizmoCopy: Readonly<Record<GizmoChoiceId, Readonly<{ name: string; 
 export const viewerStepCopy = {
   mouseControls: 'Mouse controls',
   gizmo: 'Orientation gizmo',
+  orbit: 'Orbit style',
   pickAnother: 'Pick another if it is closer to what you know',
   legendLabel: 'How to move the view',
   legendAlways: 'Always',

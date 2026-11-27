@@ -5,7 +5,6 @@ import {
   Color,
   NoToneMapping,
   PerspectiveCamera,
-  Raycaster,
   RenderTarget,
   Scene,
   Vector3,
@@ -14,12 +13,15 @@ import {
   WebGLRenderTarget,
 } from 'three';
 import { WebGLBackend, WebGPUBackend, WebGPURenderer } from 'three/webgpu';
-import { createViewportGizmoCubeAxes } from '#graphics/three/controls/viewport-gizmo-cube-axes.js';
 import { createSectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import { ViewportGizmo } from 'three-viewport-gizmo';
 import { createRenderer } from '#graphics/three/renderer.js';
-import { applyViewportGizmoSurface } from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
+import {
+  resolveViewportGizmoStyleConfig,
+  viewportGizmoNodeMaterials,
+} from '#graphics/three/controls/viewport-gizmo-styles.js';
 import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
+import { gizmoFieldOfView } from '#graphics/three/utils/gizmo.utils.js';
 
 const measureCoverage = (
   data: ArrayLike<number>,
@@ -121,13 +123,12 @@ it.each(['webgl', 'webgpu'] as const)(
     camera.up.set(0, 0, 1);
     const gizmo = new ViewportGizmo(camera, renderer, {
       type: 'rounded-cube',
-      up: 'z',
+      up: { x: 0, y: 0, z: 1 },
       size: 320,
       radius: viewportGizmoMetrics.radius,
       container: document.body,
       placement: 'top-left',
       offset: { top: 0, left: 0 },
-      background: { enabled: false },
     });
     const scene = new Scene();
     const copy = document.createElement('canvas');
@@ -149,18 +150,15 @@ it.each(['webgl', 'webgpu'] as const)(
           isHighContrast: false,
           accentColor: '#008c7d',
         });
-        applyViewportGizmoSurface(gizmo, style, backend);
-        gizmo.updateMatrixWorld(true);
-        const raycaster = new Raycaster();
-        for (const region of gizmo.children) {
-          const direction = region.position.clone().transformDirection(gizmo.matrixWorld);
-          raycaster.set(direction.clone().multiplyScalar(7), direction.negate());
-          expect(raycaster.intersectObjects(gizmo.children, false)[0]?.object, 'face, edge and corner picking').toBe(
-            region,
-          );
-        }
+        gizmo.set({
+          ...resolveViewportGizmoStyleConfig({ gizmoStyle: 'cube', colors: style, radius: viewportGizmoMetrics.radius })
+            .options,
+          // The surface alone: the triad's letters sit outside the silhouette.
+          triad: { enabled: false },
+        });
+        // Picking is the library's analytic hit test now (its own tests); this checks the surface only.
         // oxlint-disable-next-line eslint/no-await-in-loop -- A theme creates a new set of label textures and materials.
-        await renderer.compileAsync(gizmo, camera);
+        await gizmo.compile();
         for (let yaw = 0; yaw < 360; yaw += 30) {
           camera.position.set(7 * Math.sin((yaw * Math.PI) / 180), -7 * Math.cos((yaw * Math.PI) / 180), 3);
           camera.lookAt(new Vector3());
@@ -175,7 +173,7 @@ it.each(['webgl', 'webgpu'] as const)(
             }
             target?.viewport.set(0, 0, 384, 384);
             renderer.render(scene, camera);
-            gizmo.cameraUpdate();
+            gizmo.update();
             target?.viewport.set(0, 0, 320, 320);
             gizmo.render();
             if (target && !(renderer instanceof WebGLRenderer)) {
@@ -234,11 +232,10 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
     const scene = new Scene();
     const gizmo = new ViewportGizmo(camera, renderer, {
       type: 'rounded-cube',
-      up: 'z',
+      up: { x: 0, y: 0, z: 1 },
       size: 96,
       container: document.body,
       placement: 'top-right',
-      background: { enabled: false },
     });
     const style = readViewportGizmoStyle({
       container: document.body,
@@ -247,13 +244,11 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
       accentColor: '#008c7d',
     });
     picker.setStyle(style);
-    applyViewportGizmoSurface(gizmo, style, execution === 'webgl' ? 'webgl' : 'webgpu');
-    gizmo.scale.multiplyScalar(0.7);
-    gizmo.add(
-      createViewportGizmoCubeAxes({
-        renderingBackend: execution === 'webgl' ? 'webgl' : 'webgpu',
-      }),
-    );
+    gizmo.set({
+      ...resolveViewportGizmoStyleConfig({ gizmoStyle: 'cube', colors: style, radius: viewportGizmoMetrics.radius })
+        .options,
+      onMaterial: execution === 'webgl' ? undefined : viewportGizmoNodeMaterials(new Set()),
+    });
     const viewport = new Vector4();
     const draw = async (side: number, x = 1, z = 1): Promise<Uint8Array<ArrayBuffer>> => {
       await new Promise<void>((resolve) => {
@@ -276,7 +271,7 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
       renderer.setViewport(0, 0, 2560, 1440);
       renderer.autoClear = true;
       renderer.render(scene, camera);
-      gizmo.cameraUpdate();
+      gizmo.update();
       target.viewport.set(0, 0, 5120, 2880);
       picker.render({
         renderer,
@@ -357,3 +352,98 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
     }
   },
 );
+
+/*
+ * TA carry-over 2 (H3 Finding 3): Tau's view cube keeps its apparent size under the field of view slider. The
+ * library moves its camera to hold the projected size of a unit cube's front face across `fieldOfView`, but the
+ * outline it draws is nearer the centre than that face: Tau's cube shows the axis triad, which draws the whole scene
+ * at 0.7, and the rounded cube's outline is its bevel, a radius in from the face. So the cube shrinks at wide angles
+ * (about 5 % at slider 90 on 3.0.0-beta.5) and grows at narrow ones (about 8 % at slider 0). Measured as the coverage
+ * of the cube's middle row looking straight at a face, against the row at the library's default field of view (26°),
+ * which every slider value should keep within 1 %. 3.0.0-beta.6 fixes this in the library: the rounded cube's
+ * distance is solved over its outline (fork #83). The harness check beside it guards the measurement itself.
+ */
+const gizmoFieldOfViewSliders = [0, 60, 90] as const;
+
+const measureFrontFaceWidths = async (): Promise<Readonly<{ reference: number; widths: number[] }>> => {
+  await page.viewport(500, 500);
+  const canvas = document.createElement('canvas');
+  document.body.append(canvas);
+  const renderer = await createRenderer('viewport', 'webgl', { canvas, preserveDrawingBuffer: true });
+  renderer.setSize(384, 384);
+  renderer.setClearColor(0, 0);
+  renderer.toneMapping = NoToneMapping;
+  const camera = new PerspectiveCamera(45, 1, 0.1, 100);
+  camera.up.set(0, 0, 1);
+  camera.position.set(0, -7, 0);
+  camera.lookAt(new Vector3());
+  const style = readViewportGizmoStyle({
+    container: document.body,
+    colorScheme: 'light',
+    isHighContrast: false,
+    accentColor: '#008c7d',
+  });
+  // Tau's default style, the rounded cube with the axis triad.
+  const { options } = resolveViewportGizmoStyleConfig({
+    gizmoStyle: 'cube',
+    colors: style,
+    radius: viewportGizmoMetrics.radius,
+  });
+  const gizmo = new ViewportGizmo(camera, renderer, {
+    ...options,
+    up: { x: 0, y: 0, z: 1 },
+    size: 320,
+    container: document.body,
+    placement: 'top-left',
+    offset: { top: 0, left: 0 },
+  });
+  const copy = document.createElement('canvas');
+  copy.width = 384;
+  copy.height = 384;
+  const context = copy.getContext('2d', { willReadFrequently: true })!;
+  const scene = new Scene();
+  /** The cube's width along its middle row, in pixels, antialiased edges counted by their coverage. */
+  const width = (): number => {
+    renderer.render(scene, camera);
+    gizmo.update();
+    gizmo.render();
+    context.clearRect(0, 0, 384, 384);
+    context.drawImage(canvas, 0, 0);
+    const row = context.getImageData(0, 160, 384, 1).data;
+    let coverage = 0;
+    for (let x = 0; x < 384; x++) {
+      coverage += row[x * 4 + 3]! / 255;
+    }
+    return coverage;
+  };
+  try {
+    expect(gizmo.options.triad.enabled).toBe(true);
+    await gizmo.compile();
+    const reference = width();
+    const widths = gizmoFieldOfViewSliders.map((slider) => {
+      gizmo.set({ fieldOfView: gizmoFieldOfView(slider) });
+      return width();
+    });
+    return { reference, widths };
+  } finally {
+    gizmo.dispose();
+    renderer.dispose();
+    canvas.remove();
+  }
+};
+
+it('should measure Tau’s view cube under each field of view slider value', async () => {
+  const { reference, widths } = await measureFrontFaceWidths();
+  // The triad's cube is about 150 pixels across at size 320; each slider value draws one of a similar size.
+  expect(reference).toBeGreaterThan(100);
+  for (const width of widths) {
+    expect(Math.abs(width / reference - 1)).toBeLessThan(0.2);
+  }
+});
+
+it('should keep Tau’s view cube’s size under the field of view slider while the triad shows', async () => {
+  const { reference, widths } = await measureFrontFaceWidths();
+  for (const [index, slider] of gizmoFieldOfViewSliders.entries()) {
+    expect(Math.abs(widths[index]! / reference - 1), `slider ${slider}`).toBeLessThan(0.01);
+  }
+});

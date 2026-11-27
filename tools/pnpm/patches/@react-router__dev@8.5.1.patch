@@ -1,0 +1,46 @@
+diff --git a/dist/config-DP95WFpo.d.ts b/dist/config-DP95WFpo.d.ts
+--- a/dist/config-DP95WFpo.d.ts
++++ b/dist/config-DP95WFpo.d.ts
+@@ -106,6 +106,8 @@ type ReactRouterConfig = {
+   prerender?: PrerenderPaths | {
+     paths: PrerenderPaths;
+     concurrency?: number;
++    /** tau patch: each prerender request's bound, in milliseconds (React Router's default is 10000). */
++    timeout?: number;
+   };
+   /**
+    * An array of React Router plugin config presets to ease integration with
+diff --git a/dist/vite.js b/dist/vite.js
+--- a/dist/vite.js
++++ b/dist/vite.js
+@@ -2137,7 +2137,7 @@ const reactRouterVitePlugin = () => {
+ 		prerender({
+ 			config() {
+ 				process.env.IS_RR_BUILD_REQUEST = "yes";
+-				return { concurrency: getPrerenderConcurrencyConfig$1(ctx.reactRouterConfig) };
++				return { concurrency: getPrerenderConcurrencyConfig$1(ctx.reactRouterConfig), ...getPrerenderTimeoutConfig(ctx.reactRouterConfig) };
+ 			},
+ 			async requests() {
+ 				invariant(viteConfig);
+@@ -2722,6 +2722,12 @@ function assertPrerenderPathsMatchRoutes(config, prerenderPaths) {
+ 	let routes = createPrerenderRoutes(config.routes);
+ 	for (let path of prerenderPaths) if (!matchRoutes(routes, `/${path}/`.replace(/^\/\/+/, "/"))) throw new Error(`Unable to prerender path because it does not match any routes: ${path}`);
+ }
++// tau patch: `prerender.timeout` (milliseconds) reaches the prerender plugin's per-request bound, whose default is 10 s.
++// The first requests pay the server bundle's cold import, which outlasted 10 s on the macos-26 runner.
++function getPrerenderTimeoutConfig(reactRouterConfig) {
++	let { prerender } = reactRouterConfig;
++	return typeof prerender === "object" && typeof prerender.timeout === "number" ? { timeout: prerender.timeout } : {};
++}
+ function getPrerenderConcurrencyConfig$1(reactRouterConfig) {
+ 	let concurrency = 1;
+ 	let { prerender } = reactRouterConfig;
+@@ -3652,7 +3658,7 @@ export default assetsManifest.clientVersion;
+ 		warnOnClientSourceMaps(),
+ 		prerender({
+ 			config() {
+-				return { concurrency: getPrerenderConcurrencyConfig(config) };
++				return { concurrency: getPrerenderConcurrencyConfig(config), ...getPrerenderTimeoutConfig(config) };
+ 			},
+ 			logFile: (path) => logger.info(`Prerendered ${colors.bold(path)}`),
+ 			cleanup: () => configLoader.close(),

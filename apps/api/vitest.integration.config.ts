@@ -2,6 +2,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { config } from 'dotenv';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,7 +33,8 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
     testTimeout: 300_000,
     hookTimeout: 300_000,
-    reporters: ['verbose'],
+    reporters: testReporters('verbose'),
+    retry: testRetry(),
     // Gaxios + google-auth-library run `await import('node-fetch')` at request
     // time. Vitest's vite-node module runner resolves dynamic imports relative
     // to the *test file*, not the importer, which means `node-fetch` (a direct

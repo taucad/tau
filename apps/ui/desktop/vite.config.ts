@@ -12,10 +12,17 @@ import { base64Loader } from '@taucad/vite/base64-loader';
  * and a `.ts` specifier needs `allowImportingTsExtensions`. Sharing the web
  * plugin beats duplicating 40 lines that would then drift.
  */
-// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- see above.
-import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiResolveAlias, uiSsrOptions } from '../vite.config';
+/* oxlint-disable eslint/no-restricted-imports, import/extensions -- see above. */
+import {
+  createUiReactCompilerPlugin,
+  createUiSourceAliasPlugin,
+  uiBuildTarget,
+  uiResolveAlias,
+  uiSsrOptions,
+} from '../vite.config';
+/* oxlint-enable eslint/no-restricted-imports, import/extensions */
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- config-load seam is outside the app alias root.
-import { resolveTauCloudBuildEnabled, resolveTauTelemetryHostCloud } from '../build-environment';
+import { resolveTauTelemetryHostCloud } from '../build-environment';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
 import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration runs outside the app alias resolver.
@@ -26,12 +33,13 @@ import { createCsharpLanguageAssets } from '../csharp-language-assets.vite-plugi
 import { createOpenscadLanguageAssets } from '../openscad-language-assets.vite-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/* The `TAU_TARGET` define and the `tau-desktop` resolve condition, set together. */
+const desktopTarget = uiBuildTarget('desktop');
 /* The renderer stamps the desktop app's own semver as its runtime telemetry release, as desktop main does. */
 const desktopRelease = (
   JSON.parse(readFileSync(path.resolve(__dirname, '../../desktop/package.json'), 'utf8')) as { version: string }
 ).version;
 // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
-const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
 const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT']);
 const csharpAssets = createCsharpLanguageAssets(path.resolve(__dirname, '../../../out/csharp-language/stage'));
@@ -58,15 +66,13 @@ export default defineConfig({
     tauBuildFrontendUrl: JSON.stringify(''),
     tauBuildId: JSON.stringify(Date.now()),
     tauBuildRelease: JSON.stringify(desktopRelease),
-    tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
     /* The renderer's runtime telemetry signal; the release workflow sets `TAU_TELEMETRY_HOST: cloud` literally. */
     // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
     tauTelemetryHostCloudBuild: JSON.stringify(resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST'])),
     tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
     tauPicogkBrowserAssets: picogkAssets.assets ? JSON.stringify(picogkAssets.assets) : 'undefined',
     tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
-    // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
-    'import.meta.env.TAU_TARGET': '"desktop"',
+    ...desktopTarget.define,
   },
   plugins: [
     mtAssets.plugin,
@@ -78,7 +84,6 @@ export default defineConfig({
     createUiSourceAliasPlugin({
       emitModuleGraph: true,
       target: 'desktop',
-      tauCloudEnabled,
     }),
     base64Loader,
     createUiReactCompilerPlugin(),
@@ -87,10 +92,12 @@ export default defineConfig({
   ],
   worker: {
     // https://vite.dev/config/worker-options.html#worker-plugins
-    plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop', tauCloudEnabled })],
+    plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop' })],
   },
-  resolve: { alias: [...uiResolveAlias] },
-  ssr: uiSsrOptions,
+  // Workers build with this `resolve` too, so the file-manager worker resolves the desktop variant.
+  resolve: { alias: [...uiResolveAlias], conditions: desktopTarget.resolve.conditions },
+  // The server environment's own `resolve`, where the Environment API reads it (the web config's `uiSsrOptions`).
+  environments: { ssr: { resolve: { ...uiSsrOptions, ...desktopTarget.ssrResolve } } },
   // Mirrors `uiOptimizeDepsOptions` in the web config: smlibwasm resolves its WASM from import.meta.url.
   optimizeDeps: { exclude: ['@classcad/smlibwasm'] },
   server: {

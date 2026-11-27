@@ -23,12 +23,20 @@ import { hydrateLease } from '@taucad/api-git-core/store/lease';
 import { decodeManifest, encodeManifest } from '@taucad/api-git-core/store/manifest';
 import type { RepositoryLease } from '@taucad/api-git-core/store/lease';
 import { repositoryLocator } from '@taucad/api-git-core/store/locator';
-import { isPublishableTreePath, parseLfsPointer, readPublishedTree } from '#publications/publication-materializer.js';
+import {
+  isPublishableTreePath,
+  materializePublishedTags,
+  parseLfsPointer,
+  readPublishedTree,
+} from '#publications/publication-materializer.js';
 import { leaseGitRunner } from '#testing/lease-git-runner.fixture.js';
+import { createTableDatabase } from '#testing/table-database.fixture.js';
+import type { TableDatabase } from '#testing/table-database.fixture.js';
+import type { Table } from 'drizzle-orm';
 import type { MaterializerDependencies } from '#publications/publication-materializer.js';
 import { resolveLfsObjectLocation, tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
 import type { ObjectStorageServiceContract, PutBlobResult } from '@taucad/api-object-storage';
-import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
+import { blobKeyFromSha256Hex, servedBlobKey, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
 import * as schema from '@taucad/api-database/schema';
 
 type PublicationsServiceDeps = ConstructorParameters<typeof PublicationsService>;
@@ -189,18 +197,26 @@ function createPublishDatabase(args?: {
   readonly outerInsert: ReturnType<typeof vi.fn>;
 } {
   const txInserts: Array<{ table: unknown; payload: Record<string, unknown> }> = [];
+  /* The project's cloud link: none, so every publish here is a first publish. */
+  const noLink = {
+    where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }),
+  };
   const tx = {
     /* The project advisory lock the publish path takes (review F2). */
     execute: vi.fn().mockResolvedValue(undefined),
     select: vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue(args?.existingRows ?? []) }),
-      }),
+      from: vi.fn((table: unknown) =>
+        table === schema.projectShare
+          ? noLink
+          : { where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue(args?.existingRows ?? []) }) },
+      ),
     }),
     insert: vi.fn().mockImplementation((table: unknown) => ({
       values: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
         txInserts.push({ table, payload });
-        return { onConflictDoUpdate: vi.fn().mockResolvedValue(undefined) };
+        /* Awaited bare by most writes, and with `returning()` by the cloud link's upsert. */
+        const settled = Object.assign(Promise.resolve(), { returning: vi.fn().mockResolvedValue([{ ...payload }]) });
+        return { onConflictDoUpdate: vi.fn().mockReturnValue(settled) };
       }),
     })),
     update: vi.fn().mockReturnValue({
@@ -212,28 +228,34 @@ function createPublishDatabase(args?: {
     values: vi.fn().mockReturnValue({ onConflictDoUpdate: vi.fn().mockResolvedValue(undefined) }),
   });
 
+  /* Three reads, in order: the owner snapshot, the project mirror, then any
+     publication already on this name. Sequenced rather than shared, because
+     the last read is what decides create-versus-re-point. The link is read by
+     table, outside the sequence. */
+  const sequenced = vi
+    .fn()
+    .mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }),
+      }),
+    })
+    .mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue(args?.projectRows ?? []) }),
+      }),
+    })
+    .mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue(args?.existingRows ?? []) }),
+      }),
+    });
+
   const databaseService = {
     database: {
-      /* Three reads, in order: the owner snapshot, the project mirror, then any
-         publication already on this name. Sequenced rather than shared, because
-         the last read is what decides create-versus-re-point. */
-      select: vi
-        .fn()
-        .mockReturnValueOnce({
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }),
-          }),
-        })
-        .mockReturnValueOnce({
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue(args?.projectRows ?? []) }),
-          }),
-        })
-        .mockReturnValue({
-          from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue(args?.existingRows ?? []) }),
-          }),
-        }),
+      select: vi.fn(() => ({
+        from: (table: unknown) =>
+          table === schema.projectShare ? noLink : (sequenced() as { from: (from: unknown) => unknown }).from(table),
+      })),
       insert: outerInsert,
       /* The superseded manifest's decrement, which reports whether it fired. */
       update: vi.fn().mockReturnValue({
@@ -276,7 +298,6 @@ function publishRequest(
     revisionId: repositoryPath === undefined ? 'b'.repeat(40) : seededRevision(repositoryPath, tag),
     entryPath: 'main.ts',
     visibility: 'private',
-    title: 'Hello',
     ...overrides,
   };
 }
@@ -310,9 +331,10 @@ function createMetricsStub(): PublicationsServiceDeps[5] {
   } as unknown as PublicationsServiceDeps[5];
 }
 
-function createEmailStub(): PublicationsServiceDeps[6] {
+function createEmailStub(args?: { readonly deliveryEnabled?: boolean }): PublicationsServiceDeps[6] {
   return {
-    sendPublicationInvite: vi.fn().mockResolvedValue(undefined),
+    isDeliveryEnabled: args?.deliveryEnabled ?? true,
+    sendPublicationInvite: vi.fn().mockResolvedValue('sent'),
   } as unknown as PublicationsServiceDeps[6];
 }
 
@@ -341,41 +363,170 @@ function createRateLimiterStub(args?: {
   } as unknown as PublicationsServiceDeps[4];
 }
 
-function createDatabaseChainReturning(rows: unknown[]): PublicationsServiceDeps[0] {
-  const limit = vi.fn().mockResolvedValue(rows);
-  const where = vi.fn().mockReturnValue({ limit });
-  const from = vi.fn().mockReturnValue({ where });
-  const select = vi.fn().mockReturnValue({ from });
+const fixtureTime = new Date('2026-01-02T03:04:05.000Z');
 
+/** A version row of `proj_x`, private by default. */
+function publicationFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    database: { select },
-  } as unknown as PublicationsServiceDeps[0];
+    id: 'pub_test',
+    projectId: 'proj_x',
+    tag: 'v1',
+    revisionId: 'a'.repeat(40),
+    ownerId: 'user_owner',
+    visibility: 'private',
+    manifestKey: 'm.json',
+    ogImageKey: null,
+    thumbnailKey: null,
+    unpublishedAt: null,
+    parentPublicationId: null,
+    kernels: ['replicad'],
+    entryPath: 'main.ts',
+    title: 'T',
+    description: null,
+    forkCount: 0,
+    viewCount: 0,
+    ownerSnapshot: { id: 'user_owner', name: 'Owner' },
+    createdAt: fixtureTime,
+    runtimePin: '~0.1.0',
+    ...overrides,
+  };
 }
 
-function createSelectReturningRows(rows: unknown[]): { from: ReturnType<typeof vi.fn> } {
-  const limit = vi.fn().mockResolvedValue(rows);
-  const orderBy = vi.fn().mockResolvedValue(rows);
-  const where = vi.fn().mockReturnValue({ limit, orderBy });
-  const from = vi.fn().mockReturnValue({ where });
-  return { from };
+/** `proj_x`, owned by `user_owner`, pointing at `pub_test`. */
+function projectFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'proj_x',
+    ownerId: 'user_owner',
+    name: 'Tray',
+    description: 'A tray',
+    currentPublicationId: 'pub_test',
+    ...overrides,
+  };
 }
 
-function createProjectShareService(args: { readonly selectRows: unknown[][] }): PublicationsService {
-  const select = vi.fn();
-  for (const rows of args.selectRows) {
-    select.mockReturnValueOnce(createSelectReturningRows(rows));
-  }
+/** The cloud link of `proj_x`. */
+function linkRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'shr_test',
+    projectId: 'proj_x',
+    ownerId: 'user_owner',
+    visibility: 'private',
+    disabledAt: null,
+    publishedAt: fixtureTime,
+    createdAt: fixtureTime,
+    updatedAt: fixtureTime,
+    ...overrides,
+  };
+}
 
-  return createTestService(
-    { database: { select } } as unknown as PublicationsServiceDeps[0],
-    createStorageStub(),
+/** An active invitation to `shr_test`. */
+function grantRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'sga_1',
+    shareId: 'shr_test',
+    ownerId: 'user_owner',
+    recipientEmail: 'friend@example.com',
+    status: 'active',
+    createdAt: fixtureTime,
+    revokedAt: null,
+    ...overrides,
+  };
+}
+
+/**
+ * The rows one cloud link needs: its project, the version it shows, the link,
+ * its invited people and the accounts that may open it.
+ */
+function seedLink(
+  args: {
+    readonly link?: Record<string, unknown> | false;
+    readonly publication?: Record<string, unknown>;
+    readonly project?: Record<string, unknown>;
+    readonly grants?: ReadonlyArray<Record<string, unknown>>;
+    readonly users?: ReadonlyArray<Record<string, unknown>>;
+  } = {},
+): TableDatabase {
+  return createTableDatabase([
+    [schema.project, [projectFixture(args.project)]],
+    [schema.publication, [publicationFixture(args.publication)]],
+    [schema.projectShare, args.link === false ? [] : [linkRow(args.link)]],
+    [schema.projectShareAccess, [...(args.grants ?? [])]],
+    [
+      schema.user,
+      [
+        { id: 'user_owner', name: 'Owner', image: null, email: 'owner@example.com', emailVerified: true },
+        ...(args.users ?? []),
+      ],
+    ],
+  ]);
+}
+
+/** `seedLink` with `pub_newer` as the version the link shows and `pub_test` an earlier one. */
+function seedNewerVersion(args: Parameters<typeof seedLink>[0] = {}): TableDatabase {
+  const database = seedLink({ ...args, project: { currentPublicationId: 'pub_newer' } });
+  database.rows(schema.publication).push(publicationFixture({ id: 'pub_newer', tag: 'v2', manifestKey: 'm2.json' }));
+  return database;
+}
+
+/**
+ * Runs `commit` once the first read of `table` has answered: what another
+ * request committing between two reads looks like.
+ */
+function afterFirstRead(database: TableDatabase, table: Table, commit: () => void): void {
+  type Builder = PromiseLike<unknown> & Record<string, unknown>;
+  type Select = (...args: never[]) => { from: (from: Table) => Builder };
+  const handle = (database.databaseService as { database: { select: Select } }).database;
+  const select = handle.select.bind(handle);
+  let reads = 0;
+  handle.select = (...args) => {
+    const query = select(...args);
+    return {
+      from: (from) => {
+        const builder = query.from(from);
+        reads += from === table ? 1 : 0;
+        if (from === table && reads === 1) {
+          const then = builder.then.bind(builder);
+          Reflect.set(
+            builder,
+            'then',
+            async (onFulfilled?: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) =>
+              then((value) => {
+                commit();
+                return onFulfilled === undefined ? value : onFulfilled(value);
+              }, onRejected),
+          );
+        }
+        return builder;
+      },
+    };
+  };
+}
+
+/** A service over a table database; every other dependency is a stub unless given. */
+function createLinkService(
+  database: TableDatabase,
+  overrides: {
+    readonly storage?: PublicationsServiceDeps[1];
+    readonly redis?: PublicationsServiceDeps[3];
+    readonly rateLimiter?: PublicationsServiceDeps[4];
+    readonly metrics?: PublicationsServiceDeps[5];
+    readonly email?: PublicationsServiceDeps[6];
+    readonly billing?: PublicationsServiceDeps[7];
+    readonly repositoryPath?: string;
+    readonly deliverability?: NonNullable<PublicationsServiceDeps[10]>;
+  } = {},
+): PublicationsService {
+  return new PublicationsService(
+    database.databaseService as PublicationsServiceDeps[0],
+    overrides.storage ?? createManifestStorageStub(),
     createConfigStub(),
-    createRedisStub(),
-    createRateLimiterStub(),
-    createMetricsStub(),
-    createEmailStub(),
-    createBillingStub(),
-    ...leaseDependencies(''),
+    overrides.redis ?? createRedisStub(),
+    overrides.rateLimiter ?? createRateLimiterStub(),
+    overrides.metrics ?? createMetricsStub(),
+    overrides.email ?? createEmailStub(),
+    overrides.billing ?? createBillingStub(),
+    ...leaseDependencies(overrides.repositoryPath ?? ''),
+    overrides.deliverability,
   );
 }
 
@@ -677,147 +828,95 @@ describe('PublicationsService.publishFromRevision', () => {
     expect(filesField?.['.tau/parameters/main.ts.json']).toMatch(/^sha256:[a-f0-9]{64}$/u);
   });
 
-  it('should create initial private access grants and notify recipients with frontend links', async () => {
-    const email = createEmailStub();
-    const { databaseService, txInserts } = createPublishDatabase();
+  it('should create a private cloud link at the first publish and point the project at the version', async () => {
     const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
-
-    const service = createTestService(
-      databaseService,
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      email,
-      createBillingStub(),
-      ...leaseDependencies(repositoryPath),
-    );
-
-    const result = await service.publishFromRevision({
-      ownerId: 'user_1',
-      request: publishRequest(repositoryPath, {
-        sharedEmails: ['friend@example.com'],
-        notifyRecipients: true,
-      }),
-    });
-
-    const accessPayloads = txInserts
-      .filter((entry) => entry.table === schema.publicationAccess)
-      .flatMap((entry) => (Array.isArray(entry.payload) ? entry.payload : [entry.payload]));
-    expect(accessPayloads).toHaveLength(1);
-    expect(accessPayloads[0]).toMatchObject({ recipientEmail: 'friend@example.com', status: 'active' });
-    expect(vi.mocked(email.sendPublicationInvite)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(email.sendPublicationInvite).mock.calls[0]?.[0]).toMatchObject({ url: result.urls.share });
-  });
-
-  it('should still publish successfully when the owner is over the invite-email cap', async () => {
+    const database = createTableDatabase([[schema.user, [{ id: 'user_1', name: 'Ada', image: null }]]]);
     const email = createEmailStub();
-    const { databaseService } = createPublishDatabase();
-    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
+    const service = createLinkService(database, { repositoryPath, email });
 
-    const service = createTestService(
-      databaseService,
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub({ inviteAllowed: false }),
-      createMetricsStub(),
-      email,
-      createBillingStub(),
-      ...leaseDependencies(repositoryPath),
-    );
+    const { visibility: _visibility, ...withoutVisibility } = publishRequest(repositoryPath);
+    const result = await service.publishFromRevision({ ownerId: 'user_1', request: withoutVisibility });
 
-    const result = await service.publishFromRevision({
-      ownerId: 'user_1',
-      request: publishRequest(repositoryPath, { sharedEmails: ['friend@example.com'], notifyRecipients: true }),
+    const [link] = database.rows(schema.projectShare);
+    expect(link).toMatchObject({ projectId: 'proj_1', ownerId: 'user_1', visibility: 'private', disabledAt: null });
+    expect(link?.['publishedAt']).toBeInstanceOf(Date);
+    expect(result.share).toEqual({
+      id: link?.['id'],
+      url: `http://app/s/tau~${String(link?.['id'])}`,
+      visibility: 'private',
     });
-
-    expect(result.id).toMatch(/^pub_/u);
+    expect(result.share.id).toMatch(/^shr_/u);
+    expect(result.urls.share).toBe(result.share.url);
+    expect(result.urls.view).toBe(result.share.url);
+    expect(result.version).toEqual({ tag: 'v1' });
+    expect(database.rows(schema.project)[0]?.['currentPublicationId']).toBe(result.id);
+    /* The version carries the project's name and description (D3). */
+    expect(database.rows(schema.publication)[0]).toMatchObject({ title: 'Demo', visibility: 'private' });
     expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
   });
 
-  // T8 (email bounce blueprint R9): skip the undeliverable recipient before the cap; both grants exist.
-  it('should send one invite and consume one cap slot when one of two recipients is undeliverable', async () => {
-    const email = createEmailStub();
-    const metrics = createMetricsStub();
-    const limiter = createRateLimiterStub();
-    const { databaseService, txInserts } = createPublishDatabase();
+  it('should keep the link id, its setting and its invited people on a later publish, and turn a stopped link back on', async () => {
     const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
-    const deliverability = {
-      undeliverableAmong: vi.fn(async () => new Set(['gone@example.com'])),
-    } as unknown as NonNullable<PublicationsServiceDeps[10]>;
-
-    const service = createTestService(
-      databaseService,
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      limiter,
-      metrics,
-      email,
-      createBillingStub(),
-      ...leaseDependencies(repositoryPath),
-      deliverability,
-    );
-
-    await service.publishFromRevision({
-      ownerId: 'user_1',
-      request: publishRequest(repositoryPath, {
-        sharedEmails: ['friend@example.com', 'gone@example.com'],
-        notifyRecipients: true,
-      }),
-    });
-
-    const accessPayloads = txInserts
-      .filter((entry) => entry.table === schema.publicationAccess)
-      .flatMap((entry) => (Array.isArray(entry.payload) ? entry.payload : [entry.payload]));
-    expect(accessPayloads.map((payload) => (payload as { recipientEmail: string }).recipientEmail).toSorted()).toEqual([
-      'friend@example.com',
-      'gone@example.com',
+    const stoppedAt = new Date('2026-11-01T00:00:00.000Z');
+    const database = createTableDatabase([
+      [schema.user, [{ id: 'user_1', name: 'Ada', image: null }]],
+      [
+        schema.project,
+        [{ id: 'proj_1', ownerId: 'user_1', name: 'Demo', description: null, currentPublicationId: null }],
+      ],
+      [
+        schema.projectShare,
+        [
+          linkRow({
+            id: 'shr_keep',
+            projectId: 'proj_1',
+            ownerId: 'user_1',
+            visibility: 'public',
+            disabledAt: stoppedAt,
+          }),
+        ],
+      ],
+      [schema.projectShareAccess, [grantRow({ shareId: 'shr_keep' })]],
     ]);
-    expect(vi.mocked(limiter.consumeInviteEmailSlots)).toHaveBeenCalledExactlyOnceWith({ ownerId: 'user_1', count: 1 });
-    expect(vi.mocked(email.sendPublicationInvite)).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ recipientEmail: 'friend@example.com' }),
-    );
-    expect(vi.mocked(metrics.publicationInviteEmailsSuppressedTotal.add)).toHaveBeenCalledExactlyOnceWith(1, {
-      trigger: 'publish',
-      reason: 'recipient_undeliverable',
+    const email = createEmailStub();
+    const service = createLinkService(database, { repositoryPath, email });
+
+    const { visibility: _visibility, ...withoutVisibility } = publishRequest(repositoryPath);
+    const result = await service.publishFromRevision({ ownerId: 'user_1', request: withoutVisibility });
+
+    expect(result.share).toEqual({ id: 'shr_keep', url: 'http://app/s/tau~shr_keep', visibility: 'public' });
+    expect(database.rows(schema.projectShare)).toHaveLength(1);
+    expect(database.rows(schema.projectShare)[0]).toMatchObject({
+      id: 'shr_keep',
+      visibility: 'public',
+      disabledAt: null,
     });
+    expect(database.rows(schema.projectShareAccess)).toEqual([expect.objectContaining({ status: 'active' })]);
+    /* Publishing an update emails nobody (D4). */
+    expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
   });
 
-  it('should consume no cap slot when every recipient is undeliverable', async () => {
-    const email = createEmailStub();
-    const limiter = createRateLimiterStub();
-    const { databaseService } = createPublishDatabase();
+  it('should set the link to the visibility a publish asks for', async () => {
     const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
-    const deliverability = {
-      undeliverableAmong: vi.fn(async () => new Set(['gone@example.com'])),
-    } as unknown as NonNullable<PublicationsServiceDeps[10]>;
+    const database = createTableDatabase([
+      [
+        schema.project,
+        [{ id: 'proj_1', ownerId: 'user_1', name: 'Demo', description: null, currentPublicationId: null }],
+      ],
+      [
+        schema.projectShare,
+        [linkRow({ id: 'shr_keep', projectId: 'proj_1', ownerId: 'user_1', visibility: 'private' })],
+      ],
+    ]);
+    const service = createLinkService(database, { repositoryPath });
 
-    const service = createTestService(
-      databaseService,
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      limiter,
-      createMetricsStub(),
-      email,
-      createBillingStub(),
-      ...leaseDependencies(repositoryPath),
-      deliverability,
-    );
-
-    await service.publishFromRevision({
+    const result = await service.publishFromRevision({
       ownerId: 'user_1',
-      request: publishRequest(repositoryPath, {
-        sharedEmails: ['Gone@Example.com'],
-        notifyRecipients: true,
-      }),
+      request: publishRequest(repositoryPath, { visibility: 'public' }),
     });
 
-    expect(vi.mocked(limiter.consumeInviteEmailSlots)).not.toHaveBeenCalled();
-    expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
+    expect(result.share.visibility).toBe('public');
+    expect(database.rows(schema.projectShare)[0]?.['visibility']).toBe('public');
   });
 
   it('should refuse a named version larger than a publication may be', async () => {
@@ -853,1048 +952,779 @@ describe('PublicationsService.publishFromRevision', () => {
 });
 
 describe('PublicationsService.getProjectShareEnvelope', () => {
-  it('returns an unpublished envelope when the backend project mirror does not exist', async () => {
-    const service = createProjectShareService({ selectRows: [[]] });
+  it('answers no link when the backend project mirror does not exist', async () => {
+    const service = createLinkService(createTableDatabase([]));
 
-    await expect(service.getProjectShareEnvelope({ projectId: 'proj_missing', ownerId: 'owner-1' })).resolves.toEqual({
+    await expect(
+      service.getProjectShareEnvelope({ projectId: 'proj_missing', ownerId: 'user_owner' }),
+    ).resolves.toEqual({
       project: { id: 'proj_missing', name: null, description: null },
-      currentPublication: null,
-      snapshot: { state: 'unpublished' },
+      share: null,
     });
   });
 
-  it('returns an unpublished envelope for an owned project without a current publication', async () => {
-    const service = createProjectShareService({
-      selectRows: [
-        [
-          {
-            id: 'proj_1',
-            ownerId: 'owner-1',
-            name: 'Tray',
-            description: 'A tray',
-            currentPublicationId: null,
-          },
-        ],
-      ],
-    });
+  it('answers no link for a project that has never been published', async () => {
+    const service = createLinkService(seedLink({ link: false, project: { currentPublicationId: null } }));
 
-    await expect(service.getProjectShareEnvelope({ projectId: 'proj_1', ownerId: 'owner-1' })).resolves.toEqual({
-      project: { id: 'proj_1', name: 'Tray', description: 'A tray' },
-      currentPublication: null,
-      snapshot: { state: 'unpublished' },
+    await expect(service.getProjectShareEnvelope({ projectId: 'proj_x', ownerId: 'user_owner' })).resolves.toEqual({
+      project: { id: 'proj_x', name: 'Tray', description: 'A tray' },
+      share: null,
     });
   });
 
   it('rejects a project owned by another user', async () => {
-    const service = createProjectShareService({
-      selectRows: [
-        [
-          {
-            id: 'proj_1',
-            ownerId: 'owner-2',
-            name: 'Tray',
-            description: null,
-            currentPublicationId: null,
-          },
-        ],
-      ],
-    });
+    const service = createLinkService(seedLink({ project: { ownerId: 'user_other' } }));
 
-    await expect(service.getProjectShareEnvelope({ projectId: 'proj_1', ownerId: 'owner-1' })).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
+    await expect(
+      service.getProjectShareEnvelope({ projectId: 'proj_x', ownerId: 'user_owner' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('returns active grants for the current publication', async () => {
-    const createdAt = new Date('2026-01-02T03:04:05.000Z');
-    const grantCreatedAt = new Date('2026-01-03T03:04:05.000Z');
-    const service = createProjectShareService({
-      selectRows: [
-        [
-          {
-            id: 'proj_1',
-            ownerId: 'owner-1',
-            name: 'Tray',
-            description: 'A tray',
-            currentPublicationId: 'pub_current',
-          },
-        ],
-        [
-          {
-            id: 'pub_current',
-            tag: 'v1',
-            title: 'Shared tray',
-            description: 'Shared description',
-            visibility: 'private',
-            createdAt,
-            unpublishedAt: null,
-          },
-        ],
-        [
-          {
-            id: 'pva_1',
-            publicationId: 'pub_current',
-            recipientEmail: 'friend@example.com',
-            status: 'active',
-            createdAt: grantCreatedAt,
-            revokedAt: null,
-          },
-        ],
-      ],
-    });
+  it('answers the link, the version it shows and its active invited people', async () => {
+    const service = createLinkService(
+      seedLink({
+        grants: [grantRow(), grantRow({ id: 'sga_2', recipientEmail: 'gone@example.com', status: 'revoked' })],
+      }),
+    );
 
-    const envelope = await service.getProjectShareEnvelope({ projectId: 'proj_1', ownerId: 'owner-1' });
-
-    expect(envelope).toMatchObject({
-      project: { id: 'proj_1', name: 'Tray', description: 'A tray' },
-      currentPublication: {
-        id: 'pub_current',
-        tag: 'v1',
-        title: 'Shared tray',
-        description: 'Shared description',
+    await expect(service.getProjectShareEnvelope({ projectId: 'proj_x', ownerId: 'user_owner' })).resolves.toEqual({
+      project: { id: 'proj_x', name: 'Tray', description: 'A tray' },
+      share: {
+        id: 'shr_test',
+        url: 'http://app/s/tau~shr_test',
         visibility: 'private',
-        createdAt: createdAt.toISOString(),
-        urls: { share: 'http://app/s/tau~pub_current' },
+        status: 'active',
+        stoppedAt: null,
+        publishedAt: fixtureTime.toISOString(),
+        currentVersion: { publicationId: 'pub_test', tag: 'v1', revisionId: 'a'.repeat(40) },
         access: {
           grants: [
             {
-              id: 'pva_1',
-              publicationId: 'pub_current',
+              id: 'sga_1',
               recipientEmail: 'friend@example.com',
               status: 'active',
-              createdAt: grantCreatedAt.toISOString(),
+              createdAt: fixtureTime.toISOString(),
               revokedAt: null,
+              notDelivered: false,
             },
           ],
         },
       },
-      snapshot: { state: 'published-current', lastPublishedAt: createdAt.toISOString() },
     });
   });
 
-  it('returns unpublished when the current publication pointer is stale', async () => {
-    const service = createProjectShareService({
-      selectRows: [
-        [
-          {
-            id: 'proj_1',
-            ownerId: 'owner-1',
-            name: 'Tray',
-            description: null,
-            currentPublicationId: 'pub_missing',
-          },
+  it('lists invited people newest first', async () => {
+    const service = createLinkService(
+      seedLink({
+        grants: [
+          grantRow({ id: 'sga_old', recipientEmail: 'old@example.com', createdAt: new Date('2026-01-01T00:00:00Z') }),
+          grantRow({ id: 'sga_new', recipientEmail: 'new@example.com', createdAt: new Date('2026-03-01T00:00:00Z') }),
         ],
-        [],
-      ],
-    });
+      }),
+    );
 
-    await expect(service.getProjectShareEnvelope({ projectId: 'proj_1', ownerId: 'owner-1' })).resolves.toEqual({
-      project: { id: 'proj_1', name: 'Tray', description: null },
-      currentPublication: null,
-      snapshot: { state: 'unpublished' },
+    const envelope = await service.getProjectShareEnvelope({ projectId: 'proj_x', ownerId: 'user_owner' });
+
+    expect(envelope.share?.access.grants.map((grant) => grant.id)).toEqual(['sga_new', 'sga_old']);
+  });
+
+  it('answers a stopped link with when it stopped', async () => {
+    const stoppedAt = new Date('2026-02-01T00:00:00.000Z');
+    const service = createLinkService(seedLink({ link: { disabledAt: stoppedAt } }));
+
+    const envelope = await service.getProjectShareEnvelope({ projectId: 'proj_x', ownerId: 'user_owner' });
+
+    expect(envelope.share).toMatchObject({ status: 'stopped', stoppedAt: stoppedAt.toISOString() });
+  });
+
+  it('marks a grant whose recipient is undeliverable as not delivered, and only that', async () => {
+    const deliverability = mock<NonNullable<PublicationsServiceDeps[10]>>({
+      undeliverableAmong: vi.fn(async () => new Set(['gone@example.com'])),
     });
+    const service = createLinkService(
+      seedLink({ grants: [grantRow(), grantRow({ id: 'sga_2', recipientEmail: 'gone@example.com' })] }),
+      { deliverability },
+    );
+
+    const envelope = await service.getProjectShareEnvelope({ projectId: 'proj_x', ownerId: 'user_owner' });
+
+    expect(envelope.share?.access.grants.map((grant) => [grant.recipientEmail, grant.notDelivered]).toSorted()).toEqual(
+      [
+        ['friend@example.com', false],
+        ['gone@example.com', true],
+      ],
+    );
   });
 });
 
-describe('PublicationsService.getPublicationForViewer', () => {
-  const publicationRow = {
-    id: 'pub_test',
-    projectId: 'proj_x',
-    tag: 'v1',
-    revisionId: 'a'.repeat(40),
-    ownerId: 'user_owner',
-    visibility: 'public',
-    manifestKey: 'm.json',
-    ogImageKey: null,
-    thumbnailKey: null,
-    unpublishedAt: null,
-    parentPublicationId: null,
-    kernels: ['replicad'],
-    entryPath: 'main.ts',
-    title: 'T',
-    description: null,
-    forkCount: 0,
-    viewCount: 0,
-    ownerSnapshot: null,
-    createdAt: new Date(),
-    runtimePin: '~0.1.0',
+describe('PublicationsService.getShareForViewer', () => {
+  const createStorageForManifest = (): PublicationsServiceDeps[1] => {
+    const storage = createManifestStorageStub();
+    vi.mocked(storage.publicUrl).mockImplementation(() => 'https://cdn.example/blob');
+    return storage;
   };
 
-  const createStorageForManifest = (): Pick<PublicationsServiceDeps[1], 'getBlob' | 'publicUrl'> => {
-    const entryRelativePath = 'main.ts';
-    const manifestDocument = {
-      version: 1,
-      projectId: 'proj_x',
-      entryPath: entryRelativePath,
-      files: { [entryRelativePath]: `sha256:${'a'.repeat(64)}` },
-      kernels: [],
-      runtime: '@taucad/runtime@x',
-      parameters: {},
-      createdAt: '2020-01-01T00:00:00.000Z',
-    };
+  it('answers the version the link shows, with ISO timestamps and the link as its address', async () => {
+    const service = createLinkService(seedLink({ link: { visibility: 'public' } }), {
+      storage: createStorageForManifest(),
+    });
 
-    return {
-      getBlob: vi.fn().mockResolvedValue({
-        body: Readable.from([Buffer.from(JSON.stringify(manifestDocument))]),
-      }),
-      publicUrl: vi.fn(() => 'https://cdn.example/blob'),
-    };
-  };
-
-  it('returns publication timestamps as ISO strings on the wire', async () => {
-    const publicRow = {
-      ...publicationRow,
-      visibility: 'public',
-      ownerSnapshot: { id: 'user_owner', name: 'Owner' },
-    };
-
-    const entryRelativePath = 'main.ts';
-    const manifestDocument = {
-      version: 1,
-      projectId: 'proj_x',
-      entryPath: entryRelativePath,
-      files: { [entryRelativePath]: `sha256:${'a'.repeat(64)}` },
-      kernels: [],
-      runtime: '@taucad/runtime@x',
-      parameters: {},
-      createdAt: '2020-01-01T00:00:00.000Z',
-    };
-
-    const storage = {
-      getBlob: vi.fn().mockResolvedValue({
-        body: Readable.from([Buffer.from(JSON.stringify(manifestDocument))]),
-      }),
-      publicUrl: vi.fn(() => 'https://cdn.example/blob'),
-    };
-
-    const service = createTestService(
-      createDatabaseChainReturning([publicRow]),
-      storage as unknown as PublicationsServiceDeps[1],
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
-
-    const result = await service.getPublicationForViewer({ publicationId: 'pub_test' });
+    const result = await service.getShareForViewer({ shareId: 'shr_test' });
 
     expect(publicationRowSchema.safeParse(result.publication).success).toBe(true);
     expect(result.viewerRole).toBe('public');
-    expect(typeof result.publication.createdAt).toBe('string');
+    expect(result.publication.id).toBe('pub_test');
+    expect(result.publication.createdAt).toBe(fixtureTime.toISOString());
     expect(result.publication.unpublishedAt).toBeNull();
+    expect(result.urls.share).toBe('http://app/s/tau~shr_test');
+    expect(result.urls.view).toBe('http://app/s/tau~shr_test');
+  });
+
+  it('serves the version the link showed when it authorized the viewer, even if a publish lands in between', async () => {
+    const database = seedLink({ link: { visibility: 'public' } });
+    database.rows(schema.publication).push(publicationFixture({ id: 'pub_newer', tag: 'v2' }));
+    /* A publish to people you invite commits right after the first read. */
+    afterFirstRead(database, schema.projectShare, () => {
+      Object.assign(database.rows(schema.project)[0] ?? {}, { currentPublicationId: 'pub_newer' });
+      Object.assign(database.rows(schema.projectShare)[0] ?? {}, { visibility: 'private' });
+    });
+    const service = createLinkService(database, { storage: createStorageForManifest() });
+
+    const result = await service.getShareForViewer({ shareId: 'shr_test' });
+
+    expect(result.publication.id).toBe('pub_test');
+  });
+
+  /**
+   * A link service whose version is behind the push (D19), so the read repairs it from a lease; `during` commits when
+   * the repair starts, as a write that lands while it runs would.
+   */
+  const repairingService = (database: TableDatabase, during: () => void): PublicationsService => {
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('export default () => {}')]]));
+    Object.assign(database.rows(schema.publication)[0] ?? {}, { revisionId: '', manifestKey: '', kernels: [] });
+    database.rows(schema.projectGit).push({ projectId: 'proj_x', generation: 4, derivedGeneration: 2 });
+    afterFirstRead(database, schema.projectGit, during);
+    return createLinkService(database, { repositoryPath, storage: createStorageForManifest() });
+  };
+
+  it('authorizes the viewer again when a repair re-reads a version a same-name private publish replaced', async () => {
+    const database = seedLink({ link: { visibility: 'public' } });
+    /* The repair runs; meanwhile a publish under the same name to people you invite reuses the version's id. */
+    const service = repairingService(database, () => {
+      Object.assign(database.rows(schema.publication)[0] ?? {}, { title: 'Invited only' });
+      Object.assign(database.rows(schema.projectShare)[0] ?? {}, { visibility: 'private' });
+    });
+
+    await expect(service.getShareForViewer({ shareId: 'shr_test' })).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('serves the repaired version, as the re-read link shows it, to a viewer that link still lets in', async () => {
+    const database = seedLink({ link: { visibility: 'public' } });
+    const service = repairingService(database, () => {
+      Object.assign(database.rows(schema.publication)[0] ?? {}, { title: 'Repaired' });
+    });
+
+    const result = await service.getShareForViewer({ shareId: 'shr_test' });
+
+    expect(result.publication).toMatchObject({ id: 'pub_test', title: 'Repaired', visibility: 'public' });
+  });
+
+  it('serves nothing when a publish moves the link to another version while the repair runs', async () => {
+    const database = seedLink({ link: { visibility: 'public' } });
+    database.rows(schema.publication).push(publicationFixture({ id: 'pub_newer', tag: 'v2' }));
+    const service = repairingService(database, () => {
+      Object.assign(database.rows(schema.project)[0] ?? {}, { currentPublicationId: 'pub_newer' });
+    });
+
+    await expect(service.getShareForViewer({ shareId: 'shr_test' })).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('takes who can open it from the link, not from the version', async () => {
+    const service = createLinkService(
+      seedLink({ link: { visibility: 'public' }, publication: { visibility: 'private' } }),
+      { storage: createStorageForManifest() },
+    );
+
+    const result = await service.getShareForViewer({ shareId: 'shr_test' });
+
+    expect(result.publication.visibility).toBe('public');
+  });
+
+  it('answers 404 for an unknown link and for a publication id', async () => {
+    const service = createLinkService(seedLink());
+
+    await expect(service.getShareForViewer({ shareId: 'shr_unknown' })).rejects.toBeInstanceOf(NotFoundException);
+    /* An old per-version address is not a link (C1). */
+    await expect(service.getShareForViewer({ shareId: 'pub_test', viewerUserId: 'user_owner' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('answers 410 for a stopped link, even for its owner', async () => {
+    const service = createLinkService(seedLink({ link: { disabledAt: new Date() } }));
+
+    await expect(service.getShareForViewer({ shareId: 'shr_test', viewerUserId: 'user_owner' })).rejects.toBeInstanceOf(
+      GoneException,
+    );
+  });
+
+  it('answers 404 when the project no longer points at a live version', async () => {
+    const service = createLinkService(seedLink({ publication: { unpublishedAt: new Date() } }));
+
+    await expect(service.getShareForViewer({ shareId: 'shr_test', viewerUserId: 'user_owner' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('resolves default thumbnail/og URLs without double-prefixing the namespace', async () => {
     const storage = createStorageForManifest();
-    const service = createTestService(
-      createDatabaseChainReturning([{ ...publicationRow, ownerSnapshot: { id: 'user_owner', name: 'Owner' } }]),
-      storage as unknown as PublicationsServiceDeps[1],
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
+    const service = createLinkService(seedLink({ link: { visibility: 'public' } }), { storage });
 
-    await service.getPublicationForViewer({ publicationId: 'pub_test' });
+    await service.getShareForViewer({ shareId: 'shr_test' });
 
-    // Null keys fall back to the default namespace with a bare key — not the
-    // previously double-prefixed `defaults/defaults/thumb.webp`.
     expect(storage.publicUrl).toHaveBeenCalledWith({ namespace: 'defaults', key: 'thumb.webp' });
     expect(storage.publicUrl).toHaveBeenCalledWith({ namespace: 'defaults', key: 'og.png' });
   });
 
   it('resolves an uploaded thumbnail from the blobs namespace', async () => {
     const storage = createStorageForManifest();
-    const service = createTestService(
-      createDatabaseChainReturning([
-        { ...publicationRow, thumbnailKey: 'blobs/ab/cdef', ownerSnapshot: { id: 'user_owner', name: 'Owner' } },
-      ]),
-      storage as unknown as PublicationsServiceDeps[1],
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
+    const service = createLinkService(
+      seedLink({ link: { visibility: 'public' }, publication: { thumbnailKey: 'blobs/ab/cdef' } }),
+      { storage },
     );
 
-    await service.getPublicationForViewer({ publicationId: 'pub_test' });
+    await service.getShareForViewer({ shareId: 'shr_test' });
 
     expect(storage.publicUrl).toHaveBeenCalledWith({ namespace: 'blobs', key: 'ab/cdef' });
   });
 
-  it('marks the publication owner with viewerRole owner', async () => {
-    const entryRelativePath = 'main.ts';
-    const manifestDocument = {
-      version: 1,
-      projectId: 'proj_x',
-      entryPath: entryRelativePath,
-      files: { [entryRelativePath]: `sha256:${'a'.repeat(64)}` },
-      kernels: [],
-      runtime: '@taucad/runtime@x',
-      parameters: {},
-      createdAt: '2020-01-01T00:00:00.000Z',
-    };
+  it('marks the link owner with viewerRole owner', async () => {
+    const service = createLinkService(seedLink(), { storage: createStorageForManifest() });
 
-    const storage = {
-      getBlob: vi.fn().mockResolvedValue({
-        body: Readable.from([Buffer.from(JSON.stringify(manifestDocument))]),
-      }),
-      publicUrl: vi.fn(() => 'https://cdn.example/blob'),
-    };
-
-    const service = createTestService(
-      createDatabaseChainReturning([
-        { ...publicationRow, visibility: 'public', ownerSnapshot: { id: 'user_owner', name: 'Owner' } },
-      ]),
-      storage as unknown as PublicationsServiceDeps[1],
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
-
-    const result = await service.getPublicationForViewer({
-      publicationId: 'pub_test',
-      viewerUserId: publicationRow.ownerId,
-    });
+    const result = await service.getShareForViewer({ shareId: 'shr_test', viewerUserId: 'user_owner' });
 
     expect(result.viewerRole).toBe('owner');
   });
 
-  it('requires authentication before opening private publications', async () => {
-    const service = createTestService(
-      createDatabaseChainReturning([
-        { ...publicationRow, visibility: 'private', ownerSnapshot: { id: 'user_owner', name: 'Owner' } },
-      ]),
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
+  it('requires authentication before opening a link for invited people', async () => {
+    const service = createLinkService(seedLink());
 
-    await expect(service.getPublicationForViewer({ publicationId: 'pub_test' })).rejects.toBeInstanceOf(
-      UnauthorizedException,
-    );
+    await expect(service.getShareForViewer({ shareId: 'shr_test' })).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('marks active email grant viewers with viewerRole grantee', async () => {
-    const privatePublication = {
-      ...publicationRow,
-      visibility: 'private',
-      ownerSnapshot: { id: 'user_owner', name: 'Owner' },
-    };
-
-    const publicationLimit = vi.fn().mockResolvedValue([privatePublication]);
-    const publicationWhere = vi.fn().mockReturnValue({ limit: publicationLimit });
-    const publicationFrom = vi.fn().mockReturnValue({ where: publicationWhere });
-
-    /* Every publication read consults `project_git` first: derived state that is
-       behind the manifest is repaired before the row is served (D19). */
-    const derivedFrom = vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([{ generation: 3, derivedGeneration: 3 }]) }),
-    });
-
-    const userLimit = vi.fn().mockResolvedValue([{ email: 'Friend@Example.com', emailVerified: true }]);
-    const userWhere = vi.fn().mockReturnValue({ limit: userLimit });
-    const userFrom = vi.fn().mockReturnValue({ where: userWhere });
-
-    const accessLimit = vi.fn().mockResolvedValue([{ id: 'pva_1' }]);
-    const accessWhere = vi.fn().mockReturnValue({ limit: accessLimit });
-    const accessFrom = vi.fn().mockReturnValue({ where: accessWhere });
-
-    const select = vi
-      .fn()
-      .mockReturnValueOnce({ from: publicationFrom })
-      .mockReturnValueOnce({ from: derivedFrom })
-      .mockReturnValueOnce({ from: userFrom })
-      .mockReturnValueOnce({ from: accessFrom });
-    const database = { database: { select } } as unknown as PublicationsServiceDeps[0];
-
-    const service = createTestService(
-      database,
-      createStorageForManifest() as unknown as PublicationsServiceDeps[1],
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
+  it('marks an invited, verified address with viewerRole grantee', async () => {
+    const service = createLinkService(
+      seedLink({
+        grants: [grantRow()],
+        users: [{ id: 'user_friend', name: 'Friend', email: 'Friend@Example.com', emailVerified: true }],
+      }),
+      { storage: createStorageForManifest() },
     );
 
-    const result = await service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_friend' });
+    const result = await service.getShareForViewer({ shareId: 'shr_test', viewerUserId: 'user_friend' });
 
     expect(result.viewerRole).toBe('grantee');
   });
 
-  it('rejects private viewers without an active verified email grant', async () => {
-    const privatePublication = {
-      ...publicationRow,
-      visibility: 'private',
-      ownerSnapshot: { id: 'user_owner', name: 'Owner' },
-    };
-
-    const publicationLimit = vi.fn().mockResolvedValue([privatePublication]);
-    const publicationWhere = vi.fn().mockReturnValue({ limit: publicationLimit });
-    const publicationFrom = vi.fn().mockReturnValue({ where: publicationWhere });
-
-    /* Every publication read consults `project_git` first: derived state that is
-       behind the manifest is repaired before the row is served (D19). */
-    const derivedFrom = vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([{ generation: 3, derivedGeneration: 3 }]) }),
-    });
-
-    const userLimit = vi.fn().mockResolvedValue([{ email: 'stranger@example.com', emailVerified: true }]);
-    const userWhere = vi.fn().mockReturnValue({ limit: userLimit });
-    const userFrom = vi.fn().mockReturnValue({ where: userWhere });
-
-    const accessLimit = vi.fn().mockResolvedValue([]);
-    const accessWhere = vi.fn().mockReturnValue({ limit: accessLimit });
-    const accessFrom = vi.fn().mockReturnValue({ where: accessWhere });
-
-    const select = vi
-      .fn()
-      .mockReturnValueOnce({ from: publicationFrom })
-      .mockReturnValueOnce({ from: derivedFrom })
-      .mockReturnValueOnce({ from: userFrom })
-      .mockReturnValueOnce({ from: accessFrom });
-    const database = { database: { select } } as unknown as PublicationsServiceDeps[0];
-
-    const service = createTestService(
-      database,
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
+  it.each([
+    ['an address that was never invited', { email: 'stranger@example.com', emailVerified: true }, 'active'],
+    ['an address whose access was removed', { email: 'friend@example.com', emailVerified: true }, 'revoked'],
+    ['an unverified address', { email: 'friend@example.com', emailVerified: false }, 'active'],
+  ])('rejects %s with 403', async (_case, account, status) => {
+    const service = createLinkService(
+      seedLink({
+        grants: [grantRow({ status })],
+        users: [{ id: 'user_friend', name: 'Friend', ...account }],
+      }),
     );
 
     await expect(
-      service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_stranger' }),
+      service.getShareForViewer({ shareId: 'shr_test', viewerUserId: 'user_friend' }),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
 
-describe('PublicationsService.updateVisibility', () => {
-  const publicationRow = {
-    id: 'pub_access',
-    projectId: 'proj_x',
-    tag: 'v1',
-    revisionId: 'a'.repeat(40),
-    ownerId: 'user_owner',
-    visibility: 'private',
-    manifestKey: 'm.json',
-    ogImageKey: null,
-    thumbnailKey: null,
-    unpublishedAt: null,
-    parentPublicationId: null,
-    kernels: ['replicad'],
-    entryPath: 'main.ts',
-    title: 'T',
-    description: null,
-    forkCount: 0,
-    viewCount: 0,
-    ownerSnapshot: { id: 'user_owner', name: 'Owner' },
-    createdAt: new Date(),
-    runtimePin: '~0.1.0',
-  };
+describe('PublicationsService.updateProjectShare', () => {
+  const blobPutsOf = (storage: PublicationsServiceDeps[1]): Array<Record<string, unknown>> =>
+    vi
+      .mocked(storage.putBlob)
+      .mock.calls.map(([callArgs]) => callArgs as unknown as Record<string, unknown>)
+      .filter((callArgs) => callArgs['namespace'] === 'blobs');
 
-  function createServiceWithVisibilityUpdate(args: {
-    readonly ownerRows: unknown[];
-    readonly updatedRows?: unknown[];
-    readonly storage?: PublicationsServiceDeps[1];
-  }): {
-    readonly service: PublicationsService;
-    readonly update: ReturnType<typeof vi.fn>;
-    readonly set: ReturnType<typeof vi.fn>;
-    readonly storage: PublicationsServiceDeps[1];
-  } {
-    const ownerLimit = vi.fn().mockResolvedValue(args.ownerRows);
-    const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
-    const ownerFrom = vi.fn().mockReturnValue({ where: ownerWhere });
-    const select = vi.fn().mockReturnValue({ from: ownerFrom });
-
-    const returning = vi.fn().mockResolvedValue(args.updatedRows ?? [{ id: 'pub_access', visibility: 'public' }]);
-    const where = vi.fn().mockReturnValue({ returning });
-    const set = vi.fn().mockReturnValue({ where });
-    const update = vi.fn().mockReturnValue({ set });
-
-    const storage = args.storage ?? createManifestStorageStub();
-
-    const service = createTestService(
-      { database: { select, update } } as unknown as PublicationsServiceDeps[0],
-      storage,
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
-
-    return { service, update, set, storage };
-  }
-
-  it('switches private publications to public without mutating access grants', async () => {
-    const { service, update, set } = createServiceWithVisibilityUpdate({
-      ownerRows: [publicationRow],
-      updatedRows: [{ id: 'pub_access', visibility: 'public' }],
+  it('switches a link to anyone with it, copying the version it shows to the CDN tier first', async () => {
+    const database = seedLink({ grants: [grantRow()] });
+    const storage = createManifestStorageStub();
+    /* Storage first, row second: the link still says private while the bytes move. */
+    const visibilityDuringCopy: unknown[] = [];
+    vi.mocked(storage.putBlob).mockImplementation(async () => {
+      visibilityDuringCopy.push(database.rows(schema.projectShare)[0]?.['visibility']);
+      return { lost: false, etag: 'etag', alreadyExisted: false };
     });
+    const service = createLinkService(database, { storage });
 
-    const result = await service.updateVisibility({
-      publicationId: 'pub_access',
+    const share = await service.updateProjectShare({
+      projectId: 'proj_x',
       ownerId: 'user_owner',
       visibility: 'public',
     });
 
-    expect(result).toEqual({ id: 'pub_access', visibility: 'public' });
-    expect(update).toHaveBeenCalledWith(schema.publication);
-    expect(update).not.toHaveBeenCalledWith(schema.publicationAccess);
-    expect(set).toHaveBeenCalledWith({ visibility: 'public' });
+    expect(share).toMatchObject({ id: 'shr_test', visibility: 'public', status: 'active' });
+    expect(blobPutsOf(storage)).toEqual([
+      expect.objectContaining({
+        tier: 'public',
+        cacheControl: 'public, max-age=31536000, immutable',
+        ifNoneMatch: '*',
+      }),
+    ]);
+    expect(database.rows(schema.projectShare)[0]?.['visibility']).toBe('public');
+    expect(database.rows(schema.publication)[0]?.['visibility']).toBe('public');
+    /* Invited people stay on the link. */
+    expect(database.rows(schema.projectShareAccess)).toEqual([expect.objectContaining({ status: 'active' })]);
+    expect(visibilityDuringCopy).toEqual(['private']);
   });
 
-  it('switches public publications back to private', async () => {
-    const { service } = createServiceWithVisibilityUpdate({
-      ownerRows: [{ ...publicationRow, visibility: 'public' }],
-      updatedRows: [{ id: 'pub_access', visibility: 'private' }],
+  it('dual-homes the version into the private tier when the link becomes invite-only', async () => {
+    const storage = createManifestStorageStub();
+    const service = createLinkService(seedLink({ link: { visibility: 'public' } }), { storage });
+
+    await service.updateProjectShare({ projectId: 'proj_x', ownerId: 'user_owner', visibility: 'private' });
+
+    expect(blobPutsOf(storage)).toEqual([
+      expect.objectContaining({ tier: 'private', cacheControl: 'private, no-cache' }),
+    ]);
+    expect(vi.mocked(storage.deleteBlob)).not.toHaveBeenCalled();
+  });
+
+  it('skips blob copies that already exist in the target tier', async () => {
+    const storage = createManifestStorageStub();
+    vi.mocked(storage.headBlob).mockResolvedValue({
+      contentType: 'application/octet-stream',
+      size: 1,
+      etag: 'e',
+      cacheControl: '',
     });
+    const service = createLinkService(seedLink(), { storage });
+
+    await service.updateProjectShare({ projectId: 'proj_x', ownerId: 'user_owner', visibility: 'public' });
+
+    expect(vi.mocked(storage.putBlob)).not.toHaveBeenCalled();
+  });
+
+  it('keeps the setting when storage reconciliation fails', async () => {
+    const database = seedLink();
+    const storage = createManifestStorageStub();
+    vi.mocked(storage.putBlob).mockRejectedValue(new Error('bucket unavailable'));
+    const service = createLinkService(database, { storage });
 
     await expect(
-      service.updateVisibility({
-        publicationId: 'pub_access',
+      service.updateProjectShare({ projectId: 'proj_x', ownerId: 'user_owner', visibility: 'public' }),
+    ).rejects.toThrow('bucket unavailable');
+
+    expect(database.rows(schema.projectShare)[0]?.['visibility']).toBe('private');
+  });
+
+  it('writes nothing for a same-value request', async () => {
+    const database = seedLink();
+    const storage = createManifestStorageStub();
+    const service = createLinkService(database, { storage });
+
+    await expect(
+      service.updateProjectShare({ projectId: 'proj_x', ownerId: 'user_owner', visibility: 'private' }),
+    ).resolves.toMatchObject({ visibility: 'private' });
+
+    expect(database.writes).toEqual([]);
+    expect(vi.mocked(storage.putBlob)).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing when the link already has the setting by the time it holds the project lock', async () => {
+    const database = seedLink();
+    const storage = createManifestStorageStub();
+    /* Another request made the link public after this one first read it. */
+    afterFirstRead(database, schema.projectShare, () => {
+      Object.assign(database.rows(schema.projectShare)[0] ?? {}, { visibility: 'public' });
+    });
+    const service = createLinkService(database, { storage });
+
+    await expect(
+      service.updateProjectShare({ projectId: 'proj_x', ownerId: 'user_owner', visibility: 'public' }),
+    ).resolves.toMatchObject({ visibility: 'public' });
+
+    expect(database.writes).toEqual([]);
+    expect(vi.mocked(storage.putBlob)).not.toHaveBeenCalled();
+  });
+
+  it('needs the entitlement to make a link invite-only, and only then (T4/T16)', async () => {
+    const billing = createBillingStub({ canCreatePrivateShares: false });
+
+    await expect(
+      createLinkService(seedLink({ link: { visibility: 'public' } }), { billing }).updateProjectShare({
+        projectId: 'proj_x',
         ownerId: 'user_owner',
         visibility: 'private',
       }),
-    ).resolves.toEqual({ id: 'pub_access', visibility: 'private' });
-  });
-
-  it('returns the current visibility without updating for same-value requests', async () => {
-    const { service, update } = createServiceWithVisibilityUpdate({
-      ownerRows: [publicationRow],
-    });
+    ).rejects.toMatchObject({ response: { code: publicationApiCode.ENTITLEMENT_REQUIRED } });
 
     await expect(
-      service.updateVisibility({
-        publicationId: 'pub_access',
+      createLinkService(seedLink(), { billing }).updateProjectShare({
+        projectId: 'proj_x',
         ownerId: 'user_owner',
-        visibility: 'private',
+        visibility: 'public',
       }),
-    ).resolves.toEqual({ id: 'pub_access', visibility: 'private' });
-
-    expect(update).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ visibility: 'public' });
   });
 
-  it('rejects missing, forbidden, and unpublished publications', async () => {
+  it('rejects a project without a link, a stopped link and another owner', async () => {
     await expect(
-      createServiceWithVisibilityUpdate({ ownerRows: [] }).service.updateVisibility({
-        publicationId: 'pub_missing',
+      createLinkService(seedLink({ link: false })).updateProjectShare({
+        projectId: 'proj_x',
         ownerId: 'user_owner',
         visibility: 'public',
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
-
     await expect(
-      createServiceWithVisibilityUpdate({
-        ownerRows: [{ ...publicationRow, ownerId: 'other_user' }],
-      }).service.updateVisibility({
-        publicationId: 'pub_access',
-        ownerId: 'user_owner',
-        visibility: 'public',
-      }),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-
-    await expect(
-      createServiceWithVisibilityUpdate({
-        ownerRows: [{ ...publicationRow, unpublishedAt: new Date() }],
-      }).service.updateVisibility({
-        publicationId: 'pub_access',
+      createLinkService(seedLink({ link: { disabledAt: new Date() } })).updateProjectShare({
+        projectId: 'proj_x',
         ownerId: 'user_owner',
         visibility: 'public',
       }),
     ).rejects.toBeInstanceOf(GoneException);
-  });
-
-  describe('storage tier reconciliation (R7)', () => {
-    it('should copy manifest blobs to the public tier with immutable caching before flipping private → public', async () => {
-      const { service, update, storage } = createServiceWithVisibilityUpdate({
-        ownerRows: [publicationRow],
-        updatedRows: [{ id: 'pub_access', visibility: 'public' }],
-      });
-
-      await service.updateVisibility({ publicationId: 'pub_access', ownerId: 'user_owner', visibility: 'public' });
-
-      const blobPuts = vi
-        .mocked(storage.putBlob)
-        .mock.calls.map(([callArgs]) => callArgs)
-        .filter((callArgs) => callArgs.namespace === 'blobs');
-      expect(blobPuts).toEqual([
-        expect.objectContaining({
-          tier: 'public',
-          cacheControl: 'public, max-age=31536000, immutable',
-          ifNoneMatch: '*',
-        }),
-      ]);
-      // Storage reconciliation completes before the DB visibility flip.
-      const firstUpdateOrder = update.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY;
-      const lastPutOrder = vi.mocked(storage.putBlob).mock.invocationCallOrder.at(-1) ?? Number.POSITIVE_INFINITY;
-      expect(lastPutOrder).toBeLessThan(firstUpdateOrder);
-    });
-
-    it('should dual-home blobs into the private tier on public → private', async () => {
-      const { service, storage } = createServiceWithVisibilityUpdate({
-        ownerRows: [{ ...publicationRow, visibility: 'public' }],
-        updatedRows: [{ id: 'pub_access', visibility: 'private' }],
-      });
-
-      await service.updateVisibility({ publicationId: 'pub_access', ownerId: 'user_owner', visibility: 'private' });
-
-      const blobPuts = vi
-        .mocked(storage.putBlob)
-        .mock.calls.map(([callArgs]) => callArgs)
-        .filter((callArgs) => callArgs.namespace === 'blobs');
-      expect(blobPuts).toEqual([expect.objectContaining({ tier: 'private', cacheControl: 'private, no-cache' })]);
-
-      /* A manifest is written to the private tier whatever the visibility, so
-         there is no anonymous-origin copy to delete any more (review R9). */
-      expect(vi.mocked(storage.deleteBlob)).not.toHaveBeenCalled();
-    });
-
-    it('should skip blob copies that already exist in the target tier', async () => {
-      const storage = createManifestStorageStub();
-      vi.mocked(storage.headBlob).mockImplementation(async (callArgs) =>
-        callArgs.namespace === 'blobs' || callArgs.tier === 'private'
-          ? { contentType: 'application/octet-stream', size: 1, etag: 'e', cacheControl: '' }
-          : undefined,
-      );
-      const { service } = createServiceWithVisibilityUpdate({
-        ownerRows: [publicationRow],
-        updatedRows: [{ id: 'pub_access', visibility: 'public' }],
-        storage,
-      });
-
-      await service.updateVisibility({ publicationId: 'pub_access', ownerId: 'user_owner', visibility: 'public' });
-
-      expect(vi.mocked(storage.putBlob)).not.toHaveBeenCalled();
-    });
-
-    it('should keep the current visibility when storage reconciliation fails', async () => {
-      const storage = createManifestStorageStub();
-      vi.mocked(storage.putBlob).mockRejectedValue(new Error('bucket unavailable'));
-      const { service, update } = createServiceWithVisibilityUpdate({
-        ownerRows: [publicationRow],
-        storage,
-      });
-
-      await expect(
-        service.updateVisibility({ publicationId: 'pub_access', ownerId: 'user_owner', visibility: 'public' }),
-      ).rejects.toThrow('bucket unavailable');
-
-      expect(update).not.toHaveBeenCalled();
-    });
+    await expect(
+      createLinkService(seedLink({ project: { ownerId: 'user_other' } })).updateProjectShare({
+        projectId: 'proj_x',
+        ownerId: 'user_owner',
+        visibility: 'public',
+      }),
+    ).rejects.toMatchObject({ response: { code: publicationApiCode.PROJECT_FORBIDDEN } });
   });
 });
 
-describe('PublicationsService access grants', () => {
-  const publicationRow = {
-    id: 'pub_access',
-    projectId: 'proj_x',
-    tag: 'v1',
-    revisionId: 'a'.repeat(40),
-    ownerId: 'user_owner',
-    visibility: 'private',
-    manifestKey: 'm.json',
-    ogImageKey: null,
-    thumbnailKey: null,
-    unpublishedAt: null,
-    parentPublicationId: null,
-    kernels: ['replicad'],
-    entryPath: 'main.ts',
-    title: 'T',
-    description: null,
-    forkCount: 0,
-    viewCount: 0,
-    ownerSnapshot: { id: 'user_owner', name: 'Owner' },
-    createdAt: new Date(),
-    runtimePin: '~0.1.0',
-  };
+describe('PublicationsService.stopProjectShare', () => {
+  it('stops the link on a free plan, keeping its id and invited people', async () => {
+    const database = seedLink({ link: { visibility: 'public' }, grants: [grantRow()] });
+    const billing = createBillingStub({ canCreatePrivateShares: false });
+    const service = createLinkService(database, { billing });
 
-  const accessRow = {
-    id: 'pva_1',
-    publicationId: 'pub_access',
-    ownerId: 'user_owner',
-    recipientEmail: 'friend@example.com',
-    status: 'active',
-    createdAt: new Date(),
-    revokedAt: null,
-  };
+    await service.stopProjectShare({ projectId: 'proj_x', ownerId: 'user_owner' });
 
-  it('should list only active access grants', async () => {
-    const ownerLimit = vi.fn().mockResolvedValue([publicationRow]);
-    const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
-    const ownerFrom = vi.fn().mockReturnValue({ where: ownerWhere });
-
-    const orderBy = vi.fn().mockResolvedValue([accessRow]);
-    const accessWhere = vi.fn().mockReturnValue({ orderBy });
-    const accessFrom = vi.fn().mockReturnValue({ where: accessWhere });
-
-    const select = vi.fn().mockReturnValueOnce({ from: ownerFrom }).mockReturnValueOnce({ from: accessFrom });
-    const database = { database: { select } } as unknown as PublicationsServiceDeps[0];
-    const service = createTestService(
-      database,
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
-
-    const result = await service.listAccessGrants({ publicationId: 'pub_access', ownerId: 'user_owner' });
-
-    expect(result.grants).toHaveLength(1);
-    expect(result.grants[0]?.recipientEmail).toBe('friend@example.com');
-    expect(accessWhere).toHaveBeenCalledTimes(1);
+    const [stopped] = database.rows(schema.projectShare);
+    expect(stopped?.['id']).toBe('shr_test');
+    expect(stopped?.['disabledAt']).toBeInstanceOf(Date);
+    expect(database.rows(schema.projectShareAccess)).toEqual([expect.objectContaining({ status: 'active' })]);
+    await expect(service.getShareForViewer({ shareId: 'shr_test' })).rejects.toBeInstanceOf(GoneException);
   });
 
-  // R9 and D5: the owner sees "Not delivered" and nothing about why.
-  it('should mark a grant whose recipient is undeliverable as not delivered, and only that', async () => {
-    const ownerLimit = vi.fn().mockResolvedValue([publicationRow]);
-    const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
-    const ownerFrom = vi.fn().mockReturnValue({ where: ownerWhere });
-    const goneRow = {
-      ...accessRow,
-      id: 'pva_gone',
-      recipientEmail: 'gone@example.com',
-    };
-    const orderBy = vi.fn().mockResolvedValue([accessRow, goneRow]);
-    const accessWhere = vi.fn().mockReturnValue({ orderBy });
-    const accessFrom = vi.fn().mockReturnValue({ where: accessWhere });
-    const select = vi.fn().mockReturnValueOnce({ from: ownerFrom }).mockReturnValueOnce({ from: accessFrom });
-    const deliverability = {
-      undeliverableAmong: vi.fn(async () => new Set(['gone@example.com'])),
-    } as unknown as NonNullable<PublicationsServiceDeps[10]>;
-    const service = createTestService(
-      { database: { select } } as unknown as PublicationsServiceDeps[0],
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
-      deliverability,
-    );
+  it('is idempotent and keeps the first stop time', async () => {
+    const stoppedAt = new Date('2026-02-01T00:00:00.000Z');
+    const database = seedLink({ link: { disabledAt: stoppedAt } });
+    const service = createLinkService(database);
 
-    const result = await service.listAccessGrants({
-      publicationId: 'pub_access',
+    await service.stopProjectShare({ projectId: 'proj_x', ownerId: 'user_owner' });
+
+    expect(database.rows(schema.projectShare)[0]?.['disabledAt']).toBe(stoppedAt);
+  });
+
+  it('has nothing to stop for a project with no link', async () => {
+    await expect(
+      createLinkService(seedLink({ link: false })).stopProjectShare({ projectId: 'proj_x', ownerId: 'user_owner' }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects another owner', async () => {
+    await expect(
+      createLinkService(seedLink({ project: { ownerId: 'user_other' } })).stopProjectShare({
+        projectId: 'proj_x',
+        ownerId: 'user_owner',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+describe('PublicationsService link invitations', () => {
+  const invite = async (
+    service: PublicationsService,
+    overrides: { readonly recipientEmail?: string; readonly notifyRecipient?: boolean } = {},
+  ): ReturnType<PublicationsService['inviteProjectShareAccess']> =>
+    service.inviteProjectShareAccess({
+      projectId: 'proj_x',
       ownerId: 'user_owner',
+      recipientEmail: overrides.recipientEmail ?? ' New@Example.com ',
+      ...(overrides.notifyRecipient === undefined ? {} : { notifyRecipient: overrides.notifyRecipient }),
     });
 
-    expect(
-      result.grants.map(({ recipientEmail, notDelivered }) => ({
-        recipientEmail,
-        notDelivered,
-      })),
-    ).toStrictEqual([
-      { recipientEmail: 'friend@example.com', notDelivered: false },
-      { recipientEmail: 'gone@example.com', notDelivered: true },
-    ]);
-    expect(Object.keys(result.grants[1] ?? {})).not.toContain('reason');
-  });
-
-  it('should not send notification when re-adding an already active grant', async () => {
-    const ownerLimit = vi.fn().mockResolvedValue([publicationRow]);
-    const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
-    const ownerFrom = vi.fn().mockReturnValue({ where: ownerWhere });
-
-    const existingLimit = vi.fn().mockResolvedValue([accessRow]);
-    const existingWhere = vi.fn().mockReturnValue({ limit: existingLimit });
-    const existingFrom = vi.fn().mockReturnValue({ where: existingWhere });
-
-    const select = vi
-      .fn()
-      .mockReturnValueOnce({ from: ownerFrom })
-      .mockReturnValueOnce({ from: ownerFrom })
-      .mockReturnValueOnce({ from: existingFrom });
-    const returning = vi.fn().mockResolvedValue([accessRow]);
-    const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
-    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
-    const insert = vi.fn().mockReturnValue({ values });
-    const database = { database: { select, insert } } as unknown as PublicationsServiceDeps[0];
+  it('emails a new invited address the stable link and says it was sent', async () => {
+    const database = seedLink();
     const email = createEmailStub();
-    const service = createTestService(
-      database,
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      email,
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
+    const service = createLinkService(database, { email });
 
-    const result = await service.inviteAccess({
-      publicationId: 'pub_access',
-      ownerId: 'user_owner',
-      recipientEmail: ' Friend@Example.com ',
-      notifyRecipient: true,
+    const result = await invite(service);
+
+    expect(result).toMatchObject({
+      recipientEmail: 'new@example.com',
+      status: 'active',
+      notDelivered: false,
+      email: { status: 'sent' },
     });
-
-    expect(result.recipientEmail).toBe('friend@example.com');
-    expect(email.sendPublicationInvite).not.toHaveBeenCalled();
-  });
-
-  it('should send notification with a frontend publication URL when inviting a new grant', async () => {
-    const ownerLimit = vi.fn().mockResolvedValue([publicationRow]);
-    const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
-    const ownerFrom = vi.fn().mockReturnValue({ where: ownerWhere });
-
-    const existingLimit = vi.fn().mockResolvedValue([]);
-    const existingWhere = vi.fn().mockReturnValue({ limit: existingLimit });
-    const existingFrom = vi.fn().mockReturnValue({ where: existingWhere });
-
-    const select = vi
-      .fn()
-      .mockReturnValueOnce({ from: ownerFrom })
-      .mockReturnValueOnce({ from: ownerFrom })
-      .mockReturnValueOnce({ from: existingFrom });
-    const returning = vi.fn().mockResolvedValue([accessRow]);
-    const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
-    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
-    const insert = vi.fn().mockReturnValue({ values });
-    const database = { database: { select, insert } } as unknown as PublicationsServiceDeps[0];
-    const email = createEmailStub();
-    const service = createTestService(
-      database,
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      email,
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
-
-    const result = await service.inviteAccess({
-      publicationId: 'pub_access',
-      ownerId: 'user_owner',
-      recipientEmail: ' Friend@Example.com ',
-      notifyRecipient: true,
-    });
-
-    expect(result.recipientEmail).toBe('friend@example.com');
-    expect(email.sendPublicationInvite).toHaveBeenCalledWith({
-      recipientEmail: 'friend@example.com',
+    expect(result.id).toMatch(/^sga_/u);
+    expect(vi.mocked(email.sendPublicationInvite)).toHaveBeenCalledExactlyOnceWith({
+      recipientEmail: 'new@example.com',
       ownerName: 'Owner',
-      publicationTitle: 'T',
-      url: 'http://app/s/tau~pub_access',
+      publicationTitle: 'Tray',
+      url: 'http://app/s/tau~shr_test',
+    });
+    expect(database.rows(schema.projectShareAccess)).toEqual([
+      expect.objectContaining({ shareId: 'shr_test', recipientEmail: 'new@example.com', status: 'active' }),
+    ]);
+  });
+
+  it('does not email an address that already has access', async () => {
+    const email = createEmailStub();
+    const service = createLinkService(seedLink({ grants: [grantRow()] }), { email });
+
+    const result = await invite(service, { recipientEmail: 'friend@example.com' });
+
+    expect(result.email).toEqual({ status: 'not_requested' });
+    expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
+  });
+
+  it('emails a removed address that is invited again', async () => {
+    const database = seedLink({ grants: [grantRow({ status: 'revoked', revokedAt: new Date() })] });
+    const email = createEmailStub();
+    const service = createLinkService(database, { email });
+
+    const result = await invite(service, { recipientEmail: 'friend@example.com' });
+
+    expect(result.email).toEqual({ status: 'sent' });
+    expect(database.rows(schema.projectShareAccess)).toEqual([
+      expect.objectContaining({ id: 'sga_1', status: 'active', revokedAt: null }),
+    ]);
+  });
+
+  it('answers the committed grant with a skipped email when the email cannot be prepared', async () => {
+    const database = seedLink();
+    const email = createEmailStub();
+    const service = createLinkService(database, { email });
+    vi.spyOn(service, 'loadOwnerSnapshot').mockRejectedValue(new Error('database unavailable'));
+
+    const result = await invite(service);
+
+    expect(result).toMatchObject({
+      recipientEmail: 'new@example.com',
+      status: 'active',
+      email: { status: 'skipped', reason: 'send_failed' },
+    });
+    expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
+    expect(database.rows(schema.projectShareAccess)).toEqual([expect.objectContaining({ status: 'active' })]);
+  });
+
+  it('sends nothing when the caller asks for no email', async () => {
+    const email = createEmailStub();
+    const service = createLinkService(seedLink(), { email });
+
+    const result = await invite(service, { notifyRecipient: false });
+
+    expect(result.email).toEqual({ status: 'not_requested' });
+    expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
+  });
+
+  it('reports an undeliverable address without consuming the daily cap', async () => {
+    const limiter = createRateLimiterStub();
+    const metrics = createMetricsStub();
+    const deliverability = mock<NonNullable<PublicationsServiceDeps[10]>>({
+      undeliverableAmong: vi.fn(async () => new Set(['new@example.com'])),
+    });
+    const service = createLinkService(seedLink(), { rateLimiter: limiter, metrics, deliverability });
+
+    const result = await invite(service);
+
+    expect(result).toMatchObject({ notDelivered: true, email: { status: 'skipped', reason: 'undeliverable' } });
+    expect(vi.mocked(limiter.consumeInviteEmailSlots)).not.toHaveBeenCalled();
+    expect(vi.mocked(metrics.publicationInviteEmailsSuppressedTotal.add)).toHaveBeenCalledExactlyOnceWith(1, {
+      trigger: 'invite',
+      reason: 'recipient_undeliverable',
     });
   });
 
-  it('should suppress the invite notification and record it when the owner is over the daily cap', async () => {
-    const ownerLimit = vi.fn().mockResolvedValue([publicationRow]);
-    const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
-    const ownerFrom = vi.fn().mockReturnValue({ where: ownerWhere });
-
-    const existingLimit = vi.fn().mockResolvedValue([]);
-    const existingWhere = vi.fn().mockReturnValue({ limit: existingLimit });
-    const existingFrom = vi.fn().mockReturnValue({ where: existingWhere });
-
-    const select = vi
-      .fn()
-      .mockReturnValueOnce({ from: ownerFrom })
-      .mockReturnValueOnce({ from: ownerFrom })
-      .mockReturnValueOnce({ from: existingFrom });
-    const returning = vi.fn().mockResolvedValue([accessRow]);
-    const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
-    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
-    const insert = vi.fn().mockReturnValue({ values });
-    const database = { database: { select, insert } } as unknown as PublicationsServiceDeps[0];
-    const email = createEmailStub();
+  it('reports email_disabled when the deployment has no email provider', async () => {
+    const limiter = createRateLimiterStub();
     const metrics = createMetricsStub();
-    const service = createTestService(
-      database,
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub({ inviteAllowed: false }),
-      metrics,
-      email,
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
+    const email = createEmailStub({ deliveryEnabled: false });
+    const service = createLinkService(seedLink(), { rateLimiter: limiter, metrics, email });
 
-    const result = await service.inviteAccess({
-      publicationId: 'pub_access',
-      ownerId: 'user_owner',
-      recipientEmail: 'friend@example.com',
-      notifyRecipient: true,
-    });
+    const result = await invite(service);
 
-    // The access grant is still created — only the notification is withheld.
-    expect(result.recipientEmail).toBe('friend@example.com');
-    expect(email.sendPublicationInvite).not.toHaveBeenCalled();
-    expect(metrics.publicationInviteEmailsSuppressedTotal.add).toHaveBeenCalledWith(1, {
+    expect(result.email).toEqual({ status: 'skipped', reason: 'email_disabled' });
+    expect(vi.mocked(limiter.consumeInviteEmailSlots)).not.toHaveBeenCalled();
+    expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
+    expect(vi.mocked(metrics.publicationInviteEmailsSuppressedTotal.add)).toHaveBeenCalledExactlyOnceWith(1, {
       trigger: 'invite',
-      reason: 'cap_exceeded',
+      reason: 'email_disabled',
     });
   });
 
-  it('should fail closed and still grant access when the rate limiter is unavailable', async () => {
-    const ownerLimit = vi.fn().mockResolvedValue([publicationRow]);
-    const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
-    const ownerFrom = vi.fn().mockReturnValue({ where: ownerWhere });
-
-    const existingLimit = vi.fn().mockResolvedValue([]);
-    const existingWhere = vi.fn().mockReturnValue({ limit: existingLimit });
-    const existingFrom = vi.fn().mockReturnValue({ where: existingWhere });
-
-    const select = vi
-      .fn()
-      .mockReturnValueOnce({ from: ownerFrom })
-      .mockReturnValueOnce({ from: ownerFrom })
-      .mockReturnValueOnce({ from: existingFrom });
-    const returning = vi.fn().mockResolvedValue([accessRow]);
-    const onConflictDoUpdate = vi.fn().mockReturnValue({ returning });
-    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
-    const insert = vi.fn().mockReturnValue({ values });
-    const database = { database: { select, insert } } as unknown as PublicationsServiceDeps[0];
+  it('reports daily_cap and still grants access when the owner is over the cap', async () => {
+    const database = seedLink();
     const email = createEmailStub();
-    const metrics = createMetricsStub();
-    const service = createTestService(
-      database,
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub({ inviteThrows: true }),
-      metrics,
+    const service = createLinkService(database, {
       email,
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
-
-    const result = await service.inviteAccess({
-      publicationId: 'pub_access',
-      ownerId: 'user_owner',
-      recipientEmail: 'friend@example.com',
-      notifyRecipient: true,
+      rateLimiter: createRateLimiterStub({ inviteAllowed: false }),
     });
 
-    expect(result.recipientEmail).toBe('friend@example.com');
-    expect(email.sendPublicationInvite).not.toHaveBeenCalled();
-    expect(metrics.publicationInviteEmailsSuppressedTotal.add).toHaveBeenCalledWith(1, {
+    const result = await invite(service);
+
+    expect(result.email).toEqual({ status: 'skipped', reason: 'daily_cap' });
+    expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
+    expect(database.rows(schema.projectShareAccess)).toHaveLength(1);
+  });
+
+  it('fails closed and reports limiter_unavailable when the rate limiter is down', async () => {
+    const email = createEmailStub();
+    const service = createLinkService(seedLink(), {
+      email,
+      rateLimiter: createRateLimiterStub({ inviteThrows: true }),
+    });
+
+    const result = await invite(service);
+
+    expect(result.email).toEqual({ status: 'skipped', reason: 'limiter_unavailable' });
+    expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
+  });
+
+  it('reports send_failed when the provider refuses the email', async () => {
+    const email = createEmailStub();
+    vi.mocked(email.sendPublicationInvite).mockRejectedValue(new Error('resend down'));
+    const metrics = createMetricsStub();
+    const service = createLinkService(seedLink(), { email, metrics });
+
+    const result = await invite(service);
+
+    expect(result.email).toEqual({ status: 'skipped', reason: 'send_failed' });
+    expect(vi.mocked(metrics.publicationInviteEmailsTotal.add)).toHaveBeenCalledWith(1, {
       trigger: 'invite',
-      reason: 'limiter_unavailable',
+      outcome: 'failed',
     });
+  });
+
+  it('reports email_disabled when the send itself finds no provider', async () => {
+    const email = createEmailStub();
+    vi.mocked(email.sendPublicationInvite).mockResolvedValue('disabled');
+    const service = createLinkService(seedLink(), { email });
+
+    await expect(invite(service)).resolves.toMatchObject({ email: { status: 'skipped', reason: 'email_disabled' } });
+  });
+
+  it('refuses invites on a link anyone can open, a stopped link and a project with no link', async () => {
+    await expect(invite(createLinkService(seedLink({ link: { visibility: 'public' } })))).rejects.toSatisfy(
+      (error: unknown) => isBadRequestWithCode(error, publicationApiCode.FORBIDDEN),
+    );
+    await expect(invite(createLinkService(seedLink({ link: { disabledAt: new Date() } })))).rejects.toBeInstanceOf(
+      GoneException,
+    );
+    await expect(invite(createLinkService(seedLink({ link: false })))).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('removes an invited address, on a stopped link too', async () => {
+    const database = seedLink({ link: { disabledAt: new Date() }, grants: [grantRow()] });
+    const service = createLinkService(database);
+
+    const grant = await service.revokeProjectShareAccess({
+      projectId: 'proj_x',
+      ownerId: 'user_owner',
+      accessId: 'sga_1',
+    });
+
+    expect(grant).toMatchObject({ id: 'sga_1', status: 'revoked' });
+    expect(typeof grant.revokedAt).toBe('string');
+    expect(database.rows(schema.projectShareAccess)[0]?.['status']).toBe('revoked');
+  });
+
+  it('answers 404 for a grant of another link', async () => {
+    const service = createLinkService(seedLink({ grants: [grantRow({ shareId: 'shr_other' })] }));
+
+    await expect(
+      service.revokeProjectShareAccess({ projectId: 'proj_x', ownerId: 'user_owner', accessId: 'sga_1' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
 
 describe('PublicationsService.recordView', () => {
-  const basePublicationRow = {
-    id: 'pub_view',
-    projectId: 'proj_x',
-    tag: 'v1',
-    revisionId: 'a'.repeat(40),
-    ownerId: 'user_owner',
-    visibility: 'public',
-    manifestKey: 'm.json',
-    ogImageKey: null,
-    thumbnailKey: null,
-    unpublishedAt: null,
-    parentPublicationId: null,
-    kernels: ['replicad'],
-    entryPath: 'main.ts',
-    title: 'T',
-    description: null,
-    forkCount: 0,
-    viewCount: 0,
-    ownerSnapshot: null,
-    createdAt: new Date(),
-    runtimePin: '~0.1.0',
-  };
-
-  function createServiceWith(args: {
-    database: PublicationsServiceDeps[0];
-    redis?: PublicationsServiceDeps[3];
-    rateLimiter?: PublicationsServiceDeps[4];
-    metrics?: PublicationsServiceDeps[5];
-  }): PublicationsService {
-    return createTestService(
-      args.database,
-      createStorageStub(),
-      createConfigStub(),
-      args.redis ?? createRedisStub(),
-      args.rateLimiter ?? createRateLimiterStub(),
-      args.metrics ?? createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
+  function createViewService(
+    database: TableDatabase,
+    args: {
+      readonly redis?: PublicationsServiceDeps[3];
+      readonly rateLimiter?: PublicationsServiceDeps[4];
+      readonly metrics?: PublicationsServiceDeps[5];
+    } = {},
+  ): PublicationsService {
+    return createLinkService(database, {
+      ...(args.redis === undefined ? {} : { redis: args.redis }),
+      ...(args.rateLimiter === undefined ? {} : { rateLimiter: args.rateLimiter }),
+      ...(args.metrics === undefined ? {} : { metrics: args.metrics }),
+    });
   }
 
-  it('throws NotFoundException when publication is missing', async () => {
-    const service = createServiceWith({ database: createDatabaseChainReturning([]) });
+  const view = async (service: PublicationsService, identity: { viewerHash: string; sessionUserId?: string }) =>
+    service.recordView({ publicationId: 'pub_test', identity });
 
+  it('throws NotFoundException when the publication or its link is missing', async () => {
     await expect(
-      service.recordView({
+      createViewService(createTableDatabase([])).recordView({
         publicationId: 'pub_missing',
         identity: { viewerHash: 'h1' },
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(view(createViewService(seedLink({ link: false })), { viewerHash: 'h1' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
-  it('throws GoneException when publication is unpublished', async () => {
-    const service = createServiceWith({
-      database: createDatabaseChainReturning([{ ...basePublicationRow, unpublishedAt: new Date() }]),
-    });
-
+  it('throws GoneException when the publication is unpublished or the link is stopped', async () => {
     await expect(
-      service.recordView({
-        publicationId: 'pub_view',
-        identity: { viewerHash: 'h1' },
-      }),
+      view(createViewService(seedLink({ publication: { unpublishedAt: new Date() } })), { viewerHash: 'h1' }),
     ).rejects.toBeInstanceOf(GoneException);
+    await expect(
+      view(createViewService(seedLink({ link: { disabledAt: new Date() } })), { viewerHash: 'h1' }),
+    ).rejects.toBeInstanceOf(GoneException);
+  });
+
+  it('throws NotFoundException for a version the link no longer shows', async () => {
+    const database = seedNewerVersion({ link: { visibility: 'public' } });
+
+    await expect(view(createViewService(database), { viewerHash: 'h1' })).rejects.toBeInstanceOf(NotFoundException);
+    expect(database.writes).toEqual([]);
+  });
+
+  it('counts a view of a link for invited people only from someone it lets in', async () => {
+    const database = seedLink({
+      grants: [grantRow()],
+      users: [
+        { id: 'user_friend', name: 'Friend', image: null, email: 'friend@example.com', emailVerified: true },
+        { id: 'user_stranger', name: 'Stranger', image: null, email: 'stranger@example.com', emailVerified: true },
+      ],
+    });
+    const redis = createRedisStub({ pfaddReturns: 1 });
+    const metrics = createMetricsStub();
+    const service = createViewService(database, { redis, metrics });
+
+    await expect(view(service, { viewerHash: 'anonymous' })).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(view(service, { viewerHash: 'stranger', sessionUserId: 'user_stranger' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(redis.client.pfadd).not.toHaveBeenCalled();
+    expect(database.writes).toEqual([]);
+    expect(metrics.publicationViewsRejectedTotal.add).toHaveBeenCalledWith(1, { reason: 'invalid_publication' });
+
+    await view(service, { viewerHash: 'friend', sessionUserId: 'user_friend' });
+
+    expect(database.writes.filter((write) => write.table === schema.publication)).toHaveLength(1);
   });
 
   it('short-circuits owner self-view without invoking PFADD or rate limiter', async () => {
     const redis = createRedisStub();
     const rateLimiter = createRateLimiterStub();
     const metrics = createMetricsStub();
-    const service = createServiceWith({
-      database: createDatabaseChainReturning([basePublicationRow]),
-      redis,
-      rateLimiter,
-      metrics,
-    });
+    const service = createViewService(seedLink(), { redis, rateLimiter, metrics });
 
-    await service.recordView({
-      publicationId: 'pub_view',
-      identity: { viewerHash: 'h1', sessionUserId: basePublicationRow.ownerId },
-    });
+    await view(service, { viewerHash: 'h1', sessionUserId: 'user_owner' });
 
     expect(rateLimiter.consumePublicationViewSlot).not.toHaveBeenCalled();
     expect(redis.client.pfadd).not.toHaveBeenCalled();
@@ -1902,17 +1732,11 @@ describe('PublicationsService.recordView', () => {
   });
 
   it('throws 429 RATE_LIMITED when the per-identity cap is exceeded', async () => {
-    const service = createServiceWith({
-      database: createDatabaseChainReturning([basePublicationRow]),
+    const service = createViewService(seedLink({ link: { visibility: 'public' } }), {
       rateLimiter: createRateLimiterStub({ allowed: false }),
     });
 
-    await expect(
-      service.recordView({
-        publicationId: 'pub_view',
-        identity: { viewerHash: 'h1' },
-      }),
-    ).rejects.toSatisfy((error: unknown) => {
+    await expect(view(service, { viewerHash: 'h1' })).rejects.toSatisfy((error: unknown) => {
       if (!(error instanceof HttpException)) {
         return false;
       }
@@ -1927,58 +1751,30 @@ describe('PublicationsService.recordView', () => {
   });
 
   it('increments viewCount only when PFADD reports a new viewer', async () => {
-    const updateWhere = vi.fn().mockResolvedValue(undefined);
-    const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
-    const update = vi.fn().mockReturnValue({ set: updateSet });
-    const limit = vi.fn().mockResolvedValue([basePublicationRow]);
-    const where = vi.fn().mockReturnValue({ limit });
-    const from = vi.fn().mockReturnValue({ where });
-    const select = vi.fn().mockReturnValue({ from });
-    const database = {
-      database: { select, update },
-    } as unknown as PublicationsServiceDeps[0];
-
+    const database = seedLink({ link: { visibility: 'public' } });
     const redis = createRedisStub({ pfaddReturns: 1 });
     const metrics = createMetricsStub();
+    const service = createViewService(database, { redis, metrics });
 
-    const service = createServiceWith({ database, redis, metrics });
-
-    await service.recordView({
-      publicationId: 'pub_view',
-      identity: { viewerHash: 'fresh-viewer' },
-    });
+    await view(service, { viewerHash: 'fresh-viewer' });
 
     expect(redis.client.pfadd).toHaveBeenCalledTimes(1);
-    expect(update).toHaveBeenCalledTimes(1);
+    expect(database.writes.filter((write) => write.table === schema.publication)).toHaveLength(1);
     expect(metrics.publicationViewsTotal.add).toHaveBeenCalledWith(1, { deduped: 'unique' });
   });
 
   it('records duplicate when PFADD returns 0 and skips UPDATE', async () => {
-    const update = vi.fn();
-    const limit = vi.fn().mockResolvedValue([basePublicationRow]);
-    const where = vi.fn().mockReturnValue({ limit });
-    const from = vi.fn().mockReturnValue({ where });
-    const select = vi.fn().mockReturnValue({ from });
-    const database = {
-      database: { select, update },
-    } as unknown as PublicationsServiceDeps[0];
-
+    const database = seedLink({ link: { visibility: 'public' } });
     const redis = createRedisStub({ pfaddReturns: 0 });
     const metrics = createMetricsStub();
+    const service = createViewService(database, { redis, metrics });
 
-    const service = createServiceWith({ database, redis, metrics });
+    await view(service, { viewerHash: 'returning-viewer' });
 
-    await service.recordView({
-      publicationId: 'pub_view',
-      identity: { viewerHash: 'returning-viewer' },
-    });
-
-    expect(update).not.toHaveBeenCalled();
+    expect(database.writes).toEqual([]);
     expect(metrics.publicationViewsTotal.add).toHaveBeenCalledWith(1, { deduped: 'duplicate' });
   });
 });
-
-// === Private publication storage tiers ===
 
 describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => {
   function createPublishHarness(args?: {
@@ -2132,15 +1928,22 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
     expect(blobCalls).toContainEqual(expect.objectContaining({ body: thumbnail, contentType: 'image/webp' }));
   });
 
-  it('should repair stale same-key thumbnail metadata without changing bytes', async () => {
+  /* #2008: the bare digest key may be another publication's plain file, so a
+     thumbnail never repairs it; it goes to its own served key. */
+  it('should write a thumbnail to its own served key rather than rewrite the shared digest key', async () => {
     const thumbnail = validWebpSignature();
+    const sha = sha256HexFromBytes(thumbnail);
     const storage = createStorageStub();
-    vi.mocked(storage.headBlob).mockResolvedValue({
-      contentType: 'application/octet-stream',
-      size: thumbnail.byteLength,
-      etag: 'etag',
-      cacheControl: 'private, no-cache',
-    });
+    vi.mocked(storage.headBlob).mockImplementation(async (args) =>
+      args.key === blobKeyFromSha256Hex(sha)
+        ? {
+            contentType: 'application/octet-stream',
+            size: thumbnail.byteLength,
+            etag: 'etag',
+            cacheControl: '',
+          }
+        : undefined,
+    );
     const { service, repositoryPath } = createPublishHarness({
       storage,
       files: new Map([
@@ -2151,15 +1954,19 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
 
     await service.publishFromRevision({ ownerId: 'user_1', request: publishRequest(repositoryPath) });
 
-    const thumbnailWrites = vi
+    const blobWrites = vi
       .mocked(storage.putBlob)
       .mock.calls.map(([callArgs]) => callArgs)
-      .filter((callArgs) => callArgs.namespace === 'blobs' && callArgs.contentType === 'image/webp');
-    expect(thumbnailWrites).toHaveLength(1);
-    expect(thumbnailWrites[0]?.body).toStrictEqual(thumbnail);
-    // The object is already there under this digest, so the write repairs the
-    // content type rather than claiming the key.
-    expect(thumbnailWrites[0]).not.toHaveProperty('ifNoneMatch');
+      .filter((callArgs) => callArgs.namespace === 'blobs');
+    expect(blobWrites.map((callArgs) => callArgs.key)).not.toContain(blobKeyFromSha256Hex(sha));
+    expect(blobWrites).toContainEqual(
+      expect.objectContaining({
+        key: servedBlobKey(sha, 'image/webp'),
+        body: thumbnail,
+        contentType: 'image/webp',
+        ifNoneMatch: '*',
+      }),
+    );
   });
 
   it('should upsert blob refcounts inside the publish transaction, aggregated per sha', async () => {
@@ -2280,129 +2087,141 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
 
 describe('PublicationsService derived-state repair', () => {
   /**
-   * The database a repair reads and writes, answering by table rather than by
-   * call order: the repair reads `project_git`, then this project's
-   * publications, then writes both.
-   *
-   * @param args - The publication row, and the two generations on `project_git`.
-   * @returns The dependency, the row it mutates, and what it recorded.
+   * A public link on `proj_1` whose version is the given row, with the two
+   * generations on `project_git` that decide whether a read repairs it (D19).
    */
-  function createDerivedDatabase(args: {
-    publication: Record<string, unknown>;
-    generation: number;
-    derivedGeneration: number;
-  }): {
-    readonly databaseService: PublicationsServiceDeps[0];
+  function seedDerived(args: {
     readonly publication: Record<string, unknown>;
-    readonly derivedWrites: Array<Record<string, unknown>>;
-  } {
-    const derivedWrites: Array<Record<string, unknown>> = [];
-    const state = { derivedGeneration: args.derivedGeneration };
-
-    const rowsFor = (table: unknown): unknown[] =>
-      table === schema.projectGit
-        ? [{ generation: args.generation, derivedGeneration: state.derivedGeneration }]
-        : [args.publication];
-
-    /* `where` is awaited directly by the materializer and narrowed with
-       `limit(1)` by the read path, so it is both. */
-    const selectable = (table: unknown): unknown => ({
-      // oxlint-disable-next-line typescript/promise-function-async -- Drizzle's own builder is a thenable, not an async function
-      where: vi.fn(() =>
-        Object.assign(Promise.resolve(rowsFor(table)), { limit: vi.fn().mockResolvedValue(rowsFor(table)) }),
-      ),
-    });
-
-    const writer = {
-      /* The project advisory lock the materializer takes (review F2). */
-      execute: vi.fn().mockResolvedValue(undefined),
-      /* The re-read under that lock, which this single caller always wins. */
-      select: vi.fn(() => ({
-        from: vi.fn(() => ({
-          where: vi.fn(() => ({ limit: vi.fn().mockResolvedValue([args.publication]) })),
-        })),
-      })),
-      insert: vi.fn(() => ({
-        values: vi.fn(() => ({ onConflictDoUpdate: vi.fn().mockResolvedValue(undefined) })),
-      })),
-      update: vi.fn((table: unknown) => ({
-        set: vi.fn((payload: Record<string, unknown>) => {
-          if (table === schema.projectGit) {
-            derivedWrites.push(payload);
-            state.derivedGeneration = Number(payload['derivedGeneration']);
-          } else {
-            Object.assign(args.publication, payload);
-          }
-          /* Both the plain update and the compare-and-swap, which this single
-             writer always wins. */
-          return { where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([{ id: 'moved' }]) })) };
-        }),
-      })),
-    };
-
-    const database = {
-      select: vi.fn(() => ({ from: vi.fn((table: unknown) => selectable(table)) })),
-      update: writer.update,
-      insert: writer.insert,
-      transaction: vi.fn(async <T>(callback: (tx: typeof writer) => Promise<T>): Promise<T> => callback(writer)),
-    };
-
-    return {
-      databaseService: { database } as unknown as PublicationsServiceDeps[0],
-      publication: args.publication,
-      derivedWrites,
-    };
+    readonly generation: number;
+    readonly derivedGeneration: number;
+    readonly link?: Record<string, unknown>;
+  }): TableDatabase {
+    return createTableDatabase([
+      [
+        schema.project,
+        [projectFixture({ id: 'proj_1', ownerId: 'user_1', currentPublicationId: args.publication['id'] })],
+      ],
+      [schema.publication, [args.publication]],
+      [schema.projectShare, [linkRow({ projectId: 'proj_1', ownerId: 'user_1', visibility: 'public', ...args.link })]],
+      [
+        schema.projectGit,
+        [{ projectId: 'proj_1', generation: args.generation, derivedGeneration: args.derivedGeneration }],
+      ],
+    ]);
   }
 
-  it('should re-materialize from a lease and serve the repaired row when the derived generation is behind', async () => {
+  it('should re-materialize from a lease at the link tier and serve the repaired row when the derived generation is behind', async () => {
     const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('export default () => {}')]]));
     /* A push that committed its manifest and was killed before it materialized:
-       the row still points at nothing (D19). */
-    const publication: Record<string, unknown> = {
-      id: 'pub_derived',
-      projectId: 'proj_1',
-      tag: 'v1',
-      revisionId: '',
-      ownerId: 'user_1',
-      visibility: 'public',
-      manifestKey: '',
-      ogImageKey: null,
-      thumbnailKey: null,
-      unpublishedAt: null,
-      parentPublicationId: null,
-      kernels: [],
-      entryPath: 'main.ts',
-      title: 'T',
-      description: null,
-      forkCount: 0,
-      viewCount: 0,
-      ownerSnapshot: { id: 'user_1', name: 'Owner' },
-      createdAt: new Date(),
-      runtimePin: '~0.1.0',
-    };
-    const database = createDerivedDatabase({ publication, generation: 4, derivedGeneration: 2 });
+       the row still points at nothing (D19). Its tier column is stale on purpose:
+       the repair reads the tier from the link. */
+    const database = seedDerived({
+      publication: publicationFixture({
+        id: 'pub_derived',
+        projectId: 'proj_1',
+        ownerId: 'user_1',
+        revisionId: '',
+        manifestKey: '',
+        visibility: 'private',
+        kernels: [],
+      }),
+      generation: 4,
+      derivedGeneration: 2,
+    });
+    const storage = createManifestStorageStub();
+    const service = createLinkService(database, { repositoryPath, storage });
 
-    const service = createTestService(
-      database.databaseService,
-      createManifestStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(repositoryPath),
-    );
+    const result = await service.getShareForViewer({ shareId: 'shr_test' });
 
-    const result = await service.getPublicationForViewer({ publicationId: 'pub_derived' });
-
-    /* The viewer is served the version the push actually published, and the
-       marker now says so, so the next read costs one query. */
+    /* The viewer is served the version the push actually published. */
     expect(result.publication.revisionId).toBe(seededRevision(repositoryPath));
-    expect(publication['manifestKey']).toBe(`publications/pub_derived/${seededRevision(repositoryPath)}.json`);
+    const [row] = database.rows(schema.publication);
+    expect(row?.['manifestKey']).toBe(`publications/pub_derived/${seededRevision(repositoryPath)}.json`);
+    expect(row?.['visibility']).toBe('public');
+    const blobPuts = vi
+      .mocked(storage.putBlob)
+      .mock.calls.map(([callArgs]) => callArgs)
+      .filter((callArgs) => callArgs.namespace === 'blobs');
+    expect(blobPuts.length).toBeGreaterThan(0);
+    expect(blobPuts.every((callArgs) => callArgs.tier !== 'private')).toBe(true);
     /* The marker is the git service's to advance, because its repair also
        rebuilds accounting and the LFS marks (D19). */
-    expect(database.derivedWrites).toStrictEqual([]);
+    expect(database.writes.filter((write) => write.table === schema.projectGit)).toEqual([]);
+  });
+
+  it('should serve the row another request repaired while this one waited, rather than the one it first read', async () => {
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('export default () => {}')]]));
+    const database = seedDerived({
+      publication: publicationFixture({
+        id: 'pub_derived',
+        projectId: 'proj_1',
+        ownerId: 'user_1',
+        revisionId: '',
+        manifestKey: '',
+        visibility: 'public',
+        kernels: [],
+      }),
+      generation: 4,
+      derivedGeneration: 2,
+    });
+    const repairedKey = `publications/pub_derived/${seededRevision(repositoryPath)}.json`;
+    /* Another viewer's repair commits right after this one read the link, so this one finds nothing left to do. */
+    afterFirstRead(database, schema.projectShare, () => {
+      Object.assign(database.rows(schema.publication)[0] ?? {}, {
+        revisionId: seededRevision(repositoryPath),
+        manifestKey: repairedKey,
+      });
+    });
+    const service = createLinkService(database, { repositoryPath, storage: createManifestStorageStub() });
+
+    const result = await service.getShareForViewer({ shareId: 'shr_test' });
+
+    expect(result.publication.revisionId).toBe(seededRevision(repositoryPath));
+    expect(database.rows(schema.publication)[0]?.['manifestKey']).toBe(repairedKey);
+  });
+
+  it('should repair to the private tier when the project has no link', async () => {
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('export default () => {}')]]));
+    const database = seedDerived({
+      publication: publicationFixture({
+        id: 'pub_derived',
+        projectId: 'proj_1',
+        ownerId: 'user_1',
+        revisionId: '',
+        manifestKey: '',
+        visibility: 'public',
+        kernels: [],
+      }),
+      generation: 4,
+      derivedGeneration: 2,
+    });
+    database.rows(schema.projectShare).length = 0;
+    const storage = createManifestStorageStub();
+
+    /* The file proxy answers 404 without a link, but the repair is reachable
+       from the git side; drive it through the materializer directly. */
+    await materializePublishedTags(
+      {
+        databaseService: database.databaseService as MaterializerDependencies['databaseService'],
+        storage,
+        git: leaseGitRunner,
+        resolveLfsObject: lfsResolver(storage),
+      },
+      {
+        projectId: 'proj_1',
+        ownerId: 'user_1',
+        directory: repositoryPath,
+        tags: [{ ref: 'refs/tags/v1', oid: seededRevision(repositoryPath) }],
+      },
+    );
+
+    expect(database.rows(schema.publication)[0]?.['visibility']).toBe('private');
+    const blobPuts = vi
+      .mocked(storage.putBlob)
+      .mock.calls.map(([callArgs]) => callArgs)
+      .filter((callArgs) => callArgs.namespace === 'blobs');
+    expect(blobPuts.length).toBeGreaterThan(0);
+    expect(blobPuts.every((callArgs) => callArgs.tier === 'private')).toBe(true);
   });
 
   it('should serve without a lease when the marker is behind for work that is not this publication', async () => {
@@ -2410,187 +2229,79 @@ describe('PublicationsService derived-state repair', () => {
     /* The row already records the commit the manifest's tag names: the marker
        is behind for the accounting or an LFS mark, neither of which is this
        read's business, so nothing is hydrated. */
-    const publication: Record<string, unknown> = {
-      id: 'pub_current_tag',
-      projectId: 'proj_1',
-      tag: 'v1',
-      revisionId: seededRevision(repositoryPath),
-      ownerId: 'user_1',
-      visibility: 'public',
-      manifestKey: 'm.json',
-      ogImageKey: null,
-      thumbnailKey: null,
-      unpublishedAt: null,
-      parentPublicationId: null,
-      kernels: [],
-      entryPath: 'main.ts',
-      title: 'T',
-      description: null,
-      forkCount: 0,
-      viewCount: 0,
-      ownerSnapshot: { id: 'user_1', name: 'Owner' },
-      createdAt: new Date(),
-      runtimePin: '~0.1.0',
-    };
-    const database = createDerivedDatabase({ publication, generation: 4, derivedGeneration: 2 });
+    const database = seedDerived({
+      publication: publicationFixture({
+        id: 'pub_current_tag',
+        projectId: 'proj_1',
+        ownerId: 'user_1',
+        revisionId: seededRevision(repositoryPath),
+      }),
+      generation: 4,
+      derivedGeneration: 2,
+    });
+    const service = createLinkService(database, { repositoryPath });
 
-    const service = createTestService(
-      database.databaseService,
-      createManifestStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(repositoryPath),
-    );
-
-    const result = await service.getPublicationForViewer({ publicationId: 'pub_current_tag' });
+    const result = await service.getShareForViewer({ shareId: 'shr_test' });
 
     expect(result.publication.revisionId).toBe(seededRevision(repositoryPath));
-    expect(publication['manifestKey']).toBe('m.json');
+    expect(database.rows(schema.publication)[0]?.['manifestKey']).toBe('m.json');
   });
 
   it('should serve without a lease when the derived generation is current', async () => {
-    const publication: Record<string, unknown> = {
-      id: 'pub_current',
-      projectId: 'proj_1',
-      tag: 'v1',
-      revisionId: 'a'.repeat(40),
-      ownerId: 'user_1',
-      visibility: 'public',
-      manifestKey: 'm.json',
-      ogImageKey: null,
-      thumbnailKey: null,
-      unpublishedAt: null,
-      parentPublicationId: null,
-      kernels: [],
-      entryPath: 'main.ts',
-      title: 'T',
-      description: null,
-      forkCount: 0,
-      viewCount: 0,
-      ownerSnapshot: { id: 'user_1', name: 'Owner' },
-      createdAt: new Date(),
-      runtimePin: '~0.1.0',
-    };
-    const database = createDerivedDatabase({ publication, generation: 4, derivedGeneration: 4 });
+    const database = seedDerived({
+      publication: publicationFixture({ id: 'pub_current', projectId: 'proj_1', ownerId: 'user_1' }),
+      generation: 4,
+      derivedGeneration: 4,
+    });
+    /* No repository at all: a current publication must never hydrate one. */
+    const service = createLinkService(database);
 
-    const service = createTestService(
-      database.databaseService,
-      createManifestStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      /* No repository at all: a current publication must never hydrate one. */
-      ...leaseDependencies(''),
-    );
-
-    const result = await service.getPublicationForViewer({ publicationId: 'pub_current' });
+    const result = await service.getShareForViewer({ shareId: 'shr_test' });
 
     expect(result.publication.revisionId).toBe('a'.repeat(40));
-    expect(publication['manifestKey']).toBe('m.json');
-    expect(database.derivedWrites).toStrictEqual([]);
+    expect(database.rows(schema.publication)[0]?.['manifestKey']).toBe('m.json');
+    expect(database.writes).toEqual([]);
   });
 });
 
 // === Publication file proxy resolution ===
 
 describe('PublicationsService.resolvePublicationFile (R3)', () => {
-  const privateRow = {
-    id: 'pub_test',
-    projectId: 'proj_x',
-    tag: 'v1',
-    revisionId: 'a'.repeat(40),
-    ownerId: 'user_owner',
-    visibility: 'private',
-    manifestKey: 'm.json',
-    ogImageKey: null,
-    thumbnailKey: null,
-    unpublishedAt: null,
-    parentPublicationId: null,
-    kernels: ['replicad'],
-    entryPath: 'main.ts',
-    title: 'T',
-    description: null,
-    forkCount: 0,
-    viewCount: 0,
-    ownerSnapshot: { id: 'user_owner', name: 'Owner' },
-    createdAt: new Date(),
-    runtimePin: '~0.1.0',
+  const resolved = {
+    sha256Hex: testManifestSha,
+    etag: `"${testManifestSha}"`,
+    path: 'main.ts',
+    key: blobKeyFromSha256Hex(testManifestSha),
   };
 
-  function createFileService(args: {
-    readonly database: PublicationsServiceDeps[0];
-    readonly storage?: PublicationsServiceDeps[1];
-  }): { readonly service: PublicationsService; readonly storage: PublicationsServiceDeps[1] } {
-    const storage = args.storage ?? createManifestStorageStub();
-    const service = createTestService(
-      args.database,
-      storage,
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
-    );
-    return { service, storage };
+  function createFileService(database: TableDatabase): {
+    readonly service: PublicationsService;
+    readonly storage: PublicationsServiceDeps[1];
+  } {
+    const storage = createManifestStorageStub();
+    return { service: createLinkService(database, { storage }), storage };
   }
 
-  function createGranteeDatabase(args: { readonly accessRows: unknown[] }): PublicationsServiceDeps[0] {
-    const publicationLimit = vi.fn().mockResolvedValue([privateRow]);
-    const publicationFrom = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: publicationLimit }) });
-
-    /* Every publication read consults `project_git` first: derived state that is
-       behind the manifest is repaired before the row is served (D19). */
-    const derivedFrom = vi.fn().mockReturnValue({
-      where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([{ generation: 3, derivedGeneration: 3 }]) }),
-    });
-
-    const userLimit = vi.fn().mockResolvedValue([{ email: 'friend@example.com', emailVerified: true }]);
-    const userFrom = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: userLimit }) });
-
-    const accessLimit = vi.fn().mockResolvedValue(args.accessRows);
-    const accessFrom = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: accessLimit }) });
-
-    const select = vi
-      .fn()
-      .mockReturnValueOnce({ from: publicationFrom })
-      .mockReturnValueOnce({ from: derivedFrom })
-      .mockReturnValueOnce({ from: userFrom })
-      .mockReturnValueOnce({ from: accessFrom });
-
-    return { database: { select } } as unknown as PublicationsServiceDeps[0];
-  }
+  const friend = { id: 'user_friend', name: 'Friend', email: 'friend@example.com', emailVerified: true };
 
   it('should resolve the manifest sha as a strong quoted ETag for the owner', async () => {
-    const { service } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+    const { service } = createFileService(seedLink());
 
-    const resolved = await service.resolvePublicationFile({
-      publicationId: 'pub_test',
-      viewerUserId: 'user_owner',
-      path: 'main.ts',
-    });
-
-    expect(resolved).toEqual({ sha256Hex: testManifestSha, etag: `"${testManifestSha}"`, path: 'main.ts' });
+    await expect(
+      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: 'main.ts' }),
+    ).resolves.toEqual(resolved);
   });
 
-  it('should resolve for an active email grantee', async () => {
-    const { service } = createFileService({ database: createGranteeDatabase({ accessRows: [{ id: 'pva_1' }] }) });
+  it('should resolve for an invited address', async () => {
+    const { service } = createFileService(seedLink({ grants: [grantRow()], users: [friend] }));
 
     await expect(
       service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_friend', path: 'main.ts' }),
-    ).resolves.toEqual({ sha256Hex: testManifestSha, etag: `"${testManifestSha}"`, path: 'main.ts' });
+    ).resolves.toEqual(resolved);
   });
 
-  it('should reject anonymous private requests with 401 before touching storage', async () => {
-    const { service, storage } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+  it('should reject anonymous requests for an invite-only link with 401 before touching storage', async () => {
+    const { service, storage } = createFileService(seedLink());
 
     await expect(service.resolvePublicationFile({ publicationId: 'pub_test', path: 'main.ts' })).rejects.toBeInstanceOf(
       UnauthorizedException,
@@ -2598,16 +2309,33 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
     expect(vi.mocked(storage.getBlob)).not.toHaveBeenCalled();
   });
 
-  it('should reject viewers without an active grant with 403 (revocation is immediate)', async () => {
-    const { service } = createFileService({ database: createGranteeDatabase({ accessRows: [] }) });
+  it('should reject a removed address with 403 (removal is immediate)', async () => {
+    const { service } = createFileService(seedLink({ grants: [grantRow({ status: 'revoked' })], users: [friend] }));
 
     await expect(
-      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_revoked', path: 'main.ts' }),
+      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_friend', path: 'main.ts' }),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('should return 410 once the link is stopped, and 404 for a project with no link', async () => {
+    await expect(
+      createFileService(seedLink({ link: { disabledAt: new Date() } })).service.resolvePublicationFile({
+        publicationId: 'pub_test',
+        viewerUserId: 'user_owner',
+        path: 'main.ts',
+      }),
+    ).rejects.toBeInstanceOf(GoneException);
+    await expect(
+      createFileService(seedLink({ link: false })).service.resolvePublicationFile({
+        publicationId: 'pub_test',
+        viewerUserId: 'user_owner',
+        path: 'main.ts',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it('should return 404 for a path outside the publication manifest (no cross-publication re-scoping)', async () => {
-    const { service } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+    const { service } = createFileService(seedLink());
 
     await expect(
       service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: 'stolen.ts' }),
@@ -2615,7 +2343,7 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
   });
 
   it('should reject an empty path with INVALID_PATH', async () => {
-    const { service } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+    const { service } = createFileService(seedLink());
 
     await expect(
       service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: '' }),
@@ -2623,37 +2351,43 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
   });
 
   it('should return 410 for unpublished publications', async () => {
-    const { service } = createFileService({
-      database: createDatabaseChainReturning([{ ...privateRow, unpublishedAt: new Date() }]),
-    });
+    const { service } = createFileService(seedLink({ publication: { unpublishedAt: new Date() } }));
 
     await expect(
       service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: 'main.ts' }),
     ).rejects.toBeInstanceOf(GoneException);
   });
 
-  it('should serve public publications to anonymous viewers through the proxy too', async () => {
-    const { service } = createFileService({
-      database: createDatabaseChainReturning([{ ...privateRow, visibility: 'public' }]),
-    });
+  it('should serve a link anyone can open to anonymous viewers through the proxy too', async () => {
+    const { service } = createFileService(seedLink({ link: { visibility: 'public' } }));
 
-    await expect(service.resolvePublicationFile({ publicationId: 'pub_test', path: 'main.ts' })).resolves.toEqual({
-      sha256Hex: testManifestSha,
-      etag: `"${testManifestSha}"`,
-      path: 'main.ts',
-    });
+    await expect(service.resolvePublicationFile({ publicationId: 'pub_test', path: 'main.ts' })).resolves.toEqual(
+      resolved,
+    );
+  });
+
+  it('should answer 404 for an earlier version, even under a link anyone can open', async () => {
+    const { service, storage } = createFileService(seedNewerVersion({ link: { visibility: 'public' } }));
+
+    await expect(service.resolvePublicationFile({ publicationId: 'pub_test', path: 'main.ts' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(
+      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: 'main.ts' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(vi.mocked(storage.getBlob)).not.toHaveBeenCalled();
   });
 
   it('should normalize ./-prefixed request paths against manifest keys', async () => {
-    const { service } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+    const { service } = createFileService(seedLink());
 
     await expect(
       service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: './main.ts' }),
-    ).resolves.toEqual({ sha256Hex: testManifestSha, etag: `"${testManifestSha}"`, path: 'main.ts' });
+    ).resolves.toEqual(resolved);
   });
 
   it('should serve repeat resolutions from the manifest cache without re-reading storage', async () => {
-    const { service, storage } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
+    const { service, storage } = createFileService(seedLink());
 
     await service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: 'main.ts' });
     await service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: 'main.ts' });
@@ -2751,32 +2485,10 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
 
 // === Tier-aware viewer URLs and wire hardening ===
 
-describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)', () => {
-  const baseRow = {
-    id: 'pub_test',
-    projectId: 'proj_x',
-    tag: 'v1',
-    revisionId: 'a'.repeat(40),
-    ownerId: 'user_owner',
-    visibility: 'private',
-    manifestKey: 'm.json',
-    ogImageKey: null,
-    thumbnailKey: null,
-    unpublishedAt: null,
-    parentPublicationId: null,
-    kernels: ['replicad'],
-    entryPath: 'main.ts',
-    title: 'T',
-    description: null,
-    forkCount: 0,
-    viewCount: 0,
-    ownerSnapshot: { id: 'user_owner', name: 'Owner' },
-    createdAt: new Date(),
-    runtimePin: '~0.1.0',
-  };
-
+describe('PublicationsService.getShareForViewer tiered file URLs (R4/R6)', () => {
   function createViewerService(args: {
-    readonly row: Record<string, unknown>;
+    readonly link?: Record<string, unknown>;
+    readonly publication?: Record<string, unknown>;
     readonly manifestFiles?: Record<string, string>;
   }): { readonly service: PublicationsService; readonly storage: PublicationsServiceDeps[1] } {
     const storage = createStorageStub();
@@ -2790,31 +2502,26 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
       etag: 'etag',
     }));
 
-    const service = createTestService(
-      createDatabaseChainReturning([args.row]),
-      storage,
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub(),
-      ...leaseDependencies(''),
+    const service = createLinkService(
+      seedLink({
+        ...(args.link === undefined ? {} : { link: args.link }),
+        ...(args.publication === undefined ? {} : { publication: args.publication }),
+      }),
+      { storage },
     );
 
     return { service, storage };
   }
 
-  it('should emit authenticated proxy URLs with encoded paths for private publication files', async () => {
+  it('should emit authenticated proxy URLs with encoded paths for an invite-only link', async () => {
     const { service, storage } = createViewerService({
-      row: baseRow,
       manifestFiles: {
         'main.ts': `sha256:${testManifestSha}`,
         'src/deep file.ts': `sha256:${'b'.repeat(64)}`,
       },
     });
 
-    const result = await service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_owner' });
+    const result = await service.getShareForViewer({ shareId: 'shr_test', viewerUserId: 'user_owner' });
 
     expect(result.files['main.ts']).toBe('http://api.test/v1/publications/pub_test/files?path=main.ts');
     expect(result.files['src/deep file.ts']).toBe(
@@ -2824,10 +2531,10 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
     expect(vi.mocked(storage.publicUrl)).not.toHaveBeenCalledWith(expect.objectContaining({ namespace: 'blobs' }));
   });
 
-  it('should keep direct CDN URLs for public publication files', async () => {
-    const { service, storage } = createViewerService({ row: { ...baseRow, visibility: 'public' } });
+  it('should keep direct CDN URLs for a link anyone can open', async () => {
+    const { service, storage } = createViewerService({ link: { visibility: 'public' } });
 
-    const result = await service.getPublicationForViewer({ publicationId: 'pub_test' });
+    const result = await service.getShareForViewer({ shareId: 'shr_test' });
 
     expect(result.files['main.ts']).toBe('https://example.invalid/public');
     expect(vi.mocked(storage.publicUrl)).toHaveBeenCalledWith({
@@ -2836,10 +2543,37 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
     });
   });
 
-  it('should expose neither raw storage keys nor a manifest URL on the wire', async () => {
-    const { service } = createViewerService({ row: baseRow });
+  /* #2008: the thumbnail is served from its own key; a version materialized
+     before that holds it at the bare digest, which its row recorded. */
+  it.each([
+    ['a version materialized with served keys', `blobs/${servedBlobKey('c'.repeat(64), 'image/webp')}`],
+    ['a version materialized before them', `blobs/${blobKeyFromSha256Hex('c'.repeat(64))}`],
+  ])('should serve the public thumbnail from the key its row recorded, for %s', async (_case, thumbnailKey) => {
+    const { service, storage } = createViewerService({
+      link: { visibility: 'public' },
+      publication: { thumbnailKey },
+      manifestFiles: {
+        'main.ts': `sha256:${testManifestSha}`,
+        'thumbnail.webp': `sha256:${'c'.repeat(64)}`,
+      },
+    });
 
-    const result = await service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_owner' });
+    await service.getShareForViewer({ shareId: 'shr_test' });
+
+    expect(vi.mocked(storage.publicUrl)).toHaveBeenCalledWith({
+      namespace: 'blobs',
+      key: thumbnailKey.slice('blobs/'.length),
+    });
+    expect(vi.mocked(storage.publicUrl)).toHaveBeenCalledWith({
+      namespace: 'blobs',
+      key: blobKeyFromSha256Hex(testManifestSha),
+    });
+  });
+
+  it('should expose neither raw storage keys nor a manifest URL on the wire', async () => {
+    const { service } = createViewerService({});
+
+    const result = await service.getShareForViewer({ shareId: 'shr_test', viewerUserId: 'user_owner' });
 
     expect(result.publication).not.toHaveProperty('manifestKey');
     expect(result.publication).not.toHaveProperty('ogImageKey');
@@ -2848,9 +2582,9 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
   });
 
   it('should read the manifest from the private tier before falling back to the public bucket', async () => {
-    const { service, storage } = createViewerService({ row: baseRow });
+    const { service, storage } = createViewerService({});
 
-    await service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_owner' });
+    await service.getShareForViewer({ shareId: 'shr_test', viewerUserId: 'user_owner' });
 
     expect(vi.mocked(storage.getBlob)).toHaveBeenCalledWith({
       namespace: 'derivatives',
@@ -2860,75 +2594,107 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
   });
 });
 
-describe('PublicationsService private-visibility entitlement gate (T4/T16)', () => {
-  /* The gate refuses before anything is materialized, so this row needs no
-     repository and no real revision. */
-  const privateRequest = publishRequest(undefined, {
-    projectId: 'proj_gate',
-    title: 'Gate test',
-    visibility: 'private',
-  });
-
-  function createGateDatabase(parentRows: unknown[]): PublicationsServiceDeps[0] {
-    const limit = vi.fn().mockResolvedValue(parentRows);
-    const where = vi.fn().mockReturnValue({ limit });
-    const innerJoin = vi.fn().mockReturnValue({ where });
-    const from = vi.fn().mockReturnValue({ innerJoin, where });
-    const select = vi.fn().mockReturnValue({ from });
-    return { database: { select } } as unknown as PublicationsServiceDeps[0];
+describe('PublicationsService invite-only entitlement gate on publish (T4/T16)', () => {
+  /* The gate refuses before anything is materialized. */
+  function createGateService(args: { readonly entitled: boolean; readonly link?: Record<string, unknown> }): {
+    readonly service: PublicationsService;
+    readonly repositoryPath: string;
+    readonly database: TableDatabase;
+  } {
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
+    const database = createTableDatabase([
+      [
+        schema.project,
+        [{ id: 'proj_1', ownerId: 'user_free', name: 'Demo', description: null, currentPublicationId: null }],
+      ],
+      [
+        schema.projectShare,
+        args.link === undefined ? [] : [linkRow({ projectId: 'proj_1', ownerId: 'user_free', ...args.link })],
+      ],
+    ]);
+    const service = createLinkService(database, {
+      repositoryPath,
+      billing: createBillingStub({ canCreatePrivateShares: args.entitled }),
+    });
+    return { service, repositoryPath, database };
   }
 
-  function createGateService(args: { entitled: boolean; parentRows: unknown[] }): PublicationsService {
-    return createTestService(
-      createGateDatabase(args.parentRows),
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub({ canCreatePrivateShares: args.entitled }),
-      ...leaseDependencies(seedRepository(new Map([['main.ts', new Uint8Array([1])]]))),
-    );
-  }
+  const withoutVisibility = (repositoryPath: string): ReturnType<typeof publishRequest> => {
+    const { visibility: _visibility, ...rest } = publishRequest(repositoryPath);
+    return rest;
+  };
 
-  it('rejects a private publish from a free-tier user with ENTITLEMENT_REQUIRED', async () => {
-    const service = createGateService({ entitled: false, parentRows: [] });
+  it('refuses a first publish from a free-tier user, which would be invite-only, with ENTITLEMENT_REQUIRED', async () => {
+    const { service, repositoryPath } = createGateService({ entitled: false });
 
-    const publishAttempt = service.publishFromRevision({ ownerId: 'user_free', request: privateRequest });
+    const publishAttempt = service.publishFromRevision({
+      ownerId: 'user_free',
+      request: withoutVisibility(repositoryPath),
+    });
 
     await expect(publishAttempt).rejects.toThrow(ForbiddenException);
-    await expect(publishAttempt).rejects.toMatchObject({
-      response: { code: publicationApiCode.ENTITLEMENT_REQUIRED },
-    });
+    await expect(publishAttempt).rejects.toMatchObject({ response: { code: publicationApiCode.ENTITLEMENT_REQUIRED } });
   });
 
-  it('allows a grandfathered content-only republish when the current publication is already private (T16)', async () => {
-    const service = createGateService({ entitled: false, parentRows: [{ visibility: 'private' }] });
+  it('lets a free-tier user publish a link anyone can open', async () => {
+    const { service, repositoryPath } = createGateService({ entitled: false });
 
-    // The gate passes and the publish proceeds until it needs the real config
-    // plumbing — anything other than ENTITLEMENT_REQUIRED proves the gate opened.
     await expect(
-      service.publishFromRevision({ ownerId: 'user_free', request: privateRequest }),
-    ).rejects.not.toMatchObject({ response: { code: publicationApiCode.ENTITLEMENT_REQUIRED } });
+      service.publishFromRevision({
+        ownerId: 'user_free',
+        request: publishRequest(repositoryPath, { visibility: 'public' }),
+      }),
+    ).resolves.toMatchObject({ share: { visibility: 'public' } });
   });
 
-  it('allows private publishes for entitled users without consulting grandfather state', async () => {
-    const database = createGateDatabase([]);
-    const service = createTestService(
-      database,
-      createStorageStub(),
-      createConfigStub(),
-      createRedisStub(),
-      createRateLimiterStub(),
-      createMetricsStub(),
-      createEmailStub(),
-      createBillingStub({ canCreatePrivateShares: true }),
-      ...leaseDependencies(seedRepository(new Map([['main.ts', new Uint8Array([1])]]))),
-    );
+  it('lets a free-tier user keep publishing to a link that is already invite-only (T16)', async () => {
+    const { service, repositoryPath } = createGateService({ entitled: false, link: { visibility: 'private' } });
 
     await expect(
-      service.publishFromRevision({ ownerId: 'user_pro', request: privateRequest }),
-    ).rejects.not.toMatchObject({ response: { code: publicationApiCode.ENTITLEMENT_REQUIRED } });
+      service.publishFromRevision({ ownerId: 'user_free', request: withoutVisibility(repositoryPath) }),
+    ).resolves.toMatchObject({ share: { visibility: 'private' } });
+  });
+
+  it('makes a first publish at the default it names, when it names no setting', async () => {
+    const { service, repositoryPath } = createGateService({ entitled: false });
+
+    await expect(
+      service.publishFromRevision({
+        ownerId: 'user_free',
+        request: { ...withoutVisibility(repositoryPath), defaultVisibility: 'public' },
+      }),
+    ).resolves.toMatchObject({ share: { visibility: 'public' } });
+  });
+
+  it('keeps a link made since the client looked at its own setting, whatever default the publish names', async () => {
+    const { service, repositoryPath } = createGateService({ entitled: false, link: { visibility: 'private' } });
+
+    await expect(
+      service.publishFromRevision({
+        ownerId: 'user_free',
+        request: { ...withoutVisibility(repositoryPath), defaultVisibility: 'public' },
+      }),
+    ).resolves.toMatchObject({ share: { visibility: 'private' } });
+  });
+
+  it('clears the description the link showed when the project no longer has one', async () => {
+    const { service, repositoryPath, database } = createGateService({ entitled: true, link: { visibility: 'public' } });
+    Object.assign(database.rows(schema.project)[0] ?? {}, { description: 'An old description' });
+
+    await service.publishFromRevision({ ownerId: 'user_free', request: withoutVisibility(repositoryPath) });
+
+    expect(database.rows(schema.project)[0]?.['description']).toBeNull();
+    expect(database.rows(schema.publication).at(-1)?.['description']).toBeNull();
+  });
+
+  it('refuses switching a public link to invite-only on publish without the entitlement', async () => {
+    const { service, repositoryPath } = createGateService({ entitled: false, link: { visibility: 'public' } });
+
+    await expect(
+      service.publishFromRevision({
+        ownerId: 'user_free',
+        request: publishRequest(repositoryPath, { visibility: 'private' }),
+      }),
+    ).rejects.toMatchObject({ response: { code: publicationApiCode.ENTITLEMENT_REQUIRED } });
   });
 });

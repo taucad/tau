@@ -29,6 +29,7 @@
 /* oxlint-disable no-await-in-loop -- bounded retries, and a transfer pool that admits objects in order under a byte budget. */
 
 import { lfsPointerFor } from '#lfs.js';
+import { withoutQuotaMarker } from '#refusal-markers.js';
 import { remoteTransportError } from '#remotes.js';
 import type { LfsPointer } from '#lfs.js';
 import type { RevisionHttpClient, RevisionHttpResponse } from '#http-client.js';
@@ -407,8 +408,10 @@ const quotaRefusal = (body: string): LfsQuotaRefusal => {
   /* The git-lfs refusal body, as the Tau API writes it: `message` is what a
    * stock `git lfs push` prints, `files` is the object list (W11a §9.4). */
   const files = Array.isArray(record.files) ? record.files : [];
+  /* The server's marker, when it puts one in front, is a key and not the sentence. */
+  const said = typeof record.message === 'string' ? withoutQuotaMarker(record.message) : '';
   return Object.freeze({
-    message: typeof record.message === 'string' ? record.message : 'This project is over its storage plan.',
+    message: said === '' ? 'This project doesn’t fit in its backup.' : said,
     oids: Object.freeze(
       files
         .map((file: unknown) => (file as Readonly<{ oid?: unknown }>).oid)
@@ -735,10 +738,13 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
       throw new Error(`The remote refused large object ${pointer.oid}.`);
     }
     let answer = initial;
+    /* Set when the remote refused the action itself; a dropped, stalled or throttled transfer keeps it (#2015). */
+    let refused = false;
     for (let attempt = 0; attempt < transferAttempts; attempt += 1) {
       signal?.throwIfAborted();
-      if (attempt > 0 || (answer.actions?.download !== undefined && expired(answer.actions.download))) {
+      if (refused || (answer.actions?.download !== undefined && expired(answer.actions.download))) {
         answer = await refresh('download', pointer, signal);
+        refused = false;
       }
       const action = answer.actions?.download;
       if (action === undefined) {
@@ -844,6 +850,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         ) {
           throw new Error(`Downloading large object ${pointer.oid} failed (${String(response.status)}).`);
         }
+        refused = response !== undefined && !retryable(response.status);
       }
       if (attempt === transferAttempts - 1) {
         throw new Error(`Downloading large object ${pointer.oid} failed after three attempts.`);

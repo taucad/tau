@@ -29,8 +29,11 @@ type ProbeOptions = {
   packaged: boolean;
 };
 
+/** The switch that makes a launch an update probe. */
+const otaProbeArgumentPrefix = '--tau-ota-probe=';
+
 export const prepareOtaProbe = (options: ProbeOptions): { candidateTag: string; complete: () => void } | undefined => {
-  const prefix = '--tau-ota-probe=';
+  const prefix = otaProbeArgumentPrefix;
   const argument = options.arguments.find((value) => value.startsWith(prefix));
   const pendingPath = join(options.profile, 'ota-probe.pending.json');
   const sentinelPath = join(options.profile, 'ota-probe-retained.txt');
@@ -107,4 +110,31 @@ export const prepareOtaProbe = (options: ProbeOptions): { candidateTag: string; 
       renameSync(pendingPath, join(options.profile, 'ota-probe.completed.json'));
     },
   };
+};
+
+/**
+ * Admit the update probe for this launch, without letting a leftover receipt stop an ordinary launch (B29).
+ *
+ * A launch that carries `--tau-ota-probe=` is a CI probe and stays strict: any admission failure throws, as
+ * {@link prepareOtaProbe} does. A launch without it treats any failure, such as a receipt that expired, is damaged or
+ * names another app path, as "not a probe": it hands the error to `onLeftoverIgnored` and boots normally.
+ *
+ * @param options - As for {@link prepareOtaProbe}.
+ * @param onLeftoverIgnored - Told once why a leftover receipt was ignored.
+ * @returns The probe, or `undefined` when this launch is not one.
+ */
+export const admitOtaProbe = (
+  options: ProbeOptions,
+  onLeftoverIgnored: (error: unknown) => void,
+): ReturnType<typeof prepareOtaProbe> => {
+  const strict = options.arguments.some((value) => value.startsWith(otaProbeArgumentPrefix));
+  try {
+    return prepareOtaProbe(options);
+  } catch (error) {
+    if (strict) {
+      throw error;
+    }
+    onLeftoverIgnored(error);
+    return undefined;
+  }
 };

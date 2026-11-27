@@ -3,7 +3,7 @@ import { effectiveGizmoStyle, effectivePreset } from '@taucad/preferences';
 import type { PersonProfile, ViewerPreferences } from '@taucad/preferences';
 import type { CameraInput } from '@taucad/viewer/graphics/three/controls/camera-wheel-router';
 import type { GizmoStyleId } from '@taucad/viewer/graphics/three/controls/viewport-gizmo-styles';
-import { useFeature } from '#flags/use-feature.js';
+import { useFeatureState } from '#flags/use-feature.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 
 /** What the project viewer passes `CadViewer` for the person's navigation; empty keeps today's bindings. */
@@ -11,8 +11,8 @@ export type ViewerCameraInputProps = Readonly<{ cameraInput?: CameraInput; gizmo
 
 /**
  * The person's camera input and gizmo style: the stored preset, else the suggestion for the tool answer (never
- * stored, so a changed answer still moves it, C9); the three toggles as stored, absent
- * where unset so the viewer applies its built-in values; and the stored gizmo style, else the suggestion. With the
+ * stored, so a changed answer still moves it, C9); the three toggles and the orbit style as stored, absent
+ * where unset so the viewer applies its built-in values (Turntable for the orbit style); and the stored gizmo style, else the suggestion. With the
  * `viewerControls` flag off, nothing, so the viewer keeps today's bindings and cube.
  *
  * @param input - Whether `viewerControls` is on, and the person record.
@@ -30,13 +30,14 @@ export const resolveViewerCameraInput = ({
   if (!enabled) {
     return {};
   }
-  const { zoomToCursor, orbitAboutCursor, invertZoom } = viewer.controls;
+  const { zoomToCursor, orbitAboutCursor, invertZoom, orbitStyle } = viewer.controls;
   return {
     cameraInput: {
       preset: effectivePreset(viewer, profile),
       ...(zoomToCursor === undefined ? {} : { zoomToCursor }),
       ...(orbitAboutCursor === undefined ? {} : { orbitAboutCursor }),
       ...(invertZoom === undefined ? {} : { invertZoom }),
+      ...(orbitStyle === undefined ? {} : { orbitStyle }),
     },
     gizmoStyle: effectiveGizmoStyle(viewer, profile),
   };
@@ -49,7 +50,7 @@ export const resolveViewerCameraInput = ({
  * @returns The props for `CadViewer`.
  */
 export const useViewerCameraInput = (): ViewerCameraInputProps => {
-  const enabled = useFeature('viewerControls');
+  const enabled = useFeatureState('viewerControls') === 'on';
   const { profile, viewer } = usePersonRecord();
   return useMemo(() => resolveViewerCameraInput({ enabled, profile, viewer }), [enabled, profile, viewer]);
 };

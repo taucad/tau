@@ -23,7 +23,9 @@ import {
   createDesktopInstallerCatalog,
   createDesktopRouteDescriptor,
   desktopLaneKeys,
+  desktopLaneManifestKey,
   desktopManifestDigest,
+  desktopPlatformLanes,
   desktopPublicationScopes,
   verifyDesktopRouteDescriptor,
 } from './desktop-route-publication.mjs';
@@ -464,32 +466,54 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
         .split('/')
         .map((segment) => encodeURIComponent(segment))
         .join('/')}`;
-      const response = await fetch(url, { signal: AbortSignal.timeout(120_000), redirect: 'error', cache: 'no-store' });
-      if (!response.ok || !response.body) {
-        throw new Error(`Public route object unavailable: ${key}`);
-      }
-      const hash = createHash('sha256');
-      for await (const chunk of response.body) {
-        hash.update(chunk);
+      // A connection reset while reading back a large public object proves nothing about its bytes, so the whole
+      // read is retried a bounded number of times; a completed read with different bytes is never retried.
+      const publicSha256 = async (): Promise<string> => {
+        const response = await fetch(url, {
+          signal: AbortSignal.timeout(120_000),
+          redirect: 'error',
+          cache: 'no-store',
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`Public route object unavailable: ${key}`);
+        }
+        const hash = createHash('sha256');
+        for await (const chunk of response.body) {
+          hash.update(chunk);
+        }
+        return hash.digest('hex');
+      };
+      let actual: string | undefined;
+      for (let attempt = 1; actual === undefined; attempt += 1) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- Readback attempts are sequential by design.
+          actual = await publicSha256();
+        } catch (error) {
+          if (attempt >= 3) {
+            throw error;
+          }
+        }
       }
       const expected = await hashes(path);
-      if (hash.digest('hex') !== expected.sha256) {
+      if (actual !== expected.sha256) {
         throw new Error(`Public route bytes disagree: ${key}`);
       }
     },
   };
+  // The lane a promotion writes is its scope; renewal names the completed lane it renews (D-H5).
+  const scope = z.enum(desktopPublicationScopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+  const lane = z.enum(desktopPublicationScopes).parse(process.env['TAU_PUBLICATION_LANE'] ?? scope);
+  // Each lane's candidate manifest is immutable under its own key, so a second platform of one tag never collides.
+  const manifestKey = desktopLaneManifestKey(tag, lane);
   const descriptors = ['windows-nsis', 'linux-appimage']
     .filter((route) => manifest.artifacts.some((artifact) => artifact.kind === route))
     .map((route) => `desktop-update-${route}-x64.json`);
   if (operation === 'mirror-routes') {
-    for (const name of [
-      ...manifest.artifacts.map((artifact) => artifact.name),
-      ...descriptors,
-      'desktop-artifacts.json',
-    ]) {
+    for (const name of [...manifest.artifacts.map((artifact) => artifact.name), ...descriptors]) {
       // oxlint-disable-next-line no-await-in-loop -- Immutable objects and public-byte checks complete in publication order.
       await mirrorDesktopRouteFile(store, `releases/${tag}/${name}`, resolve(root, name));
     }
+    await mirrorDesktopRouteFile(store, manifestKey, resolve(root, 'desktop-artifacts.json'));
     return;
   }
   requireDesktopInstallerPublicationEnabled(manifest.channel);
@@ -513,9 +537,6 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
       offer: true,
     });
   }
-  // The lane a promotion writes is its scope; renewal names the completed lane it renews (D-H5).
-  const scope = z.enum(desktopPublicationScopes).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
-  const lane = z.enum(desktopPublicationScopes).parse(process.env['TAU_PUBLICATION_LANE'] ?? scope);
   const laneKeys = desktopLaneKeys(lane);
   const catalogPath = resolve(root, laneKeys.catalog.slice('latest/'.length));
   const composedPath = resolve(root, 'installers.json');
@@ -523,7 +544,8 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
     if (lane !== scope) {
       throw new Error('A promotion writes only its own scope lane');
     }
-    // An omitted VM run is admitted only for Mac-only scope (either channel), and the catalog then says `vm: 'pending'`.
+    // An omitted VM run is admitted only for Mac-only or Windows-only scope (either channel), and the catalog then says
+    // `vm: 'pending'`.
     const vmRun = process.env['TAU_ROUTE_VM_RUN_ID'];
     const receipts = await fetchDesktopQualifiedReceipts(manifest, root, {
       ci: required('TAU_ROUTE_CI_RUN_ID'),
@@ -544,7 +566,7 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
     // A platform lane composes its catalog with every other platform's completed catalog, each read back exactly as
     // that platform's own completion receipt recorded it; the all-platform lane keeps its single catalog.
     const others = await Promise.all(
-      (['macos', 'linux'] as const)
+      desktopPlatformLanes
         .filter((other) => other !== lane)
         .map(async (other) => [other, await readCompletedPlatformCatalog(store, other)] as const),
     );
@@ -561,14 +583,11 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
       published,
     );
     // Immutable assets/descriptors must already be public before any update pointer changes.
-    for (const name of [
-      ...manifest.artifacts.map((artifact) => artifact.name),
-      ...descriptors,
-      'desktop-artifacts.json',
-    ]) {
+    for (const name of [...manifest.artifacts.map((artifact) => artifact.name), ...descriptors]) {
       // oxlint-disable-next-line no-await-in-loop -- Admission verifies every public object before pointer writes.
       await store.verify(`releases/${tag}/${name}`, resolve(root, name));
     }
+    await store.verify(manifestKey, resolve(root, 'desktop-artifacts.json'));
     await writeFile(catalogPath, JSON.stringify(catalog) + '\n');
     if (lane !== 'all') {
       await writeFile(composedPath, JSON.stringify(published) + '\n');
@@ -726,9 +745,6 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
             artifactDirectory: root,
             ...(previous ? { previous } : {}),
           });
-    if (Date.parse(apt.inventory.validUntil) <= Date.now()) {
-      throw new Error('Expired APT snapshot cannot be published');
-    }
     await apt.publish({
       async put(object) {
         const remoteKey = `apt/${object.path}`;

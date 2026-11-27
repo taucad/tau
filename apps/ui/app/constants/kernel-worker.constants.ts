@@ -4,27 +4,53 @@ import type { RuntimeKernels } from '@taucad/runtime/worker';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
+import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
+
+/**
+ * Mark a kernel worker's construction as `tau.load.kernel.worker` (progressive loading PL5): the worker script and
+ * the wasm it fetches start here, so a harness places the kernel's first request against the route's useful mark.
+ */
+const markKernelWorkerStart = (): void => {
+  const now = performance.now();
+  pageProjectOpenPerformance().record('kernel.worker', { start: now, end: now, outcome: 'ok' });
+};
 
 export type DefaultKernelId = RuntimeKernels<typeof runtime>[number]['id'];
 
-// SB4: each kernel worker's own failures are reported once, tagged `worker: kernel`.
-const createDefaultRuntimeWorker = (): Worker =>
-  reportWorkerFailures(
-    new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), {
-      name: 'tau-ui-runtime-worker',
-      type: 'module',
-    }),
-    'kernel',
-  );
+type OnWorkerCodeLoadFailure = Parameters<KernelOptionsFactory>[0]['onWorkerCodeLoadFailure'];
 
-const createDebugRuntimeWorker = (): Worker =>
-  reportWorkerFailures(
-    new Worker(new URL('../runtime/runtime-debug.worker.ts', import.meta.url), {
-      name: 'tau-ui-runtime-debug-worker',
-      type: 'module',
-    }),
+// SB4: each kernel worker's own failures are reported once, tagged `worker: kernel`. FP10: its owner hears its code
+// failing to load before the transport closes the channel.
+const createDefaultRuntimeWorker = (onCodeLoadFailure: OnWorkerCodeLoadFailure) => (): Worker => {
+  markKernelWorkerStart();
+  return reportWorkerFailures(
+    createModuleWorker(
+      () =>
+        new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), {
+          name: 'tau-ui-runtime-worker',
+          type: 'module',
+        }),
+      { name: 'runtime', ...(onCodeLoadFailure === undefined ? {} : { onCodeLoadFailure }) },
+    ),
     'kernel',
   );
+};
+
+const createDebugRuntimeWorker = (onCodeLoadFailure: OnWorkerCodeLoadFailure) => (): Worker => {
+  markKernelWorkerStart();
+  return reportWorkerFailures(
+    createModuleWorker(
+      () =>
+        new Worker(new URL('../runtime/runtime-debug.worker.ts', import.meta.url), {
+          name: 'tau-ui-runtime-debug-worker',
+          type: 'module',
+        }),
+      { name: 'runtime-debug', ...(onCodeLoadFailure === undefined ? {} : { onCodeLoadFailure }) },
+    ),
+    'kernel',
+  );
+};
 
 /**
  * Size the worker's compute caches by the device memory class (geometry cache result-path T5).
@@ -70,10 +96,15 @@ export const sizeComputeBinding = (
  * is constructed with everything it needs up-front, preserving the
  * runtime invariant that `client.connect()` takes no arguments.
  */
-export const createDefaultKernelOptions: KernelOptionsFactory = ({ fileSystem, runtimeConfig, compute }) => ({
+export const createDefaultKernelOptions: KernelOptionsFactory = ({
+  fileSystem,
+  runtimeConfig,
+  compute,
+  onWorkerCodeLoadFailure,
+}) => ({
   config: runtimeConfig,
   transport: webWorkerTransport({
-    createWorker: createDefaultRuntimeWorker,
+    createWorker: createDefaultRuntimeWorker(onWorkerCodeLoadFailure),
     fileSystem,
     compute: sizeComputeBinding(compute, runtimeConfig.memoryConstrained),
   }),
@@ -91,7 +122,7 @@ export const createDebugKernelOptions: KernelOptionsFactory = (deps) => ({
   ...createDefaultKernelOptions(deps),
   config: deps.runtimeConfig,
   transport: webWorkerTransport({
-    createWorker: createDebugRuntimeWorker,
+    createWorker: createDebugRuntimeWorker(deps.onWorkerCodeLoadFailure),
     devtoolsTelemetry: true,
     fileSystem: deps.fileSystem,
     compute: sizeComputeBinding(deps.compute, deps.runtimeConfig.memoryConstrained),

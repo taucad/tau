@@ -3,8 +3,9 @@ name: Drift check
 # The one time-based check of the CI throughput program (Brain research/ci-throughput-review.md, Q-7). Some
 # conformance inputs change without a commit: the GitHub-hosted runner images the shell and native rows run on, and
 # the distribution archives the stock Linux guests install their packages from. Once a day this workflow records them
-# (a few Linux minutes and two macOS minutes), compares them with the fingerprint of its newest green run on `main`
-# (`scripts/src/drift-fingerprint.ts`), and dispatches on `main` only the workflows whose inputs moved:
+# (a few Linux minutes, two macOS minutes and one Windows minute), compares them with the fingerprint of its newest
+# green run on `main` (`scripts/src/drift-fingerprint.ts`), and dispatches on `main` only the workflows whose inputs
+# moved:
 # `shell-conformance.yml` (full tier) when a shell runner image or a guest's packages changed, `native-hosts.yml`
 # (every row) when a native host runner image changed. It then waits for each dispatched run and fails unless every one
 # is green, so the next green run's fingerprint becomes the baseline only once the rows passed on it; a red day
@@ -13,7 +14,7 @@ name: Drift check
 #
 # - Runner images: `$ImageOS $ImageVersion` on each label the rows use (ubuntu-24.04 hosts the Linux shell guests and
 #   the native x64 rows, ubuntu-24.04-arm the native arm64 row, macos-26 the MAC-A row, macos-26-intel the MAC-X row
-#   and the Intel native row).
+#   and the Intel native row, windows-2025 the WIN-X64 row).
 # - Guests: the candidate version of every package `libs/sandbox/scripts/shell-conformance-guest.sh` installs, resolved
 #   in the distribution's own container image against the same archives the stock cloud images use; the guest image
 #   pins themselves are in the repository, so a change to them is a commit and the queue proves it.
@@ -43,9 +44,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel]
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel, windows-2025]
     steps:
       - name: Record the image
+        shell: bash # windows-2025 defaults to pwsh
         env:
           RUNNER_LABEL: ${{ matrix.runner }}
         run: |
@@ -74,7 +76,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '24.10.0'
+          node-version: '26.13.1'
 
       # Each guest's candidate versions, in its distribution's container (`apt-cache policy` after `apt-get update`
       # against the image's own archives). A package the distribution lacks reads `(none)`, which is stable.
@@ -136,7 +138,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '24.10.0'
+          node-version: '26.13.1'
 
       - name: Download today's inputs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -153,8 +155,9 @@ jobs:
           jq -n \
             --arg u "$(cat "$dir/ubuntu-24.04")" --arg a "$(cat "$dir/ubuntu-24.04-arm")" \
             --arg m "$(cat "$dir/macos-26")" --arg i "$(cat "$dir/macos-26-intel")" \
+            --arg w "$(cat "$dir/windows-2025")" \
             --arg gu "$(cat "$dir/ubuntu")" --arg g26 "$(cat "$dir/ubuntu2604")" --arg gd "$(cat "$dir/debian")" \
-            '{runners: {"ubuntu-24.04": $u, "ubuntu-24.04-arm": $a, "macos-26": $m, "macos-26-intel": $i},
+            '{runners: {"ubuntu-24.04": $u, "ubuntu-24.04-arm": $a, "macos-26": $m, "macos-26-intel": $i, "windows-2025": $w},
               guests: {ubuntu: $gu, ubuntu2604: $g26, debian: $gd}}' > "$RUNNER_TEMP/fingerprint/fingerprint.json"
           cp "$dir"/*.versions "$RUNNER_TEMP/fingerprint/"
           cat "$RUNNER_TEMP/fingerprint/fingerprint.json"

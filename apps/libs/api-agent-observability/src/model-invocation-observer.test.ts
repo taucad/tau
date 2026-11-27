@@ -104,7 +104,7 @@ describe('ObservedModelInvocationService', () => {
   });
 
   it("should count a Vertex call's thinking as output, as the ledger does (LA3)", async () => {
-    const route = 'google-gemini-3.8-flash';
+    const route = 'google-gemini-4-hydrogen';
     const completions = new TextEncoder().encode(
       [
         { id: 'cmpl_1', model: 'gemini-test', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
@@ -269,12 +269,16 @@ describe('ObservedModelInvocationService content capture', () => {
   /** A recorder whose mode and lookup answer as a test says. */
   const capturing = (
     answer: () => boolean | undefined,
-    options: Readonly<{ eligible?: boolean; bytes?: Uint8Array<ArrayBuffer> }> = {},
+    options: Readonly<{ eligible?: boolean; bytes?: Uint8Array<ArrayBuffer>; admits?: boolean }> = {},
   ) => {
     const inner = mock<ModelInvocationService>();
     const order: string[] = [];
-    inner.invoke.mockImplementation(async () => {
+    inner.invoke.mockImplementation(async (call) => {
       order.push('invoke');
+      if (options.admits === true) {
+        call.onAdmitted?.('operation-1');
+        order.push('admitted');
+      }
       return relay(options.bytes ?? contentBody);
     });
     const recorder = mock<ModelInvocationEvidenceRecorder>();
@@ -293,7 +297,12 @@ describe('ObservedModelInvocationService content capture', () => {
     recorder.record.mockImplementation((attempt, _permission, captured) => {
       records.push({ attempt, captured });
     });
-    return { observed: new ObservedModelInvocationService(inner, recorder), records, order, recorder };
+    return {
+      observed: new ObservedModelInvocationService(inner, recorder, { admits: options.admits ?? false }),
+      records,
+      order,
+      recorder,
+    };
   };
   const drain = async (observed: ObservedModelInvocationService): Promise<Uint8Array<ArrayBuffer>> => {
     const result = await observed.invoke(intent());
@@ -309,6 +318,16 @@ describe('ObservedModelInvocationService content capture', () => {
     await drain(observed);
 
     expect(order).toEqual(['permission', 'invoke']);
+  });
+
+  /* Chat performance WP-05 (server audit S-03): the lookup's statements must not queue ahead of admission's. */
+  it('starts the purpose lookup only once a funded owner has admitted the call', async () => {
+    const { observed, order, records } = capturing(() => true, { admits: true });
+
+    expect(await drain(observed)).toEqual(contentBody);
+
+    expect(order).toEqual(['invoke', 'permission', 'admitted']);
+    expect(records[0]?.captured).toBeDefined();
   });
 
   it('captures the output and keeps the request body when content is effective at the first chunk', async () => {

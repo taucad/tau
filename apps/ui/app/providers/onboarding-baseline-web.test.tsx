@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog and environment APIs use snake/constant case. */
+import { MemoryRouter } from 'react-router';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { store } from '#hooks/use-cookie.js';
@@ -13,7 +14,7 @@ const state = vi.hoisted(() => ({
   consent: 'declined' as 'unknown' | 'accepted' | 'declined',
 }));
 
-vi.mock('#hooks/use-cookie-consent.js', () => ({
+vi.mock('#hooks/use-privacy-choices.js', () => ({
   useCookieConsent: () => state.consent,
 }));
 vi.mock('#environment.config.js', () => ({
@@ -21,6 +22,10 @@ vi.mock('#environment.config.js', () => ({
     POSTHOG_CLIENT_KEY: 'phc_baseline_web',
     POSTHOG_UI_HOST: 'https://posthog.example.invalid',
   },
+}));
+/* Replay's content decision reads the account's "Improve Tau for everyone" value; this suite does not. */
+vi.mock('#hooks/use-privacy-preferences.js', () => ({
+  usePrivacyPreferences: () => ({ preferences: undefined, isLoading: false, error: null }),
 }));
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('@better-auth-ui/react', () => ({
@@ -69,11 +74,11 @@ afterAll(() => {
 });
 
 // The SDK singleton is loaded once per module graph, so these run in order.
-describe('onboarding baseline through the web analytics boundary', () => {
+describe('onboarding baseline through the web analytics boundary', { shuffle: false }, () => {
   it('captures nothing while consent is declined', async () => {
     store.remove(firstSeenStorageName);
     markFirstSeen();
-    const view = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>);
+    const view = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>, { wrapper: MemoryRouter });
     await settle();
     reportFirstModelBuilt({ kernel: 'openscad' });
     expect(baselineCalls()).toStrictEqual([]);
@@ -82,7 +87,7 @@ describe('onboarding baseline through the web analytics boundary', () => {
 
   it('captures first_seen once after consent is accepted, then the first model once', async () => {
     state.consent = 'accepted';
-    const view = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>);
+    const view = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>, { wrapper: MemoryRouter });
     await vi.waitFor(() => {
       expect(baselineCalls().map(([event]) => event)).toStrictEqual(['first_seen']);
     }, sdkResponse);
@@ -96,7 +101,7 @@ describe('onboarding baseline through the web analytics boundary', () => {
     view.unmount();
 
     // Another load on the same device sends no second first_seen.
-    const again = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>);
+    const again = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>, { wrapper: MemoryRouter });
     await settle();
     expect(baselineCalls().map(([event]) => event)).toStrictEqual(['first_seen', 'first_model_built']);
     again.unmount();

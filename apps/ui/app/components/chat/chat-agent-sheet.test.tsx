@@ -456,6 +456,26 @@ describe('ChatAgentSheet', () => {
     expect(screen.queryByRole('option')).toBeNull();
   });
 
+  it('asks for a fresh listing each time it opens, so a fixed agent can clear', async () => {
+    /* Its own copy says "then reopen this menu": reopening is the trigger. */
+    state.placements = [codex('EXTERNAL_AGENT_UNAVAILABLE')];
+    const onOpen = vi.fn();
+    render(
+      <TooltipProvider>
+        <ChatAgentSheet agentConfig={noConfig} placements={state.placements} focusEditor={vi.fn()} onOpen={onOpen} />
+      </TooltipProvider>,
+    );
+
+    await openSheet();
+    expect(onOpen).toHaveBeenCalledOnce();
+
+    await userEvent.keyboard('{Escape}');
+    act(() => {
+      keybindings.get('/')?.();
+    });
+    expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
   it('shows the fix command the host put on a refused Grok row', async () => {
     state.placements = [
       {

@@ -1,141 +1,23 @@
 /**
- * Type-safe PostHog event emitters for workspace + webaccess project
- * lifecycle (Audit R20). Centralises event names, property shapes, and
- * the noop fallback when analytics is unavailable.
- *
- * Every event includes `workspaceId` when known and `reason` for failure
- * paths so the metrics dashboards can distinguish "missing" vs
- * "permission" vs "unsupported" gates.
+ * The app's binding of `@taucad/files-ui/utils/workspace-telemetry.utils`:
+ * it injects PostHog analytics and UI error reporting (SB4) into the
+ * library's workspace emitters.
  */
 
 import { useMemo } from 'react';
+import { createWorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
+import type { WorkspaceFailureReporter, WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import type { Analytics } from '#hooks/use-analytics.js';
 import { reportUiError } from '#lib/error-reporting.js';
-import type { ExternalPollTelemetry } from '@taucad/fs-client/file-tree-service';
 
-export const workspaceEventName = {
-  created: 'workspace.created',
-  connected: 'workspace.connected',
-  permissionRevoked: 'workspace.permission_revoked',
-  swap: 'workspace.swap',
-  openFailed: 'workspace.open_failed',
-  unmountFailed: 'workspace.unmount_failed',
-  projectCreateWebaccessBlocked: 'project.create.webaccess_blocked',
-  externalPoll: 'workspace.external_poll',
-  rootSkipped: 'workspace.root_skipped',
-  connection: 'workspace.connection',
-} as const;
-
-export type WorkspaceEventName = (typeof workspaceEventName)[keyof typeof workspaceEventName];
-
-type WorkspaceFailureReason = 'missing' | 'disconnected' | 'permission' | 'unsupported' | 'aborted' | 'unknown';
-
-export type WorkspaceTelemetry = {
-  readonly workspaceCreated: (input: { readonly workspaceId: string }) => void;
-  readonly workspaceConnected: (input: { readonly workspaceId: string }) => void;
-  readonly workspacePermissionRevoked: (input: { readonly workspaceId: string }) => void;
-  readonly workspaceSwap: (input: {
-    readonly previousWorkspaceId: string | undefined;
-    readonly nextWorkspaceId: string;
-  }) => void;
-  /**
-   * A workspace could not be opened. `error`, when the failure threw one, also goes to error reporting (SB4); the
-   * product event keeps the outcome fields only.
-   */
-  readonly workspaceOpenFailed: (input: {
-    readonly workspaceId: string | undefined;
-    readonly reason: WorkspaceFailureReason;
-    readonly error?: unknown;
-  }) => void;
-  /**
-   * Emitted when an explicit unmount call fails — for example the
-   * provider's `dispose()` throws while flushing pending writes (Audit
-   * Finding 10). `workspaceId` is only present for webaccess mounts
-   * because indexeddb / opfs mounts have no per-workspace identity.
-   */
-  readonly workspaceUnmountFailed: (input: {
-    readonly workspaceId: string | undefined;
-    readonly prefix: string;
-    readonly reason: 'dispose-failed' | 'unknown';
-    readonly error?: unknown;
-  }) => void;
-  readonly projectCreateWebaccessBlocked: (input: { readonly reason: WorkspaceFailureReason }) => void;
-  readonly workspaceExternalPoll: (input: ExternalPollTelemetry) => void;
-  /**
-   * A configured workspace was left out of the worker's route topology
-   * because its handle is gone or its permission is no longer granted
-   * (R13). Previously a bare `continue` with no signal at all.
-   */
-  readonly workspaceRootSkipped: (input: {
-    readonly workspaceId: string;
-    readonly reason: Extract<WorkspaceFailureReason, 'disconnected' | 'permission'>;
-  }) => void;
-  readonly workspaceConnection: (input: {
-    readonly operationId: string;
-    readonly workspaceId: string | undefined;
-    readonly outcome: 'ready' | 'failed';
-    readonly totalMs: number;
-    readonly registeringDuration: number;
-    readonly mountingDuration: number;
-    readonly catalogDuration: number;
-    readonly publishingDuration: number;
-    readonly candidateCount: number;
-    readonly projectCount: number;
-    readonly conflictCount: number;
-  }) => void;
-};
-
-/** Report the error a workspace failure threw (SB4), tagged with its `code`, `subject` and `operation`. */
-const reportWorkspaceFailure = (error: unknown, operation: 'open' | 'unmount', code: string): void => {
-  if (error === undefined) {
-    return;
-  }
+const reportWorkspaceFailure: WorkspaceFailureReporter = (error, details) => {
   // async-iife: bootstrap -- telemetry callers do not await; reporting never rejects.
-  void reportUiError(error, { tags: { code, subject: 'workspace', operation } });
+  void reportUiError(error, details);
 };
 
-const emit = (analytics: Analytics, name: WorkspaceEventName, properties: Record<string, unknown>): void => {
-  if (typeof analytics.capture !== 'function') {
-    return;
-  }
-  analytics.capture(name, properties);
-};
-
-export const buildWorkspaceTelemetry = (analytics: Analytics): WorkspaceTelemetry => ({
-  workspaceCreated: ({ workspaceId }) => {
-    emit(analytics, workspaceEventName.created, { workspaceId });
-  },
-  workspaceConnected: ({ workspaceId }) => {
-    emit(analytics, workspaceEventName.connected, { workspaceId });
-  },
-  workspacePermissionRevoked: ({ workspaceId }) => {
-    emit(analytics, workspaceEventName.permissionRevoked, { workspaceId });
-  },
-  workspaceSwap: ({ previousWorkspaceId, nextWorkspaceId }) => {
-    emit(analytics, workspaceEventName.swap, { previousWorkspaceId, nextWorkspaceId });
-  },
-  workspaceOpenFailed: ({ workspaceId, reason, error }) => {
-    emit(analytics, workspaceEventName.openFailed, { workspaceId, reason });
-    reportWorkspaceFailure(error, 'open', reason);
-  },
-  workspaceUnmountFailed: ({ workspaceId, prefix, reason, error }) => {
-    emit(analytics, workspaceEventName.unmountFailed, { workspaceId, prefix, reason });
-    reportWorkspaceFailure(error, 'unmount', reason);
-  },
-  projectCreateWebaccessBlocked: ({ reason }) => {
-    emit(analytics, workspaceEventName.projectCreateWebaccessBlocked, { reason });
-  },
-  workspaceExternalPoll: (aggregate) => {
-    emit(analytics, workspaceEventName.externalPoll, aggregate);
-  },
-  workspaceRootSkipped: ({ workspaceId, reason }) => {
-    emit(analytics, workspaceEventName.rootSkipped, { workspaceId, reason });
-  },
-  workspaceConnection: (aggregate) => {
-    emit(analytics, workspaceEventName.connection, aggregate);
-  },
-});
+export const buildWorkspaceTelemetry = (analytics: Analytics): WorkspaceTelemetry =>
+  createWorkspaceTelemetry({ analytics, reportFailure: reportWorkspaceFailure });
 
 export const useWorkspaceTelemetry = (): WorkspaceTelemetry => {
   const analytics = useAnalytics();

@@ -399,6 +399,47 @@ describe('compact permission requests', () => {
     expect(screen.getByText('Allowed once · response recorded')).toBeInTheDocument();
     expect(screen.queryByText(/saving/iu)).toBeNull();
   });
+  /* Claude's adapter reviews no saved policy, so its `allow_always` stays unverified; its once choices are once. */
+  it.each([
+    { scope: 'unspecified', optionId: 'allow', outcome: 'approved', expected: 'Allowed once · response recorded' },
+    { scope: 'once', optionId: 'allow', outcome: 'approved', expected: 'Allowed once · response recorded' },
+    { scope: 'unspecified', optionId: 'reject', outcome: 'denied', expected: 'Denied · response recorded' },
+    {
+      scope: 'unspecified',
+      optionId: 'allow_always',
+      outcome: 'approved',
+      expected: 'Response recorded · saving unverified',
+    },
+  ] as const)(
+    'should label a Claude $optionId answer whose once kinds were recorded as $scope with $expected',
+    ({ scope, optionId, outcome, expected }) => {
+      const claudeOptions = [
+        { optionId: 'allow_always', name: 'Always Allow', kind: 'allow_always' },
+        { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+        { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+      ] as const;
+      render(
+        <ChatPermissionRequest
+          approval={{
+            ...approval,
+            agentId: 'claude',
+            options: [...claudeOptions],
+            providerPermission: {
+              owner: 'provider',
+              persistence: 'unverified',
+              options: claudeOptions.map((option) => ({
+                optionId: option.optionId,
+                requestedScope: option.kind === 'allow_always' ? 'unspecified' : scope,
+              })),
+            },
+          }}
+          name='Claude'
+          resolution={{ outcome, optionId }}
+        />,
+      );
+      expect(screen.getByText(expected)).toBeInTheDocument();
+    },
+  );
   it('should explain unavailable persistent approval before selection', () => {
     render(
       <ChatPermissionRequest

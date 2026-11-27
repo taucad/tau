@@ -5,7 +5,7 @@ import { RootedFileSystemError } from '@taucad/filesystem';
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import type * as HandleStore from '#filesystem/handle-store.js';
+import type * as HandleStore from '@taucad/files-ui/filesystem/handle-store';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { StrictMode, Suspense, use, useEffect, useState } from 'react';
@@ -30,8 +30,8 @@ import { mock } from 'vitest-mock-extended';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils.js';
 import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
-import type { WorkspaceEntry } from '#filesystem/handle-store.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
+import type { WorkspaceEntry } from '@taucad/files-ui/filesystem/handle-store';
 import type { AppRuntimeFiles } from '#runtime/app-runtime.js';
 
 const workerTestState = vi.hoisted(() => {
@@ -46,8 +46,8 @@ const workerTestState = vi.hoisted(() => {
   return { instances };
 });
 
-vi.mock('#machines/file-manager.worker.js?worker', () => ({
-  default: class MockWorker {
+vi.mock('#machines/file-manager-worker.js', () => {
+  class MockWorker {
     public terminate = vi.fn();
     public postMessage = vi.fn();
     public addEventListener = vi.fn((type: string, handler: (event: Event) => void) => {
@@ -68,8 +68,9 @@ vi.mock('#machines/file-manager.worker.js?worker', () => ({
       }
       return true;
     }
-  },
-}));
+  }
+  return { createFileManagerWorker: () => new MockWorker() };
+});
 
 const mockMount = vi.fn<(prefix: string, config: unknown) => Promise<void>>();
 const mockUnmount = vi.fn<(prefix: string) => void>();
@@ -255,11 +256,21 @@ const handleStoreTestState = vi.hoisted(() => ({
   updateWorkspaceHandle: vi.fn(async () => undefined),
   disconnectWorkspace: vi.fn<(workspaceId: string) => Promise<WorkspaceEntry | undefined>>(async () => undefined),
   restoreWorkspaceHandle: vi.fn(async () => false),
+  /* WP9: the input a start went on without, and Home's engine mirror; neither is set outside the database rows. */
+  degraded: undefined as { input: 'records' | 'grants'; errorName: string } | undefined,
+  mirror: undefined as 'indexeddb' | 'opfs' | 'node' | undefined,
+  resetHomeRecords: vi.fn(async () => undefined),
 }));
 
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
+  readProjectRootConfigs: async () => ({
+    configuration: await mockGetProjectRootConfigs(),
+    degraded: handleStoreTestState.degraded,
+  }),
+  readHomeBackendMirror: () => handleStoreTestState.mirror,
+  resetHomeRecords: handleStoreTestState.resetHomeRecords,
   getWorkspace: vi.fn(async () => undefined),
   getWorkspaceMetadata: vi.fn(async () => undefined),
   getProjectFileSystemConfig: async () => mockGetProjectFileSystemConfig(),
@@ -338,6 +349,11 @@ const newTestRuntimeWith = (options: Parameters<typeof createAppRuntime>[0]): Re
 beforeEach(() => {
   testClock = new StepClock();
   readsHome = false;
+  /* Module-level bridge hooks outlive the test that set them; reset them so shuffled order cannot leak one. */
+  readFileForBridge = undefined;
+  readyForBridge = undefined;
+  /* `clearAllMocks` keeps implementations: a project bound to a webaccess folder must not outlive its case. */
+  mockGetProjectFileSystemConfig.mockReset().mockResolvedValue(undefined);
   testRuntime = newTestRuntime();
 });
 
@@ -848,6 +864,12 @@ describe('HomeFileManagerProvider', () => {
   });
 });
 
+/** The desktop shell's recovery members, on a desktop build: the panel reads them only there. */
+const stubDesktopShell = (shell: Record<string, unknown>): void => {
+  vi.stubEnv('TAU_TARGET', 'desktop');
+  vi.stubGlobal('tau', shell);
+};
+
 describe('SharedWorkerGate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -912,6 +934,101 @@ describe('SharedWorkerGate', () => {
     expect(screen.queryByText('subtree')).not.toBeInTheDocument();
   });
 
+  /*
+   * T-B5.3 (B5, B7, R5): a deterministic failure gets a panel whose actions change the input. The desktop actions are
+   * the shell's optional `tau.troubleshooting` and `tau.updates` members, shown only when the shell provides them.
+   */
+  describe('classified start failure', () => {
+    const troubleshooting = {
+      showLogs: vi.fn(async () => undefined),
+      open: vi.fn(async () => undefined),
+      restartInSafeMode: vi.fn(async () => undefined),
+    };
+    const updates = { check: vi.fn(async () => undefined) };
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    });
+
+    const renderFailure = async (error: Error) => {
+      mockWaitForWorkerReady.mockRejectedValue(error);
+      render(
+        <RootFileManagerProvider>
+          <SharedWorkerGate>
+            <div>subtree</div>
+          </SharedWorkerGate>
+        </RootFileManagerProvider>,
+      );
+      /* The one automatic retry of a first, transient failure, once the failure is in. */
+      await screen.findByRole('alert');
+      testClock.advance(1000);
+      /* The panel is rendered again after the retry: read it afresh each time. */
+      return () => screen.getByRole('alert');
+    };
+    const named = (name: string, message: string): Error => Object.assign(new Error(message), { name });
+
+    it('offers Update Tau, Show logs and Troubleshooting for a database a newer Tau opened', async () => {
+      stubDesktopShell({ troubleshooting, updates });
+      const panel = await renderFailure(named('VersionError', 'The requested version is less than the existing one'));
+
+      await vi.waitFor(() => {
+        expect(within(panel()).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
+      });
+      expect(within(panel()).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+      expect(within(panel()).getByRole('button', { name: 'Troubleshooting' })).toBeInTheDocument();
+      expect(within(panel()).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+      fireEvent.click(within(panel()).getByRole('button', { name: 'Update Tau' }));
+      expect(updates.check).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks to close the other Tau window when the database is blocked', async () => {
+      stubDesktopShell({ troubleshooting, updates });
+      const panel = await renderFailure(named('StorageUpgradeBlockedError', 'Opening the database is blocked'));
+
+      await vi.waitFor(() => {
+        expect(within(panel()).getByText(/close the other Tau window/iu)).toBeInTheDocument();
+      });
+      expect(within(panel()).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+    });
+
+    it('offers Restart in Safe Mode, Check for Updates and Show logs when the services utility will not start', async () => {
+      stubDesktopShell({ troubleshooting, updates });
+      const panel = await renderFailure(
+        Object.assign(new Error('The services utility did not start'), { code: 'SERVICES_UNAVAILABLE' }),
+      );
+
+      await vi.waitFor(() => {
+        expect(within(panel()).getByRole('button', { name: 'Restart in Safe Mode' })).toBeInTheDocument();
+      });
+      expect(within(panel()).getByRole('button', { name: 'Check for Updates' })).toBeInTheDocument();
+      expect(within(panel()).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+      fireEvent.click(within(panel()).getByRole('button', { name: 'Restart in Safe Mode' }));
+      expect(troubleshooting.restartInSafeMode).toHaveBeenCalledTimes(1);
+    });
+
+    it('hides a desktop action the shell does not provide', async () => {
+      stubDesktopShell({ updates });
+      const panel = await renderFailure(named('VersionError', 'The requested version is less than the existing one'));
+
+      await vi.waitFor(() => {
+        expect(within(panel()).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
+      });
+      expect(within(panel()).queryByRole('button', { name: 'Show logs' })).not.toBeInTheDocument();
+      expect(within(panel()).queryByRole('button', { name: 'Troubleshooting' })).not.toBeInTheDocument();
+    });
+
+    it('opens safe mode as a page load on the web and offers no logs', async () => {
+      const panel = await renderFailure(
+        Object.assign(new Error('The services utility did not start'), { code: 'SERVICES_UNAVAILABLE' }),
+      );
+
+      await vi.waitFor(() => {
+        expect(within(panel()).getByRole('link', { name: 'Restart in Safe Mode' })).toHaveAttribute('href', '/?safe=1');
+      });
+      expect(within(panel()).queryByRole('button', { name: 'Show logs' })).not.toBeInTheDocument();
+    });
+  });
+
   /* A pending storage selection must not hide the page or admit a worker. */
   it('renders the page while Home\u2019s storage engine resolves', async () => {
     mockGetHomeStorageBackend.mockReturnValueOnce(Promise.withResolvers<'indexeddb' | 'opfs'>().promise);
@@ -924,6 +1041,140 @@ describe('SharedWorkerGate', () => {
 
     expect(screen.getByText('subtree')).toBeInTheDocument();
     expect(workerTestState.instances).toHaveLength(0);
+  });
+});
+
+/*
+ * T-B5.5, T-B5.7 (B5, R7; the component half): a start that went on with Home alone because its records could not be
+ * read says so beside Home and offers the action for the cause. On the desktop the reset is the shell's quarantine of
+ * the local database; on the web it is offered only when Home's engine mirror exists, so Home opens on the same engine.
+ */
+describe('database panel', () => {
+  const troubleshooting = {
+    showLogs: vi.fn(async () => undefined),
+    open: vi.fn(async () => undefined),
+    restartInSafeMode: vi.fn(async () => undefined),
+    resetLocalDatabase: vi.fn(async () => undefined),
+  };
+  const updates = { check: vi.fn(async () => undefined) };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    workerTestState.instances.length = 0;
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    mockWaitForWorkerReady.mockResolvedValue(undefined);
+    readsHome = true;
+  });
+
+  afterEach(() => {
+    handleStoreTestState.degraded = undefined;
+    handleStoreTestState.mirror = undefined;
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const renderHome = async (): Promise<HTMLElement> => {
+    render(
+      <RootFileManagerProvider>
+        <HomeFileManagerNotice />
+        <SharedWorkerGate>
+          <span>files ready</span>
+        </SharedWorkerGate>
+      </RootFileManagerProvider>,
+    );
+    expect(await screen.findByText('files ready')).toBeInTheDocument();
+    return screen.findByRole('alert', { name: "Tau's local database is unavailable" });
+  };
+
+  it('should keep Home open and offer Reset local database on the desktop', async () => {
+    stubDesktopShell({ troubleshooting, updates });
+    handleStoreTestState.degraded = { input: 'records', errorName: 'UnknownError' };
+
+    const panel = await renderHome();
+
+    expect(within(panel).getByText(/Home is open/u)).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Reset local database' }));
+    expect(troubleshooting.resetLocalDatabase).toHaveBeenCalledTimes(1);
+  });
+
+  /* D3: a newer Tau's database is not damaged; updating brings the folders back, and a reset would only lose them. */
+  it('should offer Update Tau and no reset for a database a newer Tau opened', async () => {
+    stubDesktopShell({ troubleshooting, updates });
+    handleStoreTestState.degraded = { input: 'records', errorName: 'VersionError' };
+
+    const panel = await renderHome();
+
+    expect(within(panel).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Troubleshooting' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
+  });
+
+  it('should offer Update Tau and no reset on the web for a database a newer Tau opened, even with a mirror', async () => {
+    handleStoreTestState.degraded = { input: 'records', errorName: 'VersionError' };
+    handleStoreTestState.mirror = 'opfs';
+
+    const panel = await renderHome();
+
+    expect(within(panel).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
+  });
+
+  it('should ask to close the other Tau window when the database is blocked, and offer Try again', async () => {
+    stubDesktopShell({ troubleshooting, updates });
+    handleStoreTestState.degraded = { input: 'records', errorName: 'StorageUpgradeBlockedError' };
+
+    const panel = await renderHome();
+
+    expect(within(panel).getByText(/close the other Tau window/iu)).toBeInTheDocument();
+    /* Try again reloads the page, which opens the database afresh once the other window is gone. */
+    expect(within(panel).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Reset local database' })).not.toBeInTheDocument();
+  });
+
+  it('should offer no reset on the web without Home\u2019s engine mirror', async () => {
+    handleStoreTestState.degraded = { input: 'records', errorName: 'UnknownError' };
+
+    const panel = await renderHome();
+
+    expect(within(panel).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
+  });
+
+  it('should offer Reset folder list on the web when Home\u2019s engine mirror exists', async () => {
+    handleStoreTestState.degraded = { input: 'records', errorName: 'UnknownError' };
+    handleStoreTestState.mirror = 'opfs';
+
+    const panel = await renderHome();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Reset folder list' }));
+    /* The reset forgets every folder this browser connected, so it asks first. */
+    expect(handleStoreTestState.resetHomeRecords).not.toHaveBeenCalled();
+    expect(within(panel).getByText(/forgets the folders/u)).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Cancel' }));
+    expect(within(panel).queryByText(/forgets the folders/u)).not.toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Reset folder list' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Reset and reload' }));
+    await waitFor(() => {
+      expect(handleStoreTestState.resetHomeRecords).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('should show no database panel when the grant list, not the database, could not be read', async () => {
+    stubDesktopShell({ troubleshooting, updates });
+    handleStoreTestState.degraded = { input: 'grants', errorName: 'Error' };
+    render(
+      <RootFileManagerProvider>
+        <HomeFileManagerNotice />
+        <SharedWorkerGate>
+          <span>files ready</span>
+        </SharedWorkerGate>
+      </RootFileManagerProvider>,
+    );
+
+    expect(await screen.findByText('files ready')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset local database' })).not.toBeInTheDocument();
   });
 });
 
@@ -1788,7 +2039,7 @@ describe('FileManagerProvider — client + workspace facades', () => {
     const priorStorage = Object.getOwnPropertyDescriptor(navigator, 'storage');
     globalThis.indexedDB = new IDBFactory();
     Object.defineProperty(navigator, 'storage', { configurable: true, value: {} });
-    const store = await vi.importActual<typeof HandleStore>('#filesystem/handle-store.js');
+    const store = await vi.importActual<typeof HandleStore>('@taucad/files-ui/filesystem/handle-store');
     const projectId = 'proj_000000000000000000009';
     await store.setProjectFileSystemConfig({ projectId, backend: 'indexeddb', providerBasePath: 'before' });
     mockGetProjectRootConfigs.mockImplementation(store.getProjectRootConfigs);

@@ -50,7 +50,7 @@ const bodyFor = (model: Model, prompt: HelperPrompt = textPrompt): Record<string
   helperRequestBody(routeOf(model), model, prompt);
 
 const ollamaModel: Model = {
-  ...catalogRow('openai', 'gpt-5.6-luna'),
+  ...catalogRow('openai', 'gpt-6-luna'),
   id: 'llama3.2:latest',
   model: 'llama3.2:latest',
   provider: { id: 'ollama', name: 'Ollama' },
@@ -59,10 +59,10 @@ const ollamaModel: Model = {
 
 describe('helperModelRoute', () => {
   it.each([
-    ['openai', 'gpt-5.6-luna', 'openai-responses'],
+    ['openai', 'gpt-6-luna', 'openai-responses'],
     ['xai', 'grok-4.6', 'openai-responses'],
     ['anthropic', 'claude-haiku-5.5', 'anthropic'],
-    ['vertexai', 'gemini-3.8-flash', 'openai-completions'],
+    ['vertexai', 'gemini-4-hydrogen', 'openai-completions'],
     ['together', 'kimi-k3.1-pro', 'openai-completions'],
   ] as const)('should route %s %s to its provider model on its wire', (providerId, slug, wire) => {
     const row = catalogRow(providerId, slug);
@@ -89,8 +89,8 @@ describe('helperModelRoute', () => {
 
 describe('helperRequestBody', () => {
   it('should send OpenAI no reasoning, the row temperature and the helper output ceiling on the Responses wire', () => {
-    expect(bodyFor(catalogRow('openai', 'gpt-5.6-luna'), imagePrompt)).toEqual({
-      model: 'gpt-5.6-luna',
+    expect(bodyFor(catalogRow('openai', 'gpt-6-luna'), imagePrompt)).toEqual({
+      model: 'gpt-6-luna',
       stream: true,
       max_output_tokens: 64,
       temperature: 1,
@@ -167,8 +167,8 @@ describe('helperRequestBody', () => {
   });
 
   it('should prefix the Vertex model with google/ and send its lowest thinking level under extra_body', () => {
-    expect(bodyFor(catalogRow('vertexai', 'gemini-3.8-flash'), imagePrompt)).toEqual({
-      model: 'google/gemini-3.8-flash',
+    expect(bodyFor(catalogRow('vertexai', 'gemini-4-hydrogen'), imagePrompt)).toEqual({
+      model: 'google/gemini-4-hydrogen',
       stream: true,
       stream_options: { include_usage: true },
       max_tokens: 64,
@@ -196,7 +196,8 @@ describe('helperRequestBody', () => {
   });
 
   it('should carry a Vertex row temperature', () => {
-    const row = catalogRow('vertexai', 'gemini-3.1-pro');
+    const hydrogen = catalogRow('vertexai', 'gemini-4-hydrogen');
+    const row: Model = { ...hydrogen, configuration: { ...hydrogen.configuration, temperature: 1 } };
 
     expect(bodyFor(row)).toMatchObject({ model: `google/${row.model}`, temperature: 1 });
   });

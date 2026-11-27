@@ -1,0 +1,111 @@
+import { describe, expect, it } from 'vitest';
+import { archiveTooLargeCode } from '@taucad/filesystem/content-ops';
+import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
+import { savableZipDownloadBytes, zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
+import {
+  archiveTooLargeMessage,
+  FileTreeDownloadError,
+  createFileTreeDownloadError,
+  getFileTreeDownloadErrorMessage,
+  getFileTreeDownloadPolicy,
+} from '#utils/file-tree-download-policy.js';
+
+describe('file-tree-download-policy', () => {
+  describe('getFileTreeDownloadPolicy', () => {
+    it('should allow ordinary project paths', () => {
+      expect(getFileTreeDownloadPolicy({ source: 'project', versioned: true, agentAccess: 'read-write' })).toEqual({
+        allowed: true,
+      });
+    });
+
+    it('should allow a row no view stamped', () => {
+      expect(getFileTreeDownloadPolicy(undefined)).toEqual({ allowed: true });
+    });
+
+    it('should block a system-skills overlay row', () => {
+      expect(
+        getFileTreeDownloadPolicy({ source: 'system-skills', versioned: false, agentAccess: 'read-only' }),
+      ).toEqual({
+        allowed: false,
+        code: 'not-project-content',
+        message: 'System skill files are read-only and cannot be downloaded.',
+      });
+    });
+
+    it('should allow a records row the project owns', () => {
+      expect(getFileTreeDownloadPolicy({ source: 'project', versioned: false, agentAccess: 'read-only' })).toEqual({
+        allowed: true,
+      });
+    });
+
+    it('should block dependency-backed read-only paths', () => {
+      expect(getFileTreeDownloadPolicy({ source: 'dependencies', versioned: false, agentAccess: 'read-only' })).toEqual(
+        {
+          allowed: false,
+          code: 'not-project-content',
+          message: 'Dependency files are read-only and cannot be downloaded.',
+        },
+      );
+    });
+  });
+
+  describe('download errors', () => {
+    it('should preserve typed download error metadata', () => {
+      const cause = new Error('zip exploded');
+      const error = createFileTreeDownloadError({
+        code: 'zip-generation-failed',
+        path: 'public/models',
+        cause,
+      });
+
+      expect(error).toBeInstanceOf(FileTreeDownloadError);
+      expect(error).toMatchObject({
+        name: 'FileTreeDownloadError',
+        code: 'zip-generation-failed',
+        path: 'public/models',
+        message: "Failed to create ZIP for 'public/models': zip exploded",
+      });
+      expect(error.cause).toBe(cause);
+    });
+
+    it('should return typed error messages for user-facing toasts', () => {
+      const error = createFileTreeDownloadError({
+        code: 'permission-read-only',
+        path: 'node_modules',
+      });
+
+      expect(getFileTreeDownloadErrorMessage(error)).toBe('Read-only dependency paths cannot be downloaded.');
+    });
+
+    /* The archive's refusal crosses the bridge wire as a bare `Error` with a
+     * `code`, and its message is the byte count in decimal; the user is told
+     * the ceiling in their own units instead. */
+    it('should name the ceiling the archive was refused at', () => {
+      const wire = Object.assign(new Error("Archive of '' exceeds its 268435456-byte ceiling."), {
+        code: archiveTooLargeCode,
+      });
+      const inMemory = zipDownloadCeiling({});
+      const savable = zipDownloadCeiling({ showSaveFilePicker: () => undefined });
+
+      expect(getFileTreeDownloadErrorMessage(wire, inMemory)).toBe(
+        'This folder is larger than the 256.0 MB a ZIP download can hold in this browser. Download a smaller folder instead.',
+      );
+      expect(
+        getFileTreeDownloadErrorMessage(
+          createFileTreeDownloadError({ code: 'zip-generation-failed', path: 'public', cause: wire }),
+          savable,
+        ),
+      ).toBe(archiveTooLargeMessage(savableZipDownloadBytes));
+      expect(archiveTooLargeMessage(savableZipDownloadBytes)).toContain(formatBytes(savableZipDownloadBytes));
+      expect(archiveTooLargeMessage(savableZipDownloadBytes)).not.toContain('256.0 MB');
+    });
+
+    it('should still say the folder is too large when the caller gives no ceiling', () => {
+      const wire = Object.assign(new Error('refused'), { code: archiveTooLargeCode });
+
+      expect(getFileTreeDownloadErrorMessage(wire)).toBe(
+        'This folder is larger than a ZIP download can hold in this browser. Download a smaller folder instead.',
+      );
+    });
+  });
+});

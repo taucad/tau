@@ -182,7 +182,7 @@ export type ProjectRevisionsMachineEvent =
   /** The `restore` child finished a verb, so the admissions it held can run (A2). */
   | Readonly<{ type: 'restoreSettled'; checkoutId: string }>
   | (Readonly<{ type: 'revisionMinted'; revisionId: string; branch: string | undefined }> & CutAnswerFields)
-  | (Readonly<{ type: 'nothingToSave'; heldBy?: TurnAttemptKey }> & CutAnswerFields)
+  | (Readonly<{ type: 'nothingToSave'; heldBy?: TurnAttemptKey; waitFor?: RevisionGitOperation }> & CutAnswerFields)
   | (Readonly<{ type: 'cutFailed'; reason: string; code?: RevisionPortErrorCode | 'CHECKOUT_UNKNOWN' }> &
       CutAnswerFields)
   | (Readonly<{ type: 'casLost' }> & CutAnswerFields)
@@ -304,7 +304,7 @@ export type ProjectRevisionsMachineEvent =
 /** Facts projectRevisionsMachine emits for a host that holds only the root. @public */
 export type ProjectRevisionsMachineEmitted =
   | (Readonly<{ type: 'revisionMinted'; revisionId: string; branch: string | undefined }> & CutAnswerFields)
-  | (Readonly<{ type: 'nothingToSave'; heldBy?: TurnAttemptKey }> & CutAnswerFields)
+  | (Readonly<{ type: 'nothingToSave'; heldBy?: TurnAttemptKey; waitFor?: RevisionGitOperation }> & CutAnswerFields)
   | (Readonly<{ type: 'cutFailed'; reason: string; code?: RevisionPortErrorCode | 'CHECKOUT_UNKNOWN' }> &
       CutAnswerFields)
   | (Readonly<{ type: 'casLost' }> & CutAnswerFields)

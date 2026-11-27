@@ -3,7 +3,7 @@ title: 'UI Policy'
 description: 'Design system entry point: principles, token architecture, typography, spacing, motion, and component composition for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-11-15'
+updated: '2026-11-25'
 related:
   - docs/policy/color-policy.md
   - docs/policy/diagram-policy.md
@@ -164,7 +164,7 @@ A piece of UI that appears on more than one surface has one implementation, and 
 | Plan catalogue (names, prices, features)                                         | `@taucad/billing/plan-catalog`                                          |
 | Money formatting                                                                 | `formatUsd*`, `formatMonthlyPrice` in `@taucad/billing`                 |
 | Billing badge, notice, inline error, summary rows, billing date, first-line icon | `apps/ui/app/components/billing/billing-primitives.tsx`                 |
-| Settings rows, groups and their loading placeholders                             | `apps/ui/app/components/settings/settings-item.tsx`                     |
+| Settings rows, groups and their loading placeholders                             | `@taucad/settings-ui/components/settings/settings-item`                 |
 
 **Why**: the billing surfaces carried three card-brand formatters, four money formats and two plan grids that disagreed with the pricing page; one owner makes a wording or styling change a one-file change.
 
@@ -225,7 +225,7 @@ Prefer CSS transitions. Honor `prefers-reduced-motion`. Animations are functiona
 
 Only animate `transform` and `opacity` — these are GPU-composited. Never animate `width`, `height`, `margin`, or position properties.
 
-Loading states: delay spinner appearance by 150-300ms. Once visible, keep for at least 300ms to avoid flicker. Content loads as a layout-matching skeleton, not a spinner (§5 Loading Placeholders).
+Loading states follow the wait ladder in [Progressive Loading Policy](progressive-loading-policy.md) rule 16 (`utils/wait-timing`): skeleton bars for a wait that starts on the client from 300 ms, a wait indicator from 1,000 ms and then for at least 500 ms. Content loads as a layout-matching skeleton, not a spinner (§5 Loading Placeholders). Rules 15 to 22 of that policy say which region speaks, in what words, and how a wait fails.
 
 ```css
 @media (prefers-reduced-motion: reduce) {

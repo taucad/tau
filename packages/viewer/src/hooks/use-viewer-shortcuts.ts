@@ -60,9 +60,13 @@ const navigationKeys: readonly NavigationKey[] = [
   { name: 'zoomOut', combo: { key: '-' }, step: { kind: 'zoom', direction: 'out' } },
 ];
 
-/** Focus inside one of these keeps its own arrow keys: a slider, a spin button, or a radio, tab or tool row. */
+/**
+ * Focus inside one of these keeps its own arrow keys: a slider, a spin button, a radio, tab or tool row, or the view
+ * cube (an application whose arrows turn the view, its navigation buttons included). Not every application: the
+ * viewer's own stage is one, and its arrows orbit.
+ */
 const ownArrowKeysSelector =
-  '[role=slider],[role=spinbutton],[role=radiogroup],[role=radio],[role=tablist],[role=tab],[role=toolbar],input,select,textarea';
+  '[role=slider],[role=spinbutton],[role=radiogroup],[role=radio],[role=tablist],[role=tab],[role=toolbar],.viewport-gizmo-cube,input,select,textarea';
 
 /** The phrase the bar speaks for each outcome. */
 const outcomePhrases: Readonly<Record<ViewerShortcutOutcome, string>> = {
@@ -74,6 +78,7 @@ const outcomePhrases: Readonly<Record<ViewerShortcutOutcome, string>> = {
   measureOn: 'Measure on',
   measureOff: 'Measure off',
   measureNeedsModel: 'A model is required for measurement',
+  commentOff: 'Comment off',
   gridShown: 'Grid shown',
   gridHidden: 'Grid hidden',
   perspective: 'Perspective',

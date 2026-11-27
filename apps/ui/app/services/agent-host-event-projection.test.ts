@@ -1031,9 +1031,24 @@ describe('projectAgentHostEvent', () => {
     ],
     ['running', [{ type: 'start-step' }]],
     ['paused', [{ type: 'finish-step' }]],
-    ['completed', [{ type: 'finish', finishReason: 'stop', messageMetadata: { status: 'success' } }]],
-    ['failed', [{ type: 'error', errorText: 'gateway refused' }]],
-    ['cancelled', [{ type: 'abort', reason: 'cancelled' }]],
+    [
+      'completed',
+      [{ type: 'finish', finishReason: 'stop', messageMetadata: { status: 'success', endedAt: 1_788_220_800_000 } }],
+    ],
+    [
+      'failed',
+      [
+        { type: 'message-metadata', messageMetadata: { endedAt: 1_788_220_800_000 } },
+        { type: 'error', errorText: 'gateway refused' },
+      ],
+    ],
+    [
+      'cancelled',
+      [
+        { type: 'message-metadata', messageMetadata: { endedAt: 1_788_220_800_000 } },
+        { type: 'abort', reason: 'cancelled' },
+      ],
+    ],
   ] as const)('projects the %s lifecycle', (state, expected) => {
     expect(
       projectAgentHostEvent({
@@ -1065,12 +1080,12 @@ describe('projectAgentHostEvent', () => {
       category: 'overloaded',
     },
   ] as const)('projects typed $code failure as a persistent ChatError', ({ code, status, message, category }) => {
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
       detail: { code, message, status },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1089,7 +1104,7 @@ describe('projectAgentHostEvent', () => {
       availableCreditAtoms: '300000',
       routeId: 'anthropic-claude-astra-5',
     };
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
@@ -1099,7 +1114,7 @@ describe('projectAgentHostEvent', () => {
         message: 'Insufficient Tau credit for this model request.',
         details,
       },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1124,7 +1139,7 @@ describe('projectAgentHostEvent', () => {
    * refused, and the card is keyed on that code. */
   it('should project a provider-account refusal as overloaded with its details, whatever the status', () => {
     const details = { providerId: 'openai', providerCode: 'credit_balance_exhausted', accountOwner: 'tau' };
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
@@ -1134,7 +1149,7 @@ describe('projectAgentHostEvent', () => {
         message: "The model provider's account is unavailable.",
         details,
       },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1170,12 +1185,12 @@ describe('projectAgentHostEvent', () => {
     { code: 'PROVIDER_UNAVAILABLE', status: 502, category: 'overloaded' },
     { code: 'PROVIDER_UNAVAILABLE', status: 200, category: 'overloaded' },
   ])('should project $code behind HTTP $status as the $category card', ({ code, status, category }) => {
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
       detail: { code, status, message: 'Resource exhausted. Please try again later.' },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1187,12 +1202,12 @@ describe('projectAgentHostEvent', () => {
       agentId: 'codex',
       failure: { category: 'limit', title: "You've hit your usage limit.", actions: [] },
     };
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
       detail: { code: 'EXTERNAL_AGENT_LIMIT_REACHED', message: "You've hit your usage limit.", details },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1214,12 +1229,12 @@ describe('projectAgentHostEvent', () => {
    * projection's to claim.
    */
   it('should project a detail-less agent limit as a generic card', () => {
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
       detail: { code: 'EXTERNAL_AGENT_LIMIT_REACHED', message: "You've hit your usage limit." },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1232,12 +1247,12 @@ describe('projectAgentHostEvent', () => {
   });
 
   it('should carry a host failure code that has no status or details', () => {
-    const [chunk] = projectAgentHostEvent({
+    const chunk = projectAgentHostEvent({
       ...base,
       type: 'run.lifecycle',
       state: 'failed',
       detail: { code: 'NO_EVICTABLE_HISTORY', message: 'Context is oversized but has no safe history to evict.' },
-    });
+    }).at(-1);
     if (chunk?.type !== 'error') {
       throw new Error('Expected an error projection');
     }
@@ -1258,6 +1273,7 @@ describe('projectAgentHostEvent', () => {
 
   it('falls back to the generic host failure only when the run recorded no reason', () => {
     expect(projectAgentHostEvent({ ...base, type: 'run.lifecycle', state: 'failed' })).toEqual([
+      { type: 'message-metadata', messageMetadata: { endedAt: 1_788_220_800_000 } },
       { type: 'error', errorText: 'The agent host failed.' },
     ]);
   });
@@ -1324,7 +1340,7 @@ describe('projectAgentHostEvent', () => {
    * daemon's own log from cursor 0 emits each durable text block once, under an
    * id derived from the message id the log carries. The second copy came from
    * the AI SDK continuing the trailing assistant message on a resume (see
-   * `browser-agent-host-transport.ts`, `registerAgentHostRunReset`); this pins
+   * the since-deleted `browser-agent-host-transport.ts`, `registerAgentHostRunReset`); this pins
    * the layer it did *not* come from, on the real log.
    */
   it('projects each assistant text of a real daemon log exactly once from cursor 0', () => {
@@ -1652,80 +1668,86 @@ describe('external tool-call chunks', () => {
     },
   );
 
-  it.each(['codex', 'grok'])('keeps a normalized %s Tau MCP call on one dynamic SDK identity', async (agentId) => {
-    const blocks: AgentHostLiveBlocks = new Map();
-    const metadata = {
-      tauInternal: { kind: 'external-tool', origin: 'external', agentId, presentation: 'tau-mcp' },
-    } as const;
-    const [input] = chunksOf(
-      {
-        id: 'tau-mcp-input',
-        role: 'tool-input',
-        toolCallId: 'call-mcp',
-        toolName: 'screenshot',
-        call: {
-          toolCallId: 'vendor-call',
-          kind: 'execute',
-          ...(agentId === 'codex' ? { nativeName: 'screenshot' } : {}),
-          content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+  it.each(['codex', 'grok', 'claude'])(
+    'keeps a normalized %s Tau MCP call on one dynamic SDK identity',
+    async (agentId) => {
+      const blocks: AgentHostLiveBlocks = new Map();
+      /* Each adapter spells the native name its own way; durable Claude rows from
+       * before the host canonicalised it carry `mcp__tau__screenshot`. */
+      const nativeName = agentId === 'codex' ? 'screenshot' : agentId === 'claude' ? 'mcp__tau__screenshot' : undefined;
+      const metadata = {
+        tauInternal: { kind: 'external-tool', origin: 'external', agentId, presentation: 'tau-mcp' },
+      } as const;
+      const [input] = chunksOf(
+        {
+          id: 'tau-mcp-input',
+          role: 'tool-input',
+          toolCallId: 'call-mcp',
+          toolName: 'screenshot',
+          call: {
+            toolCallId: 'vendor-call',
+            kind: 'execute',
+            ...(nativeName === undefined ? {} : { nativeName }),
+            content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+          },
+          content: { targetFile: 'main.ts', mode: 'single' },
+          metadata,
         },
-        content: { targetFile: 'main.ts', mode: 'single' },
-        metadata,
-      },
-      blocks,
-    );
-    const [output] = chunksOf(
-      {
-        id: 'tau-mcp-output',
-        role: 'tool-output',
-        toolCallId: 'call-mcp',
-        toolName: 'screenshot',
-        content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
-        isError: false,
-        call: {
-          toolCallId: 'vendor-call',
-          kind: 'execute',
-          ...(agentId === 'codex' ? { nativeName: 'screenshot' } : {}),
+        blocks,
+      );
+      const [output] = chunksOf(
+        {
+          id: 'tau-mcp-output',
+          role: 'tool-output',
+          toolCallId: 'call-mcp',
+          toolName: 'screenshot',
+          content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
+          isError: false,
+          call: {
+            toolCallId: 'vendor-call',
+            kind: 'execute',
+            ...(nativeName === undefined ? {} : { nativeName }),
+          },
+          metadata,
         },
-        metadata,
-      },
-      blocks,
-    );
+        blocks,
+      );
 
-    expect(input).toMatchObject({ type: 'tool-input-available', toolName: 'screenshot' });
-    expect(input).toHaveProperty('dynamic', true);
-    expect(input).toMatchObject({
-      toolMetadata: { tau: { origin: 'external', agentId, presentation: 'tau-mcp' } },
-    });
-    expect(output).toMatchObject({ type: 'tool-output-available', output: { images: [{ view: 'isometric' }] } });
-    expect(output).toHaveProperty('dynamic', true);
-    let parts: MyUIMessage['parts'] = [];
-    const stream = new ReadableStream<UIMessageChunk>({
-      start(controller) {
-        controller.enqueue(input);
-        controller.enqueue(output);
-        controller.close();
-      },
-    });
-    for await (const message of readUIMessageStream<MyUIMessage>({ stream })) {
-      parts = message.parts;
-    }
-    expect(parts.filter((part) => part.type === 'dynamic-tool')).toHaveLength(1);
-    expect(parts.find((part) => part.type === 'dynamic-tool')).toMatchObject({
-      type: 'dynamic-tool',
-      state: 'output-available',
-      toolMetadata: {
-        tau: {
-          toolCallId: 'vendor-call',
-          origin: 'external',
-          agentId,
-          presentation: 'tau-mcp',
-          ...(agentId === 'codex' ? { nativeName: 'screenshot' } : {}),
-          content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+      expect(input).toMatchObject({ type: 'tool-input-available', toolName: 'screenshot' });
+      expect(input).toHaveProperty('dynamic', true);
+      expect(input).toMatchObject({
+        toolMetadata: { tau: { origin: 'external', agentId, presentation: 'tau-mcp' } },
+      });
+      expect(output).toMatchObject({ type: 'tool-output-available', output: { images: [{ view: 'isometric' }] } });
+      expect(output).toHaveProperty('dynamic', true);
+      let parts: MyUIMessage['parts'] = [];
+      const stream = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          controller.enqueue(input);
+          controller.enqueue(output);
+          controller.close();
         },
-      },
-    });
-  });
+      });
+      for await (const message of readUIMessageStream<MyUIMessage>({ stream })) {
+        parts = message.parts;
+      }
+      expect(parts.filter((part) => part.type === 'dynamic-tool')).toHaveLength(1);
+      expect(parts.find((part) => part.type === 'dynamic-tool')).toMatchObject({
+        type: 'dynamic-tool',
+        state: 'output-available',
+        toolMetadata: {
+          tau: {
+            toolCallId: 'vendor-call',
+            origin: 'external',
+            agentId,
+            presentation: 'tau-mcp',
+            nativeName: 'screenshot',
+            content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+          },
+        },
+      });
+    },
+  );
 });
 
 describe('external attribution', () => {
@@ -2599,6 +2621,24 @@ it('should use only the selected host session controls for the same agent', () =
   expect(latestAcpSessionData(messages, 'grok', 'A')?.hostId).toBe('A');
   expect(latestAcpSessionData(messages, 'grok', 'B')?.hostId).toBe('B');
   expect(latestAcpSessionData(messages, 'grok', 'C')).toBeUndefined();
+});
+
+it('should read an unstamped session record for the desktop placement only', () => {
+  const messages: MyUIMessage[] = [
+    {
+      id: 'session-local',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'data-acp-session',
+          data: { type: 'acp-session', id: 'local', agentId: 'claude', commands: [], configOptions: [] },
+        },
+      ],
+    },
+  ];
+  /* The desktop launcher records no host, while the composer names `desktop`; the label read the requested mode. */
+  expect(latestAcpSessionData(messages, 'claude', 'desktop')?.id).toBe('local');
+  expect(latestAcpSessionData(messages, 'claude', 'origin')).toBeUndefined();
 });
 
 it('should preserve the selected provider option when replaying a resolved permission', () => {

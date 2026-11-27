@@ -1,4 +1,6 @@
 import type { Event } from '@sentry/react';
+import type { ClientInstrumentation } from 'react-router';
+import { Topic } from '@taucad/events';
 import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
@@ -26,9 +28,17 @@ export const setReportedUserId = (id: string | undefined): void => {
   reportedUserId = id === '' ? undefined : id;
 };
 
-/** The router React Router's `HydratedRouter` publishes, as far as the processor reads it. */
-type PublishedRouter = {
-  readonly state?: { readonly matches?: ReadonlyArray<{ readonly route?: { readonly id?: unknown } }> };
+/** The display mode and its basis or problem (adaptive app deployment mode W1), or `undefined` before it is known. */
+let reportedDeploymentMode: string | undefined;
+
+/**
+ * Set the `deployment_mode` tag events carry: the display mode and its basis or problem, such as `funded/confirmed`
+ * or `unknown/unreachable` (adaptive app deployment mode charter W1).
+ *
+ * @param mode - The tag's value, or `undefined` to clear it.
+ */
+export const setReportedDeploymentMode = (mode: string | undefined): void => {
+  reportedDeploymentMode = mode;
 };
 
 /**
@@ -37,28 +47,82 @@ type PublishedRouter = {
  */
 const outOfTreeRoutePrefix = /^(?:\.\.\/)+app\//u;
 
+/** Each route's path relative to its parent, by route id, as React Router built the routes. */
+const routePaths = new Map<string, string | undefined>();
+
 /**
- * The React Router route id of the deepest match (for example `routes/w.$workspace.$project`), from
- * the data router the framework's `HydratedRouter` publishes on `window`. A desktop id
- * (`../../app/routes/…`) reads as its web id.
+ * The route instrumentation `HydratedRouter` takes (React Router 8 migration C2, RR7): React Router calls it once for
+ * every route it builds, lazily discovered ones included, and it keeps each route's path so a match list names its
+ * pattern. It wraps no handler.
+ *
+ * @public
+ */
+export const routePathInstrumentation: ClientInstrumentation = {
+  route: ({ id, path }) => {
+    routePaths.set(id, path);
+  },
+};
+
+/** The matched route the page last rendered: its deepest route id and its pattern. */
+let published: Readonly<{ id: string; pattern: string }> | undefined;
+
+/** Who is told when the matched route changes (span naming, which loads with the SDK). */
+const routeChanged = new Topic<void>({ name: 'published-route' });
+
+/**
+ * The pattern of a match list, as React Router's own `getRoutePattern` joins it (every matched route's path, empty
+ * ones skipped), with a leading slash so it reads as the URL it matches.
+ */
+const patternOf = (ids: readonly string[]): string => {
+  const joined = ids
+    .map((id) => routePaths.get(id))
+    .filter(Boolean)
+    .join('/')
+    .replaceAll(/\/\/+/gu, '/');
+  return `/${joined.replace(/^\//u, '')}`;
+};
+
+/**
+ * Publish the route ids the page rendered, root first (`useMatches()` in the root layout). A desktop id
+ * (`../../app/routes/…`) reads as its web id. Listeners hear about a change only.
+ *
+ * @param ids - The matched route ids, root first; none clears the route.
+ * @public
+ */
+export const publishRoute = (ids: readonly string[]): void => {
+  const leaf = ids.at(-1)?.replace(outOfTreeRoutePrefix, '');
+  const next = leaf === undefined || leaf === '' ? undefined : { id: leaf, pattern: patternOf(ids) };
+  if (next?.id === published?.id && next?.pattern === published?.pattern) {
+    return;
+  }
+  published = next;
+  routeChanged.emit();
+};
+
+/**
+ * Hear when the published route changes.
+ *
+ * @param listener - Called after each change.
+ * @returns A function that stops it.
+ * @public
+ */
+export const onRoutePublished = (listener: () => void): (() => void) => routeChanged.subscribe(listener);
+
+/**
+ * The React Router route id of the deepest match (for example `routes/w.$workspace.$project`), as the page last
+ * rendered it.
  *
  * @returns The route id, or `undefined` before hydration and outside a page.
  */
-export const readRouteId = (): string | undefined => {
-  try {
-    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- absent in a worker and during SSR.
-    const router = (globalThis.window as (Window & { __reactRouterDataRouter?: PublishedRouter }) | undefined)
-      ?.__reactRouterDataRouter;
-    const id = router?.state?.matches?.at(-1)?.route?.id;
-    if (typeof id !== 'string') {
-      return undefined;
-    }
-    const routeId = id.replace(outOfTreeRoutePrefix, '');
-    return routeId === '' ? undefined : routeId;
-  } catch {
-    return undefined;
-  }
-};
+export const readRouteId = (): string | undefined => published?.id;
+
+/**
+ * The URL pattern of the page's matched routes (for example `/w/:workspace/:project`).
+ *
+ * @returns The pattern, or `undefined` before hydration and outside a page.
+ * @public
+ */
+export const readRoutePattern = (): string | undefined => published?.pattern;
 
 /** `navigator.deviceMemory` (Chromium only, rounded), which the DOM library does not declare. */
 const readDeviceMemory = (): number | undefined => {
@@ -74,7 +138,8 @@ const defined = <Value>(record: Readonly<Record<string, Value | undefined>>): Re
   Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Record<string, Value>;
 
 /**
- * The tags every UI event carries: `route`, `device_class`, `build_id` and `deploy_context`.
+ * The tags every UI event carries: `route`, `route.pattern`, `device_class`, `build_id`, `deploy_context`,
+ * and `deployment_mode` (what the page showed: the display mode and its basis).
  *
  * @returns The known tags.
  */
@@ -83,9 +148,11 @@ const readTauEventTags = (): Record<string, string> => {
   /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names, filtered on by operators. */
   return defined({
     route: readRouteId(),
+    'route.pattern': readRoutePattern(),
     device_class: isMemoryConstrainedDevice() ? 'constrained' : 'standard',
     build_id: buildId === 0 ? undefined : String(buildId),
     deploy_context: ENV.TAU_DEPLOY_CONTEXT,
+    deployment_mode: reportedDeploymentMode,
   });
   /* eslint-enable @typescript-eslint/naming-convention -- Sentry tag names, filtered on by operators. */
 };

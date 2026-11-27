@@ -139,7 +139,7 @@ describe('live assertions', () => {
 
   it('should count every step of the run for its spend', () => {
     const usage = runUsage({ ...refused, messages: asked });
-    expect(usage).toMatchObject({ steps: 3, outputTokens: 11_340 });
+    expect(usage).toMatchObject({ steps: 3, inputTokens: 3000, outputTokens: 11_340 });
     expect(usage.costUsd).toBeCloseTo(0.22);
   });
 });

@@ -1,10 +1,10 @@
 /*
  * The view cube's DOM adapter, run as graphics runs it: spawned by `viewportGizmoAttached` as the adapter of the
  * cube's gesture, beside the canvas's real controls adapter and the view's real camera. `ViewportGizmo` is a scripted
- * stand-in that turns the camera it was given and dispatches the cube's events.
+ * stand-in in controlled mode: it writes no camera and dispatches the cube's events with the pose.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Color, Matrix4, Raycaster, Scene, Vector3 } from 'three';
+import { Color, Raycaster, Scene, Vector3 } from 'three';
 import type { Camera, EventDispatcher, Object3D } from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor, InspectionEvent } from 'xstate';
@@ -19,11 +19,8 @@ import {
   viewportGizmoRenderPriority,
 } from '#graphics/three/controls/viewport-gizmo-adapter.js';
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
-import {
-  applyViewportGizmoNodeMaterials,
-  applyViewportGizmoSurface,
-} from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
 import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
+import type { OrbitStyle } from '#graphics/three/controls/camera-wheel-router.js';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { subscribeViewerLoadTiming } from '#lib/viewer-load-timing.js';
 import type { ViewerLoadSpan } from '#lib/viewer-load-timing.js';
@@ -35,11 +32,17 @@ import { asCameraActor } from '#graphics/graphics-camera.js';
 type CameraUpdateHandler = (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
 
 type GizmoOptions = Readonly<{
-  up: 'x' | 'y' | 'z';
+  up: Readonly<{ x: number; y: number; z: number }>;
   type: string;
   placement: string;
   font: { family: string };
-  right: { color: number; labelColor: number };
+  x: { color: number; labelColor: number };
+  triad?: { enabled: boolean };
+  controlled: boolean;
+  fieldOfView: number;
+  roll: boolean | 'free';
+  navigation: { enabled: boolean };
+  offset: { top?: number; right?: number; bottom?: number };
 }>;
 
 const gizmos = vi.hoisted(() => [] as FakeGizmoShape[]);
@@ -48,17 +51,16 @@ type FakeGizmoShape = EventDispatcher<Record<string, Record<string, unknown>>> &
   camera: Camera;
   readonly target: Vector3;
   animating: boolean;
+  enabled: boolean;
   options: GizmoOptions;
-  readonly sets: GizmoOptions[];
-  readonly add: ReturnType<typeof vi.fn>;
+  readonly sets: Array<Partial<GizmoOptions>>;
   readonly dispose: ReturnType<typeof vi.fn>;
   readonly render: ReturnType<typeof vi.fn>;
-  readonly cameraUpdate: ReturnType<typeof vi.fn>;
-  readonly domUpdate: ReturnType<typeof vi.fn>;
-  readonly scale: { multiplyScalar: ReturnType<typeof vi.fn> };
-  readonly _viewport: number[];
-  readonly children: Object3D[];
-  readonly _domElement: HTMLElement;
+  readonly update: ReturnType<typeof vi.fn>;
+  readonly compile: ReturnType<typeof vi.fn>;
+  readonly viewport: Readonly<{ x: number; y: number; width: number; height: number }>;
+  readonly root: Readonly<{ children: Object3D[] }>;
+  readonly domElement: HTMLElement;
 };
 
 vi.mock('three-viewport-gizmo', async () => {
@@ -70,31 +72,25 @@ vi.mock('three-viewport-gizmo', async () => {
 
     public animating = false;
 
+    public enabled = true;
+
     public options: GizmoOptions;
 
-    public readonly sets: GizmoOptions[] = [];
+    public readonly sets: Array<Partial<GizmoOptions>> = [];
 
-    public readonly add = vi.fn();
+    public readonly root = { children: [new three.Object3D(), new three.Object3D()] };
 
-    public children: Object3D[] = [new three.Object3D(), new three.Object3D()];
-
-    public readonly remove = vi.fn();
-
-    // oxlint-disable-next-line @typescript-eslint/naming-convention -- `three-viewport-gizmo`'s private pointer surface.
-    public _domElement = document.createElement('div');
+    public readonly domElement = document.createElement('div');
 
     public readonly dispose = vi.fn();
 
     public readonly render = vi.fn();
 
-    public readonly cameraUpdate = vi.fn();
+    public readonly update = vi.fn();
 
-    public readonly domUpdate = vi.fn();
+    public readonly compile = vi.fn(async () => undefined);
 
-    public readonly scale = { multiplyScalar: vi.fn() };
-
-    // oxlint-disable-next-line @typescript-eslint/naming-convention -- `three-viewport-gizmo`'s private viewport field.
-    public readonly _viewport = [600, 0, 96, 96];
+    public readonly viewport = { x: 600, y: 0, width: 96, height: 96 };
 
     public constructor(camera: Camera, _renderer: unknown, options: GizmoOptions) {
       super();
@@ -103,25 +99,15 @@ vi.mock('three-viewport-gizmo', async () => {
       gizmos.push(this as unknown as FakeGizmoShape);
     }
 
-    public set(options: GizmoOptions): this {
-      // `set` regenerates the cube's children and its pointer surface.
-      this.children = [new three.Object3D(), new three.Object3D()];
-      this._domElement = document.createElement('div');
-      this.options = options;
+    public set(options: Partial<GizmoOptions>): void {
+      // `set` merges into the current options and keeps the element.
+      this.options = { ...this.options, ...options };
       this.sets.push(options);
-      return this;
     }
   }
   // eslint-disable-next-line @typescript-eslint/naming-convention -- the module's own export name.
   return { ViewportGizmo };
 });
-vi.mock('#graphics/three/controls/viewport-gizmo-cube-axes.js', () => ({
-  createViewportGizmoCubeAxes: () => ({ isAxes: true }),
-}));
-vi.mock('#graphics/three/controls/viewport-gizmo-cube-surface.js', () => ({
-  applyViewportGizmoSurface: vi.fn(),
-  applyViewportGizmoNodeMaterials: vi.fn(),
-}));
 
 const cameraView = {
   frameId: 'tau:root',
@@ -170,6 +156,7 @@ type Harness = Readonly<{
       planePicker?: SectionPlanePicker;
       backend?: ResolvedGraphicsBackend;
       gizmoStyle?: GizmoStyleId;
+      orbitStyle?: OrbitStyle;
     }>,
   ) => void;
   gizmo: () => FakeGizmoShape;
@@ -257,7 +244,7 @@ const createHarness = (): Harness => {
           [ReturnType<Harness['frames']>[number]['ref'], number]
         >
       ).map(([ref, priority]) => ({ ref, priority })),
-    attachCube({ planePicker, backend = 'webgl', gizmoStyle } = {}) {
+    attachCube({ planePicker, backend = 'webgl', gizmoStyle, orbitStyle } = {}) {
       graphics.send({
         type: 'viewportGizmoAttached',
         gizmoId: 'cube',
@@ -270,6 +257,7 @@ const createHarness = (): Harness => {
           graphics,
           planePicker,
           gizmoStyle,
+          orbitStyle,
         }),
       });
     },
@@ -279,14 +267,23 @@ const createHarness = (): Harness => {
   };
 };
 
-/** Turns the cube's camera about its target, as a drag step or an animation frame does, and dispatches `change`. */
-const turn = (gizmo: FakeGizmoShape, direction: readonly [number, number, number]): void => {
-  const offset = gizmo.camera.position.clone().sub(gizmo.target);
-  const distance = offset.length();
-  gizmo.camera.position.copy(new Vector3(...direction).normalize().multiplyScalar(distance).add(gizmo.target));
-  gizmo.camera.lookAt(gizmo.target);
-  gizmo.dispatchEvent({ type: 'change' });
+/** Reports a pose, as a drag step or an animation frame does in controlled mode: the camera is not written. */
+const turn = (
+  gizmo: FakeGizmoShape,
+  direction: readonly [number, number, number],
+  { up = new Vector3(0, 0, 1), cause = 'drag' }: Readonly<{ up?: Vector3; cause?: string }> = {},
+): void => {
+  gizmo.dispatchEvent({
+    type: 'change',
+    cause,
+    heading: null,
+    pose: { direction: new Vector3(...direction).normalize(), up },
+  });
 };
+
+/** The sets that restyle the cube, not the field of view it follows. */
+const restyles = (gizmo: FakeGizmoShape): Array<Partial<GizmoOptions>> =>
+  gizmo.sets.filter((options) => !('fieldOfView' in options));
 
 describe('view cube adapter', () => {
   it('should turn the camera once with the source gizmo for a face click, and ignore the echo of its own write', () => {
@@ -302,7 +299,7 @@ describe('view cube adapter', () => {
     // A face click: the cube animates the camera to the top face in one frame and ends.
     gizmo.animating = true;
     // The cube nudges a top view off the z up axis, as `three-viewport-gizmo` does.
-    turn(gizmo, [0, -0.01, 1]);
+    turn(gizmo, [0, -0.01, 1], { cause: 'click' });
     gizmo.animating = false;
     gizmo.dispatchEvent({ type: 'end' });
 
@@ -320,18 +317,15 @@ describe('view cube adapter', () => {
     const harness = createHarness();
     harness.attachCube();
     const gizmo = harness.gizmo();
-    // A top face exactly on the z up axis, rolled so the screen's up is +x.
-    gizmo.camera.position.set(0, 0, 20);
-    gizmo.camera.up.set(0, 0, 1);
-    gizmo.camera.quaternion.setFromAxisAngle(new Vector3(0, 0, 1), -Math.PI / 2);
+    // A top face, kept 1e-4 rad off the z up axis by the library, leaning toward -x.
     const { revision } = harness.camera.getSnapshot().context;
 
-    gizmo.dispatchEvent({ type: 'change' });
+    turn(gizmo, [-1e-4, 0, 1]);
 
     const { context } = harness.camera.getSnapshot();
     expect(context.revision).toBe(revision + 1);
     expect(context.view.direction[2]).toBeCloseTo(1, 5);
-    // Tilted off the pole away from the screen's up, so the presented view keeps +x up on screen.
+    // Tilted further the way the cube leans, so the camera takes it and keeps the roll.
     expect(context.view.direction[0]).toBeLessThan(0);
     expect(context.view.direction[1]).toBeCloseTo(0, 6);
   });
@@ -340,18 +334,12 @@ describe('view cube adapter', () => {
     const harness = createHarness();
     harness.attachCube();
     const gizmo = harness.gizmo();
-    // A bottom face exactly on the z up axis, looking up, rolled so the screen's up is +x.
-    gizmo.camera.position.set(0, 0, -20);
-    gizmo.camera.up.set(0, 0, 1);
-    gizmo.camera.quaternion.setFromRotationMatrix(
-      new Matrix4().makeBasis(new Vector3(0, 1, 0), new Vector3(1, 0, 0), new Vector3(0, 0, -1)),
-    );
-
-    gizmo.dispatchEvent({ type: 'change' });
+    // A bottom face, leaning toward +x.
+    turn(gizmo, [1e-4, 0, -1]);
 
     const { direction } = harness.camera.getSnapshot().context.view;
     expect(direction[2]).toBeCloseTo(-1, 5);
-    // Below the target an upright camera's screen up points away from the axis, so the tilt is toward it.
+    // Tilted further the way the cube leans.
     expect(direction[0]).toBeGreaterThan(0);
     expect(direction[1]).toBeCloseTo(0, 6);
   });
@@ -362,7 +350,7 @@ describe('view cube adapter', () => {
     const gizmo = harness.gizmo();
     const controls = harness.state.controls as unknown as { enabled: boolean };
 
-    gizmo.dispatchEvent({ type: 'start' });
+    gizmo.dispatchEvent({ type: 'press', pressed: null });
     turn(gizmo, [1, 0, 0.2]);
     turn(gizmo, [0, 1, 0.2]);
 
@@ -397,8 +385,8 @@ describe('view cube adapter', () => {
     const controls = harness.state.controls as unknown as { enabled: boolean };
     controls.enabled = false;
 
-    gizmo.dispatchEvent({ type: 'start' });
-    gizmo.dispatchEvent({ type: 'start' });
+    gizmo.dispatchEvent({ type: 'press', pressed: null });
+    gizmo.dispatchEvent({ type: 'press', pressed: null });
     gizmo.dispatchEvent({ type: 'end' });
 
     expect(controls.enabled).toBe(false);
@@ -409,7 +397,7 @@ describe('view cube adapter', () => {
     harness.attachCube();
     const gizmo = harness.gizmo();
     const controls = harness.state.controls as unknown as { enabled: boolean };
-    gizmo.dispatchEvent({ type: 'start' });
+    gizmo.dispatchEvent({ type: 'press', pressed: null });
     turn(gizmo, [1, 0, 0.2]);
 
     harness.graphics.send({ type: 'viewportGizmoDetached', gizmoId: 'cube' });
@@ -425,20 +413,20 @@ describe('view cube adapter', () => {
     const harness = createHarness();
     harness.attachCube();
     const gizmo = harness.gizmo();
-    gizmo.cameraUpdate.mockClear();
+    gizmo.update.mockClear();
 
     harness.camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
 
     expect(gizmos).toHaveLength(1);
     expect(gizmo.camera).toBe(harness.rig.orthographicCamera);
-    expect(gizmo.cameraUpdate).toHaveBeenCalled();
+    expect(gizmo.update).toHaveBeenCalled();
   });
 
   it('should retarget its camera, field of view and target from a presented driver snapshot', () => {
     const harness = createHarness();
     harness.attachCube();
     const gizmo = harness.gizmo();
-    gizmo.cameraUpdate.mockClear();
+    gizmo.update.mockClear();
 
     // The cube is the view's only retained consumer here.
     for (const retarget of harness.consumers) {
@@ -448,7 +436,7 @@ describe('view cube adapter', () => {
     expect(gizmos).toHaveLength(1);
     expect(gizmo.camera).toBe(harness.rig.orthographicCamera);
     expect(gizmo.target.toArray()).toEqual([1, 2, 3]);
-    expect(gizmo.cameraUpdate).toHaveBeenCalledOnce();
+    expect(gizmo.update).toHaveBeenCalledOnce();
   });
 
   it('should follow the camera target unless the cube holds the lock or animates', () => {
@@ -460,7 +448,7 @@ describe('view cube adapter', () => {
     const followed = gizmo.target.clone();
     expect(followed.length()).toBeGreaterThan(0);
 
-    gizmo.dispatchEvent({ type: 'start' });
+    gizmo.dispatchEvent({ type: 'press', pressed: null });
     turn(gizmo, [1, 0, 0.2]);
     harness.camera.send({ type: 'poseObserved', source: 'input', ...cameraView, target: [4, 5, 6] });
     expect(gizmo.target.toArray()).toEqual(followed.toArray());
@@ -477,7 +465,7 @@ describe('view cube adapter', () => {
       harness.attachCube();
 
       expect(gizmos).toHaveLength(1);
-      expect(harness.gizmo().options.up).toBe('y');
+      expect(harness.gizmo().options.up).toEqual({ x: 0, y: 1, z: 0 });
       expect(spans.filter((span) => span.phase === 'gizmo.create')).toHaveLength(1);
 
       // The theme and the up axis repaint the same cube in place: no rebuild, no second span.
@@ -485,7 +473,10 @@ describe('view cube adapter', () => {
       harness.graphics.send({ type: 'setUpDirection', payload: 'z' });
 
       expect(gizmos).toHaveLength(1);
-      expect(harness.gizmo().sets.map((options) => options.up)).toEqual(['y', 'z']);
+      expect(restyles(harness.gizmo()).map((options) => options.up)).toEqual([
+        { x: 0, y: 1, z: 0 },
+        { x: 0, y: 0, z: 1 },
+      ]);
       expect(spans.filter((span) => span.phase === 'gizmo.create')).toHaveLength(1);
     } finally {
       unsubscribe();
@@ -493,26 +484,40 @@ describe('view cube adapter', () => {
   });
 
   it.each([
-    { gizmoStyle: undefined, type: 'rounded-cube', surface: 'tau', triad: true, scale: 0.7 },
-    { gizmoStyle: 'cube', type: 'rounded-cube', surface: 'tau', triad: true, scale: 0.7 },
-    { gizmoStyle: 'classic-cube', type: 'cube', surface: 'library', triad: true, scale: 0.7 },
-    { gizmoStyle: 'axis-balls', type: 'sphere', surface: 'library', triad: false, scale: 1 },
+    { gizmoStyle: undefined, type: 'rounded-cube', triad: true },
+    { gizmoStyle: 'cube', type: 'rounded-cube', triad: true },
+    { gizmoStyle: 'classic-cube', type: 'cube', triad: true },
+    { gizmoStyle: 'axis-balls', type: 'sphere', triad: false },
   ] as const)(
-    'should draw the $gizmoStyle style as a $type gizmo, and keep it across a repaint',
-    ({ gizmoStyle, type, surface, triad, scale }) => {
+    'should draw the $gizmoStyle style as a $type gizmo in controlled mode, and keep it across a repaint',
+    ({ gizmoStyle, type, triad }) => {
       const harness = createHarness();
       harness.attachCube({ gizmoStyle });
       const gizmo = harness.gizmo();
       harness.graphics.send({ type: 'viewerEnvironmentChanged', environment: dark });
 
-      expect([gizmo.options.type, gizmo.sets.map((options) => options.type)]).toEqual([type, [type]]);
-      expect(gizmo.scale.multiplyScalar.mock.calls).toEqual([[scale]]);
-      expect(
-        vi.mocked(surface === 'tau' ? applyViewportGizmoSurface : applyViewportGizmoNodeMaterials),
-      ).toHaveBeenCalledTimes(2);
-      expect(gizmo.add).toHaveBeenCalledTimes(triad ? 2 : 0);
-      expect(gizmo.children.every((child) => child.visible)).toBe(true);
-      expect(gizmo._domElement.style.pointerEvents).toBe('');
+      expect([gizmo.options.type, restyles(gizmo).map((options) => options.type)]).toEqual([type, [type]]);
+      expect(gizmo.options.controlled).toBe(true);
+      expect(gizmo.options.triad?.enabled ?? false).toBe(triad);
+      expect(gizmo.enabled).toBe(true);
+    },
+  );
+
+  it.each([
+    { orbitStyle: undefined, roll: false },
+    { orbitStyle: 'turntable', roll: false },
+    { orbitStyle: 'free', roll: 'free' },
+  ] as const)(
+    'should roll $roll in the $orbitStyle orbit style, with the navigation buttons on and room for them',
+    ({ orbitStyle, roll }) => {
+      const harness = createHarness();
+      harness.attachCube({ orbitStyle });
+      const gizmo = harness.gizmo();
+      harness.graphics.send({ type: 'viewerEnvironmentChanged', environment: dark });
+
+      expect([gizmo.options.roll, ...restyles(gizmo).map((options) => options.roll)]).toEqual([roll, roll]);
+      expect(gizmo.options.navigation).toEqual({ enabled: true });
+      expect(gizmo.options.offset).toEqual({ top: 24, bottom: 24, right: 24 });
     },
   );
 
@@ -520,13 +525,11 @@ describe('view cube adapter', () => {
     const harness = createHarness();
     harness.attachCube({ gizmoStyle: 'axes' });
     const gizmo = harness.gizmo();
-    const hidden = (): boolean =>
-      gizmo.children.every((child) => !child.visible) && gizmo._domElement.style.pointerEvents === 'none';
-    expect([hidden(), gizmo.add.mock.calls.length]).toEqual([true, 1]);
+    expect([gizmo.enabled, gizmo.options.triad?.enabled]).toEqual([false, true]);
 
     harness.graphics.send({ type: 'viewerEnvironmentChanged', environment: dark });
 
-    expect([hidden(), gizmo.add.mock.calls.length]).toEqual([true, 2]);
+    expect([gizmo.enabled, gizmo.options.triad?.enabled]).toEqual([false, true]);
   });
 
   it('should repaint with stronger faces and legible labels in high-contrast dark mode', () => {
@@ -534,11 +537,11 @@ describe('view cube adapter', () => {
     harness.graphics.send({ type: 'viewerEnvironmentChanged', environment: dark });
     harness.attachCube();
     const gizmo = harness.gizmo();
-    const normalFace = gizmo.options.right.color;
+    const normalFace = gizmo.options.x.color;
 
     harness.graphics.send({ type: 'viewerEnvironmentChanged', environment: { ...dark, isHighContrast: true } });
 
-    const { color, labelColor } = gizmo.options.right;
+    const { color, labelColor } = gizmo.options.x;
     const luminance = (value: Color): number => 0.2126 * value.r + 0.7152 * value.g + 0.0722 * value.b;
     expect(gizmos).toHaveLength(1);
     expect(color).not.toBe(normalFace);
@@ -548,44 +551,13 @@ describe('view cube adapter', () => {
     expect(gizmo.dispose).not.toHaveBeenCalled();
   });
 
-  it('should repaint once the web font arrives, keeping the camera it follows', async () => {
-    const loaded = Promise.withResolvers<FontFace[]>();
-    const fonts = { check: () => false, load: vi.fn(async () => loaded.promise) };
-    const previousFonts = document.fonts;
-    Object.defineProperty(document, 'fonts', { configurable: true, value: fonts });
-    try {
-      const harness = createHarness();
-      harness.attachCube();
-      harness.camera.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
-      const gizmo = harness.gizmo();
-
-      expect(gizmo.sets).toHaveLength(0);
-      loaded.resolve([]);
-      await vi.waitFor(() => {
-        expect(gizmo.sets).toHaveLength(1);
-      });
-
-      expect(gizmos).toHaveLength(1);
-      expect(gizmo.camera).toBe(harness.rig.orthographicCamera);
-      expect(fonts.load).toHaveBeenCalledOnce();
-    } finally {
-      Object.defineProperty(document, 'fonts', { configurable: true, value: previousFonts });
-    }
-  });
-
-  it('should warm the cube for both native cameras on WebGPU, after the build and after each repaint', () => {
+  it('should warm the cube through the library after the build and after each repaint', () => {
     const harness = createHarness();
-    const compileAsync = vi.fn(async (_scene: unknown, _camera: unknown) => undefined);
-    Object.assign(harness.state.gl, { compileAsync });
     harness.attachCube({ backend: 'webgpu' });
 
-    expect(compileAsync.mock.calls.map((call) => call[1])).toEqual([
-      harness.rig.perspectiveCamera,
-      harness.rig.orthographicCamera,
-    ]);
-    expect(compileAsync.mock.calls.every((call) => call[0] === harness.gizmo())).toBe(true);
+    expect(harness.gizmo().compile).toHaveBeenCalledOnce();
     harness.graphics.send({ type: 'viewerEnvironmentChanged', environment: dark });
-    expect(compileAsync).toHaveBeenCalledTimes(4);
+    expect(harness.gizmo().compile).toHaveBeenCalledTimes(2);
   });
 
   it('should style the plane picker as the cube, draw it only while Section is on, and restyle it with the theme', () => {
@@ -598,7 +570,7 @@ describe('view cube adapter', () => {
 
     expect(setStyle).toHaveBeenCalledOnce();
     const [style] = setStyle.mock.calls[0]!;
-    expect(style.face).toBe(harness.gizmo().options.right.color);
+    expect(style.face).toBe(harness.gizmo().options.x.color);
     draw.ref.current(harness.state, 1 / 60);
     expect(render).not.toHaveBeenCalled();
     expect(harness.gizmo().render).toHaveBeenCalledOnce();

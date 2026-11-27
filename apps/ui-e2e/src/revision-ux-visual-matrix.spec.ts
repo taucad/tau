@@ -203,8 +203,8 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
    * what the project already is, so the chooser's own Back up to Tau Cloud waits for another choice. */
   await openBackupChooser();
   const thisDeviceOnly = backupChooser().getByRole('radio', { name: 'This device only' });
-  const tauCloud = backupChooser().getByRole('radio', { name: 'Tau Cloud' });
-  const connectBackup = backupLine().getByRole('button', { name: 'Back up to Tau Cloud', exact: true });
+  const tauCloud = backupChooser().getByRole('radio', { name: 'Tau', exact: true });
+  const connectBackup = backupLine().getByRole('button', { name: 'Back up to the cloud', exact: true });
   await target.expectAttribute(tauCloud, 'aria-checked', 'true');
   expect(await target.getAttribute(connectBackup, 'disabled')).toBeNull();
   await target.expectVisible(backupLine().getByRole('switch', { name: 'Include chats' }));
@@ -372,8 +372,10 @@ test('S24: places the chat in focus on a branch from its chip, then offers Switc
   /* The chat in focus works in main, the live checkout, as the canvas row has it. */
   await switchToBranch('main');
   /* D3 (bee2a79e41): the branch's chip ⋮ offers Run this chat here while it would move the chat in focus. */
-  await pickBranchVerb(branchName, 'Run this chat here', async () => {
-    await target.screenshot(undefined, 'revisions-S24-use-in-chat-1440-light.png');
+  await pickBranchVerb(branchName, 'Run this chat here', {
+    before: async () => {
+      await target.screenshot(undefined, 'revisions-S24-use-in-chat-1440-light.png');
+    },
   });
   await target.expectVisible(selectors.getByRole('button', { name: `Switch to ${branchName}`, exact: true }), 60_000);
   await target.screenshot(undefined, 'revisions-S24-follow-chat-1440-light.png');

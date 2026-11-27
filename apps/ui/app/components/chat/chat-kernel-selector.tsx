@@ -7,7 +7,7 @@ import { Badge } from '@taucad/ui/components/badge';
 import type { ComboBoxSubView } from '@taucad/ui/components/combobox-responsive';
 import { toast } from '@taucad/ui/components/sonner';
 import { resolveKernel } from '@taucad/types/constants';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { useFeature } from '#flags/use-feature.js';
 import { kernelPickerLayout } from '#components/chat/kernel-picker-layout.js';
 import type { KernelPickerRow } from '#components/chat/kernel-picker-layout.js';

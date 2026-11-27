@@ -24,6 +24,8 @@ export const archiveDownloads = {
     label: 'Windows',
     icon: platformIcons.windows,
     file: 'Tau-win32-x64.zip',
+    /** Listed as beta until native x64 consumer evidence qualifies the Windows build. */
+    beta: true,
     detail: 'Windows x64 · ZIP download',
     install: 'Extract the ZIP to a folder you own, then run Tau.exe and sign in.',
     updates:
@@ -33,6 +35,8 @@ export const archiveDownloads = {
     label: 'Linux',
     icon: platformIcons.linux,
     file: 'Tau-linux-x64.tar.gz',
+    /** Listed as beta until the Linux build is qualified on a real device (deferred and untested, 2026-11-17). */
+    beta: true,
     detail: 'Linux x64 · tar.gz download',
     install: 'Extract the archive to a folder you own, then run Tau and sign in.',
     updates:
@@ -49,6 +53,18 @@ export const desktopDownloads = { ...macDownloads, ...archiveDownloads };
  */
 export const isArchivePlatform = (platform: keyof typeof desktopDownloads): platform is keyof typeof archiveDownloads =>
   Object.hasOwn(archiveDownloads, platform);
+
+/**
+ * Whether a platform's download entries are marked beta: an archive platform by its own `beta` flag, the installer
+ * catalog's portable Linux route as Linux. Clearing a flag removes its badge everywhere.
+ *
+ * @param platform - A desktop platform or installer catalog route platform.
+ * @returns Whether its download entries are marked beta.
+ */
+export const isBetaPlatform = (platform: keyof typeof desktopDownloads | 'linuxPortable'): boolean => {
+  const archive = platform === 'linuxPortable' ? 'linux' : platform;
+  return isArchivePlatform(archive) && archiveDownloads[archive].beta;
+};
 
 /**
  * Select an OS from low-entropy browser hints, without persisting or transmitting them.
@@ -101,6 +117,28 @@ export const desktopDownloadLabel = (platform: keyof typeof desktopDownloads): s
 const macFileLabels = { mac: 'Apple silicon', macIntel: 'Intel Mac' } as const;
 
 /**
+ * Builds offered before they pass installer qualification: the page lists each as a direct channel archive marked beta,
+ * never recommends it to a detected host, and drops it once the installer catalog admits that platform's DMG.
+ */
+export const betaDownloads = {
+  macIntel: { file: 'Tau-macos-x64.zip', detail: 'Intel Mac · ZIP download' },
+};
+
+/**
+ * @param platform - A platform offered as a beta archive.
+ * @returns The production archive URL.
+ */
+export const betaDownloadHref = (platform: keyof typeof betaDownloads): string =>
+  `${downloadsOrigin}/latest/${betaDownloads[platform].file}`;
+
+/**
+ * @param platform - A platform offered as a beta archive.
+ * @returns Label markup from checked-in icon and product constants only.
+ */
+export const betaDownloadLabel = (platform: keyof typeof betaDownloads): string =>
+  `${desktopDownloads[platform].icon}<span>Download ZIP for ${macFileLabels[platform]}</span>`;
+
+/**
  * Label a link that downloads a file directly. A Mac link only ever serves its qualified DMG, so it says DMG and names
  * the chip; Windows and Linux keep their platform label.
  * @param platform - Published desktop build.
@@ -124,7 +162,7 @@ export type QualifiedDesktopDownload = {
   readonly href: string;
   /** The primary artifact's kind; only `macos-dmg` is a disk image. */
   readonly primaryKind: string;
-  /** Whether clean-host (operator VM) acceptance passed; `pending` is admitted only on Mac routes. */
+  /** Whether clean-host (operator VM) acceptance passed; `pending` is admitted only on Mac and Windows routes. */
   readonly cleanHost: 'passed' | 'pending';
   readonly sha256: string;
   readonly size: number;
@@ -248,9 +286,10 @@ const admitDesktopCatalog = (
     seen.add(key);
     const definition = routeDefinitions[key as keyof typeof routeDefinitions];
     const proof = catalogRecord(route['qualification'], ['ci', 'vm', 'trust']);
-    // Clean-host acceptance may be pending only for a Mac route the publisher admitted on CI evidence alone (the
-    // operator verifies the live DMG by hand); every other route needs its clean-host receipt.
-    const cleanHostPending = proof['vm'] === 'pending' && definition.primary === 'macos-dmg';
+    // Clean-host acceptance may be pending only for a Mac route (the operator verifies the live DMG by hand) or the beta
+    // Windows route the publisher admitted on CI evidence alone; every other route needs its clean-host receipt.
+    const cleanHostPending =
+      proof['vm'] === 'pending' && (definition.primary === 'macos-dmg' || definition.primary === 'windows-nsis');
     if (proof['ci'] !== true || (proof['vm'] !== true && !cleanHostPending) || proof['trust'] !== 'release') {
       throw new TypeError('Installer route has not passed release qualification');
     }
@@ -290,7 +329,9 @@ const admitDesktopCatalog = (
     result.push({
       platform: definition.platform,
       label: definition.platform === 'linuxPortable' ? 'Linux portable' : desktopDownloads[definition.platform].label,
-      detail: cleanHostPending ? `${definition.detail} · clean-Mac install testing pending` : definition.detail,
+      detail: cleanHostPending
+        ? `${definition.detail} · clean-${definition.primary === 'windows-nsis' ? 'Windows' : 'Mac'} install testing pending`
+        : definition.detail,
       install: definition.install,
       updates: definition.updates,
       href: definition.platform === 'linux' ? '#linux-installation' : primary.href,
@@ -309,6 +350,7 @@ const admitDesktopCatalog = (
 /** Routes each platform lane of a composed catalog must carry exactly (D-H5 per-platform promotion). */
 const laneRoutes = {
   macos: ['macos-zip:darwin-arm64'],
+  windows: ['windows-nsis:win32-x64'],
   linux: ['linux-apt:linux-x64', 'linux-appimage:linux-x64'],
 } as const;
 
@@ -344,13 +386,16 @@ export const createDesktopDownloadCatalog = (options: {
     for (const input of composed['platforms']) {
       const platform = catalogRecord(input, ['lane', 'catalog']);
       const { lane } = platform;
-      if ((lane !== 'macos' && lane !== 'linux') || lanes.has(lane)) {
+      if (typeof lane !== 'string' || !Object.hasOwn(laneRoutes, lane) || lanes.has(lane)) {
         throw new TypeError('Unsupported or duplicate installer platform');
       }
       lanes.add(lane);
       const admitted = admitDesktopCatalog(platform['catalog'], options.channel, immutableArtifacts);
       // Each platform is complete on its own: exactly its routes, never a partial or another platform's.
-      if (JSON.stringify([...admitted.seen].sort()) !== JSON.stringify([...laneRoutes[lane]].sort())) {
+      if (
+        JSON.stringify([...admitted.seen].sort()) !==
+        JSON.stringify([...laneRoutes[lane as keyof typeof laneRoutes]].sort())
+      ) {
         throw new TypeError('Installer platform catalog is incomplete or carries another platform');
       }
       result.push(...admitted.result);

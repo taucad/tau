@@ -5,8 +5,8 @@
 
 import { createActor } from 'xstate';
 import { describe, expect, it, vi } from 'vitest';
-import type { ComposerRecordMachineEmitted } from '#machines/composer-record.machine.js';
-import { composerRecordActors, composerRecordMachine } from '#machines/composer-record.machine.js';
+import type { ComposerRecordMachineEmitted } from '@taucad/chat-ui/machines/composer-record.machine';
+import { composerRecordActors, composerRecordMachine } from '@taucad/chat-ui/machines/composer-record.machine';
 import { deferredRecordStore } from '#services/chat-session-store-composer.js';
 
 /** A predecessor whose final filesystem write never lands. */

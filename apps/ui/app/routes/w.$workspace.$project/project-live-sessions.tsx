@@ -11,7 +11,8 @@ import { usePublishCloudProjectPreview } from '#hooks/use-publish-cloud-project-
 import { useEffect } from 'react';
 import { useSelector } from '@xstate/react';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
-import { SessionProjectProvider, useProject } from '#hooks/use-project.js';
+import { SessionProjectProvider } from '#hooks/project-provider.js';
+import { useProject } from '#hooks/use-project.js';
 import { SessionFileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project and
@@ -32,9 +33,19 @@ import {
   useRevisionCommands,
   useProjectRole,
 } from '#hooks/use-revision-status.js';
-import type { RevisionCommands } from '#hooks/use-revision-status.js';
+import type { RevisionCommands } from '@taucad/revisions-ui/hooks/use-revision-status';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
+
+import { warmWorkspaceLayout as warmViewportLayout } from '#routes/w.$workspace.$project/chat-interface-layouts.js';
+
+/**
+ * Warm the layout this viewport will mount (STO-25 SP5): the open calls it through this module once it has loaded it
+ * (`openProjectWorkspace`), so the app runtime's graph never names a layout. Never throws.
+ */
+export function warmWorkspaceLayout(): void {
+  warmViewportLayout();
+}
 
 /**
  * The session's half of a project subtree (S44), reduced to render (A7c).
@@ -64,6 +75,13 @@ function ProjectSessionBinding({
       retryManifestObservation();
     }
   }, [cloudIntent, retryManifestObservation, status?.sync.hasAppliedRemote]);
+  /* STO-25: once a tree write's closure has landed its `tau.json`, the manifest is read again, so the model surfaces
+     know from the first view whether the project holds that manifest. */
+  useEffect(() => {
+    if (cloudIntent === 'open' && status?.entryManifest !== undefined) {
+      retryManifestObservation();
+    }
+  }, [cloudIntent, retryManifestObservation, status?.entryManifest]);
   const role = useProjectRole();
   usePublishCloudProjectPreview({
     projectId,

@@ -67,7 +67,7 @@ test('answers the git wire with the API envelope a browser would have read', asy
   expect(visited.status()).toBe(403);
   expect(await visited.headerValue('content-type')).toBe('application/json; charset=utf-8');
   expect(JSON.parse(await visited.text())).toStrictEqual({
-    error: 'Syncing files to Tau Cloud is a paid plan feature.',
+    error: 'Syncing files to the cloud is a paid plan feature.',
     code: 'GIT_SYNC_NOT_ENTITLED',
     statusCode: 403,
     path: '/v1/git/two-client-probe/git-receive-pack',

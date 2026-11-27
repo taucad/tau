@@ -27,9 +27,16 @@ public sealed class AuthoredFileCaptureTests : IDisposable
         Assert.Equal("model/stl", mesh.MimeType);
         Assert.Equal(4, mesh.ByteLength);
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[] { 0, 255, 0, 128 })), mesh.Sha256);
+        // The build's own output moves into the receipt; a later write at its old path is a new file.
+        Assert.False(File.Exists(Path.Combine(capture.OutputRoot, "nested", "part.STL")));
         File.WriteAllBytes(Path.Combine(capture.OutputRoot, "nested", "part.STL"), [9]);
         Assert.Equal(new byte[] { 0, 255, 0, 128 }, File.ReadAllBytes(mesh.ArtifactPath));
-        Assert.Equal("application/vnd.openvdb", Assert.Single(files, file => file.Name == "field.vdb").MimeType);
+        // A file written into the workspace stays the author's; the receipt owns a copy.
+        var field = Assert.Single(files, file => file.Name == "field.vdb");
+        Assert.Equal("application/vnd.openvdb", field.MimeType);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(new byte[] { 3, 4, 5 })), field.Sha256);
+        File.WriteAllBytes(Path.Combine(Workspace, "field.vdb"), [6]);
+        Assert.Equal(new byte[] { 3, 4, 5 }, File.ReadAllBytes(field.ArtifactPath));
         Assert.Throws<InvalidOperationException>(() => capture.Complete());
         capture.Dispose();
         Assert.False(Directory.Exists(capture.OutputRoot));
@@ -67,5 +74,43 @@ public sealed class AuthoredFileCaptureTests : IDisposable
         File.WriteAllBytes(outside, [1]);
         File.CreateSymbolicLink(Path.Combine(capture.OutputRoot, "escape.stl"), outside);
         Assert.Throws<IOException>(() => capture.Complete());
+    }
+
+    [Fact]
+    public void StreamingDigestMatchesThePlatformAtEveryBlockBoundary()
+    {
+        var random = new Random(1337);
+        var data = new byte[300];
+        random.NextBytes(data);
+        var hash = new ManagedSha256();
+        // Every padding shape (one or two final blocks), split at every chunk size including empty spans.
+        for (var length = 0; length <= data.Length; length++)
+        {
+            foreach (var chunk in new[] { 1, 7, 63, 64, 65, 300 })
+            {
+                hash.AppendData([]);
+                for (var offset = 0; offset < length; offset += chunk)
+                    hash.AppendData(data.AsSpan(offset, Math.Min(chunk, length - offset)));
+                Assert.Equal(SHA256.HashData(data.AsSpan(0, length)), hash.GetHashAndReset());
+            }
+        }
+        using var platform = new StreamingSha256();
+        platform.AppendData(data);
+        Assert.Equal(SHA256.HashData(data), platform.GetHashAndReset());
+    }
+
+    [Fact]
+    public void StreamingFileDigestCrossesChunks()
+    {
+        var source = Path.Combine(root, "large.bin");
+        var bytes = new byte[(1 << 20) * 2 + 17];
+        new Random(7).NextBytes(bytes);
+        File.WriteAllBytes(source, bytes);
+        var expected = Convert.ToHexStringLower(SHA256.HashData(bytes));
+        Assert.Equal(expected, StreamingSha256.HexOf(source));
+        var target = Path.Combine(root, "copy.bin");
+        Assert.Equal(expected, StreamingSha256.CopyAndHex(source, target));
+        Assert.Equal(bytes, File.ReadAllBytes(target));
+        Assert.Throws<IOException>(() => StreamingSha256.CopyAndHex(source, target));
     }
 }

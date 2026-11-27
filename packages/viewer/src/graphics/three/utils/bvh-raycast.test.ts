@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { isSectionRemoved, resolveSectionPieces } from '#graphics/section-cuts.js';
 import type { SectionCut } from '#graphics/section-cuts.js';
 import * as bvhCache from '#graphics/three/utils/bvh-cache.js';
@@ -77,6 +80,20 @@ describe('raycastFirstVisibleMeshHit', () => {
 
     expect(firstVisibleHit({ raycaster, meshes: [mesh] })?.distance).toBeCloseTo(1);
     expect(build).toHaveBeenCalledTimes(1);
+  });
+
+  it('should never answer with a fat edge line, whose instanced template is no surface', () => {
+    // A model's edges are drawn as fat lines: meshes whose position attribute is a unit quad template at local z = 0,
+    // widened per segment in the shader. The surface below the line is what the ray meets.
+    const surface = createTriangleMesh(-5);
+    const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(2, 2, 2).translate(0, 0, -6));
+    const fatLine = new LineSegments2(new LineSegmentsGeometry().fromEdgesGeometry(edges), new LineMaterial());
+    const raycaster = new THREE.Raycaster(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1));
+
+    const hit = firstVisibleHit({ raycaster, meshes: [fatLine, surface] });
+
+    expect(hit?.object).toBe(surface);
+    expect(hit?.distance).toBeCloseTo(6);
   });
 
   it('should test bounds in local space under translated, rotated and nonuniformly scaled parents', () => {

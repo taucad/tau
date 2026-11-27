@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { startRuntimeChild } from '#runtime-child-supervisor.js';
+import { exitsWithin, startRuntimeChild } from '#runtime-child-supervisor.js';
 import type {
   RuntimeChildNativeKernels,
   RuntimeChildWorker,
@@ -54,6 +54,23 @@ afterEach(async () => {
     await rm(temporaryDirectory, { recursive: true });
     temporaryDirectory = undefined;
   }
+});
+
+describe('runtime child close grace', () => {
+  const pendingTimeouts = (): number =>
+    process.getActiveResourcesInfo().filter((resource) => resource === 'Timeout').length;
+
+  it('should leave no grace timer pending once the child has exited, so the daemon can exit at once', async () => {
+    const before = pendingTimeouts();
+
+    expect(await exitsWithin(Promise.resolve(), 60_000)).toBe(true);
+
+    expect(pendingTimeouts()).toBe(before);
+  });
+
+  it('should answer false once the grace passes without an exit', async () => {
+    expect(await exitsWithin(Promise.withResolvers<void>().promise, 10)).toBe(false);
+  });
 });
 
 describe('runtime child permission boundary', () => {
@@ -131,6 +148,18 @@ describe('runtime child control frames', () => {
       { type: 'zoo-proxy-credential', url: 'wss://api.example.test/v1/kernels/zoo', token: 'zt1.a.b' },
       { type: 'zoo-proxy-credential', url: 'wss://api.example.test/v1/kernels/zoo' },
     ]);
+    await child.close();
+  });
+
+  it.each([
+    ['the formats its ready message names', ['avif,gif'], ['avif', 'gif']],
+    ['none for a child that names none', [], []],
+  ] as const)('reports as transcode sources %s', async (_label, extra, expected) => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-sources-'));
+    const modulePath = fileURLToPath(new URL('fixtures/message-echo-child.mjs', import.meta.url));
+    const child = await startRuntimeChild({ modulePath, args: [join(temporaryDirectory, 'messages.jsonl'), ...extra] });
+
+    expect(child.transcodeSources).toEqual(expected);
     await child.close();
   });
 

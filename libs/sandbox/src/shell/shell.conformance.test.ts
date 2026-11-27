@@ -305,6 +305,15 @@ const receipt = (): Record<string, unknown> => {
   };
 };
 
+/* Every provider this file creates, closed after it so no custody lock is left to garbage collection (Node 26 makes a
+ * file handle the collector closes an uncaught error). */
+const providers: ShellProvider[] = [];
+const sandboxProvider = (...options: Parameters<typeof createSandboxShellProvider>): ShellProvider => {
+  const created = createSandboxShellProvider(...options);
+  providers.push(created);
+  return created;
+};
+
 describe.runIf(enabled)('shell conformance', () => {
   beforeAll(async () => {
     if (process.platform !== 'linux' && process.platform !== 'darwin') {
@@ -332,11 +341,12 @@ describe.runIf(enabled)('shell conformance', () => {
     writeFileSync(join(outside, 'canary.txt'), 'OUTSIDE-CANARY\n');
     writeFileSync(join(home, 'notes.txt'), 'HOME-NOTES\n');
     writeFileSync(join(home, '.ssh', 'id_canary'), 'SSH-CANARY\n');
-    provider = createSandboxShellProvider({ bwrapPath, home, ...(linux ? {} : { macOSTerminal: true }) });
+    provider = sandboxProvider({ bwrapPath, home, ...(linux ? {} : { macOSTerminal: true }) });
     ready = true;
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await Promise.all(providers.map(async (created) => created.close?.()));
     const path = process.env['TAU_SHELL_CONFORMANCE_RECEIPT'];
     if (path !== undefined && ready) {
       mkdirSync(dirname(path), { recursive: true });
@@ -499,7 +509,7 @@ describe.runIf(enabled)('shell conformance', () => {
       const control = await fetch(`http://127.0.0.1:${String(endpoint.port)}/control`);
 
       expect(control.status).toBe(200);
-      const granted = createSandboxShellProvider({ bwrapPath, home, supervisor: endpoint.supervisor });
+      const granted = sandboxProvider({ bwrapPath, home, supervisor: endpoint.supervisor });
       const reached = await run(
         'curl -sS --max-time 20 http://granted.tau-qualification.test/granted',
         {
@@ -549,7 +559,7 @@ describe.runIf(enabled)('shell conformance', () => {
           {
             command: `curl -fsS --max-time 5 http://${rebindingName}:${port}/`,
             domains: [rebindingName],
-            through: createSandboxShellProvider({ bwrapPath, home, supervisor: rebinding }),
+            through: sandboxProvider({ bwrapPath, home, supervisor: rebinding }),
           },
           { command: `curl -fsS --max-time 5 --noproxy '*' http://127.0.0.1:${port}/`, domains: [] },
           { command: `exec 3<>/dev/tcp/127.0.0.1/${port}`, domains: [] },
@@ -695,12 +705,12 @@ describe.runIf(enabled)('shell conformance', () => {
           ? [
               {
                 name: 'missing bubblewrap',
-                through: createSandboxShellProvider({ bwrapPath: join(work, 'e17-missing-bwrap'), home }),
+                through: sandboxProvider({ bwrapPath: join(work, 'e17-missing-bwrap'), home }),
                 executablePath: shell.path,
               },
               {
                 name: 'corrupt bubblewrap',
-                through: createSandboxShellProvider({ bwrapPath: corrupt, home }),
+                through: sandboxProvider({ bwrapPath: corrupt, home }),
                 executablePath: shell.path,
               },
             ]
@@ -919,7 +929,7 @@ describe.runIf(enabled)('shell conformance', () => {
 
   if (!linux) {
     conformance('C19', 'a provider without the own-pty rule still refuses the Terminal', async () => {
-      const outcome = await createSandboxShellProvider({ bwrapPath, home }).launch(
+      const outcome = await sandboxProvider({ bwrapPath, home }).launch(
         launchOf('', { stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } } }),
       );
 

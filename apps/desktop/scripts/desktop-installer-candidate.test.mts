@@ -203,6 +203,72 @@ const main = async (): Promise<void> => {
         1,
       );
     }
+    // Windows-only (D-H5) mirrors Linux: it may start before the release run finishes, needs only its own packaging
+    // job, and binds the exact run's win32-x64 archive artifact, never attached release metadata or Mac signing.
+    const windowsJobs = ['resolve', `Verify ${linuxTag}`, 'Package win32-x64 (unsigned)'].map((name) => ({
+      name,
+      head_sha: source,
+      run_id: 123,
+      status: 'completed',
+      conclusion: 'success',
+    }));
+    const windowsArtifact = { ...linuxArtifact, id: 790, name: 'desktop-win32-x64' };
+    const windowsResolve = {
+      ...linuxResolve,
+      TAU_DESKTOP_QUALIFICATION_SCOPE: 'windows',
+      TEST_JOBS: JSON.stringify([{ jobs: windowsJobs }]),
+      TEST_ARTIFACTS: JSON.stringify({ artifacts: [windowsArtifact] }),
+    };
+    const windowsAdmitted = run('resolve', windowsResolve);
+    assert.equal(windowsAdmitted.status, 0, windowsAdmitted.stderr);
+    assert.equal(run('resolve', { ...windowsResolve, TEST_RUN: inProgress }).status, 0);
+    // Production admits the Windows-only scope too, on its own exact-tag prerequisites.
+    const productionWindowsJobs = windowsJobs.map((job) =>
+      job.name === `Verify ${linuxTag}` ? { ...job, name: `Verify ${tag}` } : job,
+    );
+    const production = run('resolve', {
+      ...windowsResolve,
+      DESKTOP_RELEASE_TAG: tag,
+      TEST_JOBS: JSON.stringify([{ jobs: productionWindowsJobs }]),
+    });
+    assert.equal(production.status, 0, production.stderr);
+    assert.equal(run('resolve', { ...windowsResolve, DESKTOP_RELEASE_TAG: tag }).status, 1);
+    // Mac and Linux results never admit or block a Windows candidate.
+    const otherPlatformJobs = [
+      ...linuxJobs.filter((job) => job.name.startsWith('Package')),
+      ...macJobs.filter((job) => !['resolve', `Verify ${linuxTag}`].includes(job.name)),
+    ].map((job) => ({ ...job, conclusion: 'failure' }));
+    assert.equal(
+      run('resolve', {
+        ...windowsResolve,
+        TEST_JOBS: JSON.stringify([{ jobs: [...windowsJobs, ...otherPlatformJobs] }]),
+      }).status,
+      0,
+    );
+    assert.equal(run('resolve', { ...windowsResolve, TEST_JOBS: JSON.stringify([{ jobs: linuxJobs }]) }).status, 1);
+    assert.equal(run('resolve', { ...windowsResolve, TEST_JOBS: JSON.stringify([{ jobs: macJobs }]) }).status, 1);
+    for (const artifacts of [
+      [],
+      [linuxArtifact],
+      [windowsArtifact, { ...windowsArtifact, id: 791 }],
+      [{ ...windowsArtifact, expired: true }],
+      [{ ...windowsArtifact, digest: null }],
+      [{ ...windowsArtifact, workflow_run: { id: 456, head_sha: source } }],
+      [{ ...windowsArtifact, workflow_run: { id: 123, head_sha: 'b'.repeat(40) } }],
+    ]) {
+      assert.equal(run('resolve', { ...windowsResolve, TEST_ARTIFACTS: JSON.stringify({ artifacts }) }).status, 1);
+    }
+    for (const index of windowsJobs.keys()) {
+      for (const change of [{ conclusion: 'failure' }, { status: 'in_progress' }, { head_sha: 'b'.repeat(40) }]) {
+        const jobs = windowsJobs.map((job, jobIndex) => (jobIndex === index ? { ...job, ...change } : job));
+        assert.equal(run('resolve', { ...windowsResolve, TEST_JOBS: JSON.stringify([{ jobs }]) }).status, 1);
+      }
+    }
+    assert.equal(
+      run('resolve', { ...windowsResolve, TEST_RUN: JSON.stringify({ ...successful, conclusion: 'cancelled' }) })
+        .status,
+      1,
+    );
     const archives = join(root, 'archives');
     await mkdir(archives);
     const app = join(root, 'Tau-linux-x64');
@@ -312,6 +378,20 @@ const main = async (): Promise<void> => {
       assert.equal(refused.status, 1);
       assert.match(refused.stderr, /cannot stage another platform/u);
     }
+    // A Windows-only candidate never preflights release metadata and cannot stage another platform's archive.
+    const windowsPreflight = { ...linuxPreflight, TAU_DESKTOP_QUALIFICATION_SCOPE: 'windows' };
+    const windowsMetadataRefusal = run('preflight', windowsPreflight);
+    assert.equal(windowsMetadataRefusal.status, 1);
+    assert.match(windowsMetadataRefusal.stderr, /Windows-only candidates read the release-build archive artifact/u);
+    for (const target of ['darwin-arm64', 'darwin-x64', 'linux-x64']) {
+      const refused = run('stage', {
+        ...windowsPreflight,
+        DESKTOP_CANDIDATE_TARGET: target,
+        DESKTOP_CANDIDATE_STAGE: join(root, `windows-${target}`),
+      });
+      assert.equal(refused.status, 1);
+      assert.match(refused.stderr, /Windows-only candidates cannot stage another platform/u);
+    }
     // The assembled Mac-only manifest must be exactly the Apple silicon ZIP/DMG pair from this tag and source.
     const assets = join(root, 'assets');
     await mkdir(assets);
@@ -391,6 +471,39 @@ const main = async (): Promise<void> => {
       refusals,
       refusals.map(() => 1),
     );
+    // The assembled Windows-only manifest must be exactly the win32-x64 NSIS installer and ZIP.
+    const windowsArtifactFor = (kind: 'windows-nsis' | 'windows-zip', index: number) => ({
+      kind,
+      target: 'win32-x64',
+      format: desktopArtifactKinds[kind].format,
+      roles: [...desktopArtifactKinds[kind].roles],
+      name: desktopArtifactName({ kind, channel: 'staging', version: '1.0.3', arch: 'x64' }),
+      size: 10,
+      sha256: String(index).repeat(64),
+      sha512: Buffer.alloc(64, index).toString('base64'),
+    });
+    const windowsManifest = {
+      ...macManifest,
+      artifacts: [windowsArtifactFor('windows-nsis', 7), windowsArtifactFor('windows-zip', 8)],
+    };
+    const windowsScope = { TAU_DESKTOP_QUALIFICATION_SCOPE: 'windows' };
+    assert.equal(await admitScope(windowsManifest, windowsScope), 0);
+    const windowsRefusals = await Promise.all([
+      admitScopeResult({ ...windowsManifest, artifacts: [windowsArtifactFor('windows-nsis', 7)] }, windowsScope),
+      admitScopeResult({ ...windowsManifest, artifacts: [windowsArtifactFor('windows-zip', 8)] }, windowsScope),
+      admitScopeResult(
+        { ...windowsManifest, artifacts: [...windowsManifest.artifacts, ...macArtifacts] },
+        windowsScope,
+      ),
+      admitScopeResult(macManifest, windowsScope),
+      admitScopeResult(windowsManifest),
+      admitScopeResult(windowsManifest, { TAU_DESKTOP_QUALIFICATION_SCOPE: 'linux' }),
+      admitScopeResult({ ...windowsManifest, sourceCommit: 'b'.repeat(40) }, windowsScope),
+    ]);
+    for (const refused of windowsRefusals) {
+      assert.equal(refused.status, 1);
+    }
+    assert.match(windowsRefusals[2].stderr, /Windows-only publication requires exactly the NSIS installer and ZIP/u);
     await writeFile(join(archives, 'download.json'), JSON.stringify(metadata));
 
     const staging = {
@@ -471,7 +584,7 @@ const main = async (): Promise<void> => {
       assert.equal(refused.status, 1, JSON.stringify(Object.keys(changes)));
     }
 
-    // Exercise the actual fetch executable: Windows consumers fetch the existing all-platform archive.
+    // Exercise the actual fetch executable: each platform scope fetches only its own platform candidate.
     const fetchedName = 'inert-candidate.txt';
     await writeFile(join(root, fetchedName), 'authenticated fixture bytes');
     const fetchArchive = join(root, 'fetch.zip');
@@ -521,7 +634,7 @@ const main = async (): Promise<void> => {
     };
     for (const [scope, name] of [
       ['all', 'desktop-installer-candidate'],
-      ['windows', 'desktop-installer-candidate'],
+      ['windows', 'desktop-windows-installer-candidate'],
       ['macos', 'desktop-macos-installer-candidate'],
       ['linux', 'desktop-linux-installer-candidate'],
     ]) {
@@ -531,7 +644,7 @@ const main = async (): Promise<void> => {
       assert.equal(await readFile(join(fetched.directory, fetchedName), 'utf8'), 'authenticated fixture bytes');
     }
     for (const changes of [
-      { name: 'desktop-windows-installer-candidate' },
+      { name: 'desktop-installer-candidate' },
       { name: 'desktop-linux-installer-candidate' },
       { name: 'desktop-macos-installer-candidate' },
       { expired: true },
@@ -544,7 +657,7 @@ const main = async (): Promise<void> => {
     }
     assert.equal(fetchCandidate('windows-ci').result.status, 1);
     console.log(
-      'Passed candidate source-run, Linux and Mac prerequisite, Mac-only scope and exact archive admission scenarios.',
+      'Passed candidate source-run, Linux, Mac and Windows prerequisite, platform scope and exact archive admission scenarios.',
     );
   } finally {
     await rm(root, { recursive: true, force: true });

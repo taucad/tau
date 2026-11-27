@@ -1,8 +1,15 @@
 import { getToolPartName, isAnyToolPart } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
-import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
-import { useChatSelector } from '#hooks/use-chat.js';
+import { daemonPlacementOf, externalAgentDisplayName } from '#lib/agent-host-placement.js';
+import { useEffect } from 'react';
+import {
+  desktopAgentSignInBridge,
+  requestAgentSignIn,
+  takeAgentSignInSuccess,
+  useAgentSignInOutcome,
+} from '#components/terminal/agent-sign-ins.js';
+import { useChatActions, useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { agentApprovalToolName, parseAgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
 import type { AgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
@@ -10,10 +17,12 @@ import { ChatPermissionRequest } from '#components/chat/chat-permission-request.
 import { ChatLoginAffordance } from '#components/chat/chat-login-affordance.js';
 import { answerDeny, pendingMachineActionOf, recordMachineAction } from '#components/print/machine-action-approval.js';
 import { useMachinesFacet } from '#hooks/use-machines.js';
-import { operator } from '#hooks/use-machine-control.js';
+import { operator } from '#components/print/machine-operator.js';
 import type { MachineClient } from '@taucad/runtime/machine';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
+import { selectOpenApprovals } from '#machines/chat-projection.logic.js';
+import type { OpenApproval } from '#machines/chat-projection.logic.js';
 
 /** One unresolved interrupt, located in the transcript that projected it. @public */
 export type PendingAgentHostApproval = AgentHostApproval & {
@@ -81,6 +90,35 @@ export const pendingAgentHostApprovals = (messages: readonly MyUIMessage[]): rea
     );
   }
   return pending;
+};
+
+const noOpenApprovals: readonly OpenApproval[] = [];
+
+/**
+ * Every interrupt the chat is paused on: the transcript's, then any open one the host log holds that the transcript
+ * does not show.
+ *
+ * The ledger is what pauses the run and what an answer is checked against, so an open interrupt is never hidden by a
+ * transcript that failed to rebuild or has not caught up: its card is drawn from the request the log recorded.
+ *
+ * @param messages - The chat's live message list.
+ * @param open - The current run's open approvals, from {@link selectOpenApprovals}.
+ * @returns The pending interrupts, the transcript's first.
+ * @public
+ */
+export const pendingApprovals = (
+  messages: readonly MyUIMessage[],
+  open: readonly OpenApproval[],
+): readonly PendingAgentHostApproval[] => {
+  const transcript = pendingAgentHostApprovals(messages);
+  const shown = new Set(transcript.map((approval) => approval.interruptId));
+  const unshown = open.filter(({ approval }) => !shown.has(approval.interruptId));
+  return unshown.length === 0
+    ? transcript
+    : [
+        ...transcript,
+        ...unshown.map(({ runId, approval }) => ({ ...approval, messageId: runId, approvalId: approval.interruptId })),
+      ];
 };
 
 /**
@@ -206,6 +244,42 @@ const answerInterrupt = async ({
 };
 
 /**
+ * A login card that carries on by itself once the sign-in its chat asked for in Tau's tab exits 0. Another chat's
+ * card for the same agent does not: the success is bound to the chat that asked.
+ *
+ * The exit is taken once, so the turn is tried again exactly as *Try again* would, and only once: a retry that still
+ * meets a logged-out agent draws this card again and waits for another sign-in. A failed sign-in leaves the card,
+ * which says how it ended. Nothing here names an agent; the login names it.
+ *
+ * @param props - The login, the card's chat, and the action that opens its sign-in tab.
+ * @returns The affordance.
+ */
+function AgentLoginCard({
+  login,
+  chatId,
+  onSignInInTerminal,
+}: {
+  readonly login: NonNullable<AgentHostApproval['login']>;
+  readonly chatId: string;
+  readonly onSignInInTerminal: (() => void) | undefined;
+}): React.JSX.Element {
+  const { regenerate } = useChatActions();
+  const outcome = useAgentSignInOutcome(login.agentId, chatId);
+  useEffect(() => {
+    if (outcome === 'succeeded' && takeAgentSignInSuccess(login.agentId, chatId)) {
+      regenerate();
+    }
+  }, [outcome, login.agentId, chatId, regenerate]);
+  return (
+    <ChatLoginAffordance
+      login={login}
+      onSignInInTerminal={onSignInInTerminal}
+      signInFailure={typeof outcome === 'object' ? outcome : undefined}
+    />
+  );
+}
+
+/**
  * The one presenter for a paused run's interrupt, wherever the run is placed.
  *
  * Mounted above the composer (`chat-textarea.tsx`), because a run that is
@@ -221,15 +295,40 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
   const { respondToToolApproval } = useCadChatClient();
   const machines = useMachinesFacet();
   const workspace = useProjectWorkspace({ enableNoContext: true });
+  const { activeChatId } = useChatContext();
   const activeExecution = useChatSelector((state) => state.activeExecution);
+  const attachedHostId = useChatSelector((state) => state.attachedHostId);
   const messages = useChatSelector((state) => state.messages);
+  const open = useChatSelector((state) =>
+    state.projection === undefined ? noOpenApprovals : selectOpenApprovals(state.projection),
+  );
   // A paused run has exactly one unresolved interrupt: it stopped on it.
-  const approval = pendingAgentHostApprovals(messages)[0];
+  const approval = pendingApprovals(messages, open)[0];
   const login = currentRunLogin(messages);
   if (login) {
     /* Not a decision: nothing here is approved or denied, so the banner hands
      * over to the affordance that says what the *user* has to do (V11). */
-    return <ChatLoginAffordance login={login} />;
+    /* Only where this desktop runs the agent can Tau start its CLI; elsewhere the card keeps the command to copy. The
+     * host is the one whose log refused the turn, which a relaunch keeps even before the composer names an agent. */
+    const refusingHost =
+      attachedHostId ?? (activeExecution === undefined ? undefined : daemonPlacementOf(activeExecution));
+    const signsInHere =
+      workspace !== undefined && desktopAgentSignInBridge() !== undefined && refusingHost === 'desktop';
+    return (
+      <AgentLoginCard
+        key={login.agentId}
+        login={login}
+        chatId={activeChatId}
+        onSignInInTerminal={
+          signsInHere
+            ? () => {
+                requestAgentSignIn(login.agentId, activeChatId);
+                workspace.setWorkbenchOpen(true);
+              }
+            : undefined
+        }
+      />
+    );
   }
   if (!approval) {
     return undefined;

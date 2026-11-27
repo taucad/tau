@@ -175,10 +175,17 @@ const createMetricsSpy = (target?: RuntimeMetricsTarget) => ({
   setGauge: vi.fn(),
 });
 const legacyMetrics = () => ({
-  kernelExecutionDuration: { record: vi.fn() },
-  kernelExecutions: { add: vi.fn() },
-  kernelExportDuration: { record: vi.fn() },
+  syncClientAttempts: { add: vi.fn() },
+  syncClientAttemptDuration: { record: vi.fn() },
+  syncClientLag: { record: vi.fn() },
+  syncClientPending: { record: vi.fn() },
 });
+/** A legacy client metric entry the controller records itself. */
+const legacySyncAttempt = {
+  name: IngestEntryName.SYNC_ATTEMPT,
+  duration: 1500,
+  detail: { direction: 'push', outcome: 'ok', placement: 'browser' },
+};
 
 type Harness = Awaited<ReturnType<typeof createApp>>;
 const apps: NestFastifyApplication[] = [];
@@ -367,22 +374,20 @@ describe('GET /v1/telemetry/policy', () => {
 describe('POST /v1/telemetry/ingest (T10)', () => {
   it('should keep a legacy batch exactly as today: 204, recorded signed in only, no Redis', async () => {
     const harness = await createApp();
-    const legacy = { name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1500, detail: { status: 'ok' } };
-    const signedOutLegacy = await post(harness, { entries: [legacy] });
+    const signedOutLegacy = await post(harness, { entries: [legacySyncAttempt] });
     expect(signedOutLegacy.statusCode).toBe(204);
-    expect(harness.metrics.kernelExecutions.add).not.toHaveBeenCalled();
-    const signedInLegacy = await post(harness, { entries: [legacy] }, { user: 'user-1' });
+    expect(harness.metrics.syncClientAttempts.add).not.toHaveBeenCalled();
+    const signedInLegacy = await post(harness, { entries: [legacySyncAttempt] }, { user: 'user-1' });
     expect(signedInLegacy.statusCode).toBe(204);
-    expect(harness.metrics.kernelExecutions.add).toHaveBeenCalledTimes(1);
+    expect(harness.metrics.syncClientAttempts.add).toHaveBeenCalledTimes(1);
     expect(harness.redis.commands).toEqual([]);
   });
 
   it('should record legacy entries as today and answer disabled for runtime entries when off (AR-W5-09)', async () => {
     const harness = await createApp({ TAU_RUNTIME_TELEMETRY: 'off' });
-    const legacy = { name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1500, detail: { status: 'ok' } };
     const response = await post(
       harness,
-      { batch: batchId(), entries: [legacy, operation(), operation()] },
+      { batch: batchId(), entries: [legacySyncAttempt, operation(), operation()] },
       { user: 'user-1' },
     );
     expect(response.statusCode).toBe(200);
@@ -393,7 +398,7 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
       disabled: 2,
       policy: 'off',
     });
-    expect(harness.metrics.kernelExecutions.add).toHaveBeenCalledTimes(1);
+    expect(harness.metrics.syncClientAttempts.add).toHaveBeenCalledTimes(1);
     expect(harness.redis.commands).toEqual([]);
     expect(counted(harness, 'runtimeOperations')).toEqual([]);
   });
@@ -423,6 +428,97 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
       'tau.runtime.population': 'signed-in',
     });
     expect(harness.redis.keys('telemetry:hll:').length).toBeGreaterThan(0);
+  });
+
+  /* T05: every limit id with a producer is counted as a capacity refusal at the limit -1, at and +1. */
+  it.each([
+    [
+      'host.utility.resident',
+      'By',
+      1000,
+      { operation: 'render', outcome: 'terminated', code: 'HOST_LIMIT_EXCEEDED', transport: 'electron-utility' },
+    ],
+    [
+      'picovoxel.tape.instructions',
+      '{instruction}',
+      65_536,
+      { kernel: 'picovoxel', outcome: 'issue', code: 'RESOURCE_LIMIT' },
+    ],
+    [
+      'geospec.work.units',
+      '{unit}',
+      1000,
+      {
+        operation: 'verify',
+        outcome: 'issue',
+        code: 'RESOURCE_LIMIT',
+        caller: 'geospec',
+        verify: { selected: 1, passed: 0, failed: 1 },
+      },
+    ],
+  ] as const)(
+    'should count %s refusals and their demand ratio at the limit -1, at and +1',
+    async (id, unit, maximum, facet) => {
+      const harness = await createApp();
+      const values = [maximum - 1, maximum, maximum + 1];
+      const response = await post(
+        harness,
+        {
+          batch: batchId(),
+          entries: values.map((value) =>
+            operation({
+              ...facet,
+              limit: { id, unit, maximum, demand: { kind: 'measured', value }, origin: 'default' },
+            }),
+          ),
+        },
+        { user: 'user-1' },
+      );
+      expect(response.json()).toMatchObject({ recorded: 3, rejected: 0 });
+      expect(counted(harness, 'runtimeCapacityRefusals').map(({ attributes }) => attributes)).toMatchObject(
+        values.map(() => ({ 'tau.runtime.limit': id, 'tau.runtime.demand_kind': 'measured' })),
+      );
+      expect(
+        harness.runtimeMetrics.record.mock.calls
+          .filter(([name]) => name === 'runtimeCapacityDemandRatio')
+          .map(([, ratio, attributes]) => ({ ratio, attributes })),
+      ).toEqual(values.map((value) => ({ ratio: value / maximum, attributes: { 'tau.runtime.limit': id } })));
+    },
+  );
+
+  it('should count a PicoVoxel tape refusal with unknown demand and record no ratio', async () => {
+    const harness = await createApp();
+    const limit = {
+      id: 'picovoxel.tape.instructions',
+      unit: '{instruction}',
+      maximum: 65_536,
+      demand: { kind: 'unknown' },
+      origin: 'default',
+    };
+    const response = await post(
+      harness,
+      {
+        batch: batchId(),
+        entries: [operation({ kernel: 'picovoxel', outcome: 'issue', code: 'RESOURCE_LIMIT', limit })],
+      },
+      { user: 'user-1' },
+    );
+    expect(response.json()).toMatchObject({ recorded: 1, rejected: 0 });
+    expect(counted(harness, 'runtimeCapacityRefusals')).toMatchObject([
+      {
+        value: 1,
+        attributes: {
+          'tau.runtime.limit': 'picovoxel.tape.instructions',
+          'tau.runtime.demand_kind': 'unknown',
+          'kernel.id': 'picovoxel',
+        },
+      },
+    ]);
+    expect(harness.runtimeMetrics.record).not.toHaveBeenCalledWith(
+      'runtimeCapacityDemandRatio',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('should refuse an oversized body with 413 and never touch Redis', async () => {
@@ -637,8 +733,8 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
             outcome: 'issue',
             code: 'RESOURCE_LIMIT',
             limit: {
-              id: 'occt.export.triangles',
-              unit: '{triangle}',
+              id: 'picovoxel.tape.instructions',
+              unit: '{instruction}',
               maximum: 10,
               demand: { kind: 'measured', value: 15 },
               origin: 'default',
@@ -1038,134 +1134,37 @@ describe('dedupe, budget and fail-open (T29)', () => {
   });
 });
 
-describe('dual-write of the old kernel instruments (PR-7, package §8 dual-write window)', () => {
-  const legacyWrites = (harness: Harness) => ({
-    executions: harness.metrics.kernelExecutions.add.mock.calls,
-    durations: harness.metrics.kernelExecutionDuration.record.mock.calls,
-    exports: harness.metrics.kernelExportDuration.record.mock.calls,
+describe('retired kernel entries (old kernel instruments removed)', () => {
+  const retired = [
+    { name: 'observability.createGeometry', duration: 1500, detail: { status: 'success' } },
+    { name: 'observability.exportGeometry', duration: 800, detail: { status: 'success', exportFormat: 'stl' } },
+  ];
+
+  it('should accept and drop a batch of only retired entries: 204, nothing recorded, no Redis', async () => {
+    const harness = await createApp();
+    const response = await post(harness, { entries: retired }, { user: 'user-1' });
+    expect(response.statusCode).toBe(204);
+    expect(harness.metrics.syncClientAttempts.add).not.toHaveBeenCalled();
+    expect(counted(harness, 'runtimeOperations')).toEqual([]);
+    expect(harness.redis.commands).toEqual([]);
   });
 
-  it('should count a recorded succeeded evaluate or render as success, in seconds', async () => {
+  it('should not let a retired entry refuse or count against a batch with live entries', async () => {
     const harness = await createApp();
     const response = await post(
       harness,
-      { batch: batchId(), entries: [operation({ operation: 'evaluate' }, 1500), operation({}, 250)] },
+      { batch: batchId(), entries: [...retired, legacySyncAttempt, operation()] },
       { user: 'user-1' },
     );
-    expect(response.json()).toMatchObject({ recorded: 2 });
-    expect(legacyWrites(harness)).toEqual({
-      executions: [
-        [1, { 'kernel.status': 'success' }],
-        [1, { 'kernel.status': 'success' }],
-      ],
-      durations: [
-        [1.5, { 'kernel.status': 'success' }],
-        [0.25, { 'kernel.status': 'success' }],
-      ],
-      exports: [],
-    });
+    expect(response.statusCode).toBe(200);
+    expect(ingestReceiptSchema.parse(response.json())).toMatchObject({ recorded: 1, rejected: 0 });
+    expect(harness.metrics.syncClientAttempts.add).toHaveBeenCalledTimes(1);
+    expect(counted(harness, 'runtimeOperations')).toHaveLength(1);
   });
 
-  it('should count issue, failed, timed-out, terminated and discarded as error', async () => {
+  it('should still refuse an unknown entry name', async () => {
     const harness = await createApp();
-    const failures = ['issue', 'failed', 'timed-out', 'terminated', 'discarded'] as const;
-    const response = await post(
-      harness,
-      {
-        batch: batchId(),
-        entries: failures.map((outcome) => operation({ operation: 'evaluate', outcome }, 100)),
-      },
-      { user: 'user-1' },
-    );
-    expect(response.json()).toMatchObject({ recorded: failures.length });
-    const { executions, durations } = legacyWrites(harness);
-    expect(executions).toEqual(failures.map(() => [1, { 'kernel.status': 'error' }]));
-    expect(durations).toEqual(failures.map(() => [0.1, { 'kernel.status': 'error' }]));
-  });
-
-  it('should write nothing for superseded, cancelled, abandoned, refused or unknown attempts', async () => {
-    const harness = await createApp();
-    const response = await post(
-      harness,
-      {
-        batch: batchId(),
-        entries: [
-          operation({ outcome: 'superseded', count: 7 }),
-          operation({ operation: 'evaluate', outcome: 'cancelled' }),
-          operation({ outcome: 'abandoned' }),
-          operation({ operation: 'evaluate', outcome: 'refused', code: 'RESOURCE_LIMIT' }),
-          operation({ outcome: 'unknown' }),
-          operation({ operation: 'export', format: 'stl', outcome: 'superseded' }),
-        ],
-      },
-      { user: 'user-1' },
-    );
-    expect(response.json()).toMatchObject({ recorded: 6 });
-    expect(legacyWrites(harness)).toEqual({ executions: [], durations: [], exports: [] });
-  });
-
-  it('should time a recorded export into the old export histogram with export.format _OTHER only', async () => {
-    const harness = await createApp();
-    await post(
-      harness,
-      {
-        batch: batchId(),
-        entries: [
-          operation({ operation: 'export', format: 'stl' }, 2000),
-          operation({ operation: 'export', format: 'step', outcome: 'issue', code: 'RESOURCE_LIMIT' }, 40),
-          operation({
-            operation: 'transcode',
-            kernel: undefined,
-            plugin: 'assimp',
-            sourceFormat: 'glb',
-            format: 'gltf',
-          }),
-        ],
-      },
-      { user: 'user-1' },
-    );
-    expect(legacyWrites(harness)).toEqual({
-      executions: [],
-      durations: [],
-      exports: [
-        [2, { 'kernel.status': 'success', 'export.format': '_OTHER' }],
-        [0.04, { 'kernel.status': 'error', 'export.format': '_OTHER' }],
-      ],
-    });
-  });
-
-  it('should write nothing for a signed-out entry, which the old instruments never counted', async () => {
-    const harness = await createApp();
-    const response = await post(harness, {
-      batch: batchId(),
-      entries: [operation({ operation: 'evaluate' }, 100), operation({ operation: 'export', format: 'stl' }, 100)],
-    });
-    expect(response.json()).toMatchObject({ recorded: 2 });
-    expect(legacyWrites(harness)).toEqual({ executions: [], durations: [], exports: [] });
-  });
-
-  it('should write nothing for a duplicate, a rejected entry, a refused batch or a disabled deployment', async () => {
-    const harness = await createApp();
-    const body = { batch: batchId(), entries: [operation()] };
-    await post(harness, body, { user: 'user-1' });
-    expect(harness.metrics.kernelExecutions.add).toHaveBeenCalledTimes(1);
-    const duplicate = await post(harness, body, { user: 'user-1' });
-    expect(duplicate.json()).toMatchObject({ duplicate: 1 });
-    const rejected = await post(harness, {
-      batch: batchId(),
-      entries: [operation({ outcome: 'succeeded', count: 400 })],
-    });
-    expect(rejected.json()).toMatchObject({ rejected: 1 });
-    const invalidBatch = await post(harness, { batch: 'not-a-batch', entries: [operation()] });
-    expect(invalidBatch.statusCode).toBe(400);
-    const flood = Array.from({ length: runtimeIngestLimits.entriesSignedOut + 1 }, () => operation());
-    const refused = await post(harness, { batch: batchId(), entries: flood.slice(0, 200) }, { ip: '203.0.113.9' });
-    expect(refused.statusCode).toBe(429);
-    expect(harness.metrics.kernelExecutions.add).toHaveBeenCalledTimes(1);
-    expect(harness.metrics.kernelExecutionDuration.record).toHaveBeenCalledTimes(1);
-
-    const off = await createApp({ TAU_RUNTIME_TELEMETRY: 'off' });
-    await post(off, { batch: batchId(), entries: [operation()] }, { user: 'user-1' });
-    expect(legacyWrites(off)).toEqual({ executions: [], durations: [], exports: [] });
+    const response = await post(harness, { entries: [{ name: 'observability.unknown', duration: 1 }] });
+    expect(response.statusCode).toBe(400);
   });
 });

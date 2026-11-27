@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { Suspense, useState, useCallback, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -14,8 +14,8 @@ import {
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import type { ProjectLocator, ProjectDiscoveryIssue } from '@taucad/filesystem';
 import { describeProjectManifestIssue } from '@taucad/types';
-import type { ProjectListItem } from '#types/project-library.types.js';
-import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
+import type { ProjectListItem } from '@taucad/project-library/types/project-library.types';
+import type { PendingProjectRecovery } from '@taucad/project-library/types/pending-project-operation.types';
 import { createColumns } from '#components/project-library/columns.js';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Card, CardHeader, CardFooter } from '@taucad/ui/components/card';
@@ -35,9 +35,7 @@ import {
   DropdownMenuSeparator,
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
-import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
-import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { toast } from '@taucad/ui/components/sonner';
 import {
@@ -70,30 +68,36 @@ import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useWaitClock, useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
 import type { WaitIndicatorTiming } from '@taucad/ui/utils/wait-timing';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
-import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#runtime/project-library-storage.js';
-import {
-  ProjectCard,
-  ProjectCardCadPreview,
-  ProjectCardMedia,
-  projectCardVerticalFieldOfView,
-} from '#components/project-card.js';
+import type {
+  ProjectDiscoveryConflict,
+  WorkspaceBindingRepairGroup,
+} from '@taucad/project-library/runtime/project-library-storage';
+import { ProjectCard, ProjectCardMedia } from '#components/project-card.js';
 import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader, SectionHeader, usePhoneTopBar } from '#components/layout/page-header.js';
-import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
-import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
+import { projectSlugOf, projectUrlOr } from '@taucad/files-ui/utils/project-url.utils';
+import {
+  projectLocationDescriptor,
+  projectLocationFullLabel,
+} from '@taucad/files-ui/utils/project-creation-location.utils';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { assertCloudProjectActive, useCloudProjects } from '#hooks/use-cloud-projects.js';
 import type { CloudListingState, CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
-import {
-  CloudProjectCard,
-  OnTauCloudMark,
-  isCloudOnly,
-  toLibraryRows,
-  useMaterializeCloudProjects,
-} from '#routes/projects_/cloud-projects.js';
+import { CloudProjectCard, OnTauCloudMark, isCloudOnly, toLibraryRows } from '#routes/projects_/cloud-projects.js';
 import type { LibraryRow } from '#routes/projects_/cloud-projects.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
+
+/* A card's live model preview, with its CAD and graphics machines, loads when it is first turned on (PL5). */
+const ProjectCardLivePreview = lazyCode(
+  async () => {
+    const module = await import('#components/project-card-live-preview.js');
+    return { default: module.ProjectCardLivePreview };
+  },
+  // Optional code (FP9): without it the page keeps working, so a failed load renders nothing instead of an error.
+  { fallback: (): undefined => undefined },
+);
 
 // Note: useCookie is still used for projectViewMode (user preference, not per-build state)
 
@@ -108,6 +112,27 @@ export type ProjectActions = {
 /** Physical directory an unfinished operation is stuck on. */
 const recoveryDirectoryName = (recovery: PendingProjectRecovery): string =>
   recovery.storage.providerBasePath.split('/').findLast(Boolean) ?? recovery.storage.providerBasePath;
+
+/** A copy that shares its project's id with another folder, as the conflict card lists it. */
+type DuplicateCopy = Extract<ProjectDiscoveryConflict, { status: 'duplicate-id' }>;
+
+/** Where a directory lives, as a project card's location row says it: Home, or its workspace folder by name. */
+const locatorPlaceLabel = (locator: ProjectLocator, workspaceName: string | undefined): string =>
+  projectLocationFullLabel(
+    projectLocationDescriptor(
+      locator.backend === 'webaccess' ? { kind: 'workspace', workspaceName } : { kind: 'home' },
+    ),
+  );
+
+/** One folder of a copied project: where it is, its own name, and when its `tau.json` last changed, when known. */
+const copyFolderLabel = (
+  folder: Readonly<{ locator: ProjectLocator; workspaceName?: string; modifiedAt?: number }>,
+): string => {
+  const { locator } = folder;
+  const name = locator.relativeDirectory.split('/').findLast(Boolean) ?? locator.relativeDirectory;
+  const place = `${locatorPlaceLabel(locator, folder.workspaceName)} · ${name}`;
+  return folder.modifiedAt === undefined ? place : `${place} · changed ${formatRelativeTime(folder.modifiedAt)}`;
+};
 
 /** Why a discovered directory does not open, and what gets it open again. */
 const conflictSummary = (conflict: ProjectDiscoveryConflict): string => {
@@ -221,10 +246,11 @@ export function ProjectLibrary({
    */
   const [showDeleted, setShowDeleted] = useSearchParameter(searchParameterName.trash, flagParameter);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<ProjectListItem | undefined>();
+  const [copyDeleteTarget, setCopyDeleteTarget] = useState<DuplicateCopy | undefined>();
   const [repairTarget, setRepairTarget] = useState<WorkspaceBindingRepairGroup | undefined>();
   /* Everything this device holds, the Trash included — one listing under the
      same query key — so a trashed project is never offered as Tau Cloud's alone. */
-  const { projects: heldProjects } = useProjects({ includeDeleted: true });
+  const { projects: heldProjects } = useProjects({ scope: 'all' });
   const {
     projects,
     conflicts,
@@ -237,12 +263,13 @@ export function ProjectLibrary({
     duplicateProject,
     restoreProject,
     permanentlyDeleteProject: deleteProjectPermanently,
+    deleteProjectCopy,
     adoptProject,
     repairProject,
     chooseProjectDirectory,
     updateName,
     isLoading,
-  } = useProjects({ includeDeleted: showDeleted });
+  } = useProjects({ scope: showDeleted ? 'trash' : 'live' });
   const degradedProjects = projects.filter(
     (project) => project.manifestIssue !== undefined && project.deletedAt === undefined,
   );
@@ -339,20 +366,13 @@ export function ProjectLibrary({
     void retryCloudListing();
   }, [retryCloudListing]);
   const openCloudProject = useOpenCloudProject();
-  useMaterializeCloudProjects({
-    cloud: cloudProjects,
-    isSettled: isCloudSettled,
-    isFetching: isCloudFetching,
-    held: heldProjects,
-    isLoading,
-  });
   const handleOpenCloudProject = useCallback(
     async (entry: CloudProject): Promise<void> => {
       try {
         await assertCloudProjectActive(entry.id);
         await openCloudProject(entry);
       } catch (error) {
-        toast.error(`Could not open ${entry.name} from Tau Cloud`, {
+        toast.error(`Couldn’t open ${entry.name}`, {
           description: error instanceof Error ? error.message : undefined,
         });
       }
@@ -376,7 +396,7 @@ export function ProjectLibrary({
         if (trashed) {
           if (announce) {
             toast.success(`Moved ${project.name} to Trash`, {
-              description: 'Its files remain on disk and can be restored from Trash.',
+              description: 'Its files stay on this device and can be restored from Trash.',
             });
           }
           return true;
@@ -489,6 +509,23 @@ export function ProjectLibrary({
       console.error('Error permanently deleting project:', error);
     }
   }, [deleteProjectPermanently, permanentDeleteTarget]);
+
+  const confirmCopyDelete = useCallback(async () => {
+    const copy = copyDeleteTarget;
+    if (!copy) {
+      return;
+    }
+    try {
+      await deleteProjectCopy(copy.projectId, copy.locator);
+      setCopyDeleteTarget(undefined);
+      toast.success(`Deleted this copy of ${copy.manifest.name}`);
+    } catch (error) {
+      toast.error(`Could not delete this copy of ${copy.manifest.name}`, {
+        description: error instanceof Error ? error.message : undefined,
+      });
+      console.error('Error deleting project copy:', error);
+    }
+  }, [copyDeleteTarget, deleteProjectCopy]);
 
   const confirmWorkspaceBindingRepair = useCallback(async (): Promise<void> => {
     const target = repairTarget;
@@ -629,7 +666,7 @@ export function ProjectLibrary({
     <LibraryStatusSlot
       notice={shownCloudNotice}
       /* A Retry's wait is announced by the slot's status region, there before the press, so the words are heard. */
-      announcement={!isAwaitingListing && cloudWait?.isAnnounced === true ? 'Loading Tau Cloud projects' : undefined}
+      announcement={!isAwaitingListing && cloudWait?.isAnnounced === true ? 'Loading cloud projects' : undefined}
       /* One Retry for Tau Cloud: beside a failure, through the wait it starts, and from the first wait's slow mark, so a
          Retry whose request fails or waits keeps its focus. */
       retry={
@@ -665,8 +702,8 @@ export function ProjectLibrary({
         live={cloudWait?.isAnnounced !== true}
         active={!isAwaitingListing && isAwaitingCloud}
         startedAt={cloudShownFrom}
-        label='Loading Tau Cloud projects'
-        slowLabel='Still loading Tau Cloud projects'
+        label='Loading cloud projects'
+        slowLabel='Still loading cloud projects'
       />
     </LibraryStatusSlot>
   );
@@ -741,6 +778,12 @@ export function ProjectLibrary({
                 <div className='min-w-0 flex-1'>
                   <div className='truncate font-medium'>{label}</div>
                   <div className='text-sm text-muted-foreground'>{conflictSummary(conflict)}</div>
+                  {conflict.status === 'duplicate-id' ? (
+                    <CopyFolders
+                      copy={conflict}
+                      bound={heldProjects.find((project) => project.id === conflict.projectId)}
+                    />
+                  ) : null}
                   {/* A missing manifest has nothing to add to its summary. */}
                   {(conflict.status === 'invalid' || conflict.status === 'adoption-required') &&
                   conflict.issue.code !== 'manifest-missing' ? (
@@ -765,6 +808,17 @@ export function ProjectLibrary({
                     }
                   >
                     Use this folder
+                  </Button>
+                )}
+                {conflict.status === 'duplicate-id' && (
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={() => {
+                      setCopyDeleteTarget(conflict);
+                    }}
+                  >
+                    Delete this copy
                   </Button>
                 )}
               </div>
@@ -798,7 +852,7 @@ export function ProjectLibrary({
       )}
 
       {recoveries.length > 0 && (
-        <div role='group' className='mb-6 space-y-2' aria-label='Project recovery'>
+        <div id='project-recovery' role='group' className='mb-6 space-y-2' aria-label='Project recovery'>
           {recoveries.map((recovery) => (
             <div
               key={recovery.operationId}
@@ -840,9 +894,9 @@ export function ProjectLibrary({
 
       {listingError && projects.length > 0 ? (
         <div role='alert' className='flex items-center justify-between gap-3 rounded-md border p-3'>
-          <span className='text-sm'>Projects could not be refreshed.</span>
+          <span className='text-sm'>Couldn’t refresh projects.</span>
           <Button size='sm' variant='outline' onClick={async () => retry()}>
-            Retry
+            Try again
           </Button>
         </div>
       ) : null}
@@ -854,11 +908,11 @@ export function ProjectLibrary({
         >
           <PackageX className='size-8 text-muted-foreground' />
           <div>
-            <div className='font-medium'>Projects could not be loaded</div>
-            <div className='text-sm text-muted-foreground'>Check the connected workspace and try again.</div>
+            <div className='font-medium'>Couldn’t load projects</div>
+            <div className='text-sm text-muted-foreground'>Check that the folder is connected, then try again.</div>
           </div>
           <Button variant='outline' onClick={async () => retry()}>
-            Retry
+            Try again
           </Button>
         </div>
       ) : (
@@ -927,7 +981,61 @@ export function ProjectLibrary({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog
+        open={copyDeleteTarget !== undefined}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCopyDeleteTarget(undefined);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this copy of “{copyDeleteTarget?.manifest.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes the folder {copyDeleteTarget ? copyFolderLabel(copyDeleteTarget) : ''}, with
+              every file and chat inside it. The other copy stays, and so does this project’s state on this device. This
+              action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: 'destructive' })}
+              onClick={() => {
+                void confirmCopyDelete();
+              }}
+            >
+              Delete this copy
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageContent>
+  );
+}
+
+/**
+ * Both folders of a copied project, so a person can tell them apart before choosing one or deleting this copy: this
+ * copy, and the copy the project's route opens now, each with when it last changed.
+ */
+function CopyFolders({
+  copy,
+  bound,
+}: Readonly<{ copy: DuplicateCopy; bound: ProjectListItem | undefined }>): React.JSX.Element {
+  return (
+    <dl className='mt-1 grid gap-0.5 text-sm text-muted-foreground'>
+      <div className='flex min-w-0 gap-1'>
+        <dt className='shrink-0 font-medium'>This copy</dt>
+        <dd className='truncate'>{copyFolderLabel(copy)}</dd>
+      </div>
+      {bound === undefined ? null : (
+        <div className='flex min-w-0 gap-1'>
+          <dt className='shrink-0 font-medium'>Tau opens</dt>
+          <dd className='truncate'>{copyFolderLabel(bound)}</dd>
+        </div>
+      )}
+    </dl>
   );
 }
 
@@ -1020,7 +1128,14 @@ function ProjectCardSkeleton(): React.JSX.Element {
 }
 
 /** What the Projects header's slot says about Tau Cloud in words, instead of a wait (P-k). */
-type CloudNotice = 'offline' | 'failed';
+type CloudNotice = 'offline' | 'safe-mode' | 'failed';
+
+/** The notices said in words alone, with no Retry: nothing a retry could change. */
+const quietNoticeCopy: Partial<Record<CloudNotice, string>> = {
+  offline: 'Offline. Showing projects on this device.',
+  /* W9 R5 (operator ruling): safe mode makes no Tau Cloud read. */
+  'safe-mode': 'Tau Cloud is off in safe mode. Showing projects on this device.',
+};
 
 /**
  * Offline while the listing has not answered (it is held until the browser is back online), or failed.
@@ -1037,6 +1152,9 @@ function cloudNoticeOf({
   readonly isCloudSettled: boolean;
   readonly cloud: CloudListingState;
 }): CloudNotice | undefined {
+  if (cloud === 'safe-mode') {
+    return 'safe-mode';
+  }
   if (!isOnline && !isCloudSettled) {
     return 'offline';
   }
@@ -1075,7 +1193,7 @@ function cloudRetryOf({
   /** The listing's last answer was a failure and nothing has answered since. */
   readonly isFailureUnanswered: boolean;
 }): CloudRetry | undefined {
-  if (notice === 'offline') {
+  if (notice !== undefined && quietNoticeCopy[notice] !== undefined) {
     return undefined;
   }
   if (notice === 'failed' || isFailureUnanswered || wait?.isAnnounced === true || wait?.followsFailure === true) {
@@ -1130,6 +1248,7 @@ function LibraryStatusSlot({
   readonly hold?: Readonly<{ hideDelay: string; onEnd: () => void }>;
   readonly children: ReactNode;
 }): React.JSX.Element {
+  const quietCopy = notice === undefined ? undefined : quietNoticeCopy[notice];
   return (
     <div
       data-slot='project-library-status'
@@ -1148,17 +1267,19 @@ function LibraryStatusSlot({
       {/* One status region, always present, so the offline words and a Retry's wait are announced when they arrive. */}
       {/* Never `display: none`, even empty: a live region must be in the tree before its words arrive. Out of the
           flow while it shows nothing, it adds no gap. */}
-      <span role='status' className={cn('min-w-0 truncate', notice !== 'offline' && 'sr-only')}>
-        {notice === 'offline' ? 'Offline. Showing projects on this device.' : announcement}
+      <span role='status' className={cn('min-w-0 truncate', quietCopy === undefined && 'sr-only')}>
+        {quietCopy ?? announcement}
       </span>
-      {notice === 'offline' ? null : notice === 'failed' ? (
-        <span role='alert' className='flex min-w-0 items-center gap-1.5'>
-          <AlertCircle aria-hidden className='size-3.5 shrink-0 text-warning' />
-          <span className='truncate'>Tau Cloud projects not loaded</span>
-        </span>
-      ) : (
-        children
-      )}
+      {quietCopy === undefined ? (
+        notice === 'failed' ? (
+          <span role='alert' className='flex min-w-0 items-center gap-1.5'>
+            <AlertCircle aria-hidden className='size-3.5 shrink-0 text-warning' />
+            <span className='truncate'>Couldn’t load cloud projects</span>
+          </span>
+        ) : (
+          children
+        )
+      ) : null}
       {/* Last in the slot, so the same element stays while the words before it change. */}
       {retry === undefined ? null : (
         <Button
@@ -1167,10 +1288,10 @@ function LibraryStatusSlot({
           size='xs'
           className={cn('min-w-6 shrink-0', retry.slowDelay !== undefined && 'wait-after-slow')}
           style={retry.slowDelay === undefined ? undefined : retryRevealStyle(retry.slowDelay)}
-          aria-label='Retry Tau Cloud'
+          aria-label='Try loading cloud projects again'
           onClick={onRetryCloud}
         >
-          Retry
+          Try again
         </Button>
       )}
     </div>
@@ -1285,7 +1406,7 @@ function UnifiedProjectList({
           icon={PackageX}
           titleLevel={emptyTitleLevel}
           title={isCatalogUnavailable ? 'No matches on this device' : 'No matching projects'}
-          description={isCatalogUnavailable ? 'Tau Cloud projects are not all available yet.' : undefined}
+          description={isCatalogUnavailable ? 'Cloud projects are not all available yet.' : undefined}
         >
           <Button
             variant='outline'
@@ -1364,14 +1485,9 @@ function cardLocation(project: ListedCardProject): {
   const slugPath = project.slugs
     ? `${project.slugs.workspaceSlug}/${project.slugs.projectSlug}`
     : projectSlugOf(project.locator);
-  const isWorkspace = project.locator.backend === 'webaccess';
   return {
-    LocationIcon: isWorkspace ? FolderOpen : House,
-    label: projectLocationFullLabel(
-      projectLocationDescriptor(
-        isWorkspace ? { kind: 'workspace', workspaceName: project.workspaceName } : { kind: 'home' },
-      ),
-    ),
+    LocationIcon: project.locator.backend === 'webaccess' ? FolderOpen : House,
+    label: locatorPlaceLabel(project.locator, project.workspaceName),
     slugPath,
   };
 }
@@ -1439,17 +1555,9 @@ export function ProjectLibraryCard({
         onPreviewVisibilityChange={setShowPreview}
       >
         {showPreview && mainFile !== undefined ? (
-          <SharedWorkerGate>
-            <HomeFileManagerProvider key={project.id} projectId={project.id} rootDirectory={`/projects/${project.id}`}>
-              <CadPreviewProvider
-                projectId={project.id}
-                mainFile={mainFile}
-                initialVerticalFieldOfView={projectCardVerticalFieldOfView}
-              >
-                <ProjectCardCadPreview />
-              </CadPreviewProvider>
-            </HomeFileManagerProvider>
-          </SharedWorkerGate>
+          <Suspense fallback={null}>
+            <ProjectCardLivePreview key={project.id} projectId={project.id} mainFile={mainFile} />
+          </Suspense>
         ) : null}
       </ProjectCardMedia>
       <CardHeader>
@@ -1473,7 +1581,7 @@ export function ProjectLibraryCard({
                 <LocationIcon className='size-3 shrink-0' />
                 <span className='truncate'>{slugPath}</span>
                 {project.cloud?.cloudState === 'deleting' ? (
-                  <span role='status'>Deleting from Tau Cloud…</span>
+                  <span role='status'>Deleting cloud copy…</span>
                 ) : project.onCloud === true ? (
                   <OnTauCloudMark />
                 ) : undefined}

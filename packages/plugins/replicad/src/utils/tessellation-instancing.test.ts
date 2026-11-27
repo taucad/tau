@@ -30,16 +30,14 @@ describe('transformReplicadGeometryInstance', () => {
         name: 'Translated',
         locationMatrix: [1, 0, 0, 10, 0, 1, 0, 20, 0, 0, 1, 30, 0, 0, 0, 1],
         determinant: 1,
-        faceIds: [100],
-        edgeIds: [200],
       },
     });
 
     expect(result.name).toBe('Translated');
     expect(result.faces.vertices).toEqual(new Float32Array([10, 20, 30, 11, 20, 30, 10, 21, 30]));
     expect(result.edges.lines).toEqual(new Float32Array([10, 20, 30, 11, 20, 30]));
-    expect(result.faces.faceGroups).toEqual([{ start: 0, count: 3, faceId: 100 }]);
-    expect(result.edges.edgeGroups).toEqual([{ start: 0, count: 2, edgeId: 200 }]);
+    expect(result.faces.faceGroups).toBe(prototypeGeometry.faces.faceGroups);
+    expect(result.edges.edgeGroups).toBe(prototypeGeometry.edges.edgeGroups);
     expect(prototypeGeometry.faces.vertices).toEqual(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]));
   });
 
@@ -73,33 +71,5 @@ describe('transformReplicadGeometryInstance', () => {
     });
 
     expect(result.faces.triangles).toEqual(new Uint32Array([0, 2, 1]));
-  });
-
-  it('should reject occurrence face IDs whose cardinality differs from the prototype groups', () => {
-    expect(() =>
-      transformReplicadGeometryInstance({
-        prototype: prototypeGeometry,
-        instance: {
-          name: 'Mismatched faces',
-          locationMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-          determinant: 1,
-          faceIds: [100, 101],
-        },
-      }),
-    ).toThrow('Replicad tessellation instancing face ID count mismatch: expected 1, received 2');
-  });
-
-  it('should reject occurrence edge IDs whose cardinality differs from the prototype groups', () => {
-    expect(() =>
-      transformReplicadGeometryInstance({
-        prototype: prototypeGeometry,
-        instance: {
-          name: 'Mismatched edges',
-          locationMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-          determinant: 1,
-          edgeIds: [],
-        },
-      }),
-    ).toThrow('Replicad tessellation instancing edge ID count mismatch: expected 1, received 0');
   });
 });

@@ -385,7 +385,7 @@
     "drift": "round 21, finding 3: the appender puts every row it appends at the merged fold's tail, so a row under an older term follows a later term until the next refold (T14: t14_incremental_is_merge)",
     "file": "src/log/event-log-appender.ts",
     "test": "src/log/history-invariant.test.ts",
-    "find": "        const atTail = merged === undefined || extendsMergedTail(transition.event);",
+    "find": "    const atTail = merged === undefined || extendsMergedTail(transition.event);",
     "replace": "        const atTail = true;"
   },
   {
@@ -533,7 +533,15 @@
     "drift": "round 28: every refresh starts a segment read of its own while an earlier read is still in flight, so on a hung network mount a few resends hold every thread the process's file reads share and stall all file access in the host",
     "file": "src/log/event-log-appender.ts",
     "test": "src/log/event-log-appender.segments.test.ts",
-    "find": "      if (!reading || inFlight === undefined) {\n",
+    "find": "      if (outstanding.size === 0) {\n",
     "replace": "      if (queued === undefined) {\n"
+  },
+  {
+    "id": "queued-segment-read-waits-for-good",
+    "drift": "tau #1098 item 2: a refresh queued behind a segment read begins only once that read ends, so an open whose first read hangs for good refuses every start, Resume and approval SEGMENTS_UNREADABLE until the chat is reopened",
+    "file": "src/log/event-log-appender.ts",
+    "test": "src/log/event-log-appender.segments.test.ts",
+    "find": "    const overdue = outstanding.size < outstandingReadLimit && newest !== undefined ? [newest.overdue] : [];\n",
+    "replace": "    const overdue: Array<Promise<void>> = [];\n"
   }
 ]

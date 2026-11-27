@@ -1,20 +1,28 @@
-import { lazy, memo, Suspense, useSyncExternalStore } from 'react';
+import { memo, Suspense, useSyncExternalStore } from 'react';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { PartThumbnailProvider } from '#providers/part-thumbnail-provider.js';
 import { PartGalleryProvider } from '#components/geometry/cad/part-gallery.js';
-import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
+import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { TourHost } from '#components/tour/tour-host.js';
+import {
+  loadChatInterfaceDesktop,
+  loadChatInterfaceMobile,
+} from '#routes/w.$workspace.$project/chat-interface-layouts.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
+import { useProjectRole } from '#hooks/use-revision-status.js';
+import { useMarkReplayForeignContent } from '#lib/replay-content.lib.js';
 
 /* B-27, D-UI-16: each layout is its own chunk, so a phone never loads the
  * desktop shell (the dockview workbench and its panels) and a desktop never
- * loads the mobile drawer. */
-const ChatInterfaceMobile = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-interface-mobile.js');
+ * loads the mobile drawer. The open warms the viewport's one beforehand
+ * (`warmWorkspaceLayout`), through these same imports. */
+const ChatInterfaceMobile = lazyCode(async () => {
+  const module = await loadChatInterfaceMobile();
   return { default: module.ChatInterfaceMobile };
 });
 
-const ChatInterfaceDesktop = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/chat-interface-desktop.js');
+const ChatInterfaceDesktop = lazyCode(async () => {
+  const module = await loadChatInterfaceDesktop();
   return { default: module.ChatInterfaceDesktop };
 });
 
@@ -30,12 +38,15 @@ const subscribeToNothing = (): (() => void) => {
  * `false` while server rendering and hydrating, because no viewport is
  * measured there, so choosing a layout in that pass would mount (and fetch)
  * the desktop workbench on a phone and then swap. Until the client has
- * rendered once this shows the skeleton, whose arrangement is CSS; a client
- * mount — every mount below the app's file-manager gate — picks the layout
- * from its first render.
+ * rendered once this draws nothing, and the workspace frame above it, whose
+ * arrangement is CSS, shows through; a client mount — every mount below the
+ * app's file-manager gate — picks the layout from its first render.
  */
 export const ChatInterface = memo(function (): React.JSX.Element {
   const isMobile = useIsMobile();
+  const role = useProjectRole();
+  /* A collaborator's own switch does not reach the owner's chats and code: replay blocks them here. */
+  useMarkReplayForeignContent(role === 'read' || role === 'write');
   const isClientRender = useSyncExternalStore(
     subscribeToNothing,
     () => true,
@@ -49,7 +60,7 @@ export const ChatInterface = memo(function (): React.JSX.Element {
       <PartGalleryProvider>
         {/* The product tour's anchors and live region; the tour itself is a chunk loaded only when it runs. */}
         <TourHost>
-          <Suspense fallback={<WorkspaceSkeleton />}>{isClientRender ? layout : <WorkspaceSkeleton />}</Suspense>
+          <Suspense fallback={<WorkspaceOpening />}>{isClientRender ? layout : <WorkspaceOpening />}</Suspense>
         </TourHost>
       </PartGalleryProvider>
     </PartThumbnailProvider>

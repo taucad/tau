@@ -31,7 +31,7 @@ import { enumParameter, stringParameter } from '@taucad/ui-core/utils/search-par
 import { isFunction } from '@taucad/ui-core/utils/function.utils';
 import type { Handle } from '#types/matches.types.js';
 
-export const handle: Handle = { title: 'Parts', enableOverflowY: true };
+export const handle: Handle = { title: 'Parts' };
 export const meta: MetaFunction = () => [
   { title: 'Parts · Tau' },
   { name: 'description', content: 'Browse, preview and remix reusable parametric CAD parts.' },

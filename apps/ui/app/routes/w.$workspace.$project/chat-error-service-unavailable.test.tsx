@@ -38,19 +38,18 @@ describe('ChatErrorServiceUnavailable', () => {
 
     vi.mocked(useChatSelector).mockImplementation((selector) =>
       selector({
-        error: new TypeError('network error'),
-        persistedError: undefined,
+        persistedError: parseErrorForPersistence(new TypeError('network error')),
       } as unknown as CombinedChatState),
     );
     render(<ChatErrorBanner />);
-    expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
+    expect(screen.getByText('Couldn’t reach Tau')).toBeInTheDocument();
   });
 
   it('should resume the paused turn and say that it is saved', async () => {
     const user = userEvent.setup();
     render(<ChatErrorServiceUnavailable resumable />);
 
-    expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
+    expect(screen.getByText('Couldn’t reach Tau')).toBeInTheDocument();
     expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
 
@@ -66,7 +65,7 @@ describe('ChatErrorServiceUnavailable', () => {
     const user = userEvent.setup();
     render(<ChatErrorServiceUnavailable resumable={false} />);
 
-    expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
+    expect(screen.getByText('Couldn’t reach Tau')).toBeInTheDocument();
     expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /resume/iu })).not.toBeInTheDocument();
 

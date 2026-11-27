@@ -15,6 +15,7 @@ import {
   LlmGatewayError,
   maximumModelRequestBytes,
   modelRoutePausedError,
+  modelRouteRatesExpiredError,
   readUpstreamRefusal,
   recognizeProviderAccountRefusal,
   textMarker,
@@ -27,7 +28,9 @@ import {
   assertMatchingRequestDigest,
   classifyFundedLlmCapacity,
   CreditLedgerService,
+  isBillingAdmissionInvalid,
   recordSettledGenAiUsage,
+  StaleCreditOperationGenerationError,
 } from '#credit-ledger.service.js';
 import type {
   GatewayProviderId,
@@ -195,6 +198,14 @@ export class BillableModelInvocationService {
       if (isBillingAccountClosed(error)) {
         throw isBillingAccountRestricted(error) ? billingAccountRestrictedError() : billingAccountClosedError();
       }
+      if (isBillingAdmissionInvalid(error)) {
+        // A request field billing cannot record is the request's fault, answered before any dispatch.
+        throw new LlmGatewayError(
+          HttpStatus.BAD_REQUEST,
+          'INVALID_REQUEST',
+          'The request carries a field Tau billing cannot record.',
+        );
+      }
       throw error;
     }
   }
@@ -202,9 +213,11 @@ export class BillableModelInvocationService {
   private async invokeBound(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {
     const startedAt = performance.now();
     const inlineImageBytes = assertRequestBound(suppliedIntent.body);
+    /* Chat performance WP-14 step 6: the body is the caller's freshly parsed request (the gateway's Fastify body,
+     * the chat helper's `JSON.parse`), handed over and never read again by it, so it is used in place. The deep
+     * copy it used to get was a second graph of a body that can reach 32 MB. */
     const intent = {
       ...suppliedIntent,
-      body: structuredClone(suppliedIntent.body),
       priceHeaders: { ...suppliedIntent.priceHeaders },
     };
     const existing = await this.operation(intent);
@@ -382,11 +395,12 @@ export class BillableModelInvocationService {
     };
     // A caller that already left must not place a hold that only the recovery sweep releases.
     intent.signal.throwIfAborted();
-    let admission = await this.ledger.admitOperation(admissionInput);
+    // WP-14 (`AtomicAdmit`): the hold, the row and the dispatch intent commit together.
+    let admission = await this.ledger.admitOperation(admissionInput, { recordIntent: true });
     if (admission.status === 'denied' && admission.reason === 'concurrency_unavailable' && !recoveryAttempted) {
       await this.recoverCapacity(intent);
       intent.signal.throwIfAborted();
-      admission = await this.ledger.admitOperation(admissionInput);
+      admission = await this.ledger.admitOperation(admissionInput, { recordIntent: true });
     }
     if (admission.status === 'denied') {
       throw classified(this.denial(admission, intent, qualification.routeId), admission.reason);
@@ -399,7 +413,8 @@ export class BillableModelInvocationService {
         operationId: admission.operationId,
       };
     }
-    const row = await this.operation(intent);
+    const { dispatch: recorded } = admission;
+    const row = recorded?.operation ?? (await this.operation(intent));
     if (!row || row.id !== admission.operationId || row.requestDigest !== requestDigest) {
       throw new Error('Admitted model invocation identity is unavailable');
     }
@@ -412,10 +427,22 @@ export class BillableModelInvocationService {
           requestDigest,
         });
       }
+      if (recorded !== undefined) {
+        /* `ApiAbortCheck`: the intent is already recorded, so the step ends here at zero instead of waiting for the
+           sweep's grace. Nothing was sent to the supplier. */
+        await this.finishUnanswered(
+          qualification,
+          row,
+          admission.generation,
+          qualification.adapter
+            .createEvidenceCollector(qualification)
+            .failed(intent.signal.aborted ? 'client_abort' : 'deadline'),
+        );
+      }
       this.recordAdmission(intent, qualification, startedAt, 'cancelled');
-      return { state: 'pending', operationId: row.id };
+      return { state: recorded === undefined ? 'pending' : 'terminal', operationId: row.id };
     }
-    if (!(await this.ledger.markDispatchIntent(row.id, admission.generation))) {
+    if (recorded === undefined && !(await this.ledger.markDispatchIntent(row.id, admission.generation))) {
       this.recordAdmission(intent, qualification, startedAt, 'held');
       return { state: 'pending', operationId: row.id };
     }
@@ -431,6 +458,8 @@ export class BillableModelInvocationService {
     startedAt: number,
     countSignal?: AbortSignal,
   ): Promise<BillableInvocationResult> {
+    /* `ApiDispatch` fences on the row as the database sees it at send time, not as the admission saw it: a process
+       paused between the commit and this line may find the operation recovered, cancelled or past due. */
     const remaining = await this.ledger.getDispatchTimeRemaining(row.id, generation);
     if (remaining <= 0) {
       this.recordAdmission(intent, qualification, startedAt, 'held');
@@ -465,12 +494,11 @@ export class BillableModelInvocationService {
     } catch (error) {
       this.logger.warn({ err: error, operationId: row.id }, 'The model provider request failed before any response');
       intent.signal.removeEventListener('abort', recordCancellation);
-      await this.finish(
+      await this.finishUnanswered(
         qualification,
         row,
         generation,
         collector.failed(signal.aborted ? (intent.signal.aborted ? 'client_abort' : 'deadline') : 'malformed_response'),
-        intent.signal.aborted,
       );
       throw classified(
         new LlmGatewayError(
@@ -548,7 +576,9 @@ export class BillableModelInvocationService {
     }
     // The supplier answered: the operation is in flight, not abandoned. Losing this
     // transition to recovery never abandons a response that is already being charged.
-    await this.ledger.markDispatchAccepted(row.id, generation);
+    // WP-14 (`LateAccept`): the first bytes are relayed without waiting for it, and a finish that commits first
+    // leaves it a no-op (its update requires a pending, intent-recorded row).
+    this.markAccepted(row.id, generation);
     const observed = this.observedBody(
       response.body,
       collector,
@@ -615,7 +645,7 @@ export class BillableModelInvocationService {
       resolveCompletion = resolve;
       rejectCompletion = reject;
     });
-    const finish = async (evidence: TerminalEvidence, clientLeft = false): Promise<void> => {
+    const finish = async (evidence: TerminalEvidence): Promise<void> => {
       if (done) {
         return;
       }
@@ -627,7 +657,7 @@ export class BillableModelInvocationService {
         evidence.kind === 'final_usage' ? '' : streamErrorType(evidence.normalizationEvidence?.terminalReason),
       );
       try {
-        await this.finish(qualification, row, generation, evidence, clientLeft);
+        await this.finish(qualification, row, generation, evidence);
         resolveCompletion();
       } catch (error) {
         rejectCompletion(error);
@@ -718,7 +748,6 @@ export class BillableModelInvocationService {
         controller.error(error);
         await finish(
           collector.failed(intent.signal.aborted ? 'client_abort' : signal.aborted ? 'deadline' : 'malformed_response'),
-          intent.signal.aborted,
         );
       }
     };
@@ -738,10 +767,49 @@ export class BillableModelInvocationService {
             requestDigest: row.requestDigest,
           });
         }
-        await finish(collector.failed('client_abort'), true);
+        await finish(collector.failed('client_abort'));
       },
     });
     return { body, completion };
+  }
+
+  /**
+   * Settles a step whose supplier request got no response. The caller answers its refusal either way: a step that
+   * cannot be settled here (the sweep claimed it at its deadline, so this generation is stale, or the ledger did
+   * not answer) stays pending and is recovery's, as it was before this path settled anything.
+   */
+  /**
+   * Records the supplier's acceptance off the response path, held open against a stop.
+   *
+   * @param operationId - The operation.
+   * @param generation - The generation that dispatched it.
+   */
+  private markAccepted(operationId: string, generation: bigint): void {
+    const work = (async (): Promise<void> => {
+      try {
+        await this.ledger.markDispatchAccepted(operationId, generation);
+      } catch (error) {
+        this.logger.warn({ err: error, operationId }, 'Failed to record the supplier acceptance; recovery reads it');
+      }
+    })();
+    this.shutdown?.track(work);
+  }
+
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one immutable invocation checkpoint
+  private async finishUnanswered(
+    qualification: QualifiedBillableInvocation,
+    row: InvocationRow,
+    generation: bigint,
+    observed: TerminalEvidence,
+  ): Promise<void> {
+    try {
+      await this.finish(qualification, row, generation, observed);
+    } catch (error) {
+      this.logger.error(
+        { err: error, operationId: row.id },
+        'Failed to settle a step whose provider request failed; recovery resolves it',
+      );
+    }
   }
 
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one immutable invocation checkpoint
@@ -750,18 +818,21 @@ export class BillableModelInvocationService {
     row: InvocationRow,
     generation: bigint,
     observed: TerminalEvidence,
-    clientLeft = false,
   ): Promise<void> {
-    /* A stream the process cut because it is stopping (a deploy) is settled here, at
-     * zero, rather than left pending for recovery: the supplier stream is severed, so
-     * nothing further can ever price it, and recovery would reach the same absorbed
-     * outcome only after `due_at` plus its grace, while an automatic retry of the step
-     * waits on it. A person who leaves during the stop is counted the same way. */
+    /* Every end this method is handed is final for the supplier stream: it completed, it failed, it
+     * was cut (by the client, a stop, the deadline or the authorized ceiling), or the request never
+     * got a response. Nothing can observe that stream again, so nothing further can ever price the
+     * step, and it is terminalized here whatever its kind. An end with no complete usage was once
+     * left pending "so late evidence can arrive": none can, recovery only re-reads the evidence
+     * stored below and reaches the same absorbed receipt, but not before `due_at` plus its grace,
+     * and the host's retry of a lost reply, a Resume and the chat's next message all ask about
+     * this attempt before they start. A supplier that dropped a reply 30 s into a request left the
+     * run drawn as working for the rest of ten minutes (launch audit D-2; `SupplierCutSettled` in
+     * GatewayInvocation.tla). Only a process that dies before reaching here leaves a row to recovery.
+     *
+     * A stream the process cut because it is stopping (a deploy) keeps its own label, and a person
+     * who leaves during the stop is counted the same way. */
     const cutByStop = observed.kind === 'absorbed_unknown' && this.shutdown?.signal.aborted === true;
-    /* A person who stopped the turn severed it the same way, and the chat's next step
-     * asks about this attempt before it starts: holding it until recovery paused that
-     * step for up to `due_at`. Its evidence keeps the client's own reason. */
-    const cutByClient = observed.kind === 'absorbed_unknown' && clientLeft;
     const evidence: TerminalEvidence = cutByStop
       ? {
           ...observed,
@@ -792,17 +863,27 @@ export class BillableModelInvocationService {
             ? 'none'
             : 'other',
     });
-    if (evidence.kind === 'absorbed_unknown' && !cutByStop && !cutByClient) {
+    let receipt: Awaited<ReturnType<CreditLedgerService['terminalizeOperation']>>;
+    try {
+      receipt = await this.ledger.terminalizeOperation({
+        operationId: row.id,
+        accountId: row.accountId,
+        requestDigest: row.requestDigest,
+        expectedGeneration: generation,
+        evidence,
+        resolvedAt: new Date(),
+      });
+    } catch (error) {
+      /* A step cut at its deadline races the recovery sweep, which claims the row at the same due time. A sweep that
+       * won settles it from the evidence recorded above, to the receipt this call would have written: an expected
+       * outcome, not a failed settlement. */
+      if (!(error instanceof StaleCreditOperationGenerationError)) {
+        throw error;
+      }
+      this.turnSteps.delete(row);
+      this.logger.log({ operationId: row.id }, 'Recovery settled the step before its live finish');
       return;
     }
-    const receipt = await this.ledger.terminalizeOperation({
-      operationId: row.id,
-      accountId: row.accountId,
-      requestDigest: row.requestDigest,
-      expectedGeneration: generation,
-      evidence,
-      resolvedAt: new Date(),
-    });
     recordSettledGenAiUsage(
       this.metrics,
       { ...genAiAttributes(qualification), 'tau.activity': row.activity },
@@ -1106,6 +1187,15 @@ export class BillableModelInvocationService {
       });
       return modelRoutePausedError(routeId);
     }
+    if (reason === 'route_rates_expired') {
+      const { pool } = classifyFundedLlmCapacity(intent.activity);
+      this.metrics?.billingFundedOperationDenials.add(1, {
+        'deployment.environment': intent.environment,
+        'tau.billing.capacity_pool': pool,
+        'tau.billing.denial.reason': 'route_rates_expired',
+      });
+      return modelRouteRatesExpiredError(routeId);
+    }
     if (reason === 'account_restricted') {
       return billingAccountRestrictedError();
     }
@@ -1123,10 +1213,14 @@ export class BillableModelInvocationService {
         helper ? 'Too many funded helper operations are active.' : 'Too many funded model operations are active.',
       );
     }
+    /* A person reads this sentence on the card, so it says what they can do. The reason is the ledger's word for
+     * operators: it travels in the details, which the client keeps for its debug view, and as the request's
+     * `error.type`. */
     return new LlmGatewayError(
       HttpStatus.SERVICE_UNAVAILABLE,
       'PROVIDER_UNAVAILABLE',
-      `Model admission failed: ${reason}.`,
+      'Tau cannot start requests to this model right now. Try again shortly, or switch to another model.',
+      { admissionDenial: reason },
     );
   }
 }

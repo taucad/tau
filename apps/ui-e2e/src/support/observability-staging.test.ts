@@ -5,8 +5,10 @@ import { describe, expect, it, vi } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
-  observabilityUrl,
+  diagnoseMissingDesktopSignals,
+  isEventEnvelope,
   observabilityRequestKind,
+  observabilityUrl,
   observeHarnessPage,
   pollSentryEventIds,
 } from './observability-staging.ts';
@@ -32,7 +34,14 @@ describe('staging observability correlation', () => {
       .mockResolvedValueOnce(new Response('{}', { status: 429 }))
       .mockResolvedValueOnce(Response.json({ data: [] }))
       .mockResolvedValueOnce(Response.json({ data: [{ id: 'a' }, { id: 'a' }, { id: 'b' }] }));
-    expect(await pollSentryEventIds({ token: 'test', runId, pollInterval: 1, fetchEvents })).toEqual(['a', 'b']);
+    expect(
+      await pollSentryEventIds({
+        token: 'test',
+        runId,
+        pollInterval: 1,
+        fetchEvents,
+      }),
+    ).toEqual(['a', 'b']);
     const request = fetchEvents.mock.calls[0]?.[0];
     if (!(request instanceof URL)) {
       throw new TypeError('Expected a URL query');
@@ -60,7 +69,13 @@ describe('staging observability correlation', () => {
   it('should bound empty indexing results', async () => {
     const fetchEvents = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ data: [] }));
     await expect(
-      pollSentryEventIds({ token: 'test', runId, fetchEvents, pollTimeout: 10, pollInterval: 2 }),
+      pollSentryEventIds({
+        token: 'test',
+        runId,
+        fetchEvents,
+        pollTimeout: 10,
+        pollInterval: 2,
+      }),
     ).rejects.toThrow(new Error('Sentry event query exceeded its bounded observation window'));
   });
 
@@ -108,11 +123,141 @@ it('should retain only bounded envelope ids and counts when a failed page closes
     events.emit('close');
     expect(output).toHaveBeenLastCalledWith('Harness observation finished', {
       runId,
-      counts: { 'monitoring:requests': 1, 'monitoring:failed': 1, pageErrors: 1, 'monitoring:status:503': 1 },
+      counts: {
+        'monitoring:requests': 1,
+        'monitoring:failed': 1,
+        pageErrors: 1,
+        'monitoring:status:503': 1,
+      },
       eventIds: [eventId],
     });
     expect(JSON.stringify(output.mock.calls)).not.toContain('private');
   } finally {
     output.mockRestore();
   }
+});
+
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry envelope header fields are wire names. */
+describe('isEventEnvelope', () => {
+  const header = JSON.stringify({
+    event_id: 'a'.repeat(32),
+    dsn: 'https://key@o1.ingest.us.sentry.io/2',
+  });
+
+  it('should match an envelope that carries an error event, whatever else it carries', () => {
+    expect(isEventEnvelope([header, '{"type":"event"}', '{"message":"x"}'].join('\n'))).toBe(true);
+    expect(
+      isEventEnvelope([header, '{"type":"attachment","length":2}', 'hi', '{"type":"event"}', '{}'].join('\n')),
+    ).toBe(true);
+  });
+
+  it('should not match a session update, a transaction, or a body that is not an envelope', () => {
+    expect(isEventEnvelope([JSON.stringify({ sent_at: 'now' }), '{"type":"session"}', '{"sid":"s"}'].join('\n'))).toBe(
+      false,
+    );
+    expect(isEventEnvelope([header, '{"type":"transaction"}', '{"type":"event"}'].join('\n'))).toBe(false);
+    expect(isEventEnvelope(undefined)).toBe(false);
+    expect(isEventEnvelope('not json')).toBe(false);
+  });
+});
+/* eslint-enable @typescript-eslint/naming-convention -- Sentry envelope header fields are wire names. */
+
+describe('diagnoseMissingDesktopSignals', () => {
+  const window = {
+    token: 'test',
+    release: 'tau-desktop@0.5.0-staging.1',
+    since: '2026-11-18T23:37:40Z',
+    until: '2026-11-18T23:44:10.000Z',
+  };
+
+  const requestUrl = (input: Parameters<typeof fetch>[0]): URL =>
+    input instanceof URL ? input : new URL(typeof input === 'string' ? input : input.url);
+
+  const answer = (url: URL): Response => {
+    const path = url.pathname;
+    if (path.endsWith('/events/')) {
+      return url.searchParams.get('project') === '-1'
+        ? Response.json({
+            data: [
+              {
+                environment: 'production',
+                'count()': 1,
+                message: 'private message',
+              },
+            ],
+          })
+        : Response.json({
+            data: [
+              { environment: 'staging', 'count()': 2 },
+              { environment: 'staging-e2e', 'count()': 1 },
+            ],
+          });
+    }
+    if (path.endsWith('/releases/')) {
+      return Response.json([{ version: 'tau-desktop@0.5.0-staging.10' }, { version: window.release }]);
+    }
+    if (path.endsWith('/sessions/')) {
+      return Response.json({
+        groups: [
+          {
+            by: { 'session.status': 'healthy' },
+            totals: { 'sum(session)': 3 },
+          },
+        ],
+      });
+    }
+    return Response.json({
+      groups: [
+        {
+          by: { outcome: 'accepted', reason: null },
+          totals: { 'sum(quantity)': 4 },
+        },
+        {
+          by: { outcome: 'filtered', reason: 'release-version' },
+          totals: { 'sum(quantity)': 2 },
+        },
+      ],
+    });
+  };
+
+  it('should report counts and Sentry names for each cause, and nothing from an event', async () => {
+    const fetchSentry = vi.fn<typeof fetch>().mockImplementation(async (input) => answer(requestUrl(input)));
+    const diagnostics = await diagnoseMissingDesktopSignals(['desktop-boot-unhealthy'], window, fetchSentry);
+    expect(diagnostics).toEqual({
+      signalByEnvironment: { 'desktop-boot-unhealthy': { production: 1 } },
+      releaseEventsByEnvironment: { staging: 2, 'staging-e2e': 1 },
+      releaseListed: { listed: true },
+      releaseSessions: { healthy: 3 },
+      errorOutcomes: { accepted: 4, 'filtered:release-version': 2 },
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain('private');
+    const urls = fetchSentry.mock.calls.map(([input]) => requestUrl(input));
+    const signalQuery = urls.find((url) => url.searchParams.get('project') === '-1');
+    expect(signalQuery?.searchParams.get('query')).toBe(
+      'project:tau-desktop tau_event:desktop-boot-unhealthy release:"tau-desktop@0.5.0-staging.1"',
+    );
+    expect(signalQuery?.searchParams.getAll('environment')).toEqual([]);
+    const stats = urls.find((url) => url.pathname.endsWith('/stats_v2/'));
+    expect(stats?.searchParams.get('start')).toBe('2026-11-18T23:00:00.000Z');
+    expect(stats?.searchParams.get('end')).toBe('2026-11-19T00:00:00.000Z');
+    expect(stats?.searchParams.getAll('groupBy')).toEqual(['outcome', 'reason']);
+  });
+
+  it('should report a refused or failed read by status and still run the others', async () => {
+    const fetchSentry = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = requestUrl(input);
+      if (url.pathname.endsWith('/stats_v2/')) {
+        return new Response('private sentinel', { status: 403 });
+      }
+      if (url.pathname.endsWith('/sessions/')) {
+        throw new Error('private failure');
+      }
+      return answer(url);
+    });
+    const diagnostics = await diagnoseMissingDesktopSignals(['file_service.start_failed'], window, fetchSentry);
+    expect(diagnostics.errorOutcomes).toEqual({ unreadable: 'HTTP 403' });
+    expect(diagnostics.releaseSessions).toEqual({ unreadable: 'no response' });
+    expect(diagnostics.releaseListed).toEqual({ listed: true });
+    expect(JSON.stringify(diagnostics)).not.toContain('private');
+  });
 });

@@ -203,7 +203,11 @@ describe('large workspace connection', () => {
     await target.navigate('/files?settings=filesystem');
     await target.expectVisible(selectors.getByRole('button', { name: 'Reconnect', exact: true }));
     await target.click(selectors.getByRole('button', { name: 'Reconnect', exact: true }));
-    await target.expectVisible(selectors.getByText(`Updated workspace folder to "${workspaceName}"`));
+    /* Reconnect relinks this workspace (D2, U2): its marker names it, so it relinks with no question and the row is
+     * connected again, offering Change folder in place of Reconnect. */
+    await target.expectVisible(selectors.getByText(`Relinked "${workspaceName}"`, { exact: false }), 10_000);
+    await target.expectVisible(selectors.getByRole('button', { name: 'Change folder', exact: true }));
+    await target.expectCount(selectors.getByRole('button', { name: 'Reconnect', exact: true }), 0);
 
     expect(await readProjectStorageState()).toEqual(before);
     expect(await readOpfsWorkspaceMarker(workspaceName)).toEqual(markerBefore);
@@ -227,10 +231,14 @@ describe('large workspace connection', () => {
     await target.openSecondary('/projects');
     await target.expectVisible(selectors.getByText('Connection Fixture 0', { exact: true }), 20_000, 'secondary');
     await target.navigate(`/w/${slug}/project-0`, 'secondary');
-    const unavailable = selectors.getByText("The project you're looking for doesn't exist or may have been deleted.");
+    /* A disconnected workspace keeps its projects: the route says their storage is unavailable and asks to reconnect
+     * it, never that the project does not exist (W30, #2288). */
+    const unavailable = selectors.getByText('Storage unavailable', { exact: true });
+    const missing = selectors.getByText('Project not found', { exact: true });
     await target.expectHidden(unavailable, 60_000, 'secondary');
     await target.click(selectors.getByRole('button', { name: 'Disconnect workspace' }));
     await target.expectVisible(unavailable, 20_000, 'secondary');
+    await target.expectCount(missing, 0, undefined, 'secondary');
     await target.click(selectors.getByRole('button', { name: 'Add Workspace' }));
     await target.expectVisible(selectors.getByText('1 project ready'), 10_000);
     await target.expectHidden(unavailable, 20_000, 'secondary');
@@ -261,6 +269,34 @@ describe('large workspace connection', () => {
     expect(copyMarker?.['workspaceId']).not.toEqual(originalMarker?.['workspaceId']);
   });
 
+  test('relinks the same workspace with its projects when Change folder picks a copy at another place (T-R4.7)', async () => {
+    const originalName = 'workspace-connection-before-move';
+    const movedName = 'workspace-connection-after-move';
+    await installWorkspacePicker(originalName);
+    await target.navigate('/');
+    await seedWorkspace(originalName, 2);
+    await target.navigate('/files');
+    await target.click(selectors.getByRole('button', { name: 'Add Workspace' }));
+    await target.expectVisible(selectors.getByText('2 projects ready'), 10_000);
+    const before = await readProjectStorageState();
+    const originalMarker = await readOpfsWorkspaceMarker(originalName);
+    await copyOpfsDirectory(originalName, movedName);
+
+    /* Change folder is a workspace row's command, in the folder settings (D2). The settings open in a new page, so the
+     * picker installed for it answers the copy. */
+    await installWorkspacePicker(movedName);
+    await target.navigate('/files?settings=filesystem');
+    await target.click(selectors.getByRole('button', { name: 'Change folder', exact: true }));
+    await target.expectVisible(selectors.getByText(/Relinked/u), 10_000);
+    const after = await readProjectStorageState();
+
+    expect(after.workspaces).toHaveLength(1);
+    expect(after.workspaces[0]?.workspaceId).toBe(before.workspaces[0]?.workspaceId);
+    expect(after.configs).toEqual(before.configs);
+    const movedMarker = await readOpfsWorkspaceMarker(movedName);
+    expect(movedMarker?.['workspaceId']).toBe(originalMarker?.['workspaceId']);
+  });
+
   test('leaves durable state untouched when generic and exact reconnect pickers are cancelled', async () => {
     const workspaceName = 'workspace-connection-cancel';
     await target.addInitScript(() => {
@@ -276,7 +312,7 @@ describe('large workspace connection', () => {
     await target.click(selectors.getByRole('button', { name: 'Add Workspace' }));
     expect(await readProjectStorageState()).toEqual(empty);
     expect(await readOpfsWorkspaceMarker(workspaceName)).toBeUndefined();
-    await target.expectCount(selectors.getByText('Failed to connect workspace.'), 0);
+    await target.expectCount(selectors.getByText('Couldn’t connect the folder. Try again.'), 0);
 
     await target.evaluate(async (name) => {
       Object.defineProperty(globalThis, 'showDirectoryPicker', {

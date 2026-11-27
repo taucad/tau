@@ -4,10 +4,21 @@ import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { usePlatform } from '@taucad/ui/hooks/use-platform';
-import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
 import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
+
+/**
+ * The key combination that cancels the stream. Kept here rather than with the composer logic so the served Send button
+ * (the project route's workspace frame) does not pull the composer providers into its bundle.
+ */
+export const cancelChatStreamKeyCombination = {
+  key: 'Backspace',
+  modKey: true,
+  shiftKey: true,
+  requireAllModifiers: true,
+} satisfies KeyCombination;
 
 /** Monochrome action treatment shared by the composer and question replies. */
 export const chatComposerActionButtonClassName =
@@ -51,6 +62,11 @@ const ChatStreamingStopButton = memo(function ({
 
 type ChatTextareaSubmitButtonProperties = {
   readonly status: string;
+  /**
+   * A run that cannot stream still holds the chat: paused on an approval, or stopping until its host settles it. Stop
+   * is offered then too, so a run paused on an approval can always be stopped.
+   */
+  readonly canStop?: boolean;
   readonly canResume?: boolean;
   readonly isSubmitting: boolean;
   /** Dictation is under way: a running turn offers Send (queue the dictated follow-up) beside the dictation's own stop. */
@@ -73,6 +89,7 @@ type ChatTextareaSubmitButtonProperties = {
  */
 export const ChatTextareaSubmitButton = memo(function ({
   status,
+  canStop = false,
   canResume = false,
   isSubmitting,
   isDictating = false,
@@ -82,7 +99,7 @@ export const ChatTextareaSubmitButton = memo(function ({
   onSubmit,
   onCancel,
 }: ChatTextareaSubmitButtonProperties): React.JSX.Element {
-  if (!isDictating && ['streaming', 'submitted'].includes(status)) {
+  if (!isDictating && (canStop || ['streaming', 'submitted'].includes(status))) {
     return (
       <ChatStreamingStopButton formattedCancelKeyCombination={formattedCancelKeyCombination} onCancel={onCancel} />
     );
@@ -108,6 +125,7 @@ export const ChatTextareaSubmitButton = memo(function ({
           className={cn(
             chatComposerActionButtonClassName,
             'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
+            '[[data-queued-send]_&]:opacity-100 [[data-early-text]_&]:opacity-100',
           )}
           // Only when set: an explicit `undefined` would replace the tooltip's own description.
           {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}
@@ -117,7 +135,16 @@ export const ChatTextareaSubmitButton = memo(function ({
             }
           }}
         >
-          {isSubmitting ? <Loader className='size-4' /> : icon}
+          {isSubmitting ? (
+            <Loader className='size-4' />
+          ) : (
+            /* Before the rich composer is here, an Enter in the served input queues the send and marks the box
+             * (`data-queued-send`, set by the early input's script): the button shows its pending state at once. */
+            <>
+              <span className='contents [[data-queued-send]_&]:hidden'>{icon}</span>
+              <Loader className='hidden size-4 [[data-queued-send]_&]:block' />
+            </>
+          )}
           {canResume ? label : undefined}
         </Button>
       </TooltipTrigger>
@@ -131,3 +158,34 @@ export const ChatTextareaSubmitButton = memo(function ({
     </Tooltip>
   );
 });
+
+/**
+ * Send at rest, as the served composer draws it before the rich composer is here: the same button face as
+ * {@link ChatTextareaSubmitButton}'s Send, with no tooltip (nothing can act on it yet, and the served page has no
+ * tooltip provider). Its pending state shows while an Enter typed into the served input queues the send.
+ *
+ * @param props - Whether the input holds nothing to send.
+ * @returns The button.
+ */
+export function ServedSendButton({ isEmpty }: { readonly isEmpty: boolean }): React.JSX.Element {
+  return (
+    <Button
+      type='button'
+      variant='ghost'
+      size='icon-sm'
+      aria-label='Send'
+      aria-keyshortcuts='Enter'
+      aria-disabled={isEmpty}
+      className={cn(
+        chatComposerActionButtonClassName,
+        'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
+        '[[data-queued-send]_&]:opacity-100 [[data-early-text]_&]:opacity-100',
+      )}
+    >
+      <span className='contents [[data-queued-send]_&]:hidden'>
+        <ArrowUp aria-hidden='true' className='size-5' />
+      </span>
+      <Loader className='hidden size-4 [[data-queued-send]_&]:block' />
+    </Button>
+  );
+}

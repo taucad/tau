@@ -1,3 +1,5 @@
+import { useDeploymentMode, useRetryDeploymentMode } from '#cloud/use-deployment-mode.js';
+import { PageNotFound } from '#components/page-not-found.js';
 import { useMemo, useState } from 'react';
 import type { MetaFunction } from 'react-router';
 import { PageHeader } from '#components/layout/page-header.js';
@@ -19,17 +21,26 @@ import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useUsageSnapshot } from '@taucad/billing/hooks/use-usage-snapshot';
 import type { UsageSnapshotResult } from '@taucad/billing/hooks/use-usage-snapshot';
 import type { WireUsageSnapshot } from '@taucad/billing';
-import { UsageBarChart } from '#routes/usage/charts/usage-bar-chart.js';
-import { UsageLineChart } from '#routes/usage/charts/usage-line-chart.js';
-import { UsagePieChart } from '#routes/usage/charts/usage-pie-chart.js';
-import { ReservedTable } from '#routes/usage/reserved-table.js';
-import { UsageSummaryCards } from '#routes/usage/usage-summary-cards.js';
-import { UsageTable } from '#routes/usage/usage-table.js';
-import { usageActivityKinds, usageFilterOptions, useUsageFilters } from '#routes/usage/use-usage-filters.js';
+import { UsageBarChart } from '@taucad/billing-ui/components/usage/charts/usage-bar-chart';
+import { UsageLineChart } from '@taucad/billing-ui/components/usage/charts/usage-line-chart';
+import { UsagePieChart } from '@taucad/billing-ui/components/usage/charts/usage-pie-chart';
+import { ReservedTable } from '@taucad/billing-ui/components/usage/reserved-table';
+import { UsageSummaryCards } from '@taucad/billing-ui/components/usage/usage-summary-cards';
+import { UsageTable } from '@taucad/billing-ui/components/usage/usage-table';
+import {
+  usageActivityKinds,
+  usageFilterOptions,
+  useUsageFilters,
+} from '@taucad/billing-ui/components/usage/use-usage-filters';
 import { useCloudProjects } from '#hooks/use-cloud-projects.js';
-import type { ProjectNames } from '#routes/usage/activity-names.js';
-import { useBillingRevisionMinimum, usePersistSavedUsage, useSavedUsage } from '#db/billing-snapshot-store.js';
-import type { SavedUsageOutcome } from '#db/billing-snapshot-store.js';
+import { useProjectManager } from '#hooks/use-project-manager.js';
+import type { ProjectNames } from '@taucad/billing-ui/components/usage/activity-names';
+import {
+  useBillingRevisionMinimum,
+  usePersistSavedUsage,
+  useSavedUsage,
+} from '@taucad/billing-ui/db/billing-snapshot-store';
+import type { SavedUsageOutcome } from '@taucad/billing-ui/db/billing-snapshot-store';
 import type { Handle } from '#types/matches.types.js';
 
 /**
@@ -42,7 +53,6 @@ export const meta: MetaFunction = () => [{ title: 'Usage · Tau' }, { name: 'rob
 
 export const handle: Handle = {
   title: 'Tau usage',
-  enableOverflowY: true,
 };
 
 const formatInstant = (value: string): string => new Date(value).toLocaleString();
@@ -78,7 +88,7 @@ function UsageFreshness({
     'unable-to-refresh': 'Showing saved usage; unable to refresh',
     saved:
       'snapshot' in usage
-        ? `Offline — saved usage for ${savedLabel ?? 'this account'}, last updated ${formatInstant(usage.snapshot.asOf)}. Reconnect for the latest usage.`
+        ? `Offline — saved usage for ${savedLabel ?? 'this account'}, last updated ${formatInstant(usage.snapshot.asOf)}. Go online for the latest usage.`
         : '',
     unavailable: 'No saved usage for this view',
   };
@@ -160,7 +170,7 @@ function FilterMenu<Value extends string>({
   );
 }
 
-export default function UsagePage(): React.JSX.Element {
+function UsageContent(): React.JSX.Element {
   const { filters, query, setDateRange, toggleModel, toggleActivity, toggleProjects, clearFilters, hasActiveFilters } =
     useUsageFilters();
   const minimum = useBillingRevisionMinimum();
@@ -188,6 +198,8 @@ export default function UsagePage(): React.JSX.Element {
     return asking && !isFailed ? 'asking' : 'unavailable';
   }, [projects, isSettled, isFailed, asking]);
   const options = usageFilterOptions(snapshot, filters, projectNames);
+  /* Passed down, not called: the table reads a project's chats only for the row a reader opens. */
+  const { getChatRecordsForResource } = useProjectManager();
 
   return (
     <PageContent className='space-y-6'>
@@ -271,9 +283,44 @@ export default function UsagePage(): React.JSX.Element {
             description='Select an action to see its credit explanation'
             openEventId={openEventId}
             onOpenEventChange={setOpenEventId}
+            getChatRecordsForResource={getChatRecordsForResource}
           />
         </>
       ) : undefined}
     </PageContent>
+  );
+}
+
+/**
+ * `/usage`, guarded by the display mode (adaptive app deployment mode D8, BA19): the page while `funded`; the app's
+ * not-found, inside the shell, when unfunded; while unknown, checking for at most the ask deadline, then a stated
+ * "can't check" with Retry (I15). A pinned `cloud` build is always funded.
+ *
+ * @returns The page or its stand-in.
+ */
+export default function UsagePage(): React.JSX.Element {
+  const mode = useDeploymentMode();
+  const retry = useRetryDeploymentMode();
+  if (mode.state === 'funded') {
+    return <UsageContent />;
+  }
+  if (mode.state === 'unfunded') {
+    return <PageNotFound />;
+  }
+  return (
+    <div role='status' className='flex flex-col items-start gap-2 p-6 text-sm text-muted-foreground'>
+      {mode.problem === 'pending' ? (
+        <span>Checking this server…</span>
+      ) : mode.problem === 'safe-mode' ? (
+        <span>Usage is off in safe mode. Restart normally to see it.</span>
+      ) : (
+        <>
+          <span>Can’t check this server’s billing right now.</span>
+          <Button variant='outline' size='xs' onClick={retry}>
+            Retry
+          </Button>
+        </>
+      )}
+    </div>
   );
 }

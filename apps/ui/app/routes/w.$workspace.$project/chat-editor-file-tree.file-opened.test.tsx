@@ -43,7 +43,7 @@ vi.mock('@taucad/fs-client/react/use-directory-listing', () => ({
   useDirectoryListing: () => ({ kind: 'ready', path: '', entries: [] }),
 }));
 
-vi.mock('#hooks/use-file-tree.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({
   useFileTreeMap: () => tree.current,
   useFileTreeSelector: <T,>(select: (snapshot: typeof tree.current) => T): T => select(tree.current),
   useFileTreeEntry: () => undefined,
@@ -52,7 +52,7 @@ vi.mock('@taucad/ui/components/keyboard', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Enter' }),
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
-vi.mock('#filesystem/file-operation-participants.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/file-operation-participants', () => ({
   mountFileOperationParticipants: () => () => undefined,
 }));
 vi.mock('#workbench-records/view-actions.js', () => ({

@@ -236,6 +236,7 @@ vi.mock('#components/panes/dockview.js', () => ({
 }));
 
 const { ViewerDockview } = await import('./chat-viewer-dockview.js');
+const { WorkspaceLayoutReadyContext } = await import('#routes/w.$workspace.$project/project-workspace-context.js');
 
 describe('restored viewer layout admission', () => {
   beforeEach(() => {
@@ -341,6 +342,26 @@ describe('restored viewer layout admission', () => {
     expect(registerB).toHaveBeenCalledOnce();
   });
 
+  /* #2293: a returning project's layout lands as its dock attaches, before the lanes are laid out; a canvas mounted
+   * then keeps the 100 px box's aspect. The viewer mounts only at layout-ready, and shows its frame until then. */
+  it('should mount the viewer only once the workspace is layout-ready', () => {
+    const view = render(
+      <WorkspaceLayoutReadyContext.Provider value={false}>
+        <ViewerDockview />
+      </WorkspaceLayoutReadyContext.Provider>,
+    );
+    expect(screen.queryByTestId('content:main.ts')).not.toBeInTheDocument();
+    expect(view.container.querySelector('[data-slot=viewer-frame]')).toBeInTheDocument();
+
+    view.rerender(
+      <WorkspaceLayoutReadyContext.Provider value>
+        <ViewerDockview />
+      </WorkspaceLayoutReadyContext.Provider>,
+    );
+    expect(screen.getByTestId('content:main.ts')).toBeInTheDocument();
+    expect(view.container.querySelector('[data-slot=viewer-frame]')).not.toBeInTheDocument();
+  });
+
   it('should publish the resolved main entry when a viewer starts before its manifest', () => {
     fixture.mainEntryPath = '';
     fixture.emptyMain = true;
@@ -411,6 +432,21 @@ describe('restored viewer layout admission', () => {
       fixture.notifyAvailability();
     });
     expect(fixture.projectSend).toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
+  });
+
+  /* A15e (D4): a file check admits the view, so the stage and its canvas stay; a project-level wait admits nothing, not
+     even the view's graphics: its stage says the open's wait without them (cloud open loading states, option C). */
+  it('binds the view through a check of the model files and not before the project is here', () => {
+    fixture.availability = 'connecting';
+    const view = render(<ViewerDockview profile='editor' />);
+    expect(fixture.setViewEntryPath).not.toHaveBeenCalled();
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createViewGraphics' }));
+    view.unmount();
+
+    fixture.availability = 'filesChecking';
+    render(<ViewerDockview profile='editor' />);
+    expect(fixture.setViewEntryPath).toHaveBeenCalledWith('main-view', fixture.mainEntryPath);
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
   });
 
   it('admits hidden editor view settings without geometry or canvas demand', () => {

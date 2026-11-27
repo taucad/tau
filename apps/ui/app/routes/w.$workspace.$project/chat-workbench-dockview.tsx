@@ -1,7 +1,13 @@
 import { isFeatureEnabled } from '#flags/feature-flags.js';
-import { useOpenedLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
-import { BrowserPane } from '#components/browser/browser-pane.js';
+import {
+  useCloudOpenPending,
+  useFilePaneAvailability,
+  useOpenedLargeObjectPending,
+  useProjectAvailability,
+} from '#hooks/use-project-availability.js';
+import { kernelClosure } from '@taucad/ui-core/lib/kernel-closure';
+import { PaneWaitSkeleton, ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
+import type { ProjectWaitShape } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
 import { connectBrowserWorkbench } from '#components/browser/browser-workbench.js';
 import { selectDockAdapter } from '#workbench-records/workbench-adapter.js';
@@ -15,6 +21,7 @@ import {
   createContext,
   Fragment,
   memo,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -37,6 +44,7 @@ import {
   FolderOpen,
   History,
   Info,
+  KeyRound,
   Plus,
   Printer,
   Rotate3d,
@@ -65,7 +73,7 @@ import { fromDockview, toDockview } from '#workbench-records/converters.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
 import { isSurfaceShipped, withoutUnshippedPanes } from '#workbench-records/surface-availability.js';
 import { tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMime, idPrefix } from '@taucad/types/constants';
-import { FileSelector } from '#components/files/file-selector.js';
+import { FileSelector } from '@taucad/files-ui/components/files/file-selector';
 import { useProject } from '#hooks/use-project.js';
 import { Dockview } from '#components/panes/dockview.js';
 import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js';
@@ -73,53 +81,43 @@ import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 import { DockviewSplitAction } from '#components/panes/dockview-split-action.js';
 import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { isPrinterFileName } from '#components/printer/printer-file.js';
+import { isPrinterFileName } from '#components/printer/printer-file-kind.js';
 import { WorkbenchTabContextMenu } from '#components/panes/editor-tab-context-menu.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
 import { DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
 import { useIsTopRightGroup } from '#components/panes/use-is-top-right-group.js';
-import { getEditorLanguage } from '#lib/editor-languages.js';
+import { getEditorLanguage } from '@taucad/editor-ui/lib/editor-languages';
 import { ChatEditorTooLargeWarning } from '@taucad/project-workspace/components/chat-editor-too-large-warning';
 import { ChatEditorErrorPlaceholder } from '@taucad/project-workspace/components/chat-editor-error-placeholder';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useFileContent } from '#hooks/use-file-content.js';
-import type { FileContentSelection } from '#hooks/use-file-content.js';
+import { useFileContent, useFreshContent } from '@taucad/files-ui/hooks/use-file-content';
+import type { FileContentSelection } from '@taucad/files-ui/hooks/use-file-content';
 import { useVirtualDeclarationContent } from '#hooks/use-virtual-declaration-content.js';
-import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
-import { useFileTreeEntry } from '#hooks/use-file-tree.js';
+import { isVirtualDeclarationPath } from '@taucad/editor-ui/lib/virtual-declarations';
+import { useFileTreeEntry } from '@taucad/files-ui/hooks/use-file-tree';
 import type { FileProvenance } from '@taucad/types';
 import { useEditorDocumentSession } from '#hooks/use-editor-document-session.js';
-import type { EditorDocument, DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
-import { requestEditorNavigation } from '#lib/editor-navigation-service.js';
+import type { EditorDocument, DocumentChange, DocumentTransaction } from '@taucad/editor-ui/lib/editor-document';
+import { requestEditorNavigation } from '@taucad/editor-ui/lib/editor-navigation-service';
 import { Loader } from '@taucad/ui/components/loader';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useWaitStart } from '#hooks/use-wait-start.js';
-import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
-import { CodeEditor } from '#components/code/code-editor.client.js';
+import { EditorPanePlaceholder } from '@taucad/editor-ui/components/code/editor-pane-placeholder';
+import { CodeEditor } from '@taucad/editor-ui/components/code/code-editor.client';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
 import { useFeature } from '#flags/use-feature.js';
 import { fileViewerRouter } from '#routes/w.$workspace.$project/file-viewers/built-in-viewers.js';
 import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@taucad/ui-core/filesystem/workspace-errors';
-import { ParametersPanelBody } from '#routes/w.$workspace.$project/chat-parameters.js';
-import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinematics.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 import { EditorSymbolPathProvider } from '#routes/w.$workspace.$project/editor-symbol-path.js';
-import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
-import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
-import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
-import { useReportHistoryPaneShown } from '#routes/w.$workspace.$project/revision-pane-requests.js';
-import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
-import { JobsPanelBody } from '#routes/w.$workspace.$project/chat-jobs.js';
-import { PrintPanelBody } from '#routes/w.$workspace.$project/chat-print.js';
-import { ConverterPanelBody } from '#routes/w.$workspace.$project/chat-converter.js';
-import { DetailsPanelBody } from '#routes/w.$workspace.$project/chat-details.js';
-import { TelemetryPanelContent } from '#routes/w.$workspace.$project/chat-kernel.js';
-import { ChatConsole } from '#routes/w.$workspace.$project/chat-console.js';
-import { ProjectTerminalPane } from '#components/terminal/terminal-pane.js';
+import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
+import { useReportHistoryPaneShown } from '@taucad/revisions-ui/lib/revision-pane-requests';
+import { desktopAgentSignInBridge } from '#components/terminal/agent-sign-ins.js';
+import { agentSignInComponent, connectAgentSignInWorkbench } from '#components/terminal/agent-sign-in-workbench.js';
+import type { AgentSignInPanelParameters } from '#components/terminal/agent-sign-in-workbench.js';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
 import { WorkbenchToggleSlot } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import {
   projectWorkspaceKeyCombinations,
@@ -154,6 +152,74 @@ import type {
   ResolvedFileViewer,
 } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 import { useTourAnchor } from '#components/tour/tour-anchors.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
+
+/*
+ * Each Workbench pane's body is its own chunk, loaded when its pane first mounts (progressive loading PL5), as the
+ * phone's sheets already load theirs: the project route's interactive tier carries the dock's frame and its file
+ * tree, never the explorer's part visuals (three.js), the print preparation (the agent-tool registry), the
+ * configuration forms, the exporter or the debug panes. A body draws inside its pane's frame when it arrives.
+ */
+const BrowserPane = lazyCode(async () => {
+  const module = await import('#components/browser/browser-pane.js');
+  return { default: module.BrowserPane };
+});
+const ParametersPanelBody = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-parameters.js');
+  return { default: module.ParametersPanelBody };
+});
+const KinematicsPanelBody = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-kinematics.js');
+  return { default: module.KinematicsPanelBody };
+});
+const ModelPanelBody = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-explorer.js');
+  return { default: module.ModelPanelBody };
+});
+const RevisionsPanelBody = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-revisions.js');
+  return { default: module.RevisionsPanelBody };
+});
+const AgentsPanelBody = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-agents.js');
+  return { default: module.AgentsPanelBody };
+});
+const JobsPanelBody = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-jobs.js');
+  return { default: module.JobsPanelBody };
+});
+const PrintPanelBody = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-print.js');
+  return { default: module.PrintPanelBody };
+});
+const ConverterPanelBody = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-converter.js');
+  return { default: module.ConverterPanelBody };
+});
+const DetailsPanelBody = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-details.js');
+  return { default: module.DetailsPanelBody };
+});
+const TelemetryPanelContent = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-kernel.js');
+  return { default: module.TelemetryPanelContent };
+});
+const ChatConsole = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-console.js');
+  return { default: module.ChatConsole };
+});
+const ProjectTerminalPane = lazyCode(async () => {
+  const module = await import('#components/terminal/terminal-pane.js');
+  return { default: module.ProjectTerminalPane };
+});
+const AgentSignInTab = lazyCode(async () => {
+  const module = await import('#components/terminal/agent-sign-in-tab.js');
+  return { default: module.AgentSignInTab };
+});
+const ProjectShareWorkbenchPanel = lazyCode(async () => {
+  const module = await import('#routes/w.$workspace.$project/project-share-action.js');
+  return { default: module.ProjectShareWorkbenchPanel };
+});
 
 const reportEditorSaveFailure = async (completion: Promise<void>, path: string): Promise<void> => {
   try {
@@ -274,27 +340,69 @@ function EditorPanel(properties: IDockviewPanelProps<EditorPanelParameters>): Re
   );
 }
 
+/**
+ * A lazy pane body inside its pane: the pane's frame shows until the body's chunk is in, with the body's shape where it
+ * has one (Progressive Loading Policy rule 15), on the open's clock for a pane the open restored.
+ */
+function PaneBody({
+  children,
+  shape,
+  label,
+}: {
+  readonly children: ReactNode;
+  readonly shape?: ProjectWaitShape;
+  readonly label?: string;
+}): React.JSX.Element {
+  return (
+    <Suspense
+      fallback={shape === undefined || label === undefined ? null : <PaneWaitSkeleton shape={shape} label={label} />}
+    >
+      {children}
+    </Suspense>
+  );
+}
+
 function BrowserWorkbenchPanel({ params }: IDockviewPanelProps<BrowserPanelParameters>): React.JSX.Element {
-  return <BrowserPane tabId={params.browserTabId} />;
+  return (
+    <PaneBody>
+      <BrowserPane tabId={params.browserTabId} />
+    </PaneBody>
+  );
 }
 
 function ParametersWorkbenchPanel(): React.JSX.Element {
-  return <ParametersPanelBody />;
+  return (
+    <PaneBody shape='fields' label='Parameters'>
+      <ParametersPanelBody />
+    </PaneBody>
+  );
 }
 
 function KinematicsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
-  return <KinematicsPanelBody panelApi={api} />;
+  return (
+    <PaneBody shape='list' label='Kinematics'>
+      <KinematicsPanelBody panelApi={api} />
+    </PaneBody>
+  );
 }
 
 function ModelWorkbenchPanel(): React.JSX.Element {
-  return <ModelPanelBody />;
+  return (
+    <PaneBody shape='tree' label='Model'>
+      <ModelPanelBody />
+    </PaneBody>
+  );
 }
 
 function RevisionsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const { projectId } = useProject();
   /* The toolbar chip reads as pressed while History is on screen (C2). */
   useReportHistoryPaneShown(projectId, useWorkbenchPanelShown(api));
-  return <RevisionsPanelBody />;
+  return (
+    <PaneBody shape='list' label='History'>
+      <RevisionsPanelBody />
+    </PaneBody>
+  );
 }
 
 /** Dockview retains hidden panels; their transcript queries wait until this panel and lane are shown. */
@@ -319,38 +427,64 @@ function useWorkbenchPanelShown(panelApi: IDockviewPanelProps['api']): boolean {
 
 function AgentsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const isShown = useWorkbenchPanelShown(api);
-  return <AgentsPanelBody enableHistory={isShown} />;
+  return (
+    <PaneBody shape='list' label='Agents'>
+      <AgentsPanelBody enableHistory={isShown} />
+    </PaneBody>
+  );
 }
 
 function JobsWorkbenchPanel(): React.JSX.Element {
-  return <JobsPanelBody />;
+  return (
+    <PaneBody shape='list' label='Jobs'>
+      <JobsPanelBody />
+    </PaneBody>
+  );
 }
 
 export function PrintWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const isShown = useWorkbenchPanelShown(api);
-  return <PrintPanelBody isShown={isShown} />;
+  return (
+    <PaneBody shape='fields' label='Print'>
+      <PrintPanelBody isShown={isShown} />
+    </PaneBody>
+  );
 }
 
 export function ExportWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
   const isShown = useWorkbenchPanelShown(api);
-  return <ConverterPanelBody downloadOnly={profile === 'shared'} isShown={isShown} />;
+  return (
+    <PaneBody shape='fields' label='Export'>
+      <ConverterPanelBody downloadOnly={profile === 'shared'} isShown={isShown} />
+    </PaneBody>
+  );
 }
 
 function ShareWorkbenchPanel(): React.JSX.Element {
-  return <ProjectShareWorkbenchPanel />;
+  return (
+    <PaneBody shape='list' label='Share'>
+      <ProjectShareWorkbenchPanel />
+    </PaneBody>
+  );
 }
 
 function DetailsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
   const isShown = useWorkbenchPanelShown(api);
-  return <DetailsPanelBody readOnly={profile === 'shared'} enableHistory={isShown} />;
+  return (
+    <PaneBody shape='fields' label='Details'>
+      <DetailsPanelBody readOnly={profile === 'shared'} enableHistory={isShown} />
+    </PaneBody>
+  );
 }
 
 function TelemetryWorkbenchPanel(): React.JSX.Element {
   const enabled = useFeature('tauDebug');
   return enabled ? (
-    <TelemetryPanelContent />
+    <PaneBody>
+      <TelemetryPanelContent />
+    </PaneBody>
   ) : (
     <p className='p-4 text-muted-foreground'>Kernel diagnostics require debug mode.</p>
   );
@@ -358,13 +492,45 @@ function TelemetryWorkbenchPanel(): React.JSX.Element {
 
 function ConsoleWorkbenchPanel(): React.JSX.Element {
   const enabled = useFeature('tauDebug');
-  return enabled ? <ChatConsole /> : <p className='p-4 text-muted-foreground'>Console requires debug mode.</p>;
+  return enabled ? (
+    <PaneBody>
+      <ChatConsole />
+    </PaneBody>
+  ) : (
+    <p className='p-4 text-muted-foreground'>Console requires debug mode.</p>
+  );
 }
 
 /* Closing the Terminal's tab unmounts the pane, which ends its session. */
 function TerminalWorkbenchPanel(): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
-  return <ProjectTerminalPane profile={profile} />;
+  return (
+    <PaneBody>
+      <ProjectTerminalPane profile={profile} />
+    </PaneBody>
+  );
+}
+
+/** One external agent's sign-in, a top-level tab of its own beside the Terminal (ACP agent policy rule 10). */
+function AgentSignInWorkbenchPanel({
+  api,
+  params,
+}: IDockviewPanelProps<AgentSignInPanelParameters>): React.JSX.Element | undefined {
+  const bridge = desktopAgentSignInBridge();
+  if (bridge === undefined) {
+    return undefined;
+  }
+  return (
+    <PaneBody>
+      <AgentSignInTab
+        agentId={params.agentId}
+        bridge={bridge}
+        onClose={() => {
+          api.close();
+        }}
+      />
+    </PaneBody>
+  );
 }
 
 type WorkbenchSurface = {
@@ -852,6 +1018,7 @@ const components = {
   kernel: TelemetryWorkbenchPanel,
   console: ConsoleWorkbenchPanel,
   terminal: TerminalWorkbenchPanel,
+  [agentSignInComponent]: AgentSignInWorkbenchPanel,
 };
 
 export const workbenchPanels = {
@@ -885,13 +1052,15 @@ export const getWorkbenchTabIcon: DockviewTabIconRenderer = (properties) => {
   );
   const filePath = getFileParameters(properties)?.filePath;
   const Icon =
-    mode === 'open-file'
-      ? FolderOpen
-      : mode === 'launcher'
-        ? Plus
-        : filePath !== undefined && isPrinterFileName(filePath)
-          ? Printer
-          : surface?.icon;
+    properties.api.component === agentSignInComponent
+      ? KeyRound
+      : mode === 'open-file'
+        ? FolderOpen
+        : mode === 'launcher'
+          ? Plus
+          : filePath !== undefined && isPrinterFileName(filePath)
+            ? Printer
+            : surface?.icon;
   if (surface?.id === 'export' && Icon !== undefined) {
     return <ExportTabIcon icon={Icon} />;
   }
@@ -1203,6 +1372,12 @@ const workbenchDockOperations: Readonly<Record<WorkbenchProfile, WorkbenchDockOp
 };
 
 /** The desktop Browser's tabs follow the workbench while it is not showing a record. */
+/** External-agent sign-ins open as tabs beside the Terminal, where this desktop can run one. */
+const connectWorkbenchAgentSignIns: NonNullable<WorkbenchAdapterPorts['connectAgentSignIns']> = (api, isRestoring) =>
+  desktopAgentSignInBridge() === undefined
+    ? () => undefined
+    : connectAgentSignInWorkbench({ api, isRestoring, terminalPanelId: workbenchPanels.terminal.id });
+
 const connectWorkbenchBrowser: NonNullable<WorkbenchAdapterPorts['connectBrowser']> = (api, isRestoring) => {
   const bridge = getBrowserBridge();
   if (!bridge) {
@@ -1411,7 +1586,32 @@ export const FileEditor = memo(function ({
   // gate — there is no local "force open" state because the override is
   // expressed by re-resolving with `forceText` / `sizeLimit` options.
   const virtualDeclaration = useVirtualDeclarationContent(documentSession, filePath);
-  const fileContent = useFileContent(virtualDeclaration === undefined ? filePath : undefined);
+  /* A first view (STO-25): the entry closure's pane opens once the closure lands. Any other file may still hold the
+     previous revision's bytes, or be absent, until the open's apply lands it (D9: an unlanded path is what is on disk),
+     so its pane waits on its own file, and "File not found" for every authored file (I7). Nothing is read while the
+     pane waits, and once its gate opens it shows only a read begun after that: the change that replaced what an
+     earlier reader cached reaches the page late (I7). */
+  const absence = useProjectAvailability('absence');
+  const gate = useFilePaneAvailability(filePath, kernelClosure(mainEntryPath).includes(filePath));
+  const fresh = useFreshContent(
+    virtualDeclaration === undefined ? filePath : undefined,
+    gate === 'ready',
+    useCloudOpenPending(),
+  );
+  const availability = gate === 'ready' && fresh.state !== 'open' ? 'waiting' : gate;
+  const fileContent = useFileContent(
+    virtualDeclaration === undefined && availability === 'ready' ? filePath : undefined,
+    { retainValue: !fresh.readAfresh },
+  );
+  /* The open itself showed only the fresh read (I7); once the pane's own observation is ready, last good bytes
+   * outlive a later transient failure as for any other pane. */
+  const { readAfresh, settled: freshSettled, state: freshState } = fresh;
+  const observedReady = fileContent.observation.status === 'ready';
+  useEffect(() => {
+    if (readAfresh && freshState === 'open' && observedReady) {
+      freshSettled();
+    }
+  }, [freshSettled, freshState, observedReady, readAfresh]);
   // A declaration held in memory has nothing to observe on disk, so it is always current.
   const result = useMemo(
     (): FileContentSelection =>
@@ -1534,7 +1734,6 @@ export const FileEditor = memo(function ({
   let body: ReactNode;
   let resolvedViewer: ResolvedFileViewer | undefined;
   let viewerRequest: Omit<FileViewerRenderRequest, 'renderPane'> | undefined;
-  const availability = useProjectAvailability();
   /* One wait per pane, owned here and not by the placeholder, which is replaced when the text arrives: it runs until
      the file's text is on screen (the placeholder shows it as soon as it is read). A sync or a large object shows its
      own notice instead. */
@@ -1567,8 +1766,8 @@ export const FileEditor = memo(function ({
       break;
     }
     case 'orphaned': {
-      if (availability !== 'ready') {
-        body = <ProjectSyncPlaceholder state={availability} />;
+      if (absence !== 'ready') {
+        body = <ProjectWaitSkeleton state={absence} shape='code' label={filePath.split('/').pop() ?? filePath} />;
         break;
       }
       body = (
@@ -1711,8 +1910,26 @@ export const FileEditor = memo(function ({
     </FileWorkbenchPane>
   );
 
+  if (fresh.state === 'failed') {
+    /* The fresh read failed: say so and offer it again, never the content held before (I7). */
+    return (
+      <div className='flex h-full flex-col bg-background'>
+        <div className='min-h-0 flex-1'>
+          <ChatEditorErrorPlaceholder cause={fresh.cause} />
+        </div>
+        <div className='flex justify-center pb-4'>
+          <Button variant='outline' size='sm' onClick={fresh.retry}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  if (availability === 'waiting') {
+    return <EditorPanePlaceholder label={`Waiting for ${name}`} />;
+  }
   if (availability !== 'ready') {
-    return <ProjectSyncPlaceholder state={availability} />;
+    return <ProjectWaitSkeleton state={availability} shape='code' label={name} />;
   }
 
   /* Every branch renders through one component type, so the pane (its header and its wait slot) stays the same node
@@ -1965,6 +2182,7 @@ export const WorkbenchDockview = memo(function ({
       navigate: requestEditorNavigation,
       dock: workbenchDockOperations[profile],
       connectBrowser: profile === 'shared' ? undefined : connectWorkbenchBrowser,
+      connectAgentSignIns: profile === 'shared' ? undefined : connectWorkbenchAgentSignIns,
     }),
     [connectWorkbench, editorRef, isMobile, layoutController, profile, projectId, setWorkbenchOpen],
   );

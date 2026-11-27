@@ -74,7 +74,7 @@ vi.mock('#filesystem/build-skew.js', async (importOriginal) => ({
     };
   },
 }));
-vi.mock('#components/ui/collapsible-code-block.js', () => ({
+vi.mock('@taucad/editor-ui/components/ui/collapsible-code-block', () => ({
   CollapsibleCodeBlock: ({ title }: { readonly title: string }) => <pre aria-label='Stack trace'>{title}</pre>,
 }));
 

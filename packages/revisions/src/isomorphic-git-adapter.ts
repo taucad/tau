@@ -66,6 +66,7 @@ import {
 } from '#adapter-transport/adapter-transport.js';
 import { installBufferGlobal } from '#buffer-global.js';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
+import { pooled } from '#object-store/pooled.js';
 import { settleBounded } from '#chat-projection-pool.js';
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
 import { CorruptBytesError } from '#compute-worker/errors.js';
@@ -429,6 +430,9 @@ const catalogueFamiliesOf = (references: readonly string[]): CatalogueFamily[] |
 /** The largest `upload-pack` answer a fetch reads: the pack ceiling and its framing. Bytes. */
 const uploadPackCeilingBytes = 64 * 1024 * 1024 + 64 * 1024;
 
+/* Blob and large-object reads a whole-tree read keeps in flight at once. */
+const treeReadStreams = 32;
+
 /**
  * Create a `RevisionPort` over a filesystem provider, backed by `isomorphic-git`.
  *
@@ -681,13 +685,26 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     oid: string,
     paths: readonly string[],
   ): Promise<ReadonlyMap<string, Readonly<{ oid: string; mode: string }>>> => {
+    /* Each tree once per call, by name: paths under one directory share its read, its decode and its lookup. */
+    const read = new Map<string, Promise<ReadonlyMap<string, TreeCodecEntry>>>();
+    const entriesOf = async (tree: string): Promise<ReadonlyMap<string, TreeCodecEntry>> => {
+      let entries = read.get(tree);
+      if (entries === undefined) {
+        entries = (async () => {
+          const listed = await treeEntries(tree);
+          return new Map(listed.map((entry) => [entry.path, entry]));
+        })();
+        read.set(tree, entries);
+      }
+      return entries;
+    };
     const entryAt = async (path: string): Promise<Readonly<{ oid: string; mode: string }> | undefined> => {
       const segments = path.split('/');
       let tree = oid;
       for (const [index, segment] of segments.entries()) {
         // oxlint-disable-next-line no-await-in-loop -- each directory names the next one to read.
-        const entries = await treeEntries(tree);
-        const entry = entries.find((candidate) => candidate.path === segment);
+        const named = await entriesOf(tree);
+        const entry = named.get(segment);
         if (entry === undefined) {
           return undefined;
         }
@@ -1946,24 +1963,37 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         readOptions?.paths === undefined
           ? await flatTree(commit.tree)
           : await selectedTree(commit.tree, readOptions.paths);
-      /* Pointers first, then their bytes together: the files keep tree order,
-       * and only the large objects' transfers run side by side, under the LFS
-       * client's own count and byte bounds. */
-      const read: Array<
-        Readonly<{ path: string; content: Uint8Array<ArrayBuffer>; mode: FileMode; pointer: LfsPointer | undefined }>
-      > = [];
-      for (const [path, { oid, mode }] of paths) {
-        // oxlint-disable-next-line no-await-in-loop -- resolve one file before reading the next; a pointer is a few bytes.
-        const content = await blobOf(oid);
-        read.push({ path, content, mode: mode as FileMode, pointer: readLfsPointer(content) });
-      }
+      /* Blobs, then the large objects' bytes: the files keep tree order. A
+       * bounded number of blob reads run side by side (each one a pack range
+       * and an inflate on the compute worker), so a whole tree is not one
+       * round trip per file after another; the large objects' transfers run
+       * under the LFS client's own count and byte bounds. */
+      const read = await pooled(
+        [...paths],
+        treeReadStreams,
+        async ([path, { oid, mode }]): Promise<
+          Readonly<{ path: string; content: Uint8Array<ArrayBuffer>; mode: FileMode; pointer: LfsPointer | undefined }>
+        > => {
+          const content = await blobOf(oid);
+          return { path, content, mode: mode as FileMode, pointer: readLfsPointer(content) };
+        },
+      );
       const pointers = read.flatMap(({ pointer }) => (pointer === undefined ? [] : [pointer]));
       if (readOptions?.largeObjects === 'local') {
-        /* No transfer: what is here already is read, and the rest stay pointers for the caller to track. */
-        const local = new Map<string, Uint8Array<ArrayBuffer>>();
+        /* No transfer: what is here already is read, each object once and a bounded number at a time,
+         * and the rest stay pointers for the caller to track. */
+        /* The first pointer of each object, as one read after another took it. */
+        const firsts = new Map<string, LfsPointer>();
         for (const pointer of pointers) {
-          // oxlint-disable-next-line no-await-in-loop -- one local read at a time, as the hydrate's own scan does.
-          const content = local.has(pointer.oid) ? undefined : await readLocalLfsObject(pointer);
+          if (!firsts.has(pointer.oid)) {
+            firsts.set(pointer.oid, pointer);
+          }
+        }
+        const unique = [...firsts.values()];
+        const contents = await pooled(unique, treeReadStreams, async (pointer) => readLocalLfsObject(pointer));
+        const local = new Map<string, Uint8Array<ArrayBuffer>>();
+        for (const [at, pointer] of unique.entries()) {
+          const content = contents[at];
           if (content !== undefined) {
             local.set(pointer.oid, content);
           }

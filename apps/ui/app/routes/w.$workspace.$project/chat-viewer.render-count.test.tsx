@@ -154,17 +154,22 @@ vi.mock('#workbench-records/view-actions.js', () => ({
   }),
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
-vi.mock('#hooks/use-file-tree.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({
   useFileTreeSelector: <T,>(select: (tree: Map<string, unknown>) => T): T =>
     select(new Map([[entryPath, { type: 'file', name: entryPath }]])),
 }));
-vi.mock('#hooks/use-file-content.js', () => ({ useFileContent: () => ({ kind: 'text', text: 'cube();' }) }));
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
+  useFileContent: () => ({ kind: 'text', text: 'cube();' }),
+}));
 vi.mock('@taucad/viewer/hooks/use-graphics', async () => {
   const { useSelector } = await import('@xstate/react');
   return {
     GraphicsProvider: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
     useGraphics: () => actors.graphics,
     useGraphicsSelector: <T,>(selector: (state: SnapshotFrom<typeof graphicsLikeMachine>) => T): T =>
+      useSelector(actors.graphics!, selector),
+    useOptionalGraphics: () => actors.graphics,
+    useOptionalGraphicsSelector: <T,>(selector: (state: SnapshotFrom<typeof graphicsLikeMachine>) => T): T =>
       useSelector(actors.graphics!, selector),
     useModelInteractionSelector: <T,>(selector: (state: { context: Record<string, unknown> }) => T): T =>
       selector({ context: { unitsById: {} } }),

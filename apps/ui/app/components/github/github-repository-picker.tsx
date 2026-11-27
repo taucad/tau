@@ -30,7 +30,7 @@ import {
   githubErrorMessage,
 } from '#lib/github-connections.js';
 import { authClient } from '#lib/auth-client.js';
-import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { isDesktopTarget } from '@taucad/files-ui/filesystem/desktop-bridge';
 import type {
   GithubBranch,
   GithubConnection,
@@ -708,8 +708,8 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
           <AlertDialogHeader>
             <AlertDialogTitle>Disconnect {connection?.login} from Tau?</AlertDialogTitle>
             <AlertDialogDescription>
-              Tau removes this account and asks GitHub to revoke its access. Projects linked through it stop syncing
-              until you connect GitHub again.
+              Tau removes this account and asks GitHub to revoke its access. Projects that back up to GitHub through it
+              stop backing up until you connect GitHub again.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

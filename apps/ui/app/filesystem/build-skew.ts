@@ -372,13 +372,38 @@ const isLiveAnnouncement = (message: unknown): message is LiveAnnouncement =>
 
 const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(channelName);
 
+/**
+ * The question to the server under way, which every check asked meanwhile shares (`askLiveBuild`
+ * coalesces them): its answer is applied once, in the phase the latest check joined it in, against the
+ * newest build a peer claimed meanwhile, so an older claim's answer never drops a newer claim as stale.
+ */
+type Question = { applied: Promise<void>; askedIn: number; claimedBuildId: number | undefined };
+let question: Question | undefined;
+/** The channel is closed: no check acts any more, so nothing dispatches, schedules or posts. */
+let isClosed = false;
+
+const applyAnswer = async (asked: Question): Promise<void> => {
+  const answer = await askLiveBuild().finally(() => {
+    question = undefined;
+  });
+  if (asked.askedIn === epoch && !isClosed) {
+    dispatch({ type: 'answer', answer, claimedBuildId: asked.claimedBuildId });
+  }
+};
+
 /** Ask the server which build is live and apply the answer, unless the phase changed while it was asked. */
 const askServer = async (claimedBuildId: number | undefined): Promise<void> => {
-  const askedIn = epoch;
-  const answer = await askLiveBuild();
-  if (askedIn === epoch) {
-    dispatch({ type: 'answer', answer, claimedBuildId });
+  if (question) {
+    question.askedIn = epoch;
+    if ((question.claimedBuildId ?? -Infinity) < (claimedBuildId ?? -Infinity)) {
+      question.claimedBuildId = claimedBuildId;
+    }
+    return question.applied;
   }
+  const asked: Question = { applied: Promise.resolve(), askedIn: epoch, claimedBuildId };
+  question = asked;
+  asked.applied = applyAnswer(asked);
+  return asked.applied;
 };
 
 /** The timer a phase runs while it lasts: rechecks for a peer's unanswered word and for the confirmations. */
@@ -454,7 +479,8 @@ let inFlightQuery: Promise<void> | undefined;
 /** Lookups whose budget has not passed: the questions go on while any is waiting. */
 let waitingLookups = 0;
 
-const hasWaitingLookup = (): boolean => waitingLookups > 0;
+/** A closed guard has no lookup waiting on it: its questions stop with its checks. */
+const hasWaitingLookup = (): boolean => waitingLookups > 0 && !isClosed;
 
 /**
  * One question, then one more every `lookupConfirmDelay` while the server's word is unsettled, not at
@@ -579,6 +605,7 @@ if (channel) {
 
 /** Stop listening to other tabs. A page never needs this; tests that load the module afresh do. */
 export const closeBuildSkewChannel = (): void => {
+  isClosed = true;
   channel?.close();
   clearTimeout(phaseTimer);
   phaseTimer = undefined;

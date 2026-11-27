@@ -215,7 +215,7 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
                   id: effects.createId(),
                   role: 'assistant',
                   content: [{ type: 'text', text: input.opening.notice }],
-                  metadata: { tauInternal: { origin: 'external', agentId: input.adapter.id } },
+                  metadata: { tauInternal: { kind: 'external-tool', origin: 'external', agentId: input.adapter.id } },
                 },
               },
             ]);
@@ -291,7 +291,13 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
               seams.signal.throwIfAborted();
               const resolution = await projection.approve(
                 {
-                  prompt: params.toolCall.title ?? `Allow ${params.toolCall.toolCallId}?`,
+                  /* An empty title is no title: the prompt becomes a durable row's non-empty reason (E-6). */
+                  prompt:
+                    params.toolCall.title === undefined ||
+                    params.toolCall.title === null ||
+                    params.toolCall.title === ''
+                      ? `Allow ${params.toolCall.toolCallId === '' ? 'this tool call' : params.toolCall.toolCallId}?`
+                      : params.toolCall.title,
                   payload: providerPermissionPayload(params, input.adapter, {
                     negotiated: input.permissionReadback,
                     localPrepared: readback !== undefined,

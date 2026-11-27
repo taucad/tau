@@ -12,14 +12,14 @@ type AgentTurnDetail = Extract<ClientMetricEntry, { name: typeof IngestEntryName
 
 function createMockMetrics() {
   return {
-    kernelExecutionDuration: { record: vi.fn() },
-    kernelExecutions: { add: vi.fn() },
-    kernelExportDuration: { record: vi.fn() },
     agentSessions: { add: vi.fn() },
     agentTurns: { add: vi.fn() },
     agentTurnDuration: { record: vi.fn() },
     agentTimeToFirstUpdate: { record: vi.fn() },
     agentToolCalls: { add: vi.fn() },
+    agentToolResults: { add: vi.fn() },
+    agentToolResultDelay: { record: vi.fn() },
+    agentAdmissionDelay: { record: vi.fn() },
     agentTokens: { add: vi.fn() },
     agentErrors: { add: vi.fn() },
     agentSafeguardInterventions: { add: vi.fn() },
@@ -71,84 +71,28 @@ describe('TelemetryController', () => {
     void controller.ingest(body, 'user-1', request, reply);
   };
 
-  it('should accept a signed-out batch without recording it', () => {
-    void controller.ingest(
-      { entries: [{ name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1500, detail: { status: 'ok' } }] },
-      undefined,
-      request,
-      reply,
-    );
+  const syncAttempt = {
+    name: IngestEntryName.SYNC_ATTEMPT,
+    duration: 120,
+    detail: { direction: 'push', outcome: 'ok', placement: 'browser' },
+  } as const;
 
-    expect(mockMetrics.kernelExecutionDuration.record).not.toHaveBeenCalled();
-    expect(mockMetrics.kernelExecutions.add).not.toHaveBeenCalled();
+  it('should accept a signed-out batch without recording it', () => {
+    void controller.ingest({ entries: [syncAttempt] }, undefined, request, reply);
+
+    expect(mockMetrics.syncClientAttempts.add).not.toHaveBeenCalled();
   });
 
   describe('POST /v1/telemetry/ingest', () => {
-    it('should record kernel execution duration and count for createGeometry entries', () => {
+    it('should drop a retired kernel entry unrecorded and record the rest of the batch', () => {
       ingestSignedIn({
-        entries: [{ name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1500, detail: { status: 'ok' } }],
+        entries: [{ name: 'observability.createGeometry' }, syncAttempt, { name: 'observability.exportGeometry' }],
       });
 
-      expect(mockMetrics.kernelExecutionDuration.record).toHaveBeenCalledWith(1.5, {
-        [AttributeKey.KERNEL_STATUS]: 'ok',
-      });
-      expect(mockMetrics.kernelExecutions.add).toHaveBeenCalledWith(1, { [AttributeKey.KERNEL_STATUS]: 'ok' });
-    });
-
-    it('should record export duration for exportGeometry entries', () => {
-      ingestSignedIn({
-        entries: [
-          {
-            name: IngestEntryName.KERNEL_EXPORT_GEOMETRY,
-            duration: 800,
-            detail: { status: 'ok', exportFormat: 'glb' },
-          },
-        ],
-      });
-
-      expect(mockMetrics.kernelExportDuration.record).toHaveBeenCalledWith(0.8, {
-        [AttributeKey.KERNEL_STATUS]: 'ok',
-        [AttributeKey.EXPORT_FORMAT]: 'glb',
-      });
-    });
-
-    it('should default status to "unknown" when detail is missing', () => {
-      ingestSignedIn({
-        entries: [{ name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 500 }],
-      });
-
-      expect(mockMetrics.kernelExecutionDuration.record).toHaveBeenCalledWith(0.5, {
-        [AttributeKey.KERNEL_STATUS]: 'unknown',
-      });
-    });
-
-    it('should default export format to "unknown" when not provided', () => {
-      ingestSignedIn({
-        entries: [{ name: IngestEntryName.KERNEL_EXPORT_GEOMETRY, duration: 300, detail: { status: 'ok' } }],
-      });
-
-      expect(mockMetrics.kernelExportDuration.record).toHaveBeenCalledWith(0.3, {
-        [AttributeKey.KERNEL_STATUS]: 'ok',
-        [AttributeKey.EXPORT_FORMAT]: 'unknown',
-      });
-    });
-
-    it('should process multiple entries in a single batch', () => {
-      ingestSignedIn({
-        entries: [
-          { name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1000, detail: { status: 'ok' } },
-          {
-            name: IngestEntryName.KERNEL_EXPORT_GEOMETRY,
-            duration: 2000,
-            detail: { status: 'ok', exportFormat: 'step' },
-          },
-          { name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 500, detail: { status: 'error' } },
-        ],
-      });
-
-      expect(mockMetrics.kernelExecutionDuration.record).toHaveBeenCalledTimes(2);
-      expect(mockMetrics.kernelExecutions.add).toHaveBeenCalledTimes(2);
-      expect(mockMetrics.kernelExportDuration.record).toHaveBeenCalledTimes(1);
+      const touched = Object.entries(mockMetrics)
+        .filter(([, instrument]) => ('add' in instrument ? instrument.add : instrument.record).mock.calls.length > 0)
+        .map(([key]) => key);
+      expect(touched).toEqual(['syncClientAttempts', 'syncClientAttemptDuration']);
     });
 
     it('should record a client sync attempt, its duration, its lag and its queue depth by placement, clamped', () => {
@@ -573,6 +517,82 @@ describe('TelemetryController', () => {
     });
   });
 
+  /* B4, C3: a synthetic turn with every delivery and admission field passes the ingest pipe and maps to its series. */
+  describe('tool-result delivery and admission phases', () => {
+    const pipe = new ZodValidationPipe();
+    const browser = { [AttributeKey.AGENT_ID]: 'tau', [AttributeKey.AGENT_PLACEMENT]: 'browser' };
+    const turnWith = (detail: Record<string, unknown>) => ({
+      entries: [
+        {
+          name: IngestEntryName.AGENT_TURN,
+          duration: 4000,
+          detail: { agentId: 'tau', placement: 'browser', outcome: 'completed', ...detail },
+        },
+      ],
+    });
+    const delivered = {
+      toolResults: 3,
+      toolResultsExcluded: 2,
+      toolResultsUnsettled: 1,
+      toolResultDelayMax: 1.25,
+      admissionDelay: { create: 1.5, page: 0.05, dispatch: 0.03, host: 0.08, delivery: 0.02 },
+      hostStart: 'cold',
+      chatState: 'reopened',
+      deploymentRefetched: true,
+    };
+    const validated = (body: unknown): IngestPayloadDto =>
+      // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- pipe.transform return type is any from NestJS ValidationPipe
+      pipe.transform(body, { type: 'body', metatype: IngestPayloadDto });
+
+    it('should record every field of a synthetic turn on its series', () => {
+      ingestSignedIn(validated(turnWith(delivered)));
+
+      expect(mockMetrics.agentToolResults.add.mock.calls).toEqual([
+        [3, { ...browser, [AttributeKey.AGENT_TOOL_RESULT_DELIVERY]: 'timed' }],
+        [2, { ...browser, [AttributeKey.AGENT_TOOL_RESULT_DELIVERY]: 'excluded' }],
+        [1, { ...browser, [AttributeKey.AGENT_TOOL_RESULT_DELIVERY]: 'unsettled' }],
+      ]);
+      expect(mockMetrics.agentToolResultDelay.record).toHaveBeenCalledWith(1.25, browser);
+      const labels = {
+        ...browser,
+        [AttributeKey.AGENT_HOST_START]: 'cold',
+        [AttributeKey.AGENT_CHAT_STATE]: 'reopened',
+        [AttributeKey.AGENT_DEPLOYMENT_REFETCHED]: 'true',
+      };
+      expect(mockMetrics.agentAdmissionDelay.record.mock.calls).toEqual(
+        Object.entries(delivered.admissionDelay).map(([phase, seconds]) => [
+          seconds,
+          { ...labels, [AttributeKey.AGENT_ADMISSION_PHASE]: phase },
+        ]),
+      );
+    });
+
+    it('should label an unreported admission fact as unreported and record no delay without a timed result', () => {
+      ingestSignedIn(
+        validated(turnWith({ toolResultsExcluded: 1, toolResultDelayMax: 9, admissionDelay: { host: 0.1 } })),
+      );
+
+      expect(mockMetrics.agentToolResults.add).toHaveBeenCalledTimes(1);
+      expect(mockMetrics.agentToolResultDelay.record).not.toHaveBeenCalled();
+      expect(mockMetrics.agentAdmissionDelay.record).toHaveBeenCalledWith(0.1, {
+        ...browser,
+        [AttributeKey.AGENT_HOST_START]: 'unreported',
+        [AttributeKey.AGENT_CHAT_STATE]: 'unreported',
+        [AttributeKey.AGENT_DEPLOYMENT_REFETCHED]: 'unreported',
+        [AttributeKey.AGENT_ADMISSION_PHASE]: 'host',
+      });
+    });
+
+    it('should still reject a field outside the allowlist: dropped from the detail, or refused in a phase', () => {
+      const parsed = validated(turnWith({ ...delivered, chatId: 'chat_1', prompt: 'a bracket' }));
+
+      expect(parsed.entries[0]).toMatchObject({ detail: { agentId: 'tau', ...delivered } });
+      expect(parsed.entries[0]).not.toHaveProperty('detail.chatId');
+      expect(parsed.entries[0]).not.toHaveProperty('detail.prompt');
+      expect(() => validated(turnWith({ admissionDelay: { model: 1 } }))).toThrow();
+    });
+  });
+
   describe('agent turn context', () => {
     const context: AgentTurnContext = {
       kernelId: 'replicad',
@@ -746,6 +766,22 @@ describe('TelemetryController', () => {
 
   describe('IngestPayloadDto validation (via ZodValidationPipe)', () => {
     const pipe = new ZodValidationPipe();
+
+    it('should admit a retired kernel entry by name only, so an old client batch is not refused', () => {
+      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- pipe.transform return type is any from NestJS ValidationPipe
+      const parsed = pipe.transform(
+        {
+          entries: [
+            { name: 'observability.createGeometry', duration: 5, detail: { status: 'error', error: 'Kernel crash' } },
+            { name: 'observability.exportGeometry', duration: 5, detail: { status: 'ok', exportFormat: 'stl' } },
+          ],
+        },
+        { type: 'body', metatype: IngestPayloadDto },
+      );
+      expect(parsed).toEqual({
+        entries: [{ name: 'observability.createGeometry' }, { name: 'observability.exportGeometry' }],
+      });
+    });
 
     it('should reject entries with unknown names', () => {
       expect(() =>

@@ -5,8 +5,8 @@
  * changes either way.
  */
 import { useMemo } from 'react';
-import { isFeatureEnabled } from '#flags/feature-flags.js';
-import { subscribeFeatureFlags, useFeature } from '#flags/use-feature.js';
+import { readFeatureState } from '#flags/feature-flags.js';
+import { subscribeFeatureFlags, useFeatureState } from '#flags/use-feature.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import type { ViewResolutionLevels } from '#workbench-records/view-record-binding-changes.js';
@@ -20,7 +20,8 @@ import { exceptionsForView, useViewExceptions, viewExceptionsStore } from '#work
  * @returns The levels.
  */
 export const readViewLevels = (projectId: string, viewId: string): ViewResolutionLevels => ({
-  ...(isFeatureEnabled('viewerControls') ? { person: personRecordStores.viewer.read().viewDefaults } : {}),
+  /* Unknown reads as absent: the sessions follow the flag and re-seed the leaves when it arrives; nothing is written. */
+  ...(readFeatureState('viewerControls') === 'on' ? { person: personRecordStores.viewer.read().viewDefaults } : {}),
   exceptions: exceptionsForView(viewExceptionsStore.read(), projectId, viewId),
 });
 
@@ -64,7 +65,7 @@ export const deviceViewLevels = (projectId: string): ViewLevelsSource => ({
  * @returns The levels, stable while none of them changes.
  */
 export const useViewLevels = (projectId: string, viewId: string): ViewResolutionLevels => {
-  const viewerControls = useFeature('viewerControls');
+  const viewerControls = useFeatureState('viewerControls') === 'on';
   const { viewer } = usePersonRecord();
   const exceptions = exceptionsForView(useViewExceptions(), projectId, viewId);
   return useMemo(

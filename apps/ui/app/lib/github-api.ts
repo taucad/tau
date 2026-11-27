@@ -2,7 +2,7 @@ import { Octokit } from '@octokit/rest';
 import { z } from 'zod';
 import { metaConfig } from '#constants/meta.constants.js';
 import { ENV } from '#environment.config.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
+import { recordApiRequestId } from '@taucad/ui-core/lib/api-request-id';
 
 type GithubBranchesResponse = {
   readonly branches: ReadonlyArray<{ name: string; sha: string; updatedAt: number }>;

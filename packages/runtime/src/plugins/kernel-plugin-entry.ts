@@ -29,6 +29,10 @@ export type {
   RenderResult,
   ResolveInput,
   TessellationReport,
+  BuildReport,
+  KernelBuildReport,
+  OperationCost,
+  OperationReuse,
   ResolveOutput,
   ViewDeclaration,
   ViewInstance,
@@ -37,6 +41,7 @@ export type {
   KernelExportResult,
 } from '#types/runtime-kernel-v2.types.js';
 export type {
+  KernelExecuteOptions,
   KernelFileSystem,
   RealmGroup,
   RealmHold,
@@ -62,6 +67,7 @@ export type {
 export type { KernelPlugin } from '#plugins/plugin-types.js';
 export { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 export {
+  bindKernelModuleCode,
   convertRawIssuesToKernelIssues,
   createKernelParameterDeclaration,
   createKernelModuleShim,
@@ -69,11 +75,13 @@ export {
   extractDefaultParameters,
   isRecordObject,
   loadBinaryFile,
+  portableKernelModuleCode,
   registerKernelModule,
   toVmEntryPath,
 } from '#kernels/kernel-module-helpers.js';
 export type { RuntimeModuleExports } from '#kernels/kernel-module-helpers.js';
 export { checkAbort } from '#framework/cooperative-abort.js';
+export { isRenderAbortedError } from '#framework/runtime-operation-errors.js';
 export { createRealmGroup } from '#framework/realm-resources.js';
 export { named } from '#framework/named.js';
 export { getWebAssemblyExceptionConstructor, isWebAssemblyException } from '#framework/wasm-exception.js';

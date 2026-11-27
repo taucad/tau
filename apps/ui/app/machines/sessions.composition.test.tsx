@@ -27,13 +27,14 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { createContext, useContext, useEffect } from 'react';
 import { act, render, screen } from '@testing-library/react';
-import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { Link, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { DataMemoryRouter } from '#test-utils/data-memory-router.js';
 import { createActor, createCallbackLogic, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EventObject } from 'xstate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { ProjectRouteAccess } from '#runtime/project-library.js';
+import type { ProjectRouteAccess } from '@taucad/project-library/runtime/project-library';
 import { workbenchRecords } from '@taucad/workbench';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 
@@ -53,6 +54,14 @@ import { useChatSidebarStatus, useProjectSidebarRow } from '#hooks/use-sidebar-s
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
+
+/** The build target `@taucad/*` libraries resolve; the app's own reads still follow `TAU_TARGET`. */
+const buildTarget = vi.hoisted(() => ({ desktop: false }));
+vi.mock('@taucad/ui-core/lib/build-target', () => ({
+  get isDesktopTarget() {
+    return buildTarget.desktop;
+  },
+}));
 
 const {
   workerFrames,
@@ -374,6 +383,10 @@ const projectContextOf = (projectId: string): unknown => {
   const created = {
     projectId: 'unused',
     parameterService,
+    /* What the model gate reads of every project (T6): its main entry, its views and its geometry units. */
+    mainEntryPath: '',
+    viewRecords: new Map(),
+    geometryUnits: new Map(),
     viewGraphics: viewGraphicsOf(projectId),
     flushWorkbenchRecordProducers: producerFlushOf(projectId),
     projectRef: {
@@ -419,7 +432,7 @@ const projectContextOf = (projectId: string): unknown => {
   projectContexts.set(projectId, created);
   return created;
 };
-vi.mock('#hooks/use-project.js', () => ({
+vi.mock('#hooks/project-provider.js', () => ({
   SessionProjectProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     return (
       <StubProjectContext.Provider value={projectId}>
@@ -427,6 +440,8 @@ vi.mock('#hooks/use-project.js', () => ({
       </StubProjectContext.Provider>
     );
   },
+}));
+vi.mock('#hooks/use-project.js', () => ({
   useProject: () => projectContextOf(useContext(StubProjectContext)),
 }));
 vi.mock('#routes/w.$workspace.$project/workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
@@ -450,7 +465,7 @@ vi.mock('#hooks/use-project-slug-route.js', () => ({
         : { status: 'resolved', value: project },
   useCanonicalProjectUrlCorrection: () => undefined,
 }));
-vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: () => revisionClient }));
+vi.mock('@taucad/revisions-ui/services/revision-client-registry', () => ({ peekRevisionClient: () => revisionClient }));
 vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useRevisionClient: () => revisionClient,
@@ -461,7 +476,7 @@ vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
 /* The checkout routes are storage, and storage is a leaf here: what S48(14) is
  * about is the workbench following the selection, not where the route table is
  * persisted. */
-vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getProjectRootConfigs: async () => ({
     projects: [{ projectId: 'unused', providerBasePath: 'projects/unused' }],
@@ -510,7 +525,7 @@ vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({ Proje
 vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({ ProjectExportAction: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-print-route-intent.js', () => ({ ProjectPrintRouteIntent: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({ ProjectShareRouteIntent: () => null }));
-vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+vi.mock('#routes/w.$workspace.$project/project-workspace-provider.js', () => ({
   ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-interface.js', () => ({ ChatInterface: () => null }));
@@ -744,7 +759,7 @@ const renderRouteFamily = async (
   initialEntry = `/w/workspace/${projectId}`,
 ): Promise<{ navigate: (target: string) => Promise<void>; unmount: () => void }> => {
   const view = render(
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <DataMemoryRouter initialEntries={[initialEntry]}>
       <NavigationProbe />
       <QueryClientProvider client={queryClient}>
         <SessionsProvider actor={sessionsActor} focus={focusHost}>
@@ -765,7 +780,7 @@ const renderRouteFamily = async (
           </routeModule.ProjectSessionsHost>
         </SessionsProvider>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </DataMemoryRouter>,
   );
   await settle();
   return {
@@ -1818,7 +1833,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
         return !snapshot.matches('opening') && !snapshot.matches('closing');
       });
     const view = render(
-      <MemoryRouter initialEntries={[initialEntry]}>
+      <DataMemoryRouter initialEntries={[initialEntry]}>
         <NavigationProbe />
         <QueryClientProvider client={queryClient}>
           <SessionsProvider actor={registry.actor} focus={registry.slice}>
@@ -1829,7 +1844,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
             </routeModule.ProjectSessionsHost>
           </SessionsProvider>
         </QueryClientProvider>
-      </MemoryRouter>,
+      </DataMemoryRouter>,
     );
     unmounts.push(view.unmount);
     await settle(quiet);
@@ -1990,6 +2005,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
 describe('sessions composition — the desktop quit hold (S48(17))', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    buildTarget.desktop = false;
     delete (globalThis as { tau?: unknown }).tau;
     flushProducers.mockReset();
     for (const stop of stops.splice(0)) {
@@ -2031,6 +2047,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
   it('should refuse quit for blocked workbench intent and wait for its repaired checked write', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const asks: Array<() => void> = [];
     const answers: string[] = [];
     (globalThis as { tau?: unknown }).tau = {
@@ -2122,6 +2139,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
    */
   it('should flush every producer before it closes a session or answers main', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const asks: Array<() => void> = [];
     const order: string[] = [];
     (globalThis as { tau?: unknown }).tau = {
@@ -2165,6 +2183,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
   it('answers a quit ask buffered before the renderer mounted', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const answers: string[] = [];
     let ready = false;
     (globalThis as { tau?: unknown }).tau = {
@@ -2213,6 +2232,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
   it('paints what is being waited for, and Quit anyway answers main', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const asks: Array<() => void> = [];
     const answers: string[] = [];
     (globalThis as { tau?: unknown }).tau = {
@@ -2277,6 +2297,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
   it('shows a failed producer flush, keeps sessions live, then retries before answering quit', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const asks: Array<() => void> = [];
     const answers: string[] = [];
     (globalThis as { tau?: unknown }).tau = {

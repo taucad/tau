@@ -9,8 +9,11 @@ import type {
   WorkspaceMutationError,
   WorkspaceScope,
   ProjectRootConfiguration,
+  ProjectRootConfigurationResult,
+  RootStatus,
   ProjectDiscoveryResult,
   ProjectRouteVerification,
+  ProjectAbsence,
   ResolvedProjectManifest,
   CommitPendingProjectDirectoryInput,
   CommitPendingProjectDirectoryResult,
@@ -78,8 +81,11 @@ export type WorkspaceAuthorityClient = Pick<
   | 'mount'
   | 'unmount'
   | 'configureProjectRoots'
+  | 'getRootStatuses'
+  | 'recheckRoots'
   | 'listProjectManifests'
   | 'verifyProjectRoute'
+  | 'verifyAbsent'
   | 'commitPendingProjectDirectory'
   | 'adoptProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
@@ -200,12 +206,21 @@ export type FileSystemClient = {
    */
   mount(prefix: string, config: MountConfig): Promise<void>;
   unmount(prefix: string): void;
-  /** Replace the worker's persistent project routes from the main-thread locator store. */
-  configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void>;
+  /**
+   * Replace the worker's persistent project routes from the main-thread locator store.
+   * Resolves with one status per root; rejects only when Home cannot be admitted.
+   */
+  configureProjectRoots(configuration: ProjectRootConfiguration): Promise<ProjectRootConfigurationResult>;
+  /** The published status of each configured root, in configuration order. */
+  getRootStatuses(): Promise<RootStatus[]>;
+  /** Probe again every root that is not found, needs permission or is not responding. */
+  recheckRoots(storageRootKeys?: string[]): Promise<RootStatus[]>;
   /** Discover content-addressed projects by scanning configured physical roots. */
   listProjectManifests(): Promise<ProjectDiscoveryResult>;
   /** Verify the exact installed binding without discovery or repair. */
   verifyProjectRoute(input: { projectId: string }): Promise<ProjectRouteVerification>;
+  /** Prove from storage whether any configured root still carries an id; the discovery index is never asked. */
+  verifyAbsent(projectId: string): Promise<ProjectAbsence>;
   /** Commit one durable journal snapshot as an identity-safe manifest-last project directory. */
   commitPendingProjectDirectory(
     input: CommitPendingProjectDirectoryInput,

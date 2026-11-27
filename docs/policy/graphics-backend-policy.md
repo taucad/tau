@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, backend evidence, and kernel mesh resolution'
 status: active
 created: '2026-05-07'
-updated: '2026-11-02'
+updated: '2026-11-17'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -39,7 +39,7 @@ During consolidation, distinguish renderer family (classic or node) from the ini
 
 ### 2. Create renderers through the shared factory
 
-Use `createRenderer` in `graphics/three/renderer.ts`. The `viewport` preset with `nodePipeline: true` owns interactive antialiasing and backend depth/post-processing choices; the performance-first node candidate uses single-sample scene/frame targets while classic WebGL retains its existing MSAA; `offscreen` owns bitmap-transfer choices; `showcase` owns brand surfaces built on TSL node materials (the metal morph loader), always returning Three's node renderer so one graph serves WebGPU and its WebGL 2 backend. Await `WebGPURenderer.init()` before use, and call WebGL-only methods only after narrowing the renderer.
+Use `createRenderer` in `graphics/three/renderer.ts`. The `viewport` preset with `nodePipeline: true` owns interactive antialiasing and backend depth/post-processing choices; the performance-first node candidate uses single-sample scene/frame targets while classic WebGL retains its existing MSAA; `offscreen` owns bitmap-transfer choices; `showcase` owns brand surfaces built on TSL node materials (the metal morph loader), always returning Three's node renderer so one graph serves WebGPU and its WebGL 2 backend. Await `WebGPURenderer.init()` before use, and call WebGL-only methods only after narrowing the renderer. A browser can give a canvas no WebGL 2 context at all (hardware acceleration off, a blocklisted GPU): `createRenderer` then rejects with `GraphicsContextUnavailableError` on every preset, never with three's null-context `TypeError`. Nothing falls back from it, so it is not a WebGPU initialization error: the viewport shows its failure screen with the error's message, a showcase start remembers it for the page (`showcase-backend.ts`) and keeps its stand-in, and Sentry groups it apart at warning level (`graphics-context-failure.lib.ts`). A caller that starts a renderer without awaiting it still handles the rejection.
 
 A showcase surface is not an interactive viewer: it may prefer WebGPU when an adapter exists because Three falls back to the WebGL 2 backend on its own, and it must pause while offscreen, hidden, or under reduced motion. An adapter is not a canvas that presents: Chromium on a software adapter destroys a WebGPU canvas's device at its first presented frame. A surface whose canvas is shown, or copied from, creates its renderer with `presented: true`, which runs the viewport's first-frame check and reports such a canvas as a canvas loss (`reportWebGpuCanvasLoss`); the surface then starts once more on a fresh canvas with the backend resolved again, which lands on WebGL (`showcase-backend.ts`). It scales its own cost to the device: tessellation, post-processing, thin-film shading and frame rate follow a quality tier, and a frame-time governor steps pixel ratio, bloom and frame rate down under load.
 
@@ -122,6 +122,8 @@ Send measurement and overlay pointer events to their owning XState machine. Use 
 ### 12. Validate behavior, not only graph shape
 
 Shader graph snapshots and source fingerprints are supplementary. Pair them with focused runtime assertions. For user-visible parity, use the backend e2e harness and remote-canvas screenshots with deterministic pixel characteristics. Where a headless adapter cannot present frames, read an offscreen render target back through the renderer so the backend still yields pixel evidence; keep presented-canvas screenshots wherever the canvas does present.
+
+The render tier (`@taucad/viewer/graphics/three/render-tier`) drops ambient occlusion, FXAA and speculative camera preparation on a software rasterizer, and shrinks the environment cubemap. A test that asserts one of those passes declares it: it runs under the tier's test-only override with the features it asserts (`HardwareComposition` in `packages/viewer/src/test/hardware-composition.test-utils.tsx` for the composition) and asserts the tier the canvas resolved, so it never passes or fails on whichever adapter it got. Override only what the row asserts: SwiftShader filters a hardware-size environment for minutes. Frame-time claims are hardware claims and run on a real GPU.
 
 Test backend construction, WebGPU initialization, reversed-depth transparent ordering, alpha/depth state, clone ownership, cross-renderer material isolation, demand-frame invalidation, cache eviction, clipping-aware picking, and gesture cancellation.
 

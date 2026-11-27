@@ -91,13 +91,13 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — fifty-seven today', () => {
+  it('is every non-private type:package project, sorted — fifty-nine today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    // `geospec` left for taucad/geospec (59 to 58), then `rhino` was removed (58 to 57).
-    expect(names).toHaveLength(57);
+    // `geospec` left for taucad/geospec (59 to 58), then `rhino` was removed (58 to 57), then `heif` was added (57 to 58, #2337), then `cadmpeg` was added (58 to 59, #2588).
+    expect(names).toHaveLength(59);
     expect(names).toEqual([...names].sort());
     // Both ends of the train.
     for (const name of ['archive-core', 'runtime', 'runtime-testing', 'cli']) {
@@ -245,13 +245,13 @@ describe('validateTags()', () => {
           project('desktop-app', ['scope:ui', 'type:app', 'release:app', 'ci:desktop'], undefined),
           project('two-lanes', ['scope:ui', 'type:app-lib', 'layer:feature', 'ci:shell', 'ci:desktop'], undefined),
           project('browser-app', ['scope:ui', 'type:app', 'ci:browser', 'ci:standalone'], undefined),
-          project('quarantined-e2e', ['scope:ui', 'type:e2e', 'ci:standalone', 'ci:quarantined'], undefined),
+          project('nightly-only-e2e', ['scope:ui', 'type:e2e', 'ci:standalone', 'ci:nightly-only'], undefined),
           project('unknown-lane', ['scope:ui', 'type:app', 'ci:desktop', 'ci:packaged'], undefined),
           project('repeated-lane', ['scope:ui', 'type:app', 'ci:desktop', 'ci:desktop'], undefined),
         ],
       }),
     ).toEqual([
-      'fixture/unknown-lane: unknown tag "ci:packaged" (ci: must be one of browser, standalone, quarantined, shell, desktop, native-hosts)',
+      'fixture/unknown-lane: unknown tag "ci:packaged" (ci: must be one of browser, standalone, nightly-only, shell, desktop, native-hosts, windows-unit)',
       'fixture/repeated-lane: duplicate tag "ci:desktop"',
     ]);
   });
@@ -274,6 +274,44 @@ describe('validateTags()', () => {
       'fixture/two-roles: expected exactly one shell: tag, found shell:sandbox, shell:service',
       'fixture/shell-package: unexpected tag "shell:service" (shell: is only for type:lib or type:app-lib projects)',
       'fixture/shell-app: unexpected tag "shell:terminal" (shell: is only for type:lib or type:app-lib projects)',
+    ]);
+  });
+});
+
+describe('validateTags() for the UI layering', () => {
+  it('allows one valid ui name on a UI app library and refuses it on every other project', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('ui-lib', ['scope:ui', 'type:app-lib', 'layer:feature', 'ui:chat-ui'], undefined),
+          project('unnamed-ui-lib', ['scope:ui', 'type:app-lib', 'layer:feature'], undefined),
+          project('unknown-ui-name', ['scope:ui', 'type:app-lib', 'layer:feature', 'ui:chat'], undefined),
+          project('two-ui-names', ['scope:ui', 'type:app-lib', 'layer:feature', 'ui:infra', 'ui:ui-kit'], undefined),
+          project('ui-app', ['scope:ui', 'type:app', 'ui:infra'], undefined),
+          project('shared-app-lib', ['scope:shared', 'type:app-lib', 'layer:util', 'ui:infra'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-ui-name: unknown tag "ui:chat" (ui: must be one of ui-core, ui-kit, chat-ui, files-ui, editor-ui, revisions-ui, publish-ui, settings-ui, billing-ui, chat-surfaces, project-library, project-workspace, agent-host-ui, infra, unlayered)',
+      'fixture/two-ui-names: expected exactly one ui: tag, found ui:infra, ui:ui-kit',
+      'fixture/ui-app: unexpected tag "ui:infra" (ui: is only for scope:ui type:app-lib projects)',
+      'fixture/shared-app-lib: unexpected tag "ui:infra" (ui: is only for scope:ui type:app-lib projects)',
+    ]);
+  });
+
+  it('allows the agent protocol tag on a library or package and refuses it elsewhere', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('protocol-lib', ['scope:shared', 'type:lib', 'protocol:agent'], undefined),
+          project('protocol-package', ['scope:shared', 'type:package', 'protocol:agent'], undefined),
+          project('unknown-protocol', ['scope:shared', 'type:lib', 'protocol:rpc'], undefined),
+          project('protocol-app-lib', ['scope:ui', 'type:app-lib', 'layer:util', 'protocol:agent'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-protocol: unknown tag "protocol:rpc" (protocol: must be one of agent)',
+      'fixture/protocol-app-lib: unexpected tag "protocol:agent" (protocol: is only for type:lib or type:package projects)',
     ]);
   });
 });

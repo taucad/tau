@@ -7,6 +7,29 @@ export type DesktopReleaseChannel = 'production' | 'staging';
 export const desktopDownloadOrigin = (channel: DesktopReleaseChannel): string =>
   channel === 'staging' ? 'https://downloads.taucad.dev' : 'https://downloads.tau.new';
 
+/** Every page **Download Tau** may open is one of Tau's release pages on GitHub. */
+const releasePagesPrefix = 'https://github.com/taucad/tau/releases';
+
+/**
+ * Where **Download Tau** goes (desktop resilient startup blueprint, D8; R15). It needs nothing from the updater, so it
+ * also covers a damaged installation marker (B27) and a clock the updater refuses (B25).
+ *
+ * @param channel - The running build's channel.
+ * @param offered - The release the updater offers, when it has one.
+ * @returns The offered release's page when there is one; otherwise the latest production release, or the release list
+ * for staging, whose builds are pre-releases that `latest` does not show.
+ */
+export const desktopDownloadPage = (
+  channel: DesktopReleaseChannel,
+  offered?: { readonly releasePage?: string | undefined },
+): string => {
+  const page = offered?.releasePage;
+  if (page !== undefined && (page === releasePagesPrefix || page.startsWith(`${releasePagesPrefix}/`))) {
+    return page;
+  }
+  return channel === 'staging' ? releasePagesPrefix : `${releasePagesPrefix}/latest`;
+};
+
 export const stagingPackageVersion = (sequence: number): string => {
   if (!Number.isSafeInteger(sequence) || sequence < 1 || sequence > 99_989_999) {
     throw new TypeError('Staging sequence must be an integer from 1 to 99989999');
@@ -150,7 +173,7 @@ export type DesktopArtifact = z.infer<typeof artifactSchema>;
 export type DesktopArtifactManifest = z.infer<typeof manifestSchema>;
 
 /** The single-platform production candidates, as sorted target lists: Apple silicon Mac and Linux. */
-const desktopProductionPlatformTargets: ReadonlySet<string> = new Set(['darwin-arm64', 'linux-x64']);
+const desktopProductionPlatformTargets: ReadonlySet<string> = new Set(['darwin-arm64', 'win32-x64', 'linux-x64']);
 
 /** Parse candidate metadata without modifying the deployed legacy download.json contract. */
 export const parseDesktopArtifactManifest = (input: unknown): DesktopArtifactManifest => {
@@ -183,8 +206,9 @@ export const parseDesktopArtifactManifest = (input: unknown): DesktopArtifactMan
     artifacts.add(key);
     targets.add(artifact.target);
   }
-  // D-H5 (operator ruling 2026-11-10): production is either the all-platform candidate or one platform's own candidate
-  // (Apple silicon Mac, or Linux), which publication admits only with every route of that platform.
+  // D-H5 (operator ruling 2026-11-10, Windows added 2026-11-17): production is either the all-platform candidate or one
+  // platform's own candidate (Apple silicon Mac, Windows x64, or Linux), which publication admits only with every route
+  // of that platform.
   const productionTargets = [...targets].sort().join(',');
   if (
     manifest.channel === 'production' &&

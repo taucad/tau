@@ -89,20 +89,34 @@ describe('MountTable integration', () => {
       await context.service.writeFile(`/projects/${committedId}/main.ts`, 'committed');
       vi.spyOn(context.providerRegistry, 'getProvider').mockRejectedValueOnce(new Error('provider unavailable'));
 
-      await expect(
-        context.service.configureProjectRoots({
-          projects: [
-            {
-              projectId: replacementId,
-              backend: 'memory',
-              storageRootKey: 'memory:replacement',
-              providerBasePath: 'replacement-physical',
-            },
-          ],
-          roots: [],
-        }),
-      ).rejects.toThrow('provider unavailable');
+      const result = await context.service.configureProjectRoots({
+        projects: [
+          {
+            projectId: replacementId,
+            backend: 'memory',
+            storageRootKey: 'memory:replacement',
+            providerBasePath: 'replacement-physical',
+          },
+          {
+            projectId: committedId,
+            backend: 'memory',
+            storageRootKey: 'memory:committed',
+            providerBasePath: 'committed-physical',
+          },
+        ],
+        roots: [],
+      });
 
+      /* The failed provider skips its own route (blueprint B15) and nothing else. */
+      expect(result.skipped).toEqual([
+        {
+          kind: 'project',
+          reason: 'provider-unavailable',
+          projectId: replacementId,
+          storageRootKey: 'memory:replacement',
+        },
+      ]);
+      expect(context.mountTable.getExactMount(`/projects/${replacementId}`)).toBeUndefined();
       expect(await context.service.readFile(`/projects/${committedId}/main.ts`, 'utf8')).toBe('committed');
       context.service.dispose();
     });

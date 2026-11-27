@@ -1,0 +1,16 @@
+--- a/apps/ui/src/boot.test.ts
++++ b/apps/ui/src/boot.test.ts
+@@
+ import { expect, it } from 'vitest';
+
+ it('mounts the worker', async () => {
+   const worker = await boot();
+-  await sleep(100);
+   expect(worker.state).toBe('ready');
+ });
+
+ it('stops the worker', async () => {
+   const worker = await boot();
++  await sleep(500);
+   expect((await worker.stop()).state).toBe('stopped');
+ });

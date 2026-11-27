@@ -11,8 +11,6 @@
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { AnyShape } from 'replicad';
 import type * as ReplicadModule from 'replicad';
-import { contentDigest, digestContent } from '@taucad/cache-core';
-import type { CacheValue, ComputeAction, ContentDigest } from '@taucad/cache-core';
 import { createExportFile } from '@taucad/runtime/types';
 import type { GeometrySvg, RuntimeSpanTracer, KernelIssue, KernelStackFrame } from '@taucad/runtime/types';
 import { SourceMapConsumer } from 'source-map-js';
@@ -61,7 +59,7 @@ import {
   wrapOcForExceptions,
   occtExplicitTessellationDefaults,
 } from '@taucad/occt-core';
-import type { OcctModuleFactory, OcErrorContext, OcTracingSummary } from '@taucad/occt-core';
+import type { OcctModuleFactory, OcErrorContext, OcRunMainResult, OcTracingSummary } from '@taucad/occt-core';
 
 import {
   isDrawingShape,
@@ -78,8 +76,15 @@ import type { NativeHandleEntry } from '#interface-resolution.js';
 import type { GlbResources } from '@taucad/geometry-core';
 
 import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
-import { createReplicadComputeReuse, replicadComputeNamespace, replicadModuleFacade } from '#replicad-compute-reuse.js';
-import type { ReplicadComputeReuseAdapter } from '#replicad-compute-reuse.js';
+import { installNativeUserBreak } from '#utils/native-user-break.js';
+import { createLiveTier, installOperationTier } from '#live-tier/live-tier.js';
+import { createReplicadMeshMemo } from '#utils/mesh-memo.js';
+import { meterOperations, tierBuildReport } from '#utils/operation-cost.js';
+import type { OperationMeter } from '#utils/operation-cost.js';
+import type { ReplicadMeshMemo } from '#utils/mesh-memo.js';
+import type { LiveTier } from '#live-tier/live-tier.js';
+import { createHandleEpochs, isUseAfterReleaseMessage } from '#build-epochs.js';
+import type { CollectorGroup, HandleEpochs } from '#build-epochs.js';
 
 import type { GeometryReplicad } from '#replicad.types.js';
 import { replicadDetectPattern } from '#replicad.constants.js';
@@ -166,15 +171,6 @@ const replicadSourceMapUrl = new URL('sourcemaps/replicad.js.map', import.meta.u
 const replicadSingleWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/wasm')).href;
 const replicadMultiWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/multi/wasm')).href;
 
-// Content digests of the two shipped OCCT binaries. The digest of a shipped asset is a
-// build-time constant, so reading and SHA-256ing 23 MB again at every init (~20 ms of cold
-// start) only recovers these values. `asset-ownership.test.ts` recomputes both from the
-// installed binaries and fails when the dependency moves.
-const replicadWasmDigests = {
-  single: 'sha256:ca354769b158aa38479e6fa59bc7511d0fa896059ce755a0cff85261a637ee6a',
-  multi: 'sha256:31b1fdd375d8257218bdeb155f7aeaf34e074f8ddb01a815ea7ebfa85d4e6444',
-} as const;
-
 // =============================================================================
 // WASM variant selection
 // =============================================================================
@@ -259,34 +255,6 @@ async function resolveWasm(wasm: WasmOption, logger: RuntimeLogger, tracer?: Run
   }
 }
 
-/**
- * Identify the implementation assets that participate in compute-reuse identity.
- *
- * A built-in variant resolves to its constant digest; only a caller-supplied pair has no
- * build-time identity, so it alone is read and hashed. Returns undefined when a supplied
- * asset cannot be read, which leaves compute reuse without an implementation identity.
- *
- * @param variant - Concrete variant chosen by {@link resolveWasm}.
- * @param customUrls - Caller-supplied asset URLs, empty for the built-in variants.
- * @returns The asset digests, or undefined when they could not be identified.
- */
-async function identifyImplementationAssets(
-  variant: ResolvedWasm['variant'],
-  customUrls: readonly string[],
-): Promise<readonly ContentDigest[] | undefined> {
-  if (variant !== 'custom') {
-    return [contentDigest({ value: replicadWasmDigests[variant] })];
-  }
-
-  const loaded = await Promise.all(customUrls.map(async (url) => loadBinaryFile(url)));
-  const present = loaded.filter((bytes): bytes is ArrayBuffer => bytes !== undefined);
-  if (loaded.length === 0 || present.length !== loaded.length) {
-    return undefined;
-  }
-
-  return Promise.all(present.map(async (bytes) => digestContent({ bytes: new Uint8Array(bytes) })));
-}
-
 // =============================================================================
 // Types
 // =============================================================================
@@ -303,10 +271,32 @@ type ReplicadContext = {
   libraryExportNames: Set<string>;
   tracingSummary?: OcTracingSummary;
   libraryTrace: KernelLibraryTraceHandle<ReplicadLibrary>;
-  computeReuse: ReplicadComputeReuseAdapter<ReplicadLibrary> | undefined;
-  computeProducer: ComputeAction['producer'];
-  computeEnvironment: CacheValue;
+  /** The live tier; undefined when compute reuse is switched off for this kernel. */
+  liveTier: LiveTier<BuiltModel> | undefined;
+  /** Build and module epochs: what each delivered handle owns, deleted when the runtime releases it (E12). */
+  epochs: HandleEpochs;
+  /**
+   * Release fallback, first stage: the entry path of each module that returned or used a value its epochs had
+   * deleted, mapped to that module's bundled code and the collector group of its fresh instance. Builds of that code
+   * leave their handles to the collector. When the entry's bundle code changes, the entry is dropped and its group
+   * retired (the old instance never runs again but stays in the module map, so its memo is deleted, not collected),
+   * and the edited module starts with deterministic release again.
+   */
+  collectorModules: Map<string, { readonly code: string; readonly group: CollectorGroup }>;
+  /**
+   * Release fallback, second stage: a module's fresh instance used a deleted value again (state kept outside the
+   * bundle, such as `globalThis`). Every later build in this worker leaves its handles to the collector.
+   */
+  collectorWorker: boolean;
+  /** Meshes and boxes kept across renders (E7, N2); made by the first render with the live tier, never without it. */
+  meshMemo?: ReplicadMeshMemo;
 };
+
+/** What one build delivers: the native handle and the offers derived from it. */
+type BuiltModel = { handle: NativeHandle; issues?: KernelIssue[] } & ReturnType<typeof offersFor>;
+
+/** Handles of builds delivered with the live tier installed, and of scene-table revisits (see `serializeHandle`). */
+const tierBuiltHandles = new WeakSet<NativeHandle>();
 
 type ReplicadLibrary = typeof ReplicadModule;
 
@@ -316,7 +306,7 @@ type ReplicadLibrary = typeof ReplicadModule;
  * cannot read an unexported manifest, so this pins it; `replicad-package-identity.test.ts` fails
  * when it differs from the installed package.
  */
-const replicadPackage = { name: '@taulabs/replicad', version: '1.1.0-taulabs.1' } as const;
+const replicadPackage = { name: '@taulabs/replicad', version: '1.2.1-beta.1' } as const;
 
 // Match both the public package name (`replicad/`) and the aliased pnpm path
 // (`@taulabs/replicad/`) — the package.json aliases `replicad` to the Tau fork,
@@ -501,9 +491,11 @@ export const replicadKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: replicadDetectPattern,
   builtinModuleNames: ['replicad', '@taucad/replicad/annotations'],
+  // Resolves through the bundler and reads model sources only as bundle output.
+  sourceIdentity: 'bundle',
   builtinPackages: {
     replicad: replicadPackage,
-    'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '0.23.0-beta.0' },
+    'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '1.2.1-beta.0' },
   },
   name: 'ReplicadKernel',
   // 1.5.0: native-handle snapshots are binary BRep. The version keys every cached entry, so text
@@ -541,7 +533,8 @@ export const replicadKernel = defineKernel({
   },
   async initialize(options, runtime): Promise<ReplicadContext> {
     const replicadModule = await import('replicad');
-    const replicadLibrary = replicadModuleFacade(replicadModule);
+    // A mutable facade: the library tracer's proxies need configurable properties.
+    const replicadLibrary: ReplicadLibrary = { ...replicadModule };
     const { mangledToOriginal: exportNameMap, exportNames: libraryExportNames } = preserveExportNames(replicadModule);
 
     const { logger, tracer } = runtime;
@@ -552,6 +545,7 @@ export const replicadKernel = defineKernel({
       tessellationInstancing,
       wasm,
       computeReuse: computeReuseOption,
+      computeReuseBytes,
     } = options;
 
     const wasmLabel = typeof wasm === 'string' ? wasm : 'custom';
@@ -607,6 +601,9 @@ export const replicadKernel = defineKernel({
           logger.log(`Replicad OCCT initialised: variant=${resolved.variant} (single-threaded)`);
         }
 
+        // N1: long native booleans and meshing stop on the same abort word the exception proxy polls.
+        installNativeUserBreak(raw);
+
         // The creating kernel binds the library once (Q5): library-internal OC calls trace to it, which is
         // exact with one realm per client; every other kernel's wrapper sees only its kernel-direct calls.
         // ponytail: no unbind on last release — `replicad` keeps the stale instance until the next create rebinds it.
@@ -636,40 +633,20 @@ export const replicadKernel = defineKernel({
         logger.warn('Failed to load default font', { data: error });
       }
 
-      // Off constructs nothing: no asset read, no digest, no adapter (D14, I13, A5).
-      const identifiedAssets =
-        computeReuseOption === false
+      // Explicit off constructs nothing: no tier, no cache installed, no key built (I2). A Replicad build without
+      // the operation cache seam runs without the tier.
+      const seamProbe: Partial<ReplicadLibrary> = replicadModule;
+      const seamPresent = typeof seamProbe.setOperationCache === 'function';
+      const liveTier =
+        computeReuseOption === false || !seamPresent
           ? undefined
-          : await identifyImplementationAssets(
-              resolved.variant,
-              typeof wasm === 'string' ? [] : [wasm.wasmUrl, wasm.wasmBindingsUrl],
-            );
-      const assetsIdentified = identifiedAssets !== undefined;
-      // Explicit off wins; omission keeps the historical asset-derived default (C2).
-      const computeReuseEnabled = computeReuseOption ?? assetsIdentified;
-      const implementationAssets = identifiedAssets ?? [];
-      if (!assetsIdentified && computeReuseOption !== false) {
-        logger.warn('Replicad semantic compute reuse disabled because implementation assets could not be identified.');
-      }
-      const computeProducer = {
-        id: '@taucad/replicad',
-        version: `replicad@${replicadPackage.version}|replicad-opencascadejs@0.23.0-beta.0|adapter@1`,
-        implementationAssets,
-      };
-      const computeEnvironment = {
-        wasmVariant: resolved.variant,
-        lengthUnit: 'millimeter',
-      };
-      const computeReuse = computeReuseEnabled
-        ? createReplicadComputeReuse({
-            library: replicadLibrary,
-            enabled: true,
-            producer: computeProducer,
-            environment: computeEnvironment,
-          })
-        : undefined;
+          : createLiveTier<BuiltModel>({
+              library: replicadLibrary,
+              releaseScene: releaseBuiltModel,
+              byteBudget: computeReuseBytes,
+            });
       const libraryTrace = createKernelLibraryTracer({
-        library: computeReuse?.library ?? replicadLibrary,
+        library: replicadLibrary,
         tracer,
         mode: libraryTracing,
         policy: replicadLibraryTracePolicy,
@@ -706,9 +683,10 @@ export const replicadKernel = defineKernel({
         libraryExportNames,
         tracingSummary,
         libraryTrace,
-        computeReuse,
-        computeProducer,
-        computeEnvironment,
+        liveTier,
+        epochs: createHandleEpochs(replicadLibrary),
+        collectorModules: new Map(),
+        collectorWorker: false,
       };
     } catch (error) {
       occt.release();
@@ -731,7 +709,7 @@ export const replicadKernel = defineKernel({
       }
       bundleSourceMap = bundleResult.sourceMap;
 
-      const executeResult = await runtime.execute(bundleResult.code);
+      const executeResult = await context.epochs.inModuleEpoch(async () => runtime.execute(bundleResult.code));
       if (!executeResult.success) {
         return createKernelError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
       }
@@ -769,20 +747,49 @@ export const replicadKernel = defineKernel({
       }
       bundleSourceMap = bundleResult.sourceMap;
 
-      const buildGeometry = named('Object.createGeometry', async () => {
-        const executeResult = await runtime.execute(bundleResult.code);
-        if (!executeResult.success) {
-          throw new ReplicadBuildError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
-        }
-        entryUrl = executeResult.entryUrl;
+      // The live tier only while compute reuse is on: with it off nothing is installed and no key is built (I2).
+      const documentTier =
+        runtime.compute.status === 'on' && context.liveTier ? context.liveTier.forEntry(entryPath) : undefined;
+      // R16: a build key already seen returns its scene without running any user code.
+      const revisited = documentTier?.scenes.lookup(bundleResult.code, parameters);
+      if (revisited) {
+        return tracedStep(tracer, 'replicad.scene-table-hit', () => {
+          const delivered = aliasBuiltModel(revisited);
+          tierBuiltHandles.add(delivered.handle);
+          context.epochs.adopt(delivered.handle);
+          return { ...delivered, build: { reused: true } };
+        });
+      }
 
-        const mainResult = await tracedPhase(tracer, 'create.runOcMain', async () => {
-          const mainSpan = tracer.startSpan('replicad.run-main', {
-            phase: 'computingGeometry',
-            stage: 'brep',
-          });
+      // R18: the meter of the delivered run of user code; a fallback re-run gets a fresh one.
+      let meter: OperationMeter | undefined;
+      const collector = collectorRelease(context, entryPath, bundleResult.code);
+      let releaseFallback: 'module' | 'worker' | undefined;
+      /** Executes the module, or with `fresh` runs it again and replaces its cached instance. */
+      const executeModule = async (fresh: boolean) => {
+        const result = await context.epochs.inModuleEpoch(async () =>
+          runtime.execute(bundleResult.code, fresh ? { fresh } : undefined),
+        );
+        if (!result.success) {
+          throw new ReplicadBuildError(convertRawIssuesToKernelIssues(result.issues, relativeFilePath));
+        }
+        entryUrl = result.entryUrl;
+        return result;
+      };
+
+      const buildGeometry = named('Object.createGeometry', async () => {
+        let executeResult = await executeModule(false);
+
+        /** One run of `main` with the tier installed; a delivered value an epoch deleted fails it before `endBuild`. */
+        const runMainOnce = async (): Promise<OcRunMainResult & { released?: boolean }> => {
+          meter = documentTier ? meterOperations(documentTier.operations.cache) : undefined;
+          const endBuild =
+            documentTier && meter
+              ? installOperationTier(context.replicadLibrary, { ...documentTier.operations, cache: meter.cache })
+              : undefined;
+          let outcome: 'delivered' | 'failed' = 'failed';
           try {
-            return await context.libraryTrace.runInScope({
+            const result = await context.libraryTrace.runInScope({
               scope: 'user-main',
               operation: async () =>
                 runOcMain({
@@ -796,10 +803,76 @@ export const replicadKernel = defineKernel({
                   firstArg: context.libraryTrace.tracedLibrary,
                 }),
             });
+            if (
+              result.success &&
+              deliveredValues(context.libraryTrace.unwrap(result.value)).some((value) =>
+                context.epochs.wasReleased(value),
+              )
+            ) {
+              // A shape kept in module state and returned after the build that delivered it was released.
+              return { success: false, released: true, issues: [releasedShapeIssue()] };
+            }
+            outcome = result.success ? 'delivered' : 'failed';
+            return result;
+          } finally {
+            endBuild?.(outcome);
+          }
+        };
+
+        const mainResult = await tracedPhase(tracer, 'create.runOcMain', async () => {
+          const mainSpan = tracer.startSpan('replicad.run-main', {
+            phase: 'computingGeometry',
+            stage: 'brep',
+          });
+          try {
+            let result = await runMainOnce();
+            // Release fallback (see build-epochs.ts): a use of a value the epochs deleted runs the module fresh and
+            // leaves it to the collector; if the fresh instance fails the same way, the whole worker switches to the
+            // collector and runs it once more. Anything else, or a failure after that, is the build's.
+            while (!result.success && usedReleasedValue(context, result)) {
+              if (!collector.group && !context.collectorWorker) {
+                releaseFallback = 'module';
+                collector.group = context.epochs.collectorGroup();
+                context.collectorModules.set(entryPath, { code: bundleResult.code, group: collector.group });
+              } else if (context.collectorWorker) {
+                break;
+              } else {
+                releaseFallback = 'worker';
+                context.collectorWorker = true;
+              }
+              runtime.logger.warn(
+                releaseFallback === 'module'
+                  ? 'Replicad module used a released shape; running it fresh with collector release'
+                  : 'Replicad module used a released shape again; switching this worker to collector release',
+                { data: { filePath: relativeFilePath } },
+              );
+              // oxlint-disable-next-line eslint/no-await-in-loop -- at most two retries, each after the last one failed.
+              executeResult = await executeModule(true);
+              // oxlint-disable-next-line eslint/no-await-in-loop -- the retry runs the module just executed.
+              result = await runMainOnce();
+            }
+            return result;
           } finally {
             context.libraryTrace.emitSummary();
             context.tracingSummary?.flush();
-            mainSpan.end();
+            const fallback: Record<string, string> = releaseFallback ? { releaseFallback } : {};
+            if (documentTier) {
+              const { hits, misses, stored, opaque, failureHits, evicted, entries, bytes } =
+                documentTier.operations.stats();
+              mainSpan.end({
+                ...fallback,
+                tierHits: hits,
+                tierMisses: misses,
+                tierStored: stored,
+                tierOpaque: opaque,
+                tierFailureHits: failureHits,
+                tierEvicted: evicted,
+                tierEntries: entries,
+                tierBytes: bytes,
+              });
+            } else {
+              mainSpan.end(fallback);
+            }
           }
         });
 
@@ -807,8 +880,7 @@ export const replicadKernel = defineKernel({
           throw new ReplicadBuildError(mainResult.issues);
         }
 
-        const traced = context.libraryTrace.unwrap(mainResult.value);
-        const shapes = context.computeReuse ? context.computeReuse.unwrap(traced) : traced;
+        const shapes = context.libraryTrace.unwrap(mainResult.value);
 
         if (shapes === undefined) {
           runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
@@ -862,26 +934,18 @@ export const replicadKernel = defineKernel({
         return { handle, issues, ...offersFor(handle) };
       });
 
-      if (runtime.compute.status !== 'on' || !context.computeReuse) {
-        // Off arm: no scope, no recipe, no announcement, no publication tail.
-        return await buildGeometry();
+      const built = await buildGeometry();
+      if (documentTier) {
+        // Fail closed (catalogue N7): any build delivered with a tier installed shares native shapes with tier
+        // entries that a later build's destructive boolean may change in place, so it has no exact snapshot.
+        tierBuiltHandles.add(built.handle);
       }
-      const computeScope = runtime.compute.openScope({
-        namespace: replicadComputeNamespace,
-        producer: context.computeProducer,
-        environment: context.computeEnvironment,
-        discovery: { entryPath },
-        resident: context.computeReuse.resident,
+      documentTier?.scenes.admit(bundleResult.code, parameters, aliasBuiltModel(built));
+      // After the worker switch, state may live outside the bundle: no group is retired, the collector frees it all.
+      context.epochs.adopt(built.handle, {
+        collector: context.collectorWorker || (collector.group ?? false),
       });
-      let outcome: 'delivered' | 'failed' = 'failed';
-      try {
-        const built = await context.computeReuse.run(computeScope, buildGeometry);
-        outcome = 'delivered';
-        return built;
-      } finally {
-        // Seals metadata only; the runtime permits the tail after actual delivery.
-        computeScope.close({ outcome });
-      }
+      return documentTier ? { ...built, build: tierBuildReport(documentTier.operations, meter) } : built;
     } catch (error) {
       if (error instanceof ReplicadBuildError) {
         throw error;
@@ -934,12 +998,18 @@ export const replicadKernel = defineKernel({
       }));
 
       let renderMode: 'flat' | 'tessellation-instanced' | 'mixed' = 'flat';
+      // E7: meshes are kept across renders only with the live tier; with reuse off every render meshes (I2).
+      const meshMemo =
+        runtime.compute.status === 'on' && context.liveTier
+          ? (context.meshMemo ??= createReplicadMeshMemo({ openCascade: context.openCascade }))
+          : undefined;
       // One pass at the requested tessellation: nothing coarsens a mesh (no triangle budget).
       const rendered = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
         const renderOutputSpan = tracer.startSpan('replicad.render-output', {
           phase: 'computingGeometry',
           stage: 'render-output',
         });
+        meshMemo?.beginRender();
         try {
           return context.libraryTrace.runInScope({
             scope: 'render-output',
@@ -950,6 +1020,7 @@ export const replicadKernel = defineKernel({
                 openCascade: context.openCascade,
                 tessellationInstancing: context.tessellationInstancing,
                 tracer,
+                meshMemo,
                 onRenderMode(mode) {
                   renderMode = mode;
                 },
@@ -958,7 +1029,8 @@ export const replicadKernel = defineKernel({
         } finally {
           // Render's OC calls get their own `oc.summary`, not the next evaluation's.
           context.tracingSummary?.flush();
-          renderOutputSpan.end({ renderMode });
+          const memo = meshMemo ? memoAttributes(meshMemo) : {};
+          renderOutputSpan.end({ renderMode, ...memo });
         }
       });
 
@@ -985,6 +1057,7 @@ export const replicadKernel = defineKernel({
             images: handle.images,
             textures: handle.textures,
             samplers: handle.samplers,
+            packFacts: meshMemo?.packFacts,
             geometries: includeEdges
               ? shapes3d
               : shapes3d.map((geometry) => ({
@@ -1003,9 +1076,14 @@ export const replicadKernel = defineKernel({
           gltfSpan.end();
         }
       });
+      const memo = meshMemo?.stats();
       return {
         content: gltfBlob,
-        tessellation: rendered.tessellation,
+        // R18: the parts whose mesh the memo kept, beside the cost of the mesh.
+        tessellation:
+          memo === undefined
+            ? rendered.tessellation
+            : { ...rendered.tessellation, meshes: { reused: memo.hits, computed: memo.misses } },
         issues: mechanismIssues,
       };
     } catch (error) {
@@ -1068,6 +1146,14 @@ export const replicadKernel = defineKernel({
                 explicitDefaults: occtExplicitTessellationDefaults.export,
               });
               const { linearTolerance, angularTolerance } = requested;
+              // N14: with the live tier, the export composes the part meshes a render or an earlier export kept at
+              // these exact tolerances; what it meshes goes to the memo's one-generation export slot, not the display
+              // memo. With reuse off every export meshes, as before (I2).
+              const meshMemo =
+                runtime.compute.status === 'on' && context.liveTier
+                  ? (context.meshMemo ??= createReplicadMeshMemo({ openCascade: context.openCascade }))
+                  : undefined;
+              meshMemo?.beginExport();
               const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
                 render(namedShapes, {
                   tessellation: { linearTolerance, angularTolerance },
@@ -1075,8 +1161,11 @@ export const replicadKernel = defineKernel({
                   openCascade: context.openCascade,
                   tessellationInstancing: context.tessellationInstancing,
                   tracer: runtime.tracer,
+                  meshMemo,
                 }),
-              );
+              ).finally(() => {
+                meshMemo?.endExport();
+              });
               const temporaryShapes = renderedShapes.filter(
                 (shape): shape is GeometryReplicad => shape.format === 'replicad',
               );
@@ -1217,6 +1306,12 @@ export const replicadKernel = defineKernel({
   },
 
   serializeHandle({ handle }, runtime, context) {
+    if (tierBuiltHandles.has(handle)) {
+      // Catalogue N7: a destructive boolean may add parametric curves in place to native shapes a tier entry
+      // shares with this build, so its B-rep can differ from reuse off. A snapshot is published as byte-exact, so
+      // none is written: the refusal comes before any native work, and the durable cache keeps reuse-off builds.
+      throw new Error('A Replicad build made with the live tier has no exact native-handle snapshot.');
+    }
     return tracedStep(runtime.tracer, 'create.serializeNativeHandle', () =>
       serializeReplicadHandle(handle, context.replicadLibrary),
     );
@@ -1226,7 +1321,7 @@ export const replicadKernel = defineKernel({
     if (serialized.format !== replicadSnapshotFormat) {
       throw new Error(`Unsupported replicad native-handle snapshot format: ${String(serialized.format)}`);
     }
-    return {
+    return context.epochs.adopt({
       ...serialized,
       shapes: serialized.shapes.map((entry) => ({
         shape:
@@ -1235,7 +1330,12 @@ export const replicadKernel = defineKernel({
             : readBinaryBrep(context.replicadLibrary, entry.brep),
         ...entry.metadata,
       })),
-    };
+    });
+  },
+
+  // E12: the runtime releases a handle once nothing it keeps reaches it; its build epoch deletes what it alone owns.
+  releaseHandle({ handle }, _runtime, context) {
+    context.epochs.release(handle);
   },
 
   // D-RT-03: the realm's one OCCT instance; the host recycles the worker when this outgrows its device.
@@ -1244,9 +1344,160 @@ export const replicadKernel = defineKernel({
   observedHeapBytes: (context) => context.occt.value.wasmMemory.buffer.byteLength,
 
   async onDispose(context) {
-    context.occt.release();
+    try {
+      context.meshMemo?.dispose();
+      // Released shapes still parked for the next build are deleted with the kernel (E12).
+      context.epochs.dispose();
+      context.liveTier?.dispose();
+    } finally {
+      context.occt.release();
+    }
   },
 });
+
+/**
+ * Whether builds of an entry's module leave their handles to the collector (release fallback, first stage). An entry
+ * whose bundle code changed since it fell back is dropped. The map is empty unless a module fell back, so the normal
+ * path reads no key.
+ * @param context - The kernel context.
+ * @param entryPath - The entry being built.
+ * @param code - Its bundled code.
+ * @returns The module's collector group, if it fell back; the build sets it when it falls back.
+ */
+const collectorRelease = (
+  context: ReplicadContext,
+  entryPath: string,
+  code: string,
+): { group: CollectorGroup | undefined } => {
+  if (context.collectorModules.size === 0) {
+    return { group: undefined };
+  }
+  const fellBack = context.collectorModules.get(entryPath);
+  if (fellBack === undefined || fellBack.code === code) {
+    return { group: fellBack?.group };
+  }
+  context.collectorModules.delete(entryPath);
+  if (!context.collectorWorker) {
+    fellBack.group.retire();
+  }
+  return { group: undefined };
+};
+
+/**
+ * Whether a failed run of `main` used a value the epochs deleted: it returned one, or it threw Replicad's or embind's
+ * exact use-after-release message after the epochs had deleted something.
+ * @param context - The kernel context.
+ * @param result - The failed run.
+ * @returns True when the release fallback answers it.
+ */
+const usedReleasedValue = (
+  context: ReplicadContext,
+  result: { readonly released?: boolean; readonly issues: readonly KernelIssue[] },
+): boolean =>
+  result.released === true ||
+  (context.epochs.stats().deleted > 0 && result.issues.some(({ message }) => isUseAfterReleaseMessage(message)));
+
+/**
+ * The values a `main` result delivers, in the forms `normalizeRenderShapes` accepts: a shape, a `{ shape }` entry, an
+ * array of either, or a model with `shapes`.
+ * @param value - What `main` returned, unwrapped.
+ * @returns The candidate shape values.
+ */
+const deliveredValues = (value: unknown): unknown[] => {
+  const shapeOf = (item: unknown): unknown => (isRecordObject(item) && 'shape' in item ? item['shape'] : item);
+  if (Array.isArray(value)) {
+    return value.map((item) => shapeOf(item));
+  }
+  if (isRecordObject(value) && Array.isArray(value['shapes'])) {
+    return value['shapes'].map((item: unknown) => shapeOf(item));
+  }
+  return [shapeOf(value)];
+};
+
+/**
+ * The issue of a build whose `main` returned a shape released with an earlier build.
+ * @returns The issue.
+ */
+const releasedShapeIssue = (): KernelIssue => ({
+  message: 'This object has been deleted',
+  code: 'RUNTIME',
+  type: 'runtime',
+  severity: 'error',
+});
+
+type Aliasable = { delete?: () => void; innerShape?: { delete?: () => void }; clone(): Aliasable };
+
+/**
+ * End a render in the mesh memo and report it on the render span.
+ * @param meshMemo - The memo the render used.
+ * @returns The memo's counters for the span.
+ */
+const memoAttributes = (meshMemo: ReplicadMeshMemo): Record<string, number> => {
+  meshMemo.endRender();
+  const { hits, misses, boxHits, boxMisses, evicted, partners, bytes } = meshMemo.stats();
+  return {
+    meshMemoHits: hits,
+    meshMemoMisses: misses,
+    meshMemoBoxHits: boxHits,
+    meshMemoBoxMisses: boxMisses,
+    meshMemoEvicted: evicted,
+    meshMemoPartners: partners,
+    meshMemoBytes: bytes,
+  };
+};
+
+/**
+ * Delete the aliases a copy of a build owns. A drawing has no `delete`; its blueprint owns the native curves.
+ *
+ * @param entries - The copy's entries.
+ */
+const deleteAliases = (entries: readonly NativeHandleEntry[]): void => {
+  for (const { shape } of entries) {
+    // Typed as `AnyShape`, but a drawing entry has no `delete` at runtime.
+    const owned: Aliasable = shape;
+    if (typeof owned.delete === 'function') {
+      owned.delete();
+    } else {
+      owned.innerShape?.delete?.();
+    }
+  }
+};
+const aliasEntries = (entries: readonly NativeHandleEntry[]): NativeHandleEntry[] => {
+  const aliases: NativeHandleEntry[] = [];
+  try {
+    for (const entry of entries) {
+      aliases.push({ ...entry, shape: entry.shape.clone() });
+    }
+  } catch (error) {
+    deleteAliases(aliases);
+    throw error;
+  }
+  return aliases;
+};
+
+/**
+ * A build with new aliases of its shapes. The scene table keeps one copy and delivers another on a revisit,
+ * so nothing the runtime does with a delivered handle reaches the table (R16).
+ *
+ * @param built - The build to copy.
+ * @returns The copy, owning its aliases.
+ */
+const aliasBuiltModel = (built: BuiltModel): BuiltModel => {
+  const handle = { ...built.handle, shapes: aliasEntries(built.handle.shapes) };
+  if (tierBuiltHandles.has(built.handle)) {
+    tierBuiltHandles.add(handle);
+  }
+  return { ...built, handle };
+};
+
+/**
+ * Delete the aliases the scene table owns, once, when it evicts the scene.
+ *
+ * @param stored - The table's copy of the build.
+ */
+const releaseBuiltModel = (stored: BuiltModel): void => {
+  deleteAliases(stored.handle.shapes);
+};
 
 /**
  * Delete the shape copies an export made, as soon as the export no longer reads them (D-RT-20).
@@ -1265,33 +1516,23 @@ const replicadSnapshotFormat = 'occt-bintools';
 let snapshotSequence = 0;
 
 /**
- * Write one shape as binary BRep through MEMFS.
+ * Write one shape as binary BRep without its triangulation (G4). The live shape is read, never changed: a displayed
+ * shape keeps its display mesh (mesh-state rule, E10), and the bytes do not depend on whether it was meshed.
  *
- * The shipped binding cannot write binary without triangles: its six-argument `BinTools.Write` needs
- * the unbound `BinTools_FormatVersion` enum. So the display triangulation a render cached on the
- * live shape is dropped first. It is a cache, and the replicad mesher re-meshes on every render.
- *
- * @param library - The replicad library bound to this realm's OpenCASCADE instance.
+ * @param library - The replicad library bound to this realm's OpenCascade instance.
  * @param shape - The live shape to snapshot.
  * @returns The binary BRep bytes.
  */
 const writeBinaryBrep = (library: ReplicadLibrary, shape: AnyShape): Uint8Array<ArrayBuffer> => {
+  // `getOC()` returns `OpenCascadeInstance`, which `replicad-opencascadejs` types with `wasmMemory`: no cast needed.
   const oc = library.getOC();
-  const path = `/tmp/tau_replicad_native_handle_${++snapshotSequence}.bin`;
-  const progress = new oc.Message_ProgressRange();
+  const data = oc.ReplicadBinaryBrep.Write(shape.wrapped, false, false);
   try {
-    oc.BRepTools.Clean(shape.wrapped, false);
-    if (!oc.BinTools.Write(shape.wrapped, path, progress)) {
-      throw new Error('Replicad native-handle snapshot write failed.');
-    }
-    return new Uint8Array(oc.FS.readFile(path));
+    const pointer = data.getPtr();
+    // A copy, not a view: the buffer is freed below and a later memory.grow() would detach a view.
+    return new Uint8Array(oc.wasmMemory.buffer).slice(pointer, pointer + data.getSize());
   } finally {
-    progress.delete();
-    try {
-      oc.FS.unlink(path);
-    } catch {
-      // A failed write may leave no file; MEMFS cleanup is best-effort.
-    }
+    data.delete();
   }
 };
 

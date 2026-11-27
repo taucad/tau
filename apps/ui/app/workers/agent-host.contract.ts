@@ -17,7 +17,7 @@ import {
 } from '@taucad/agent-host/wire';
 import type { AgentWireHello } from '@taucad/agent-host/wire';
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
-import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type { PageTelemetryContext } from '#telemetry/page-telemetry.js';
 import { z } from 'zod';
@@ -282,6 +282,12 @@ export type AgentHostWorkerProtocol = {
       readonly result: undefined;
       readonly wireResult: unknown;
     };
+    /** A composer took focus: a send may follow, so each project host refreshes its deployment answer early (C7). */
+    readonly composerFocus: {
+      readonly args: Readonly<Record<string, never>>;
+      readonly result: undefined;
+      readonly wireResult: unknown;
+    };
   };
   readonly notifies: {
     readonly rebridgeRequested: { readonly args: { readonly projectId: string; readonly hostId: string } };
@@ -521,6 +527,7 @@ export const agentHostWorkerProtocolSchemas = {
       result: z.unknown(),
     },
     visibility: { args: z.strictObject({ visible: z.boolean() }), result: z.unknown() },
+    composerFocus: { args: z.strictObject({}), result: z.unknown() },
   },
   notifies: {
     rebridgeRequested: z.strictObject({ projectId: nonEmptyString, hostId: nonEmptyString }),

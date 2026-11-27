@@ -33,7 +33,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useFileTreeMap } from '#hooks/use-file-tree.js';
+import { useFileTreeMap } from '@taucad/files-ui/hooks/use-file-tree';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
@@ -41,16 +41,15 @@ import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { selectStripVerbs, useRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { requestBranchControl } from '#routes/w.$workspace.$project/revision-pane-requests.js';
-import { listedBranchesOf } from '#routes/w.$workspace.$project/history-lanes.js';
+import { requestBranchControl } from '@taucad/revisions-ui/lib/revision-pane-requests';
+import { listedBranchesOf } from '@taucad/revisions-ui/lib/history-lanes';
 import { requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
+import { getFileTreeDownloadErrorMessage } from '@taucad/files-ui/utils/file-tree-download-policy';
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
-import { captureCadImages, omittedSectionCutsNotice } from '#services/headless-capture.js';
-import { getGraphicsCameraState } from '@taucad/viewer/graphics/graphics-camera';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * The focused project's palette items. Rendered inside the focused project's view (A11), they register into the
@@ -193,6 +192,11 @@ function ProjectCommandPaletteItemsReady({ paletteId }: { readonly paletteId: st
       if (!claimedActor) {
         throw new Error('No settled CAD unit is available');
       }
+      // The capture recipe and the camera rig bring three.js; they load with the first capture (progressive loading PL5).
+      const [{ captureCadImages, omittedSectionCutsNotice }, { getGraphicsCameraState }] = await Promise.all([
+        loadCode(async () => import('#services/headless-capture.js')),
+        loadCode(async () => import('@taucad/viewer/graphics/graphics-camera')),
+      ]);
       const { files, omittedSectionCutIds } = await captureCadImages({
         cadRef: claimedActor,
         graphicsRef: mainGraphicsRef,
@@ -219,7 +223,7 @@ function ProjectCommandPaletteItemsReady({ paletteId }: { readonly paletteId: st
           return `Downloaded ${filename}`;
         },
         error(error) {
-          let message = `Failed to download ${filename}`;
+          let message = `Couldn’t download ${filename}`;
           if (error instanceof Error) {
             message = `${message}: ${error.message}`;
           }
@@ -296,7 +300,7 @@ function ProjectCommandPaletteItemsReady({ paletteId }: { readonly paletteId: st
         : [
             {
               id: 'connect-tau-cloud',
-              label: 'Back up to Tau Cloud',
+              label: 'Back up to the cloud',
               group: 'History',
               icon: <Cloud />,
               action: handleOpenSync,

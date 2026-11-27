@@ -15,7 +15,7 @@ import {
   generatedIgnoreEntries,
   isAttributesPath,
   isLargeObjectPath,
-  isTrackedLargeObjectPath,
+  placeholderPathMatcher,
   legacyBlockMatcher,
   largeObjectThresholdBytes,
   repositoryLargeObjectMatcher,
@@ -25,6 +25,10 @@ import { parseRevisionCommitMessage, revisionCommitMessage } from '#revision-hea
 import type { RevisionTrailer } from '#revision-headers.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { recordedBy } from '#test/identity.js';
+
+/* The one rule over a lone root attributes file. */
+const tracks = (path: string, attributes: string | undefined): boolean =>
+  placeholderPathMatcher(new Map(attributes === undefined ? [] : [['.gitattributes', attributes]]))(path);
 
 describe('generated ignore file', () => {
   let ignoreRoot: string;
@@ -297,33 +301,31 @@ describe('generated attributes file', () => {
 
   it('tracks one path by name, anchors it, and says so afterwards (P15)', () => {
     const families = generatedGitattributesContent(undefined);
-    expect(isTrackedLargeObjectPath('notes.txt', families)).toBe(false);
+    expect(tracks('notes.txt', families)).toBe(false);
     const tracked = generatedGitattributesContent(families, ['notes.txt', 'docs/manual.md']);
     expect(tracked).toContain('/notes.txt filter=lfs diff=lfs merge=lfs -text');
     expect(tracked).toContain('/docs/manual.md filter=lfs diff=lfs merge=lfs -text');
-    expect(isTrackedLargeObjectPath('notes.txt', tracked)).toBe(true);
-    expect(isTrackedLargeObjectPath('docs/manual.md', tracked)).toBe(true);
+    expect(tracks('notes.txt', tracked)).toBe(true);
+    expect(tracks('docs/manual.md', tracked)).toBe(true);
     // A family the table already names never earns a line of its own.
-    expect(isTrackedLargeObjectPath('models/big.step', families)).toBe(true);
+    expect(tracks('models/big.step', families)).toBe(true);
     // Idempotent: the same cut twice is the same file.
     expect(generatedGitattributesContent(tracked, ['notes.txt'])).toBe(tracked);
     // A path with whitespace has no quoting in gitattributes; `?` matches it.
     const spaced = generatedGitattributesContent(families, ['my notes.txt']);
     expect(spaced).toContain('/my?notes.txt filter=lfs');
-    expect(isTrackedLargeObjectPath('my notes.txt', spaced)).toBe(true);
+    expect(tracks('my notes.txt', spaced)).toBe(true);
   });
 });
 
 describe('the one pointer rule (D16)', () => {
   it('tracks a path only when the attributes say so, never by its family alone', () => {
-    expect(isTrackedLargeObjectPath('models/part.step', undefined)).toBe(false);
-    expect(isTrackedLargeObjectPath('models/part.step', '* text=auto\n')).toBe(false);
-    expect(isTrackedLargeObjectPath('models/part.step', '*.step filter=lfs\n')).toBe(true);
+    expect(tracks('models/part.step', undefined)).toBe(false);
+    expect(tracks('models/part.step', '* text=auto\n')).toBe(false);
+    expect(tracks('models/part.step', '*.step filter=lfs\n')).toBe(true);
     /* Git matches case-sensitively; a cut gives a case variant a line of its own instead. */
-    expect(isTrackedLargeObjectPath('PART.STEP', generatedGitattributesContent(undefined))).toBe(false);
-    expect(
-      isTrackedLargeObjectPath('kept.step', `${generatedGitattributesContent(undefined)}kept.step -filter\n`),
-    ).toBe(false);
+    expect(tracks('PART.STEP', generatedGitattributesContent(undefined))).toBe(false);
+    expect(tracks('kept.step', `${generatedGitattributesContent(undefined)}kept.step -filter\n`)).toBe(false);
   });
 
   it('replaces the block in place, so a later hand-written line still overrides it', () => {

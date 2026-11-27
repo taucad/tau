@@ -2,7 +2,7 @@ import { memo } from 'react';
 import type React from 'react';
 import { CircleAlert, Mail } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { CodeViewer } from '#components/code/code-viewer.js';
+import { CodeViewer } from '@taucad/editor-ui/components/code/code-viewer';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-details.js';
 
@@ -15,7 +15,7 @@ import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-detai
  * the refusal's fields stay in Tau Debug.
  *
  * The support address is the one the account-closure notices already use
- * (`account-closure-settings.tsx`).
+ * (`account-closure-settings` in `@taucad/billing-ui`).
  *
  * @param properties - Card class and the raw refusal for Tau Debug.
  * @returns The notice.

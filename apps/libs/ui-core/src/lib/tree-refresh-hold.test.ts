@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import { holdTreeRefreshesWhileApplying } from '#lib/tree-refresh-hold.js';
 
-/** A projection source whose only moving field is `applyingRoots`. */
+/** A projection source whose moving fields are `applyingRoots` and the selected checkout's readiness. */
 const createSource = (): {
   client: Parameters<typeof holdTreeRefreshesWhileApplying>[0]['client'];
-  publish: (applyingRoots: readonly string[] | undefined) => void;
+  publish: (
+    applyingRoots: readonly string[] | undefined,
+    reading?: Pick<RevisionStatusProjection, 'checkoutRoot' | 'readiness'>,
+  ) => void;
   listenerCount: () => number;
 } => {
   let status: RevisionStatusProjection | undefined;
@@ -20,8 +23,12 @@ const createSource = (): {
         };
       },
     },
-    publish: (applyingRoots) => {
-      status = (applyingRoots === undefined ? {} : { applyingRoots }) as RevisionStatusProjection;
+    publish: (applyingRoots, reading) => {
+      const published: Partial<RevisionStatusProjection> = {
+        ...(applyingRoots === undefined ? {} : { applyingRoots }),
+        ...reading,
+      };
+      status = published as RevisionStatusProjection;
       for (const listener of listeners) {
         listener();
       }
@@ -30,9 +37,15 @@ const createSource = (): {
   };
 };
 
-const createTree = (): { tree: { pauseRefreshes: () => () => void }; pauses: () => number; releases: () => number } => {
+const createTree = (): {
+  tree: Parameters<typeof holdTreeRefreshesWhileApplying>[0]['tree'];
+  pauses: () => number;
+  releases: () => number;
+  readsThrough: () => number;
+} => {
   let pauses = 0;
   let releases = 0;
+  let readsThrough = 0;
   return {
     tree: {
       pauseRefreshes: () => {
@@ -41,9 +54,13 @@ const createTree = (): { tree: { pauseRefreshes: () => () => void }; pauses: () 
           releases += 1;
         };
       },
+      refreshListedThroughHold: () => {
+        readsThrough += 1;
+      },
     },
     pauses: () => pauses,
     releases: () => releases,
+    readsThrough: () => readsThrough,
   };
 };
 
@@ -107,7 +124,7 @@ describe('holdTreeRefreshesWhileApplying', () => {
     const pauseRefreshes = vi.fn(() => release);
     const dispose = holdTreeRefreshesWhileApplying({
       client: source.client,
-      tree: { pauseRefreshes },
+      tree: { pauseRefreshes, refreshListedThroughHold: vi.fn() },
       root: '/projects/alpha',
     });
 
@@ -118,5 +135,56 @@ describe('holdTreeRefreshesWhileApplying', () => {
     expect(release).toHaveBeenCalledOnce();
     dispose();
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  /*
+   * STO-25: the tree first shows at `entryReady`, while the apply is still writing. A hold that re-read nothing until
+   * the apply ended showed the root as it was before the apply: every entry still to land missing, never arriving (I7).
+   */
+  it('should let one re-read of the listed tree through when its apply reaches entryReady', () => {
+    const source = createSource();
+    const { tree, pauses, releases, readsThrough } = createTree();
+    const dispose = holdTreeRefreshesWhileApplying({ client: source.client, tree, root: '/projects/alpha' });
+
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'treeReady' });
+    expect(readsThrough()).toBe(0);
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'entryReady' });
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'entryReady' });
+    expect(readsThrough()).toBe(1);
+    expect(pauses()).toBe(1);
+    expect(releases()).toBe(0);
+
+    /* The next apply's first view is another one. */
+    source.publish(undefined, { checkoutRoot: '/projects/alpha', readiness: 'materialized' });
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'entryReady' });
+    expect(readsThrough()).toBe(2);
+    dispose();
+  });
+
+  /* Readiness is monotonic only within one tree: a second tree write inside one hold reads treeReady, then entryReady. */
+  it('should re-read through the hold on each entry into entryReady within one hold', () => {
+    const source = createSource();
+    const { tree, pauses, readsThrough } = createTree();
+    holdTreeRefreshesWhileApplying({ client: source.client, tree, root: '/projects/alpha' });
+
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'entryReady' });
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'treeReady' });
+    expect(readsThrough()).toBe(1);
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'entryReady' });
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'entryReady' });
+
+    expect(readsThrough()).toBe(2);
+    expect(pauses()).toBe(1);
+  });
+
+  it('should not re-read through the hold for another checkout’s readiness', () => {
+    const source = createSource();
+    const { tree, readsThrough } = createTree();
+    holdTreeRefreshesWhileApplying({ client: source.client, tree, root: '/projects/alpha' });
+
+    source.publish(['/projects/alpha'], { checkoutRoot: '/checkouts/linked-1', readiness: 'entryReady' });
+    source.publish(undefined, { checkoutRoot: '/projects/alpha', readiness: 'entryReady' });
+
+    expect(readsThrough()).toBe(0);
   });
 });

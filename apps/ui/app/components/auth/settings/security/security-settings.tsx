@@ -1,12 +1,12 @@
 'use client';
 
-import { SettingsGroup, SettingsItem } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsItem } from '@taucad/settings-ui/components/settings/settings-item';
 
 import { useAuth } from '@better-auth-ui/react';
 import { cn } from '@taucad/ui/utils/cn';
 import { ActiveSessions } from '#components/auth/settings/security/active-sessions.js';
-import { ChangePassword } from '#components/auth/settings/security/change-password.js';
-import { LinkedAccounts } from '#components/auth/settings/security/linked-accounts.js';
+import { ChangePassword } from '@taucad/settings-ui/components/auth/settings/security/change-password';
+import { LinkedAccounts } from '@taucad/settings-ui/components/auth/settings/security/linked-accounts';
 import { GithubPermissions } from '#components/auth/settings/security/github-permissions.js';
 import { EmailDeliverabilityBanner } from '#components/auth/settings/account/email-deliverability-banner.js';
 

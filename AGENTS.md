@@ -26,7 +26,7 @@ Use Nx tasks and workspace generators; inspect help/source for unfamiliar flags.
 
 ## Scope and authority
 
-Before editing, read `AGENTS.md` from the root through each target parent, in order; combine chains for multiple paths. Apply the policy conditions below and include applicable instruction paths in delegated briefs. Start a bounded native task in its narrowest suitable directory when supported; root-started tasks still read target descendants explicitly.
+Before editing, read `AGENTS.md` from the root through each target parent, in order; combine chains for multiple paths. Apply the policy conditions below and include applicable instruction paths in delegated briefs. Start a bounded native task in its narrowest suitable directory when supported; root-started tasks still read target descendants.
 
 System, developer and current user instructions take precedence. [Design](docs/policy/design-policy.md) governs user-facing design. Applicable normative policies cannot be weakened by operational AGENTS files or skills. Local AGENTS narrow ancestor operation within their directory, consistently with those policies; skills implement that task contract. Resolve contradictions at the owning source.
 
@@ -58,7 +58,7 @@ Project configuration and exports define current interfaces.
 Read the owners for each touched concern:
 
 - TS/JS/declarations: [lint](docs/policy/lint-policy.md), [TypeScript](docs/policy/typescript-policy.md), [JSDoc](docs/policy/jsdoc-policy.md); public APIs also [library API](docs/policy/library-api-policy.md)
-- Tests/specs/harnesses: [testing](docs/policy/testing-policy.md); React/jsdom adds [React testing](docs/policy/react-testing-policy.md); TLA+/Lean specs add [formal verification](docs/policy/formal-verification-policy.md)
+- Tests/specs/harnesses/CI failures: [testing](docs/policy/testing-policy.md); React/jsdom adds [React testing](docs/policy/react-testing-policy.md); TLA+/Lean specs add [formal verification](docs/policy/formal-verification-policy.md)
 - XState: [XState](docs/policy/xstate-policy.md); revision graphs/checkouts/machines/sync also [revisions](docs/policy/revisions-policy.md)
 - React/Tailwind/tokens/accessibility: [DESIGN](docs/policy/design-policy.md), [React](docs/policy/react-policy.md), [UI](docs/policy/ui-policy.md), [color](docs/policy/color-policy.md), [accessibility](docs/policy/accessibility-policy.md), [pages](docs/policy/page-composition-policy.md)
 - Agent capabilities/upgrades/telemetry: [observability](docs/policy/agent-observability-policy.md)

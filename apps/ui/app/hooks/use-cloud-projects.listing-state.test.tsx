@@ -11,13 +11,15 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PropsWithChildren } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setRevisionSessionUser } from '#lib/revision-actor.js';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 import { useCloudProjects } from '#hooks/use-cloud-projects.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Deployment environment keys.
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));
 
 const fetchMock = vi.fn<typeof fetch>();
+const safeMode = vi.hoisted(() => ({ on: false }));
+vi.mock('#hooks/use-runtime-safe-mode.js', () => ({ useRuntimeSafeMode: () => safeMode.on }));
 
 let client: QueryClient;
 const createWrapper = () => {
@@ -32,6 +34,7 @@ const createWrapper = () => {
 const cloudOf = (result: { readonly current: ReturnType<typeof useCloudProjects> }): string => result.current.cloud;
 
 beforeEach(() => {
+  safeMode.on = false;
   localStorage.clear();
   setRevisionSessionUser(undefined);
   fetchMock.mockReset();
@@ -44,6 +47,27 @@ afterEach(() => {
 });
 
 describe('H6: the cloud listing state', () => {
+  /* W9 R5 (operator ruling): safe mode makes no Tau Cloud read, the deletion recovery and a person's Retry included. */
+  it('reports safe-mode and never reads Tau Cloud in safe mode, a Retry included', async () => {
+    safeMode.on = true;
+    setRevisionSessionUser({ id: 'user-1', name: 'One' } as Parameters<typeof setRevisionSessionUser>[0]);
+    localStorage.setItem(
+      'tau:cloud-project-deletions:user-1',
+      JSON.stringify([{ id: 'p1', name: 'P', state: 'checking' }]),
+    );
+    const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
+
+    expect(cloudOf(result)).toBe('safe-mode');
+    await act(async () => {
+      await result.current.retry();
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(cloudOf(result)).toBe('safe-mode');
+  });
+
   it('H6: reports fetching while the listing request is in flight, then ready once it answers', async () => {
     const response = Promise.withResolvers<Response>();
     fetchMock.mockImplementation(async () => response.promise);

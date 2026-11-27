@@ -143,7 +143,7 @@ export const installBrowserHost = ({
         return;
       }
       page.state.isLoading = false;
-      page.state.error = 'This page could not be loaded. Check the address and your connection, then reload.';
+      page.state.error = 'Couldn’t load this page. Check the address and your connection, then reload.';
       page.view.setVisible(false);
       publish(owner);
     }
@@ -220,7 +220,7 @@ export const installBrowserHost = ({
       state.error =
         code <= -200 && code >= -299
           ? 'The connection is not trusted. Check the website certificate or use another address.'
-          : 'This page could not be loaded. Check the address and your connection, then reload.';
+          : 'Couldn’t load this page. Check the address and your connection, then reload.';
       state.isLoading = false;
       view.setVisible(false);
       publish(owner);

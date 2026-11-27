@@ -6,6 +6,7 @@ import {
   desktopFileLabel,
   detectDesktopPlatform,
   isArchivePlatform,
+  isBetaPlatform,
 } from '#www/downloads.js';
 import type { QualifiedDesktopDownload } from '#www/downloads.js';
 import { downloadsOrigin, environmentHref, stagingDesktopNote } from '#www/environment.js';
@@ -39,7 +40,8 @@ export const initializeHostDownload = (hostname: string): void => {
   const instructions = document.querySelector('[data-install-instructions]');
   const note = document.querySelector('[data-platform-note]');
   if (detail) {
-    detail.textContent = download.detail;
+    // The hero button carries no badge, so its detail line says beta.
+    detail.textContent = isBetaPlatform(hostPlatform) ? `${download.detail} · beta` : download.detail;
   }
   if (instructions) {
     instructions.textContent = download.install;
@@ -65,6 +67,13 @@ const macDiskImage = (
     ? { platform: choice.platform, archive }
     : undefined;
 };
+
+/**
+ * A copy of the page's server-rendered Beta badge, so catalog entries carry the same markup and classes.
+ * @returns The badge, or undefined when the page renders none.
+ */
+const betaBadge = (): Node | undefined =>
+  document.querySelector('.download-title [data-slot="badge"]')?.cloneNode(true);
 
 /**
  * Show a qualified Mac disk image's detail with its paired ZIP as a visible secondary link.
@@ -169,6 +178,9 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
         for (const entry of document.querySelectorAll<HTMLElement>(`[data-mac-route="${diskImage.platform}"]`)) {
           entry.hidden = entry.dataset['macHero'] !== undefined && host !== 'mac';
         }
+        for (const entry of document.querySelectorAll<HTMLElement>(`[data-beta-route="${diskImage.platform}"]`)) {
+          entry.hidden = true;
+        }
       }
       for (const link of document.querySelectorAll<HTMLAnchorElement>(
         `a[data-download-platform="${choice.platform}"]`,
@@ -186,6 +198,10 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
         if (detail) {
           describe(detail);
         }
+        // The hero button carries no badge, so its detail line says beta.
+        if (detail && isBetaPlatform(choice.platform)) {
+          detail.append(' · beta');
+        }
         const instructions = document.querySelector('[data-install-instructions]');
         if (instructions) {
           instructions.textContent = choice.install;
@@ -202,6 +218,10 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
       }
       const heading = document.createElement('summary');
       heading.textContent = `${choice.label} — installation and archive downloads`;
+      const badge = isBetaPlatform(choice.platform) ? betaBadge() : undefined;
+      if (badge) {
+        heading.append(' ', badge);
+      }
       section.append(heading);
       const body = document.createElement('div');
       body.className = 'installer-guide-body';

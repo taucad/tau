@@ -6,7 +6,7 @@ import type { ExportFile } from '@taucad/runtime/types';
 import type * as RenderModule from 'nanoraster';
 import type { TranscoderServices } from '@taucad/runtime/transcoder';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import { imageTranscoder } from '#image.transcoder.js';
+import { renderTranscoder } from '#image.transcoder.js';
 import { imageEdgeSchemas } from '#image-export-options.js';
 
 const backendMock = vi.hoisted(() => ({ load: vi.fn() }));
@@ -67,7 +67,7 @@ const glbFile = (bytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46])): ExportFile =
 });
 
 describe('image transcoder', () => {
-  const resolveImageDefinition = async () => resolveRuntimePluginDefinition('transcoder', imageTranscoder());
+  const resolveImageDefinition = async () => resolveRuntimePluginDefinition('transcoder', renderTranscoder());
   let imageDefinition: Awaited<ReturnType<typeof resolveImageDefinition>>;
   let context: { renderer: typeof RenderModule; adapter: RenderModule.AdapterInfo | undefined };
   let runtime: TranscoderServices;
@@ -96,7 +96,7 @@ describe('image transcoder', () => {
 
   describe('initialize', () => {
     it('should version renderer output for export cache invalidation', () => {
-      expect(imageDefinition.version).toBe('16.0.0');
+      expect(imageDefinition.version).toBe('17.0.0');
     });
 
     it('should load the renderer and describe its adapter once during initialize', () => {
@@ -519,8 +519,9 @@ describe('image transcoder', () => {
       const ao = {
         radiusPixels: 9.6,
         intensity: 0.75,
-        distanceFalloff: 1,
-        thicknessRatio: 1 / 0.09,
+        distanceFalloff: 0.5,
+        falloffEndRatio: 22,
+        falloffRange: 0.8,
         denoiseDepthTolerance: 0.1,
         samples: 16,
         resolutionScale: 0.5,

@@ -5,6 +5,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /*
@@ -87,6 +88,8 @@ export default defineConfig({
     },
   },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     provide: { webGpuProfile, surfaceAa: 'on', parity: { outDir: outputDirectory, fixtures, backends } },
     include: ['src/graphics/three/viewer-parity-capture.browser.test.tsx'],
     testTimeout: 600_000,

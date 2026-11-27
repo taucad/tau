@@ -152,6 +152,13 @@ export const createIdentityTracer = (options: IdentityTracerOptions = {}) => {
       if (!failed) {
         if (options.onResult) options.onResult(result, entry, rawLibrary);
         const identity: Identity = { id, identifiable, allowListed };
+        /* Effect model (audit F7): a call on a receiver that returns nothing (a mutator) or returns the receiver
+         * itself (a builder) has changed the receiver, so the receiver's identity advances to this call's. Without
+         * it, two runs that mutate the same object differently give every later call on it the same identity, and
+         * a ceiling counts those calls as shared. Identity is conservative here: a void call that does not mutate
+         * also advances, which only under-counts sharing. */
+        if (input.receiver && (result === undefined || result === input.receiver))
+          identities.set(input.receiver, identity);
         result = wrapResult(result, identity);
       }
     }
@@ -176,7 +183,8 @@ export const createIdentityTracer = (options: IdentityTracerOptions = {}) => {
           call({
             op: property,
             receiver: object,
-            receiverIdentity: identity ?? identities.get(object),
+            // The receiver's current identity: it advances when a builder or mutator changes the object (F7).
+            receiverIdentity: identities.get(object) ?? identity,
             invoke: () => method.apply(object, values.map(unwrap)),
             args: values,
           });
@@ -222,7 +230,7 @@ export const createIdentityTracer = (options: IdentityTracerOptions = {}) => {
               op: property,
               invoke: () => Reflect.construct(object as new (...v: unknown[]) => unknown, values.map(unwrap)),
               args: values,
-            });
+            }) as object;
           },
         });
         proxied.set(value as object, proxy);

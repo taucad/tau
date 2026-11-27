@@ -1,15 +1,23 @@
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
-import { useCallback, useEffect, useState } from 'react';
+import { CoveringSheetStatus } from '#routes/w.$workspace.$project/covering-sheet.js';
+import { PaneWaitSkeleton, ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useProject } from '#hooks/use-project.js';
 import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
-import { DebugProbes } from '#chat-clients/debug-probes.js';
+import { ChatSignInReturn } from '#routes/w.$workspace.$project/chat-sign-in-return.js';
 import { ENV } from '#environment.config.js';
-import { ChatPaneSkeleton } from '@taucad/project-workspace/components/chat-pane-skeleton';
+import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
+
+/* Debug-only probes for the e2e specs, with the headless capture recipe: their own chunk (progressive loading PL5). */
+const DebugProbes = lazyCode(async () => {
+  const module = await import('#chat-clients/debug-probes.js');
+  return { default: module.DebugProbes };
+});
 
 /**
  * Renders when `ensureFocusedChatActor` rejects. Surfaces the typed
@@ -106,16 +114,23 @@ export function ChatInterfaceSessionGate({
           bodyless body factory, which every consumer of `useCadChatClient`
           used to write over each other. */}
       <ChatTurnHost />
-      {ENV.TAU_DEBUG ? <DebugProbes /> : null}
+      {/* The chat's one owner of a return from sign-in: the card that sends the person there only arms it. */}
+      <ChatSignInReturn />
+      {ENV.TAU_DEBUG ? (
+        <Suspense fallback={null}>
+          <DebugProbes />
+        </Suspense>
+      ) : null}
       {children}
     </ActiveChatProvider>
   );
 }
 
 /**
- * Visual gate for the chat pane. Decides between the skeleton (while
- * the editor machine is re-ensuring the focused chat), the typed error
- * panel (when ensure rejected), or the pane's real content.
+ * Visual gate for the chat pane. Decides between the lane's frame (while
+ * the project opens, with the transcript's shape, or while the editor
+ * machine is re-ensuring the focused chat), the typed error panel (when
+ * ensure rejected), or the pane's real content.
  *
  * Does NOT mount `<ActiveChatProvider>` — that is owned by
  * {@link ChatInterfaceSessionGate} so the viewer toolbar and every
@@ -125,7 +140,8 @@ export function ChatInterfaceSessionGate({
  */
 export function ChatHistoryGate({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const { editorRef } = useProject();
-  const availability = useProjectAvailability();
+  /* Open on the chats' own records (SP2h), never on a partial history (I7): not on the whole apply. */
+  const availability = useProjectAvailability('chats');
   const chats = useRevisionStatus()?.sync.chats;
   const { syncNow } = useRevisionCommands();
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
@@ -142,28 +158,34 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
   );
 
   if (availability !== 'ready') {
-    return <ProjectSyncPlaceholder state={availability} />;
+    /* The lane keeps its frame through the open and its feed draws the transcript's shape; the viewer says the open
+       (Progressive Loading Policy rules 15 and 17). The frame's composer box, served from first paint, stays over the
+       lane's foot until a composer adopts it, and queues a send meanwhile (rule 20). */
+    return (
+      <ChatLaneFrame headerStatus={<CoveringSheetStatus />}>
+        <ProjectWaitSkeleton state={availability} shape='transcript' label='Chat' />
+      </ChatLaneFrame>
+    );
+  }
+  if (focusedChatId === undefined && !focusedChatError && chats !== 'disabled' && chats !== 'failed') {
+    /* The chats are still on their way: the lane keeps its frame and its feed draws the transcript's shape, with no
+       words (Progressive Loading Policy rule 15; UI Policy § 5). */
+    return (
+      <ChatLaneFrame>
+        <PaneWaitSkeleton shape='transcript' label='Chat' />
+      </ChatLaneFrame>
+    );
   }
   if (focusedChatId === undefined && !focusedChatError) {
     return (
-      <div
-        className='flex size-full flex-col items-center justify-center gap-2 p-6 text-center'
-        role='status'
-        aria-busy={chats === 'loading' || chats === 'unknown'}
-      >
+      <div className='flex size-full flex-col items-center justify-center gap-2 p-6 text-center' role='status'>
         <p className='text-sm font-medium'>
-          {chats === 'disabled'
-            ? 'Chat sync is off'
-            : chats === 'failed'
-              ? 'Couldn’t load chat history'
-              : 'Loading chat history'}
+          {chats === 'disabled' ? 'Chats aren’t included in this project’s backup' : 'Couldn’t load chat history'}
         </p>
         <p className='max-w-64 text-xs text-muted-foreground'>
           {chats === 'disabled'
             ? 'Your project files are available. Create a new chat to work here.'
-            : chats === 'failed'
-              ? 'Your project files are available. Try loading your chats again.'
-              : 'Your project files can open while chats arrive.'}
+            : 'Your project files are available. Try loading your chats again.'}
         </p>
         {chats === 'failed' ? (
           <Button size='sm' variant='outline' onClick={syncNow}>
@@ -178,7 +200,12 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
   }
 
   if (isEnsuring) {
-    return <ChatPaneSkeleton variant='ensuring' />;
+    /* The focused chat is being established again: the same frame and shape, no words. */
+    return (
+      <ChatLaneFrame>
+        <PaneWaitSkeleton shape='transcript' label='Chat' />
+      </ChatLaneFrame>
+    );
   }
 
   // oxlint-disable-next-line react/jsx-no-useless-fragment -- forwarding children verbatim

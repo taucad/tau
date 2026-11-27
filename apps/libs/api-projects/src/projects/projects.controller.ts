@@ -186,7 +186,7 @@ export class ProjectsController {
     if (!entitlements.canSyncFiles) {
       throw new ForbiddenException({
         code: 'GIT_SYNC_NOT_ENTITLED',
-        message: 'Syncing files to Tau Cloud is a paid plan feature.',
+        message: 'Syncing files to the cloud is a paid plan feature.',
       });
     }
 
@@ -223,7 +223,7 @@ export class ProjectsController {
       if ((counted?.value ?? 0) >= registeredProjectLimitPerOwner) {
         throw new ForbiddenException({
           code: 'PROJECT_LIMIT_REACHED',
-          message: `This account has reached its limit of ${String(registeredProjectLimitPerOwner)} projects on Tau Cloud.`,
+          message: `This account has reached its limit of ${String(registeredProjectLimitPerOwner)} projects in the cloud.`,
         });
       }
       await transaction.insert(project).values({

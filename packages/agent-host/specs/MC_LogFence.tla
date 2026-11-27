@@ -1,13 +1,14 @@
 ------------------------------ MODULE MC_LogFence ------------------------------
 (* Apalache instance of LogFence. Three writers stand for two workers and    *)
+(* S4's follower; a write is a batch of up to four rows (WP-10 step A).     *)
 (* S4's follower. IndInit starts from an arbitrary IndInv state whose log   *)
 (* holds at most six rows; epochs and view lengths are unbounded integers.  *)
 (* No EXTENDS Apalache (its Gen): the runner's SANY pass has no Apalache    *)
 (* library, so the arbitrary state is built from existentials over Int.     *)
 EXTENDS LogFence
 
-ConstInit == Writers = {"w1", "w2", "f"} /\ Conditional = TRUE
-ConstInitNoCheck == Writers = {"w1", "w2", "f"} /\ Conditional = FALSE
+ConstInit == Writers = {"w1", "w2", "f"} /\ Conditional = TRUE /\ MaxBatch = 4
+ConstInitNoCheck == Writers = {"w1", "w2", "f"} /\ Conditional = FALSE /\ MaxBatch = 4
 
 \* @type: (Int, Str) => {e: Int, w: Str};
 R(e, w) == [e |-> e, w |-> w]

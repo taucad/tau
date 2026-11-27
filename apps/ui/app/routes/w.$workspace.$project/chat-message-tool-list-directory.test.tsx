@@ -101,7 +101,7 @@ vi.mock('@taucad/ui-kit/icons/file-extension-icon', () => ({
 
 const editorSendMock = vi.fn();
 
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink({ children, path }: { readonly children: React.ReactNode; readonly path: string }): React.JSX.Element {
     return (
       <span

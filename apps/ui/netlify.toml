@@ -27,7 +27,7 @@
 [build]
 # Vendored engine licences must clear before any deploy artifact is built.
 # Paths relative to site base directory (`apps/ui`, set in Terraform).
-command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && node scripts/write-content-security-policy-headers.mts build/client && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/verify-shipped-assets.mts build/client && node scripts/retain-previous-assets.mts"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui --skip-nx-cache && node scripts/stamp-build-release.mts build && node scripts/write-content-security-policy-headers.mts build/client && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/verify-shipped-assets.mts build/client && node scripts/retain-previous-assets.mts"
 publish = "build/client"
 
 # The last step keeps the previous deploys' `/assets/*` in this one, so a page
@@ -43,22 +43,26 @@ publish = "build/client"
 # Temporary: current Netlify plan cannot create Builds-scoped secrets.
 NX_NO_CLOUD = "true"
 
-# The React Router plugin writes the SSR function to `.netlify/v1/functions`
-# under this base. Naming that directory makes Netlify bundle the function from
-# its real path, where its import of `build/server/server.js` resolves, as a
-# user function that outranks the copy `deploy-ui.yml` exposes as a framework
+# The React Router plugin (`@netlify/vite-plugin-react-router` 4.x) writes the
+# SSR function `react-router-server.mjs` to `.netlify/v1/functions` under this
+# base. It imports the Environment API server build `build/server/index.js` and
+# the adapter's `serverless` request handler. Naming that directory makes
+# Netlify bundle the function from its real path, where both imports resolve, as
+# a user function that outranks the copy `deploy-ui.yml` exposes as a framework
 # function through its `.netlify` link (which ships without the server build).
+# Server source maps never reach it: `ui:build` moves them to
+# `build/server-sourcemaps` (SSR bundle policy rule 5).
 [functions]
 directory = ".netlify/v1/functions"
 
 [context.production]
-command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && node scripts/write-content-security-policy-headers.mts build/client && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/verify-shipped-assets.mts build/client && node scripts/write-skew-protection-config.mts && node scripts/retain-previous-assets.mts"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui --skip-nx-cache && node scripts/stamp-build-release.mts build && node scripts/write-content-security-policy-headers.mts build/client && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && SENTRY_AUTH_TOKEN=\"$TAU_SENTRY_AUTH_TOKEN\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; }) && node scripts/verify-shipped-assets.mts build/client && node scripts/write-skew-protection-config.mts && node scripts/retain-previous-assets.mts"
 
 [context.deploy-preview]
-command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && node scripts/write-content-security-policy-headers.mts build/client"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui --skip-nx-cache && node scripts/stamp-build-release.mts build && node scripts/write-content-security-policy-headers.mts build/client"
 
 [context.branch-deploy]
-command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && node scripts/write-content-security-policy-headers.mts build/client"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui --skip-nx-cache && node scripts/stamp-build-release.mts build && node scripts/write-content-security-policy-headers.mts build/client"
 
 [dev]
 command = "pnpm nx dev ui"
@@ -74,6 +78,12 @@ TAU_WEBSOCKET_URL = "ws://localhost:4001"
 # Marketing site: `netlify/edge-functions/marketing.ts` proxies a full load of
 # `/` and the apps/www pages to the deploy named by the `MARKETING_ORIGIN` site
 # variable (set per site in tau-cloud). Unset, every request reaches the app.
+# A GET or HEAD of `/` with the `tau-entry=app` preference gets the prerendered
+# Home shell (progressive loading PL4): the edge function rewrites it to
+# `/__shell/home/index.html`, where the build moves the prerender of `/`
+# (scripts/place-static-shells.ts), and expires `tau_skew` on it. Nothing else
+# at `/`, and not the root data request (`/_root.data`, or `/_.data` with
+# trailing-slash-aware data requests; the edge function accepts both), changes delivery.
 
 # The docs site serves documentation at its root, so the old runtime-scoped
 # LLM indexes are replaced by its top-level ones rather than moving verbatim.
@@ -125,6 +135,32 @@ to = "https://docs.tau.new/llms.mdx/:splat"
 status = 301
 force = true
 
+# Static shells (progressive loading PL3). Every `/w/:workspace/:project` document is the
+# prerendered `build/client/w/__shell/__shell/index.html`, served by the CDN through the
+# edge function netlify/edge-functions/static-shell.ts, whose paths hold each segment to
+# the dotless grammar. No rule here rewrites to the shell: the React Router function is
+# registered with `preferStatic`, so a rule answers before it, and a rule's `:project`
+# also matches `<project>.data`, the project's data request. `.data` requests, `/preview`
+# and every other `/w/…` shape stay on the function, which excludes nothing and renders
+# the same document whenever the edge function passes a request on. The shell's headers
+# are the static ones below and `_headers`, which match a function document's
+# (scripts/check-static-shells.mts). Generated from app/lib/route-classes.ts;
+# app/lib/route-classes.test.ts fails when this block drifts. The edge cache serves the
+# shell without the `Set-Cookie` below on a hit, so the edge function sets the same
+# expiry on every shell response.
+# BEGIN static shell routing
+[[redirects]]
+from = "https://www.tau.new/w/*"
+to = "https://tau.new/w/:splat"
+status = 301
+force = true
+
+[[headers]]
+for = "/w/*"
+[headers.values]
+Set-Cookie = "tau_skew=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax"
+# END static shell routing
+
 [[headers]]
 for = "/*"
 [headers.values]
@@ -143,8 +179,10 @@ Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(),
 Cross-Origin-Opener-Policy = "same-origin"
 Cross-Origin-Resource-Policy = "same-origin"
 Cross-Origin-Embedder-Policy = "require-corp"
-# JavaScript Profiling
-Document-Policy = "js-profiling"
+# Document-Policy (`js-profiling`) is not set here: like the CSP below it differs per site.
+# Function documents send it off the production origin only (OQ-P11), so the build writes it
+# into staging's `_headers` and never into production's
+# (scripts/write-content-security-policy-headers.mts).
 # Content Security Policy (CSP), report-only. It is not set here: this file is
 # shared by both sites, which both deploy the production context, so it cannot
 # name only one environment's hosts. Each build writes its site's policy into
@@ -179,10 +217,31 @@ Reporting-Endpoints = 'default="/api/reports"'
 
 # The apex selects marketing or the app from a presentation cookie. Never reuse
 # one visitor's document for another, or restore stale HTML after switching.
+# The edge function also sets these on every answer at `/`, the Home shell included.
 [[headers]]
 for = "/"
 [headers.values]
 Cache-Control = "private, no-store"
+CDN-Cache-Control = "no-store"
+Netlify-CDN-Cache-Control = "no-store"
+
+# The web app's service worker (progressive loading PL7, scripts/build-service-worker.ts).
+# Never stored by the browser or the CDN, so a new deploy's worker, the kill switch's
+# included (TAU_SERVICE_WORKER_KILL_SWITCH), reaches a visitor on their next page load.
+# server.ts sends the same for a self-hosted serve.
+[[headers]]
+for = "/service-worker.js"
+[headers.values]
+Cache-Control = "no-cache, no-store, must-revalidate"
+CDN-Cache-Control = "no-store"
+Netlify-CDN-Cache-Control = "no-store"
+
+# The retiring worker at the retired /usage worker's URL (ui@0.3.0 and earlier registered
+# /offline-shell-worker.js at scope /), stored nowhere for the same reason.
+[[headers]]
+for = "/offline-shell-worker.js"
+[headers.values]
+Cache-Control = "no-cache, no-store, must-revalidate"
 CDN-Cache-Control = "no-store"
 Netlify-CDN-Cache-Control = "no-store"
 

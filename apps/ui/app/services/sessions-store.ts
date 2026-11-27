@@ -24,7 +24,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, AnyActorRef, EventObject } from 'xstate';
 import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
-import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { isDesktopTarget } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { liveProjectBudgetFor, sessionsMachine } from '#machines/sessions.machine.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import type {
@@ -47,6 +47,8 @@ import type { ProjectChoices } from '#runtime/choices.js';
 import { createWorkspaceFacade, readied, servicesBound, servicesOf } from '#runtime/file-manager-facade.js';
 import type { FacadeFiles } from '#runtime/file-manager-facade.js';
 import type {
+  SessionRevisionsAheadInput,
+  SessionRevisionsAheadPorts,
   SessionRevisionsCallback,
   SessionRevisionsEmitted,
   SessionRevisionsEvent,
@@ -55,7 +57,7 @@ import type {
 } from '#runtime/session-revisions.js';
 import type { HostConnectorCallback, HostConnectorChatStore, HostConnectorPorts } from '#runtime/host-connector.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import { openSessionFileManager, trackSessionFileManager } from '#runtime/session-file-manager.js';
 import type { SessionFileManager, SessionFileManagerPorts } from '#runtime/session-file-manager.js';
 import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';
@@ -665,6 +667,12 @@ export type SessionRevisionsModule = Readonly<{
   ) => SessionRevisionsPorts;
 }>;
 
+/** The same module as the registry's early open loads it (STO-25 SP6). @public */
+export type SessionRevisionsAheadModule = Readonly<{
+  openRevisionsAheadOfSession: (ports: SessionRevisionsAheadPorts) => (input: SessionRevisionsAheadInput) => () => void;
+  createSessionRevisionsAheadPorts: (reportFault: (error: unknown) => void) => SessionRevisionsAheadPorts;
+}>;
+
 /** The `hostConnector` module as the session loads it (D5). @public */
 export type HostConnectorModule = Readonly<{
   hostConnectorCallback: (ports: HostConnectorPorts) => HostConnectorCallback;
@@ -903,6 +911,166 @@ const unloadOn = (wiring: SessionWiring) =>
       waiting.clear();
     };
   });
+
+/** The route request focus holds, as far as an early open reads it: which project it names, if any. @public */
+export type SessionsAheadRouteRequest = Readonly<{
+  requestId: string;
+  home: boolean;
+  projectId?: string;
+  slugs?: Readonly<{ workspaceSlug: string; projectSlug: string }>;
+}>;
+
+/**
+ * Focus as an early open reads it: the route's request, and where an open settled. `focusedOn` is the project focus is
+ * focused on; `heldOn` the project focus holds on an answer that opens nothing (start failed, access refused, trashed,
+ * missing, …).
+ *
+ * @public
+ */
+export type SessionsAheadFocusView = Readonly<{
+  request?: SessionsAheadRouteRequest;
+  focusedOn?: string;
+  heldOn?: string;
+}>;
+
+/** The registry as an early open reads it: which projects have a session, and in what state. @public */
+export type SessionsAheadRegistryView = Pick<SessionsMachineContext, 'refs' | 'status'>;
+
+/** What an *Open* gesture asks of the registry's composition: start its project's open now (STO-25 SP6). @public */
+export type SessionsOpenAheadGesture = Readonly<{
+  projectId: string;
+  /** The project's route slugs: its workspace is the one the session opens it in (B7). */
+  slugs: Readonly<{ workspaceSlug: string; projectSlug: string }>;
+  /** The gesture asserted the project active on Tau Cloud just before. */
+  asserted?: boolean;
+}>;
+
+/** Start a gesture's open; @returns its release, for a gesture whose navigation failed. @public */
+export type SessionsOpenAhead = (gesture: SessionsOpenAheadGesture) => () => void;
+
+/**
+ * The registry's early open (STO-25 SP6): the *Open* gesture starts its project's revision client, and its Tau Cloud
+ * open, before the project route's code has loaded, through the same lazily loaded module and worker the project's
+ * session will use, so the session's `revisions` child takes the same connection when the registry opens the project.
+ *
+ * Liveness is the registry's, with no timer: one gesture at a time (a newer one releases the last), and a gesture's
+ * connection lives until the project's session takes it. It is released when focus's route request names another
+ * place (the person went elsewhere); when the open settles without a session for the project (focus focused on it with
+ * none, after a budget decline, or held on an answer that opens nothing, after a start failure); when the registry's
+ * session for it fails, closes or goes; when who is signed in changes; or when the gesture itself releases it. A
+ * release never closes a client a session holds (`openRevisionsAheadOfSession`), so once a session's `revisions` child
+ * took the client these are no-ops. The desktop's revisions are its host's, so nothing starts there; nor before the
+ * shared worker exists.
+ *
+ * @param input - The `revisions` module loader, the shared worker, focus, the registry and whether this is the desktop.
+ * @returns The gesture's entry point.
+ * @public
+ */
+export const createSessionsOpenAhead = (
+  input: Readonly<{
+    loadRevisions: () => Promise<SessionRevisionsAheadModule>;
+    worker: () => Worker | undefined;
+    focus: SessionsObservable<SessionsAheadFocusView>;
+    registry: SessionsObservable<SessionsAheadRegistryView>;
+    /** The desktop build; read from the bridge unless a row says. */
+    desktop?: boolean;
+  }>,
+): SessionsOpenAhead => {
+  const load = loadOnce(input.loadRevisions);
+  let current: Readonly<{ projectId: string; release: () => void }> | undefined;
+  return (gesture) => {
+    const worker = input.worker();
+    if ((input.desktop ?? isDesktopTarget) || worker === undefined) {
+      return () => undefined;
+    }
+    if (current?.projectId === gesture.projectId) {
+      return current.release;
+    }
+    current?.release();
+    const { projectId, slugs } = gesture;
+    const ended = new AbortController();
+    let releaseOpen: (() => void) | undefined;
+    const startedAt = input.focus.get().request?.requestId;
+    /* Whether the registry has had a session for the project since the gesture: one that goes ended without it. */
+    let hadSession = input.registry.get().refs[projectId] !== undefined;
+    let stopFollowing: () => void = () => undefined;
+    const names = (request: SessionsAheadRouteRequest): boolean =>
+      !request.home &&
+      (request.projectId === undefined
+        ? request.slugs?.workspaceSlug === slugs.workspaceSlug && request.slugs.projectSlug === slugs.projectSlug
+        : request.projectId === projectId);
+    const slot = {
+      projectId,
+      release: (): void => {
+        if (ended.signal.aborted) {
+          return;
+        }
+        ended.abort();
+        if (current === slot) {
+          current = undefined;
+        }
+        stopFollowing();
+        try {
+          releaseOpen?.();
+        } catch (error) {
+          reportAppRuntimeFault(error);
+        }
+      },
+    };
+    current = slot;
+    /* Whether the gesture's open is over without a session for the project, or the person is elsewhere. */
+    const isOver = (): boolean => {
+      const { request, focusedOn, heldOn } = input.focus.get();
+      if (request !== undefined && request.requestId !== startedAt && !names(request)) {
+        return true;
+      }
+      const { refs, status } = input.registry.get();
+      const hasSession = refs[projectId] !== undefined;
+      const state = status[projectId]?.state;
+      const sessionEnded =
+        (hadSession && !hasSession) || state === 'failed' || state === 'closing' || state === 'closed';
+      hadSession ||= hasSession;
+      return sessionEnded || heldOn === projectId || (focusedOn === projectId && !hasSession);
+    };
+    const follow = (): void => {
+      if (isOver()) {
+        slot.release();
+      }
+    };
+    const stopFocus = input.focus.subscribe(follow);
+    const stopRegistry = input.registry.subscribe(follow);
+    stopFollowing = () => {
+      stopFocus();
+      stopRegistry();
+    };
+    if (ended.signal.aborted) {
+      /* Released while subscribing: let go of what was just taken. */
+      stopFollowing();
+      return slot.release;
+    }
+    // async-iife: bootstrap -- the gesture never waits on the module; the session loads the same one.
+    void (async (): Promise<void> => {
+      try {
+        const module = await load();
+        if (ended.signal.aborted) {
+          return;
+        }
+        releaseOpen = module.openRevisionsAheadOfSession(
+          module.createSessionRevisionsAheadPorts(reportAppRuntimeFault),
+        )({
+          projectId,
+          workspace: slugs.workspaceSlug,
+          worker,
+          ...(gesture.asserted === true ? { asserted: true } : {}),
+        });
+      } catch (error) {
+        reportAppRuntimeFault(error);
+        slot.release();
+      }
+    })();
+    return slot.release;
+  };
+};
 
 /* A registry composed without wiring (rows that run the registry alone) starts none of these, and its sessions'
  * `revisions` child answers a quiesce at once. */

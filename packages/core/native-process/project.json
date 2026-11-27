@@ -21,7 +21,7 @@
       },
       "options": {
         "cwd": "{workspaceRoot}/packages/core/native-process",
-        "command": "../../../node_modules/.bin/vitest run --config vitest.config.ts src/native-sandbox.integration.test.ts"
+        "command": "vitest run --config vitest.config.ts src/native-sandbox.integration.test.ts"
       }
     }
   }

@@ -57,6 +57,13 @@ describe('selected project route verification', () => {
     ).toBe(true);
     expect(writes).not.toHaveBeenCalled();
     expect(scan).not.toHaveBeenCalled();
+    // It names the directory it read, as discovery locates that directory, so a caller can tell which copy it proved.
+    const discovery = await context.service.listProjectManifests();
+    const discovered = discovery.entries.find((entry) => 'projectId' in entry && entry.projectId === projectId);
+    expect(result).toMatchObject({
+      storageRootKey: discovered?.locator.storageRootKey,
+      providerBasePath: discovered?.locator.relativeDirectory,
+    });
   });
 
   it('should require discovery rather than fall through to the parent mount', async () => {
@@ -118,9 +125,14 @@ describe('selected project route verification', () => {
   it('should report failed configuration as unavailable until a successful configuration', async () => {
     await seed();
     const route = { projectId, backend: 'indexeddb', providerBasePath: 'selected' } as const;
+    /* Only Home can fail a configuration now (blueprint D1): its provider refuses once. */
+    const unreadable = vi
+      .spyOn(context.providerRegistry, 'getProvider')
+      .mockRejectedValue(Object.assign(new Error('Home is unreadable.'), { code: 'EIO' }));
     await expect(
-      context.service.configureProjectRoots({ roots: [{ backend: 'indexeddb' }], projects: [route, route] }),
-    ).rejects.toThrow();
+      context.service.configureProjectRoots({ roots: [{ backend: 'indexeddb' }], projects: [route] }),
+    ).rejects.toMatchObject({ code: 'HOME_ROOT_UNAVAILABLE' });
+    unreadable.mockRestore();
     await expect(context.service.verifyProjectRoute({ projectId })).resolves.toEqual({ status: 'unavailable' });
     await context.service.configureProjectRoots({
       roots: [{ backend: 'indexeddb' }],

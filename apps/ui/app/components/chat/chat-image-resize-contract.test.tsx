@@ -1,20 +1,20 @@
 /**
- * Chat-image resize chokepoint contract test.
+ * Chat-image chokepoint contract test.
  *
  * Locks the image policy for every entry point:
  *
- *   user-provided images are resized to the chat byte ceiling, while generated
- *   headless captures are retained byte-for-byte so lossless renders are not
+ *   user-provided images go through the one storage policy — canonical images within the limits pass through
+ *   unchanged and never reach the converter (I6), any other image is converted to JPEG through the runtime's
+ *   transcode port (I3) — while generated headless captures are retained byte-for-byte so lossless renders are not
  *   silently downscaled and converted to JPEG.
  *
  * The 12 entry points (OS drag-drop, file picker, paste, Tiptap paste, viewer
  * toolbar, viewer-pane drag, desktop @-suggestion single + composite, mobile
  * @-popover current/all/per-view, and edit-mode draft) all converge on
  * `addDraftAttachment` / `addEditDraftAttachment`. We assert the contract by driving the **real**
- * `resizeImageActor` (wrapping the **real** `resizeImageForChat` with
- * FakeImage stubs where upload compression applies) through every entry-point category. Failure paths are
- * also covered: a corrupt image in a multi-file batch must NOT block the
- * surviving images, and a single failure must surface as one toast via the
+ * `resizeImageActor` (the real `normalizeImageAttachment`, with a fake transcode port standing in for the runtime
+ * worker) through every entry-point category. Failure paths are also covered: a corrupt image in a multi-file batch
+ * must NOT block the surviving images, and a single failure must surface as one refusal via the
  * `imageResizeFailed` emit subscriber.
  *
  * If a future contributor adds a 13th entry point, they MUST extend the
@@ -22,79 +22,49 @@
  */
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- test fixture constants use SCREAMING_SNAKE_CASE */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createActor, createAsyncLogic, waitFor as xstateWaitFor } from 'xstate';
-import { draftMachine } from '#hooks/draft.machine.js';
-import { resizeImageActor } from '@taucad/chat-ui/hooks/resize-image.actor';
-import { MAX_DATA_URL_LENGTH } from '@taucad/chat-ui/utils/resize-image';
+import { uint8ArrayToBase64 } from 'uint8array-extras';
+import { attachmentImageBackground, attachmentImageLimits } from '@taucad/agent-host/wire';
+import type { AttachmentTranscodeInput } from '@taucad/agent-host/wire';
+import { draftMachine } from '@taucad/chat-ui/hooks/draft.machine';
+import { createResizeImageActor } from '#hooks/attachment-image.actor.js';
 import type { StoredAttachment } from '@taucad/chat-ui/utils/attachment.utils';
-import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
+import type { DraftAttachmentModel } from '@taucad/chat-ui/hooks/draft.machine';
+import { AttachmentRefusedError } from '@taucad/chat-ui/utils/attachment-refusal';
 
-const SMALL_JPEG_DATA_URL = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
-const SMALL_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==';
-const OVERSIZED_RAW_URL = `data:image/png;base64,${'A'.repeat(2_000_000)}`;
+/** A PNG header of the given size; the policy reads only headers. */
+const pngOf = (width: number, height: number): Uint8Array<ArrayBuffer> => {
+  const bytes = new Uint8Array(33);
+  const view = new DataView(bytes.buffer);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52]);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  bytes.set([0x08, 0x06, 0x00, 0x00, 0x00], 24);
+  return bytes;
+};
+
+/** A baseline JPEG frame header of the given size. */
+const jpegOf = (width: number, height: number): Uint8Array<ArrayBuffer> => {
+  const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0, 0, 0, 0, 0x03, 0x01, 0x22, 0x00]);
+  const view = new DataView(bytes.buffer);
+  view.setUint16(7, height);
+  view.setUint16(9, width);
+  return bytes;
+};
+
+const dataUrlOf = (mediaType: string, bytes: Uint8Array<ArrayBuffer>): string =>
+  `data:${mediaType};base64,${uint8ArrayToBase64(bytes)}`;
+
+const SMALL_JPEG_DATA_URL = dataUrlOf('image/jpeg', jpegOf(100, 100));
+const SMALL_PNG_DATA_URL = dataUrlOf('image/png', pngOf(100, 100));
+const OVERSIZED_PNG_DATA_URL = dataUrlOf('image/png', pngOf(4000, 4000));
+/** A PNG signature with no header: the policy refuses it as unreadable. */
+const CORRUPT_PNG_DATA_URL = dataUrlOf('image/png', pngOf(4000, 4000).slice(0, 12));
 const MALFORMED_URL = 'data:image/png,not-base64';
 
-let mockImageWidth = 4000;
-let mockImageHeight = 4000;
-let mockImageShouldErrorFor: ReadonlySet<string> = new Set();
-let canvasDataUrl = SMALL_JPEG_DATA_URL;
-
-class FakeImage {
-  public naturalWidth = 0;
-  public naturalHeight = 0;
-  private readonly listeners: Record<string, Array<() => void>> = {};
-  private currentSrc = '';
-  public addEventListener(event: string, handler: () => void) {
-    this.listeners[event] ??= [];
-    this.listeners[event].push(handler);
-  }
-  public get src(): string {
-    return this.currentSrc;
-  }
-  public set src(value: string) {
-    this.currentSrc = value;
-    setTimeout(() => {
-      if (mockImageShouldErrorFor.has(value)) {
-        for (const handler of this.listeners['error'] ?? []) {
-          handler();
-        }
-        return;
-      }
-      this.naturalWidth = mockImageWidth;
-      this.naturalHeight = mockImageHeight;
-      for (const handler of this.listeners['load'] ?? []) {
-        handler();
-      }
-    }, 0);
-  }
-}
-
-beforeEach(() => {
-  mockImageWidth = 4000;
-  mockImageHeight = 4000;
-  mockImageShouldErrorFor = new Set();
-  canvasDataUrl = SMALL_JPEG_DATA_URL;
-  vi.stubGlobal('Image', FakeImage);
-  const createElementMock = (tag: string): HTMLElement => {
-    if (tag === 'canvas') {
-      return {
-        width: 0,
-        height: 0,
-        getContext: () => ({ drawImage: vi.fn() }),
-        toDataURL: () => canvasDataUrl,
-      } as unknown as HTMLCanvasElement;
-    }
-    return document.createElementNS('http://www.w3.org/1999/xhtml', tag);
-  };
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions, typescript/no-deprecated -- electron's WebviewTag overload is the one mockImplementation captures (and the one marked deprecated); the mock only ever builds HTML elements.
-  vi.spyOn(document, 'createElement').mockImplementation(createElementMock as typeof document.createElement);
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
+/** What the fake runtime converts every image to: a 1200×1200 JPEG header. */
+const CONVERTED = jpegOf(1200, 1200);
 
 const visionModel: DraftAttachmentModel = {
   name: 'Vision',
@@ -106,10 +76,20 @@ type StoreInput = { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?
 /** What reached `storing`, in order: the bytes the draft will reference. */
 const stored: StoreInput[] = [];
 
+/** The conversions the fake runtime was asked for, in order. */
+const conversions: AttachmentTranscodeInput[] = [];
+const transcode = vi.fn(async (input: AttachmentTranscodeInput): Promise<Uint8Array<ArrayBuffer>> => {
+  conversions.push(input);
+  return CONVERTED;
+});
+
 const provideRealResize = () =>
   draftMachine.provide({
     actors: {
-      resizeImageActor,
+      resizeImageActor: createResizeImageActor({
+        transcode,
+        loadTranscodeSources: async () => ['jpeg', 'png', 'webp', 'gif', 'avif', 'bmp', 'tiff'],
+      }),
       storeAttachmentActor: createAsyncLogic<{ type: 'attachmentStored'; attachment: StoredAttachment }, StoreInput>({
         run: async ({ input }) => {
           stored.push(input);
@@ -129,14 +109,11 @@ const provideRealResize = () =>
 
 const startActor = () => {
   stored.length = 0;
+  conversions.length = 0;
   const actor = createActor(provideRealResize(), { input: {} });
   actor.start();
   return actor;
 };
-
-/** Base64 data-URL length of stored bytes, the unit `MAX_DATA_URL_LENGTH` is stated in. */
-const dataUrlLength = (input: StoreInput): number =>
-  `data:${input.mediaType};base64,`.length + Math.ceil(input.bytes.byteLength / 3) * 4;
 
 type EntryDispatch = (actor: ReturnType<typeof startActor>, raw: string) => void;
 
@@ -231,7 +208,7 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
     it(`should apply the draft image policy to ${entry.label}`, async () => {
       const actor = startActor();
       try {
-        entry.dispatch(actor, OVERSIZED_RAW_URL);
+        entry.dispatch(actor, OVERSIZED_PNG_DATA_URL);
         const resultState = await xstateWaitFor(
           actor,
           (s) => {
@@ -247,11 +224,21 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
         ).toMatchObject({ hash: '1'.padStart(64, '0') });
         const [kept] = stored;
         if (entry.preserveOriginal) {
-          expect(kept).toMatchObject({ mediaType: 'image/png' });
-          expect(dataUrlLength(kept!)).toBe(OVERSIZED_RAW_URL.length);
+          expect(kept).toMatchObject({ mediaType: 'image/png', bytes: pngOf(4000, 4000) });
+          expect(conversions).toEqual([]);
         } else {
-          expect(kept).toMatchObject({ mediaType: 'image/jpeg' });
-          expect(dataUrlLength(kept!)).toBeLessThanOrEqual(MAX_DATA_URL_LENGTH);
+          expect(kept).toMatchObject({ mediaType: 'image/jpeg', bytes: CONVERTED });
+          expect(conversions).toEqual([
+            expect.objectContaining({
+              from: 'png',
+              to: 'jpeg',
+              options: {
+                maxEdge: attachmentImageLimits.maxEdge,
+                maxBytes: attachmentImageLimits.maxBytes,
+                background: attachmentImageBackground,
+              },
+            }),
+          ]);
         }
       } finally {
         actor.stop();
@@ -259,19 +246,16 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
     });
   }
 
-  it('should keep the queue ordered FIFO and produce sized URLs in original drop order (multi-file drop)', async () => {
+  it('should keep the queue ordered FIFO, pass canonical images through and convert only the oversized ones', async () => {
     const actor = startActor();
     try {
       const inputs = [
         SMALL_PNG_DATA_URL,
-        OVERSIZED_RAW_URL,
+        OVERSIZED_PNG_DATA_URL,
         SMALL_JPEG_DATA_URL,
-        OVERSIZED_RAW_URL,
+        OVERSIZED_PNG_DATA_URL,
         SMALL_PNG_DATA_URL,
       ];
-      // Make small URLs short-circuit (already within limits, returned unchanged)
-      mockImageWidth = 100;
-      mockImageHeight = 100;
 
       for (const raw of inputs) {
         actor.send({ type: 'addDraftAttachment', dataUrl: raw, model: visionModel });
@@ -286,7 +270,7 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
       expect(finalState.context.draftAttachments.map((attachment) => attachment.hash)).toEqual(
         ['1', '2', '3', '4', '5'].map((index) => index.padStart(64, '0')),
       );
-      // Small images pass through unchanged; the oversized ones were compressed to JPEG.
+      // Canonical images within the limits pass through byte for byte; the oversized ones were converted to JPEG.
       expect(stored.map((input) => input.mediaType)).toEqual([
         'image/png',
         'image/jpeg',
@@ -294,18 +278,15 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
         'image/jpeg',
         'image/png',
       ]);
-      for (const input of stored) {
-        expect(dataUrlLength(input)).toBeLessThanOrEqual(MAX_DATA_URL_LENGTH);
-      }
+      expect(stored[0]!.bytes).toEqual(pngOf(100, 100));
+      expect(stored[2]!.bytes).toEqual(jpegOf(100, 100));
+      expect(conversions).toHaveLength(2);
     } finally {
       actor.stop();
     }
   });
 
-  it('should drain the queue after a failed image inside a multi-file drop (4 valid + 1 corrupt) and emit exactly one failure', async () => {
-    const corruptRaw = `data:image/png;base64,${'B'.repeat(2_000_000)}`;
-    mockImageShouldErrorFor = new Set([corruptRaw]);
-
+  it('should drain the queue after a corrupt image inside a multi-file drop (4 valid + 1 corrupt) and emit exactly one refusal', async () => {
     const actor = startActor();
     try {
       const failures: Error[] = [];
@@ -314,14 +295,10 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
       });
 
       actor.send({ type: 'addDraftAttachment', dataUrl: SMALL_PNG_DATA_URL, model: visionModel });
-      actor.send({ type: 'addDraftAttachment', dataUrl: corruptRaw, model: visionModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: CORRUPT_PNG_DATA_URL, model: visionModel });
       actor.send({ type: 'addDraftAttachment', dataUrl: SMALL_JPEG_DATA_URL, model: visionModel });
       actor.send({ type: 'addDraftAttachment', dataUrl: SMALL_PNG_DATA_URL, model: visionModel });
       actor.send({ type: 'addDraftAttachment', dataUrl: SMALL_JPEG_DATA_URL, model: visionModel });
-
-      // Use small images so they short-circuit the resize ladder
-      mockImageWidth = 100;
-      mockImageHeight = 100;
 
       const finalState = await xstateWaitFor(
         actor,
@@ -331,8 +308,34 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
 
       expect(finalState.context.draftAttachments).toHaveLength(4);
       expect(failures).toHaveLength(1);
-      expect(failures[0]).toBeInstanceOf(Error);
-      expect(failures[0]!.message).toBe('Failed to load image');
+      expect(failures[0]).toBeInstanceOf(AttachmentRefusedError);
+      expect((failures[0] as AttachmentRefusedError).copy).toEqual({
+        title: "Couldn't attach this image",
+        description: "This PNG file is damaged or incomplete, so it couldn't be read.",
+      });
+      expect(conversions).toEqual([]);
+      subscription.unsubscribe();
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should refuse an image whose conversion fails, by name, and keep nothing', async () => {
+    transcode.mockRejectedValueOnce(new Error('worker terminated'));
+    const actor = startActor();
+    try {
+      const failures: Error[] = [];
+      const subscription = actor.on('imageResizeFailed', (event) => {
+        failures.push(event.error);
+      });
+
+      actor.send({ type: 'addDraftAttachment', dataUrl: OVERSIZED_PNG_DATA_URL, model: visionModel });
+      await xstateWaitFor(actor, (s) => s.context.attachmentQueue.length === 0, { timeout: 2000 });
+
+      expect(stored).toEqual([]);
+      expect((failures[0] as AttachmentRefusedError).copy.description).toBe(
+        "Couldn't convert this PNG image. Try again, or save it as JPEG and attach that.",
+      );
       subscription.unsubscribe();
     } finally {
       actor.stop();

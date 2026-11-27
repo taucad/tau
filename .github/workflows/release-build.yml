@@ -362,8 +362,6 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
-        with:
-          node-version: '24.10.0'
 
       - name: Check the packaging host
         run: |
@@ -768,7 +766,7 @@ jobs:
           SHA256: ${{ steps.layer.outputs.sha256 }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
+          curl --fail --silent --show-error --location --retry 7 --retry-all-errors \
             --output "$RUNNER_TEMP/public" "$DEPENDENCY_BASE_URL$KEY"
           echo "$SHA256  $RUNNER_TEMP/public" | sha256sum --check --strict
 
@@ -777,7 +775,10 @@ jobs:
   # 150 MB (X2). Before anything is published the built CLI prepares it from a
   # file:// mirror into an empty dependency store and serves it from there, and the
   # serve-build gate runs against that store path with the in-tree build moved
-  # aside. The pin is composed here and landed by a follow-up PR; until then
+  # aside. The layer holds no cadmpeg engine: the daemon mounts the CLI's own
+  # installed cadmpeg-ts engines same-origin (cadmpeg engine delivery charter
+  # W6), and the smoke test fetches one from it and checks its digest against
+  # cadmpeg-ts/digests. The pin is composed here and landed by a follow-up PR; until then
   # `packages/cli/serve-ui-layer.json` is a fail-closed placeholder.
   serve-ui-layer:
     needs: [resolve, verify-app]
@@ -819,7 +820,10 @@ jobs:
           jq . out/serve-ui-layer/tau-layer.json
       # The pin is written into this checkout only, so the CLI built next embeds it; the mirror is
       # the one source the preparation host may use (no fallback to the pinned URLs, which are not
-      # published yet).
+      # published yet). `--smoke-test` fetches the smallest cadmpeg engine from the daemon serving the
+      # prepared store's UI and refuses unless it answers as application/wasm with the isolation headers
+      # and the exact bytes cadmpeg-ts/digests states; `engines == "mounted"` proves it ran, so a layer
+      # built against another cadmpeg-ts than this checkout installs (EQ1) fails here.
       - name: Prepare and serve the layer from an empty dependency store
         run: |
           set -euo pipefail
@@ -835,7 +839,7 @@ jobs:
           TAU_CONFIG_DIR="$RUNNER_TEMP/tau-config" TAU_DEPENDENCY_MIRROR="file://$RUNNER_TEMP/mirror/" \
             TAU_DEPENDENCY_MIRROR_NO_FALLBACK=1 node packages/cli/dist/bin/tau.mjs serve "$RUNNER_TEMP/project" \
             --smoke-test --json --port=0 --no-external-agents | tee "$RUNNER_TEMP/serve.json"
-          jq -e '.kind == "serve" and .ok == true and .ui == true' "$RUNNER_TEMP/serve.json" > /dev/null
+          jq -e '.kind == "serve" and .ok == true and .ui == true and .engines == "mounted"' "$RUNNER_TEMP/serve.json" > /dev/null
           root=$(find "$RUNNER_TEMP/tau-config/dependencies/closures/sha256" -mindepth 3 -maxdepth 3 \
             -path '*/client/index.html' -printf '%h\n')
           test "$(wc -l <<< "$root")" = 1
@@ -1030,7 +1034,7 @@ jobs:
           SHA256: ${{ steps.layer.outputs.sha256 }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
+          curl --fail --silent --show-error --location --retry 7 --retry-all-errors \
             --output "$RUNNER_TEMP/public" "$DEPENDENCY_BASE_URL$KEY"
           echo "$SHA256  $RUNNER_TEMP/public" | sha256sum --check --strict
 
@@ -1076,6 +1080,16 @@ jobs:
         with:
           ref: refs/tags/${{ needs.resolve.outputs.tag }}
           persist-credentials: false
+      # The checkout above can be a commit older than this workflow, so the apt installer comes from this
+      # workflow's own commit (scripts/src/apt-resilience.test.ts).
+      - name: Check out this workflow's apt installer
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          path: .tau-ci
+          sparse-checkout: .github/actions/apt-install
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
@@ -1088,10 +1102,11 @@ jobs:
           set -euo pipefail
           pipx install uv
           uv --version
-          if [ "$RUNNER_OS" = Linux ]; then
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq libcurl4-openssl-dev zlib1g-dev
-          fi
+      - name: Install the libcurl and zlib headers for prepare-git
+        if: runner.os == 'Linux'
+        uses: ./.tau-ci/.github/actions/apt-install
+        with:
+          packages: libcurl4-openssl-dev zlib1g-dev
 
       # The Linux package seals the build123d closure it ships (charter W6), and its
       # seal step compiles bytecode inside the native sandbox.
@@ -1234,8 +1249,6 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/setup-nx
-        with:
-          node-version: '24.10.0'
       # The candidate is still a draft, which this job's read-only token cannot
       # see: take the archive and download.json desktop-publish attached from the
       # run's artifacts, whose public R2 bytes desktop-mirror verified.
@@ -1265,7 +1278,7 @@ jobs:
           found=false
           origin=https://downloads.tau.new
           if [ "$CHANNEL" = staging ]; then origin=https://downloads.taucad.dev; fi
-          status=$(curl --silent --show-error --retry 3 --output "$RUNNER_TEMP/current.json" --write-out '%{http_code}' "$origin/latest/download.json")
+          status=$(curl --silent --show-error --retry 7 --retry-all-errors --output "$RUNNER_TEMP/current.json" --write-out '%{http_code}' "$origin/latest/download.json")
           if [ "$status" != 200 ] && [ "$status" != 404 ]; then echo "Current download pointer returned $status" >&2; exit 1; fi
           # Prefer the actual installed channel baseline. Only initial bootstrap
           # (or a retry of an already-promoted tag) falls back to mirrored candidates.
@@ -1291,7 +1304,8 @@ jobs:
             # Older ARM-only releases cannot serve as an Intel baseline.
             if ! jq -e --arg target "$TARGET" '.assets[$target]' "$previous_dir/download.json" > /dev/null; then continue; fi
             url=$(jq -r --arg target "$TARGET" '.assets[$target].url' "$previous_dir/download.json")
-            curl --fail --location --retry 3 "$url" --output "$RUNNER_TEMP/baseline.zip"
+            # Every error is retried, a failed name resolution included, for about two minutes (1, 2, … 64 s).
+            curl --fail --location --retry 7 --retry-all-errors "$url" --output "$RUNNER_TEMP/baseline.zip"
             expected=$(jq -r --arg target "$TARGET" '.assets[$target].sha256' "$previous_dir/download.json")
             printf '%s  %s\n' "$expected" "$RUNNER_TEMP/baseline.zip" | shasum -a 256 -c -
             found=true
@@ -1345,8 +1359,10 @@ jobs:
     concurrency:
       group: desktop-promotion-${{ needs.resolve.outputs.channel }}
       cancel-in-progress: false
+    # The one production desktop step that reaches users, so the release-manager approval is here and nowhere else in
+    # this workflow (approvals audit R3): `desktop-ota-promotion` admits only `desktop@*` tags.
     environment:
-      name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
+      name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop-ota-promotion' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

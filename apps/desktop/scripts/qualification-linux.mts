@@ -447,6 +447,11 @@ export type LinuxAptQualificationDriver = QualificationPlatformDriver & {
   ): Promise<number>;
   cleanHostRecord?(): LinuxCleanHostRecord;
   captureActiveRuntime(pid: number, resourceRelativePath: string): Promise<ActiveAptRuntime>;
+  /**
+   * T-B22.4 only: install a later candidate's authenticated runtime and selector over the observed baseline, with no
+   * Tau process running, as a system upgrade that has already completed. The baseline's generation stays installed.
+   */
+  installSelection(candidate: QualificationCandidate, repository: AptQualificationRepository): Promise<void>;
   waitForScheduledUpgrade(request: {
     candidate: QualificationCandidate;
     repository: AptQualificationRepository;
@@ -703,9 +708,6 @@ export const createLinuxAptQualificationDriver = (
       throw new Error('APT repository channel/route differs');
     }
     const snapshot = await readDesktopAptSnapshot(repository);
-    if (Date.parse(snapshot.inventory.validUntil) <= Date.now()) {
-      throw new Error('APT qualification snapshot expired');
-    }
     const { runtimeKind, selectorKind } = linuxInstallation(manifest.channel, candidate.route === 'linux-appimage');
     for (const kind of [runtimeKind, selectorKind]) {
       const artifact = manifest.artifacts.find((item) => item.kind === kind);
@@ -969,6 +971,19 @@ export const createLinuxAptQualificationDriver = (
     observe,
     measureSecurity: access.measureSecurity,
     captureActiveRuntime,
+    async installSelection(candidate, repository) {
+      if (!installed || !current || cleanHost) {
+        throw new Error('A selection follows the observed baseline on a CI host only');
+      }
+      await authenticate(candidate, repository);
+      const { runtimeKind, selectorKind } = linuxInstallation(
+        candidate.manifest.channel,
+        candidate.route === 'linux-appimage',
+      );
+      const paths = await Promise.all([runtimeKind, selectorKind].map(async (kind) => verifyArtifact(candidate, kind)));
+      runQualificationApt('install', paths);
+      currentRepository = repository;
+    },
     ...(cleanHost
       ? {
           launchConsumer,

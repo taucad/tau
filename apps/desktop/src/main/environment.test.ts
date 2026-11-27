@@ -137,10 +137,9 @@ describe('desktopEnvironment', () => {
     expect(clientEnvironment({ TAU_MACHINES_ENABLED: 'true' })).toMatchObject({ TAU_MACHINES_ENABLED: 'true' });
   });
 
-  it('publishes the billing environment the cloud renderer needs', () => {
-    expect(clientEnvironment({ TAU_BILLING_ENVIRONMENT: 'development' })).toMatchObject({
-      TAU_BILLING_ENVIRONMENT: 'development',
-    });
+  /* The adaptive renderer takes its billing environment from the deployment answer (adaptive app deployment mode D7). */
+  it('does not publish a billing environment', () => {
+    expect(clientEnvironment({ TAU_BILLING_ENVIRONMENT: 'development' })).not.toHaveProperty('TAU_BILLING_ENVIRONMENT');
   });
 });
 

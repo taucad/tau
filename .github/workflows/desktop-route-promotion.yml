@@ -12,9 +12,9 @@ on:
         options: [promote-routes, renew-routes]
         required: true
       scope:
-        description: All qualified routes, or one platform's catalog (Apple silicon ZIP/DMG, or Linux APT/AppImage) on either channel (D-H5, promotion only)
+        description: All qualified routes, or one platform's catalog (Apple silicon ZIP/DMG, Windows NSIS/ZIP, or Linux APT/AppImage) on either channel (D-H5, promotion only)
         type: choice
-        options: [all, macos, linux]
+        options: [all, macos, windows, linux]
         default: all
       tag:
         description: Exact candidate tag (promotion only)
@@ -26,13 +26,11 @@ on:
         description: Trusted native qualification run (W9, promotion only)
         type: string
       vm-run-id:
-        description: Trusted operator VM acceptance run (W10, promotion only; may be left empty only for a Mac-only (scope macos) promotion on either channel, which then publishes its routes as clean-host pending)
+        description: Trusted operator VM acceptance run (W10, promotion only; may be left empty only for a Mac-only (scope macos) or Windows-only (scope windows) promotion on either channel, which then publishes its routes as clean-host pending)
         type: string
       manifest-sha256:
         description: Reviewed canonical manifest digest (promotion only)
         type: string
-  schedule:
-    - cron: '17 3 * * *'
 
 permissions:
   contents: read
@@ -44,7 +42,7 @@ jobs:
   # `release-desktop-staging.yml` for a full candidate (`intel`) of the same commit and stops: the
   # operator promotes that tag once its installer candidate and qualification runs are green. A
   # production tag (`desktop@*`) always packages both. Only the `all` scope asks for Intel, so a
-  # per-platform scope (`macos` or `linux`) never does.
+  # per-platform scope (`macos`, `windows` or `linux`) never does.
   candidate:
     name: Require a full candidate
     if: github.ref == 'refs/heads/main'
@@ -83,33 +81,33 @@ jobs:
   publication:
     needs: [candidate]
     # Each channel has its own repository gate, read before any environment is selected:
-    # a dispatch runs only for an enabled channel, and the nightly schedule renews only enabled channels.
+    # a dispatch runs only for an enabled channel. There is no schedule: APT metadata and update descriptors no
+    # longer expire, so renewal is a manual `renew-routes` dispatch only (for example after a key rotation).
     if: >-
-      github.ref == 'refs/heads/main' && (
-        (github.event_name == 'schedule' && (vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true' || vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true')) ||
-        (github.event_name == 'workflow_dispatch' && (
-          (inputs.channel == 'staging' && vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true') ||
-          (inputs.channel == 'production' && vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true'))))
+      github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && (
+        (inputs.channel == 'staging' && vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true') ||
+        (inputs.channel == 'production' && vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true'))
     strategy:
       fail-fast: false
       matrix:
-        channel: >-
-          ${{ github.event_name == 'schedule' && fromJSON(format('[{0}{1}{2}]',
-            vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true' && '"staging"' || '',
-            vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true' && vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true' && ',' || '',
-            vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true' && '"production"' || '')) || fromJSON(format('["{0}"]', inputs.channel)) }}
+        channel: ${{ fromJSON(format('["{0}"]', inputs.channel)) }}
     # The same lock covers promotion, renewal and recovery, across all runs.
     concurrency:
       group: desktop-installer-publication-${{ matrix.channel }}
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # Renewal runs in `desktop-installer-renewal-<channel>`. A production promotion is the step that publishes
+    # to users, so it alone runs in the release-manager reviewed `desktop-promotion-production` (approvals audit R2);
+    # staging promotes in `desktop-installers-staging`. desktop-publication-authority.mts admits the same subjects.
     environment:
-      name: ${{ (github.event_name == 'schedule' || inputs.operation == 'renew-routes') && 'desktop-installer-renewal' || 'desktop-installers' }}-${{ matrix.channel }}
+      name: >-
+        ${{ inputs.operation == 'renew-routes' && format('desktop-installer-renewal-{0}', matrix.channel)
+        || (matrix.channel == 'production' && 'desktop-promotion-production' || 'desktop-installers-staging') }}
       deployment: false
     permissions:
       contents: read
-      actions: read
+      actions: write # read runs, and dispatch the release gate for a candidate that has no verdict
       id-token: write
     env:
       pnpm_config_verify_deps_before_run: error
@@ -129,7 +127,7 @@ jobs:
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate-run-id }}
       TAU_ROUTE_CI_RUN_ID: ${{ inputs.ci-run-id }}
       TAU_ROUTE_VM_RUN_ID: ${{ inputs.vm-run-id }}
-      # Scheduled renewal has no inputs and renews the completed catalog whatever scope promoted it.
+      # Renewal renews the completed catalog whatever scope promoted it.
       TAU_DESKTOP_QUALIFICATION_SCOPE: ${{ inputs.scope || 'all' }}
     steps:
       - name: Select requested channel
@@ -138,7 +136,7 @@ jobs:
           REQUESTED: ${{ inputs.channel }}
           CHANNEL: ${{ matrix.channel }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$REQUESTED" = "$CHANNEL" ]; then
+          if [ "$REQUESTED" = "$CHANNEL" ]; then
             echo 'run=true' >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -181,12 +179,36 @@ jobs:
           fi
           echo "::error::No green shell conformance on ${sha} (${TAG}). Dispatch shell-conformance.yml on the tag, or cut a new candidate."
           exit 1
+      # The release gate (CI throughput review RG-1, `release-gate.yml`): a promotion on either channel
+      # needs a green gate verdict on the candidate's own commit (the uncached sweep, the formal matrix and the
+      # cross-root read lint). The newest candidate's gate started by itself when `release-build.yml` ran for
+      # its tag. Running or red blocks and names the run; no verdict dispatches the gate for the commit and
+      # blocks naming it, and the operator promotes again once it passes. Nothing here waits on it. A renewal
+      # publishes nothing new and does not read it.
+      - name: Find the candidate's commit
+        id: candidate-commit
+        if: steps.selected.outputs.run == 'true' && inputs.operation == 'promote-routes'
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [ -n "$TAG" ] || { echo '::error::A promotion names its candidate tag.'; exit 1; }
+          echo "sha=$(gh api "repos/${GH_REPO}/commits/${TAG}" --jq .sha)" >> "$GITHUB_OUTPUT"
+      - name: Require a green release gate on the candidate's commit
+        if: steps.selected.outputs.run == 'true' && inputs.operation == 'promote-routes'
+        uses: ./.github/actions/release-gate-verdict
+        with:
+          sha: ${{ steps.candidate-commit.outputs.sha }}
+          github-token: ${{ github.token }}
+          require: 'true'
+          dispatch: 'true'
       - name: Load protected signing inputs
         if: steps.selected.outputs.run == 'true'
         env:
-          APPIMAGE_PRIVATE_KEY: ${{ inputs.scope != 'macos' && secrets.TAU_APPIMAGE_PRIVATE_KEY || '' }}
-          APPIMAGE_PUBLIC_KEYS: ${{ inputs.scope != 'macos' && vars.TAU_APPIMAGE_PUBLIC_KEYS || '' }}
-          APT_PRIVATE_KEY_BASE64: ${{ inputs.scope != 'macos' && secrets.TAU_APT_PRIVATE_KEY_BASE64 || '' }}
+          APPIMAGE_PRIVATE_KEY: ${{ inputs.scope != 'macos' && inputs.scope != 'windows' && secrets.TAU_APPIMAGE_PRIVATE_KEY || '' }}
+          APPIMAGE_PUBLIC_KEYS: ${{ inputs.scope != 'macos' && inputs.scope != 'windows' && vars.TAU_APPIMAGE_PUBLIC_KEYS || '' }}
+          APT_PRIVATE_KEY_BASE64: ${{ inputs.scope != 'macos' && inputs.scope != 'windows' && secrets.TAU_APT_PRIVATE_KEY_BASE64 || '' }}
           ROUTE_TRUST: ${{ vars.TAU_ROUTE_TRUST }}
         run: |
           set -euo pipefail
@@ -194,8 +216,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/desktop-signing" out/desktop
           printf '%s' "$ROUTE_TRUST" > "$RUNNER_TEMP/desktop-signing/route-trust.json"
           mkdir -m 700 "$RUNNER_TEMP/desktop-signing/gnupg"
-          # A Mac-only promotion admits no AppImage or APT route, so Linux signing material is never materialized.
-          if [ "$TAU_DESKTOP_QUALIFICATION_SCOPE" != macos ]; then
+          # A Mac-only or Windows-only promotion admits no AppImage or APT route, so Linux signing material is never
+          # materialized.
+          if [ "$TAU_DESKTOP_QUALIFICATION_SCOPE" != macos ] && [ "$TAU_DESKTOP_QUALIFICATION_SCOPE" != windows ]; then
             printf '%s' "$APPIMAGE_PRIVATE_KEY" > "$RUNNER_TEMP/desktop-signing/appimage.pem"
             printf '%s' "$APPIMAGE_PUBLIC_KEYS" > "$RUNNER_TEMP/desktop-signing/public-keys.json"
             if [ -n "$APT_PRIVATE_KEY_BASE64" ]; then
@@ -239,5 +262,5 @@ jobs:
       - name: Report failed metadata renewal or publication
         if: failure() && steps.selected.outputs.run == 'true'
         run: |
-          echo '::error::Desktop installer metadata publication failed. Check the last completed receipt and recover the same candidate before seven-day descriptor/APT validity expires.'
+          echo '::error::Desktop installer metadata publication failed. Check the last completed receipt and re-run the same operation for the same candidate; it resumes from that receipt.'
           echo 'Public promotion remains unqualified unless every pointer has a completed readback receipt. Follow the desktop release handbook.' >> "$GITHUB_STEP_SUMMARY"

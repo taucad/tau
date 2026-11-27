@@ -37,6 +37,11 @@ type ModuleAsset = { fileName: string; sourcePath: string; sha256: string };
 
 /** Physical files and emitted ownership evidence, with ASAR counted once. */
 export type PayloadInventory = {
+  /**
+   * Whether the renderer carries the display-mode owner (`apps/ui/app/runtime/deployment.machine.ts`, adaptive app
+   * deployment mode D2): the one build decides funded or not from its API's deployment answer (W12).
+   */
+  deploymentOwner?: boolean;
   files: PayloadFile[];
   chunks: ModuleChunk[];
   assets: ModuleAsset[];
@@ -315,7 +320,7 @@ export const isForbiddenDesktopSurfaceModule = (moduleId: string): boolean => {
   return (
     /apps\/ui\/app\/root\.tsx(?:\?|$)/u.test(path) ||
     /apps\/ui\/app\/components\/(?:cookie-consent|layout\/(?:page-footer|route-footer))\.tsx(?:\?|$)/u.test(path) ||
-    /apps\/ui\/app\/(?:hooks\/use-cookie-consent|lib\/cookie-consent\.lib|lib\/web-posthog\.lib|providers\/web-analytics-provider)\.tsx?(?:\?|$)/u.test(
+    /apps\/ui\/app\/(?:hooks\/use-privacy-choices|lib\/cookie-consent\.lib|lib\/web-posthog\.lib|providers\/web-analytics-provider)\.tsx?(?:\?|$)/u.test(
       path,
     ) ||
     /apps\/ui\/app\/(?:offline\/|routes\/legal(?:\.|\/)|routes\/_index\/(?:route|legacy-landing|marketing-landing)\.tsx(?:\?|$))/u.test(
@@ -489,6 +494,23 @@ const inspectForwardingChunk = async (options: {
   }
 };
 
+/**
+ * Whether a renderer's module graph carries the display-mode owner.
+ *
+ * @param moduleIds - Every module id in the renderer's emitted graph.
+ * @returns `true` when the owner's machine is in the graph.
+ */
+export const carriesDeploymentOwner = (moduleIds: readonly string[]): boolean =>
+  moduleIds.some((id) => /(?:^|\/)apps\/ui\/app\/runtime\/deployment\.machine\.ts$/u.test(id.replaceAll('\\', '/')));
+
+/** Record whether the renderer carries the owner, and a violation when it must and does not. */
+const recordDeploymentOwner = (inventory: PayloadInventory, required: boolean): void => {
+  inventory.deploymentOwner = carriesDeploymentOwner(inventory.chunks.flatMap((chunk) => chunk.moduleIds));
+  if (required && !inventory.deploymentOwner) {
+    inventory.violations.push('Renderer carries no display-mode owner (apps/ui/app/runtime/deployment.machine.ts)');
+  }
+};
+
 /** Inventory files without traversing symlinks, and collect renderer violations. */
 // oxlint-disable-next-line complexity -- one bounded pass classifies each payload boundary and its cross-scope invariants.
 export const inspectDesktopPayload = async (options: {
@@ -498,6 +520,8 @@ export const inspectDesktopPayload = async (options: {
   archive?: string;
   /** Language server stages; defaults to this checkout's `out/` stages. */
   stagedLanguageServers?: StagedLanguageServers;
+  /** The renderer must carry the display-mode owner; one without it is a violation. */
+  expectDeploymentOwner?: boolean;
 }): Promise<PayloadInventory> => {
   const workspaceRoot = resolve(import.meta.dirname, '../../..');
   const inventory: PayloadInventory = {
@@ -842,6 +866,7 @@ export const inspectDesktopPayload = async (options: {
   if (wasmBytes > approvedWasmBytes) {
     inventory.violations.push(`Renderer WASM budget exceeded: ${wasmBytes} bytes`);
   }
+  recordDeploymentOwner(inventory, options.expectDeploymentOwner === true);
   inventory.files.sort((left, right) => `${left.scope}/${left.path}`.localeCompare(`${right.scope}/${right.path}`));
   inventory.violations = [...new Set(inventory.violations)].sort();
   return inventory;
@@ -858,6 +883,7 @@ const main = async (): Promise<void> => {
       output: { type: 'string' },
       'source-revision': { type: 'string' },
       'report-only': { type: 'boolean', default: false },
+      'expect-deployment-owner': { type: 'boolean', default: false },
     },
   });
   const inventory = await inspectDesktopPayload({
@@ -865,6 +891,7 @@ const main = async (): Promise<void> => {
     host: resolve(values.host),
     ...(values.app ? { app: resolve(values.app) } : {}),
     ...(values.archive ? { archive: resolve(values.archive) } : {}),
+    expectDeploymentOwner: values['expect-deployment-owner'],
   });
   const report = JSON.stringify(
     {
@@ -881,7 +908,7 @@ const main = async (): Promise<void> => {
     await writeFile(resolve(values.output), `${report}\n`);
   }
   process.stdout.write(
-    `${JSON.stringify({ totals: inventory.totals, violations: inventory.violations }, undefined, 2)}\n`,
+    `${JSON.stringify({ deploymentOwner: inventory.deploymentOwner, totals: inventory.totals, violations: inventory.violations }, undefined, 2)}\n`,
   );
   if (!values['report-only'] && inventory.violations.length > 0) {
     process.exitCode = 1;

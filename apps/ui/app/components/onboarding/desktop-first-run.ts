@@ -1,4 +1,4 @@
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { useProjects } from '#hooks/use-projects.js';
 
 /** What decides a desktop first run. */
@@ -34,7 +34,7 @@ export const isDesktopFirstRun = ({
  * @returns Whether setup opens before home.
  */
 export const useIsDesktopFirstRun = (): boolean => {
-  const { projects, isListed, error } = useProjects({ includeDeleted: true });
+  const { projects, isListed, error } = useProjects({ scope: 'all' });
   return isDesktopFirstRun({
     isFirstLaunch: desktopBridge()?.firstRun === true,
     isListed,

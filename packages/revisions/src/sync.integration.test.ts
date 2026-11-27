@@ -2250,7 +2250,7 @@ describe.runIf(gitToolchainOnPath)('the open pull’s deadline over isomorphic-g
         },
         { timeout: 30_000 },
       );
-      expect(selectSyncFacet(scheduler.getSnapshot()).error).toContain('did not answer in time');
+      expect(selectSyncFacet(scheduler.getSnapshot()).error).toContain('Backup is taking too long');
       scheduler.stop();
     } finally {
       await remote.close();

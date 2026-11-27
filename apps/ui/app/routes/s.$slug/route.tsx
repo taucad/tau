@@ -1,7 +1,7 @@
 import { Heading } from '@taucad/ui/components/heading';
-import { SharedProjectPassword } from '#components/share/shared-project-password.js';
+import { SharedProjectPassword } from '@taucad/publish-ui/components/share/shared-project-password';
 import { useEffect, useMemo, useState } from 'react';
-import type { LoaderFunctionArgs, MetaFunction } from 'react-router';
+import type { MetaFunction } from 'react-router';
 import { useLoaderData, useLocation, useParams } from 'react-router';
 import {
   getActiveGroupValues,
@@ -24,13 +24,16 @@ import PublicationViewRoute, {
   ErrorBoundary as PublicationErrorBoundary,
   PublicationInteractiveSurface,
   loadPublication as publicationLoader,
-  publicationMeta,
 } from '#components/share/tau-publication.js';
-import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
-import type { ParsedPublication } from '#components/share/parsed-publication.js';
-import { GithubGistManagement } from '#components/share/github-gist-management.js';
+import { publicationMeta } from '@taucad/publish-ui/components/share/tau-publication';
+import type { PublicationRouteLoaderData } from '@taucad/publish-ui/components/share/tau-publication';
+import type { ParsedPublication } from '@taucad/publish-ui/components/share/parsed-publication';
+import { GithubGistManagement } from '@taucad/publish-ui/components/share/github-gist-management';
+import { GithubGistServicesProvider } from '@taucad/publish-ui/components/share/github-gist-services';
+import { githubGistServices } from '#components/share/github-gist-services.js';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { shareProviderRegistry, withBrowserShareProviderContext } from '#lib/share-providers.js';
+import type { Route } from './+types/route.js';
 
 export const handle: Handle = { enablePageWrapper: false };
 
@@ -124,7 +127,7 @@ export const resolvePortableArtifact = (
   };
 };
 
-export const loader = async (arguments_: LoaderFunctionArgs): Promise<unknown> => {
+export const loader = async (arguments_: Route.LoaderArgs): Promise<unknown> => {
   const { slug } = arguments_.params;
   if (!slug) {
     // oxlint-disable-next-line typescript-eslint/only-throw-error -- route loaders use Response for HTTP status control.
@@ -144,7 +147,7 @@ export const loader = async (arguments_: LoaderFunctionArgs): Promise<unknown> =
         description: example.manifest.description,
         ...(example.thumbnailUrl
           ? {
-              thumbnail: new URL(example.thumbnailUrl, arguments_.request.url).toString(),
+              thumbnail: new URL(example.thumbnailUrl, arguments_.url).toString(),
             }
           : {}),
       },
@@ -157,6 +160,23 @@ export const loader = async (arguments_: LoaderFunctionArgs): Promise<unknown> =
     ...arguments_,
     params: { ...arguments_.params, id: locator.reference },
   });
+};
+
+/**
+ * The document's `Cache-Control` is the loader's when it chose one. React Router sends a loader's headers on the
+ * document only through this export, and `entry.server.tsx` sets its `private, no-cache` default only when no route
+ * chose. A cloud link's viewer payload and its lock screens (`private, no-store`, thrown with the lock response) must
+ * never be stored; a portable or builtin share sets nothing and keeps the default.
+ *
+ * @returns The parent's headers, with the loader's or the thrown response's `Cache-Control` when it set one.
+ */
+export const headers = ({ parentHeaders, loaderHeaders, errorHeaders }: Route.HeadersArgs): Headers => {
+  const documentHeaders = new Headers(parentHeaders);
+  const cacheControl = errorHeaders?.get('Cache-Control') ?? loaderHeaders.get('Cache-Control');
+  if (cacheControl !== null) {
+    documentHeaders.set('Cache-Control', cacheControl);
+  }
+  return documentHeaders;
 };
 
 export const meta: MetaFunction<typeof loader> = (arguments_) => {
@@ -251,7 +271,7 @@ export const PortableShareSurface = (): React.JSX.Element => {
                 }
               : { kind: 'none' },
           );
-          setSourceLabel(`${passwordProtected ? 'Password-protected ' : ''}${provider.descriptor.label}`);
+          setSourceLabel(`${provider.descriptor.label}${passwordProtected ? ' · Password-protected' : ''}`);
           if (passwordProtected) {
             globalThis.history.replaceState(
               globalThis.history.state,
@@ -292,10 +312,10 @@ export const PortableShareSurface = (): React.JSX.Element => {
       <main className='flex min-h-dvh items-center justify-center bg-background p-6'>
         <div className='max-w-md rounded-xl border bg-card p-6 text-center'>
           <Heading level={1} variant='title'>
-            GitHub Gist unpublished
+            Gist deleted
           </Heading>
           <p className='mt-2 text-sm text-muted-foreground'>
-            This Tau share and its GitHub Gist link no longer resolve.
+            The Gist is gone from GitHub, so this link and its GitHub link no longer open.
           </p>
         </div>
       </main>
@@ -383,17 +403,20 @@ export const PortableShareSurface = (): React.JSX.Element => {
       sourceLabel={resolved.parameterDiagnostic ?? sourceLabel}
       managementActions={
         parseShareSlug(slug).providerId === 'github-gist' ? (
-          <GithubGistManagement
-            locator={parseShareSlug(slug)}
-            protection={protection}
-            collectSnapshot={async () => collectOpenedSnapshot(resolved.files, publication.entryPath)}
-            onRepublished={(url) => {
-              globalThis.location.assign(url);
-            }}
-            onUnpublished={() => {
-              setUnpublished(true);
-            }}
-          />
+          <GithubGistServicesProvider value={githubGistServices}>
+            <GithubGistManagement
+              locator={parseShareSlug(slug)}
+              protection={protection}
+              collectSnapshot={async () => collectOpenedSnapshot(resolved.files, publication.entryPath)}
+              shareUrl={sourceUrl}
+              onRepublished={(url) => {
+                globalThis.location.assign(url);
+              }}
+              onUnpublished={() => {
+                setUnpublished(true);
+              }}
+            />
+          </GithubGistServicesProvider>
         ) : undefined
       }
     />

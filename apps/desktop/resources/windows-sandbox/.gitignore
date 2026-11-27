@@ -1,0 +1,3 @@
+# The Windows shell sandbox helper is built by libs/sandbox/scripts/build-windows-sandbox.mts, never committed.
+*
+!.gitignore

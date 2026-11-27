@@ -258,16 +258,6 @@ await run('telemetry', async () => {
     const response = await call('POST', '/v1/telemetry/ingest', {
       body: {
         entries: [
-          {
-            name: 'observability.createGeometry',
-            duration: random(80, 2500),
-            detail: { status: failed ? 'error' : 'success' },
-          },
-          {
-            name: 'observability.exportGeometry',
-            duration: random(200, 4000),
-            detail: { status: 'success', exportFormat: ['stl', 'step', 'glb'][round % 3] },
-          },
           // Synthetic fixtures in the shape the UI and daemon send: they validate ingest to metrics, not agents.
           {
             name: 'agent.session',
@@ -441,13 +431,16 @@ await run('publications', async () => {
       revisionId: tagRevision,
       entryPath: 'main.scad',
       visibility: 'private',
-      title: 'W36 harness publication',
-      sharedEmails: ['w36-reader@example.test'],
-      notifyRecipients: true,
     },
   });
   check(created.status === 201, `publish ${created.status}`);
-  const { id } = (await created.json()) as { id: string };
+  const { id, share } = (await created.json()) as { id: string; share: { id: string } };
+  /* Invites are made on the project's cloud link and report what happened to their email. */
+  const invited = await call('POST', `/v1/projects/${projectId}/share/access`, {
+    body: { email: 'w36-reader@example.test' },
+  });
+  check(invited.status === 201, `link invite ${invited.status}`);
+  check((await status('GET', `/v1/shares/${share.id}`, { auth: false })) === 401, 'anonymous link denied');
   check((await status('PATCH', `/v1/publications/${id}/views`, { auth: false })) === 204, 'anonymous view');
   check((await status('PATCH', `/v1/publications/${id}/views`, { auth: false })) === 204, 'duplicate view');
   await call('PATCH', `/v1/publications/${id}/views`);
@@ -467,6 +460,8 @@ await run('publications', async () => {
     'anonymous file denied',
   );
   await call('GET', `/v1/publications/does-not-exist/files?path=main.scad`);
+  check((await status('DELETE', `/v1/projects/${projectId}/share`)) === 204, 'stop sharing');
+  check((await status('GET', `/v1/shares/${share.id}`)) === 410, 'stopped link gone');
 });
 
 // ---------------------------------------------------------------------------------------------

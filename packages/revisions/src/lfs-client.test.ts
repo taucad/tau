@@ -62,6 +62,39 @@ describe('createLfsClient batch validation', () => {
     ).rejects.toThrow(/invalid LFS batch entry/u);
   });
 
+  /* Tier 2a (R-2): a server may put the quota marker in front of the batch's sentence; the marker is a key, never words a person reads. */
+  it('reads a storage refusal’s sentence without the quota marker, and keeps a sentence that has none', async () => {
+    const oid = 'c'.repeat(64);
+    const refusing = (body: string): RevisionHttpClient => ({
+      request: async () => ({ ...response(body), statusCode: 413, statusMessage: 'Payload Too Large' }),
+    });
+    const refusalFor = async (body: string): Promise<unknown> => {
+      try {
+        await createLfsClient({ url: 'https://api.tau.test/git', http: refusing(body) }).upload({
+          pointers: [{ oid, size: 1 }],
+          read: async () => encoder.encode('x'),
+        });
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    };
+    const sentence = 'This push needs more room than your 1 GB storage plan has left, so it was not backed up.';
+
+    await expect(
+      refusalFor(JSON.stringify({ message: `Tau: storage quota exceeded — ${sentence}`, files: [{ oid }] })),
+    ).resolves.toMatchObject({ name: 'LfsQuotaError', refusal: { message: sentence, oids: [oid] } });
+    await expect(refusalFor(JSON.stringify({ message: sentence }))).resolves.toMatchObject({
+      refusal: { message: sentence },
+    });
+    await expect(refusalFor(JSON.stringify({ message: 'Tau: storage quota exceeded' }))).resolves.toMatchObject({
+      refusal: { message: 'This project doesn’t fit in its backup.' },
+    });
+    await expect(refusalFor('{}')).resolves.toMatchObject({
+      refusal: { message: 'This project doesn’t fit in its backup.' },
+    });
+  });
+
   it('checks both the declared size and hash of a downloaded object', async () => {
     const oid = 'b'.repeat(64);
     const http: RevisionHttpClient = {
@@ -374,7 +407,7 @@ describe('bounded private transfers', () => {
     }
   });
 
-  it('retries a broken download stream with a newly authorized action', async () => {
+  it('retries a broken download stream on the action it already holds', async () => {
     const request = vi
       .fn<RevisionHttpClient['request']>()
       .mockImplementation(async () => batchResponse([answer({ actions: { download: action } })]));
@@ -393,7 +426,7 @@ describe('bounded private transfers', () => {
     await expect(
       createLfsClient({ url: 'https://api.tau.test/git', http: { request }, fetch: transfer }).download(pointer),
     ).resolves.toEqual(bytes);
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledTimes(1);
     expect(transfer).toHaveBeenCalledTimes(2);
   });
 
@@ -921,6 +954,93 @@ describe('downloadMany', () => {
     }).downloadMany({ pointers: pointers.slice(0, 2), received: async () => undefined });
     expect(asked).toEqual([pointers.slice(0, 2).map((pointer) => pointer.oid), [pointers[0]!.oid]]);
     expect(transfer).toHaveBeenCalledTimes(3);
+  });
+
+  /* #2015: a dropped connection or a busy host says nothing about the action, so its retry asks the batch endpoint nothing. */
+  it('retries a dropped or throttled transfer on the action it already holds, without another batch call', async () => {
+    const { request, asked } = batchEndpoint({ expires_in: 900 });
+    const failures = new Map<string, () => Promise<Response>>([
+      [
+        pointers[0]!.oid,
+        async () => {
+          throw new TypeError('net::ERR_HTTP2_PROTOCOL_ERROR');
+        },
+      ],
+      [pointers[1]!.oid, async () => new Response('', { status: 503 })],
+      [pointers[2]!.oid, async () => new Response('', { status: 429 })],
+      [
+        pointers[3]!.oid,
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(new TypeError('interrupted'));
+              },
+            }),
+          ),
+      ],
+    ]);
+    const transfer = vi.fn<typeof fetch>(async (url) => {
+      const fail = failures.get(oidOf(url));
+      if (fail !== undefined) {
+        failures.delete(oidOf(url));
+        return fail();
+      }
+      return new Response(contentOf.get(oidOf(url)));
+    });
+    const received = new Set<string>();
+    await createLfsClient({ url: 'https://api.tau.test/git', http: { request }, fetch: transfer }).downloadMany({
+      pointers: pointers.slice(0, 5),
+      received: async (pointer) => {
+        received.add(pointer.oid);
+      },
+    });
+    expect(asked).toEqual([pointers.slice(0, 5).map((pointer) => pointer.oid)]);
+    expect(transfer).toHaveBeenCalledTimes(9);
+    expect(received.size).toBe(5);
+  });
+
+  it('re-authorizes a retry whose action was refused, or lapsed while it backed off', async () => {
+    let now = 1_000_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { request, asked } = batchEndpoint({ expires_in: 900 });
+    const failures = new Map<string, () => Promise<Response>>([
+      [pointers[0]!.oid, async () => new Response('', { status: 401 })],
+      [pointers[1]!.oid, async () => new Response('', { status: 403 })],
+      [
+        pointers[2]!.oid,
+        async () => {
+          /* Its lifetime runs out while it fails. */
+          now += 901_000;
+          throw new TypeError('disconnected');
+        },
+      ],
+    ]);
+    const transfer = vi.fn<typeof fetch>(async (url) => {
+      const fail = failures.get(oidOf(url));
+      if (fail !== undefined) {
+        failures.delete(oidOf(url));
+        return fail();
+      }
+      return new Response(contentOf.get(oidOf(url)));
+    });
+    try {
+      await createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request },
+        fetch: transfer,
+        downloadConcurrency: 1,
+      }).downloadMany({ pointers: pointers.slice(0, 3), received: async () => undefined });
+      expect(asked).toEqual([
+        pointers.slice(0, 3).map((pointer) => pointer.oid),
+        [pointers[0]!.oid],
+        [pointers[1]!.oid],
+        [pointers[2]!.oid],
+      ]);
+      expect(transfer).toHaveBeenCalledTimes(6);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('gives up on a refusal of a freshly issued action', async () => {

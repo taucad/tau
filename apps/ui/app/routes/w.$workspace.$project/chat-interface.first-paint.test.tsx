@@ -19,6 +19,11 @@ const layout = vi.hoisted(() => (name: string, label: string) => () => {
   return { [name]: () => <main aria-label={label} /> };
 });
 
+/* The replay foreign-content mark reads the project role, which needs a ProjectProvider these tests do not mount. */
+vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useProjectRole: () => undefined,
+}));
 vi.mock('#providers/part-thumbnail-provider.js', () => ({
   PartThumbnailProvider: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
 }));
@@ -27,8 +32,8 @@ vi.mock('#components/geometry/cad/part-gallery.js', () => ({
 }));
 /* The product tour's host registers its palette entry; the palette is the app shell's, outside this suite. */
 vi.mock('#components/layout/command-palette.js', () => ({ useCommandPaletteItems: () => undefined }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({
-  WorkspaceSkeleton: () => <div role='status' aria-label='Opening project' />,
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', () => ({
+  WorkspaceOpening: () => <div role='status' aria-label='Opening project' />,
 }));
 
 function stubViewport(mobile: boolean): void {

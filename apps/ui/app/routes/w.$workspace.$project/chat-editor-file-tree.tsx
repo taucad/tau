@@ -1,7 +1,7 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
 import { runWhenRendered, subscribeWorkbenchFileReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 import { useLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { useCallback, useId, useState, useRef, useMemo, useEffect, memo } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import type { ItemInstance, TreeInstance } from '@headless-tree/core';
@@ -76,7 +76,7 @@ import {
   DropdownMenuLabel,
 } from '@taucad/ui/components/dropdown-menu';
 import { useProject } from '#hooks/use-project.js';
-import { mountFileOperationParticipants } from '#filesystem/file-operation-participants.js';
+import { mountFileOperationParticipants } from '@taucad/files-ui/filesystem/file-operation-participants';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { ViewerNode } from '@taucad/workbench';
@@ -94,7 +94,7 @@ import { getFileExtension, encodeTextFile } from '@taucad/ui-core/utils/filesyst
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
 import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useFileTreeSelector } from '#hooks/use-file-tree.js';
+import { useFileTreeSelector } from '@taucad/files-ui/hooks/use-file-tree';
 import { useDirectoryListing } from '@taucad/fs-client/react/use-directory-listing';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
@@ -102,12 +102,12 @@ import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { parentDirectory } from '@taucad/utils/path';
 import { useRowWindow } from '@taucad/project-workspace/hooks/use-row-window';
 
-import type { TreeItemData } from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
+import type { TreeItemData } from '@taucad/files-ui/utils/file-tree.utils';
 import {
   buildFileTreeIndex,
   indexedItemData,
   isEditorSystemArtifactPath,
-} from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
+} from '@taucad/files-ui/utils/file-tree.utils';
 import { fileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import type { FileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@taucad/ui-core/filesystem/workspace-errors';
@@ -138,11 +138,14 @@ import {
   createFileTreeDownloadError,
   getFileTreeDownloadErrorMessage,
   getFileTreeDownloadPolicy,
-} from '#routes/w.$workspace.$project/file-tree-download-policy.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
-import { previewProjectFileInQuickLook } from '#filesystem/desktop-quick-look.js';
+} from '@taucad/files-ui/utils/file-tree-download-policy';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
+import { previewProjectFileInQuickLook } from '@taucad/files-ui/filesystem/desktop-quick-look';
+import type { QuickLookServices } from '@taucad/files-ui/filesystem/desktop-quick-look';
+import { desktopKernelOptions } from '#constants/desktop-kernel-options.js';
 import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
 import type { RevealInFileManager } from '#hooks/use-native-file-manager.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
 
 /**
  * What one row shows about where its bytes come from.
@@ -156,9 +159,31 @@ type RowPresentation = FileProvenanceLabel & {
   readonly provenance: FileProvenance | undefined;
   readonly isSubtreeRoot: boolean;
   readonly subtreeRootLevel?: number;
+  /**
+   * A file a tree write has yet to land, or a folder only such files make (STO-25, I7): shown arriving, never missing,
+   * and read-only until it lands.
+   */
+  readonly isArriving?: boolean;
+  /**
+   * Whether a file opens read-only, where it differs from `readOnly`: an arriving file is read-only in the tree only
+   * until it lands, so it opens as its source says, and its pane waits for its bytes.
+   */
+  readonly opensReadOnly?: boolean;
 };
 
 /** The shared read-only refusal copy, read once so the call site is not a pseudo-constructor. */
+/** Quick Look converts through the project's desktop kernel, its attempts reported as `quicklook`. */
+const quickLookServices: QuickLookServices = {
+  resolveKernelOptions: async (projectId, computeMode) => desktopKernelOptions(projectId, undefined, computeMode)(),
+  async loadRuntimeObserver() {
+    const { observeRuntimeClient } = await loadCode(async () => {
+      const { observeRuntimeClient } = await import('#telemetry/runtime-telemetry.js');
+      return { observeRuntimeClient };
+    });
+    return (client) => observeRuntimeClient(client, 'quicklook');
+  },
+};
+
 const readOnlyPathMessage = (path: string): string => {
   const copy = workspaceMutationErrorCopy.READ_ONLY_MOUNT;
   return typeof copy === 'function' ? copy({ path }) : copy;
@@ -187,6 +212,9 @@ const sameProvenance = (previous?: FileProvenance, next?: FileProvenance): boole
     previous?.identity === next?.identity &&
     previous?.overrides === next?.overrides);
 
+/* A row a tree write has yet to land, or a folder only such rows make (STO-25, I7). */
+const isArrivingEntry = (entry: FileEntry): boolean => entry.pending === true;
+
 /**
  * Whether two tree snapshots draw the same rows.
  *
@@ -203,6 +231,7 @@ function sameTreeRows(previous: ReadonlyMap<string, FileEntry>, next: ReadonlyMa
       before !== entry &&
       (before?.name !== entry.name ||
         before.type !== entry.type ||
+        isArrivingEntry(before) !== isArrivingEntry(entry) ||
         !sameProvenance(before.provenance, entry.provenance))
     ) {
       return false;
@@ -220,8 +249,12 @@ function buildRowPresentation(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<
 
   const presentation = new Map<string, RowPresentation>();
   for (const [path, label] of labels) {
+    /* Not on disk yet: nothing may rename, move, delete or make anything inside it until it lands. */
+    const arriving = isArrivingEntry(fileTreeMap.get(path)!)
+      ? { isArriving: true, readOnly: true, opensReadOnly: label.readOnly }
+      : {};
     if (!label.readOnly) {
-      presentation.set(path, { ...label, isSubtreeRoot: true });
+      presentation.set(path, { ...label, isSubtreeRoot: true, ...arriving });
       continue;
     }
 
@@ -238,6 +271,7 @@ function buildRowPresentation(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<
       ...label,
       isSubtreeRoot: subtreeRoot === path,
       subtreeRootLevel: subtreeRoot.split('/').length - 1,
+      ...arriving,
     });
   }
 
@@ -556,6 +590,14 @@ export const ChatEditorFileTree = memo(function ({
   );
   /** The user's access is `source !== 'project'` (ruling P10), never `agentAccess`. */
   const isReadOnlyPath = useCallback((path: string): boolean => presentationFor(path).readOnly, [presentationFor]);
+  /** Whether a file opens read-only: an arriving one opens as its source says, writable once it lands. */
+  const opensReadOnlyPath = useCallback(
+    (path: string): boolean => {
+      const presentation = presentationFor(path);
+      return presentation.opensReadOnly ?? presentation.readOnly;
+    },
+    [presentationFor],
+  );
 
   const fileTree = useMemo((): FileItem[] => {
     if (fileTreeMap.size === 0) {
@@ -943,7 +985,7 @@ export const ChatEditorFileTree = memo(function ({
     onPrimaryAction(item) {
       if (!item.isFolder()) {
         const path = item.getId();
-        requestOpenFile(path, readOnly || isReadOnlyPath(path));
+        requestOpenFile(path, readOnly || opensReadOnlyPath(path));
       }
     },
     hotkeys: {
@@ -1369,9 +1411,9 @@ export const ChatEditorFileTree = memo(function ({
 
   const handleOpenInEditor = useCallback(
     (path: string) => {
-      requestOpenFile(path, isReadOnlyPath(path));
+      requestOpenFile(path, opensReadOnlyPath(path));
     },
-    [isReadOnlyPath, requestOpenFile],
+    [opensReadOnlyPath, requestOpenFile],
   );
 
   const handleOpenInViewer = useCallback(
@@ -1389,7 +1431,7 @@ export const ChatEditorFileTree = memo(function ({
         return;
       }
       const name = path.split('/').pop() ?? path;
-      toast.promise(previewProjectFileInQuickLook({ path, projectId, runtimeFileSystem }), {
+      toast.promise(previewProjectFileInQuickLook({ path, projectId, runtimeFileSystem }, quickLookServices), {
         loading: `Preparing ${name} for Quick Look…`,
         success: `Opened ${name} in Quick Look`,
         error: (error: unknown) => (error instanceof Error ? error.message : 'Quick Look failed'),
@@ -2187,9 +2229,10 @@ export const ChatEditorFileTree = memo(function ({
  */
 /** An empty project offers one clear action, a touch path that does not depend on dropping files (PN-FIL-3, I2). */
 function FileTreeEmptyState({ onUpload }: { readonly onUpload: (() => void) | undefined }): React.JSX.Element {
-  const availability = useProjectAvailability();
+  /* "No files" speaks for every authored file: while an open's apply still writes them, it waits (I7). */
+  const availability = useProjectAvailability('absence');
   if (availability !== 'ready') {
-    return <ProjectSyncPlaceholder state={availability} />;
+    return <ProjectWaitSkeleton state={availability} shape='tree' label='Files' />;
   }
   return (
     <PanelEmptyState icon={FolderOpen} title='No files available' className='rounded-xl border bg-card'>
@@ -2368,7 +2411,7 @@ function TreeItem({
         <>
           <Item disabled>
             <Lock aria-hidden />
-            Read-only
+            {presentation.isArriving === true ? 'Arriving' : 'Read-only'}
           </Item>
           {overridableUnit ? (
             <Item
@@ -2578,10 +2621,14 @@ function TreeItem({
               {presentation.badge}
             </Badge>
           ) : null}
-          {isAwaitingLargeObject ? (
-            <span data-large-object-pending className='flex shrink-0 items-center'>
+          {isAwaitingLargeObject || presentation.isArriving === true ? (
+            <span
+              data-large-object-pending={isAwaitingLargeObject ? '' : undefined}
+              data-arriving={presentation.isArriving === true ? '' : undefined}
+              className='flex shrink-0 items-center'
+            >
               <Loader className='size-3 text-muted-foreground motion-reduce:animate-none' />
-              <span className='sr-only'>Downloading</span>
+              <span className='sr-only'>{isAwaitingLargeObject ? 'Downloading' : 'Arriving'}</span>
             </span>
           ) : null}
           {presentation.isSubtreeRoot && presentation.glyph === 'lock' ? (

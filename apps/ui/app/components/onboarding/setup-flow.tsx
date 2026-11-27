@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router';
-import type { GizmoStyleId, GoalId, LanguageId, MousePresetId, ToolId } from '@taucad/preferences';
+import type { GizmoStyleId, GoalId, LanguageId, MousePresetId, OrbitStyleId, ToolId } from '@taucad/preferences';
 import { resetLeaf } from '@taucad/preferences';
 import { Button } from '@taucad/ui/components/button';
 import { Heading } from '@taucad/ui/components/heading';
 import { cn } from '@taucad/ui/utils/cn';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
-import { useFeature } from '#flags/use-feature.js';
-import { settingsSectionSchema } from '#hooks/use-settings-dialog.js';
+import { useFeature, useFeatureGate } from '#flags/use-feature.js';
+import { settingsSectionSchema } from '@taucad/settings-ui/components/settings/settings-section';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
 import type { SectionWriteResult } from '#preferences/section-store.js';
@@ -108,7 +108,9 @@ export type SetupFlowProps = Readonly<{
  */
 export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: SetupFlowProps): React.JSX.Element {
   const navigate = useNavigate();
-  const isViewerControlsEnabled = useFeature('viewerControls');
+  /* A gate, like the route's: a failed flag load keeps a viewer-step link on its step, and a later answer of off does
+     not take away a step already shown. */
+  const isViewerControlsEnabled = useFeatureGate('viewerControls') === 'open';
   const isWarehouseEnabled = useFeature('partsWarehouse');
   const steps = setupSteps(isViewerControlsEnabled);
   const { profile, viewer, onboarding, writeProfile, writeViewer, writeOnboarding } = usePersonRecord();
@@ -188,6 +190,9 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
     preset: (preset: MousePresetId) => {
       answer('viewer', () => writeViewer({ controls: { preset } }));
       telemetry.presetSelected(preset, profile);
+    },
+    orbitStyle: (orbitStyle: OrbitStyleId) => {
+      answer('viewer', () => writeViewer({ controls: { orbitStyle } }));
     },
     gizmo: (choice: GizmoChoiceId) => {
       if (choice === 'none') {
@@ -289,6 +294,7 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
                   viewer={viewer}
                   onPresetChange={answers.preset}
                   onGizmoChange={answers.gizmo}
+                  onOrbitStyleChange={answers.orbitStyle}
                 />
               ) : null}
               {current === 'how' ? (

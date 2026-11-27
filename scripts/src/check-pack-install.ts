@@ -222,6 +222,8 @@ try {
   } else {
     await rm(root, { recursive: true, force: true });
   }
+  // Release any custody still held (a probe that did not stop): a lock left to garbage collection fails on Node 26.
+  await provider.close?.();
 }
 `;
 

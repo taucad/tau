@@ -58,7 +58,7 @@ You authorise us, through Stripe, our payment processor, to charge your payment 
 
 ## 4. Our software and open source
 
-Tau's own source code, including the GeoSpec engine, is published under the Apache License 2.0 at [github.com/taucad/tau](https://github.com/taucad/tau). Third-party components keep their own licenses, listed in our [Open-Source Notices](/legal/open-source). Nothing in these terms limits any right those licenses give you; in particular, you may modify the LGPL-licensed Open CASCADE Technology components for your own use and reverse engineer them to debug those modifications.
+Tau's own source code, including the GeoSpec engine, is published under the Apache License 2.0 at [github.com/taucad/tau](https://github.com/taucad/tau). Third-party components keep their own licenses, listed in our [Open-Source Notices](/legal/open-source). Nothing in these terms limits any right those licenses give you; in particular, you may modify the LGPL-licensed components, including Open CASCADE Technology, libheif and libde265, for your own use, use your modified versions with Tau, and reverse engineer Tau to debug those modifications.
 
 The hosted service, our infrastructure, the Tau name and logos, and content we create that is not in the open-source code remain ours. You may use the hosted service for your own purposes under these terms; you may not resell it or use our trademarks without our permission.
 

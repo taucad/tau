@@ -251,6 +251,40 @@ describe('createRuntimeAgentClients', () => {
     });
   });
 
+  it('should report what the build reused and cost, and the meshes the kernel kept (R18)', async () => {
+    const build = {
+      reused: false,
+      elapsed: 7735,
+      operations: { reused: 412, computed: 108 },
+      costliest: [{ operation: 'Shape.fillet', elapsed: 2100, calls: 12 }],
+    };
+    const tessellation: TessellationReport = {
+      triangles: 12,
+      vertices: 8,
+      elapsed: 3,
+      meshes: { reused: 1, computed: 1 },
+    };
+    const clients = clientsFor(
+      runtimeFixture({
+        evaluate: () => ({ ...evaluation(), build }),
+        render: () => rendering({ mimeType: 'model/gltf-binary', content: glb(), tessellation }),
+      }),
+    );
+
+    await expect(clients.kernelClient.evaluateModel({ targetFile: 'main.ts' })).resolves.toMatchObject({
+      success: true,
+      status: 'ready',
+      build,
+      tessellation,
+    });
+  });
+
+  it('omits the build report from a runtime that reports none', async () => {
+    const clients = clientsFor(runtimeFixture());
+
+    expect(await clients.kernelClient.evaluateModel({ targetFile: 'main.ts' })).not.toHaveProperty('build');
+  });
+
   it('omits the mesh cost when the kernel reports none', async () => {
     const clients = clientsFor(runtimeFixture());
 
@@ -460,7 +494,12 @@ describe('createRuntimeAgentClients', () => {
     });
     await expect(
       clients.images.captureImages({ targetFile: 'drawing.ts', mode: 'multi_angle', view: 'drawing' }),
-    ).resolves.toEqual({ success: true, images: [{ view: 'drawing', dataUrl: 'data:image/png;base64,AQ==' }] });
+    ).resolves.toEqual({
+      success: true,
+      images: [{ view: 'drawing', dataUrl: 'data:image/png;base64,AQ==' }],
+      message:
+        'View drawing is a 2D drawing with one canonical view, so multi_angle returned one image; its six camera angles apply to 3D views only.',
+    });
     expect(clients.exporter).toHaveBeenCalledTimes(2);
     const unitless = clientsFor(
       runtimeFixture({
@@ -473,6 +512,8 @@ describe('createRuntimeAgentClients', () => {
     await expect(unitless.images.captureImages({ targetFile: 'drawing.ts', mode: 'multi_angle' })).resolves.toEqual({
       success: true,
       images: [{ view: 'drawing', dataUrl: 'data:image/png;base64,AQ==' }],
+      message:
+        'View drawing is a 2D drawing with one canonical view, so multi_angle returned one image; its six camera angles apply to 3D views only.',
     });
     expect(unitless.exporter.mock.calls[2]?.[0]).toMatchObject({
       exportOptions: { axes: false, scaleBar: false },

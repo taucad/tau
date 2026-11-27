@@ -8,6 +8,7 @@ import {
   FileSystemBridgeProtocolVersionError,
   fileSystemBridgeProtocolVersion,
   fileSystemBridgeSchemas,
+  fileSystemLongCalls,
 } from '#filesystem-bridge-protocol.js';
 import { createTransferredFileSystemBridgeProxy } from '#filesystem-bridge.js';
 
@@ -26,6 +27,29 @@ describe('void call results', () => {
 
   it.each([0, '', {}, false])('rejects %o', (value) => {
     expect(result.safeParse(value)).toMatchObject({ success: false });
+  });
+});
+
+describe('project root configuration results (T-R1.1)', () => {
+  it('should parse the per-root result of configureProjectRoots and the two root-status calls', () => {
+    const { configureProjectRoots, getRootStatuses, recheckRoots } = fileSystemBridgeSchemas.calls;
+    const result = {
+      roots: [
+        { storageRootKey: 'node:/home', backend: 'node', state: 'available' },
+        { storageRootKey: 'node:/lost', backend: 'node', state: 'notFound', code: 'ENOENT' },
+      ],
+      skipped: [{ kind: 'project', reason: 'root-unavailable', projectId: 'proj_x', storageRootKey: 'node:/lost' }],
+    };
+    expect(configureProjectRoots.result.safeParse(result)).toMatchObject({ success: true, data: result });
+    expect(configureProjectRoots.result.safeParse(undefined).success).toBe(false);
+    expect(
+      configureProjectRoots.result.safeParse({ ...result, roots: [{ ...result.roots[0], state: 'gone' }] }).success,
+    ).toBe(false);
+    expect(getRootStatuses.args.safeParse([]).success).toBe(true);
+    expect(getRootStatuses.result.safeParse(result.roots).success).toBe(true);
+    expect(recheckRoots.args.safeParse([]).success).toBe(true);
+    expect(recheckRoots.args.safeParse([['node:/lost']]).success).toBe(true);
+    expect(recheckRoots.result.safeParse(result.roots).success).toBe(true);
   });
 });
 
@@ -55,10 +79,29 @@ describe('metadata-only stats (I3)', () => {
     expect(fileSystemBridgeSchemas.calls.stat.args.safeParse(['large.txt']).success).toBe(true);
     expect(fileSystemBridgeSchemas.calls.stat.result.safeParse(head).success).toBe(true);
   });
+
+  it('accepts a scoped tree listing holding an unmeasured file beside a folder', () => {
+    const tree = fileSystemBridgeSchemas.calls.readScopedShallowDirectory.result;
+    const folder = { id: '/heatx', name: 'heatx', size: 0, mtimeMs: 0, children: [] };
+    const file = { id: '/.DS_Store', name: '.DS_Store', size: 6148, mtimeMs: 1 };
+    expect(tree.safeParse([folder, file]).success).toBe(true);
+    expect(tree.safeParse([folder, { ...file, contentKind: 'binary' }]).success).toBe(true);
+    expect(tree.safeParse([{ ...file, lineCount: 3 }]).success).toBe(false);
+    expect(tree.safeParse([{ ...folder, children: [file] }]).success).toBe(true);
+  });
 });
 
 /* A literal, so a bump is a deliberate edit to this line and not a silent one:
  * every other assertion in the suite now reads the constant (G0-11). */
+describe('reads a tree write holds (D10, STO-25)', () => {
+  it('should carry every read that may wait for a landing as a long call, never under the ordinary deadline', () => {
+    for (const method of ['readFile', 'readFileWithDigest', 'readRange', 'stat', 'lstat', 'exists', 'readdir']) {
+      expect(Object.hasOwn(fileSystemLongCalls, method)).toBe(true);
+      expect(Object.hasOwn(fileSystemBridgeSchemas.calls, method)).toBe(true);
+    }
+  });
+});
+
 describe('filesystem bridge protocol version', () => {
   it('should be 11', () => {
     expect(fileSystemBridgeProtocolVersion).toBe(11);

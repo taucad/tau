@@ -14,6 +14,8 @@ import { guardActors } from '@taucad/xstate-testing/inspect';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import { ObservationService } from '@taucad/fs-client/observation-service';
+import { sha256Bytes } from '@taucad/utils/hash';
+import { reconciledManifest } from '#lib/manifest-reconciliation.js';
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { parameterEntryPath, projectToManifest, serializeProjectManifest } from '@taucad/types';
@@ -57,7 +59,7 @@ import type { PartialDeep } from 'type-fest';
 import type * as CadMachineModule from '#machines/cad.machine.js';
 import type * as ParameterSetServiceModule from '@taucad/ui-core/services/parameter-set-service';
 
-vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({ isBrowser: true }));
 /* Every parameter service the runtime builds, each with a spied close; `decorate` lets a row stand in for its reads. */
 const services = vi.hoisted(() => ({
   built: [] as Array<ParameterSetService & { close: ReturnType<typeof vi.fn> }>,
@@ -936,6 +938,44 @@ describe('createProjectRuntime', () => {
     expect(projectStates).not.toContain(JSON.stringify('loading'));
     states.unsubscribe();
     actor.stop();
+  });
+
+  /* STO-25 SP6: the load's bytes are the project's reconciled manifest from the moment it is ready with them, while
+   * the observation's own first read is still held (as a Tau Cloud open's apply holds it). */
+  it('should name the manifest the load read as reconciled before the observation reads it', async () => {
+    const content = createContent();
+    const held = new Promise<Uint8Array<ArrayBuffer>>(() => {
+      /* The observation's read is held for the test's life. */
+    });
+    const service = {
+      ...content.service,
+      observeContent: () =>
+        new ObservationService<FileContentResult>({
+          resource: 'tau.json',
+          watch: () => content.watchReady(),
+          read: async () => ({ kind: 'text', content: await held }),
+        }),
+    };
+    const { actor } = createProjectRuntime({
+      projectId: project.id,
+      fileManager: {
+        fileManagerRef: createFileManager(service),
+        parameterFiles: fixedPort(mock<ParameterFilesClient>()),
+      },
+      library: createLibrary(),
+      profile: 'shared',
+      input: { shouldLoadModelOnStart: false },
+    });
+    actor.start();
+    try {
+      await settle();
+      expect(selectProjectRef(actor.getSnapshot()).getSnapshot().matches('ready')).toBe(true);
+      const digest = await sha256Bytes(manifestBytes);
+      await expect.poll(() => reconciledManifest(project.id)).toBe(digest);
+    } finally {
+      actor.stop();
+    }
+    expect(reconciledManifest(project.id)).toBeUndefined();
   });
 
   it('should answer every public event in every state', () => {

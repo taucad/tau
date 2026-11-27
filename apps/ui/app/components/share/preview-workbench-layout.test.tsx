@@ -7,7 +7,7 @@ vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: () => true,
 }));
 
-vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+vi.mock('#routes/w.$workspace.$project/project-workspace-provider.js', () => ({
   ProjectWorkspaceProvider: ({ children }: { readonly children: React.JSX.Element }): React.JSX.Element => children,
 }));
 

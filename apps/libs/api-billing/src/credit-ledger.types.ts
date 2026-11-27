@@ -4,6 +4,7 @@ import type {
   JointInputMaximum,
   SupplierValuation,
 } from '@taucad/api-database/schema/billing.types';
+import type { creditOperation } from '@taucad/api-database/schema';
 
 export type CreditSource = 'promo' | 'plan' | 'purchased';
 export type QualifiedCategory = 'llm' | 'zoo_engine';
@@ -62,6 +63,11 @@ export type AdmissionDenial =
   | 'concurrency_unavailable'
   /** An operator paused this route; the gateway answers 503 `MODEL_ROUTE_PAUSED`. */
   | 'route_paused'
+  /**
+   * The route's supplier rates were published with an end date that has passed, so no request on it can be priced
+   * until its successor is published; every other route still answers. The gateway answers 503 `MODEL_ROUTE_PAUSED`.
+   */
+  | 'route_rates_expired'
   | 'policy_unavailable';
 
 export type AdmissionResult =
@@ -70,6 +76,11 @@ export type AdmissionResult =
       operationId: string;
       generation: bigint;
       authorized: SourceAmounts;
+      /**
+       * Present when the admit also recorded dispatch intent (chat performance WP-14): the row as written, and the
+       * milliseconds left before its dispatch deadline, read at commit.
+       */
+      dispatch?: { readonly operation: typeof creditOperation.$inferSelect };
     }
   | {
       status: 'replay';

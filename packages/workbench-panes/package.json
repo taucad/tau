@@ -69,6 +69,7 @@
     "./parameters/parameters-source": "./src/parameters/parameters-source.ts",
     "./records/view-record": "./src/records/view-record.ts",
     "./registry/pane-registry": "./src/registry/pane-registry.ts",
+    "./share/share-notice": "./src/share/share-notice.tsx",
     "./share/share-pane": "./src/share/share-pane.tsx",
     "./share/share-source": "./src/share/share-source.ts",
     "./shell/capture-view-control": "./src/shell/capture-view-control.tsx",
@@ -256,6 +257,11 @@
         "import": "./dist/registry/pane-registry.mjs",
         "default": "./dist/registry/pane-registry.mjs"
       },
+      "./share/share-notice": {
+        "types": "./dist/share/share-notice.d.mts",
+        "import": "./dist/share/share-notice.mjs",
+        "default": "./dist/share/share-notice.mjs"
+      },
       "./share/share-pane": {
         "types": "./dist/share/share-pane.d.mts",
         "import": "./dist/share/share-pane.mjs",
@@ -312,6 +318,7 @@
   "dependencies": {
     "@rjsf/core": "6.11.0",
     "@rjsf/utils": "6.11.0",
+    "@taucad/camera": "workspace:*",
     "@taucad/kinematics": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "@taucad/project-core": "workspace:*",
@@ -325,7 +332,7 @@
   },
   "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0",
-    "@taucad/ui": "^0.1.0-beta.0",
+    "@taucad/ui": "^0.1.0-beta.10",
     "@taucad/viewer": "^0.1.0-beta.0",
     "@xstate/react": "^7.0.0-alpha.3",
     "react": "^19.0.0",

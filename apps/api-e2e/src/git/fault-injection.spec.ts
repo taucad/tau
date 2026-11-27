@@ -67,9 +67,10 @@ const suitePids = new Set([...inject('gitE2EApiPids'), ...inject('gitE2EStorageP
 /**
  * Lease directories present now, so a case can prove it left none behind.
  *
- * Leases live under `tau-git-leases/<pid>/` (W10 defect 2's fix), so the census
- * is one level deeper than the worker directories: a *running* worker's own
- * parent is not a leak, and an empty one is nothing at all. Anything that is
+ * Leases live under `tau-git-leases/<pid>/host-<id>/` (W10 defect 2's fix, one
+ * parent per lease host), so the census reads below the worker and host
+ * directories: a *running* worker's own parents are not a leak, and an empty
+ * one is nothing at all. Anything that is
  * not a pid directory is counted as itself — that is the pre-fix layout, whose
  * leftovers are exactly what this census was written to see.
  */
@@ -89,8 +90,19 @@ const leaseDirectories = async (): Promise<readonly string[]> => {
         return [];
       }
       try {
-        const leases = await readdir(join(leaseRoot, worker.name));
-        return leases.map((lease) => `${worker.name}/${lease}`);
+        /* Each lease host in a worker has its own `host-<id>/` parent (so one host's boot sweep spares another's). */
+        const hosts = await readdir(join(leaseRoot, worker.name));
+        const leases = await Promise.all(
+          hosts.map(async (host) =>
+            host.startsWith('host-')
+              ? readdir(join(leaseRoot, worker.name, host)).then(
+                  (held) => held.map((lease) => `${worker.name}/${host}/${lease}`),
+                  () => [],
+                )
+              : [`${worker.name}/${host}`],
+          ),
+        );
+        return leases.flat();
       } catch {
         /* The worker cleaned up between the two reads. */
         return [];

@@ -22,10 +22,11 @@ const state = vi.hoisted(() => ({
   providers: [] as Array<{ handle: { providers: () => React.JSXElementConstructor<React.PropsWithChildren> } }>,
   commandPalette: [] as Array<{ id: string; handle: { commandPalette: () => ReactNode } }>,
   sidebarMounts: 0,
-  enableOverflowY: false,
+  scroll: undefined as 'document' | 'contained' | undefined,
   locationKey: 'default',
   pathname: '/',
   navigationType: 'POP' as 'POP' | 'PUSH' | 'REPLACE',
+  workspaceFrame: { drawn: false, pending: false, pathname: '/' },
 }));
 
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => state.isMobile }));
@@ -38,6 +39,7 @@ vi.mock('react-router', () => ({
   ),
   Outlet: () => <div>Page content</div>,
   useLocation: () => ({ key: state.locationKey, pathname: state.pathname, hash: '' }),
+  useParams: () => ({}),
   NavigationType: { Pop: 'POP', Push: 'PUSH', Replace: 'REPLACE' },
   useNavigationType: () => state.navigationType,
 }));
@@ -64,6 +66,9 @@ vi.mock('allotment', () => {
   );
   return { Allotment, LayoutPriority: { Low: 0, High: 1 } };
 });
+vi.mock('#components/layout/use-workspace-frame-state.js', () => ({
+  useWorkspaceFrameState: () => state.workspaceFrame,
+}));
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => state.authState }));
 vi.mock('#hooks/use-desktop-fullscreen.js', () => ({ useDesktopFullscreen: () => state.isFullscreen }));
 vi.mock('#flags/use-feature.js', () => ({ useFeatureFlags: () => ({}) }));
@@ -80,7 +85,7 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
         state.enablePageWrapper === undefined ? [] : [{ handle: { enablePageWrapper: state.enablePageWrapper } }],
       enablePageHeader:
         state.enablePageHeader === undefined ? [] : [{ handle: { enablePageHeader: state.enablePageHeader } }],
-      enableOverflowY: state.enableOverflowY ? [{ handle: { enableOverflowY: true } }] : [],
+      scroll: state.scroll === undefined ? [] : [{ handle: { scroll: state.scroll } }],
       providers: state.providers,
     }),
 }));
@@ -156,10 +161,11 @@ beforeEach(() => {
   state.providers = [];
   state.commandPalette = [];
   state.sidebarMounts = 0;
-  state.enableOverflowY = false;
+  state.scroll = undefined;
   state.locationKey = 'default';
   state.pathname = '/';
   state.navigationType = 'POP';
+  state.workspaceFrame = { drawn: false, pending: false, pathname: '/' };
   sessionStorage.clear();
   vi.unstubAllEnvs();
 });
@@ -357,9 +363,7 @@ describe('Page header contract', () => {
         .querySelector<HTMLElement>('[data-slot=application-shell]')
         ?.style.getPropertyValue('--titlebar-controls-width'),
     ).toBe('calc(var(--sidebar-panel-width) - 1px)');
-    expect(container.querySelector('header > div')).toHaveClass(
-      'md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
-    );
+    expect(container.querySelector('header > div')).toHaveClass('md:sidebar-closed:ml-(--titlebar-controls-width)');
   });
 
   it('should update occupied header width and traffic-light inset on native fullscreen transitions', () => {
@@ -440,6 +444,37 @@ describe('Page auth-aware wrapper contract', () => {
   });
 });
 
+/* T-A1.1 (D4.1): every route scrolls at the shell, wrapped or wrapperless, unless it declares `scroll: 'contained'`. */
+describe('Page scroll contract', () => {
+  const scroller = (): HTMLElement | undefined =>
+    screen.getByText('Page content').closest<HTMLElement>('.overflow-y-auto') ?? undefined;
+
+  it.each([
+    ['inside the application shell', undefined],
+    ['without the application shell', false],
+  ] as const)('should scroll a route with no scroll handle %s on both axes', (_label, enablePageWrapper) => {
+    state.enablePageWrapper = enablePageWrapper;
+    render(<Page />);
+
+    expect(scroller()).toBeDefined();
+    expect(scroller()).toHaveClass('overflow-x-auto');
+  });
+
+  it.each([
+    ['inside the application shell', undefined],
+    ['without the application shell', false],
+  ] as const)(
+    "should leave the scrolling to a route that declares scroll 'contained' %s",
+    (_label, enablePageWrapper) => {
+      state.enablePageWrapper = enablePageWrapper;
+      state.scroll = 'contained';
+      render(<Page />);
+
+      expect(scroller()).toBeUndefined();
+    },
+  );
+});
+
 describe('Page scroll restoration', () => {
   /* `html, body { overflow: hidden }` makes the shell's inner scroller the page's
    * scroller, which React Router's `ScrollRestoration` never sees (lane C P4). */
@@ -453,7 +488,6 @@ describe('Page scroll restoration', () => {
     ['inside the application shell', undefined],
     ['without the application shell', false],
   ] as const)('should restore the saved offset when Back returns to an entry %s', (_label, enablePageWrapper) => {
-    state.enableOverflowY = true;
     state.enablePageWrapper = enablePageWrapper;
     state.locationKey = 'community';
     state.pathname = '/community';
@@ -491,7 +525,6 @@ describe('Page scroll restoration', () => {
       },
     );
     try {
-      state.enableOverflowY = true;
       state.locationKey = 'community';
       state.pathname = '/community';
       const { rerender } = render(<Page />);
@@ -522,8 +555,45 @@ describe('Page scroll restoration', () => {
     }
   });
 
+  /* Review round 2 (A15b2): the route content sits in the shell's frame host, a `display: contents` box, so the hold
+   * watches the content inside it, not the host. */
+  it("should watch the route content's own box through the shell's frame host", () => {
+    const observed: Element[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        public observe(element: Element): void {
+          observed.push(element);
+        }
+        public disconnect(): void {
+          // Nothing to release.
+        }
+      },
+    );
+    const style = document.createElement('style');
+    style.textContent = '.contents { display: contents; }';
+    document.head.append(style);
+    try {
+      state.locationKey = 'community';
+      state.pathname = '/community';
+      const { rerender } = render(<Page />);
+      scrollTo(900);
+      state.locationKey = 'example';
+      state.navigationType = 'PUSH';
+      rerender(<Page />);
+      state.locationKey = 'community';
+      state.navigationType = 'POP';
+      rerender(<Page />);
+
+      expect(observed).toContain(screen.getByText('Page content'));
+      expect(observed.some((element) => element.classList.contains('contents'))).toBe(false);
+    } finally {
+      style.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('should keep the offset when a filter or dialog replaces the entry on the same page', () => {
-    state.enableOverflowY = true;
     state.locationKey = 'community';
     state.pathname = '/community';
     const { rerender } = render(<Page />);
@@ -546,7 +616,6 @@ describe('Page scroll restoration', () => {
   });
 
   it('should start a new entry at the top when the store is blocked', () => {
-    state.enableOverflowY = true;
     state.locationKey = 'community';
     const { rerender } = render(<Page />);
     const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
@@ -570,10 +639,57 @@ describe('Page scroll restoration', () => {
   });
 
   it('should leave a route that does not scroll the shell untouched', () => {
+    state.scroll = 'contained';
     state.locationKey = 'workspace';
     const { container } = render(<Page />);
 
     expect(container.querySelector('section')).not.toHaveClass('overflow-y-auto');
     expect(sessionStorage).toHaveLength(0);
+  });
+});
+
+/*
+ * A15b2 (F11): drawn ahead of the route, the frame is laid out as the project route lays it out, so the route's
+ * commit moves nothing: no page header and no page scroller (the page being left may be scrolled away), and the frame
+ * reads the destination's hint, as the router has not pushed its URL yet.
+ */
+describe('Page workspace frame ahead of the route', () => {
+  it("should lay the pending frame out as the project route does, at the destination's path", () => {
+    state.hasBreadcrumb = true;
+    state.workspaceFrame = { drawn: true, pending: true, pathname: '/w/home/gearbox' };
+    const { container } = render(<Page />);
+    const frame = container.querySelector('[data-slot=workspace-frame]');
+
+    expect(frame).toHaveAttribute('data-workspace-pending');
+    expect(frame).toHaveTextContent('Page content');
+    expect(container.querySelector('header')).not.toBeInTheDocument();
+    expect(container.querySelector('main')).toHaveClass('[--header-height:0px]');
+    expect(container.querySelector('section')).not.toHaveClass('overflow-y-auto');
+  });
+
+  it('should keep the page content in one node from the page being left, through the pending frame, to the route', () => {
+    state.hasBreadcrumb = true;
+    const { container, rerender } = render(<Page />);
+    const content = screen.getByText('Page content');
+    expect(container.querySelector('header')).toBeInTheDocument();
+
+    state.workspaceFrame = { drawn: true, pending: true, pathname: '/w/home/gearbox' };
+    rerender(<Page />);
+    expect(screen.getByText('Page content')).toBe(content);
+    const frame = container.querySelector('[data-slot=workspace-frame]');
+    const lanes = container.querySelector('[data-slot=workspace-frame-lanes]');
+
+    /* The route commits: the same frame and lanes, no longer pending. */
+    state.workspaceFrame = { drawn: true, pending: false, pathname: '/w/home/gearbox' };
+    rerender(<Page />);
+    expect(container.querySelector('[data-slot=workspace-frame]')).toBe(frame);
+    expect(container.querySelector('[data-slot=workspace-frame-lanes]')).toBe(lanes);
+    expect(frame).not.toHaveAttribute('data-workspace-pending');
+    expect(screen.getByText('Page content')).toBe(content);
+
+    state.workspaceFrame = { drawn: false, pending: false, pathname: '/' };
+    rerender(<Page />);
+    expect(screen.getByText('Page content')).toBe(content);
+    expect(container.querySelector('header')).toBeInTheDocument();
   });
 });

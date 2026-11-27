@@ -23,16 +23,10 @@ const cappedModelIds = [
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
   'openai-gpt-6-luna',
-  'openai-gpt-5.6-sol',
-  'openai-gpt-5.6-terra',
-  'openai-gpt-5.6-luna',
-  'openai-gpt-5.5',
+  'google-gemini-4-neon',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
-  'google-gemini-3.1-pro',
-  'google-gemini-3.8-flash',
-  'google-gemini-3.5-flash-lite',
-  'google-gemini-3.5-flash',
+  'google-gemini-4-hydrogen',
   'together-kimi-k3.1-pro',
   'together-glm-5.3',
   'together-glm-5.3-flash',
@@ -60,16 +54,10 @@ const pdfInputModelIds = [
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
   'openai-gpt-6-luna',
-  'openai-gpt-5.6-sol',
-  'openai-gpt-5.6-terra',
-  'openai-gpt-5.6-luna',
-  'openai-gpt-5.5',
+  'google-gemini-4-neon',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
-  'google-gemini-3.1-pro',
-  'google-gemini-3.8-flash',
-  'google-gemini-3.5-flash-lite',
-  'google-gemini-3.5-flash',
+  'google-gemini-4-hydrogen',
 ];
 
 const getCloudCatalogEntries = () => Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
@@ -149,12 +137,12 @@ describe('modelList', () => {
       }
     });
 
-    it('should include every row default in its own levels, sent at high', () => {
+    it('should include every row default in its own levels, sent at medium', () => {
       for (const model of getCloudCatalogEntries()) {
         const levels: readonly string[] | undefined = model.support?.reasoning?.levels;
         if (levels !== undefined) {
           expect(levels, model.id).toContain(forwardedDefault(model));
-          expect(forwardedDefault(model), model.id).toBe('high');
+          expect(forwardedDefault(model), model.id).toBe('medium');
         }
       }
     });
@@ -176,9 +164,6 @@ describe('modelList', () => {
         'openai-gpt-6-astra',
         'openai-gpt-6-sol',
         'openai-gpt-6-luna',
-        'openai-gpt-5.6-sol',
-        'openai-gpt-5.6-terra',
-        'openai-gpt-5.6-luna',
       ]);
     });
 
@@ -204,6 +189,8 @@ describe('modelList', () => {
         'anthropic-claude-sonnet-5.5',
         'openai-gpt-6.1-terra',
         'openai-gpt-6-astra',
+        'google-gemini-4-neon',
+        'google-gemini-4-hydrogen',
       ]);
       expect(
         getCloudCatalogEntries()
@@ -215,12 +202,10 @@ describe('modelList', () => {
 
   it('should offer PDF input on every Gemini catalog model', () => {
     const geminiModelIds = [
+      'google-gemini-4-neon',
       'google-gemini-4-argon',
       'google-gemini-4-carbon',
-      'google-gemini-3.1-pro',
-      'google-gemini-3.8-flash',
-      'google-gemini-3.5-flash-lite',
-      'google-gemini-3.5-flash',
+      'google-gemini-4-hydrogen',
     ];
 
     for (const id of geminiModelIds) {
@@ -305,7 +290,7 @@ describe('ModelService', () => {
         maxTokens: 128_000,
         cost: { inputTokens: 2, outputTokens: 10, cacheReadTokens: 0.2, cacheWriteTokens: 2.5 },
       },
-      configuration: { thinking: { type: 'adaptive', display: 'summarized' }, outputConfig: { effort: 'high' } },
+      configuration: { thinking: { type: 'adaptive', display: 'summarized' }, outputConfig: { effort: 'medium' } },
     });
     expect(modelList.anthropic['claude-sonnet-5']?.recommended).toBe(false);
   });
@@ -334,7 +319,7 @@ describe('ModelService', () => {
         streaming: true,
         maxTokens: 120_000,
         thinking: { type: 'adaptive', display: 'summarized' },
-        outputConfig: { effort: 'high' },
+        outputConfig: { effort: 'medium' },
       },
     });
     expect(opus5?.configuration).toHaveProperty('max_tokens', 120_000);
@@ -365,7 +350,7 @@ describe('ModelService', () => {
         streaming: true,
         maxTokens: 120_000,
         thinking: { type: 'adaptive', display: 'summarized' },
-        outputConfig: { effort: 'high' },
+        outputConfig: { effort: 'medium' },
       },
     });
     expect(fable52?.configuration).toHaveProperty('max_tokens', 120_000);
@@ -373,18 +358,14 @@ describe('ModelService', () => {
     expect(modelList.anthropic['claude-fable-5']?.recommended).toBe(false);
   });
 
-  it('lists every GPT-5.6 tier and keeps GPT-5.5 non-recommended', async () => {
-    const service = createModelService();
-    const listedModels = await service.getModels();
-    const gpt56ModelIds = ['openai-gpt-5.6-sol', 'openai-gpt-5.6-terra', 'openai-gpt-5.6-luna'];
-    const listedModelIds = listedModels.map((model) => model.id);
+  it('lists no GPT-5 generation model', async () => {
+    const listedModels = await createModelService().getModels();
 
-    expect(service.models.map((model) => model.id)).toEqual(expect.arrayContaining(gpt56ModelIds));
-    expect(listedModelIds).toEqual(expect.arrayContaining([...gpt56ModelIds, 'openai-gpt-5.5']));
-    expect(modelList.openai['gpt-5.5']?.recommended).toBe(false);
+    expect(listedModels.filter((model) => model.id.startsWith('openai-gpt-5'))).toEqual([]);
+    expect(Object.keys(modelList.openai).filter((key) => key.startsWith('gpt-5'))).toEqual([]);
   });
 
-  it('should recommend GPT-6.1 Terra while retaining GPT-5.6 Terra as non-recommended', async () => {
+  it('should recommend GPT-6.1 Terra', async () => {
     const listedModels = await createModelService().getModels();
     expect(listedModels.find((model) => model.id === 'openai-gpt-6.1-terra')).toMatchObject({
       recommended: true,
@@ -400,9 +381,8 @@ describe('ModelService', () => {
         knowledgeCutoff: '2026-06',
         cost: { inputTokens: 1, outputTokens: 5, cacheReadTokens: 0.05, cacheWriteTokens: 1.25 },
       },
-      configuration: { streaming: true, reasoning: { effort: 'high', summary: 'auto' } },
+      configuration: { streaming: true, reasoning: { effort: 'medium', summary: 'auto' } },
     });
-    expect(listedModels.find((model) => model.id === 'openai-gpt-5.6-terra')).toMatchObject({ recommended: false });
     expect(gatewayModelRoutes()).toContainEqual({
       routeId: 'openai-gpt-6.1-terra',
       modelId: 'gpt-6.1-terra',
@@ -420,36 +400,25 @@ describe('ModelService', () => {
     expect(modelList.openai['gpt-6-astra']?.recommended).toBe(true);
   });
 
-  it.each(['gemini-4-argon', 'gemini-4-carbon'])(
-    'should list %s with image and PDF input and selectable reasoning',
-    async (model) => {
-      const listedModels = await createModelService().getModels();
-      const entry = listedModels.find((listed) => listed.id === `google-${model}`);
+  it.each([
+    ['gemini-4-neon', ['low', 'medium', 'high', 'xhigh']],
+    ['gemini-4-argon', ['low', 'medium', 'high']],
+    ['gemini-4-carbon', ['low', 'medium', 'high']],
+    ['gemini-4-hydrogen', ['low', 'medium', 'high', 'xhigh']],
+  ])('should list %s with image and PDF input and selectable reasoning', async (model, levels) => {
+    const listedModels = await createModelService().getModels();
+    const entry = listedModels.find((listed) => listed.id === `google-${model}`);
 
-      expect(entry).toMatchObject({
-        model,
-        provider: { id: 'vertexai', name: 'Google' },
-        support: {
-          tools: true,
-          toolChoice: false,
-          modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
-          reasoning: { levels: ['low', 'medium', 'high'] },
-        },
-      });
-    },
-  );
-
-  it('recommends Gemini 3.8 Flash instead of the Gemini 3.5 models', async () => {
-    const service = createModelService();
-    const listedModels = await service.getModels();
-    const listedModelIds = listedModels.map((model) => model.id);
-    const newModelIds = ['google-gemini-3.8-flash', 'google-gemini-3.5-flash-lite'];
-
-    expect(listedModelIds).toEqual(expect.arrayContaining([...newModelIds, 'google-gemini-3.5-flash']));
-    expect(modelList.vertexai['gemini-3.7-flash']).toBeUndefined();
-    expect(modelList.vertexai['gemini-3.8-flash']?.recommended).toBe(true);
-    expect(modelList.vertexai['gemini-3.5-flash-lite']?.recommended).toBe(false);
-    expect(modelList.vertexai['gemini-3.5-flash']?.recommended).toBe(false);
+    expect(entry).toMatchObject({
+      model,
+      provider: { id: 'vertexai', name: 'Google' },
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
+        reasoning: { levels },
+      },
+    });
   });
 
   it('lists GLM 5.3 as an enabled text-only tool-capable model', async () => {
@@ -487,7 +456,7 @@ describe('ModelService', () => {
       configuration: {
         streaming: true,
         maxOutputTokens: 64_000,
-        reasoning: { effort: 'high', summary: 'auto' },
+        reasoning: { effort: 'medium', summary: 'auto' },
       },
     });
     expect(modelList.xai['grok-4.6']?.recommended).toBe(false);

@@ -109,13 +109,13 @@ describe('installStaleBuildRecovery', () => {
     // Shown again: the decision lands, and a new failure is decided and tagged as usual.
     globalThis.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
     await settle();
-    expect(readStaleBuildOutcome(held)).toBe('current');
+    expect(readStaleBuildOutcome(held)).toBe('transient');
     const later = new TypeError('Importing a module script failed.');
     const decided = recoverFromStaleBuild(later);
     const laterTag = classifyStaleBuildFailure(later);
     await vi.advanceTimersByTimeAsync(lookupConfirmDelay * 3);
-    await expect(decided).resolves.toBe('current');
-    await expect(laterTag).resolves.toBe('current');
+    await expect(decided).resolves.toBe('transient');
+    await expect(laterTag).resolves.toBe('transient');
     expect(fetchMock).toHaveBeenCalled();
   });
 
@@ -139,13 +139,13 @@ describe('installStaleBuildRecovery', () => {
 
     setVisibility('visible');
     await settle();
-    expect(readStaleBuildOutcome(held)).toBe('current');
+    expect(readStaleBuildOutcome(held)).toBe('transient');
     const later = new TypeError('Importing a module script failed.');
     const decided = recoverFromStaleBuild(later);
     const laterTag = classifyStaleBuildFailure(later);
     await vi.advanceTimersByTimeAsync(lookupConfirmDelay * 3);
-    await expect(decided).resolves.toBe('current');
-    await expect(laterTag).resolves.toBe('current');
+    await expect(decided).resolves.toBe('transient');
+    await expect(laterTag).resolves.toBe('transient');
   });
 
   it('should treat a document that boots hidden as hidden from the start, so nothing waits for it to be shown', async () => {
@@ -189,7 +189,7 @@ describe('installStaleBuildRecovery', () => {
     globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: later }));
     const laterTag = classifyStaleBuildFailure(later);
     await settle();
-    await expect(laterTag).resolves.toBe('current');
+    await expect(laterTag).resolves.toBe('transient');
   });
 
   it("should hand a failure only Vite's preloader reported to the tracker at once while the page is hidden", async () => {
@@ -549,11 +549,13 @@ describe('installStaleBuildRecovery', () => {
       }),
     );
     const error = new TypeError('Importing a module script failed.');
+    // Worked on, so the live build's own failure is offered by its panel, never reloaded (D19).
+    vi.spyOn(performance, 'now').mockReturnValue(60_000);
 
     recoverFromCaughtError(error);
     await settle();
 
-    expect(readStaleBuildOutcome(error)).toBe('current');
+    expect(readStaleBuildOutcome(error)).toBe('transient');
     expect(reload).not.toHaveBeenCalled();
     expect(skew.isReloadOffered()).toBe(false);
   });
@@ -620,6 +622,72 @@ describe('installStaleBuildRecovery', () => {
     await settle();
 
     expect(reload).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * A client navigation in flight, as React Router's own global holds it: the URL still names the page being left,
+   * and the router's pending navigation names the destination.
+   */
+  const stubPendingNavigation = (destination: string, formMethod?: string): void => {
+    const url = new URL(destination, 'https://tau.test');
+    vi.stubGlobal('__reactRouterDataRouter', {
+      state: {
+        navigation: {
+          state: 'loading',
+          location: { pathname: url.pathname, search: url.search, hash: url.hash },
+          ...(formMethod === undefined ? {} : { formMethod }),
+        },
+      },
+      createHref: (location: { pathname: string; search: string; hash: string }) =>
+        `${location.pathname}${location.search}${location.hash}`,
+    });
+  };
+
+  const stubReloadAndAssign = (): { reload: ReturnType<typeof vi.fn>; assign: ReturnType<typeof vi.fn> } => {
+    const reload = vi.fn();
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...globalThis.location, pathname: '/', search: '', hash: '', reload, assign });
+    return { reload, assign };
+  };
+
+  /* PL7 staging verification 2026-11-21, row 5 (`/convert`): a route module's dependency failed during a client
+   * navigation within the auto-reload window, and the page's reload of the current URL landed the user on Home. */
+  it.each([
+    ['on the build the server still runs', 'own'],
+    ['after a deploy replaced the build', 'deployed'],
+  ] as const)(
+    "should reload into a client navigation's destination when its code fails to load %s",
+    async (_case, server) => {
+      const { installStaleBuildRecovery } = await load();
+      stubServer(server === 'own' ? ownBuildId : deployedBuildId);
+      const { reload, assign } = stubReloadAndAssign();
+      stubPendingNavigation('/convert?from=home#viewer');
+      uninstall = installStaleBuildRecovery();
+
+      const event = new Event('vite:preloadError');
+      Object.assign(event, {
+        payload: new TypeError('Failed to fetch dynamically imported module: /assets/route-1.js'),
+      });
+      globalThis.dispatchEvent(event);
+      await settle();
+
+      expect(assign).toHaveBeenCalledExactlyOnceWith('/convert?from=home#viewer');
+      expect(reload).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should reload the page itself when no navigation is pending, or a submission is', async () => {
+    const { installStaleBuildRecovery } = await load();
+    stubServer(deployedBuildId);
+    const { reload, assign } = stubReloadAndAssign();
+    stubPendingNavigation('/convert', 'POST');
+    uninstall = installStaleBuildRecovery();
+
+    rejectWithStaleModule();
+    await settle();
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it('should leave any other SDK load failure alone', async () => {

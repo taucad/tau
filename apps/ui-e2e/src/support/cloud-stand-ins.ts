@@ -215,8 +215,8 @@ export const cloudLoadProbe: CloudLoadProbe = {
   richComposer: '[aria-label="Ask Tau to build anything..."]',
   plainComposer: 'textarea[aria-label="Chat message"]',
   projectGrid: 'ul[aria-label="Projects"]',
-  cloudListingText: 'Loading Tau Cloud projects',
-  cloudStateText: 'Tau Cloud projects',
+  cloudListingText: 'Loading cloud projects',
+  cloudStateText: 'Cloud projects',
   statusSlot: '[data-slot="project-library-status"]',
   sessionPath: '/v1/auth/get-session',
 };

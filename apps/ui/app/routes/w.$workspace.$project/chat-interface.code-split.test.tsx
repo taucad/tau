@@ -16,6 +16,11 @@ const panel = vi.hoisted(() => (name: string, label: string) => () => {
 });
 
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => true }));
+/* The replay foreign-content mark reads the project role, which needs a ProjectProvider these tests do not mount. */
+vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useProjectRole: () => undefined,
+}));
 vi.mock('#providers/part-thumbnail-provider.js', () => ({
   PartThumbnailProvider: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
 }));
@@ -75,7 +80,7 @@ vi.mock('#routes/w.$workspace.$project/chat-interface-nav.js', () => ({
   ChatInterfaceNav: () => null,
   surfaceTitle: (id: string) => id,
 }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({ WorkspaceSkeleton: () => null }));
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', () => ({ WorkspaceOpening: () => null }));
 /* The project top bar (W2) has its own suite; this shell suite only needs its slot. */
 vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
 

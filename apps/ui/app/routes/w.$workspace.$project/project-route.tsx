@@ -7,7 +7,7 @@ import {
   ProjectRouteRetryContext,
   ProjectRouteStateContext,
 } from '#routes/w.$workspace.$project/project-route-state.js';
-import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
+import { WorkspaceFrame, WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
 import type { LiveProjectSessions as LiveProjectSessionsComponent } from '#routes/w.$workspace.$project/project-live-sessions.js';
 import {
   ProjectRouteIntent,
@@ -21,6 +21,7 @@ import type { CommittedProjectRoute, FocusRegistryView } from '#machines/focus.r
 import type { FocusRouteCommand } from '#machines/focus.machine.js';
 import type { SessionsMachineContext } from '#machines/sessions.machine.js';
 import { loadProjectWorkspace } from '#lib/project-workspace-warmup.js';
+import { projectOpenCopy } from '#lib/project-open-copy.js';
 
 /*
  * D19/W21: the CAD workspace is not in the root layout's module graph. Everything a live project
@@ -111,7 +112,7 @@ export function ProjectRouteGate({
           <div
             className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'
             role='status'
-            aria-label='Opening project'
+            aria-label={projectOpenCopy.label}
           >
             <Loader className='size-8' />
           </div>
@@ -158,7 +159,8 @@ export function ProjectRouteProviders({
 }): React.ReactNode {
   const appHosted = useContext(ProjectSessionsHostContext);
   if (appHosted) {
-    return <ProjectRouteContent isProjectRoute>{children}</ProjectRouteContent>;
+    /* A15b2: under the app host the shell draws the frame around this (`Page`), so it is in place before the route. */
+    return <ProjectRouteGateContent isProjectRoute>{children}</ProjectRouteGateContent>;
   }
   return (
     <DetachedProjectRoute
@@ -212,10 +214,11 @@ function DetachedProjectRoute({
 }
 
 /**
- * A project route's content region until this document's file-manager worker exists: the workspace's own
- * placeholder, or the file service's failure notice in its place. The shell around it is already there (D24), so the
- * placeholder draws the content region only; this is also what the server renders for a project URL, beside the shell.
- * Any other route's content is never held, and keeps its tree position whichever route comes next.
+ * A project route's content region with no app host (a suite that mounts the route alone): the persistent workspace
+ * frame (A15b), with the content over it once this document's file-manager worker exists, or the file service's
+ * failure notice in its place. Under the app host the shell draws the frame instead (`Page`, A15b2) and the route
+ * renders only the gate. Any other route's content is never held, and keeps its tree position whichever route comes
+ * next.
  *
  * @param props - The route's content, and whether the route is a project's.
  * @returns The content, once the worker exists or at once off a project route.
@@ -227,10 +230,26 @@ function ProjectRouteContent({
   readonly children?: React.ReactNode;
   readonly isProjectRoute: boolean;
 }): React.ReactNode {
+  /* One host element whatever the route, so a visit off a project route keeps the content's tree position. */
+  return (
+    <WorkspaceFrame isDrawn={isProjectRoute}>
+      <ProjectRouteGateContent isProjectRoute={isProjectRoute}>{children}</ProjectRouteGateContent>
+    </WorkspaceFrame>
+  );
+}
+
+/** The content region's gate on the file-manager worker, inside whichever frame draws the region. */
+function ProjectRouteGateContent({
+  children,
+  isProjectRoute,
+}: {
+  readonly children?: React.ReactNode;
+  readonly isProjectRoute: boolean;
+}): React.ReactNode {
   return (
     <SharedWorkerGate
       shouldReportFailure={isProjectRoute}
-      placeholder={isProjectRoute ? <WorkspaceSkeleton /> : children}
+      placeholder={isProjectRoute ? <WorkspaceOpening /> : children}
     >
       {children}
     </SharedWorkerGate>

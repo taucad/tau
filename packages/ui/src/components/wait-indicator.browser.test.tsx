@@ -76,6 +76,39 @@ it('should swap to the slow words and Retry at 10,000 ms without changing its bo
   expect(boxOf(find('wait-indicator'))).toEqual(box);
 });
 
+it('should keep its words while progress moves, and turn slow only 10,000 ms after the last progress', () => {
+  const props = {
+    active: true,
+    label: 'Opening project',
+    slowLabel: 'Still opening project',
+    onRetry: () => undefined,
+  };
+  const view = renderAt(0, { ...props, progress: 0.1 });
+  const startedWithTheWait = new Set(document.getAnimations());
+  view.rerender(
+    <WaitClockProvider clock={clockAt(9000)}>
+      <WaitIndicator {...props} progress={0.2} />
+    </WaitClockProvider>,
+  );
+  /* Moves the wait to `time` ms after its start: an animation that began with the progress began 9,000 ms in. */
+  const at = (time: number): void => {
+    for (const animation of document.getAnimations()) {
+      animation.pause();
+      animation.currentTime = startedWithTheWait.has(animation) ? time : time - 9000;
+    }
+  };
+
+  at(10_001);
+  expect(isShown(find('wait-indicator-label'))).toBe(true);
+  expect(isShown(find('wait-indicator-slow'))).toBe(false);
+  at(18_999);
+  expect(isShown(find('wait-indicator-label'))).toBe(true);
+  at(19_001);
+  expect(isShown(find('wait-indicator-label'))).toBe(false);
+  expect(isShown(find('wait-indicator-slow'))).toBe(true);
+  expect(within(find('wait-indicator-slow')).getByRole('button', { name: 'Try again' })).toBeVisible();
+});
+
 it('should keep the slow words hidden while the indicator itself is still hidden', () => {
   renderAt(0, { active: true, label: 'Loading chat', slowLabel: 'Still loading chat' });
 

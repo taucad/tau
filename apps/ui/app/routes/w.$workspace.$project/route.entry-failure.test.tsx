@@ -9,7 +9,7 @@ import WorkspaceProjectRoute from '#routes/w.$workspace.$project/route.js';
 
 const pending = vi.hoisted(() => {
   const module = Promise.withResolvers<never>();
-  return { ...module, recover: vi.fn(), resolving: false };
+  return { ...module, recover: vi.fn(), reload: vi.fn(), resolving: false };
 });
 vi.mock('#routes/w.$workspace.$project/project-live-sessions.js', async () => pending.promise);
 vi.mock('#lib/stale-build-recovery.js', () => ({ recoverFromCaughtError: pending.recover }));
@@ -23,12 +23,13 @@ vi.mock('#routes/w.$workspace.$project/project-route-state.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-route-notices.js', () => ({
   ProjectRouteNotice: () => <p>Resolving the requested project</p>,
 }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({
-  WorkspaceSkeleton: () => <p role='status'>Loading workspace</p>,
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', () => ({
+  WorkspaceOpening: () => <p role='status'>Loading workspace</p>,
 }));
 
 describe('project entry module failure', () => {
   it('should keep recovery bounded and return to the current authority notice on navigation', async () => {
+    vi.stubGlobal('location', { ...globalThis.location, reload: pending.reload });
     const view = render(<WorkspaceProjectRoute />);
     expect(screen.getByRole('status')).toHaveTextContent('Loading workspace');
     const error = new TypeError('Failed to fetch dynamically imported module');
@@ -38,9 +39,10 @@ describe('project entry module failure', () => {
     expect(await screen.findByRole('alert', { name: 'Workspace unavailable' })).toBeInTheDocument();
     // Vitest wraps a rejected module factory and retains the import failure as its cause.
     expect(pending.recover).toHaveBeenCalledWith(expect.objectContaining({ cause: error }));
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByRole('alert', { name: 'Workspace unavailable' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
+    // The page keeps the failed module, so only a reload loads it (PL7 staging defects FP9): no in-place retry.
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(pending.reload).toHaveBeenCalledOnce();
     pending.resolving = true;
     view.rerender(<WorkspaceProjectRoute />);
     expect(screen.getByText('Resolving the requested project')).toBeInTheDocument();

@@ -221,7 +221,70 @@ const removeCreatedParents = async ({ first, last }: Readonly<{ first: string; l
   }
 };
 
+/** Errors Windows answers a rename with while another program briefly holds one of its files. */
+const transientRenameCodes = new Set(['EPERM', 'EACCES', 'EBUSY']);
+/** How long a Windows rename keeps retrying a transient lock, in total. */
+const renameRetryBudgetMilliseconds = 1000;
+
+/**
+ * Rename, retrying on Windows while the error is one a transient lock gives.
+ *
+ * Windows Defender, the search indexer and backup agents open a freshly
+ * written file for a moment, and a rename over or of it then fails with
+ * `EPERM`, `EACCES` or `EBUSY` though nothing is wrong. As graceful-fs does,
+ * the rename is retried with a growing delay (10 ms doubling, at most 250 ms
+ * apart) for about a second; the last error is the answer. Elsewhere these
+ * codes are real and answered at once. What the first attempt was admitted on
+ * can change during a backoff, so `beforeRetry` runs again after each one and
+ * its refusal is the answer.
+ *
+ * @param from - The path to rename.
+ * @param to - Its new path.
+ * @param beforeRetry - The checks the first attempt passed, run again before each retry.
+ */
+const renameRetryingTransientLocks = async (
+  from: string,
+  to: string,
+  beforeRetry: () => Promise<void>,
+): Promise<void> => {
+  const startedAt = Date.now();
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each attempt waits on the one before it.
+      await fs.rename(from, to);
+      return;
+    } catch (error) {
+      const { code } = error as NodeJS.ErrnoException;
+      const elapsed = Date.now() - startedAt;
+      if (process.platform !== 'win32' || code === undefined || !transientRenameCodes.has(code)) {
+        throw error;
+      }
+      if (elapsed >= renameRetryBudgetMilliseconds) {
+        throw error;
+      }
+      const backoffMilliseconds = Math.min(10 * 2 ** attempt, 250, renameRetryBudgetMilliseconds - elapsed);
+      // oxlint-disable-next-line no-await-in-loop -- the backoff between attempts.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, backoffMilliseconds);
+      });
+      // oxlint-disable-next-line no-await-in-loop -- the next attempt is admitted only on these checks.
+      await beforeRetry();
+    }
+  }
+};
+
 /* Whether a process with this pid exists: `EPERM` means it does, under another user. */
+/**
+ * Whether files on this process's disk keep a Git executable bit. NTFS has
+ * none: Node reports no execute bit for a Windows file and `chmod` touches
+ * only the read-only flag, so there a provider exposes no mode at all and a
+ * revision keeps the mode it recorded instead of reading `100644` back.
+ *
+ * @returns `false` on Windows, `true` elsewhere.
+ * @public
+ */
+export const nodeDiskKeepsFileModes = (): boolean => process.platform !== 'win32';
+
 const isProcessAlive = (pid: number): boolean => {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     return false;
@@ -407,6 +470,67 @@ const serializedWatcher = (watcher: NativeWatcher): NativeWatcher => ({
     return { unsubscribe: async () => serializeNative(async () => subscription.unsubscribe()) };
   },
 });
+/** How often a Windows watch rewrites its probe while it waits for the native watcher to report it. */
+const watchProbeIntervalMilliseconds = 50;
+/** How long a Windows watch waits for its probe before it is admitted unconfirmed, as it was before probes. */
+const watchProbeBudgetMilliseconds = 5000;
+
+/**
+ * A probe file for the native watch on `directory`. Its name has the shape of
+ * an atomic write's temp file (`.<name>.<pid>.<uuid>.tmp`), so watch streams
+ * and listings never show it and a crash leaves one the temp sweep removes.
+ *
+ * @param directory - The directory the native watch observes.
+ * @returns The probe's path, and a promise the watch callback resolves on its event.
+ */
+const watchProbe = (directory: string): { path: string; seen: PromiseWithResolvers<void> } => ({
+  path: path.join(directory, `.tau-watch-probe.${process.pid}.${randomUUID()}.tmp`),
+  seen: Promise.withResolvers<void>(),
+});
+
+/**
+ * Wait until the native watch reports `probe`, rewriting it meanwhile.
+ *
+ * On Windows `@parcel/watcher`'s `subscribe` resolves once it has queued the
+ * watch to its backend thread, which issues `ReadDirectoryChangesW` later; a
+ * change in between is never reported. So a Windows watch is admitted only
+ * once its own probe came back through it, or after a bounded wait, or at once
+ * if the probe cannot be written (a read-only directory), as before probes.
+ *
+ * @param probe - The probe from {@link watchProbe}, whose `seen` the watch callback resolves.
+ */
+const awaitNativeWatchLive = async (probe: { path: string; seen: PromiseWithResolvers<void> }): Promise<void> => {
+  const seen = (async (): Promise<'live'> => {
+    await probe.seen.promise;
+    return 'live';
+  })();
+  const startedAt = Date.now();
+  try {
+    while (Date.now() - startedAt < watchProbeBudgetMilliseconds) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each rewrite waits for the one before it to be missed.
+        await fs.writeFile(probe.path, String(Date.now()));
+      } catch {
+        return;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- the pause between rewrites, cut short by the probe's event.
+      const outcome = await Promise.race([
+        seen,
+        new Promise<'waiting'>((resolve) => {
+          setTimeout(() => {
+            resolve('waiting');
+          }, watchProbeIntervalMilliseconds);
+        }),
+      ]);
+      if (outcome === 'live') {
+        return;
+      }
+    }
+  } finally {
+    await fs.rm(probe.path, { force: true }).catch(() => undefined);
+  }
+};
+
 type WatchClosures = { pending: Set<Promise<void>>; admissions: Set<Promise<void>>; failures: unknown[] };
 const watchClosures = new WeakMap<NodeFsProvider, WatchClosures>();
 
@@ -529,6 +653,10 @@ const nativeIgnores = (rootedPath: string, directory: string, excludes: readonly
  */
 export class NodeFsProvider extends AbstractFileSystemProvider {
   public readonly capabilities: ProviderCapabilities;
+  /** Present only on a disk that keeps an executable bit ({@link nodeDiskKeepsFileModes}). */
+  public readonly getFileMode?: (path: string) => Promise<FileMode>;
+  /** Present only on a disk that keeps an executable bit ({@link nodeDiskKeepsFileModes}). */
+  public readonly setFileMode?: (path: string, mode: FileMode) => Promise<void>;
 
   private readonly _base: string;
   private readonly _policy: PathPolicy | undefined;
@@ -574,6 +702,10 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       movesInPlace: true,
       ...(store === undefined ? {} : { largeObjectSources: true }),
     };
+    if (nodeDiskKeepsFileModes()) {
+      this.getFileMode = async (rooted) => this._readFileMode(rooted);
+      this.setFileMode = async (rooted, mode) => this._writeFileMode(rooted, mode);
+    }
     entryObservers.set(this, createEntryObserver({ root: this._base, policy: this._policy }));
     boundedReads.set(this, async (rooted, maximumBytes) => this._readBounded(rooted, maximumBytes));
     boundedListings.set(this, async (rooted, limits) => this._listBounded(rooted, limits));
@@ -831,28 +963,6 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     return headStat(await fs.stat(target));
   }
 
-  public async getFileMode(path_: string): Promise<FileMode> {
-    this._assertRootedPath(path_);
-    const stats = await fs.stat(await this._resolve(path_));
-    if (!stats.isFile()) {
-      throw this._einval(path_);
-    }
-    const permissions = stats.mode % 0o1000;
-    const executable =
-      Math.floor(permissions / 0o100) % 2 === 1 || Math.floor(permissions / 0o10) % 2 === 1 || permissions % 2 === 1;
-    return executable ? '100755' : '100644';
-  }
-
-  public async setFileMode(path_: string, mode: FileMode): Promise<void> {
-    this._assertRootedPath(path_);
-    const target = await this._resolve(path_, 'mutate');
-    const stats = await fs.stat(target);
-    if (!stats.isFile()) {
-      throw this._einval(path_);
-    }
-    await fs.chmod(target, mode === '100755' ? 0o755 : 0o644);
-  }
-
   public async unlink(path_: string): Promise<void> {
     this._assertRootedPath(path_);
     const target = await this._resolve(path_, 'mutate');
@@ -871,7 +981,13 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       // provider. POSIX answers EINVAL for removing `.`; so does `rename` here.
       throw this._einval(path_);
     }
-    await fs.rmdir(await this._resolve(path_, 'mutate'));
+    const target = await this._resolve(path_, 'mutate');
+    // Windows answers `rmdir` on a file with ENOENT; the library contract is ENOTDIR.
+    const entry = await this._lstatOrUndefined(target);
+    if (entry !== undefined && !entry.isDirectory()) {
+      throw this._enotdir(path_);
+    }
+    await fs.rmdir(target);
   }
 
   public async rename(from: string, to: string): Promise<void> {
@@ -1035,9 +1151,23 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       /* Excluded subtrees of a watched directory are never watched natively, so a bulk change under one (a cache
        * rebuild, an install) neither spends inotify watches nor reaches this process at all. */
       const ignore = targetIsDirectory ? nativeIgnores(entry.rootedPath, directory, excludes) : [];
+      const probe = process.platform === 'win32' ? watchProbe(directory) : undefined;
       const subscription = await native.subscribe(
         directory,
-        (error, events) => {
+        (error, reported) => {
+          let events = reported;
+          if (probe !== undefined && error) {
+            /* A stream that failed is never going to report the probe; admission answers the failure. */
+            probe.seen.resolve();
+          }
+          if (probe !== undefined && reported.some((event) => event.path === probe.path)) {
+            probe.seen.resolve();
+            /* The probe is this watch's own, and it arrives before the entry records its directory. */
+            events = reported.filter((event) => event.path !== probe.path);
+            if (events.length === 0 && !error) {
+              return;
+            }
+          }
           if (unsubscribed) {
             return;
           }
@@ -1095,6 +1225,9 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         },
         ignore.length === 0 ? undefined : { ignore },
       );
+      if (probe !== undefined && !unsubscribed) {
+        await awaitNativeWatchLive(probe);
+      }
       if (unsubscribed) {
         close(subscription);
         return;
@@ -1352,6 +1485,28 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     } catch {
       return false;
     }
+  }
+
+  private async _readFileMode(path_: string): Promise<FileMode> {
+    this._assertRootedPath(path_);
+    const stats = await fs.stat(await this._resolve(path_));
+    if (!stats.isFile()) {
+      throw this._einval(path_);
+    }
+    const permissions = stats.mode % 0o1000;
+    const executable =
+      Math.floor(permissions / 0o100) % 2 === 1 || Math.floor(permissions / 0o10) % 2 === 1 || permissions % 2 === 1;
+    return executable ? '100755' : '100644';
+  }
+
+  private async _writeFileMode(path_: string, mode: FileMode): Promise<void> {
+    this._assertRootedPath(path_);
+    const target = await this._resolve(path_, 'mutate');
+    const stats = await fs.stat(target);
+    if (!stats.isFile()) {
+      throw this._einval(path_);
+    }
+    await fs.chmod(target, mode === '100755' ? 0o755 : 0o644);
   }
 
   private async _lstatOrUndefined(absolute: string): Promise<Stats | undefined> {
@@ -1954,26 +2109,35 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
   /**
    * Rename the synced temp sibling over its target, refusing a swapped parent or a symlink target.
+   * The same checks, `beforeReplace` included, admit every retry of a rename Windows briefly refused.
    *
    * @param staged - A filled write.
-   * @param beforeReplace - Runs after the checks, immediately before the rename.
+   * @param beforeReplace - Runs after the checks, immediately before each rename attempt.
    */
   private async _publishTemporary(staged: StagedWrite, beforeReplace?: () => Promise<void>): Promise<void> {
     const { rootedPath, targetPath, realBase, admittedDirectory, admittedTarget, temporaryPath } = staged;
-    const currentDirectory = await fs.realpath(path.dirname(targetPath));
-    if (currentDirectory !== admittedDirectory || !isContained(realBase, currentDirectory)) {
-      throw this._errno('ELOOP', 'refusing to replace a file through a changed parent', rootedPath);
-    }
-    const currentTarget = await this._lstatOrUndefined(admittedTarget);
-    if (currentTarget?.isSymbolicLink() === true) {
-      throw this._errno('ELOOP', 'refusing to replace symbolic link', rootedPath);
-    }
-    await beforeReplace?.();
+    const admit = async (): Promise<void> => {
+      const currentDirectory = await fs.realpath(path.dirname(targetPath));
+      if (currentDirectory !== admittedDirectory || !isContained(realBase, currentDirectory)) {
+        throw this._errno('ELOOP', 'refusing to replace a file through a changed parent', rootedPath);
+      }
+      const currentTarget = await this._lstatOrUndefined(admittedTarget);
+      if (currentTarget?.isSymbolicLink() === true) {
+        throw this._errno('ELOOP', 'refusing to replace symbolic link', rootedPath);
+      }
+      await beforeReplace?.();
+    };
+    await admit();
     /* Rename keeps the inode, so this identifies the entry the rename is about
      * to publish — and tells a later writer's entry apart from ours below. */
     staged.written = await fs.lstat(temporaryPath, { bigint: true });
     staged.renaming = true;
-    await fs.rename(temporaryPath, admittedTarget);
+    /* A refused rename published nothing: a retry the checks refuse leaves the write known not applied. */
+    await renameRetryingTransientLocks(temporaryPath, admittedTarget, async () => {
+      staged.renaming = false;
+      await admit();
+      staged.renaming = true;
+    });
     staged.replaced = true;
   }
 

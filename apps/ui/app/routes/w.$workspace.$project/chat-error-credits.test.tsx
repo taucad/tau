@@ -4,7 +4,17 @@ import userEvent from '@testing-library/user-event';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party billing surface owns the direct billing client contract
 import { entitlementsFromTier } from '@taucad/billing';
 import { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.js';
-import { ChatErrorCredits as ChatErrorCreditsSelfHost } from '#routes/w.$workspace.$project/chat-error-credits.self-host.js';
+import { ChatErrorCredits as ChatErrorCreditsSelfHost } from '#routes/w.$workspace.$project/chat-error-credits.unfunded.js';
+
+/* A funded deployment with the Cloud chunk loaded (adaptive app deployment mode W12). */
+vi.mock('#cloud/use-deployment-mode.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.fundedModeModule();
+});
+vi.mock('#cloud/cloud-entries.js', async () => {
+  const fixture = await import('#cloud/funded-cloud.fixture.js');
+  return fixture.loadedCloudEntries();
+});
 
 const openSettingsDialog = vi.hoisted(() => vi.fn());
 const continueChat = vi.fn();
@@ -34,7 +44,7 @@ vi.mock('#hooks/use-models.js', () => ({
 }));
 
 const topupModalMock = vi.hoisted(() => vi.fn((_props: { isOpen: boolean }) => undefined));
-vi.mock('#components/billing/topup-modal.js', () => ({
+vi.mock('@taucad/billing-ui/components/billing/topup-modal', () => ({
   TopupModal: (props: { readonly isOpen: boolean }) => {
     topupModalMock(props);
     return <div data-testid='topup-modal' data-open={props.isOpen} />;

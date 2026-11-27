@@ -93,7 +93,7 @@ const row = (modelId: string): ModelListEntry => {
 /**
  * The environment variable one catalog row's provider needs.
  *
- * @param modelId - Tau catalog model id, such as `google-gemini-3.8-flash`.
+ * @param modelId - Tau catalog model id, such as `google-gemini-4-hydrogen`.
  * @returns The credential's environment variable name.
  */
 export const liveCredentialName = (modelId: string): string => {
@@ -134,6 +134,26 @@ const configuredRepeats = Number(process.env['TAU_LIVE_REPEATS'] ?? '0');
  */
 export const liveRepeats = Number.isInteger(configuredRepeats) && configuredRepeats > 0 ? configuredRepeats : 0;
 
+const liveEfforts = ['low', 'medium', 'high', 'xhigh'] as const;
+
+/**
+ * The reasoning effort `TAU_LIVE_EFFORT` asks every live row to run at instead of its catalog default, for effort
+ * studies; unset leaves the catalog's own.
+ *
+ * @returns The effort, or undefined when the variable is unset.
+ */
+const liveEffortOverride = (): (typeof liveEfforts)[number] | undefined => {
+  const value = process.env['TAU_LIVE_EFFORT'];
+  if (value === undefined || value === '') {
+    return undefined;
+  }
+  const effort = liveEfforts.find((level) => level === value);
+  if (effort === undefined) {
+    throw new Error(`TAU_LIVE_EFFORT must be one of ${liveEfforts.join(', ')}; got ${value}.`);
+  }
+  return effort;
+};
+
 /**
  * Project a catalog row onto the session model the agent host runs a turn with.
  *
@@ -141,7 +161,7 @@ export const liveRepeats = Number.isInteger(configuredRepeats) && configuredRepe
  * `apps/ui/app/chat-clients/_internal/turn-body.ts`: the provider id is the
  * provider kind, and reasoning comes from the row's own configuration —
  * Anthropic's thinking budget or adaptive display, Vertex's thinking level, and
- * the OpenAI-shaped `reasoning` block for every other provider.
+ * the OpenAI-shaped `reasoning` block for every other provider. `TAU_LIVE_EFFORT` replaces the derived effort.
  *
  * @param modelId - Tau catalog model id.
  * @returns The `AgentSessionModel` for `createAgentSession`.
@@ -149,7 +169,7 @@ export const liveRepeats = Number.isInteger(configuredRepeats) && configuredRepe
 export const liveSessionModel = (modelId: string): AgentSessionModel => {
   const entry = row(modelId);
   const { configuration, details } = entry;
-  const reasoning = ((): AgentSessionModel['reasoning'] => {
+  const derived = ((): AgentSessionModel['reasoning'] => {
     if (entry.provider.id === 'anthropic') {
       if (configuration.thinking?.type === 'enabled') {
         return { budgetTokens: configuration.thinking.budget_tokens };
@@ -168,6 +188,8 @@ export const liveSessionModel = (modelId: string): AgentSessionModel => {
     }
     return configuration.reasoning;
   })();
+  const effort = liveEffortOverride();
+  const reasoning = effort === undefined ? derived : { ...derived, effort };
   const declared = entry.support?.reasoning;
   return {
     id: entry.id,

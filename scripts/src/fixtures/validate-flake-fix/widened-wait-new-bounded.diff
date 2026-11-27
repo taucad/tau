@@ -1,0 +1,13 @@
+--- a/apps/ui/src/boot.test.ts
++++ b/apps/ui/src/boot.test.ts
+@@
+ import { describe, expect, it, vi } from 'vitest';
+
+ describe('boot', () => {
+   it('mounts the worker', async () => {
+     const worker = await boot();
+-    await vi.waitFor(() => expect(worker.state).toBe('ready'), { timeout: 100 });
++    await vi.waitFor(() => expect(worker.port).toBeDefined(), { timeout: 100 });
++    await vi.waitFor(() => expect(worker.state).toBe('ready'), { timeout: 200 });
+   });
+ });

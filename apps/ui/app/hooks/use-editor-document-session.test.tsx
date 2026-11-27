@@ -4,10 +4,10 @@ import { mock } from 'vitest-mock-extended';
 import type { MockProxy } from 'vitest-mock-extended';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { lfsPointerFor } from '@taucad/revisions';
-import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
-import { revisionClients } from '#services/revision-client-registry.js';
-import type { RevisionClient } from '#types/revision-client.types.js';
-import type * as EditorDocumentSessionModule from '#lib/editor-document-session.js';
+import type { EditorLanguageEnvironment } from '@taucad/editor-ui/lib/editor-language-environment';
+import { revisionClients } from '@taucad/revisions-ui/services/revision-client-registry';
+import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
+import type * as EditorDocumentSessionModule from '@taucad/editor-ui/lib/editor-document-session';
 import { slowWriteMilliseconds } from '#workbench-records/record-health.js';
 
 const editorRef = vi.hoisted(() => ({ send: vi.fn() }));
@@ -27,7 +27,7 @@ const records = vi.hoisted(() => ({
   waiting: false,
   settled: undefined as PromiseWithResolvers<void> | undefined,
 }));
-vi.mock('#lib/editor-document-session.js', async (importOriginal) => {
+vi.mock('@taucad/editor-ui/lib/editor-document-session', async (importOriginal) => {
   const original = await importOriginal<typeof EditorDocumentSessionModule>();
   return {
     ...original,
@@ -267,5 +267,31 @@ describe('EditorDocumentSessionProvider language reads (D9, W4 review 3)', () =>
     } finally {
       revisionClients.delete('p');
     }
+  });
+});
+
+describe('EditorDocumentSessionProvider owed text (A7e)', () => {
+  it('should record text the page has not confirmed on disk when it goes, under the published scope', async () => {
+    const { editorTextDebts, setEditorTextScope } = await import('@taucad/editor-ui/lib/editor-document-session');
+    const scope = { workspace: 'w', actorId: 'usr_1' };
+    setEditorTextScope('p', scope);
+    const environment = await mountEnvironment();
+    const content = vi.mocked(contentService.current!);
+    content.resolve.mockResolvedValue({ kind: 'text', content: new TextEncoder().encode('one\n') });
+    content.saveEditor.mockReturnValue(Promise.withResolvers<void>().promise);
+    await environment.session.acquire('main.ts');
+    environment.session.apply('main.ts', {
+      expectedVersion: 1,
+      origin: 'view',
+      changes: [{ from: 0, to: 3, insert: 'mine' }],
+    });
+    /* Never answers; held only so the save is in flight. */
+    const pending = environment.session.scheduleSave('main.ts');
+    expect(pending).toBeInstanceOf(Promise);
+    globalThis.dispatchEvent(new Event('pagehide'));
+    expect(content.saveEditor).toHaveBeenCalledOnce();
+    expect(editorTextDebts.list({ scope, projectId: 'p' })).toMatchObject([{ path: 'main.ts', text: 'mine\n' }]);
+    setEditorTextScope('p', undefined);
+    localStorage.clear();
   });
 });

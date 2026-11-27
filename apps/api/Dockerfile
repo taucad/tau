@@ -3,12 +3,12 @@
 # Multi-stage Fly.io image for the Tau NestJS API.
 #
 # Stages: base -> deps -> build -> pruned -> runtime-base -> mirror | maintenance | storage | runtime
-#   base         : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
+#   base         : node:<NODE_VERSION>-bookworm-slim with pnpm pinned via `npm i -g` (no Corepack).
 #   deps         : workspace skeleton only (lockfile, pnpmfile + every workspace package.json
 #                  + patches); cache key independent of source edits.
 #   build        : full source + `pnpm nx build api`; reuses deps layer cache.
 #   pruned       : `pnpm deploy --prod` to materialise a self-contained app dir.
-#   runtime-base : minimal `node:24-slim` with the pinned git (no git-lfs), running as
+#   runtime-base : minimal bookworm-slim Node with the pinned git (no git-lfs), running as
 #                  non-root `nestjs` (uid 1001). Exposes nothing.
 #   mirror       : the private `tau-mirror` app (W13 DM1, the B2 second copy), built with
 #                  `--target mirror`; runs `mirror-command.js worker`, metrics on 9464 only,
@@ -28,7 +28,7 @@
 #     cache key to lockfile + package.jsons; a separate fetch layer adds noise.
 #   - No NODE_OPTIONS=--import otel.js: app/main.ts already side-effect imports
 #     #telemetry/otel.js; doubling it would double-init the SDK.
-#   - Runtime base stays on `node:24-slim`: @pyroscope/nodejs
+#   - Runtime base stays on Debian slim, not alpine: @pyroscope/nodejs
 #     is a node-gyp native addon with unverified musl support; alpine swap
 #     should be smoke-tested in staging first.
 #   - `--filter=@taucad/api...` reverted: Nx's project-graph plugins
@@ -41,14 +41,16 @@
 # The Node CI runs Nx under (`.github/actions/setup-nx` `node-version`). `nx.json` hashes
 # `node --version` into every task, so any other version here misses every remote cache
 # entry CI wrote (`scripts/src/nx-cache-inputs.test.ts` keeps the two equal).
-ARG NODE_VERSION=24.20.0
+# The bases name `-bookworm-slim`: from Node 26 the plain `-slim` tag is trixie, and the
+# git pins below are bookworm (deb12) versions (the same test keeps every base on bookworm).
+ARG NODE_VERSION=26.13.1
 ARG PNPM_VERSION=10.30.3
 # Pinned (charter W8): see the runtime-base stage.
 ARG GIT_VERSION=1:2.39.5-0+deb12u3
 ARG GIT_LFS_VERSION=3.3.0-1+deb12u1
 
 # ── Base ──────────────────────────────────────────────────────────────────
-FROM node:${NODE_VERSION}-slim AS base
+FROM node:${NODE_VERSION}-bookworm-slim AS base
 ARG PNPM_VERSION
 ENV PNPM_HOME="/pnpm" \
     PATH="/pnpm:$PATH" \
@@ -113,7 +115,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm --config.auto-install-peers=false --filter=@taucad/api --prod deploy /pruned --legacy
 
 # ── Runtime base (shared by the API and the private apps) ─────────────────
-FROM node:${NODE_VERSION}-slim AS runtime-base
+FROM node:${NODE_VERSION}-bookworm-slim AS runtime-base
 WORKDIR /app
 
 # The Tau Hosted Remote is git's own binaries behind HTTP (charter D15):
@@ -123,7 +125,7 @@ WORKDIR /app
 # Pinned (charter W8), because git decides the bytes of every pack this service
 # writes: an unpinned `apt-get install` means a rebuild of an unchanged commit can
 # ship a different git. The versions are the bookworm candidates of the
-# `node:24-slim` base. When Debian rolls a point release the old version leaves the
+# `-bookworm-slim` base. When Debian rolls a point release the old version leaves the
 # index and this build fails loudly — bump the ARGs at the top, which is the
 # intended maintenance, rather than dropping the pin.
 ARG GIT_VERSION

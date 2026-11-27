@@ -55,7 +55,7 @@ import { projectEventTypes, projectIgnoredEvents, projectMachine } from '#machin
 import type { ProjectContext, ProjectEvent } from '#machines/project.machine.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isBrowser: true,
 }));
 

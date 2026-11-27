@@ -280,10 +280,22 @@ const createSourcePlugin = (session: BundlerSourceSession, detect: boolean): Plu
   },
 });
 
-const commonJsBanner = (modules: ReadonlyMap<string, BuiltinModule>): string => {
-  const globals = [...modules.values()]
+/**
+ * The script prelude a bundle starts with: one binding per built-in module global, in a fixed order.
+ *
+ * @param modules - The registered built-in modules.
+ * @param names - The module names to bind, or every registered module when omitted.
+ * @returns The banner source.
+ */
+const commonJsBanner = (modules: ReadonlyMap<string, BuiltinModule>, names?: readonly string[]): string => {
+  const selected = names === undefined ? undefined : new Set(names);
+  const globals = [...modules.entries()]
+    .filter(([name]) => selected === undefined || selected.has(name))
+    .map(([, module]) => module)
     .filter((module) => module.globalName !== undefined && module.registryExpression !== undefined)
     .map((module) => `const ${module.globalName} = ${module.registryExpression};`)
+    // Each line starts with its global's name, so this orders by name, not by registration.
+    .toSorted()
     .join('\n');
   return `${globals}\nconst exports = {};\nconst module = { exports };\n`;
 };
@@ -348,7 +360,11 @@ export class EsbuildBundler {
     return { detectedModules: observation.detectedModules, dependencies: observation.dependencies };
   }
 
-  public async bundle(entryPath: string, signal = new AbortController().signal): Promise<BundleResult> {
+  public async bundle(
+    entryPath: string,
+    signal = new AbortController().signal,
+    globals?: readonly string[],
+  ): Promise<BundleResult> {
     const session = this.#host.beginSession({ mode: 'bundle', signal, entryPath });
     try {
       const options: BuildOptions = {
@@ -362,7 +378,7 @@ export class EsbuildBundler {
         outdir: 'out',
         plugins: [createSourcePlugin(session, false)],
         logLevel: 'silent',
-        banner: { js: commonJsBanner(this.#builtins) },
+        banner: { js: commonJsBanner(this.#builtins, globals) },
       };
       const result = await getEsbuild().build(options);
       const output = result.outputFiles?.find((file) => file.path.endsWith('.js')) ?? result.outputFiles?.[0];

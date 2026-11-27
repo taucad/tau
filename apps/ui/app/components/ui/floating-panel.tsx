@@ -11,7 +11,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { DrawerClose, drawerActionClass, drawerGrabStrip, useIsInsideDrawer } from '@taucad/ui/components/drawer';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { PaneSearchProvider, usePaneSearch } from '@taucad/ui/components/pane-search';
-import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
+import { CollapsibleCodeBlock } from '@taucad/editor-ui/components/ui/collapsible-code-block';
+import { isCodeLoadFailure } from '@taucad/ui-core/lib/code-loading';
 import { reportUiError } from '#lib/error-reporting.js';
 import { reactErrorDetails } from '#lib/react-root-errors.js';
 import { isDesktopTarget } from '#lib/build-target.js';
@@ -404,6 +405,13 @@ class FloatingPanelErrorBoundary extends React.Component<
 /** How many floating panel contents hold this one: a nested panel's header is never the one under a grabber. */
 const FloatingPanelContentDepthContext = React.createContext(0);
 
+/**
+ * A status the host shows in a phone sheet's header, in the trailing slot before the outermost panel's actions: the
+ * workspace's own wait while the sheet covers the region that says it (Progressive Loading Policy rule 17). Nothing
+ * elsewhere.
+ */
+const SheetHeaderStatusContext = React.createContext<ReactNode>(undefined);
+
 function FloatingPanelContent({ children, className, errorFallback }: FloatingPanelContentProps): React.JSX.Element {
   const fallback = errorFallback ?? ((props) => <FloatingPanelErrorContent {...props} />);
   const depth = React.useContext(FloatingPanelContentDepthContext) + 1;
@@ -476,6 +484,10 @@ function FloatingPanelContentHeaderActions({
   className,
 }: FloatingPanelContentHeaderActionsProps): React.JSX.Element {
   const isMobile = useIsMobile();
+  const depth = React.useContext(FloatingPanelContentDepthContext);
+  /* Only the host provides it, and only for its covering sheet. Not gated on being inside the drawer: the Terminal
+     sheet renders through a portal outside the drawer's React tree. */
+  const sheetStatus = React.useContext(SheetHeaderStatusContext);
   return (
     <div
       className={cn(
@@ -492,6 +504,7 @@ function FloatingPanelContentHeaderActions({
       )}
       data-slot='floating-panel-content-header-actions'
     >
+      {isMobile && depth <= 1 ? sheetStatus : null}
       {children}
     </div>
   );
@@ -599,8 +612,16 @@ function FloatingPanelErrorContent({
 }: FloatingPanelErrorContentProps): React.JSX.Element {
   const errorMessage = error?.message;
   const errorStack = error?.stack;
+  /* Code that failed to load stays failed in this page (PL7 staging defects blueprint D17): rendering the panel again
+   * meets the same failure, so only Reload is offered, and the page's recovery has already decided whether to reload. */
+  const isCodeFailure = isCodeLoadFailure(error);
   const displayDescription =
-    description ?? (errorMessage ? undefined : 'An unexpected error occurred. Please try again.');
+    description ??
+    (isCodeFailure
+      ? 'Part of Tau did not finish loading. Reload to continue.'
+      : errorMessage
+        ? undefined
+        : 'An unexpected error occurred. Please try again.');
 
   return (
     <div className={cn('flex h-full flex-col items-center justify-center gap-4 p-6', className)}>
@@ -643,11 +664,13 @@ function FloatingPanelErrorContent({
 
       {/* Action Buttons */}
       <div className='flex flex-wrap items-center justify-center gap-2'>
-        <Button variant='default' size='sm' className='gap-2' onClick={onRetry}>
-          <RotateCcw className='size-4' />
-          Try Again
-        </Button>
-        <Button variant='outline' size='sm' className='gap-2' onClick={onReload}>
+        {isCodeFailure ? undefined : (
+          <Button variant='default' size='sm' className='gap-2' onClick={onRetry}>
+            <RotateCcw className='size-4' />
+            Try Again
+          </Button>
+        )}
+        <Button variant={isCodeFailure ? 'default' : 'outline'} size='sm' className='gap-2' onClick={onReload}>
           <RefreshCcw className='size-4' />
           Reload Page
         </Button>
@@ -668,6 +691,7 @@ export {
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
   FloatingPanelErrorContent,
+  SheetHeaderStatusContext,
   useFloatingPanel,
 };
 export type { Side, Align, FloatingPanelErrorFallbackProps };

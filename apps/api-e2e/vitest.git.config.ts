@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -15,6 +16,8 @@ export default defineConfig({
     alias: [{ find: /^#git\/(.*)\.js$/u, replacement: `${resolve(import.meta.dirname, 'src/git')}/$1.ts` }],
   },
   test: {
+    reporters: testReporters('default'),
+    retry: testRetry(),
     include: ['src/git/**/*.spec.ts'],
     // Deletion acceptance owns guarded disposable services through its dedicated targets.
     exclude: ['src/git/project-deletion.spec.ts', 'src/git/project-deletion-race.spec.ts'],

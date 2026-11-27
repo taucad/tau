@@ -15,9 +15,15 @@
  * this way.
  *
  * The source also says whether its values are settled ({@link readRemoteFlagStatus}): `pending` while a client is
- * connected but has not answered, `evaluated` once PostHog's values (or a seeded state) are in, and `absent` when no
- * answer will come (analytics not admitted or withdrawn, the SDK failed to load, or the flag load failed), so the
- * defaults are final. The layout-flag mirror (`#flags/layout-flags`) writes only settled values.
+ * connected but has not answered, `evaluated` once PostHog's values (or a seeded state) are in, `absent` when the host
+ * decided no answer will come (analytics not admitted or withdrawn, or no key), so the defaults are final, and `failed`
+ * when an answer was due but did not arrive (the flag load failed, or the SDK could not load or subscribe). A failed
+ * load decides nothing about the visitor: PostHog keeps refreshing in the background, and a later answer moves the
+ * source to `evaluated` (F2d).
+ *
+ * Only a decision publishes `absent` ({@link disconnectRemoteFlags}). Letting go of the client because its follower
+ * re-runs or remounts is not one ({@link releaseRemoteFlags}): the last answer stands until the client is followed
+ * again, so a flag PostHog answered on never reads as a final off in between (F2c).
  */
 
 import { Topic } from '@taucad/events';
@@ -29,10 +35,12 @@ import { ENV } from '#environment.config.js';
 export type RemoteFlagValues = Readonly<Partial<Record<FeatureFlagName, boolean>>>;
 
 /**
- * Whether the remote values can still change without a later event: `pending` until a connected client answers,
- * `evaluated` once it has, `absent` when no answer will come and the registry defaults are final.
+ * Where the remote values stand: `pending` until a connected client answers, `evaluated` once it has, `absent` when the
+ * host decided no answer will come and the registry defaults are final, `failed` when an answer was due and did not
+ * arrive. `failed` holds no values (the registry defaults show) and is not final: a later answer moves it to
+ * `evaluated`.
  */
-export type RemoteFlagStatus = 'pending' | 'evaluated' | 'absent';
+export type RemoteFlagStatus = 'pending' | 'evaluated' | 'absent' | 'failed';
 
 /** The part of the PostHog client this source reads. */
 export type RemoteFlagClient = {
@@ -53,6 +61,8 @@ let values: RemoteFlagValues | undefined;
 /* Until the analytics boundary decides, nothing has answered. */
 let status: RemoteFlagStatus = 'pending';
 let disconnectClient: (() => void) | undefined;
+/* The client whose answer (`evaluated` or `failed`) is held, so following it again keeps that answer. */
+let answeredClient: RemoteFlagClient | undefined;
 
 /** Each PostHog-backed registry name with its PostHog flag key. */
 const remoteFlagKeys: ReadonlyArray<readonly [FeatureFlagName, string]> = featureFlagNames.flatMap((name) => {
@@ -140,32 +150,50 @@ export function subscribeRemoteFlags(listener: () => void): () => void {
 }
 
 /**
- * Follow a PostHog client's evaluated flags until {@link disconnectRemoteFlags}. Called by the analytics boundary
- * once the host admits analytics; replaces any earlier client.
+ * Follow a PostHog client's evaluated flags until {@link releaseRemoteFlags} or {@link disconnectRemoteFlags}. Called
+ * by the analytics boundary once the host admits analytics; replaces any earlier client.
+ *
+ * Following the client whose answer is held again (the boundary's effect re-ran, or the boundary remounted) keeps that
+ * answer, evaluated or failed, until the client calls back. Any other client, or one followed after a decision, starts
+ * `pending`.
+ *
+ * A callback that reports `errorsLoading` (posthog-js gave up on `/flags` after its timeout and retries) publishes
+ * `failed`, unless this client has already answered: PostHog then keeps the flags it holds, and so does this source.
  *
  * @param client - The initialised PostHog singleton.
  */
 export function connectRemoteFlags(client: RemoteFlagClient): void {
   releaseClient();
-  update(undefined, 'pending');
+  if (client !== answeredClient || (status !== 'evaluated' && status !== 'failed')) {
+    answeredClient = undefined;
+    update(undefined, 'pending');
+  }
   const read = (
     _flags?: readonly string[],
     _variants?: Readonly<Record<string, string | boolean>>,
     context?: { readonly errorsLoading?: boolean },
   ): void => {
+    const isFirstAnswer = answeredClient !== client || status !== 'evaluated';
+    answeredClient = client;
+    /* A failed load decides nothing: keep an earlier answer, or wait for PostHog's next refresh with no values. */
+    if (context?.errorsLoading === true) {
+      if (isFirstAnswer) {
+        update(undefined, 'failed');
+      }
+      return;
+    }
     const variants = client.featureFlags?.getFlagVariants();
-    /* A failed flag load still answers: no value is coming, so what the client holds now is final. */
-    const answered: RemoteFlagStatus = context?.errorsLoading === true ? 'absent' : 'evaluated';
-    update(variants === undefined ? values : project(variants), answered);
+    update(variants === undefined ? values : project(variants), 'evaluated');
   };
   try {
     // `onFeatureFlags` also calls back at once when flags have already loaded.
     const unsubscribe = client.onFeatureFlags(read);
     disconnectClient = typeof unsubscribe === 'function' ? unsubscribe : undefined;
   } catch {
-    // Optional analytics must not prevent the product from opening; defaults stay in force.
+    // Optional analytics must not prevent the product from opening; defaults show, and nothing was decided.
     disconnectClient = undefined;
-    update(undefined, 'absent');
+    answeredClient = undefined;
+    update(undefined, 'failed');
   }
 }
 
@@ -175,10 +203,32 @@ function releaseClient(): void {
 }
 
 /**
- * Stop following the client and return every PostHog-backed flag to its registry default, which is then final:
- * analytics are not admitted, were withdrawn, or the SDK could not load.
+ * Stop following the client without deciding anything: the values and status stay as they are, and nothing is
+ * published. The analytics boundary calls this when its admission effect is cleaned up, which a re-run or a remount
+ * does while analytics stay admitted; whatever comes next (following the client again, or a withdrawal through
+ * {@link disconnectRemoteFlags}) decides.
+ */
+export function releaseRemoteFlags(): void {
+  releaseClient();
+}
+
+/**
+ * Report that no client can answer although analytics are admitted: the SDK could not load. Every PostHog-backed flag
+ * shows its registry default, and reads `unknown`, since nothing was decided about the visitor.
+ */
+export function failRemoteFlags(): void {
+  releaseClient();
+  answeredClient = undefined;
+  update(undefined, 'failed');
+}
+
+/**
+ * Stop following the client and return every PostHog-backed flag to its registry default, which is then final. Call it
+ * only on a decision: analytics are not admitted, were withdrawn, or the build has no key. A failure is not one
+ * ({@link failRemoteFlags}).
  */
 export function disconnectRemoteFlags(): void {
   releaseClient();
+  answeredClient = undefined;
   update(undefined, 'absent');
 }

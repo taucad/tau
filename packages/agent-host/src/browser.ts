@@ -10,6 +10,7 @@ import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
 import type { HostClock } from '#harness/session.js';
 import { createBrowserLeadership } from '#browser/leadership.js';
+import { chatLeadershipNames } from '#launchers/leadership/names.js';
 import {
   chatRecordFileName,
   chatSegmentsDirectoryName,
@@ -100,7 +101,7 @@ const readAll = (handle: SyncAccessHandle): Uint8Array<ArrayBuffer> => {
   return bytes;
 };
 
-const appendAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>): void => {
+const writeAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>): void => {
   const start = handle.getSize();
   let offset = 0;
   while (offset < bytes.byteLength) {
@@ -113,6 +114,10 @@ const appendAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>): vo
     }
     offset += written;
   }
+};
+
+const appendAll = (handle: SyncAccessHandle, bytes: Uint8Array<ArrayBuffer>): void => {
+  writeAll(handle, bytes);
   handle.flush();
 };
 
@@ -135,8 +140,8 @@ const readerOf = (read: () => Promise<Uint8Array<ArrayBuffer>>): BrowserEventLog
  * Open an OPFS positional-append event log in a dedicated browser worker.
  *
  * A write open holds the exclusive sync access handle for the log's life: every JSONL line is written at
- * `getSize()` and flushed before its append resolves, and every append is fenced on the log's length (`LOG_FENCED`,
- * D5). While another worker holds the handle the open is refused `WRITER_LOCKED`, whose recovery is to wait (CL-Q1).
+ * `getSize()` and flushed before its append resolves (a batch's lines once, after the last), and every append is
+ * fenced on the log's length (`LOG_FENCED`, D5). While another worker holds the handle the open is refused `WRITER_LOCKED`, whose recovery is to wait (CL-Q1).
  * A read open reads the file without a handle. OPFS is unavailable on null origins, so tests must use a real origin.
  *
  * @param options - Exact OPFS file handle owned by the elected worker leader, and the access mode.
@@ -209,6 +214,13 @@ const openOpfsWriter = async (
     read: async () => readAll(handle),
     append: async (bytes) => {
       appendAll(handle, bytes);
+    },
+    /* A batch's rows are written back to back and flushed once (WP-10 step A). */
+    write: async (bytes) => {
+      writeAll(handle, bytes);
+    },
+    sync: async () => {
+      handle.flush();
     },
     truncate: async (size) => {
       handle.truncate(size);
@@ -729,3 +741,124 @@ const leadershipOf = (
     clock: options.clock,
     delays: options.delays,
   });
+
+/*
+ * A headless hold on chats' logs (W30, row L7): the same Web Lock a tab's leadership takes before it opens a chat's
+ * writer (M2, `chatLeadershipNames`), taken by a reader that serves nothing. While it is held no tab can open a writer
+ * for the chat, so a run cannot start or append, and the reader can trust the log it reads to stay as it read it.
+ *
+ * A peer may still steal the lock (RH-R12: a silent holder is stolen from). A stolen lease is reported as lost, so the
+ * caller checks it before an irreversible step instead of assuming it held throughout.
+ */
+
+/**
+ * How long a lease waits for a chat's lock by default: a session that just closed releases its locks in that time.
+ *
+ * @public
+ */
+export const chatLogLeaseWaitMilliseconds = 5000;
+
+/** A held lease on every chat it named. @public */
+export type ChatLogLease = Readonly<{
+  status: 'held';
+  /** Whether a peer stole any of the chats' locks since the lease was granted. */
+  lost: () => boolean;
+  /** Release every lock the lease holds. Idempotent. */
+  release: () => void;
+}>;
+
+/** A lease that was not granted: another process leads `chatId` and did not let go within the wait. @public */
+export type ChatLogLeaseRefusal = Readonly<{ status: 'led-elsewhere'; chatId: string }>;
+
+/**
+ * Take one lock, waiting at most `waitMilliseconds` for its grant.
+ *
+ * @param lock - The lock's name.
+ * @param waitMilliseconds - How long to wait for the grant.
+ * @param onStolen - Called when a peer steals the lock after it was granted.
+ * @returns The release of a granted lock, or `undefined` when the wait passed first.
+ */
+const takeLeaseLock = async (
+  lock: string,
+  waitMilliseconds: number,
+  onStolen: () => void,
+): Promise<(() => void) | undefined> => {
+  let letGo = (): void => undefined;
+  const held = new Promise<void>((resolve) => {
+    letGo = resolve;
+  });
+  return new Promise<(() => void) | undefined>((resolve) => {
+    const grant = { granted: false };
+    // async-iife: bootstrap -- a grant is held for as long as its callback runs; the outcome resolves the caller.
+    void (async (): Promise<void> => {
+      try {
+        await navigator.locks.request(lock, { signal: AbortSignal.timeout(waitMilliseconds) }, async () => {
+          grant.granted = true;
+          resolve(letGo);
+          await held;
+        });
+      } catch {
+        /* Before the grant: the wait passed. After it: a peer stole the lock. */
+        if (grant.granted) {
+          onStolen();
+        } else {
+          resolve(undefined);
+        }
+      }
+    })();
+  });
+};
+
+/**
+ * Take every named chat's leadership lock, in a fixed order, so no tab can open a writer for any of them.
+ *
+ * @param input - The project, its chats, and how long to wait for each lock.
+ * @returns The lease, or which chat another process kept leading past the wait. A refusal holds nothing.
+ * @public
+ *
+ * @example <caption>Read a closed project's chat logs with no writer appending meanwhile</caption>
+ * ```typescript
+ * import { leaseChatLogs } from '@taucad/agent-host/browser';
+ *
+ * const lease = await leaseChatLogs({ projectId: 'proj_1', chatIds: ['chat_1'] });
+ * if (lease.status === 'held') {
+ *   try {
+ *     // Read the logs here.
+ *   } finally {
+ *     lease.release();
+ *   }
+ * }
+ * ```
+ */
+export const leaseChatLogs = async ({
+  projectId,
+  chatIds,
+  waitMilliseconds = chatLogLeaseWaitMilliseconds,
+}: Readonly<{
+  projectId: string;
+  chatIds: readonly string[];
+  waitMilliseconds?: number;
+}>): Promise<ChatLogLease | ChatLogLeaseRefusal> => {
+  const releases: Array<() => void> = [];
+  const state = { lost: false, released: false };
+  const release = (): void => {
+    state.released = true;
+    for (const releaseOne of releases.splice(0)) {
+      releaseOne();
+    }
+  };
+  const onStolen = (): void => {
+    state.lost ||= !state.released;
+  };
+  /* One order for every lease, so two leases over shared chats never wait on each other. */
+  for (const chatId of [...new Set(chatIds)].toSorted()) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- one lock at a time, in order.
+    const letGo = await takeLeaseLock(chatLeadershipNames(projectId, chatId).lock, waitMilliseconds, onStolen);
+    if (letGo === undefined) {
+      release();
+      return { status: 'led-elsewhere', chatId };
+    }
+    releases.push(letGo);
+  }
+  return { status: 'held', lost: () => state.lost, release };
+};

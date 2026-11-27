@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 
 import { packageVersion } from '@taucad/runtime/metadata';
+import { deriveTranscodeSources } from '@taucad/runtime/plugin';
 import { webSocketHost } from '@taucad/runtime/transport/websocket-host';
 import { createRuntimeWorker } from '@taucad/runtime/worker';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
@@ -20,6 +21,12 @@ export type {
 export type HostRuntimeHandle = {
   readonly url: URL;
   readonly runtimeVersion: string;
+  /**
+   * The formats this runtime's registered transcoders convert to JPEG (`deriveTranscodeSources(runtime, 'jpeg')`): what
+   * the daemon may convert agent media from. A child reports it in its `ready` message. Empty for a runtime defined with
+   * a `configSchema`.
+   */
+  readonly transcodeSources: readonly string[];
   close(): Promise<void>;
 };
 
@@ -68,6 +75,8 @@ export const serveHostRuntime = async (options: {
   return {
     url: new URL(`ws://${address.host}:${String(address.port)}`),
     runtimeVersion: packageVersion,
+    /* A configured runtime names its transcoders only once a worker resolves its config, so it reports none here. */
+    transcodeSources: 'transcoders' in options.runtime ? deriveTranscodeSources(options.runtime, 'jpeg') : [],
     async close(): Promise<void> {
       await host.close();
     },

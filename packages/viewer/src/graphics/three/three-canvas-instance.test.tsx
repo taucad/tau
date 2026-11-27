@@ -30,6 +30,7 @@ import {
 } from '#graphics/three/utils/infinite-grid-frame.js';
 import type * as ViewerEnvironmentModule from '#environment/viewer-environment.jsx';
 import type { ViewportGizmoAdapterEvent, ViewportGizmoAdapterLogic } from '#machines/viewport-gizmo-gesture.machine.js';
+import { hardwareRenderTier } from '#graphics/three/render-tier.js';
 
 /**
  * Dispatches context-loss handlers registered via the latest stub `<Canvas>`
@@ -429,6 +430,7 @@ describe('ThreeCanvasInstance', () => {
       ref?.send({
         type: 'hostCreated',
         backend: 'webgl',
+        tier: hardwareRenderTier('webgl'),
         surface: { width: 800, height: 600, pixelRatio: 1 },
         domElement: document.createElement('canvas'),
         host: createCallbackLogicStub(),
@@ -690,7 +692,7 @@ describe('ThreeCanvasInstance', () => {
     expect(adapters.isInteractionLocked?.()).toBe(false);
 
     report?.({ type: 'gizmoPressed' });
-    report?.({ type: 'gizmoTurned' });
+    report?.({ type: 'gizmoTurned', cause: 'drag' });
 
     expect(adapters.isInteractionLocked?.()).toBe(true);
     report?.({ type: 'gizmoReleased' });

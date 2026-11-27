@@ -9,6 +9,7 @@ import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 import type { ProjectRootConfiguration } from '#mount-table.js';
 import type { ExternalChangeFact, FileSystemProvider, WatchEvent } from '#types.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
+import { racyTimestampMilliseconds } from '#external-change-ingest.js';
 
 type ObserverRecord = {
   readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
@@ -68,6 +69,7 @@ afterEach(() => {
   TestFileSystemObserver.instances.length = 0;
   TestFileSystemObserver.observeHook = undefined;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 async function createWebAccessService(options?: {
@@ -414,23 +416,27 @@ describe('WorkspaceFileService external webaccess observation', () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it('rejects a webaccess project route without its canonical discovery root', async () => {
+  it('refuses a webaccess project route without its canonical discovery root', async () => {
     vi.stubGlobal('FileSystemObserver', TestFileSystemObserver);
     const { service, workspaceId } = await createWebAccessService({ native: true });
 
-    await expect(
-      service.configureProjectRoots({
-        projects: [
-          {
-            backend: 'webaccess',
-            workspaceId,
-            projectId: alphaProjectId,
-            providerBasePath: alphaPhysicalRoot,
-          },
-        ],
-        roots: [],
-      }),
-    ).rejects.toThrow('requires an explicit');
+    const result = await service.configureProjectRoots({
+      projects: [
+        {
+          backend: 'webaccess',
+          workspaceId,
+          projectId: alphaProjectId,
+          providerBasePath: alphaPhysicalRoot,
+        },
+      ],
+      roots: [],
+    });
+
+    /* Skipped (blueprint B3): a route with no root never mounts on a cached handle. */
+    expect(result.skipped).toEqual([{ kind: 'project', reason: 'root-unavailable', projectId: alphaProjectId }]);
+    await expect(service.exists(`/projects/${alphaProjectId}`)).rejects.toMatchObject({
+      name: 'UnboundProjectRouteError',
+    });
   });
 
   it('delivers a native out-of-band file edit to only the matching rooted watch', async () => {
@@ -838,6 +844,10 @@ describe('WorkspaceFileService external webaccess observation', () => {
     await service.pollExternalChanges();
     expect(globalEvents).toEqual([]);
     await provider.writeFile('dropped-project/tau.json', '{}');
+    /* Past the racy window, so the write is settled when the poll captures it: a row inside the window is reported
+     * changed again by the next poll (discovery index A3), which `the racy guard` tests cover. */
+    const settledAt = Date.now() + racyTimestampMilliseconds + 1000;
+    vi.spyOn(Date, 'now').mockReturnValue(settledAt);
     await service.pollExternalChanges();
 
     expect(globalEvents).toEqual([{ type: 'reset' }, { type: 'reset' }, { type: 'reset' }]);

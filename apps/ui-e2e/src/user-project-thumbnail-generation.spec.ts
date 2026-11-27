@@ -85,8 +85,7 @@ async function expectProjectCardParity(name: string): Promise<void> {
       async () =>
         target.evaluate(
           async () => {
-            const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getRendererIdentity(): { frame: number } } })
-              .__TAU_SECTION_VIEW_TEST__;
+            const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
             if (!bridge) {
               return false;
             }
@@ -105,9 +104,7 @@ async function expectProjectCardParity(name: string): Promise<void> {
   previewForeground = await measureProjectCardForeground(activeMedia, 'secondary');
   const camera = await target.evaluate(
     () => {
-      const bridge = (
-        globalThis as { __TAU_SECTION_VIEW_TEST__?: { getCamera(): unknown; getSectionState(): unknown } }
-      ).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       return {
         camera: bridge?.getCamera(),
         section: bridge?.getSectionState(),

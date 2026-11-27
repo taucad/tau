@@ -1,14 +1,17 @@
 /*
- * The view cube's in-place repaint against the real `ViewportGizmo`: `set` regenerates the cube, and the adapter's
- * `disposeViewportGizmoChildren` first takes every old child away, so no stale face, label or axis stays drawn.
+ * The view cube's in-place repaint and its pole views against the real `ViewportGizmo`: `set` restyles the same cube,
+ * and in controlled mode the pose the cube reports is the one the camera presents.
  */
 import * as THREE from 'three';
 import { ViewportGizmo } from 'three-viewport-gizmo';
+import type { ViewportGizmoEventMap } from 'three-viewport-gizmo';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  disposeViewportGizmoChildren,
-  readViewportGizmoPose,
-} from '#graphics/three/controls/viewport-gizmo-adapter.js';
+import { createActor } from 'xstate';
+import { createCameraView } from '@taucad/camera';
+import { cameraMachine } from '@taucad/camera/machine';
+import { readViewportGizmoPose, viewportGizmoOptions } from '#graphics/three/controls/viewport-gizmo-adapter.js';
+import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
+import { gizmoStyleIds, resolveViewportGizmoStyleConfig } from '#graphics/three/controls/viewport-gizmo-styles.js';
 
 /** The renderer surface the cube reads while it builds: its canvas, viewport and scissor. */
 const renderer = {
@@ -17,18 +20,6 @@ const renderer = {
   getScissor: (target: THREE.Vector4) => target.set(0, 0, 800, 600),
   getScissorTest: () => false,
 } as unknown as THREE.WebGLRenderer;
-
-const createGizmo = (): ViewportGizmo =>
-  new ViewportGizmo(new THREE.PerspectiveCamera(), renderer, { type: 'cube', container: document.body });
-
-/** An axes group standing in for the cube's axes: a line and a textured label. */
-const createAxes = (): { axes: THREE.Group; label: THREE.SpriteMaterial; line: THREE.BufferGeometry } => {
-  const axes = new THREE.Group();
-  const line = new THREE.BufferGeometry();
-  const label = new THREE.SpriteMaterial({ map: new THREE.Texture() });
-  axes.add(new THREE.Line(line, new THREE.LineBasicMaterial()), new THREE.Sprite(label));
-  return { axes, label, line };
-};
 
 /** The jsdom environment has no 2D canvas: a context whose every method does nothing, enough for the cube to paint its labels. */
 const noopContext = new Proxy(
@@ -49,42 +40,53 @@ afterEach(() => {
 });
 
 describe('view cube repaint', () => {
-  it('should keep the same children across repeated repaints', () => {
-    const gizmo = createGizmo();
-    gizmo.add(createAxes().axes);
-    const painted = gizmo.children.length;
+  it('should keep the same element and children across repeated repaints', () => {
+    const gizmo = new ViewportGizmo(new THREE.PerspectiveCamera(), renderer, {
+      type: 'cube',
+      container: document.body,
+      triad: { enabled: true },
+    });
+    const { domElement } = gizmo;
+    const painted = gizmo.root.children.length;
 
     for (let repaint = 0; repaint < 3; repaint += 1) {
-      disposeViewportGizmoChildren(gizmo);
-      gizmo.set({ type: 'cube', container: document.body });
-      gizmo.add(createAxes().axes);
+      gizmo.set({ x: { color: repaint }, triad: { enabled: true } });
     }
 
-    expect(gizmo.children).toHaveLength(painted);
+    expect(gizmo.domElement).toBe(domElement);
+    expect(gizmo.root.children).toHaveLength(painted);
     gizmo.dispose();
   });
+});
 
-  it('should dispose every face material and the axes with their label textures', () => {
-    const gizmo = createGizmo();
-    const { axes, label, line } = createAxes();
-    gizmo.add(axes);
-    const faces = gizmo.children.flatMap((child) => {
-      const { idleMaterial } = child.userData as { idleMaterial?: THREE.Material };
-      return idleMaterial ? [idleMaterial] : [];
+describe('view cube options', () => {
+  it.each(gizmoStyleIds)('should build and restyle the %s style with the options Tau passes', (gizmoStyle) => {
+    const style = readViewportGizmoStyle({
+      container: document.body,
+      colorScheme: 'light',
+      isHighContrast: false,
+      accentColor: '#008c7d',
     });
-    const disposed = faces.map((material) => vi.spyOn(material, 'dispose'));
-    const labelDisposed = vi.spyOn(label, 'dispose');
-    const labelTextureDisposed = vi.spyOn(label.map!, 'dispose');
-    const lineDisposed = vi.spyOn(line, 'dispose');
+    const options = (upDirection: 'x' | 'y' | 'z') =>
+      viewportGizmoOptions({
+        style,
+        upDirection,
+        container: document.body,
+        placeTopRight: false,
+        size: 96,
+        styleConfig: resolveViewportGizmoStyleConfig({
+          gizmoStyle,
+          colors: style,
+          radius: viewportGizmoMetrics.radius,
+        }),
+      });
+    const gizmo = new ViewportGizmo(new THREE.PerspectiveCamera(), renderer, options('z'));
 
-    disposeViewportGizmoChildren(gizmo);
+    // The library throws on an unknown or invalid key, so building and restyling is the check.
+    gizmo.set(options('y'));
 
-    expect(gizmo.children).toEqual([]);
-    expect(faces.length).toBeGreaterThan(0);
-    for (const spy of disposed) {
-      expect(spy).toHaveBeenCalledOnce();
-    }
-    expect([labelDisposed, labelTextureDisposed, lineDisposed].map((spy) => spy.mock.calls.length)).toEqual([1, 1, 1]);
+    expect(gizmo.options.controlled).toBe(true);
+    expect(gizmo.options.up.toArray()).toEqual([0, 1, 0]);
     gizmo.dispose();
   });
 });
@@ -93,27 +95,86 @@ describe('view cube pole views', () => {
   const axes = ['x', 'y', 'z'] as const;
   const cases = axes.flatMap((up) => [1, -1].map((sign) => ({ up, sign })));
 
-  it.each(cases)('should present the roll the cube turned to, $up up, side $sign', ({ up, sign }) => {
+  it.each(cases)('should present the view the cube reported, $up up, side $sign', async ({ up, sign }) => {
     const camera = new THREE.PerspectiveCamera();
     camera.up.set(0, 0, 0)[up] = 1;
     camera.position.set(3, 4, 5);
     camera.lookAt(0, 0, 0);
-    const gizmo = new ViewportGizmo(camera, renderer, { type: 'cube', up, container: document.body });
+    const gizmo = new ViewportGizmo(camera, renderer, {
+      type: 'cube',
+      up: camera.up,
+      container: document.body,
+      controlled: true,
+      roll: false,
+    });
     const pole = new THREE.Vector3();
     pole[up] = sign;
 
-    gizmo.lookFrom(pole, false);
+    const end: ViewportGizmoEventMap['end'] = await gizmo.lookFrom(pole, { animated: false });
     const pose = readViewportGizmoPose({
-      camera,
+      pose: end.pose,
       target: gizmo.target,
       renderFrame: { anchorFrameId: 'test-root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 },
       verticalSpan: 1,
     });
 
-    // The camera presents an upright view from the pose's direction; it has to be the one the cube turned to.
+    // The camera actor takes the pose (Finding T1): the view it presents has to be the one the cube reported, so the
+    // Bottom label reads as the cube shows it, not turned half a turn.
+    const cameraActor = createActor(cameraMachine, {
+      input: {
+        initialView: createCameraView({
+          frameId: 'test-root',
+          requestedVerticalFieldOfView: 60,
+          perspectiveZoom: 1,
+          target: [0, 0, 0],
+          direction: [3, 4, 5],
+          up: [up === 'x' ? 1 : 0, up === 'y' ? 1 : 0, up === 'z' ? 1 : 0],
+          verticalSpan: 1,
+          viewport: { width: 800, height: 600, pixelRatio: 1 },
+          bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+        }),
+      },
+    }).start();
+    cameraActor.send({ type: 'poseObserved', source: 'gizmo', ...pose });
+    const { view } = cameraActor.getSnapshot().context;
+    cameraActor.stop();
     const presented = new THREE.Quaternion().setFromRotationMatrix(
-      new THREE.Matrix4().lookAt(new THREE.Vector3(...pose!.direction), new THREE.Vector3(), camera.up),
+      new THREE.Matrix4().lookAt(
+        new THREE.Vector3(...view.direction),
+        new THREE.Vector3(),
+        new THREE.Vector3(...view.up),
+      ),
     );
-    expect(presented.angleTo(camera.quaternion)).toBeLessThan(0.01);
+    const reported = new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().lookAt(end.pose.direction, new THREE.Vector3(), end.pose.up),
+    );
+    expect(presented.angleTo(reported)).toBeLessThan(0.01);
+    // The camera presents the cube's own pose: no tilt off the pole the cube stopped at (TA carry-over 1).
+    expect(new THREE.Vector3(...view.direction).angleTo(end.pose.direction)).toBeLessThan(1e-9);
+    expect(new THREE.Vector3(...view.up).angleTo(end.pose.up)).toBeLessThan(1e-9);
+    gizmo.dispose();
+  });
+
+  /*
+   * A drag on the cube toward a pole: every pose the cube reports, however near the pole, reaches the camera as it is,
+   * so the view keeps moving toward the pole and never jumps back off it (invariant I2, no snap).
+   */
+  it('should hand the camera every pose of a drag toward the pole unchanged', () => {
+    const up = new THREE.Vector3(0, 0, 1);
+    const renderFrame = { anchorFrameId: 'test-root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 } as const;
+    const polars = [1e-1, 1e-2, 2e-3, 1e-3, 9e-4, 5e-4, 2e-4, 1e-4];
+    const presented = polars.map((polar) => {
+      const direction = new THREE.Vector3(Math.sin(polar), 0, Math.cos(polar));
+      const pose = readViewportGizmoPose({
+        pose: { direction, up },
+        target: new THREE.Vector3(),
+        renderFrame,
+        verticalSpan: 1,
+      });
+      return new THREE.Vector3(...pose.direction).angleTo(up);
+    });
+    for (const [index, polar] of polars.entries()) {
+      expect(presented[index]).toBeCloseTo(polar, 9);
+    }
   });
 });

@@ -35,6 +35,11 @@ const watchIntervalBlurred = 10_000;
 const watchIntervalNativeSafetyNet = 60_000;
 /** Milliseconds. */
 const pollingTelemetryWindow = 60_000;
+/**
+ * After a discovery-wide walk, the next poll waits at least this many times the walk's duration after it ended, so a
+ * large folder is not walked without rest (project-library fast-path blueprint, index-contract review A3).
+ */
+const pollRestFactor = 5;
 // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
 // ponytail: 5-tick global reconcile (10 s visible / 50 s hidden); tune from poll telemetry.
 const globalReconcileTickInterval = 5;
@@ -376,6 +381,10 @@ export class FileTreeService {
   /* Outstanding {@link FileTreeService.pauseRefreshes} holds. While any is
    * held, re-reads collect in `pendingRefreshPaths` and nothing lists. */
   private refreshPauses = 0;
+  /* Leased directories {@link FileTreeService.refreshListedThroughHold} let one re-read through a hold for. */
+  private readonly readsThroughHold = new Set<string>();
+  /* Directories {@link FileTreeService.refreshListedThroughHold} still has to re-read, a batch per task. */
+  private readonly throughHoldPaths = new Set<string>();
   /* Set by dispose: a hold released afterwards must not list through a closed proxy. */
   private disposed = false;
   private pollingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -687,12 +696,15 @@ export class FileTreeService {
           dispose: () => {
             unsubscribe();
             watch.dispose();
+            /* A stopped observation reads nothing: a read let through for it lapses with it. */
+            this.readsThroughHold.delete(key);
           },
         };
       },
       read: async ({ signal, isCurrent }) => {
         try {
-          if (fresh && this.refreshPauses > 0 && this.isDirectoryResolvedKey(key)) {
+          const throughHold = this.readsThroughHold.delete(key);
+          if (fresh && this.refreshPauses > 0 && this.isDirectoryResolvedKey(key) && !throughHold) {
             /* An optimistic patch while a hold is taken re-renders from the
              * tree; the listing itself waits for the hold's release. */
             this.pendingRefreshPaths.add(key);
@@ -875,6 +887,32 @@ export class FileTreeService {
     };
   }
 
+  /**
+   * Re-read every directory the tree has listed, once, now, even while a hold
+   * is taken; the hold stays and folds whatever changes after into the
+   * re-reads at its release. A tree first shown while a revision apply is
+   * still writing (`entryReady`, STO-25) lists every entry that apply will
+   * land, landed or arriving, rather than what its root held before the apply
+   * (I7). Bounded by what the tree has listed, as a scoped reset is. Like a
+   * release, the call may come from a store subscriber inside a commit, so the
+   * re-reads start from a later task.
+   */
+  public refreshListedThroughHold(): void {
+    const epoch = this._epoch;
+    setTimeout(() => {
+      if (this.disposed || this._epoch !== epoch) {
+        return;
+      }
+      for (const key of ['', ...this._tree.descendantKeys('')]) {
+        if (this.isDirectoryResolvedKey(key)) {
+          this.pendingRefreshPaths.delete(key);
+          this.throughHoldPaths.add(key);
+        }
+      }
+      this.drainReadsThroughHold(epoch);
+    }, 0);
+  }
+
   /** Whether a {@link FileTreeService.pauseRefreshes} hold is outstanding. */
   public get refreshesPaused(): boolean {
     return this.refreshPauses > 0;
@@ -902,16 +940,21 @@ export class FileTreeService {
     };
     this.pollingTelemetry = telemetry;
     let completedTicks = 0;
+    /** How long the last tick's discovery-wide walk took, or 0 when the tick made none. Milliseconds. */
+    let lastWalkDuration = 0;
 
     const poll = (): void => {
       if (epoch !== this.pollingEpoch) {
         return;
       }
-      const pollInterval = this.nativelyObserved
-        ? watchIntervalNativeSafetyNet
-        : this.visibility.isVisible()
-          ? watchIntervalFocused
-          : watchIntervalBlurred;
+      const pollInterval = Math.max(
+        pollRestFactor * lastWalkDuration,
+        this.nativelyObserved
+          ? watchIntervalNativeSafetyNet
+          : this.visibility.isVisible()
+            ? watchIntervalFocused
+            : watchIntervalBlurred,
+      );
       this.pollingTimer = setTimeout(async () => {
         this.pollingTimer = undefined;
         const visible = this.visibility.isVisible();
@@ -921,8 +964,11 @@ export class FileTreeService {
         try {
           this.nativelyObserved = await this.proxy.pollExternalChanges(this.paths.toAbsoluteWorkspacePath(''));
           completedTicks++;
+          lastWalkDuration = 0;
           if (completedTicks % globalReconcileTickInterval === 0) {
+            const walkStartedAt = performance.now();
             await this.proxy.pollExternalChanges();
+            lastWalkDuration = performance.now() - walkStartedAt;
           }
           success = true;
         } catch (error) {
@@ -1037,6 +1083,8 @@ export class FileTreeService {
       this.refreshTimer = undefined;
     }
     this.pendingRefreshPaths.clear();
+    this.readsThroughHold.clear();
+    this.throughHoldPaths.clear();
     // The new root has not reported native observation yet: poll it promptly.
     this.nativelyObserved = false;
     this.reschedulePoll?.();
@@ -1084,6 +1132,8 @@ export class FileTreeService {
   public dispose(): void {
     this.disposed = true;
     this.pendingRefreshPaths.clear();
+    this.readsThroughHold.clear();
+    this.throughHoldPaths.clear();
     for (const pending of this.pendingSearches.values()) {
       clearTimeout(pending.timer);
       for (const waiter of pending.waiters) {
@@ -1211,27 +1261,60 @@ export class FileTreeService {
     if (this.refreshPauses > 0) {
       return;
     }
-    const pendingPaths: string[] = [];
-    for (const pendingPath of this.pendingRefreshPaths) {
-      if (pendingPaths.length === refreshesPerTask) {
-        break;
-      }
-      pendingPaths.push(pendingPath);
-    }
-    for (const pendingPath of pendingPaths) {
-      this.pendingRefreshPaths.delete(pendingPath);
-    }
+    const pendingPaths = this.takeRefreshBatch(this.pendingRefreshPaths);
     if (this.pendingRefreshPaths.size > 0) {
       this.refreshTimer = setTimeout(() => {
         this.drainPendingRefreshes();
       }, 0);
     }
-    for (const pendingPath of pendingPaths) {
-      const observation = this.listingObservations.get(pendingPath)?.deref();
+    this.rereadDirectories(pendingPaths, false);
+  }
+
+  /*
+   * The same drain for the directories {@link FileTreeService.refreshListedThroughHold}
+   * lets through a hold: a batch per task, the pause ignored, stopped by a
+   * reset or a dispose.
+   */
+  private drainReadsThroughHold(epoch: number): void {
+    if (this.disposed || this._epoch !== epoch) {
+      this.throughHoldPaths.clear();
+      return;
+    }
+    const paths = this.takeRefreshBatch(this.throughHoldPaths);
+    if (this.throughHoldPaths.size > 0) {
+      setTimeout(() => {
+        this.drainReadsThroughHold(epoch);
+      }, 0);
+    }
+    this.rereadDirectories(paths, true);
+  }
+
+  /* Take up to {@link refreshesPerTask} directories off a queue. */
+  private takeRefreshBatch(queue: Set<string>): string[] {
+    const batch: string[] = [];
+    for (const path of queue) {
+      if (batch.length === refreshesPerTask) {
+        break;
+      }
+      batch.push(path);
+    }
+    for (const path of batch) {
+      queue.delete(path);
+    }
+    return batch;
+  }
+
+  /* Re-read each directory, through its leased observation when it has one. */
+  private rereadDirectories(paths: readonly string[], throughHold: boolean): void {
+    for (const path of paths) {
+      const observation = this.listingObservations.get(path)?.deref();
       if (observation && observation.activeLeaseCount > 0) {
+        if (throughHold) {
+          this.readsThroughHold.add(path);
+        }
         observation.refresh();
       } else {
-        void this.executeRefresh(pendingPath);
+        void this.executeRefresh(path);
       }
     }
   }
@@ -1896,6 +1979,7 @@ export class FileTreeService {
           existing.size !== nextDirectory.size ||
           existing.mtimeMs !== nextDirectory.mtimeMs ||
           existing.isDirectoryResolved !== nextDirectory.isDirectoryResolved ||
+          existing.pending !== nextDirectory.pending ||
           !sameProvenance(existing.provenance, nextDirectory.provenance)
         ) {
           newTree.set(entryPath, nextDirectory);
@@ -1921,6 +2005,7 @@ export class FileTreeService {
       isLoaded,
       ...fileMetadataFields(entry),
       ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
+      ...(entry.pending === true ? { pending: true } : {}),
     };
   }
 
@@ -1938,6 +2023,7 @@ export class FileTreeService {
       isLoaded: existing?.type === 'dir' ? existing.isLoaded : false,
       isDirectoryResolved: existing?.type === 'dir' ? existing.isDirectoryResolved : false,
       ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
+      ...(entry.pending === true ? { pending: true } : {}),
     };
   }
 
@@ -1946,6 +2032,7 @@ export class FileTreeService {
       current.size !== next.size ||
       current.mtimeMs !== next.mtimeMs ||
       current.contentKind !== next.contentKind ||
+      current.pending !== next.pending ||
       !sameProvenance(current.provenance, next.provenance) ||
       (current.contentKind === 'text' && next.contentKind === 'text' && current.lineCount !== next.lineCount)
     );

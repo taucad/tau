@@ -20,13 +20,13 @@ import { isModelListEntryEnabled, LlmGatewayError, modelList } from '@taucad/api
 const adapter = mock<BillableModelProviderAdapter>();
 const resolver = new CodeOwnedBillableModelQualificationResolver({
   adapters: new Map([
-    ['openai-gpt-5.6-luna', adapter],
-    ['openai-gpt-5.6-sol', adapter],
-    ['openai-gpt-5.5', adapter],
+    ['openai-gpt-6-luna', adapter],
+    ['openai-gpt-6-sol', adapter],
     ['anthropic-claude-opus-5', adapter],
     ['together-glm-5.3', adapter],
     ['morph-deepseek-v4.1-flash', adapter],
-    ['google-gemini-3.5-flash', adapter],
+    ['google-gemini-4-neon', adapter],
+    ['google-gemini-4-hydrogen', adapter],
     ['xai-grok-4.6', adapter],
   ]),
   executionTimeout: 30_000,
@@ -44,19 +44,19 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(32);
-    expect(new Set(billableModelRouteIds).size).toBe(32);
+    expect(billableModelRouteIds).toHaveLength(26);
+    expect(new Set(billableModelRouteIds).size).toBe(26);
     expect(billableModelRouteIds).toContain('anthropic-claude-fable-5.2');
     expect(billableModelRouteIds).toContain('anthropic-claude-sonnet-5.5');
-    expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
+    expect(billableModelRouteIds).toContain('google-gemini-4-hydrogen');
     expect(billableModelRouteIds).toContain('morph-deepseek-v4.1-flash');
   });
 
   it('should qualify a configured provider without a manual account map', () => {
-    const dependencies = { adapters: new Map([['openai-gpt-5.6-luna', adapter]]), executionTimeout: 30_000 };
+    const dependencies = { adapters: new Map([['openai-gpt-6-luna', adapter]]), executionTimeout: 30_000 };
     const configured = new CodeOwnedBillableModelQualificationResolver(dependencies);
     const result = configured.resolve(
-      intent({ model: 'openai-gpt-5.6-luna', input: 'hello', max_output_tokens: 16, stream: true }),
+      intent({ model: 'openai-gpt-6-luna', input: 'hello', max_output_tokens: 16, stream: true }),
     );
     expect(result).toMatchObject({ providerId: 'openai' });
     expect(result.invocation).not.toHaveProperty('credentialAccount');
@@ -68,14 +68,10 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       executionTimeout: 30_000,
     });
     expect(() =>
-      unavailable.resolve(
-        intent({ model: 'openai-gpt-5.6-luna', input: 'hello', max_output_tokens: 16, stream: true }),
-      ),
+      unavailable.resolve(intent({ model: 'openai-gpt-6-luna', input: 'hello', max_output_tokens: 16, stream: true })),
     ).toThrow(LlmGatewayError);
     try {
-      unavailable.resolve(
-        intent({ model: 'openai-gpt-5.6-luna', input: 'hello', max_output_tokens: 16, stream: true }),
-      );
+      unavailable.resolve(intent({ model: 'openai-gpt-6-luna', input: 'hello', max_output_tokens: 16, stream: true }));
       expect.fail('Expected an unavailable provider');
     } catch (error) {
       expect(error).toBeInstanceOf(LlmGatewayError);
@@ -87,7 +83,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should emit the exact Vertex OpenAI compatibility model name', () => {
     const result = resolver.resolve({
       ...intent({
-        model: 'google-gemini-3.5-flash',
+        model: 'google-gemini-4-hydrogen',
         messages: [{ role: 'user', content: 'hello' }],
         max_completion_tokens: 16,
         stream: true,
@@ -96,7 +92,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     });
 
     expect(result.normalizedRequest.body).toMatchObject({
-      model: 'google/gemini-3.5-flash',
+      model: 'google/gemini-4-hydrogen',
       messages: [{ role: 'user', content: 'hello' }],
       max_completion_tokens: 16,
     });
@@ -110,30 +106,30 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       failure: 'no output maximum',
       limits: {},
       message:
-        'Model request must carry exactly one output-token maximum; route google-gemini-3.5-flash expects max_completion_tokens',
+        'Model request must carry exactly one output-token maximum; route google-gemini-4-hydrogen expects max_completion_tokens',
     },
     {
       failure: 'two output maxima',
       limits: { max_tokens: 16, max_completion_tokens: 16 },
       message:
-        'Model request must carry exactly one output-token maximum; route google-gemini-3.5-flash expects max_completion_tokens',
+        'Model request must carry exactly one output-token maximum; route google-gemini-4-hydrogen expects max_completion_tokens',
     },
     {
       failure: 'the field the route does not accept',
       limits: { max_tokens: 16 },
       message:
-        'Model request bounds output with a field route google-gemini-3.5-flash does not accept; it expects max_completion_tokens',
+        'Model request bounds output with a field route google-gemini-4-hydrogen does not accept; it expects max_completion_tokens',
     },
     {
       failure: 'a maximum past the route ceiling',
       limits: { max_completion_tokens: 65_537 },
-      message: "Model request max_completion_tokens of 65537 exceeds route google-gemini-3.5-flash's maximum of 65536",
+      message: "Model request max_completion_tokens of 65537 exceeds route google-gemini-4-hydrogen's maximum of 65536",
     },
   ])('should refuse $failure naming the route and its output field', ({ limits, message }) => {
     expect(() =>
       resolver.resolve({
         ...intent({
-          model: 'google-gemini-3.5-flash',
+          model: 'google-gemini-4-hydrogen',
           messages: [{ role: 'user', content: 'hello' }],
           stream: true,
           ...limits,
@@ -145,17 +141,17 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
 
   it('should bound the input by the request itself', () => {
     const result = resolver.resolve(
-      intent({ model: 'openai-gpt-5.6-luna', input: 'hello', max_output_tokens: 100, stream: true }),
+      intent({ model: 'openai-gpt-6-luna', input: 'hello', max_output_tokens: 100, stream: true }),
     );
 
-    /* 85 serialized bytes, one conversation element and the per-route overhead. */
+    /* 83 serialized bytes, one conversation element and the per-route overhead. */
     expect(result.maximumQuantities).toEqual([
-      { dimension: 'uncached_input', tier: null, quantity: 4245n },
-      { dimension: 'cache_read', tier: null, quantity: 4245n },
-      { dimension: 'cache_write', tier: '30m', quantity: 4245n },
+      { dimension: 'uncached_input', tier: null, quantity: 4243n },
+      { dimension: 'cache_read', tier: null, quantity: 4243n },
+      { dimension: 'cache_write', tier: '30m', quantity: 4243n },
       { dimension: 'output', tier: null, quantity: 100n },
     ]);
-    expect(result.invocation.jointInputMaximum).toEqual({ version: 'joint-input-v1', quantity: '4245' });
+    expect(result.invocation.jointInputMaximum).toEqual({ version: 'joint-input-v1', quantity: '4243' });
     expect(result.invocation.supplierRatesValidUntil).toBeNull();
     expect(result.normalizedRequest).not.toHaveProperty('billing');
   });
@@ -163,7 +159,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should fall closed onto the provider context partition when the bound exceeds it', () => {
     const result = resolver.resolve(
       intent({
-        model: 'openai-gpt-5.6-luna',
+        model: 'openai-gpt-6-luna',
         input: 'x'.repeat(1_100_000),
         max_output_tokens: 100,
         stream: true,
@@ -171,14 +167,14 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     );
 
     expect(result.maximumQuantities[0]).toEqual({ dimension: 'uncached_input', tier: null, quantity: 1_049_900n });
-    expect(result.sku).toBe('model:openai-gpt-5.6-luna:long-context');
+    expect(result.sku).toBe('model:openai-gpt-6-luna:long-context');
   });
 
   it('should reject uncontracted provider options before returning admission data', () => {
     expect(() =>
       resolver.resolve(
         intent({
-          model: 'openai-gpt-5.6-luna',
+          model: 'openai-gpt-6-luna',
           input: 'hello',
           max_output_tokens: 100,
           stream: true,
@@ -188,9 +184,9 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     ).toThrow('outside the funded request contract');
   });
 
-  it('should qualify GPT-5.5 without a separately billed cache-write meter', () => {
+  it('should qualify a Responses route without a separately billed cache-write meter', () => {
     const result = resolver.resolve(
-      intent({ model: 'openai-gpt-5.5', input: 'hello', max_output_tokens: 100, stream: true }),
+      intent({ model: 'xai-grok-4.6', input: 'hello', max_output_tokens: 100, stream: true }),
     );
     expect(result.maximumQuantities.map(({ dimension }) => dimension)).toEqual([
       'uncached_input',
@@ -203,7 +199,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should accept the host Responses tool-turn shape without admitting provider-paid options', () => {
     const result = resolver.resolve(
       intent({
-        model: 'openai-gpt-5.6-luna',
+        model: 'openai-gpt-6-luna',
         input: [
           { role: 'developer', content: 'static\n\nworkspace\n\ndynamic' },
           { role: 'user', content: [{ type: 'input_text', text: 'hello' }] },
@@ -224,7 +220,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       }),
     );
 
-    expect(result.routeId).toBe('openai-gpt-5.6-luna');
+    expect(result.routeId).toBe('openai-gpt-6-luna');
     expect(result.normalizedRequest).toMatchObject({ body: { store: false, tools: [{ name: 'read_file' }] } });
   });
 
@@ -332,7 +328,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       output_config: { effort: 'high' },
     };
     const responses = {
-      model: 'openai-gpt-5.6-sol',
+      model: 'openai-gpt-6-sol',
       input: [{ role: 'user', content: 'hello' }],
       max_output_tokens: 16,
       stream: true,
@@ -402,30 +398,30 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     expect(result.invocation.jointInputMaximum).toBeUndefined();
   });
 
-  it('should pin dated supplier evidence without using the process clock as authority', () => {
+  it('should pin the base tariff and no expiry while the bound cannot reach the premium threshold', () => {
     const result = resolver.resolve(
-      intent({ model: 'openai-gpt-5.6-sol', input: 'hello', max_output_tokens: 100, stream: true }),
+      intent({ model: 'openai-gpt-6-sol', input: 'hello', max_output_tokens: 100, stream: true }),
     );
-    expect(result.invocation.supplierRatesValidUntil).toBe('2026-11-21T23:59:59.999Z');
+    expect(result.invocation.supplierRatesValidUntil).toBeNull();
     /* The bound proves the premium threshold unreachable, so the base tariff is the
      * pinned maximum and the valuation may carry no schedule above it. */
-    expect(result.sku).toBe('model:openai-gpt-5.6-sol');
+    expect(result.sku).toBe('model:openai-gpt-6-sol');
     expect(result.invocation.supplierRates).toEqual([
-      { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '4000000000000', denominatorUnits: '1000000' },
-      { dimension: 'cache_read', tier: null, numeratorPicoUsd: '400000000000', denominatorUnits: '1000000' },
-      { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '5000000000000', denominatorUnits: '1000000' },
-      { dimension: 'output', tier: null, numeratorPicoUsd: '20000000000000', denominatorUnits: '1000000' },
+      { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '2000000000000', denominatorUnits: '1000000' },
+      { dimension: 'cache_read', tier: null, numeratorPicoUsd: '200000000000', denominatorUnits: '1000000' },
+      { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '2500000000000', denominatorUnits: '1000000' },
+      { dimension: 'output', tier: null, numeratorPicoUsd: '10000000000000', denominatorUnits: '1000000' },
     ]);
     expect(result.invocation.supplierValuation).toMatchObject({
       version: 'supplier-valuation-v1',
-      sourceRevision: 'official-pricing:2026-09-06:openai-gpt-5.6-sol',
+      sourceRevision: 'official-pricing:2026-09-06:openai-gpt-6-sol',
       longContextMinimumInputTokens: null,
       longContextRates: null,
       baseRates: [
-        { dimension: 'uncached_input', numeratorPicoUsd: '4000000000000' },
-        { dimension: 'cache_read', numeratorPicoUsd: '400000000000' },
-        { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '5000000000000' },
-        { dimension: 'output', numeratorPicoUsd: '20000000000000' },
+        { dimension: 'uncached_input', numeratorPicoUsd: '2000000000000' },
+        { dimension: 'cache_read', numeratorPicoUsd: '200000000000' },
+        { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '2500000000000' },
+        { dimension: 'output', numeratorPicoUsd: '10000000000000' },
       ],
     });
   });
@@ -433,34 +429,34 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should pin the premium tariff and both valuation tables once the bound reaches the threshold', () => {
     const result = resolver.resolve(
       intent({
-        model: 'openai-gpt-5.6-sol',
+        model: 'openai-gpt-6-sol',
         input: 'x'.repeat(280_000),
         max_output_tokens: 100,
         stream: true,
       }),
     );
 
-    expect(result.sku).toBe('model:openai-gpt-5.6-sol:long-context');
-    expect(result.meterContractId).toBe('model-meter-v1:openai-gpt-5.6-sol:long-context');
+    expect(result.sku).toBe('model:openai-gpt-6-sol:long-context');
+    expect(result.meterContractId).toBe('model-meter-v1:openai-gpt-6-sol:long-context');
     expect(result.invocation.supplierRates[0]).toEqual({
       dimension: 'uncached_input',
       tier: null,
-      numeratorPicoUsd: '8000000000000',
+      numeratorPicoUsd: '4000000000000',
       denominatorUnits: '1000000',
     });
     expect(result.invocation.supplierValuation).toMatchObject({
       longContextMinimumInputTokens: '272001',
       baseRates: [
+        { dimension: 'uncached_input', numeratorPicoUsd: '2000000000000' },
+        { dimension: 'cache_read', numeratorPicoUsd: '200000000000' },
+        { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '2500000000000' },
+        { dimension: 'output', numeratorPicoUsd: '10000000000000' },
+      ],
+      longContextRates: [
         { dimension: 'uncached_input', numeratorPicoUsd: '4000000000000' },
         { dimension: 'cache_read', numeratorPicoUsd: '400000000000' },
         { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '5000000000000' },
-        { dimension: 'output', numeratorPicoUsd: '20000000000000' },
-      ],
-      longContextRates: [
-        { dimension: 'uncached_input', numeratorPicoUsd: '8000000000000' },
-        { dimension: 'cache_read', numeratorPicoUsd: '800000000000' },
-        { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '10000000000000' },
-        { dimension: 'output', numeratorPicoUsd: '30000000000000' },
+        { dimension: 'output', numeratorPicoUsd: '15000000000000' },
       ],
     });
   });
@@ -488,7 +484,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should carry a supplier valuation for Vertex operations so Gemini spend can settle', () => {
     const result = resolver.resolve({
       ...intent({
-        model: 'google-gemini-3.5-flash',
+        model: 'google-gemini-4-hydrogen',
         messages: [{ role: 'user', content: 'hello' }],
         max_completion_tokens: 16,
         stream: true,
@@ -498,13 +494,13 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
 
     expect(result.invocation.supplierValuation).toEqual({
       version: 'supplier-valuation-v1',
-      sourceRevision: 'official-pricing:2026-09-06:google-gemini-3.5-flash',
+      sourceRevision: 'official-pricing:2026-11-16:google-gemini-4-hydrogen',
       longContextMinimumInputTokens: null,
       longContextRates: null,
       baseRates: [
         { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1500000000000', denominatorUnits: '1000000' },
-        { dimension: 'cache_read', tier: null, numeratorPicoUsd: '150000000000', denominatorUnits: '1000000' },
-        { dimension: 'output', tier: null, numeratorPicoUsd: '9000000000000', denominatorUnits: '1000000' },
+        { dimension: 'cache_read', tier: null, numeratorPicoUsd: '75000000000', denominatorUnits: '1000000' },
+        { dimension: 'output', tier: null, numeratorPicoUsd: '7500000000000', denominatorUnits: '1000000' },
       ],
     });
   });
@@ -607,19 +603,43 @@ const qualifyRoute = (routeId: string): QualifiedBillableInvocation => {
 
 describe('catalog route vocabulary', () => {
   it.each(['gemini-4-argon', 'gemini-4-carbon'])(
-    'should pin %s introductory pricing with an expiry and no explicit cache-write meter',
+    'should bill %s at its standard rate with no expiry and no explicit cache-write meter',
     (model) => {
       const result = qualifyRoute(`google-${model}`);
 
       expect(result.normalizedRequest.body).toMatchObject({ model: `google/${model}` });
-      expect(result.invocation.supplierRatesValidUntil).toBe('2026-11-30T23:59:59.999Z');
+      expect(result.invocation.supplierRatesValidUntil).toBeNull();
       expect(result.invocation.supplierRates).toEqual([
-        { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '2000000000000', denominatorUnits: '1000000' },
-        { dimension: 'cache_read', tier: null, numeratorPicoUsd: '100000000000', denominatorUnits: '1000000' },
-        { dimension: 'output', tier: null, numeratorPicoUsd: '10000000000000', denominatorUnits: '1000000' },
+        { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '4000000000000', denominatorUnits: '1000000' },
+        { dimension: 'cache_read', tier: null, numeratorPicoUsd: '200000000000', denominatorUnits: '1000000' },
+        { dimension: 'output', tier: null, numeratorPicoUsd: '20000000000000', denominatorUnits: '1000000' },
       ]);
     },
   );
+
+  it('should bill gemini-4-neon at its standard rate with no expiry', () => {
+    const result = qualifyRoute('google-gemini-4-neon');
+
+    expect(result.normalizedRequest.body).toMatchObject({ model: 'google/gemini-4-neon' });
+    expect(result.invocation.supplierRatesValidUntil).toBeNull();
+    expect(result.invocation.supplierRates).toEqual([
+      { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '3000000000000', denominatorUnits: '1000000' },
+      { dimension: 'cache_read', tier: null, numeratorPicoUsd: '150000000000', denominatorUnits: '1000000' },
+      { dimension: 'output', tier: null, numeratorPicoUsd: '15000000000000', denominatorUnits: '1000000' },
+    ]);
+  });
+
+  it('should bill gemini-4-hydrogen at its standard rate with no expiry', () => {
+    const result = qualifyRoute('google-gemini-4-hydrogen');
+
+    expect(result.normalizedRequest.body).toMatchObject({ model: 'google/gemini-4-hydrogen' });
+    expect(result.invocation.supplierRatesValidUntil).toBeNull();
+    expect(result.invocation.supplierRates).toEqual([
+      { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1500000000000', denominatorUnits: '1000000' },
+      { dimension: 'cache_read', tier: null, numeratorPicoUsd: '75000000000', denominatorUnits: '1000000' },
+      { dimension: 'output', tier: null, numeratorPicoUsd: '7500000000000', denominatorUnits: '1000000' },
+    ]);
+  });
 
   it.each([
     { input: 'hello', suffix: '', amounts: ['1000000000000', '50000000000', '1250000000000', '5000000000000'] },
@@ -750,13 +770,13 @@ describe('catalog route vocabulary', () => {
 
   it('should refuse a premium tariff that no funded route can pin', () => {
     expect(() => {
-      assertTieredRoutesAreFunded(['openai-gpt-5.6-terrra']);
-    }).toThrow('Tiered tariff openai-gpt-5.6-terrra has no funded route');
+      assertTieredRoutesAreFunded(['openai-gpt-6-terrra']);
+    }).toThrow('Tiered tariff openai-gpt-6-terrra has no funded route');
   });
 
   it('should refuse a supplier model id that is not a catalog route id', () => {
     expect(() =>
-      catalogResolver.resolve(intent({ model: 'gpt-5.6-luna', input: 'hello', max_output_tokens: 1, stream: true })),
+      catalogResolver.resolve(intent({ model: 'gpt-6-luna', input: 'hello', max_output_tokens: 1, stream: true })),
     ).toThrow('Model route is not qualified');
   });
 });

@@ -480,6 +480,12 @@ export type SyncProjectRecordsActorInput = Readonly<{
   priorEvidenceHead?: string;
   /** When this pull read the remote's refs, on this device's clock: the chats it projects record it (`pullRecordAfter`). */
   pulledAt?: number | undefined;
+  /**
+   * The records may run while the apply writes the checkout (SP2h): a fast-forward whose `tau.json` asks for chats as
+   * the checkout's does. `syncChats` is then the fetch's reading of the applied manifest, since the checkout's may be
+   * mid-write; without it the records wait for the apply and read the manifest it landed.
+   */
+  besideApply?: true;
 }>;
 
 /** Independent completion of optional records after authored integration. @public */
@@ -590,6 +596,8 @@ const terminalFailureCodes: ReadonlySet<string> = new Set([
   'REMOTE_DAMAGED',
   /* D49: refused before any network call; retrying cannot change the tree. */
   'LFS_REMOTE_UNSUPPORTED',
+  /* W9 R5: safe mode refuses Tau Cloud before any request; only a normal restart ends it. */
+  'REMOTE_SAFE_MODE',
 ]);
 
 const codeOf = (error: unknown): string | undefined => {
@@ -663,6 +671,9 @@ export const syncFailureReason = (error: unknown): SyncFailureReason => {
     case 'REMOTE_DAMAGED': {
       return 'damaged';
     }
+    case 'REMOTE_SAFE_MODE': {
+      return 'safeMode';
+    }
     /* The server refused the refs, not the device (contract §4): a fetch and a
      * replay clear it, so the action beside it is *Sync now*, not *Sign in*. */
     case 'REMOTE_REJECTED':
@@ -679,8 +690,7 @@ export const syncFailureReason = (error: unknown): SyncFailureReason => {
   }
 };
 
-const reason = (error: unknown): string =>
-  error instanceof Error ? error.message : 'This project could not be backed up.';
+const reason = (error: unknown): string => (error instanceof Error ? error.message : 'Couldn’t back up this project.');
 
 const unsupported = async (): Promise<never> => {
   await Promise.resolve();
@@ -722,7 +732,7 @@ const refusalSaid = (
     refused.ref.startsWith('refs/heads/') && refused.ref !== historyRefOf(branch)
       ? refused.ref.slice('refs/heads/'.length)
       : undefined;
-  return `${other ?? 'This branch'} changed on the remote; this project will catch up and try again.`;
+  return `${other ?? 'This branch'} changed somewhere else. Tau will get those changes and try again.`;
 };
 
 /**
@@ -875,7 +885,7 @@ const nextPending = (
             ...(entry.head === undefined ? {} : { head: entry.head }),
             ...(remote === undefined ? {} : { remote }),
             expected: leases[entry.name],
-            reason: entry.reason ?? 'The remote refused this ref.',
+            reason: entry.reason ?? 'Couldn’t back up part of this project. Try again.',
             recordedAt: now,
           },
         ]
@@ -1071,6 +1081,27 @@ const failedRecords = (context: SyncMachineContext, error: unknown): readonly Sy
     reason: error instanceof Error ? error.message : 'Optional records could not be restored.',
   }));
 
+/* The record projection's input, its empty stand-in when the fetch named none. */
+const recordsInputOf = (context: SyncMachineContext): SyncProjectRecordsActorInput =>
+  context.recordProjection ?? { remote: '', fetchRefs: [], refs: [], syncChats: false, syncLargeExports: false };
+
+/* What the record projection settled, whichever state ran it. */
+const recordsSettled = (context: SyncMachineContext, output: SyncProjectRecordsActorOutput): SyncContextPatch => ({
+  ...rememberRecords(context, output.records),
+  chats: output.chats,
+});
+
+/*
+ * Whether the open has only its optional records left: the authored apply has landed, so the deadline fails the
+ * records alone and the person keeps the files (SP2h runs them beside a fast-forward).
+ */
+const onlyRecordsLeft = (value: unknown): boolean => {
+  const childOf = (state: unknown, key: string): unknown =>
+    typeof state === 'object' && state !== null ? Object.getOwnPropertyDescriptor(state, key)?.value : undefined;
+  const opening = childOf(value, 'opening');
+  return opening === 'projectingRecords' || childOf(childOf(opening, 'besideApply'), 'authored') === 'applied';
+};
+
 const rememberFetch = (
   context: SyncMachineContext,
   enq: SyncEnqueue,
@@ -1147,7 +1178,7 @@ const thrownOutcome = (error: unknown): SyncAttemptOutcome => {
 /* A cancelled pull may already have applied linked checkouts. Preserve that
  * result and write the retry record only after its effect returns. */
 const closeRetry = (context: SyncMachineContext): SyncContextPatch => {
-  const why = 'Closing stopped the transfer; this project will try again.';
+  const why = 'Closing stopped the backup. It continues the next time you open this project.';
   return {
     pendingFetch: false,
     pendingFlush: false,
@@ -1651,7 +1682,7 @@ const syncMachineDefinition = setup({
         return {
           target: 'queued',
           context: {
-            error: 'This device is offline; this project will be backed up when it is back online.',
+            error: 'You’re offline. This project backs up when you’re back online.',
             reason: 'offline',
           },
         };
@@ -1681,7 +1712,7 @@ const syncMachineDefinition = setup({
         pullRenderWindow: { context: { withinPullWindow: false } },
         pullDeadline: ({ context, value }, enq) => {
           reportPullAttempt(context, enq, 'retry');
-          if (typeof value !== 'string' && value['opening'] === 'projectingRecords') {
+          if (onlyRecordsLeft(value)) {
             return {
               target: 'recording',
               context: rememberRecords(
@@ -1693,7 +1724,7 @@ const syncMachineDefinition = setup({
           return {
             target: 'queued',
             context: {
-              error: 'The remote did not answer in time; this project will try again.',
+              error: 'Backup is taking too long. Tau will try again.',
               reason: 'offline',
               chats: context.chats === 'loading' ? 'failed' : context.chats,
             },
@@ -1715,7 +1746,10 @@ const syncMachineDefinition = setup({
               const remembered = rememberFetch(context, enq, event.output);
               switch (event.output.integration) {
                 case 'fastForward': {
-                  return { target: 'fastForwarding', context: remembered };
+                  return {
+                    target: event.output.recordProjection?.besideApply === true ? 'besideApply' : 'fastForwarding',
+                    context: remembered,
+                  };
                 }
                 case 'diverged': {
                   return { target: 'merging', context: remembered };
@@ -1766,7 +1800,7 @@ const syncMachineDefinition = setup({
               }
               const conflict = {
                 conflictRef: `refs/heads/${event.output.branch}`,
-                error: 'The remote and this device changed the same files.',
+                error: 'This project changed here and somewhere else. Choose what to keep, then back up again.',
               };
               /* A re-pull that lands on the conflict already waiting (D55) is
                * not news: announcing it again toasted on every retry. */
@@ -1806,23 +1840,64 @@ const syncMachineDefinition = setup({
         projectingRecords: {
           invoke: {
             src: 'projectRecords',
-            input: ({ context }) =>
-              context.recordProjection ?? {
-                remote: context.remote ?? '',
-                fetchRefs: [],
-                refs: [],
-                syncChats: false,
-                syncLargeExports: false,
-              },
-            onDone: ({ context, event }) => ({
-              target: 'done',
-              context: { ...rememberRecords(context, event.output.records), chats: event.output.chats },
-            }),
+            input: ({ context }) => recordsInputOf(context),
+            onDone: ({ context, event }) => ({ target: 'done', context: recordsSettled(context, event.output) }),
             onError: ({ context, event }) => ({
               target: 'done',
               context: rememberRecords(context, failedRecords(context, event.error)),
             }),
           },
+        },
+        /*
+         * A fast-forward whose records write only unversioned paths, disjoint from its own (SP2h): the chats land while
+         * the files are written, so a chat opens on its records and never waits for the whole download. The remote is
+         * applied only once the authored region lands; a failed or held apply ends both, as it always did.
+         */
+        besideApply: {
+          type: 'parallel',
+          states: {
+            authored: {
+              initial: 'fastForwarding',
+              states: {
+                fastForwarding: {
+                  invoke: {
+                    src: 'fastForward',
+                    input: ({ context }) => ({ remote: context.remote ?? '', branch: context.branch }),
+                    onDone: ({ context, event }, enq) => {
+                      if (event.output !== undefined && 'hold' in event.output) {
+                        return heldAt(event.output);
+                      }
+                      reportFastForward(context, enq, event.output);
+                      return { target: 'applied' };
+                    },
+                    onError: ({ event }) => pullFailed(event.error),
+                  },
+                },
+                applied: { type: 'final', entry: () => ({ context: { hasAppliedRemote: true } }) },
+              },
+            },
+            records: {
+              initial: 'projecting',
+              states: {
+                projecting: {
+                  invoke: {
+                    src: 'projectRecords',
+                    input: ({ context }) => recordsInputOf(context),
+                    onDone: ({ context, event }) => ({
+                      target: 'projected',
+                      context: recordsSettled(context, event.output),
+                    }),
+                    onError: ({ context, event }) => ({
+                      target: 'projected',
+                      context: rememberRecords(context, failedRecords(context, event.error)),
+                    }),
+                  },
+                },
+                projected: { type: 'final' },
+              },
+            },
+          },
+          onDone: { target: 'done' },
         },
         done: { type: 'final' },
       },
@@ -1884,7 +1959,7 @@ const syncMachineDefinition = setup({
                 target: 'failed',
                 context: {
                   pushIds: [event.pushId],
-                  error: 'Connect to the internet before pushing.',
+                  error: 'Go online before backing up to GitHub.',
                   reason: 'offline',
                 },
               },
@@ -2175,7 +2250,7 @@ const syncMachineDefinition = setup({
       after: {
         pushDeadline: ({ context }, enq) => {
           reportPushAttempt(context, enq, { outcome: 'retry' });
-          const why = 'The remote did not answer in time; this project will try again.';
+          const why = 'Backup is taking too long. Tau will try again.';
           return {
             target: 'recording',
             context: {
@@ -2348,7 +2423,7 @@ const syncMachineDefinition = setup({
         return { context: { cutCount, requestId } };
       },
       after: {
-        mintDeadline: mintRefused('Your changes could not be saved before synchronizing; this project will try again.'),
+        mintDeadline: mintRefused('Couldn’t save your changes before backing up. Tau will try again.'),
       },
       on: {
         revisionMinted: ({ context, event }) =>
@@ -2364,7 +2439,7 @@ const syncMachineDefinition = setup({
             return {};
           }
           return context.mintRepulled
-            ? mintRefused('Your changes could not be saved before synchronizing; this project will try again.')
+            ? mintRefused('Couldn’t save your changes before backing up. Tau will try again.')
             : { target: 'opening', context: { mintRepulled: true } };
         },
         cutFailed: ({ context, event }) => (answersOurCut(context, event) ? mintRefused(event.reason) : {}),
@@ -2442,7 +2517,7 @@ const syncMachineDefinition = setup({
         enq.emit({
           type: 'syncConflict',
           ref: context.conflictRef ?? historyRefOf(context.branch),
-          reason: context.error ?? 'The remote has work this device has not seen.',
+          reason: context.error ?? 'This project changed somewhere else. Tau will get those changes first.',
         });
         return { context: settleEveryPush(context, enq, 'conflicted') };
       },
@@ -2714,7 +2789,7 @@ const facetStateOf = (value: string, withinPullWindow: boolean): SyncFacet['stat
  *
  * A lost lease is caught up by the next pull's merge, except on a branch whose
  * merge recorded a conflict: that branch moves only once the person decides,
- * so "will catch up and try again" would be false. The conflicts are the
+ * so "will get those changes and try again" would be false. The conflicts are the
  * root's (read from the conflict lines, so they survive a reload); this
  * machine keeps no copy.
  *
@@ -2728,7 +2803,7 @@ const waitingSaid = (context: SyncMachineContext, undecided: readonly string[]):
   );
   return waiting === undefined
     ? undefined
-    : `${waiting === context.branch ? 'This branch' : waiting} waits on your decision; its revisions back up once you choose.`;
+    : `${waiting === context.branch ? 'This branch' : waiting} is waiting for your decision. It backs up once you choose.`;
 };
 
 /**
@@ -2799,9 +2874,12 @@ export const selectSyncFacet = (
      * reaches the person through `error`. */
     pullPhase: snapshot.matches({ opening: 'fetching' })
       ? 'fetching'
-      : snapshot.matches({ opening: 'fastForwarding' }) || snapshot.matches({ opening: 'merging' })
+      : snapshot.matches({ opening: 'fastForwarding' }) ||
+          snapshot.matches({ opening: 'merging' }) ||
+          snapshot.matches({ opening: { besideApply: { authored: 'fastForwarding' } } })
         ? 'applying'
-        : snapshot.matches({ opening: 'projectingRecords' })
+        : snapshot.matches({ opening: 'projectingRecords' }) ||
+            snapshot.matches({ opening: { besideApply: { authored: 'applied' } } })
           ? 'records'
           : 'idle',
     hasAppliedRemote: snapshot.context.hasAppliedRemote,

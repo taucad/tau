@@ -20,11 +20,8 @@ import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceF
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { createCheckoutRoutes, createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import type {
-  RevisionToast,
-  WorkerProjectRevisions,
-  WorkerRevisionResponse,
-} from '#machines/file-manager.worker.revisions.js';
+import type { WorkerProjectRevisions } from '#machines/file-manager.worker.revisions.js';
+import type { RevisionToast, WorkerRevisionResponse } from '@taucad/revisions-ui/types/revision-worker-protocol';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { startEnvironmentHost } from '#runtime/environment.fixture.js';
 import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
@@ -827,6 +824,19 @@ describe('the page client of the worker revision root', () => {
     revisionClient.close();
   });
 
+  it('should hold a first view the page shows until the client opens, then say it on the port (STO-25)', () => {
+    const { worker, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    const shownFrames = (): unknown[] =>
+      messages.filter((message) => (message as { command?: string }).command === 'firstViewShown');
+    revisionClient.firstViewShown?.();
+    expect(shownFrames()).toEqual([]);
+
+    revisionClient.open();
+    expect(shownFrames()).toEqual([{ command: 'firstViewShown' }]);
+    revisionClient.close();
+  });
+
   it("should say the page's resolved telemetry consent on every port and every change, and stop when closed (PR-7)", () => {
     telemetryConsent.set('denied');
     const { worker, messages } = controlledWorker();
@@ -1075,8 +1085,9 @@ describe('the page client of the worker revision root', () => {
     messages.length = 0;
 
     let settled = false;
+    let outcome: string | undefined;
     const flush = (async () => {
-      await client.saveRevision('close');
+      outcome = await client.saveRevision('close');
       settled = true;
     })();
 
@@ -1088,10 +1099,12 @@ describe('the page client of the worker revision root', () => {
     ports[0]?.postMessage({
       type: 'result',
       id: frame.id,
-      result: { kind: 'saved' },
+      result: { kind: 'saved', outcome: 'recorded' },
     } satisfies WorkerRevisionResponse);
     await flush;
     expect(settled).toBe(true);
+    /* What the cut came to reaches the caller (A7e). */
+    expect(outcome).toBe('recorded');
   });
 
   /* Round 27: the page reads a foreign run by whether the host's placement can pull the chat; an older host says nothing. */

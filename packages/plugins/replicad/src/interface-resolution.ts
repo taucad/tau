@@ -33,18 +33,6 @@ const r6 = (n: number): number => {
   return value === 0 ? 0 : value;
 };
 
-const describeFaceCandidates = (faces: readonly ReplicadFace[]): string =>
-  faces
-    .slice(0, 8)
-    .map(
-      (face) =>
-        `${face.geomType} @ [${face.center
-          .toTuple()
-          .map((coordinate) => r6(coordinate))
-          .join(', ')}]`,
-    )
-    .join('; ') + (faces.length > 8 ? `; ... ${faces.length - 8} more` : '');
-
 /**
  * Per-entry face-query context. Replicad's `FaceFinder.find(shape)` re-lists
  * `shape.faces` (a TopExp walk with O(n²) IsSame dedup) and recomputes face
@@ -54,46 +42,123 @@ const describeFaceCandidates = (faces: readonly ReplicadFace[]): string =>
  * (`geomType`, `center`, no-argument `normalAt`), so each OCCT computation
  * runs at most once per face while every filter observes the same values in
  * the same order as an uncached run.
+ *
+ * The center and the default normal are memoized as plain coordinate
+ * tuples, never as shared `Vector`s: a finder may own and delete the
+ * `Vector` it reads (the `@taulabs/replicad` fork's `inPlane` deletes the
+ * center, and its `shouldKeep` and `parallelTo(face)` delete the normal), so
+ * each `face.center` and `face.normalAt()` read returns a fresh `Vector`
+ * built from the tuple.
  */
 type EntryFaceQueries = {
   listFaces: () => readonly ReplicadFace[];
   createFinder: () => ReplicadModule.FaceFinder;
+  /** The face's memoized center of mass, read from OCCT at most once. */
+  centerOf: (face: ReplicadFace) => VectorTuple;
+  /** Deletes the listed faces and every finder created, once the entry is resolved. */
+  dispose: () => void;
 };
 
-const memoizeInstanceGetter = (face: ReplicadFace, key: 'geomType' | 'center'): void => {
+type VectorTuple = readonly [x: number, y: number, z: number];
+
+/**
+ * Copy a `Vector` the caller owns into a tuple and delete the `Vector`.
+ *
+ * @param vector - Vector to consume.
+ * @returns Its coordinates.
+ */
+const consumeVector = (vector: ReplicadVector): VectorTuple => {
+  const [x, y, z] = vector.toTuple();
+  vector.delete();
+  return [x, y, z];
+};
+
+const getPrototypeGetter = (face: ReplicadFace, key: 'geomType' | 'center'): (() => unknown) | undefined => {
   const facePrototype: unknown = Object.getPrototypeOf(face);
-  const prototypeGetter = Object.getOwnPropertyDescriptor(facePrototype as Record<string, unknown>, key)?.get;
+  return Object.getOwnPropertyDescriptor(facePrototype as Record<string, unknown>, key)?.get;
+};
+
+const memoizeGeomType = (face: ReplicadFace): void => {
+  const prototypeGetter = getPrototypeGetter(face, 'geomType');
   if (!prototypeGetter) {
     return;
   }
 
-  Object.defineProperty(face, key, {
+  Object.defineProperty(face, 'geomType', {
     configurable: true,
     get(): unknown {
       const value: unknown = prototypeGetter.call(face);
-      Object.defineProperty(face, key, { configurable: true, value });
+      Object.defineProperty(face, 'geomType', { configurable: true, value });
       return value;
     },
   });
 };
 
-const memoizeDefaultNormal = (face: ReplicadFace): void => {
+/**
+ * Read a face's center once as a tuple and serve every later `face.center`
+ * read a fresh `Vector` the reader owns.
+ *
+ * @param face - Listed face whose `center` getter to memoize.
+ * @param replicadLibrary - Live Replicad module used to construct each `Vector`.
+ * @returns Reader for the memoized center tuple.
+ */
+const memoizeCenter = (face: ReplicadFace, replicadLibrary: ReplicadLibrary): (() => VectorTuple) => {
+  const prototypeGetter = getPrototypeGetter(face, 'center');
+  const readVector = (): ReplicadVector =>
+    prototypeGetter ? (prototypeGetter.call(face) as ReplicadVector) : face.center;
+  let center: VectorTuple | undefined;
+  // `Face.center` hands its caller a new `Vector`; only the tuple is kept.
+  const readCenter = (): VectorTuple => {
+    center ??= consumeVector(readVector());
+    return center;
+  };
+
+  if (prototypeGetter) {
+    Object.defineProperty(face, 'center', {
+      configurable: true,
+      get: (): ReplicadVector => new replicadLibrary.Vector([...readCenter()]),
+    });
+  }
+  return readCenter;
+};
+
+const describeFace = (face: ReplicadFace, queries: EntryFaceQueries): string =>
+  `${face.geomType} @ [${queries
+    .centerOf(face)
+    .map((coordinate) => r6(coordinate))
+    .join(', ')}]`;
+
+const describeFaceCandidates = (faces: readonly ReplicadFace[], queries: EntryFaceQueries): string =>
+  faces
+    .slice(0, 8)
+    .map((face) => describeFace(face, queries))
+    .join('; ') + (faces.length > 8 ? `; ... ${faces.length - 8} more` : '');
+
+/**
+ * Read a face's default normal once as a tuple and serve every later
+ * no-argument `face.normalAt()` call a fresh `Vector` the caller owns.
+ *
+ * @param face - Listed face whose `normalAt` to memoize.
+ * @param replicadLibrary - Live Replicad module used to construct each `Vector`.
+ */
+const memoizeDefaultNormal = (face: ReplicadFace, replicadLibrary: ReplicadLibrary): void => {
   const computeNormalAt = face.normalAt.bind(face);
-  let defaultNormal: ReplicadVector | undefined;
+  let defaultNormal: VectorTuple | undefined;
   face.normalAt = (locationVector?: Parameters<ReplicadFace['normalAt']>[0]): ReplicadVector => {
     if (locationVector) {
       return computeNormalAt(locationVector);
     }
 
-    defaultNormal ??= computeNormalAt();
-    return defaultNormal;
+    defaultNormal ??= consumeVector(computeNormalAt());
+    return new replicadLibrary.Vector([...defaultNormal]);
   };
 };
 
 const createEntryFaceQueries = (entry: InputShape, replicadLibrary: ReplicadLibrary): EntryFaceQueries => {
   class LazyNormalFaceFinder extends replicadLibrary.FaceFinder {
     // Same filters, same order, same values as the base implementation; the
-    // normal is just computed on first read instead of eagerly per face.
+    // normal is just computed on first read instead of eagerly per face. Like
+    // the fork's `shouldKeep`, it owns that normal and deletes it afterwards.
     public override shouldKeep(element: ReplicadFace): boolean {
       let defaultNormal: ReplicadVector | undefined;
       const filterInput = {
@@ -103,23 +168,52 @@ const createEntryFaceQueries = (entry: InputShape, replicadLibrary: ReplicadLibr
           return defaultNormal;
         },
       };
-      return this.filters.every((filter) => filter(filterInput));
+      try {
+        return this.filters.every((filter) => filter(filterInput));
+      } finally {
+        defaultNormal?.delete();
+      }
     }
   }
 
   let faces: readonly ReplicadFace[] | undefined;
-  return {
-    createFinder: () => new LazyNormalFaceFinder(),
-    listFaces: () => {
-      if (!faces) {
-        faces = entry.shape.faces;
-        for (const face of faces) {
-          memoizeInstanceGetter(face, 'geomType');
-          memoizeInstanceGetter(face, 'center');
-          memoizeDefaultNormal(face);
-        }
+  const finders: ReplicadModule.FaceFinder[] = [];
+  const centerReaders = new WeakMap<ReplicadFace, () => VectorTuple>();
+  const listFaces = (): readonly ReplicadFace[] => {
+    if (!faces) {
+      faces = entry.shape.faces;
+      for (const face of faces) {
+        memoizeGeomType(face);
+        centerReaders.set(face, memoizeCenter(face, replicadLibrary));
+        memoizeDefaultNormal(face, replicadLibrary);
       }
-      return faces;
+    }
+    return faces;
+  };
+  return {
+    createFinder: () => {
+      const finder = new LazyNormalFaceFinder();
+      finders.push(finder);
+      return finder;
+    },
+    listFaces,
+    centerOf: (face) => {
+      let readCenter = centerReaders.get(face);
+      if (!readCenter) {
+        readCenter = memoizeCenter(face, replicadLibrary);
+        centerReaders.set(face, readCenter);
+      }
+      return readCenter();
+    },
+    // The listing and the finders are the resolver's own: `shape.faces` hands out a new wrapper per face, and a
+    // finder owns what its filters made. Only face indices leave the resolver.
+    dispose: () => {
+      for (const face of faces ?? []) {
+        face.delete();
+      }
+      for (const finder of finders) {
+        finder.delete();
+      }
     },
   };
 };
@@ -188,7 +282,7 @@ const resolveSingleFaceInterface = ({
   const candidates = faces.filter((face) => finder.shouldKeep(face));
 
   if (candidates.length !== 1) {
-    const facts = candidates.length > 0 ? `; candidates: ${describeFaceCandidates(candidates)}` : '';
+    const facts = candidates.length > 0 ? `; candidates: ${describeFaceCandidates(candidates, queries)}` : '';
     throw new Error(
       `GeoSpec interface '${interfaceName}' on entry '${entryName}': face finder matched ` +
         `${candidates.length} faces, expected exactly 1${facts}`,
@@ -199,11 +293,7 @@ const resolveSingleFaceInterface = ({
   if (declaration.kind === 'axis' && !axisSurfaceTypes.has(face.geomType)) {
     throw new Error(
       `GeoSpec interface '${interfaceName}' on entry '${entryName}': axis() requires a cylindrical or ` +
-        `conical face, but the resolved face is ${face.geomType} @ [` +
-        `${face.center
-          .toTuple()
-          .map((coordinate) => r6(coordinate))
-          .join(', ')}]`,
+        `conical face, but the resolved face is ${describeFace(face, queries)}`,
     );
   }
 
@@ -234,43 +324,47 @@ export const resolveEntryInterfaces = (entry: InputShape, replicadLibrary: Repli
     resolvedInterfaces.push(resolveSingleFaceInterface({ entryName, interfaceName: name, declaration, queries }));
   };
 
-  for (const [key, declaration] of Object.entries(interfaces)) {
-    if (!isValidAuthoringKey(key)) {
-      const reason = isValidInterfaceName(key)
-        ? 'authoring keys are index-free; indices come only from group() membership'
-        : 'it does not match the GeoSpec interface-name grammar';
-      throw new Error(`GeoSpec interface key '${key}' on entry '${entryName}' is invalid: ${reason}`);
-    }
+  try {
+    for (const [key, declaration] of Object.entries(interfaces)) {
+      if (!isValidAuthoringKey(key)) {
+        const reason = isValidInterfaceName(key)
+          ? 'authoring keys are index-free; indices come only from group() membership'
+          : 'it does not match the GeoSpec interface-name grammar';
+        throw new Error(`GeoSpec interface key '${key}' on entry '${entryName}' is invalid: ${reason}`);
+      }
 
-    switch (declaration.kind) {
-      case 'face':
-      case 'axis': {
-        resolveFaceLike(key, declaration);
-        break;
-      }
-      case 'group': {
-        for (const [index, member] of declaration.members.entries()) {
-          resolveFaceLike(`${key}[${index + 1}]`, member);
+      switch (declaration.kind) {
+        case 'face':
+        case 'axis': {
+          resolveFaceLike(key, declaration);
+          break;
         }
-        break;
-      }
-      case 'datum': {
-        validateDatumFrame({
-          interfaceName: key,
-          entryName,
-          xAxis: declaration.xAxis,
-          zAxis: declaration.zAxis,
-        });
-        resolvedInterfaces.push({
-          kind: 'datum',
-          name: key,
-          origin: declaration.origin,
-          xAxis: declaration.xAxis,
-          zAxis: declaration.zAxis,
-        });
-        break;
+        case 'group': {
+          for (const [index, member] of declaration.members.entries()) {
+            resolveFaceLike(`${key}[${index + 1}]`, member);
+          }
+          break;
+        }
+        case 'datum': {
+          validateDatumFrame({
+            interfaceName: key,
+            entryName,
+            xAxis: declaration.xAxis,
+            zAxis: declaration.zAxis,
+          });
+          resolvedInterfaces.push({
+            kind: 'datum',
+            name: key,
+            origin: declaration.origin,
+            xAxis: declaration.xAxis,
+            zAxis: declaration.zAxis,
+          });
+          break;
+        }
       }
     }
+  } finally {
+    queries.dispose();
   }
 
   return resolvedInterfaces.length > 0 ? { ...rest, interfaces, resolvedInterfaces } : rest;

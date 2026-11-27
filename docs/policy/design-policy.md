@@ -267,7 +267,7 @@ The token architecture is three-tier — primitive → semantic → component �
 - **Contrast is verified on rendered pairs.** The lightness scale is Tau's version of the USWDS grade system: grades guide selection, but token pairs used as text-on-surface must pass measured WCAG 2.2 AA contrast (4.5:1 body, 3:1 large text) in every theme, including opacity and layered surfaces. When placing or moving a lightness step, check dark-theme pairs with APCA Lc values as a design-time instrument (Lc 75+ body, Lc 60+ secondary text) — WCAG 2.x remains the conformance claim, APCA never is. Rationale and thresholds: research doc Findings 3 and 5.
 - Opacity modifiers: 5–90 in steps of 10, on semantic tokens only.
 
-**Radius** is a calc-derived ladder (`--radius-xs` → `--radius-4xl`); under `corner-shape: superellipse(1.5)` support the whole scale upgrades to squircles globally. Never hand-pick a radius outside the ladder. Two shapes sit beside it, each with one owner: `rounded-full` for a true circle or capsule, and the drawer's `--drawer-radius`, which follows the screen's curve ([Mobile UI Policy](mobile-ui-policy.md) Rules 3 and 5).
+**Radius** is a calc-derived ladder (`--radius-xs` → `--radius-4xl`); under `corner-shape: superellipse(1.5)` support the whole scale upgrades to squircles globally. Never hand-pick a radius outside the ladder. Two shapes sit beside it, each with one owner: the full radius for a true circle or capsule (`rounded-full`, or `shape-round` where the shape depends on the viewport), and the drawer's `--drawer-radius`, which follows the screen's curve ([Mobile UI Policy](mobile-ui-policy.md) Rules 3 and 5).
 
 **Spacing** is a 4px base; multiples of 4 only.
 

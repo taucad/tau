@@ -74,7 +74,7 @@ describe('the session builds its file manager as a child (A6c)', () => {
   it('should open the project file manager through the opener as the session opens, with nothing mounted', () => {
     const { registry, opener, opened } = harness((id) => openSessionFileManagerStandIn(id, { ready: false }));
 
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
 
     expect(opener.mock.calls).toEqual([[projectId]]);
     /* Synchronously: the subtree that renders for a live project reads the file manager in its first render. */
@@ -83,7 +83,7 @@ describe('the session builds its file manager as a child (A6c)', () => {
 
   it('I5: should go live when its file manager is ready, with no binding mounted to report it', async () => {
     const { registry, opened } = harness((id) => openSessionFileManagerStandIn(id, { ready: false }));
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     await flush();
 
     expect(sessionOf(registry)?.getSnapshot().matches('opening')).toBe(true);
@@ -96,7 +96,7 @@ describe('the session builds its file manager as a child (A6c)', () => {
 
   it('I23: should close the file manager when the session closes, and open a fresh one on the next open', async () => {
     const { registry, opened, opener } = harness((id) => openSessionFileManagerStandIn(id));
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     await flush();
     expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
 
@@ -106,7 +106,7 @@ describe('the session builds its file manager as a child (A6c)', () => {
     expect(sessionOf(registry)).toBeUndefined();
     expect(opened[0]?.isClosed()).toBe(true);
 
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     expect(opener).toHaveBeenCalledTimes(2);
     expect(opened[1]?.isClosed()).toBe(false);
     expect(sessionOf(registry)?.getSnapshot().context.fileManagerRef).toBe(opened[1]?.fileManagerRef);
@@ -116,7 +116,7 @@ describe('the session builds its file manager as a child (A6c)', () => {
     const { registry } = harness(() => {
       throw new Error('no host');
     });
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     await flush();
 
     const session = sessionOf(registry);
@@ -127,7 +127,7 @@ describe('the session builds its file manager as a child (A6c)', () => {
 
   it('should report the views region again when the file manager comes back after the session opened', async () => {
     const { registry, opened } = harness((id) => openSessionFileManagerStandIn(id));
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     await flush();
     const session = sessionOf(registry);
     session?.send({ type: 'childFailed', region: 'views', reason: 'worker lost' });
@@ -145,7 +145,7 @@ describe("the session's file manager follows the host's shared worker (A6c)", ()
   it('should build no file manager while rootFiles holds no worker, and build it once the worker is up', () => {
     const worker = sharedWorkerOf(undefined);
     const { registry, opener, opened } = harness((id) => openSessionFileManagerStandIn(id), worker.port);
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
 
     expect(opener).not.toHaveBeenCalled();
     expect(sessionOf(registry)?.getSnapshot().context.fileManagerRef).toBeUndefined();
@@ -159,7 +159,7 @@ describe("the session's file manager follows the host's shared worker (A6c)", ()
   it('should close the file manager built on a replaced worker and build a fresh one on the new worker', async () => {
     const worker = sharedWorkerOf(workerA);
     const { registry, opener, opened } = harness((id) => openSessionFileManagerStandIn(id), worker.port);
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     await flush();
     expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
 
@@ -180,7 +180,7 @@ describe("the session's file manager follows the host's shared worker (A6c)", ()
   it('should rebuild when the worker is swapped in one step, and close the last one with the session', async () => {
     const worker = sharedWorkerOf(workerA);
     const { registry, opened } = harness((id) => openSessionFileManagerStandIn(id), worker.port);
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
 
     worker.set(workerB);
     expect(opened[0]?.isClosed()).toBe(true);
@@ -198,7 +198,7 @@ describe('a nested file manager that errs on a dead worker (A6c)', () => {
   it('should not fail an opening session when its file manager errs first, and go live on the rebuild', async () => {
     const worker = sharedWorkerOf(workerA);
     const { registry, opened } = harness((id) => openSessionFileManagerStandIn(id, { ready: false }), worker.port);
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     await flush();
 
     /* The nested file manager sees the worker die before `rootFiles` does, then the root restarts its worker. */
@@ -221,7 +221,7 @@ describe("the app runtime's registry builds each session's file manager through 
     /* Idle file managers: `rootFiles` never connects, so it holds no worker for a session's file manager to share. */
     const runtime = createAppRuntime({ idleFileManagers: true }).start();
     const registry = selectRuntimeSessions(runtime);
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
 
     expect(registry.getSnapshot().context.refs[projectId]?.getSnapshot().context.fileManagerRef).toBeUndefined();
 

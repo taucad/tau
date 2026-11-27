@@ -25,8 +25,13 @@ afterEach(() => {
   }
 });
 /** Focus's `open` command, as focus's own `sendTo` hands it to the port. */
-type OpenCommand = Readonly<{ type: 'open'; requestId: string; projectId: string }>;
-const open = (requestId: string, projectId: string): OpenCommand => ({ type: 'open', requestId, projectId });
+type OpenCommand = Readonly<{ type: 'open'; requestId: string; projectId: string; request: { workspace: string } }>;
+const open = (requestId: string, projectId: string): OpenCommand => ({
+  type: 'open',
+  requestId,
+  projectId,
+  request: { workspace: '' },
+});
 const flushTasks = async (): Promise<void> => {
   await new Promise<void>((resolve) => {
     globalThis.setTimeout(resolve, 0);

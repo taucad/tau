@@ -95,7 +95,7 @@ const harness = (facts: Partial<SessionRuntimeFacts> = {}, clock?: StepClock, wi
 const sessionOf = (registry: Harness['registry']) => registry.getSnapshot().context.refs[projectId];
 
 const open = async (registry: Harness['registry'], request?: ProjectSessionOpenRequest): Promise<void> => {
-  registry.send({ type: 'open', projectId, ...(request === undefined ? {} : { request }) });
+  registry.send({ type: 'open', projectId, request: request ?? { workspace: '' } });
   await flush();
 };
 

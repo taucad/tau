@@ -754,7 +754,7 @@ const openAndRender = async (
     registry.send({
       type: 'open',
       projectId,
-      ...(chat === undefined || projectId !== focus?.projectId ? {} : { request: { workspace: 'ws', ...chat } }),
+      request: chat === undefined || projectId !== focus?.projectId ? { workspace: '' } : { workspace: 'ws', ...chat },
     });
   }
   const view = render(tree(focus));
@@ -1393,7 +1393,7 @@ describe("each session's unload flush walks the project's producer set (A0.2 ite
   });
 
   it("should hold the session stage on hide until the session's editor flush reaches storing idle (item 9)", async () => {
-    registry.send({ type: 'open', projectId: projectA });
+    registry.send({ type: 'open', projectId: projectA, request: { workspace: '' } });
     render(tree({ projectId: projectA }, true, true));
     await flushTasks();
     const editor = actorFor(`editor:${projectA}`);

@@ -331,7 +331,7 @@ const openLive = async () => {
   });
   registry.start();
   roots.push(registry);
-  registry.send({ type: 'open', projectId: project.id });
+  registry.send({ type: 'open', projectId: project.id, request: { workspace: '' } });
   await settle();
   const session = registry.getSnapshot().context.refs[project.id];
   expect(session?.getSnapshot().matches('live')).toBe(true);
@@ -456,9 +456,9 @@ describe('a session over a real runtime, nothing mounted (A7c, S6, I5, I6)', () 
       { clock, input: { budget: 1 } },
     ).start();
     roots.push(evicting);
-    evicting.send({ type: 'open', projectId: project.id });
+    evicting.send({ type: 'open', projectId: project.id, request: { workspace: '' } });
     await settle();
-    evicting.send({ type: 'open', projectId: projectB });
+    evicting.send({ type: 'open', projectId: projectB, request: { workspace: '' } });
     await settle(40);
     expect(evicting.getSnapshot().context.refs[project.id]).toBeUndefined();
     expect(log).toContain(`connector:release:${project.id}`);

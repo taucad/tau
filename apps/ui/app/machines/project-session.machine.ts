@@ -115,7 +115,10 @@ export type ProjectSessionAvailability = 'pending' | 'slow' | 'settled';
 /** Input accepted when creating a projectSessionMachine actor. @public */
 export type ProjectSessionMachineInput = Readonly<{
   projectId: string;
-  /** What this session was opened with. Optional until A10: the sidebar and the notice send bare opens until A5b. */
+  /**
+   * What this session was opened with. The registry always passes the open's request, which is required since A10;
+   * only a session a test creates directly may have none.
+   */
   request?: ProjectSessionOpenRequest;
   /** The sessions registry; this session reports its liveness to it. */
   parentRef?: AnyActorRef;
@@ -293,7 +296,8 @@ export type ProjectSessionMachineEvent =
    * The session's own timer: an asked flush ran past its bound (A7c, I15). It is raised with a delay and cancelled by
    * the flush's answer; any other delivery finds no flush under its id and is answered with nothing (MC-R18). It is in
    * the public alphabet under D14 because `schemas.internalEvents` loses the emitted types of a spawned session in the
-   * registry's `refs` under the pinned XState alpha; A10 moves it back to internal once the pin allows.
+   * registry's `refs` under the pinned XState alpha. It goes back to internal once the pin allows (XState policy, App state
+   * contract).
    */
   | { readonly type: 'flushExpired'; readonly requestId: string }
   /**

@@ -30,7 +30,7 @@ type Samples = { [T in SessionsMachineEvent['type']]: ReadonlyArray<Extract<Sess
 
 const samples: Samples = {
   open: [
-    { type: 'open', projectId: 'a' },
+    { type: 'open', projectId: 'a', request: { workspace: '' } },
     { type: 'open', projectId: 'a', request: { workspace: 'w', chatId: 'chat-1', epoch: 0 } },
   ],
   close: [{ type: 'close', projectId: 'a', reason: 'user' }],

@@ -90,7 +90,7 @@ describe("the app runtime's sessions build their file managers through its host 
     const registry = selectRuntimeSessions(runtime);
     const fileManagerOf = () => registry.getSnapshot().context.refs[projectId]?.getSnapshot().context.fileManagerRef;
 
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     await flush();
 
     expect(world.opened).toHaveLength(1);
@@ -118,7 +118,7 @@ describe("the app runtime's sessions build their file managers through its host 
     const runtime = createAppRuntime({ clock, idleFileManagers: true }).start();
     world.setWorker(inertWorker('a'));
     const registry = selectRuntimeSessions(runtime);
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     const ports = world.ports[0]!;
 
     const built = ports.build(sessionFileManagerSpec(projectId));

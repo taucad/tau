@@ -1923,7 +1923,7 @@ describe('GitRepositoryService security floor (W9)', () => {
 
       const pushed = push(commitTree(tree, base));
       expect(pushed.ok, 'a mode change reached the ref').toBe(false);
-      expect(pushed.output).toContain('chat log only grows');
+      expect(pushed.output).toContain('rewrites a log that only grows');
     });
 
     it('lands an ordinary two-device append', () => {

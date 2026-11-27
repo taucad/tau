@@ -165,7 +165,23 @@ export type ReceivePackResult = {
   readonly receipt: string | undefined;
   /** Request body bytes that arrived: the API counts a push's size from them. */
   readonly bodyBytes: number;
+  /**
+   * Whether the manifest this push was prepared against held any branch or tag (contracts § 3, R3-1). A push
+   * into a repository with neither is a first backup however many record refs landed before it, which is what
+   * the `backup-first-refused` alert pages on.
+   */
+  readonly historyBefore: boolean;
 };
+
+/**
+ * Whether a manifest holds history: any `refs/heads/*` or `refs/tags/*`. Record refs (`refs/tau/*`) do not count,
+ * because a released client pushes them in a receive-pack of their own before its first branch.
+ *
+ * @param references - The manifest's refs.
+ * @returns True when a branch or tag is already backed up.
+ */
+export const holdsHistory = (references: Readonly<Record<string, unknown>>): boolean =>
+  Object.keys(references).some((ref) => ref.startsWith('refs/heads/') || ref.startsWith('refs/tags/'));
 
 export class StorageGitService extends GitLeaseHost {
   /**
@@ -370,6 +386,7 @@ export class StorageGitService extends GitLeaseHost {
     const push = this.#writerStarted(grant.project);
     return this.runLeaseThen('receive_pack', this.leaseRequest(grant), async (lease, digest) => {
       const ceilingRemaining = Math.max(0, this.repositoryByteCeiling - manifestPackBytes(lease.manifest));
+      const historyBefore = lease.manifest !== undefined && holdsHistory(lease.manifest.refs);
       const child = this.spawnService({
         lease,
         service: 'git-receive-pack',
@@ -392,15 +409,14 @@ export class StorageGitService extends GitLeaseHost {
           TAU_GIT_QUOTA_REMAINING_BYTES: String(grant.remainingBytes),
           // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
           TAU_GIT_CEILING_REMAINING_BYTES: String(ceilingRemaining),
-          /* B4: every commit new to the history must name this account (D28: the
-             session's, never the body's), checked by Node because a Tau record
-             is JSON; and the forge whose commits Tau did not record may pass. */
+          /* B6: a push the API admitted for an account (D28: the session's,
+             never the body's) has its version tags checked, by Node because a
+             Tau-Tag record is JSON. No hook reads authorship (cloud backup
+             admission blueprint D2): the pusher only gates that check. */
           // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
           TAU_GIT_PUSHER: grant.committedBy,
           // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
           TAU_GIT_NODE: process.execPath,
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
-          ...(grant.forge === undefined ? {} : { TAU_GIT_FORGE: grant.forge }),
           /* D17: the plan refusal's sentence, addressed to this caller. */
           ...(grant.quotaSentence === undefined
             ? {}
@@ -436,6 +452,7 @@ export class StorageGitService extends GitLeaseHost {
             report,
             receipt: await this.repairReceipt(grant, lease, digest),
             bodyBytes: request.counter.bytes,
+            historyBefore,
           },
         };
       }
@@ -462,12 +479,18 @@ export class StorageGitService extends GitLeaseHost {
             report,
             receipt: await this.repairReceipt(grant, lease, digest),
             bodyBytes: request.counter.bytes,
+            historyBefore,
           },
         };
       }
       const facts = await this.commitFacts(grant, lease, result);
       this.sweepAfterReply(grant, result);
-      const value = { report, receipt: this.signQuietly(grant, facts), bodyBytes: request.counter.bytes };
+      const value = {
+        report,
+        receipt: this.signQuietly(grant, facts),
+        bodyBytes: request.counter.bytes,
+        historyBefore,
+      };
       const { compaction } = result;
       return compaction === undefined
         ? { value }

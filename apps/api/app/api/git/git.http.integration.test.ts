@@ -38,7 +38,6 @@ import { DurableEventsService } from '#api/durable-events/durable-events.service
 import type { ProjectRole } from '@taucad/api-projects/collaboration/project-access.service';
 import { commercialEntitlementsKey } from '@taucad/api-projects/entitlements/commercial-entitlements';
 import {
-  authorshipRefusals,
   pktLine,
   repositoryStoreKey,
   versionNumberRefusals,
@@ -570,7 +569,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     const refusedOwners = await runGit(['push', 'origin', 'refs/tau/owners/owner_1'], clone);
     expect(refusedOwners.code).not.toBe(0);
     expect(refusedOwners.stderr).toContain(
-      'Tau: refused refs/tau/owners/owner_1 — host-local refs never leave a host.',
+      'Tau: refused commit history on refs/tau/owners/owner_1 — host-local refs never leave a host.',
     );
 
     const chatPush = await runGit(['push', 'origin', 'refs/tau/chats/chat_1'], clone);
@@ -925,12 +924,11 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   }, 120_000);
 
   /**
-   * B4 (A3, Q11; Revisions Policy rule 19): every commit new to the project's
-   * history names the pushing account, whatever its Tau record's version, on a
-   * project Tau registered. The records are the shape the client writes today.
-   * No refusal repeats an id, a name or an address the commit recorded.
+   * Cloud backup admission blueprint D2 (WP2a; operator rulings OP1, Q1): no commit is refused for who it claims
+   * to be by. Every revision B4 used to refuse is backed up through the real API, the storage worker and the hook;
+   * who an entry is shown as by is decided at read time.
    */
-  it('refuses a revision that does not name its pusher, and one that carries an email, each with its own reason', async () => {
+  it('backs up revisions that name another account, carry an email, or were not recorded by Tau', async () => {
     state.origin = 'local-mirror';
     try {
       const clone = path.join(workspace, 'authorship');
@@ -977,80 +975,54 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       const push = async (branch: string) => runGit(['push', 'origin', `HEAD:refs/heads/${branch}`], clone);
       const noreply = (id: string): string => `${id}@users.noreply.tau.new`;
 
-      /* B pushing a revision signed as A. */
+      /* B pushing a revision recorded as A (was ACTOR_NOT_PUSHER). */
       await revise(noreply(callers.owner.id), {
         actor: { kind: 'user', id: callers.owner.id, name: 'Member owner', email: `${callers.owner.id}@test.com` },
       });
       const forged = await push('authorship-forged');
-      expect(forged.code).not.toBe(0);
-      expect(forged.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
-      expect(forged.stderr).not.toContain(callers.owner.id);
-      expect(forged.stderr).not.toContain('Member owner');
-      expect(await advertised()).not.toContain('authorship-forged');
+      expect(forged.code, forged.stderr).toBe(0);
 
-      /* An agent working for A, pushed by B. */
+      /* An agent working for A, pushed by B (was ACTOR_NOT_PUSHER). */
       await revise(noreply(callers.owner.id), {
         source: 'agent',
         actor: { kind: 'agent', id: 'agent', runId: 'run_b4', onBehalfOf: { kind: 'user', id: callers.owner.id } },
       });
       const forgedAgent = await push('authorship-forged-agent');
-      expect(forgedAgent.code).not.toBe(0);
-      expect(forgedAgent.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
+      expect(forgedAgent.code, forgedAgent.stderr).toBe(0);
 
-      /* A Tau-written revision carrying an environment email (Q11). */
+      /* A Tau-written revision carrying an environment email (was AUTHOR_ADDRESS). */
       await revise('writer@example.com', {
         actor: { kind: 'user', id: callers.writer.id, email: 'writer@example.com' },
       });
       const leaked = await push('authorship-email');
-      expect(leaked.code).not.toBe(0);
-      expect(leaked.stderr).toContain(authorshipRefusals.GIT_PUSH_AUTHOR_ADDRESS);
-      expect(leaked.stderr).not.toContain('writer@example.com');
+      expect(leaked.code, leaked.stderr).toBe(0);
 
-      /* A commit Tau did not record, on a project not linked to GitHub: the refusal names the fix. */
+      /* A commit Tau did not record, on a project not linked to GitHub (was NOT_RECORDED_BY_TAU). */
       await revise('someone@example.com', undefined, 'someone@example.com');
       const outside = await push('authorship-outside');
-      expect(outside.code).not.toBe(0);
-      expect(outside.stderr).toContain(authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU);
-      expect(outside.stderr).toContain(`your Tau no-reply address is ${noreply(callers.writer.id)}`);
-      expect(outside.stderr).not.toContain('someone@example.com');
-      expect(await advertised()).not.toMatch(/authorship-(?:forged|email|outside)/u);
+      expect(outside.code, outside.stderr).toBe(0);
 
-      /* …and the same commit on a project linked to GitHub. */
-      state.origin = 'github';
-      const linked = await push('authorship-outside');
-      expect(linked.code, linked.stderr).toBe(0);
-      state.origin = 'local-mirror';
-
-      /* A commit made with stock git under the identity Tau seeds. Pushed by another
-         member first, it names an account other than its pusher… */
+      /* A commit made with stock git under the writer's identity, pushed by another member (was ACTOR_NOT_PUSHER). */
       await revise(noreply(callers.writer.id), undefined, noreply(callers.writer.id));
       const owner = path.join(workspace, 'authorship-owner');
       await gitOk(['clone', remoteFor(callers.owner.token), owner], workspace);
       await gitOk(['fetch', '--quiet', clone, 'HEAD:refs/heads/authorship-git-carried'], owner);
       const carried = await runGit(['push', 'origin', 'refs/heads/authorship-git-carried'], owner);
-      expect(carried.code).not.toBe(0);
-      expect(carried.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
-      /* …and pushed by its own author, it is backed up. */
-      const own = await push('authorship-git');
-      expect(own.code, own.stderr).toBe(0);
-      expect(await advertised()).not.toMatch(/authorship-(?:forged|email|git-carried)/u);
-      expect(await advertised()).toContain('refs/heads/authorship-git');
+      expect(carried.code, carried.stderr).toBe(0);
 
-      /* The pusher's own revision, and an agent's on the pusher's behalf. */
-      await revise(noreply(callers.writer.id), {
-        actor: { kind: 'user', id: callers.writer.id, name: 'Member writer' },
-      });
-      const recordedOwn = await push('authorship-own');
-      expect(recordedOwn.code, recordedOwn.stderr).toBe(0);
-      await revise(noreply(callers.writer.id), {
-        source: 'agent',
-        actor: { kind: 'agent', id: 'agent', runId: 'run_b4', onBehalfOf: { kind: 'user', id: callers.writer.id } },
-      });
-      const onBehalf = await push('authorship-agent');
-      expect(onBehalf.code, onBehalf.stderr).toBe(0);
       const advertisement = await advertised();
-      expect(advertisement).toContain('refs/heads/authorship-own');
-      expect(advertisement).toContain('refs/heads/authorship-agent');
+      for (const branch of [
+        'authorship-forged',
+        'authorship-forged-agent',
+        'authorship-email',
+        'authorship-outside',
+        'authorship-git-carried',
+      ]) {
+        expect(advertisement).toContain(`refs/heads/${branch}`);
+      }
+      for (const outcome of [forged, forgedAgent, leaked, outside, carried]) {
+        expect(outcome.stderr).not.toContain('Tau: refused');
+      }
     } finally {
       state.origin = 'github';
     }

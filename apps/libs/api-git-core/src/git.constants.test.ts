@@ -6,9 +6,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 import {
-  authorshipRefusals,
+  checkFailedSentence,
   commitRefusalMarker,
   ceilingRefusalMarker,
+  hookCodeLinePrefix,
+  hookRefusalCodes,
+  retiredAuthorshipRefusals,
+  terminalRefusalOpening,
   gitLfsObjectKey,
   isRemovableRef,
   pktLine,
@@ -412,7 +416,12 @@ describe('Tau Hosted Remote constants', () => {
         /* The refusal *opens* with the marker, which is what lets the client
          classify a status-less `pre-receive` refusal as the D20 ceiling
          (`packages/revisions/src/remotes.ts`) while showing these same words. */
-        expect(refused.stderr.startsWith(opener), refused.stderr).toBe(true);
+        const sentences = refused.stderr
+          .split('\n')
+          .filter((line) => !line.startsWith(hookCodeLinePrefix))
+          .join('\n');
+        expect(sentences.startsWith(opener), refused.stderr).toBe(true);
+        expect(refused.stderr.startsWith(hookCodeLinePrefix), 'the code line comes first').toBe(true);
         if (sentence !== undefined) {
           expect(refused.stderr).toContain(sentence);
         }
@@ -436,8 +445,8 @@ describe('Tau Hosted Remote constants', () => {
    */
   /* Ruling R4 (W7): the operation log `refs/tau/ops/<device>` has the chat segment's shape and the same rule. */
   it.each([
-    ['refs/tau/chats/chat_1', 'chat log only grows'],
-    ['refs/tau/ops/device-a', 'operation log only grows'],
+    ['refs/tau/chats/chat_1', 'rewrites a log that only grows'],
+    ['refs/tau/ops/device-a', 'rewrites a log that only grows'],
   ] as const)(
     'passes an ordinary append to %s and refuses a rewritten, truncated or dropped segment',
     async (ref, sentence) => {
@@ -553,7 +562,9 @@ describe('Tau Hosted Remote constants', () => {
       // oxlint-disable-next-line no-await-in-loop -- one hook run per case, by design
       const refused = await push(`${from} ${to} ${ref}`);
       expect(refused.code, label).toBe(1);
-      expect(refused.stderr, label).toContain(`Tau: refused ${ref} — ${constants.conflictedRevisionRefusal}`);
+      expect(refused.stderr, label).toContain(
+        `${terminalRefusalOpening(ref)} — ${constants.conflictedRevisionRefusal}`,
+      );
     }
 
     /* The decision: main's tip first, the conflicted revision among the later parents. */
@@ -615,7 +626,7 @@ describe('Tau Hosted Remote constants', () => {
     onTestFinished(failing.dispose);
     const refused = await failing.push(`${none} ${failing.base} refs/heads/feature`);
     expect(refused.code).toBe(1);
-    expect(refused.stderr).toContain('could not be checked');
+    expect(refused.stderr).toContain(checkFailedSentence);
   });
 
   /* RV-W6 F8: a bare `conflicts` would shadow every device's lines. */
@@ -645,7 +656,7 @@ describe('Tau Hosted Remote constants', () => {
     const refused = await push(`${none} ${base} refs/heads/next`, { TAU_GIT_QUOTA_REMAINING_BYTES: '4096' });
 
     expect(refused.code, refused.stderr).toBe(1);
-    expect(refused.stderr).toContain('cannot be measured');
+    expect(refused.stderr).toContain(checkFailedSentence);
     expect(refused.stderr).toContain('nothing was written');
   });
 
@@ -708,13 +719,11 @@ describe('Tau Hosted Remote constants', () => {
 });
 
 /**
- * B4 (blueprint A3, Q11; Revisions Policy rule 19): every commit new to a
- * project's history names the account pushing it, through the installed hook
- * itself. The pusher's own record is the version 2 shape (B1)
- * `revisionCommitMessage` and `revisionAuthorSignature` write; no older version
- * is read (I7).
+ * Cloud backup admission blueprint D2 (WP2a; operator rulings OP1, Q1): the hook judges no authorship. B4's
+ * check is gone; every commit it refused is admitted through the installed hook itself, and who an entry is
+ * shown as by is decided at read time, never at admission.
  */
-describe('pre-receive authorship check (B4)', () => {
+describe('pre-receive judges no authorship (WP2a)', () => {
   const pusher = 'user_b4_pusher';
   const other = 'user_b4_other';
   const noreply = (id: string): string => `${id}@users.noreply.tau.new`;
@@ -827,255 +836,107 @@ describe('pre-receive authorship check (B4)', () => {
     return { git, commit, push, base, dispose: async () => rm(fixture, { recursive: true, force: true }) };
   };
 
-  it("passes the pusher's own revision, and an agent's on the pusher's behalf", async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const own = await repository.commit(
-      noreply(pusher),
-      recorded({ actor: { kind: 'user', id: pusher, name: 'Pusher' } }),
-    );
-    const agent = await repository.commit(
-      noreply(pusher),
-      recorded({
-        source: 'agent',
-        runId: 'run_1',
-        actor: { kind: 'agent', id: 'agent', runId: 'run_1', onBehalfOf: { kind: 'user', id: pusher } },
-        capture: 'turn',
-      }),
-      own,
-    );
-    const outcome = await repository.push(agent);
-    expect(outcome.code, outcome.stderr).toBe(0);
-  });
-
-  it('refuses B pushing a revision recorded as A, and never repeats what A recorded', async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const forged = await repository.commit(
-      noreply(other),
-      recorded({ actor: { kind: 'user', id: other, name: 'Other Person' } }),
-    );
-    const outcome = await repository.push(forged);
-    expect(outcome.code).toBe(1);
-    expect(outcome.stderr).toContain(
-      `Tau: refused commit ${forged.slice(0, 12)} — ${authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER}`,
-    );
-    expect(outcome.stderr).toContain('nothing was written');
-    expect(outcome.stderr).not.toContain(other);
-    expect(outcome.stderr).not.toContain('Other Person');
-  });
-
-  it.each<{ label: string; email: string; provenance: Readonly<Record<string, unknown>> }>([
+  /**
+   * P8 (WP2a): every shape a device has written is admitted, whoever it claims to be by. Each row was refused
+   * before WP2a, under the retired code named.
+   */
+  it.each<{ label: string; email: string | { author: string; committer: string }; message: string }>([
     {
-      label: 'an agent acting for A',
+      label: "the pusher's own version 2 revision",
+      email: noreply(pusher),
+      message: recorded({ actor: { kind: 'user', id: pusher, name: 'Pusher' } }),
+    },
+    {
+      label: 'a revision recorded as another account (was ACTOR_NOT_PUSHER)',
       email: noreply(other),
-      provenance: {
+      message: recorded({ actor: { kind: 'user', id: other, name: 'Other Person' } }),
+    },
+    {
+      label: 'an agent acting for another account (was ACTOR_NOT_PUSHER)',
+      email: noreply(other),
+      message: recorded({
         actor: { kind: 'agent', id: 'agent', runId: 'run_1', onBehalfOf: { kind: 'user', id: other } },
         capture: 'turn',
-      },
+      }),
     },
     {
-      label: 'a record naming the pusher under the address of A',
-      email: noreply(other),
-      provenance: { actor: { kind: 'user', id: pusher } },
-    },
-    {
-      label: 'a machine login name',
+      label: 'a machine login name (was ACTOR_NOT_PUSHER)',
       email: noreply('root'),
-      provenance: { actor: { kind: 'user', id: 'root' } },
+      message: recorded({ actor: { kind: 'user', id: 'root' } }),
     },
-  ])('refuses $label as not naming the pusher', async ({ email, provenance }) => {
+    {
+      label: 'an anonymous revision authored as its own pseudonym',
+      email: noreply('anon:3fa9c1d2'),
+      message: recorded({ actor: { kind: 'user', id: 'anon:3fa9c1d2', anonymous: true } }),
+    },
+    {
+      label: 'a Tau-written revision carrying an environment email (was AUTHOR_ADDRESS)',
+      email: 'person@example.com',
+      message: recorded({ actor: { kind: 'user', id: pusher, email: 'person@example.com' } }),
+    },
+    {
+      label: "GitHub's no-reply address on a project not linked to it (was AUTHOR_ADDRESS)",
+      email: '583231+octocat@users.noreply.github.com',
+      message: recorded({ actor: { kind: 'user', id: pusher } }),
+    },
+    {
+      label: 'a commit Tau did not record, on a project not linked to GitHub (was NOT_RECORDED_BY_TAU)',
+      email: { author: 'me@example.com', committer: 'me@example.com' },
+      message: 'Edited with git\n',
+    },
+    {
+      label: "another member's commit made with git (was ACTOR_NOT_PUSHER)",
+      email: { author: noreply(other), committer: noreply(other) },
+      message: 'Edited with git\n',
+    },
+    {
+      label: 'a record that does not parse (was RECORD_UNREADABLE)',
+      email: noreply(pusher),
+      message: 'Saved\n\nTau-Metadata: {not json\n',
+    },
+    {
+      label: 'a version 2 record naming no one (was RECORD_UNREADABLE)',
+      email: noreply(pusher),
+      message: 'Saved\n\nTau-Metadata: {"version":2}\n',
+    },
+    {
+      label: 'a version 1 record naming the device login (was RECORD_UNREADABLE)',
+      email: noreply('LOCAL-HANDLE'),
+      message: `Saved\n\nTau-Metadata: ${JSON.stringify({
+        version: 1,
+        parents: [],
+        provenance: {
+          source: 'user',
+          actorId: 'LOCAL-HANDLE',
+          actor: { kind: 'user', id: 'LOCAL-HANDLE', name: 'LOCAL-HANDLE' },
+          trigger: 'idle',
+          createdAt: 0,
+        },
+        summary: { generated: 'Saved changes (idle)' },
+      })}\nTau-Actor: user LOCAL-HANDLE\nTau-Trigger: idle\n`,
+    },
+    {
+      label: 'a record from a newer writer (version 3)',
+      email: noreply(pusher),
+      message: `Saved\n\nTau-Metadata: ${JSON.stringify({ version: 3, provenance: { actor: { kind: 'user', id: pusher } } })}\n`,
+    },
+    {
+      label: 'two Tau-Metadata lines, the last naming another account',
+      email: noreply(pusher),
+      message: `${recorded({ actor: { kind: 'user', id: pusher } })}${recorded({ actor: { kind: 'user', id: other } })
+        .split('\n')
+        .slice(2)
+        .join('\n')}`,
+    },
+  ])('admits $label', async ({ email, message }) => {
     const repository = await authorshipRepository();
     onTestFinished(repository.dispose);
-    const outcome = await repository.push(await repository.commit(email, recorded(provenance)));
-    expect(outcome.code).toBe(1);
-    expect(outcome.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
+    const outcome = await repository.push(await repository.commit(email, message));
+    expect(outcome.stderr, 'no authorship refusal remains (OP1, Q1)').toBe('');
+    expect(outcome.code).toBe(0);
   });
 
-  it('passes an anonymous revision authored as its own pseudonym', async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const anonymous = await repository.commit(
-      noreply('anon:3fa9c1d2'),
-      recorded({ actor: { kind: 'user', id: 'anon:3fa9c1d2', anonymous: true } }),
-    );
-    const outcome = await repository.push(anonymous);
-    expect(outcome.code, outcome.stderr).toBe(0);
-  });
-
-  it('refuses a Tau-written revision carrying an environment email with its own reason (Q11)', async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const leaked = await repository.commit(
-      'person@example.com',
-      recorded({ actor: { kind: 'user', id: pusher, email: 'person@example.com' } }),
-    );
-    const outcome = await repository.push(leaked);
-    expect(outcome.code).toBe(1);
-    expect(outcome.stderr).toContain(authorshipRefusals.GIT_PUSH_AUTHOR_ADDRESS);
-    expect(outcome.stderr).not.toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
-    expect(outcome.stderr).not.toContain('person@example.com');
-  });
-
-  it('passes a commit Tau did not record only on a project linked to GitHub', async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const outside = await repository.commit('someone@example.com', 'Edited on GitHub\n');
-    const unlinked = await repository.push(outside);
-    expect(unlinked.code).toBe(1);
-    expect(unlinked.stderr).toContain(authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU);
-    expect(unlinked.stderr).not.toContain('someone@example.com');
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
-    const linked = await repository.push(outside, { TAU_GIT_FORGE: 'github' });
-    expect(linked.code, linked.stderr).toBe(0);
-  });
-
-  /* A commit made with stock git under the identity Tau seeds: author and committer are the pusher's no-reply address. */
-  it("passes the pusher's own commit made with git, on a project not linked to GitHub", async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const own = await repository.commit({ author: noreply(pusher), committer: noreply(pusher) }, 'Edited with git\n');
-    const outcome = await repository.push(own);
-    expect(outcome.code, outcome.stderr).toBe(0);
-    /* Tau's own committer beside the pusher's author passes too: it names no one else. */
-    const viaTau = await repository.commit(noreply(pusher), 'Edited with git\n');
-    const tau = await repository.push(viaTau);
-    expect(tau.code, tau.stderr).toBe(0);
-  });
-
-  it('refuses another member pushing that commit, and one committed with another address, without repeating it', async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const theirs = await repository.commit({ author: noreply(other), committer: noreply(other) }, 'Edited with git\n');
-    const outcome = await repository.push(theirs);
-    expect(outcome.code).toBe(1);
-    expect(outcome.stderr).toContain(
-      `${commitRefusalMarker} ${theirs.slice(0, 12)} — ${authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER}`,
-    );
-    expect(outcome.stderr).not.toContain(other);
-    /* The pusher's author with a real committer address would put that address in Tau Cloud. */
-    const leaked = await repository.commit(
-      { author: noreply(pusher), committer: 'me@example.com' },
-      'Edited with git\n',
-    );
-    const committed = await repository.push(leaked);
-    expect(committed.code).toBe(1);
-    expect(committed.stderr).toContain(authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU);
-    expect(committed.stderr).not.toContain('me@example.com');
-  });
-
-  it('refuses a commit made with git under a foreign address with the fix and the pusher’s own address', async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const foreign = await repository.commit(
-      { author: 'me@example.com', committer: 'me@example.com' },
-      'Edited with git\n',
-    );
-    const outcome = await repository.push(foreign);
-    expect(outcome.code).toBe(1);
-    expect(outcome.stderr).toContain(
-      `${commitRefusalMarker} ${foreign.slice(0, 12)} — ${authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU}`,
-    );
-    expect(authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU).toContain('Commit with your Tau identity');
-    expect(outcome.stderr).toContain(`Tau: your Tau no-reply address is ${noreply(pusher)}.`);
-    expect(outcome.stderr).not.toContain('me@example.com');
-    /* Only that refusal names the pusher's address: one that names another account does not. */
-    const theirs = await repository.commit({ author: noreply(other), committer: noreply(other) }, 'Edited with git\n');
-    const named = await repository.push(theirs);
-    expect(named.stderr).not.toContain('no-reply address is');
-  });
-
-  it('should spell the commit refusal marker the way packages/revisions matches it', () => {
-    expect(commitRefusalMarker).toBe('Tau: refused commit');
-  });
-
-  it("takes GitHub's no-reply address for the pusher's revision on a linked project only", async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const revision = await repository.commit(
-      '583231+octocat@users.noreply.github.com',
-      recorded({ actor: { kind: 'user', id: pusher } }),
-    );
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
-    const linked = await repository.push(revision, { TAU_GIT_FORGE: 'github' });
-    expect(linked.code, linked.stderr).toBe(0);
-    const unlinked = await repository.push(revision);
-    expect(unlinked.code).toBe(1);
-    expect(unlinked.stderr).toContain(authorshipRefusals.GIT_PUSH_AUTHOR_ADDRESS);
-  });
-
-  it('refuses a Tau record that does not parse, names no one, or is not version 2', async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const v2 = (provenance: Readonly<Record<string, unknown>>): string =>
-      `Saved\n\nTau-Metadata: ${JSON.stringify({ version: 2, parents: [], provenance, summary: {} })}\n`;
-    const own = { source: 'user', actor: { kind: 'user', id: pusher }, capture: 'save', via: 'browser', createdAt: 0 };
-    for (const message of [
-      'Saved\n\nTau-Metadata: {not json\n',
-      'Saved\n\nTau-Metadata: {"version":2}\n',
-      /* A version 1 record naming the pusher: no older reader is kept (I7). */
-      `Saved\n\nTau-Metadata: ${JSON.stringify({ version: 1, parents: [], provenance: { source: 'user', actorId: pusher, createdAt: 0 }, summary: {} })}\n`,
-      v2({ ...own, actor: undefined }),
-      v2({ ...own, capture: undefined }),
-      v2({ ...own, via: undefined }),
-      v2({ ...own, actor: { kind: 'agent', id: 'agent', runId: 'run_1' } }),
-      v2({ ...own, actor: { kind: 'agent', id: 'agent', onBehalfOf: { kind: 'user', id: pusher } } }),
-    ]) {
-      // oxlint-disable-next-line no-await-in-loop -- one hook run per record, by design
-      const outcome = await repository.push(await repository.commit(noreply(pusher), message));
-      expect(outcome.code, message).toBe(1);
-      expect(outcome.stderr).toContain(authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE);
-    }
-  });
-
-  it('reads the last Tau-Metadata line, as the client does', async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const own = recorded({ actor: { kind: 'user', id: pusher } });
-    const forged = recorded({ actor: { kind: 'user', id: other } });
-    /* The forged record last: the client reads that one, so the hook must too. */
-    const outcome = await repository.push(
-      await repository.commit(noreply(pusher), `${own}${forged.split('\n').slice(2).join('\n')}`),
-    );
-    expect(outcome.code).toBe(1);
-    expect(outcome.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
-  });
-
-  it('checks what the history does not reach yet, including a commit a record ref carried first', async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const forged = await repository.commit(noreply(other), recorded({ actor: { kind: 'user', id: other } }));
-    /* Record refs are not history: an artifact ref is not checked… */
-    const record = await repository.push(forged, {}, 'refs/tau/artifacts/a1');
-    expect(record.code, record.stderr).toBe(0);
-    repository.git('update-ref', 'refs/tau/artifacts/a1', forged);
-    /* …but a branch that takes the commit in is, though the server already holds it. */
-    const branch = await repository.push(forged);
-    expect(branch.code).toBe(1);
-    expect(branch.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
-    /* Once another branch holds it, it is no longer new to the history. */
-    repository.git('update-ref', 'refs/heads/elsewhere', forged);
-    const held = await repository.push(forged);
-    expect(held.code, held.stderr).toBe(0);
-  });
-
-  it('fails closed when it cannot run the check, and checks nothing without a pusher', async () => {
-    const repository = await authorshipRepository();
-    onTestFinished(repository.dispose);
-    const outside = await repository.commit('someone@example.com', 'Edited elsewhere\n');
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
-    const noNode = await repository.push(outside, { TAU_GIT_NODE: '' });
-    expect(noNode.code).toBe(1);
-    expect(noNode.stderr).toContain(authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE);
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
-    const brokenNode = await repository.push(outside, { TAU_GIT_NODE: '/bin/false', TAU_GIT_FORGE: 'github' });
-    expect(brokenNode.code).toBe(1);
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
-    const maintenance = await repository.push(outside, { TAU_GIT_PUSHER: '' });
-    expect(maintenance.code, maintenance.stderr).toBe(0);
-  });
-
-  it('names at most ten refused commits and counts the rest', async () => {
+  it('admits a whole history of foreign commits, with no Node to run and with none', async () => {
     const repository = await authorshipRepository();
     onTestFinished(repository.dispose);
     let tip = repository.base;
@@ -1083,10 +944,159 @@ describe('pre-receive authorship check (B4)', () => {
       // oxlint-disable-next-line no-await-in-loop -- a chain, each commit on the last
       tip = await repository.commit('someone@example.com', `Outside ${String(index)}\n`, tip);
     }
-    const outcome = await repository.push(tip);
-    expect(outcome.code).toBe(1);
-    expect(outcome.stderr.match(/Tau: refused commit /gu)).toHaveLength(10);
-    expect(outcome.stderr).toContain('and 2 more commits');
+    /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+    const environments: ReadonlyArray<Readonly<Record<string, string>>> = [
+      {},
+      { TAU_GIT_NODE: '' },
+      { TAU_GIT_NODE: '/bin/false' },
+      { TAU_GIT_PUSHER: '' },
+    ];
+    /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment maps */
+    for (const extra of environments) {
+      // oxlint-disable-next-line no-await-in-loop -- one hook run per environment
+      const outcome = await repository.push(tip, extra);
+      expect(outcome.stderr, JSON.stringify(extra)).toBe('');
+      expect(outcome.code).toBe(0);
+    }
+  });
+
+  it('prints none of the retired authorship sentences, and keeps them only as data', () => {
+    for (const sentence of Object.values(retiredAuthorshipRefusals)) {
+      expect(preReceiveHookScript).not.toContain(sentence);
+    }
+    expect(preReceiveHookScript).not.toContain('TAU_GIT_FORGE');
+    expect(preReceiveHookScript).not.toContain('Tau-Metadata');
+  });
+
+  it('should spell the commit refusal marker the way packages/revisions matches it', () => {
+    expect(commitRefusalMarker).toBe('Tau: refused commit');
+  });
+});
+
+/**
+ * P8b (WP2a, contracts § 5): every refusal opens with one `Tau-Code: <CODE> <count>` line per distinct code,
+ * lowest rank first; every terminal sentence carries the marker shipped clients file as fatal; the quota,
+ * ceiling and taken-number markers keep their bytes; and the output closes with `Tau: nothing was written.`
+ */
+describe('pre-receive refusal output (contracts § 5)', () => {
+  /** The hook's code lines, in order, as `[code, count]`. */
+  const codeLines = (stderr: string): Array<[string, number]> =>
+    [...stderr.matchAll(/^Tau-Code: (\S+) (\d+)$/gmu)].map(([, code = '', count = '0']) => [code, Number(count)]);
+  /** The sentences after the code lines. */
+  const sentencesOf = (stderr: string): string[] =>
+    stderr.split('\n').filter((line) => line !== '' && !line.startsWith(hookCodeLinePrefix));
+
+  beforeAll(async () => {
+    hookDirectory = await mkdtemp(path.join(tmpdir(), 'tau-git-hook-'));
+    hookPath = path.join(hookDirectory, 'pre-receive');
+    await writeFile(hookPath, preReceiveHookScript, 'utf8');
+    await chmod(hookPath, 0o755);
+  });
+
+  afterAll(async () => {
+    await rm(hookDirectory, { recursive: true, force: true });
+  });
+
+  it('declares one rank and class per code, ranked as contracts § 5 orders them', () => {
+    expect(Object.fromEntries(Object.entries(hookRefusalCodes).map(([code, { rank }]) => [code, rank]))).toEqual({
+      /* eslint-disable @typescript-eslint/naming-convention -- the keys are refusal codes */
+      GIT_PUSH_NOT_ADMITTED: 1,
+      GIT_PUSH_REF_NOT_PUSHABLE: 2,
+      GIT_PUSH_REF_DELETION: 2,
+      GIT_PUSH_RECORD_REWRITTEN: 2,
+      GIT_PUSH_CONFLICT_REF_INVALID: 2,
+      GIT_PUSH_CONFLICT_OFF_LINE: 2,
+      GIT_PUSH_VERSION_TAG_INVALID: 2,
+      GIT_PUSH_VERSION_MOVED: 2,
+      GIT_PUSH_FILE_TOO_LARGE: 2,
+      GIT_PUSH_QUOTA: 3,
+      GIT_PUSH_CEILING: 3,
+      GIT_PUSH_VERSION_NUMBER_TAKEN: 4,
+      GIT_PUSH_NOT_FAST_FORWARD: 4,
+      GIT_PUSH_CHECK_FAILED: 5,
+      /* eslint-enable @typescript-eslint/naming-convention -- end of the refusal codes */
+    });
+  });
+
+  it('prints the admission refusal under its code, with the marker, and nothing else', async () => {
+    const refused = await runHook('refs/heads/main', {});
+    expect(refused.code).toBe(1);
+    expect(codeLines(refused.stderr)).toEqual([['GIT_PUSH_NOT_ADMITTED', 1]]);
+    expect(sentencesOf(refused.stderr)).toEqual([
+      'Tau: refused commit history — this repository accepts pushes only through the Tau API.',
+      'Tau: nothing was written.',
+    ]);
+  });
+
+  it('counts each code once per refusal and ranks the first code line highest', async () => {
+    const repository = await hookRepository();
+    onTestFinished(repository.dispose);
+    await repository.git('update-ref', 'refs/heads/feature', repository.base);
+    const ahead = await repository.commit([repository.base], false);
+    const sideways = await repository.commit([repository.base], false);
+    await repository.git('update-ref', 'refs/heads/feature', ahead);
+    const refused = await repository.push([
+      `${ahead} ${sideways} refs/heads/feature`,
+      `${none} ${repository.base} refs/remotes/origin/main`,
+      `${'1'.repeat(40)} ${none} refs/tags/v2`,
+      `${none} ${repository.base} refs/tau/owners/o1`,
+    ]);
+    expect(refused.code).toBe(1);
+    expect(codeLines(refused.stderr)).toEqual([
+      ['GIT_PUSH_REF_DELETION', 1],
+      ['GIT_PUSH_REF_NOT_PUSHABLE', 2],
+      ['GIT_PUSH_NOT_FAST_FORWARD', 1],
+    ]);
+    const lines = refused.stderr.split('\n').filter(Boolean);
+    /* Codes first, then sentences, then the closing line. */
+    expect(lines.slice(0, 3).every((line) => line.startsWith(hookCodeLinePrefix))).toBe(true);
+    expect(lines.at(-1)).toBe('Tau: nothing was written.');
+    expect(refused.stderr).toContain(
+      `${terminalRefusalOpening('refs/remotes/origin/main')} — host-local refs never leave a host.`,
+    );
+    expect(refused.stderr).toContain('Tau: pushable refs are');
+  });
+
+  it('opens every terminal sentence with the marker shipped clients file as fatal', async () => {
+    const repository = await hookRepository();
+    onTestFinished(repository.dispose);
+    const other = await repository.commit([repository.base], false);
+    const conflicted = await repository.commit([other, repository.base], true);
+    const outcomes = [
+      await runHook('refs/heads/main', {}),
+      await runHook('refs/remotes/origin/main'),
+      await runHook(`${'1'.repeat(40)} ${none} refs/heads/main`),
+      await repository.push(`${none} ${repository.base} refs/heads/conflicts`),
+      await repository.push(`${none} ${conflicted} refs/heads/main`),
+    ];
+    for (const outcome of outcomes) {
+      expect(outcome.code).toBe(1);
+      const terminal = sentencesOf(outcome.stderr).filter((line) => line.startsWith('Tau: refused'));
+      expect(terminal.length, outcome.stderr).toBeGreaterThan(0);
+      for (const line of terminal) {
+        expect(line.startsWith(commitRefusalMarker), line).toBe(true);
+      }
+    }
+  });
+
+  it('keeps the non-fast-forward refusal unmarked, so a client fetches and merges rather than stopping', async () => {
+    const repository = await hookRepository();
+    onTestFinished(repository.dispose);
+    const ahead = await repository.commit([repository.base], false);
+    const sideways = await repository.commit([repository.base], false);
+    await repository.git('update-ref', 'refs/heads/main', ahead);
+    const refused = await repository.push(`${ahead} ${sideways} refs/heads/main`);
+    expect(codeLines(refused.stderr)).toEqual([['GIT_PUSH_NOT_FAST_FORWARD', 1]]);
+    expect(refused.stderr).not.toContain(commitRefusalMarker);
+  });
+
+  it('files a check that could not finish as retryable, never behind the marker', async () => {
+    const failing = await hookRepository({ failWalk: true });
+    onTestFinished(failing.dispose);
+    const refused = await failing.push(`${none} ${failing.base} refs/heads/feature`);
+    expect(codeLines(refused.stderr)).toEqual([['GIT_PUSH_CHECK_FAILED', 1]]);
+    expect(refused.stderr).toContain(checkFailedSentence);
+    expect(refused.stderr).not.toContain(commitRefusalMarker);
   });
 });
 
@@ -1254,7 +1264,9 @@ describe('pre-receive version-number check (B6)', () => {
       `${held} ${await repository.tag('v4', 'Hinge', { id, seconds: 1_790_000_200, object: later })} refs/tags/v4`,
     ]);
     expect(moved.code).toBe(1);
-    expect(moved.stderr).toContain(`Tau: refused refs/tags/v4 — ${versionNumberRefusals.GIT_PUSH_VERSION_MOVED}`);
+    expect(moved.stderr).toContain(
+      `${terminalRefusalOpening('refs/tags/v4')} — ${versionNumberRefusals.GIT_PUSH_VERSION_MOVED}`,
+    );
     expect(moved.stderr).toContain('Tau: nothing was written.');
   });
 
@@ -1305,7 +1317,8 @@ describe('pre-receive version-number check (B6)', () => {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment name
     const noNode = await repository.push([`${none} ${lid} refs/tags/v5`], { TAU_GIT_NODE: '' });
     expect(noNode.code).toBe(1);
-    expect(noNode.stderr).toContain(authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE);
+    expect(noNode.stderr).toContain(checkFailedSentence);
+    expect(noNode.stderr).toContain('Tau-Code: GIT_PUSH_CHECK_FAILED 1');
   });
 
   it('spells the taken-number marker the way packages/revisions matches it', () => {

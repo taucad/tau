@@ -18,6 +18,15 @@ export const gitExecutorKey = Symbol('GitExecutor');
 /** A grant's facts without the method and path, which the executor fills from the operation. */
 export type GrantFacts = Omit<StorageGrantFacts, 'method' | 'path'>;
 
+/** What a push answers through either executor. */
+export type ReceivePackAnswer = {
+  readonly report: Uint8Array<ArrayBuffer>;
+  readonly receipt: string | undefined;
+  readonly bodyBytes: number;
+  /** Whether a branch or tag was backed up before this push; `undefined` when the worker did not say. */
+  readonly historyBefore: boolean | undefined;
+};
+
 /** The request body of a smart-HTTP RPC. */
 export type RpcBody = {
   readonly body: Readable;
@@ -32,15 +41,11 @@ export type GitExecutor = {
     request: RpcBody,
   ): Promise<{ readonly output: Readable; readonly receipt: string | undefined }>;
 
-  /** `git-receive-pack`: report-status once the commit resolved, the receipt, and the body bytes that arrived. */
-  receivePack(
-    facts: GrantFacts,
-    request: RpcBody,
-  ): Promise<{
-    readonly report: Uint8Array<ArrayBuffer>;
-    readonly receipt: string | undefined;
-    readonly bodyBytes: number;
-  }>;
+  /**
+   * `git-receive-pack`: report-status once the commit resolved, the receipt, the body bytes that arrived, and
+   * whether the manifest the push was prepared against held a branch or tag (`undefined` from an older worker).
+   */
+  receivePack(facts: GrantFacts, request: RpcBody): Promise<ReceivePackAnswer>;
 
   /** The audited ref removal's commit; `facts.ref` and `facts.tip` name it. */
   removeRef(facts: GrantFacts): Promise<{

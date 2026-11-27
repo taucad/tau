@@ -6,7 +6,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { HttpException } from '@nestjs/common';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { developmentSigningKeyJson } from '#forwarding/contract/development-keys.js';
-import { outcomeHeader, refusedOutcome } from '#forwarding/contract/framing.js';
+import {
+  encodeReceiptPrefix,
+  framingHeader,
+  historyBeforeHeader,
+  outcomeHeader,
+  receiptPrefixed,
+  refusedOutcome,
+} from '#forwarding/contract/framing.js';
 import { forwardIdleTimeoutMilliseconds } from '#forwarding/contract/hop.js';
 import { parseSigningKey } from '#forwarding/contract/keys.js';
 import type { GrantFacts } from '#forwarding/git-executor.js';
@@ -155,5 +162,28 @@ describe('storage forwarder connections (DC1 review)', () => {
     expect(sent, 'the body kept streaming after the refusal').toBe(afterRefusal);
     expect(closed, 'the refused request’s connection must be closed').toBe(true);
     body.destroy();
+  });
+
+  /* Contracts § 3 (R3-1): whether the push's manifest held a branch or tag rides back on a header. */
+  it.each([
+    ['1', false],
+    ['0', true],
+    [undefined, undefined],
+  ] as const)('should read the history-before header %s as a first backup of %s', async (header, firstBackup) => {
+    const { forwarder } = await listen((request, response) => {
+      request.resume();
+      request.on('end', () => {
+        response
+          .writeHead(200, {
+            'content-type': 'application/x-git-receive-pack-result',
+            [framingHeader]: receiptPrefixed,
+            'tau-storage-body-bytes': '4',
+            ...(header === undefined ? {} : { [historyBeforeHeader]: header }),
+          })
+          .end(Buffer.concat([encodeReceiptPrefix(undefined), Buffer.from('0000')]));
+      });
+    });
+    const answer = await forwarder.receivePack(facts, { body: Readable.from([Buffer.from('0000')]), gzipped: false });
+    expect(answer.historyBefore === undefined ? undefined : !answer.historyBefore).toBe(firstBackup);
   });
 });

@@ -5,6 +5,7 @@ import { HttpException, Logger, ServiceUnavailableException } from '@nestjs/comm
 import type { GitForwardErrorReason, GitSpillReason, MetricsService } from '@taucad/api-observability/metrics';
 import {
   framingHeader,
+  historyBeforeHeader,
   outcomeHeader,
   readReceiptPrefix,
   receiptPrefixed,
@@ -22,7 +23,14 @@ import {
 import type { StorageOperation } from '#forwarding/contract/grant.js';
 import type { SigningKey } from '#forwarding/contract/keys.js';
 import type { AdvertisementDialect } from '#advertisement.js';
-import type { GitExecutor, GitReadRequest, GrantFacts, RpcBody, StorageTombstone } from '#forwarding/git-executor.js';
+import type {
+  GitExecutor,
+  GitReadRequest,
+  GrantFacts,
+  ReceivePackAnswer,
+  RpcBody,
+  StorageTombstone,
+} from '#forwarding/git-executor.js';
 import { ReplayableBody } from '#forwarding/replay-body.js';
 import type { StorageRouter, StorageTarget } from '#forwarding/storage-router.js';
 import { commitDeadlineMilliseconds, gitRpcTimeoutMilliseconds } from '#store/limits.js';
@@ -186,19 +194,18 @@ export class StorageForwarder implements GitExecutor {
     return { output: response, receipt };
   }
 
-  public async receivePack(
-    facts: GrantFacts,
-    request: RpcBody,
-  ): Promise<{
-    readonly report: Uint8Array<ArrayBuffer>;
-    readonly receipt: string | undefined;
-    readonly bodyBytes: number;
-  }> {
+  public async receivePack(facts: GrantFacts, request: RpcBody): Promise<ReceivePackAnswer> {
     const response = await this.#forward('git-receive-pack', facts, request);
     const receipt = await this.#receiptOf(response);
     const report = await readAll(response, jsonResponseLimitBytes);
     const bodyBytes = Number(response.headers['tau-storage-body-bytes'] ?? 0);
-    return { report, receipt, bodyBytes: Number.isFinite(bodyBytes) ? bodyBytes : 0 };
+    const historyBefore = response.headers[historyBeforeHeader];
+    return {
+      report,
+      receipt,
+      bodyBytes: Number.isFinite(bodyBytes) ? bodyBytes : 0,
+      historyBefore: historyBefore === '1' ? true : historyBefore === '0' ? false : undefined,
+    };
   }
 
   public async removeRef(facts: GrantFacts): Promise<{

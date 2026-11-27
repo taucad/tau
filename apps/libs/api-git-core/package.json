@@ -42,6 +42,7 @@
     "./forwarding/unconfigured-executor": "./src/forwarding/unconfigured-executor.ts",
     "./git-refusals": "./src/git-refusals.ts",
     "./git.constants": "./src/git.constants.ts",
+    "./hook-refusals": "./src/hook-refusals.ts",
     "./lease-host": "./src/lease-host.ts",
     "./lfs-keys": "./src/lfs-keys.ts",
     "./lfs-references": "./src/lfs-references.ts",

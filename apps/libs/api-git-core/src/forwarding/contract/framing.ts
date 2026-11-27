@@ -10,6 +10,13 @@ import type { Readable } from 'node:stream';
  * client, so stock git never sees it.
  */
 
+/**
+ * The response header a worker answers a push with: `1` when the manifest the push was prepared against held a
+ * branch or tag, `0` when it held neither (a first backup). An older worker sends none, which tau-api counts as
+ * `first_backup="unknown"` (cloud backup admission contracts § 3, R3-1).
+ */
+export const historyBeforeHeader = 'tau-storage-history-before';
+
 /** Response header that says the body opens with a receipt prefix. */
 export const framingHeader = 'tau-storage-framing';
 

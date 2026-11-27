@@ -6,6 +6,7 @@ import type { MetricsService } from '@taucad/api-observability/metrics';
 import {
   encodeReceiptPrefix,
   framingHeader,
+  historyBeforeHeader,
   outcomeHeader,
   receiptPrefixed,
   refusedOutcome,
@@ -190,6 +191,8 @@ export const createStorageRequestHandler = (
           'cache-control': 'no-cache',
           [framingHeader]: receiptPrefixed,
           'tau-storage-body-bytes': String(result.bodyBytes),
+          /* Contracts § 3 (R3-1): whether the push's manifest held a branch or tag, so tau-api can tell a first backup. */
+          [historyBeforeHeader]: result.historyBefore ? '1' : '0',
         });
         response.end(Buffer.concat([encodeReceiptPrefix(result.receipt), result.report]));
         return;

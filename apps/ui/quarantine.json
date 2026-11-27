@@ -1,0 +1,14 @@
+{
+  "$schema": "../../tools/vitest-ci/quarantine.schema.json",
+  "entries": [
+    {
+      "test": "app/lib/project-workspace-warmup.test.ts > openProjectWorkspace > warms the layout through the shell once it loads, while link intent warms only the shell",
+      "owner": "rifont",
+      "issue": 2964,
+      "class": "unreproduced",
+      "created": "2026-11-27",
+      "expires": "2026-12-11",
+      "evidence": "2 flake events (retry 2) in its last 4 executions; runs 45944456425, 45962980135"
+    }
+  ]
+}

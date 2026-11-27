@@ -1,6 +1,6 @@
 ---
 title: 'Revisions Policy'
-description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
+description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, the provenance module and record-format evolution, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
 updated: '2026-11-27'
@@ -69,9 +69,9 @@ Store exactly one repository per project. Treat the workspace as the binding and
 
 A revision id is its commit id. Its `treeId` is the content identity of exactly the paths whose registry answer is `versioned: true`; its parents encode graph topology. Hosts mint revisions and advance refs by compare-and-swap. Agents edit checkout files and never call `RevisionPort`.
 
-Carry a structured actor, trigger, summary, and provenance on every revision. The `Tau-Metadata` trailer is version 2 (blueprint B1): `provenance.actor` (a user, or an agent with its run id and the user it acted for), `provenance.capture` (the trigger) and `provenance.via` (the surface that wrote it: `browser`, `desktop`, `cli`, `serve` or `cloud`) are required, no capture is built without a resolved identity, there is no fallback actor id, and no version 1 reader is kept. Include `provenance.turnId` in the `Tau-Metadata` trailer and change-id preimage so `log(branch)` alone can rebuild a chat revision card after reload. Admit only host-attested `turn.finalized`, `turn.conflicted`, and `turn.failed` settlements to revision UI.
+Carry a structured actor, trigger, summary, and provenance on every revision. The `Tau-Metadata` trailer is version 2 (blueprint B1): `provenance.actor` (a user, or an agent with its run id and the user it acted for), `provenance.capture` (the trigger) and `provenance.via` (the surface that wrote it: `browser`, `desktop`, `cli`, `serve` or `cloud`) are required, no capture is built without a resolved identity, there is no fallback actor id, and no version 1 reader is kept: a version 1 record, a newer one and a corrupt one are classified from the commit's headers. Every shape a version 2 writer has written stays readable (readers tolerate additive fields; identity values compare exactly), so no released client's history becomes unreadable (cloud backup admission blueprint I10, D10). Include `provenance.turnId` in the `Tau-Metadata` trailer and change-id preimage so `log(branch)` alone can rebuild a chat revision card after reload. Admit only host-attested `turn.finalized`, `turn.conflicted`, and `turn.failed` settlements to revision UI.
 
-Read who made a revision by type, never from a string (blueprint B2). A history row carries `who`: `{ kind: 'recorded', identity }` with the identity its trailer records, or `{ kind: 'unrecorded', authorName? }` with the git author of a commit Tau did not write; it carries `capture` under the trailer's name, and its recorded trailer only for diagnostics behind Tau's debug setting. No row has a string actor or an `unknown` stand-in, no reader matches an id against a known fallback, and the agent's `history` tool returns the same typed `who` and none of the row's ids beyond its own.
+Read records, account shapes, claimable identities, recognised agents and "first brought" only through `@taucad/revisions/provenance`, the one reader, verifier and join (cloud backup admission blueprint D1, I2); its server half, `@taucad/revisions/provenance/server`, is the only code that compares an address, and no rendering surface imports it. Who an entry is shown as by is `attributionOf`'s answer: an account only for the attested pusher of a joined entry, never for an unjoined one (I3). Read who made a revision by type, never from a string (blueprint B2). A history row carries `who`: `{ kind: 'recorded', identity }` with the identity its trailer records, or `{ kind: 'unrecorded', authorName? }` with the git author of a commit Tau did not write; it carries `capture` under the trailer's name, and its recorded trailer only for diagnostics behind Tau's debug setting. No row has a string actor or an `unknown` stand-in, no reader matches an id against a known fallback, and the agent's `history` tool returns the same typed `who` and none of the row's ids beyond its own.
 
 Never display a first-parent ordinal: an entry has no number (M11), and the ordinal stays an internal fact that only says whether anything is saved yet. Derive dirty, **Current**, branch labels, and **Switch to _branch_** from the graph and selected checkout at read time. Never persist those projections or derive them from a chat transcript.
 
@@ -445,6 +445,16 @@ Hold these costs, which the budgets above depend on:
 
 Spend work once: memoize object ids across a cut, capture only the paths a complete change feed names, and otherwise only what the checkout's Project Index changed and removed since the last capture's cursor (its epoch, its generation and the clock reading, all taken before the capture began) (S10). Each such capture runs the D5 compare first, so an edit no observer reported (another program, a burst past the change limit) is in the index's changes before they are trusted; it also re-reads what the compare holds as racy and every file whose timestamp was within the racy window of the last capture's reading (EQ7), as a walk would. Where the provider reports modes, each kept file's mode is asked again and a changed one is re-read, since a mode change moves neither size nor timestamp; where it reports none, a kept file whose mode differs from what a walk would give it (the head's mode, or `100644`) walks everything. A `rescan`, a cursor from another epoch, no cursor, a memo-bypassing capture, a changed ignore source (a `.gitignore` among the paths, or another `info/exclude` or `core.ignoreCase`), or an index that cannot compare, list or answer walks everything, and an empty answer with `rescan` is never read as no change. An incremental capture asks the ignore rules only about the paths it reads, a directory Git listed whole above one included (native: literal pathspecs to `ls-files`; browser: those paths' own directories), and keeps the last capture's listing for the rest; it also asks about each path whose tracking a head move changed in a way the last capture does not account for (an outside `git rm --cached` or `git add -f` and commit, the file untouched), and walks whenever the per-path answer fails. The complete feed wins where it names the paths, since it asks the index nothing; batch native object reads through one `cat-file --batch`, mint native trees incrementally (D16: the store's tree-id memo names each object, a presence check reads only the headers of those the port cannot vouch for, a held root is still checked so a prune or restore never leaves a commit over a missing tree, the memo is forgotten on any failed mint, and only missing ones are written — changed blobs through one blob-only `fast-import`, changed trees children first through one `mktree --batch`, with Git's ids checked against the memo's), and key a derived log on its head rather than recomputing it per mint. Return a referentially stable view from every revision hook so a marker flip costs one render, not a re-walk.
 
+### 21. Evolve the record format under the golden corpus
+
+Write only the current record shape, and keep every shape from version 2 onward readable through the provenance module (cloud backup admission blueprint D10). The golden corpus (`packages/revisions/src/provenance/corpus/`) holds raw commits and tags with their expected readings and attributions: hand-built device states, and each `ui@` and `desktop@` release's own writer output for every leg since version 2 (`packages/revisions/scripts/pin-writer-corpus.ts`).
+
+- **G1.** Every corpus entry reads and attributes as `expected.json` records, under the digest `rules-ledger.json` pins for the current `provenanceRules`. A change to any answer bumps `provenanceRules`; the ledger never rewrites an entry.
+- **G2.** The working tree's writer produces exactly the pinned bytes for every leg (`writers/current.json`). A writer change re-pins the corpus in the same change, and a client release adds its writer's pin.
+- **No refusal for shape.** Tau Cloud never refuses a record shape; the hook admits every corpus commit (P8). A reader learns shape N+1 before any released client writes it, and a shape the module cannot parse is counted and routed into the corpus (`backup-unknown-shape`, WP3).
+
+The record format and its readers change only together with the corpus; G3 was retired with the generated hook program (operator ruling D-STRICT).
+
 ## Summary Checklist
 
 - [ ] Every surface reads one composed view of the selected checkout.
@@ -460,6 +470,14 @@ Spend work once: memoize object ids across a cut, capture only the paths a compl
 - [ ] Entitlement is checked before a connect is offered, and nothing is registered before the plan admits it.
 - [ ] Deletions and non-fast-forward updates are refused server-side for every ref family.
 - [ ] Each budgeted revision operation is measured against its budget, not assumed.
+- [ ] Backup is total for history current builds write: nothing after the hook refuses, and no commit is refused for who it claims to be by or its record shape (I1).
+- [ ] Every surface reads records, decides who an entry is by and decides "first brought" through `@taucad/revisions/provenance` (I2).
+- [ ] No account is shown for an entry without an attested join to its push (I3).
+- [ ] The manifest's shape is closed: `Manifest` and `PushRecord` gain no field (I5).
+- [ ] Every hook refusal carries a `Tau-Code` and every sentence about backup is page-owned copy (I9).
+- [ ] No address leaves the server or the provenance module; Tau never writes one (I11).
+- [ ] Attribution survives copy, restore and key compromise and cannot be planted there (I14).
+- [ ] A change to a record writer, the provenance reader or the hook keeps G1, G2 and P8 green, re-pinning the corpus in the same change.
 
 ## References
 

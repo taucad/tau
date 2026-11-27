@@ -3,9 +3,11 @@ title: 'Testing Policy'
 description: 'Writing high-quality tests across the Tau monorepo. Assert observable behavior, error assertions, resource cleanup, mock factories, and async patterns. Covers Vitest, kernel tests, and API tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-11-25'
+updated: '2026-11-27'
 related:
   - docs/policy/react-testing-policy.md
+  - docs/policy/revisions-policy.md
+  - docs/research/cloud-backup-admission-blueprint.md
   - docs/policy/typescript-policy.md
   - docs/policy/geospec-policy.md
   - docs/research/typescript-overloads.md
@@ -402,6 +404,10 @@ A change that crosses a public operation, plugin authoring contract, worker RPC,
 
 Omitting a layer requires an explicit reason tied to the change's observable boundary. `bytes.length > 0` is insufficient when semantic, round-trip, byte-equality, or pixel evidence is available.
 
+### 13.1 Record writers, the provenance reader and the hook
+
+A change to a revision record writer (`revision-headers.ts`, `git-objects.ts`, an actor resolver), to `@taucad/revisions/provenance`, or to the Hosted Remote's `pre-receive` hook runs the provenance golden corpus and its equivalence checks in the same change (cloud backup admission blueprint D10; [revisions policy](revisions-policy.md) rule 21): `revisions`' `corpus.test.ts` (G1, P1, P5) and `writers.test.ts` (G2), and `api-git-core`'s `version-skew/provenance-corpus.test.ts` (P8, every corpus object through the installed hook). A writer change re-pins with `node packages/revisions/scripts/pin-writer-corpus.ts`; a changed answer bumps `provenanceRules`. Neither a re-pin nor a bump may drop a release production still serves.
+
 ## 14. Re-Home Provider Coverage Before Deleting Its Owner
 
 Replacing an execution plane, provider adapter, or transport deletes the tests that lived there. Before that deletion lands, inventory the checks that protect opaque provider replay metadata — signatures, continuation tokens, cache handles, any value the provider requires back byte-exactly — and name their successor in the new plane. A generic codec that compiles against the new plane does not prove it carries a provider-specific field the old adapter handled deliberately.
@@ -495,3 +501,4 @@ Before merging a test:
 - [ ] Test names follow `should <verb> <outcome>` pattern
 - [ ] Structured data assertions check shape, not just existence
 - [ ] A flaky test is fixed at its cause, not skipped, slept on or given more retries, and any longer timeout carries a measured `Timeout-budget:`
+- [ ] A change to a record writer, the provenance reader or the hook runs the golden corpus, G2 and P8 (§ 13.1)

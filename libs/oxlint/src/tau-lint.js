@@ -56,12 +56,13 @@ import { noPluginDefaultExportRule } from './rules/no-plugin-default-export.js';
 import { noPluginDefaultImportRule } from './rules/no-plugin-default-import.js';
 import { requirePluginPackageBindingRule } from './rules/require-plugin-package-binding.js';
 import { noKernelTypeAssertionRule } from './rules/no-kernel-type-assertion.js';
+import { noPinnedTestOrderRule } from './rules/no-pinned-test-order.js';
 
 /** @type {Plugin} */
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.34.0',
+    version: '1.35.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -113,6 +114,7 @@ const plugin = {
     'no-plugin-default-import': noPluginDefaultImportRule,
     'require-plugin-package-binding': requirePluginPackageBindingRule,
     'no-kernel-type-assertion': noKernelTypeAssertionRule,
+    'no-pinned-test-order': noPinnedTestOrderRule,
   },
 };
 

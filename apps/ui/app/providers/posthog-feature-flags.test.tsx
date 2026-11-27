@@ -2,8 +2,12 @@
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog and environment APIs use snake/constant case. */
 import { MemoryRouter } from 'react-router';
 import type { ReactNode } from 'react';
+import type { PostHog } from 'posthog-js';
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { useFeatureState as useFeatureStateHook } from '#flags/use-feature.js';
+import type { WebAnalyticsProvider as WebAnalyticsProviderComponent } from '#providers/web-analytics-provider.js';
+import { requestUrl, restoreSdkPlatform, stubSdkPlatform } from '#providers/posthog-sdk.test-utils.js';
 
 /*
  * Runs the installed PostHog SDK through the web analytics boundary, as `web-analytics-provider.test.tsx` does, so
@@ -24,7 +28,6 @@ vi.mock('#hooks/use-privacy-preferences.js', () => ({
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('@better-auth-ui/react', () => ({ useSession: () => ({ data: undefined, isPending: false }) }));
 
-const requests: string[] = [];
 const flagsResponse = JSON.stringify({
   flags: {
     onboarding: { key: 'onboarding', enabled: true },
@@ -32,29 +35,44 @@ const flagsResponse = JSON.stringify({
   },
 });
 
-vi.spyOn(XMLHttpRequest.prototype, 'open').mockImplementation((_method, url) => {
-  requests.push(String(url));
-});
-vi.spyOn(XMLHttpRequest.prototype, 'send').mockImplementation(() => undefined);
-vi.stubGlobal(
-  'fetch',
-  vi.fn(async (input: RequestInfo | URL) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    requests.push(url);
-    return new Response(url.includes('/flags/') ? flagsResponse : '{}', { status: 200 });
-  }),
-);
-vi.stubGlobal('requestIdleCallback', (callback: () => void) => setTimeout(callback, 0));
-vi.stubGlobal('cancelIdleCallback', (id: ReturnType<typeof setTimeout>) => {
-  clearTimeout(id);
-});
-Object.defineProperty(navigator, 'sendBeacon', { configurable: true, value: vi.fn(() => true) });
+// Transform the module graph once, outside any hook's timeout; each test evaluates its own copy below.
+await import('#providers/web-analytics-provider.js');
+await import('#flags/use-feature.js');
+await import('posthog-js');
 
-const { posthog } = await import('posthog-js');
-const { WebAnalyticsProvider } = await import('#providers/web-analytics-provider.js');
-const { useFeatureState } = await import('#flags/use-feature.js');
+/** The requests this test's SDK instance sent. */
+let requests: string[];
+let posthog: PostHog;
+let WebAnalyticsProvider: typeof WebAnalyticsProviderComponent;
+let useFeatureState: typeof useFeatureStateHook;
 
-type ConsoleWindow = { posthog?: typeof posthog };
+// Each test gets its own SDK instance, flag source, transport and document.
+beforeEach(async () => {
+  state.consent = 'declined';
+  const sent: string[] = [];
+  requests = sent;
+  stubSdkPlatform({
+    open: (url) => {
+      sent.push(url);
+    },
+    fetch: async (input) => {
+      const url = requestUrl(input);
+      sent.push(url);
+      return new Response(url.includes('/flags/') ? flagsResponse : '{}', { status: 200 });
+    },
+    sendBeacon: () => true,
+  });
+  ({ posthog } = await import('posthog-js'));
+  ({ WebAnalyticsProvider } = await import('#providers/web-analytics-provider.js'));
+  ({ useFeatureState } = await import('#flags/use-feature.js'));
+});
+
+afterEach(() => {
+  cleanup();
+  restoreSdkPlatform(posthog);
+});
+
+type ConsoleWindow = { posthog?: PostHog };
 
 const Flags = (): React.JSX.Element => (
   <p>
@@ -79,14 +97,7 @@ const settle = async (): Promise<void> => {
 /** The real SDK debounces and fetches asynchronously; a loaded CI runner can take longer than the 1 s default. */
 const sdkResponse = { timeout: 10_000 };
 
-afterAll(() => {
-  cleanup();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-});
-
-// The SDK singleton is loaded once per module graph, so these run in order.
-describe('PostHog-backed flags through the web analytics boundary', { shuffle: false }, () => {
+describe('PostHog-backed flags through the web analytics boundary', () => {
   it('resolves to defaults and requests no flags when analytics are declined', async () => {
     const view = render(tree(), { wrapper: MemoryRouter });
     await settle();

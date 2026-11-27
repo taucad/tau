@@ -128,6 +128,8 @@
     "tau-lint/no-scene-override-material": "error",
     "tau-lint/no-impl-in-index": "error",
     "tau-lint/no-test-bridge-redeclaration": "error",
+    // A suite passes in any order; `shuffle: false` is never the fix. See docs/policy/testing-policy.md.
+    "tau-lint/no-pinned-test-order": "error",
     "tau-lint/plugin-capability-filename": "error",
     // First-party plugin surface (filename-scoped in each rule; each plugin's own lint enforces it on itself):
     // named-only implementation modules, no default import of a plugin module, the package-named `definePlugin`

@@ -422,6 +422,26 @@ export const succeedManifest = (base: Manifest | undefined, draft: ManifestDraft
   };
 };
 
+/**
+ * `manifest` with its commit time, and its own push record's, moved to `at`: the attestation key collision rule
+ * (cloud backup admission blueprint D3; contracts § 2). Everything else stays, the spilled segment's key included,
+ * so a segment already stored for this successor is still the one it names.
+ *
+ * @param manifest - A successor not yet committed.
+ * @param at - Its new commit time.
+ * @returns The same successor at `at`.
+ */
+export const withCommittedAt = (manifest: Manifest, at: Date): Manifest => {
+  const committedAt = at.toISOString();
+  return {
+    ...manifest,
+    committedAt,
+    pushes: manifest.pushes.map((record) =>
+      record.generation === manifest.generation ? { ...record, committedAt } : record,
+    ),
+  };
+};
+
 /** `pushes/<first generation>-<last generation>-<nonce>.json`: unique to this writer, as a pack key is (NI4). */
 const segmentKeyFor = (records: readonly PushRecord[]): string =>
   `pushes/${String(records[0]?.generation ?? 0)}-${String(records.at(-1)?.generation ?? 0)}-${randomBytes(8).toString('hex')}.json`;

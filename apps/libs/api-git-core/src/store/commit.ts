@@ -10,7 +10,12 @@ import { compactLease, shouldCompact } from '#store/compaction.js';
 import { RepositoryStoreError } from '#store/errors.js';
 import type { FaultInjector } from '#store/fault-points.js';
 import { readLeaseReferences, runGit } from '#store/lease.js';
-import { pushCarriesAnonymousCommit } from '#store/push-anonymity.js';
+import { coverageBudgetMilliseconds, coveragePass } from '#store/coverage-pass.js';
+import type { CoverageFailure, CoverageResult } from '#store/coverage-pass.js';
+import type { CoverageInputs } from '@taucad/revisions/provenance';
+import { commitBits, hasBit, recordKey, signAttestation, writeAttestation } from '#store/attestation.js';
+import type { AttestationObject, PushAttestation } from '#store/attestation.js';
+import type { SigningKey } from '#forwarding/contract/keys.js';
 import type { RepositoryLease } from '#store/lease.js';
 import {
   commitDeadlineMilliseconds,
@@ -35,6 +40,7 @@ import {
   spilledPushLog,
   succeedManifest,
   tombstoneManifest,
+  withCommittedAt,
 } from '#store/manifest.js';
 import type { Manifest, ManifestPack } from '#store/manifest.js';
 
@@ -66,12 +72,62 @@ import type { Manifest, ManifestPack } from '#store/manifest.js';
  */
 export type MovedRef = { readonly ref: string; readonly before?: string; readonly after?: string };
 
+/**
+ * Why an admitted push's attestation is degraded or missing (R3-2): the `reason` label of
+ * `tau_sync_attestation_degraded_total`. None of these refuses the push.
+ */
+export type AttestationDegradedReason = CoverageFailure | 'unreadable_commit' | 'signing_failed' | 'write_failed';
+
+/** Every degraded reason, for seeding the counter at boot. */
+export const attestationDegradedReasons: readonly AttestationDegradedReason[] = [
+  'walk_failed',
+  'budget_exceeded',
+  'unreadable_commit',
+  'signing_failed',
+  'write_failed',
+];
+
+/**
+ * What a push's or a removal's commit attests (cloud backup admission blueprint D3; contracts § 2, § 3). Every
+ * account successor that goes through `commitLease` passes this; server committers (compaction, fence, tombstone,
+ * purge, restore) do not go through `commitLease` and write none, which is the partition P4a asserts.
+ */
+export type CommitAttestationArguments = Readonly<{
+  kind: PushAttestation['kind'];
+  /** The attestation signing key; `undefined` admits the push with no attestation (`signing_failed`). */
+  signer: SigningKey | undefined;
+  /** The inline claim's identities, the pusher's verified sign-in email and the linked GitHub id, from the grant. */
+  identities: readonly string[];
+  verifiedEmail?: string;
+  forgeId?: string;
+  sessionId?: string;
+  client?: PushAttestation['client'];
+  /** The coverage pass's budget; `min(120 s, deadline - 60 s)` by default. */
+  budgetMilliseconds?: number;
+}>;
+
+/** What the receipt says about the attestation a commit wrote (contracts § 3). */
+export type AttestationSummary = Readonly<{
+  record: string;
+  kid: string;
+  origin: 'admission';
+  coverage: 'complete' | 'failed';
+  commits: number;
+  covered: Readonly<{ claim: number; address: number; forge: number }>;
+  anonymous: boolean;
+  shapes: Readonly<{ tauOther: number }>;
+}>;
+
 export type CommitResult =
   | { readonly committed: false; readonly reason: 'no-ref-change' }
   | {
       readonly committed: true;
       readonly manifest: Manifest;
       readonly token: CommitToken;
+      /** The attestation this commit wrote, when it wrote one. */
+      readonly attestation?: AttestationSummary;
+      /** Why the attestation is degraded or missing, when it is; empty or absent when it is whole. */
+      readonly degraded?: readonly AttestationDegradedReason[];
       /** Whether this commit's own manifest write carried a compaction. */
       readonly compacted: boolean;
       /**
@@ -124,6 +180,8 @@ export type CommitLeaseArguments = {
   faults?: FaultInjector;
   /** Told how long each phase took, in seconds, as it ends — failed or not (W14 OB2). */
   onPhase?: CommitPhaseObserver;
+  /** The attestation to write; absent only where no attestation is wanted (tests of other concerns). */
+  attest?: CommitAttestationArguments;
 };
 
 /**
@@ -296,7 +354,11 @@ const uploadKeyFor = (packFile: string): string =>
 // oxlint-disable-next-line max-lines-per-function -- the write path is one sequence; splitting it hides the order that makes it safe
 export const commitLease = async (args: CommitLeaseArguments): Promise<CommitResult> => {
   const { store, lease } = args;
-  const { at, packBound, byteCeiling, deadlineAt } = resolveBounds(args);
+  const bounds = resolveBounds(args);
+  const { packBound, byteCeiling, deadlineAt } = bounds;
+  /* Moved by 1 ms on an attestation key collision, before any manifest write; every later step, the rebase
+     included, takes the moved value (contracts § 2, E10). */
+  let { at } = bounds;
   const assertDeadline = (): void => {
     if (Date.now() > deadlineAt) {
       throw new RepositoryStoreError(
@@ -312,11 +374,22 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
       return undefined;
     }
     await assertCommittable(lease);
-    const [inLease, anonymous] = await Promise.all([
+    const [inLease, coverage] = await Promise.all([
       packFilesIn(lease.directory),
-      pushCarriesAnonymousCommit({ directory: lease.directory, before: lease.manifest?.refs ?? {}, after: references }),
+      coveragePass({
+        directory: lease.directory,
+        before: lease.manifest?.refs ?? {},
+        after: references,
+        inputs: coverageInputsOf(args),
+        budgetMilliseconds: args.attest?.budgetMilliseconds ?? coverageBudgetMilliseconds(deadlineAt),
+      }),
     ]);
-    return { references, anonymous, arrived: inLease.filter((name) => !lease.hydratedPackFiles.has(name)) };
+    return {
+      references,
+      coverage,
+      anonymous: coverage.anonymous,
+      arrived: inLease.filter((name) => !lease.hydratedPackFiles.has(name)),
+    };
   });
   if (prepared === undefined) {
     return { committed: false, reason: 'no-ref-change' };
@@ -355,7 +428,7 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
     bytes: upload.bytes,
     indexStored: true,
   }));
-  const next = succeedManifest(
+  let next = succeedManifest(
     lease.manifest,
     {
       refs: references,
@@ -366,6 +439,19 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
     },
     at,
   );
+  const degraded: AttestationDegradedReason[] = degradedByCoverage(prepared.coverage);
+  const attestationFor = (successor: Manifest): AttestationPlan =>
+    args.attest === undefined
+      ? undefined
+      : planAttestation({
+          attest: args.attest,
+          coverage: prepared.coverage,
+          successor,
+          before: lease.manifest?.refs ?? {},
+          degraded,
+        });
+  let attestation = attestationFor(next);
+  let attestationWrite: AttestationWrite = attestation === undefined ? 'failed' : 'pending';
 
   // Each pack goes up with the index beside it (D33): the stored index removes
   // the 5.0–9.0 s `index-pack` term from every later hydrate for 0.17 % more
@@ -414,6 +500,20 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
         ),
       async (signal: AbortSignal) =>
         writeSpilledPushLog({ store, locator: lease.locator, base: lease.manifest, next, signal }),
+      // The attestation, chunks first, in the same round and before any manifest write (D3). It never fails the
+      // round: a failed write admits the push with no attestation (R3-2).
+      ...(attestation === undefined
+        ? []
+        : [
+            async (signal: AbortSignal) => {
+              attestationWrite = await writeAttestationQuietly({
+                store,
+                locator: lease.locator,
+                objects: attestation?.objects ?? [],
+                signal,
+              });
+            },
+          ]),
       // In the same round, so the manifest that names a tip is never ahead of its listing.
       ...listingPuts(store, lease.locator, listings),
       ...listingRetirementPuts({
@@ -425,6 +525,13 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
     ]),
   );
   await args.faults?.('after-pack-upload');
+
+  /* A collision: another push with the same account, millisecond and moved tips wrote this key first. Move `at`
+     by 1 ms and write again, still before any manifest write (contracts § 2). */
+  if (attestationWrite === 'collision') {
+    assertDeadline();
+    ({ at, next, attestation, attestationWrite } = await movePastCollision({ store, lease, at, next, attestationFor }));
+  }
 
   if (lease.manifest !== undefined) {
     // A self-check on the succession this commit is about to write: the base a
@@ -534,6 +641,174 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
       return outcome;
     },
     moved: movedReferences(lease.manifest?.refs ?? {}, references),
+    ...attestationOutcome({
+      attested: args.attest !== undefined,
+      attestation,
+      attestationWrite,
+      coverage: prepared.coverage,
+      degraded,
+    }),
+  };
+};
+
+/** How often one commit moves `at` past an attestation key collision before it gives up on the attestation. */
+const maximumCollisionMoves = 3;
+
+/** The coverage pass's inputs: the pusher, and the grant's claim, verified email and forge id when it carries them. */
+const coverageInputsOf = (args: CommitLeaseArguments): CoverageInputs => ({
+  pusher: args.committedBy,
+  identities: args.attest?.identities ?? [],
+  ...(args.attest?.verifiedEmail === undefined ? {} : { verifiedEmail: args.attest.verifiedEmail }),
+  ...(args.attest?.forgeId === undefined ? {} : { forgeId: args.attest.forgeId }),
+});
+
+/**
+ * Another push with the same account, millisecond and moved tips wrote this attestation key first: move `at` by
+ * 1 ms, re-sign under the new key and write again, still before any manifest write (contracts § 2, E10).
+ */
+const movePastCollision = async (args: {
+  store: RepositoryStore;
+  lease: RepositoryLease;
+  at: Date;
+  next: Manifest;
+  attestationFor: (successor: Manifest) => AttestationPlan;
+}): Promise<{ at: Date; next: Manifest; attestation: AttestationPlan; attestationWrite: AttestationWrite }> => {
+  let { at, next } = args;
+  let attestation: AttestationPlan;
+  let attestationWrite: AttestationWrite = 'collision';
+  for (let moves = 0; attestationWrite === 'collision' && moves < maximumCollisionMoves; moves += 1) {
+    at = new Date(at.getTime() + 1);
+    next = withCommittedAt(next, at);
+    attestation = args.attestationFor(next);
+    attestationWrite =
+      attestation === undefined
+        ? 'failed'
+        : // oxlint-disable-next-line no-await-in-loop -- each move follows the collision before it
+          await writeAttestationQuietly({
+            store: args.store,
+            locator: args.lease.locator,
+            objects: attestation.objects,
+          });
+  }
+  return { at, next, attestation, attestationWrite };
+};
+
+/** Where a commit's attestation write stands. */
+type AttestationWrite = 'pending' | 'written' | 'collision' | 'failed';
+
+/** The signed objects of one commit's attestation, with what the receipt reports about them. */
+type AttestationPlan =
+  | Readonly<{ objects: readonly AttestationObject[]; record: string; kid: string; coverage: 'complete' | 'failed' }>
+  | undefined;
+
+const degradedByCoverage = (coverage: CoverageResult): AttestationDegradedReason[] => {
+  if (coverage.coverage === 'failed') {
+    return [coverage.reason];
+  }
+  return coverage.unreadable > 0 ? ['unreadable_commit'] : [];
+};
+
+/**
+ * Signs the attestation of `successor`'s newest record (contracts § 2): the complete moved-ref list, the coverage
+ * pass's commits (none when it failed), and where the address and forge inputs came from. A missing or unusable
+ * signing key records `signing_failed` and plans nothing.
+ */
+const planAttestation = (args: {
+  attest: CommitAttestationArguments;
+  coverage: CoverageResult;
+  successor: Manifest;
+  before: Manifest['refs'];
+  degraded: AttestationDegradedReason[];
+}): AttestationPlan => {
+  const { attest, coverage, successor } = args;
+  const pushed = successor.pushes.at(-1);
+  if (attest.signer === undefined || pushed === undefined) {
+    if (!args.degraded.includes('signing_failed')) {
+      args.degraded.push('signing_failed');
+    }
+    return undefined;
+  }
+  const record = recordKey(pushed);
+  try {
+    const objects = signAttestation(
+      {
+        record,
+        kind: attest.kind,
+        origin: 'admission',
+        coverage: coverage.coverage,
+        ...(attest.sessionId === undefined ? {} : { sessionId: attest.sessionId }),
+        ...(attest.client === undefined ? {} : { client: attest.client }),
+        ...(attest.identities.length === 0 ? {} : { claim: { identities: attest.identities } }),
+        basisInputs: {
+          email: attest.verifiedEmail === undefined ? 'none' : 'admission',
+          forge: attest.forgeId === undefined ? 'none' : 'admission',
+        },
+        refs: movedReferences(args.before, successor.refs).map((move) =>
+          move.after === undefined ? { ref: move.ref } : { ref: move.ref, tip: move.after },
+        ),
+        commits: coverage.coverage === 'complete' ? coverage.commits : [],
+      },
+      attest.signer,
+    );
+    return { objects, record, kid: attest.signer.kid, coverage: coverage.coverage };
+  } catch (error) {
+    logger.warn(`could not sign the attestation of a commit: ${error instanceof Error ? error.name : 'error'}`);
+    if (!args.degraded.includes('signing_failed')) {
+      args.degraded.push('signing_failed');
+    }
+    return undefined;
+  }
+};
+
+/** {@link writeAttestation}, answering `failed` instead of throwing: a failed attestation write never refuses. */
+const writeAttestationQuietly = async (args: {
+  store: RepositoryStore;
+  locator: RepositoryLocator;
+  objects: readonly AttestationObject[];
+  signal?: AbortSignal;
+}): Promise<AttestationWrite> => {
+  try {
+    return await writeAttestation(args);
+  } catch (error) {
+    logger.warn(
+      `could not write the attestation for ${args.locator.projectId}: ${error instanceof Error ? error.name : 'error'}`,
+    );
+    return 'failed';
+  }
+};
+
+/** The result's `attestation` and `degraded` fields: a summary when the write landed, every reason otherwise. */
+const attestationOutcome = (args: {
+  attested: boolean;
+  attestation: AttestationPlan;
+  attestationWrite: AttestationWrite;
+  coverage: CoverageResult;
+  degraded: readonly AttestationDegradedReason[];
+}): { attestation?: AttestationSummary; degraded?: readonly AttestationDegradedReason[] } => {
+  if (!args.attested) {
+    return {};
+  }
+  const written = args.attestation !== undefined && args.attestationWrite === 'written';
+  const degraded: readonly AttestationDegradedReason[] =
+    written || args.degraded.includes('signing_failed') ? args.degraded : [...args.degraded, 'write_failed'];
+  return {
+    ...(written && args.attestation !== undefined ? { attestation: summaryOf(args.attestation, args.coverage) } : {}),
+    ...(degraded.length === 0 ? {} : { degraded }),
+  };
+};
+
+const summaryOf = (plan: NonNullable<AttestationPlan>, coverage: CoverageResult): AttestationSummary => {
+  const commits = coverage.coverage === 'complete' ? coverage.commits : [];
+  const count = (bit: number): number => commits.filter((entry) => hasBit(entry, bit)).length;
+  return {
+    record: plan.record,
+    kid: plan.kid,
+    origin: 'admission',
+    coverage: plan.coverage,
+    commits: commits.length,
+    covered: { claim: count(commitBits.claim), address: count(commitBits.address), forge: count(commitBits.forge) },
+    anonymous: coverage.anonymous,
+    shapes: { tauOther: count(commitBits.tauOther) },
   };
 };
 

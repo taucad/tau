@@ -57,6 +57,15 @@ const allBits = Object.values(commitBits).reduce((total, bit) => total + bit, 0)
 /** One first-brought commit: its id, its bits, and its `claimable` handle when it has one. */
 export type CommitEntry = readonly [oid: string, bits: number, claimable?: string];
 
+/**
+ * Whether an entry carries a bit. Bits are distinct powers of two, so this is a digit test, not a mask.
+ *
+ * @param entry - A commit entry.
+ * @param bit - One of {@link commitBits}.
+ * @returns True when set.
+ */
+export const hasBit = (entry: CommitEntry, bit: number): boolean => Math.floor(entry[1] / bit) % 2 === 1;
+
 /** The attestation's payload (contracts § 2), without the envelope's kid. */
 export type PushAttestation = Readonly<{
   v: typeof attestationVersion;
@@ -406,7 +415,7 @@ const commitsOf = async (
   },
   candidate: { key: string; attestation: PushAttestation; kid: string },
 ): Promise<readonly CommitEntry[] | undefined> => {
-  const { attestation, kid } = candidate;
+  const { attestation } = candidate;
   if (attestation.commits.chunks === undefined) {
     return attestation.commits.inline ?? [];
   }

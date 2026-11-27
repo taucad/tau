@@ -372,7 +372,9 @@ describe.runIf(gitToolchainOnPath)('git ignore rules as Git reads them', () => {
         'ay',
         'x[]',
         'foo',
-        'foo\\',
+        /* A name ending in a backslash cannot exist on Windows, where Git for Windows reads a backslash as a
+         * separator, so its `check-ignore` answers for `foo/` there: the oracle asks only where Git can. */
+        ...(process.platform === 'win32' ? [] : ['foo\\']),
         'foo ',
       ];
       const files = Object.fromEntries(

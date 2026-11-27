@@ -22,5 +22,11 @@
     "treeIntegrity": "sha256-U+We+T+82yOLW0tKQwH7ZxLh4nhMIxo/vS7p4oKqkoM=",
     "fileCount": 25806,
     "byteLength": 1172611333
+  },
+  "win32-x64": {
+    "closureIntegrity": "sha256-0pOtXy8ym1jf6vaEuGYlW1HfMsiXO19aogMWxrBYt5w=",
+    "treeIntegrity": "sha256-qOdknGEanHyW/DpCyRehNosutj4GwQwZoWfNQFZSMaI=",
+    "fileCount": 24164,
+    "byteLength": 759427217
   }
 }

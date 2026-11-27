@@ -134,9 +134,17 @@ relayElectronPorts(servicesPortRelayTag);
 
 contextBridge.exposeInMainWorld('ENV', bootstrap.env);
 
+/* The renderer's half of desktop sign-in (DSI-4). Main keeps every token; the window learns only how an attempt is
+ * going, how it ended, the account's email and when the sign-in ends. */
 contextBridge.exposeInMainWorld('tauAuth', {
-  signIn: async (): Promise<void> => {
-    await ipcRenderer.invoke('tau:auth:sign-in');
+  signIn: async (mode?: unknown): Promise<unknown> =>
+    ipcRenderer.invoke('tau:auth:sign-in', mode === 'different-account' ? 'different-account' : 'consent'),
+  cancelSignIn: async (): Promise<void> => {
+    await ipcRenderer.invoke('tau:auth:cancel-sign-in');
+  },
+  status: async (): Promise<unknown> => ipcRenderer.invoke('tau:auth:status'),
+  clearNotice: async (): Promise<void> => {
+    await ipcRenderer.invoke('tau:auth:clear-notice');
   },
   signOut: async (): Promise<void> => {
     await ipcRenderer.invoke('tau:auth:sign-out');

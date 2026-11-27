@@ -111,6 +111,40 @@ describe('queued message adornment', () => {
       expect(props.onEdit).toHaveBeenCalledWith('one', 'Make the gear stronger');
     });
   });
+  it("should show an automatic send's words without a live region, which only the person's own Send now has", async () => {
+    // The queue sends its next item by itself (when a turn ends, or a project open releases a queued send): that is not
+    // the person's action, so the row adds no live region of its own.
+    render(<ChatMessageQueueView {...fixture({ sendingId: 'one' })} />);
+    expect(screen.getByRole('button', { name: 'Send now' })).toHaveTextContent('Sending…');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+  it("should keep the person's own Send now spoken while its durable steer is still in flight", async () => {
+    // CodeRabbit on #2973: `onSteer` settles once the steer is recorded, but the steer itself is still in flight; the
+    // person's own "Sending…" must not lose its live region midway.
+    const user = userEvent.setup();
+    const recorded = Promise.withResolvers<void>();
+    const props = fixture({ onSteer: async () => recorded.promise });
+    const { rerender } = render(<ChatMessageQueueView {...props} />);
+    await user.click(screen.getByRole('button', { name: 'Send now' }));
+    const steering = props.items.map<ChatMessageQueueProps['items'][number]>((item) => ({
+      ...item,
+      steer: { type: 'cancel', commandId: 'cancel_one', payload: { chatId: 'chat', runId: 'run' } },
+    }));
+    rerender(<ChatMessageQueueView {...props} items={steering} />);
+    recorded.resolve();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Delete queued message 1' })).toBeDisabled();
+    });
+    await recorded.promise;
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Sending');
+    });
+    // The steer settles: the row is no longer busy, and a later automatic send of it stays silent.
+    rerender(<ChatMessageQueueView {...props} items={props.items} />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    rerender(<ChatMessageQueueView {...props} items={props.items} sendingId='one' />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
   it('should make uncertain deliveries immutable and expose a retry action', async () => {
     const user = userEvent.setup();
     const props = fixture({ sendingId: 'one', error: 'Waiting for acknowledgement' });

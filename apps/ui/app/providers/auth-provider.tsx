@@ -1,4 +1,6 @@
-import { useContext, useEffect } from 'react';
+import { useContext, useEffect, useState, useSyncExternalStore } from 'react';
+import { toast } from 'sonner';
+import { Topic } from '@taucad/events';
 import { Link, useNavigate } from 'react-router';
 import { QueryClientContext } from '@tanstack/react-query';
 import type { AuthProviderProps } from '@better-auth-ui/react';
@@ -20,12 +22,45 @@ import { authReturnOrigin } from '#lib/share-origin.js';
  * or drop a session and be told when one changes, but never sees the token.
  */
 export type TauDesktopAuthBridge = {
-  /** Opens the system browser and resolves once main has a session (or the user cancelled). */
-  readonly signIn: () => Promise<void>;
+  /**
+   * Opens the system browser and resolves with how the attempt ended. `different-account` asks the browser to sign
+   * in afresh before consent.
+   */
+  readonly signIn: (mode?: DesktopSignInMode) => Promise<DesktopSignInOutcome | undefined>;
+  /** Ends the attempt in flight, if any. */
+  readonly cancelSignIn: () => Promise<void>;
+  /** The attempt in flight, a notice to show once, the account's email and when the sign-in ends. Never a token. */
+  readonly status: () => Promise<DesktopSignInStatus | undefined>;
+  /** Forgets the notice once shown. */
+  readonly clearNotice: () => Promise<void>;
   /** Drops main's stored credential and resolves once it is gone. */
   readonly signOut: () => Promise<void>;
   /** Subscribes to sign-in/sign-out/refresh. Returns an unsubscribe function. */
   readonly onAuthChanged: (listener: () => void) => () => void;
+};
+
+/** How a desktop sign-in is asked for: the usual consent, or a sign-in as another account first. */
+export type DesktopSignInMode = 'consent' | 'different-account';
+
+/** How a desktop sign-in attempt ended. */
+export type DesktopSignInOutcome = 'signed-in' | 'canceled' | 'expired' | 'error';
+
+/** What main tells the window about desktop sign-in (DSI-4). */
+export type DesktopSignInStatus = {
+  /** The attempt in flight: its link for Copy link, whether the browser came back, whether it opened at all. */
+  readonly attempt?: {
+    readonly url: string;
+    readonly phase: 'waiting' | 'finishing';
+    readonly browserFailed: boolean;
+  };
+  /** Something to say once: an update signed the person out, or the sign-in ended. */
+  readonly notice?: {
+    readonly kind: 'signed-out-by-update' | 'sign-in-ended';
+    readonly email?: string;
+  };
+  readonly email?: string;
+  /** ISO time the sign-in ends however often it refreshes (90 days after it began). */
+  readonly signInEndsAt?: string;
 };
 
 declare global {
@@ -93,9 +128,96 @@ function runDesktopAuthAction(to: string): boolean {
 
   const bridge = globalThis.window.tauAuth;
   if (bridge) {
-    void callDesktopShell(bridge[action]);
+    if (action === 'signIn') {
+      void startDesktopSignIn('consent');
+    } else {
+      void callDesktopShell(bridge.signOut);
+    }
   }
   return true;
+}
+
+/* The last attempt's outcome, shared by the window's sign-in panel and whatever started the attempt. */
+let lastDesktopSignInOutcome: DesktopSignInOutcome | undefined;
+let desktopSignInAttempts = 0;
+const desktopSignInOutcomeChanges = new Topic<void>({ name: 'DesktopSignIn.outcome' });
+
+const setDesktopSignInOutcome = (outcome: DesktopSignInOutcome | undefined): void => {
+  lastDesktopSignInOutcome = outcome;
+  desktopSignInOutcomeChanges.emit();
+};
+
+/**
+ * Starts a desktop sign-in through the shell and records how it ended for {@link useDesktopSignInOutcome}.
+ *
+ * @param mode - The usual consent, or a sign-in as another account first.
+ */
+export async function startDesktopSignIn(mode: DesktopSignInMode): Promise<void> {
+  const bridge = globalThis.window.tauAuth;
+  if (!bridge) {
+    return;
+  }
+  desktopSignInAttempts += 1;
+  const attempt = desktopSignInAttempts;
+  setDesktopSignInOutcome(undefined);
+  let outcome: DesktopSignInOutcome | undefined;
+  try {
+    outcome = await bridge.signIn(mode);
+  } catch {
+    outcome = 'error';
+  }
+  // A newer attempt replaced this one (the shell reports it canceled): only the newest attempt's outcome shows.
+  if (attempt === desktopSignInAttempts) {
+    setDesktopSignInOutcome(outcome ?? 'error');
+  }
+}
+
+/**
+ * How the last desktop sign-in attempt ended; `undefined` while one is open or before the first.
+ *
+ * @returns The outcome.
+ */
+export function useDesktopSignInOutcome(): DesktopSignInOutcome | undefined {
+  return useSyncExternalStore(
+    (listener) => desktopSignInOutcomeChanges.subscribe(listener),
+    () => lastDesktopSignInOutcome,
+    () => undefined,
+  );
+}
+
+/**
+ * What main says about desktop sign-in, read again whenever it announces a change.
+ *
+ * @returns The status, or `undefined` outside the desktop window or before the first read.
+ */
+export function useDesktopSignInStatus(): DesktopSignInStatus | undefined {
+  const [status, setStatus] = useState<DesktopSignInStatus | undefined>();
+  useEffect(() => {
+    const bridge = isDesktopTarget() ? globalThis.window.tauAuth : undefined;
+    if (!bridge) {
+      return;
+    }
+    let isCurrent = true;
+    const read = async (): Promise<void> => {
+      try {
+        const next = await bridge.status();
+        if (isCurrent) {
+          setStatus(next);
+        }
+      } catch {
+        // The next change reads it again.
+      }
+    };
+    void read();
+    const unsubscribe = bridge.onAuthChanged(() => {
+      void read();
+    });
+    return () => {
+      isCurrent = false;
+      unsubscribe();
+    };
+  }, []);
+  return status;
 }
 
 /**
@@ -104,7 +226,7 @@ function runDesktopAuthAction(to: string): boolean {
  *
  * @param call - The bridge method to run.
  */
-export async function callDesktopShell(call: () => Promise<void>): Promise<void> {
+export async function callDesktopShell(call: () => Promise<unknown>): Promise<void> {
   try {
     await call();
   } catch {
@@ -229,6 +351,65 @@ export function DesktopAuthBridge(): undefined {
       void queryClient?.invalidateQueries({ queryKey: authQueryKeyPrefix });
     });
   }, [purgeFinancial, queryClient]);
+
+  useDesktopSignInNotices();
+}
+
+/** Milliseconds before the sign-in's absolute end at which the window offers to renew it (Principal ruling P1). */
+const renewalWarningLead = 7 * 24 * 60 * 60 * 1000;
+
+/* Once per window: the renewal warning is not repeated on every refresh. */
+let hasWarnedOfSignInEnd = false;
+
+/**
+ * Says once what main has to tell the person unasked: an update signed them out, the sign-in ended, or it ends soon
+ * (with one-click renew).
+ */
+function useDesktopSignInNotices(): void {
+  const status = useDesktopSignInStatus();
+  const notice = status?.notice;
+  const signInEndsAt = status?.signInEndsAt;
+
+  useEffect(() => {
+    const bridge = globalThis.window.tauAuth;
+    if (!bridge || notice === undefined) {
+      return;
+    }
+    const account = notice.email === undefined ? '' : ` as ${notice.email}`;
+    toast(notice.kind === 'signed-out-by-update' ? 'Sign in again' : 'Your sign-in ended', {
+      description:
+        notice.kind === 'signed-out-by-update'
+          ? `This update of Tau signs in a new way, so you were signed out${account}.`
+          : `Tau Desktop is no longer signed in${account}.`,
+      action: {
+        label: 'Sign in',
+        onClick: () => {
+          void startDesktopSignIn('consent');
+        },
+      },
+    });
+    void callDesktopShell(bridge.clearNotice);
+  }, [notice]);
+
+  useEffect(() => {
+    if (signInEndsAt === undefined || hasWarnedOfSignInEnd) {
+      return;
+    }
+    const endsAt = new Date(signInEndsAt);
+    if (endsAt.getTime() - Date.now() > renewalWarningLead) {
+      return;
+    }
+    hasWarnedOfSignInEnd = true;
+    toast('Your sign-in ends soon', {
+      description: `Tau Desktop signs out on ${endsAt.toLocaleDateString()}. Renew it in your browser to stay signed in.`,
+      action: {
+        label: 'Renew',
+        onClick: () => {
+          void startDesktopSignIn('consent');
+        },
+      },
+    });
+  }, [signInEndsAt]);
 }
 
 /**

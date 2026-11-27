@@ -364,7 +364,10 @@ describe('createHostToolRegistry', () => {
 
     /* The authored `.tau` controls keep their own rows, so the agent still
      * writes the file it is asked to keep. */
-    const authored = await invoke(registry, 'create_file', { targetFile: '.tau/AGENTS.md', content: 'ok\n' });
+    const authored = await invoke(registry, 'create_file', {
+      targetFile: '.tau/parameters/main.ts.json',
+      content: '{}\n',
+    });
     expect(authored.isError).toBe(false);
   });
 

@@ -103,13 +103,13 @@ describe('BillingSettings', () => {
     expect(notice.compareDocumentPosition(screen.getByText('$20/month'))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
-  it('renders source balances and holds from the C03 explanation', () => {
+  it('renders the credits left from the C03 explanation without showing holds', () => {
     renderSettings();
-    expect(screen.getByTestId('credit-balance')).toHaveTextContent(/^4 credits$/u);
+    /* The ledger holds 1 purchased and 2 monthly credits for running work; the page shows what is left, not holds. */
+    expect(screen.getByTestId('credit-balance')).toHaveTextContent(/^5 credits$/u);
     expect(screen.getByText('<1% left')).toBeInTheDocument();
-    expect(
-      screen.getByText('1 more are on hold for work in progress. Purchased credits never expire.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Purchased credits never expire.')).toBeInTheDocument();
+    expect(screen.queryByText(/hold|held|reserved/iu)).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Monthly credits' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Purchased credits' })).toBeInTheDocument();
     expect(screen.queryByText('Balance details')).not.toBeInTheDocument();
@@ -132,6 +132,29 @@ describe('BillingSettings', () => {
       expect.objectContaining({ requestId: 'request_1' }),
     );
     expect(followPaymentRedirect).toHaveBeenCalled();
+  });
+
+  it('opens the website for the portal, automatic reload and cancellation in Tau Desktop, keeping Add credits', async () => {
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <SettingsSectionsProvider sections={createSettingsCatalogue([])}>
+            <BillingSettings webBillingUrl='https://tau.test/?settings=billing' />
+          </SettingsSectionsProvider>
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    const manage = screen.getByRole('link', { name: /manage subscription/i });
+    expect(manage).toHaveAttribute('href', 'https://tau.test/?settings=billing');
+    expect(manage).toHaveAttribute('target', '_blank');
+    for (const title of ['Automatic reload', 'Cancel plan']) {
+      const row = screen.getByRole('group', { name: title });
+      expect(row.querySelector('a')).toHaveAttribute('href', 'https://tau.test/?settings=billing');
+    }
+    await userEvent.click(manage);
+    expect(createPortalAction).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /add credits/i })).toBeInTheDocument();
   });
 
   it('shows no stale balance when authority is unavailable but keeps Add credits and a retry', async () => {

@@ -136,7 +136,7 @@ export const generatedIgnoreEntries = ({ rows, reservedDirectory }: IgnoreLayout
           ...rows
             .filter((row) => row.versioned && inReserved(row))
             /* No trailing `/`: a directory row classifies its bare path too, so a
-             * file named `.tau/skills` is versioned and must be re-included. */
+             * file named `.tau/parameters` is versioned and must be re-included. */
             .map((row) => `!/${row.prefix}`),
         ]),
     ...rows

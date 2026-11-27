@@ -907,6 +907,30 @@
       "owner": "chat performance WP-06"
     },
     {
+      "id": "HA1-NODE-MARKER-STALE",
+      "bound": "A writer's marker on a folder a browser shares with tau serve (a Node pid marker judged by a provider open, or a provider epoch-ms marker judged by tau serve) is honoured while the newer of the log's newest row and the marker's mtime is within foreignRunStaleMilliseconds (XD3, 10 min); past it the other writer takes the marker over (HA-I10)",
+      "site": "packages/agent-host/src/log/writer-marker.ts",
+      "token": "now - Math.max(touchedAt ?? 0, rowAt ?? 0) < foreignRunStaleMilliseconds",
+      "class": "Liveness",
+      "owner": "host attachment reliability HA1"
+    },
+    {
+      "id": "HA1-OWN-READ-POLL",
+      "bound": "While a chat's own run is unsettled or a shrink is suspect, or its last read failed, the page re-reads its own segment from the file every unsettledReadPollMilliseconds (1 s) while visible; the same pass judges the HA-I5 stale span (2 x runHeartbeatMilliseconds past foreignRunStaleMilliseconds) and the 30 s shrink refusal (readRefusalMilliseconds)",
+      "site": "apps/ui/app/services/chat-own-segment-source.ts",
+      "token": "poll = setTimeout(wake, unsettledReadPollMilliseconds)",
+      "class": "Liveness",
+      "owner": "host attachment reliability HA1"
+    },
+    {
+      "id": "HA1-IN-PAGE-ATTACH-BACKOFF",
+      "bound": "Once HA-I5's stale span completes (XD3 + 2 x runHeartbeatMilliseconds + one poll) the page sends attach in-page at once; while the run stays unsettled it sends again 1 s later, doubling to inPageAttachBackoffMilliseconds (8 s); any change to the run's newest row or marker restarts the span and the backoff",
+      "site": "apps/ui/app/services/chat-own-segment-source.ts",
+      "token": "inPageAttachBackoffMilliseconds",
+      "class": "Liveness",
+      "owner": "host attachment reliability HA1"
+    },
+    {
       "id": "HA0-READ-LOSS",
       "bound": "Report-only: a lost or refused chat read (not a leadership handoff) that lasts 10 s (chatReadLossBoundMilliseconds) reports chat.read.cold-hidden and run.unsettled.own; an attach clears it",
       "site": "apps/ui/app/services/chat-session-store.ts",

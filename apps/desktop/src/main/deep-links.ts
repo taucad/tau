@@ -14,6 +14,10 @@
  * reader sees is the **host**. `tau:invitations/<token>`, with no authority, is
  * a different URL with an opaque path, and is refused rather than guessed at.
  *
+ * Sign-in is not a link (share-link ruling R1, 2026-11-27): Tau Desktop signs in through a loopback redirect to a
+ * listener it opens for that one attempt, so `tau://` carries no credential and `tau://auth/…` is refused like any
+ * other unknown link.
+ *
  * One link names an address rather than a route: `tau://host/<loopback origin>?code=<code>`, which `tau open --desktop`
  * opens for a folder it serves (ruling X54). It is admitted only for a loopback HTTP origin with a port, because the
  * renderer redeems its single-use code there and nowhere else: a link cannot point the app at another machine.
@@ -46,9 +50,6 @@ const identifierPattern = /^[\w~.-]{1,256}$/u;
 /* `URLSearchParams` form-encoding: unreserved `*-._`, `+` for space, `%XX`,
  * and the `=`/`&` separators. That is exactly what `formatShareUrl` produces. */
 const fragmentPattern = /^[A-Za-z0-9*%=&+._-]+$/u;
-/* The same shape `apps/ui/app/routes/auth.desktop` refuses to carry. */
-const statePattern = /^[\w-]{8,128}$/u;
-const oneTimeTokenPattern = /^[\w-]{1,256}$/u;
 /* The daemon mints 32 random bytes, base64url: 43 characters. */
 const handOffCodePattern = /^[\w-]{16,256}$/u;
 /* Loopback only, with a port: the daemon binds `127.0.0.1` and names `localhost` among its own origins. */
@@ -63,8 +64,6 @@ export type DeepLink =
   | { readonly kind: 'share'; readonly route: string }
   /** `tau://i/<repository path>`. */
   | { readonly kind: 'import'; readonly route: string }
-  /** `tau://auth/callback` — redeemed in main; it never reaches the renderer. */
-  | { readonly kind: 'auth-callback'; readonly oneTimeToken: string; readonly state: string }
   /** `tau://host/<loopback origin>?code=<code>` — handed to the renderer, which redeems the code at that daemon. */
   | { readonly kind: 'host'; readonly origin: string; readonly code: string };
 
@@ -133,18 +132,6 @@ const importRoute = (segments: readonly string[]): DeepLink | undefined => {
   return { kind: 'import', route: `/import/${repository}` };
 };
 
-const authCallback = (segments: readonly string[], parameters: URLSearchParams): DeepLink | undefined => {
-  if (segments.length !== 1 || segments[0] !== 'callback' || parameters.size !== 2) {
-    return undefined;
-  }
-  const oneTimeToken = parameters.get('ott') ?? '';
-  const state = parameters.get('state') ?? '';
-  if (!oneTimeTokenPattern.test(oneTimeToken) || !statePattern.test(state)) {
-    return undefined;
-  }
-  return { kind: 'auth-callback', oneTimeToken, state };
-};
-
 const hostHandOff = (path: string, parameters: URLSearchParams): DeepLink | undefined => {
   const port = loopbackOriginPattern.exec(path)?.[1];
   const code = parameters.get('code') ?? '';
@@ -206,9 +193,6 @@ export const parseDeepLink = (
     }
     case 'i': {
       return hasFragmentOrQuery ? undefined : importRoute(segments);
-    }
-    case 'auth': {
-      return url.hash === '' ? authCallback(segments, url.searchParams) : undefined;
     }
     case 'host': {
       /* The origin is the whole path after `/`, compared verbatim: a dot segment, a second slash or a userinfo makes

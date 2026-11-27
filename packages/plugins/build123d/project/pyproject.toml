@@ -16,6 +16,7 @@ environments = [
   "sys_platform == 'darwin' and platform_machine == 'x86_64' and implementation_name == 'cpython'",
   "sys_platform == 'linux' and platform_machine == 'aarch64' and implementation_name == 'cpython'",
   "sys_platform == 'linux' and platform_machine == 'x86_64' and implementation_name == 'cpython'",
+  "sys_platform == 'win32' and platform_machine == 'AMD64' and implementation_name == 'cpython'",
 ]
 constraint-dependencies = [
   "anytree==2.13.0",
@@ -27,6 +28,7 @@ constraint-dependencies = [
   "certifi==2026.7.22",
   "charset-normalizer==3.5.1",
   "cloudpickle==3.1.2",
+  "colorama==0.4.6",
   "dataclasses-json==0.6.7",
   "deprecated==3.0.0",
   "executing==2.2.1",

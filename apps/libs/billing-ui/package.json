@@ -46,7 +46,6 @@
     "./components/usage/columns": "./src/components/usage/columns.tsx",
     "./components/usage/credits": "./src/components/usage/credits.ts",
     "./components/usage/provider-colors": "./src/components/usage/provider-colors.ts",
-    "./components/usage/reserved-table": "./src/components/usage/reserved-table.tsx",
     "./components/usage/usage-summary-cards": "./src/components/usage/usage-summary-cards.tsx",
     "./components/usage/usage-table": "./src/components/usage/usage-table.tsx",
     "./components/usage/use-chat-name": "./src/components/usage/use-chat-name.ts",

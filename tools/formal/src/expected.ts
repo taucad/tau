@@ -20,6 +20,11 @@ export type Expectation = {
   readonly ref?: string;
   /** The work package that fixes a `defect`. */
   readonly fixedBy?: string;
+  /**
+   * TLC's maximum heap in gigabytes for this configuration (default 1). Only for a configuration of millions of
+   * states whose fingerprint set and queue outgrow 1 GB: there TLC spends most of its time collecting garbage.
+   */
+  readonly heapGigabytes?: number;
 };
 
 export type ApalacheExpectation = Expectation & { readonly args: readonly string[] };
@@ -95,6 +100,9 @@ export const compareOutcome = (expectation: Expectation, actual: Outcome): strin
   return `expected ${describeOutcome(expectation.expect)}, got ${describeOutcome(actual)}${note}`;
 };
 
+/** The largest TLC heap one configuration may ask for: four of them fit a 16 GB CI runner. */
+const maxHeapGigabytes = 4;
+
 /** Structural rules on an expectation file; returns one message per problem. */
 export const lintExpectedFile = (file: ExpectedFile): string[] => {
   const problems: string[] = [];
@@ -111,6 +119,12 @@ export const lintExpectedFile = (file: ExpectedFile): string[] => {
     }
     if (entry.kind === 'defect' && entry.fixedBy === undefined) {
       problems.push(`${name}: a defect names the work package that fixes it (fixedBy)`);
+    }
+    if (
+      entry.heapGigabytes !== undefined &&
+      (!Number.isInteger(entry.heapGigabytes) || entry.heapGigabytes < 1 || entry.heapGigabytes > maxHeapGigabytes)
+    ) {
+      problems.push(`${name}: heapGigabytes is a whole number from 1 to ${String(maxHeapGigabytes)}`);
     }
   }
   return problems;

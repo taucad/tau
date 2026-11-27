@@ -135,20 +135,20 @@ describe('generated ignore file', () => {
     const entries = generatedIgnoreEntries({
       reservedDirectory: '.tau',
       rows: [
-        { ...row, prefix: '.tau/skills/private', anchored: true },
+        { ...row, prefix: '.tau/parameters/private', anchored: true },
         {
           ...row,
           class: 'authored',
           versioned: true,
           agentAccess: 'read-write',
-          prefix: '.tau/skills',
+          prefix: '.tau/parameters',
           anchored: true,
         },
         { ...row, prefix: '.tau/chats', anchored: true },
       ],
     });
 
-    expect(entries).toStrictEqual(['/.tau/*', '!/.tau/skills', '/.tau/skills/private/']);
+    expect(entries).toStrictEqual(['/.tau/*', '!/.tau/parameters', '/.tau/parameters/private/']);
   });
 
   /* The whole block, literally: it is the one artifact a person reads in their
@@ -160,8 +160,6 @@ describe('generated ignore file', () => {
 /.tau/*
 !/.tau/parameters
 !/.tau/machines
-!/.tau/skills
-!/.tau/AGENTS.md
 .jj
 /exports/
 /thumbnail.webp
@@ -179,12 +177,7 @@ node_modules/
       (row) => row.versioned && row.prefix.startsWith(`${tauRevisionPolicy.reservedDirectory}/`),
     );
 
-    expect(inside.map((row) => row.prefix)).toStrictEqual([
-      '.tau/parameters',
-      '.tau/machines',
-      '.tau/skills',
-      '.tau/AGENTS.md',
-    ]);
+    expect(inside.map((row) => row.prefix)).toStrictEqual(['.tau/parameters', '.tau/machines']);
     expect(inside.filter((row) => row.prefix.split('/').length !== 2)).toStrictEqual([]);
   });
 
@@ -213,7 +206,7 @@ node_modules/
           '.tau/workspaces/project/tau.json': true,
           '.tau/revisions/objects/ab/cdef': true,
           /* eslint-enable no-restricted-syntax -- the pin is back on below. */
-          '.tau/skills/a/.git/HEAD': true,
+          '.tau/parameters/a/.git/HEAD': true,
           '.tau/binding.json': true,
           '.tau/staging/import-x/intent.json': true,
           '.tau/chats/c.jsonl': true,
@@ -229,8 +222,12 @@ node_modules/
           'lib/node_modules/dep/index.js': true,
           '.tau/parameters/x.json': false,
           '.tau/machines/printer.json': false,
-          '.tau/skills/a/SKILL.md': false,
-          '.tau/AGENTS.md': false,
+          /* The agent files' retired `.tau` paths have no row: whatever is left there is not versioned. */
+          '.tau/skills/a/SKILL.md': true,
+          '.tau/AGENTS.md': true,
+          /* Where they live now, outside `.tau`, they are the project's own files. */
+          'AGENTS.md': false,
+          '.agents/skills/a/SKILL.md': false,
           '.tau/cache/mesh.bin': true,
           'src/part.ts': false,
         };
@@ -566,7 +563,9 @@ describe('attributes as git reads them (W11.2 review)', () => {
       ];
       const others = ['models/a1.note', 'models/starry.note', 'models/whatx.note', 'models/backslash.note'];
       const files = { '.gitattributes': generatedGitattributesContent(undefined, named) };
-      const paths = [...named, ...others];
+      /* Git for Windows reads a backslash in a path as a separator, and no Windows file name holds one, so Git is
+       * asked only where it can answer; Tau's own verdict on every path is checked below. */
+      const paths = [...named, ...others].filter((path) => process.platform !== 'win32' || !path.includes('\\'));
 
       expect(verdicts(files, paths, false)).toStrictEqual(await checkAttribute(files, paths, false));
       expect(verdicts(files, named, false)).toStrictEqual(named.map(() => true));

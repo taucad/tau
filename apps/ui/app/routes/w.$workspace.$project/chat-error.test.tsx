@@ -10,7 +10,7 @@ import type * as AgentHostModule from '@taucad/agent-host';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { chatTurnNotStartedCode, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
-import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
+import { ChatError as ChatErrorBanner, resetFailureVoicesForTest } from '#routes/w.$workspace.$project/chat-error.js';
 import { chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
@@ -154,6 +154,7 @@ describe('ChatError', () => {
   beforeEach(() => {
     debug.enabled = false;
     resumableFailureOverrides.clear();
+    resetFailureVoicesForTest();
     vi.clearAllMocks();
   });
 
@@ -343,6 +344,62 @@ describe('ChatError', () => {
     state = failedRunState('req_2');
     const retried = render(<ChatErrorBanner />);
     expect(decisionIdOf(retried.container)).toBe('run:req_2:1');
+  });
+
+  /* A refused send's turn leaves the transcript, so the chat's failure moves between the last turn and the slot under
+   * the empty transcript. One failure is said once per page, where it can be heard. */
+  const Places = ({ hasTurn, hasEmpty }: { readonly hasTurn: boolean; readonly hasEmpty: boolean }): ReactNode => (
+    <>
+      {hasTurn ? (
+        <div data-testid='turn'>
+          <ChatErrorBanner />
+        </div>
+      ) : null}
+      {hasEmpty ? (
+        <section data-testid='empty'>
+          <ChatErrorBanner />
+        </section>
+      ) : null}
+    </>
+  );
+  const roleIn = (testId: string): string | undefined =>
+    screen.getByTestId(testId).querySelector('[data-slot=chat-error-card]')?.getAttribute('role') ?? undefined;
+
+  /* Staging re-check 4: the copies swapped in separate commits. The alert under the empty transcript lasted about
+   * 100 ms, then the copy in the turn stayed silent; an alert removed that soon may go unheard. */
+  it('should hand the saying to the copy that stays when the first copy leaves before it could be heard', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(10_000);
+    const state = failedRunState('req_1');
+    vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
+    const view = render(<Places hasTurn={false} hasEmpty />);
+    expect(roleIn('empty')).toBe('alert');
+
+    now.mockReturnValue(10_080);
+    view.rerender(<Places hasTurn hasEmpty />);
+    expect(roleIn('turn')).toBe('group');
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+
+    now.mockReturnValue(10_180);
+    view.rerender(<Places hasTurn hasEmpty={false} />);
+    expect(roleIn('turn')).toBe('alert');
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('should keep later copies quiet once a copy stayed long enough to be heard, on this page', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(20_000);
+    const state = failedRunState('req_7');
+    vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
+    const view = render(<Places hasTurn hasEmpty={false} />);
+    const title = screen.getByRole('alert').querySelector('p')?.textContent ?? '';
+
+    now.mockReturnValue(21_500);
+    view.rerender(<Places hasTurn={false} hasEmpty />);
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('group', { name: title })).toBeInTheDocument();
+    view.unmount();
+    render(<Places hasTurn={false} hasEmpty />);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('should identify a refused command by its request (I5)', () => {
@@ -1446,6 +1503,7 @@ describe('ChatError for a run abandoned on a pending model attempt', () => {
   beforeEach(() => {
     debug.enabled = false;
     resumableFailureOverrides.clear();
+    resetFailureVoicesForTest();
     vi.clearAllMocks();
     resetAutoResumes();
     vi.useFakeTimers();

@@ -10,7 +10,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -19,6 +19,7 @@ import type { NativeGitRemoteCredential } from '#native-git-port.js';
 import type { RevisionPort } from '#revision-port.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { shellQuote, shellWord, writeShellExecutable } from '#test/script-executable.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 
@@ -45,13 +46,10 @@ const helperFixture = async (authenticated = true): Promise<HelperFixture> => {
   });
   const repositoryPath = join(root, 'project');
   const helperLog = join(root, 'helper.log');
-  const wrapper = join(root, 'git-isolated');
   await mkdir(repositoryPath, { recursive: true });
-  await writeFile(
-    wrapper,
-    ['#!/bin/sh', 'GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 exec git "$@"', ''].join('\n'),
-    { mode: 0o755 },
-  );
+  const wrapper = await writeShellExecutable(join(root, 'git-isolated'), [
+    'GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 exec git "$@"',
+  ]);
   return {
     url: fixture.url,
     repositoryPath,
@@ -77,12 +75,16 @@ const helperFixture = async (authenticated = true): Promise<HelperFixture> => {
       execFileSync('git', ['config', 'user.name', author.name], { cwd: repositoryPath });
       execFileSync('git', ['config', 'user.email', author.email], { cwd: repositoryPath });
       await port.setRemote({ name: 'origin', url: fixture.url });
-      execFileSync('git', ['config', 'credential.helper', `!f() { echo generic >> ${helperLog}; }; f`], {
+      execFileSync('git', ['config', 'credential.helper', `!f() { echo generic >> ${shellWord(helperLog)}; }; f`], {
         cwd: repositoryPath,
       });
-      execFileSync('git', ['config', `credential.${fixture.url}.helper`, `!f() { echo scoped >> ${helperLog}; }; f`], {
-        cwd: repositoryPath,
-      });
+      execFileSync(
+        'git',
+        ['config', `credential.${fixture.url}.helper`, `!f() { echo scoped >> ${shellWord(helperLog)}; }; f`],
+        {
+          cwd: repositoryPath,
+        },
+      );
       return port;
     },
   };
@@ -239,9 +241,13 @@ describe.runIf(gitToolchainOnPath)('GitHub SSH credentials', () => {
         cwd: fixture.repositoryPath,
       });
       const sshLog = join(fixture.repositoryPath, 'ssh-called');
-      execFileSync('git', ['config', 'core.sshCommand', `sh -c 'echo called > ${sshLog}; exit 1'`], {
-        cwd: fixture.repositoryPath,
-      });
+      execFileSync(
+        'git',
+        ['config', 'core.sshCommand', `sh -c ${shellQuote(`echo called > ${shellWord(sshLog)}; exit 1`)}`],
+        {
+          cwd: fixture.repositoryPath,
+        },
+      );
       await expect(port.fetch({ remote: 'origin' })).rejects.toThrow('Native Git failed');
       await expect(readFile(sshLog)).rejects.toMatchObject({ code: 'ENOENT' });
       expect(await fixture.helperCalls()).toStrictEqual([]);

@@ -160,6 +160,7 @@
     "GatewayInvocation.target-three-attempts.cfg": {
       "tier": "nightly",
       "expect": "pass",
+      "heapGigabytes": 4,
       "ref": "EQ1 with three attempts: re-prepare, end the run, Resume proceeds; ChargeAfterRecordedLoss, LostReplyBound and IndInv hold (10.7M distinct states; StopCharges FALSE, as the charged-cut branch doubles it past the watchdog, and target-safety checks it with these invariants)"
     },
     "GatewayInvocation.today-NoUncodedDeadEnd-3.cfg": {

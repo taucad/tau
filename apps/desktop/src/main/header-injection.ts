@@ -27,6 +27,8 @@ export type TauHeaderInjectionOptions = {
    * whatever token there is. Omitted, nothing waits.
    */
   readonly ready?: Promise<unknown>;
+  /** Told the bearer a request to an allowed origin carried when the answer was 401. */
+  readonly onUnauthorized?: (token: string) => void;
 };
 
 /**
@@ -86,10 +88,12 @@ type WebRequestLike = {
   onBeforeSendHeaders(
     filter: { urls: string[] },
     listener: (
-      details: { url: string; requestHeaders: Record<string, string> },
+      details: { id?: number; url: string; requestHeaders: Record<string, string> },
       callback: (response: { requestHeaders: Record<string, string> }) => void,
     ) => void,
   ): void;
+  onCompleted?(filter: { urls: string[] }, listener: (details: { id: number; statusCode: number }) => void): void;
+  onErrorOccurred?(filter: { urls: string[] }, listener: (details: { id: number }) => void): void;
 };
 
 /** The longest an authenticated request waits for the stored credential to be read: a keychain prompt can take minutes. */
@@ -116,10 +120,36 @@ export const installTauHeaderInjection = (webRequest: WebRequestLike, options: T
   /* `<all_urls>` with an in-listener origin test, never a URL-pattern filter:
    * pattern filters do not match custom standard schemes, and the exactness of
    * the decision matters more than the small cost of seeing every request. */
+  /* The bearer each in-flight authenticated request carried, so a 401 names the token it refused, not a newer one. */
+  const sent = new Map<number, string>();
+  const send = (
+    details: { id?: number; url: string; requestHeaders: Record<string, string> },
+    callback: (response: { requestHeaders: Record<string, string> }) => void,
+  ): void => {
+    const requestHeaders = injectTauHeaders(details.url, details.requestHeaders, options);
+    const bearer = requestHeaders['authorization'];
+    if (options.onUnauthorized !== undefined && details.id !== undefined && bearer?.startsWith('Bearer ') === true) {
+      sent.set(details.id, bearer.slice('Bearer '.length));
+    }
+    callback({ requestHeaders });
+  };
+  if (options.onUnauthorized !== undefined) {
+    const { onUnauthorized } = options;
+    webRequest.onCompleted?.({ urls: ['<all_urls>'] }, (details) => {
+      const token = sent.get(details.id);
+      sent.delete(details.id);
+      if (token !== undefined && details.statusCode === 401) {
+        onUnauthorized(token);
+      }
+    });
+    webRequest.onErrorOccurred?.({ urls: ['<all_urls>'] }, (details) => {
+      sent.delete(details.id);
+    });
+  }
   webRequest.onBeforeSendHeaders({ urls: ['<all_urls>'] }, (details, callback) => {
     const origin = originOf(details.url);
     if (credentialRead || origin === undefined || !options.allowedOrigins.includes(origin)) {
-      callback({ requestHeaders: injectTauHeaders(details.url, details.requestHeaders, options) });
+      send(details, callback);
       return;
     }
     /* Only a request that would carry the credential waits for it; everything else goes at once. */
@@ -133,7 +163,7 @@ export const installTauHeaderInjection = (webRequest: WebRequestLike, options: T
         }),
       ]);
       clearTimeout(bound);
-      callback({ requestHeaders: injectTauHeaders(details.url, details.requestHeaders, options) });
+      send(details, callback);
     })();
   });
 };

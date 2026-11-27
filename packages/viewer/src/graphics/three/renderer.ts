@@ -8,6 +8,7 @@ import { installWebGpuDepthSampling } from '#graphics/three/webgpu-depth-samplin
 import { installWebGlClearState } from '#graphics/three/webgl-clear-state.js';
 import { installWebGpuStencilState } from '#graphics/three/webgpu-stencil-state.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
+import { renderOnDemand } from '#graphics/three/render-on-demand.js';
 import { GraphicsContextUnavailableError, reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
 
 /**
@@ -426,6 +427,8 @@ export async function createRenderer(
       }
     }
 
+    // Viewport and offscreen surfaces render on demand; Three's own loop would request a frame every vsync.
+    renderOnDemand(renderer);
     return renderer;
   }
 

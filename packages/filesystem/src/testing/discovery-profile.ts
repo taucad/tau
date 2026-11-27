@@ -20,6 +20,7 @@ import { ChangeEventBus } from '#change-event-bus.js';
 import { MountTable } from '#mount-table.js';
 import type { ProjectRootConfig, ProjectRootConfiguration, StorageRootConfig } from '#mount-table.js';
 import { ProviderRegistry } from '#provider-registry.js';
+import type { IoScheduler } from '#io-scheduler.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import { ProjectDirectoryIndex } from '#project-directory-index.js';
@@ -82,6 +83,8 @@ export type DiscoveryProfile = Readonly<{
   removeBehind: (root: 'home' | 'workspace', path: string) => Promise<void>;
   /** The providers the authority reads each root through, for a test that injects a fault. */
   providers: Readonly<{ home: FileSystemProvider; workspace: FileSystemProvider }>;
+  /** The authority's I/O lanes (FW4), for a test that reads what each lane holds. */
+  ioScheduler: IoScheduler;
   /** The folder's scope, as a delete of one of its directories names it. */
   workspaceScope: StorageRootConfig;
   shape: DiscoveryProfileShape;
@@ -285,6 +288,7 @@ export async function createDiscoveryProfile(
       await directory.removeEntry(name, { recursive: true });
     },
     providers: { home: homeInstance, workspace: workspaceInstance },
+    ioScheduler: providerRegistry.ioScheduler,
     workspaceScope,
     shape,
     measure,

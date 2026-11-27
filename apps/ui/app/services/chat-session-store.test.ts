@@ -1209,6 +1209,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         };
       });
       await vi.waitFor(() => {
+        /* A zero-byte own log with no record is not a chat the file vouches for (HA-I3a): the host read stays. */
         expect(subscribe).toHaveBeenCalledOnce();
       });
       expect(reloaded.observedChatIdsOf('project_seed_waiting_ack')).toEqual(['chat_seed_waiting_ack']);
@@ -1785,16 +1786,15 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         close: vi.fn(async () => undefined),
       }),
     );
-    await settle();
-    expect(hostCommand).toHaveBeenCalledTimes(2);
-    publishLogPage(reloaded, chatId, manualRows.slice(0, 2), { cursor: 0, endCursor: 3 });
-    await settle();
-    expect(hostCommand).toHaveBeenCalledTimes(2);
-    expect(reloadedSession.messages).toContainEqual(seed);
-    publishLogPage(reloaded, chatId, manualRows.slice(2), { cursor: 2, endCursor: 3 });
-    await vi.waitFor(() => {
-      expect(deps.consumeChatStartupRequest).toHaveBeenCalledTimes(2);
-    });
+    /* HA1: the reloaded page reads its own log from the file whole, never a page at a time, so the durable manual
+     * turn supersedes the seed as soon as it is read, and the seed is never replayed. The bound covers the source's
+     * first, on-demand module load. */
+    await vi.waitFor(
+      () => {
+        expect(deps.consumeChatStartupRequest).toHaveBeenCalledTimes(2);
+      },
+      { timeout: 5000 },
+    );
     expect(deps.consumeChatStartupRequest).toHaveBeenLastCalledWith(chatId, 'req_seed_superseded');
     await settle();
     expect(reloadedSession.messages.some((message) => message.id === seed.id)).toBe(false);
@@ -5830,25 +5830,65 @@ describe('ChatSessionStore', () => {
         }
       });
 
-      it('should still show a refusal that is not a wait as undelivered, sent once', async () => {
+      it('should return a send its host refused without applying it to the composer, sent once (H-1)', async () => {
         const chatId = 'departing_host_refusal';
-        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
-        hostCommand.mockResolvedValueOnce({
-          commandId: 'req_refused_host',
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        hostCommand.mockImplementationOnce(async (command) => ({
+          commandId: command.commandId,
           generation: 1,
           status: 'refused',
           effect: 'not-applied',
-          code: 'HOST_MODEL_UNAVAILABLE',
-          message: 'No model is configured.',
-        });
+          code: 'HOST_NOT_PAIRED',
+          message: 'This host is not paired.',
+        }));
         const unadmit = queueAdmission(chatId);
         try {
           publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
           await store.requestTurn(chatId, queuedGesture('refused_host'));
           await vi.waitFor(() => {
-            expect(session.messageQueueRef.getSnapshot().context.error).toBeDefined();
+            expect(session.draftActorRef.getSnapshot().context.draftText).toBe('refused_host');
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
           });
+          expect(session.stateActorRef.getSnapshot().context.failureReason).toContain('HOST_NOT_PAIRED');
           expect(store.hostWaitOf(chatId)).toBeUndefined();
+          expect(hostCommand).toHaveBeenCalledOnce();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should leave a refused send editable in the outbox when the composer holds new text (H-1)', async () => {
+        const chatId = 'departing_host_refusal_kept';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        hostCommand.mockImplementationOnce(async (command) => {
+          session.draftActorRef.send({ type: 'setDraftText', text: 'a newer thought' });
+          return {
+            commandId: command.commandId,
+            generation: 1,
+            status: 'refused',
+            effect: 'not-applied',
+            code: 'EXTERNAL_AGENT_UNAVAILABLE',
+            message: 'That agent is not available on this host.',
+          };
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('kept'));
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.error).toContain('This message wasn’t sent');
+          });
+          const saved = deps.client.json(chatMessageQueuePath(projectId, chatId)) as {
+            items: ReadonlyArray<Record<string, unknown>>;
+          };
+          expect(saved.items).toHaveLength(1);
+          expect(saved.items[0]).not.toHaveProperty('command');
+          expect(saved.items[0]).not.toHaveProperty('commandPlacement');
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('a newer thought');
           expect(hostCommand).toHaveBeenCalledOnce();
         } finally {
           unadmit();
@@ -10019,5 +10059,89 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
 
     expect(continues()).toHaveLength(1);
     store.release(session.chatId);
+  });
+});
+
+describe('ChatSessionStore — a run this page did not start ends here too (audit A-1)', () => {
+  const openChat = async (chatId: string) => {
+    const store = createStore();
+    const session = store.acquire(chatId, `${chatId}_project`);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    return { store, session };
+  };
+
+  it('should leave observing when one read folds a run’s running and its end', async () => {
+    const { store, session } = await openChat('chat_a1_folded');
+    publishLogRows(store, 'chat_a1_folded', [lifecycleRow(0, 'admitted')]);
+    expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'observing' } })).toBe(true);
+
+    publishLogRows(store, 'chat_a1_folded', [lifecycleRow(1, 'running'), lifecycleRow(2, 'completed')], 1);
+
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'queued' })).toBe(false);
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'running' })).toBe(false);
+    store.release('chat_a1_folded');
+  });
+
+  it('should leave observing when an admitted run is cancelled before it runs', async () => {
+    const { store, session } = await openChat('chat_a1_cancelled');
+    publishLogRows(store, 'chat_a1_cancelled', [lifecycleRow(0, 'admitted')]);
+
+    publishLogRows(store, 'chat_a1_cancelled', [lifecycleRow(1, 'cancelled')], 1);
+
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'queued' })).toBe(false);
+    store.release('chat_a1_cancelled');
+  });
+
+  it('should stop running when one read ends the presented run and a whole later one', async () => {
+    const { store, session } = await openChat('chat_a1_later');
+    publishLogRows(store, 'chat_a1_later', [lifecycleRow(0, 'admitted', 'run_1'), lifecycleRow(1, 'running', 'run_1')]);
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'running' })).toBe(true);
+
+    publishLogRows(
+      store,
+      'chat_a1_later',
+      [
+        lifecycleRow(2, 'completed', 'run_1'),
+        lifecycleRow(3, 'admitted', 'run_2'),
+        lifecycleRow(4, 'running', 'run_2'),
+        lifecycleRow(5, 'completed', 'run_2'),
+      ],
+      2,
+    );
+
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'running' })).toBe(false);
+    store.release('chat_a1_later');
+  });
+
+  it('should admit a held gesture once the other tab’s run that interrupted its admission ends', async () => {
+    const { store, session } = await openChat('chat_a1_held');
+    const admitted = vi.fn();
+    const unpublish = publishChatTurnAdmission('chat_a1_held', async (gesture, signal) => {
+      admitted(gesture.kind);
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          reject(new Error('aborted'));
+        });
+      });
+    });
+    try {
+      void store.requestTurn('chat_a1_held', { kind: 'regenerate' });
+      await vi.waitFor(() => {
+        expect(admitted).toHaveBeenCalledOnce();
+      });
+      publishLogRows(store, 'chat_a1_held', [lifecycleRow(0, 'admitted', 'run_other')]);
+      expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'observing' } })).toBe(true);
+
+      publishLogRows(store, 'chat_a1_held', [lifecycleRow(1, 'cancelled', 'run_other')], 1);
+
+      await vi.waitFor(() => {
+        expect(admitted).toHaveBeenCalledTimes(2);
+      });
+    } finally {
+      unpublish();
+      store.release('chat_a1_held');
+    }
   });
 });

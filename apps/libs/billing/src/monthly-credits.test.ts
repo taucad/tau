@@ -26,10 +26,10 @@ const balanceOf = (overrides: Partial<WireCreditBalance>): WireCreditBalance => 
 });
 
 describe('monthlyCreditsFromBalance', () => {
-  it('should meter unheld plan credits against the Pro allotment and ignore purchased and promotional credits', () => {
+  it('should meter plan credits against the Pro allotment, ignoring holds and purchased and promotional credits', () => {
     const monthly = monthlyCreditsFromBalance(
       balanceOf({
-        planGrantCreditAtoms: credits(1500),
+        planGrantCreditAtoms: credits(1400),
         planHeldCreditAtoms: credits(100),
         purchasedCreditAtoms: credits(900),
         promoGrantCreditAtoms: credits(100),

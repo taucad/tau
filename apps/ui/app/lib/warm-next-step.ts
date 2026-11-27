@@ -128,3 +128,43 @@ export function scheduleNextStepWarm({
     void warmQuietly(warm, routeClass.warms, routeClass.id);
   }, host);
 }
+
+const warmSendFromManifest = async (target: string): Promise<unknown> => {
+  const { warmSendTier } = await loadCode(async () => {
+    const { warmSendTier } = await import('#lib/warm-route-class.js');
+    return { warmSendTier };
+  });
+  return warmSendTier({ target });
+};
+
+/** Classes whose send tier this document has already asked for. */
+const sendWarmed = new Set<string>();
+
+/**
+ * Prefetch what a send that opens `target` fetches after Enter, once per document, when a composer that sends there
+ * is first typed in (WP-12 step 2). Nothing under Save-Data, and a failure warms nothing: the send loads as before.
+ *
+ * @param target - The class the send opens (`project` from Home).
+ * @param options - The warming step (the warm manifest's send tier by default) and the window's navigator.
+ */
+export function warmSendOnIntent(
+  target: string,
+  {
+    warm = warmSendFromManifest,
+    navigator = globalThis.navigator,
+  }: Readonly<{ warm?: (target: string) => Promise<unknown>; navigator?: unknown }> = {},
+): void {
+  if (sendWarmed.has(target) || prefersReducedData(navigator)) {
+    return;
+  }
+  sendWarmed.add(target);
+  const run = async (): Promise<void> => {
+    try {
+      await warm(target);
+    } catch {
+      // Warming is optional.
+    }
+  };
+  // async-iife: bootstrap -- an input handler cannot await; this optional warm-up owns its failure.
+  void run();
+}

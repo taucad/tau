@@ -203,7 +203,7 @@ const anthropicCacheWrites = (
  *   (`billable-stop-charge.ts`); without it a stop settles absorbed at zero.
  * @returns The collector.
  */
-// eslint-disable-next-line max-params -- the stop pricing is optional, so every existing caller keeps its three arguments
+// oxlint-disable-next-line max-params -- the stop pricing is optional, so every existing caller keeps its three arguments
 export const createBillableModelEvidenceCollector = (
   wire: BillableProviderWire,
   expectedDimensions: ReadonlySet<string>,

@@ -23,14 +23,14 @@ export const estimatedOutputTokensField = 'estimatedOutputTokens';
 /** Characters per output token for the stop estimate; English prose runs about four, code fewer, so this errs low. */
 const charactersPerToken = 4;
 
-type Record_ = Readonly<Record<string, unknown>>;
+type JsonObject = Readonly<Record<string, unknown>>;
 
-const isRecord = (value: unknown): value is Record_ =>
+const isRecord = (value: unknown): value is JsonObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const textLength = (value: unknown): number => (typeof value === 'string' ? value.length : 0);
 
-const anthropicCharacters = (event: Record_): number => {
+const anthropicCharacters = (event: JsonObject): number => {
   if (event['type'] !== 'content_block_delta' || !isRecord(event['delta'])) {
     return 0;
   }
@@ -38,10 +38,10 @@ const anthropicCharacters = (event: Record_): number => {
   return textLength(delta['text']) + textLength(delta['thinking']) + textLength(delta['partial_json']);
 };
 
-const responsesCharacters = (event: Record_): number =>
+const responsesCharacters = (event: JsonObject): number =>
   typeof event['type'] === 'string' && event['type'].endsWith('.delta') ? textLength(event['delta']) : 0;
 
-const completionsCharacters = (event: Record_): number => {
+const completionsCharacters = (event: JsonObject): number => {
   const { choices } = event;
   if (!Array.isArray(choices)) {
     return 0;

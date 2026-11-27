@@ -35,13 +35,15 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../..', import.meta.url))] },
   },
   /* `isomorphic-git` and its `buffer`: RM-A22's worker; the kernel worker's dependencies, which a project host's
-   * runtime client loads. Each found late is optimised mid-run, and the reload that follows flakes the suite. */
+   * runtime client loads, and since WP-12 step 7 an admitted turn warms that runtime, so its image and import codecs
+   * load too. Each found late is optimised mid-run, and the reload that follows flakes the suite. */
   optimizeDeps: {
     include: [
       '@taucad/gltf > draco3dgltf',
       'buffer',
       '@taucad/revisions > isomorphic-git',
       '@taucad/smlib > @classcad/smlibwasm',
+      '@taucad/smlib > @classcad/smlibwasm/kernel',
       '@jscad/modeling',
       '@taucad/kcl-wasm-lib',
       '@taulabs/openrscad-engine',
@@ -50,6 +52,10 @@ export default defineConfig({
       'esbuild',
       'esbuild-wasm',
       '@taucad/assimp > libassimp',
+      '@taucad/assimp > libassimp/capabilities',
+      '@taucad/cadmpeg > cadmpeg-ts/core',
+      '@taucad/cadmpeg > cadmpeg-ts/digests',
+      '@taucad/heif > libheif-js/libheif-wasm/libheif.js',
       'libcascade/multi/init',
       'libcascade/single/init',
       'manifold-3d',
@@ -61,7 +67,19 @@ export default defineConfig({
       'manifold-3d/lib/scene-builder.js',
       'manifold-3d/lib/wasm.js',
       'manifold-3d/manifoldCAD',
+      '@taucad/image > @jsquash/avif/codec/dec/avif_dec.js',
+      '@taucad/image > @jsquash/jpeg/codec/dec/mozjpeg_dec.js',
+      '@taucad/image > @jsquash/jpeg/codec/enc/mozjpeg_enc.js',
+      '@taucad/image > @jsquash/jpeg/meta.js',
+      '@taucad/image > @jsquash/png/codec/pkg/squoosh_png.js',
+      '@taucad/image > @jsquash/resize/lib/resize/pkg/squoosh_resize.js',
+      '@taucad/image > @jsquash/webp/codec/dec/webp_dec.js',
+      '@taucad/image > @jsquash/webp/codec/enc/webp_enc.js',
+      '@taucad/image > @jsquash/webp/meta.js',
+      '@taucad/image > jpeg-js',
       '@taucad/image > nanoraster/options',
+      '@taucad/image > omggif',
+      '@taucad/image > utif2',
       '@taucad/brep > occt-import-js',
       '@taucad/picovoxel > picovoxel',
       '@taucad/picovoxel > picovoxel/latticelibrary',

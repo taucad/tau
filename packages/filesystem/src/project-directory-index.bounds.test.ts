@@ -130,3 +130,134 @@ describe('a root past the discovery index bounds (A5, S14)', () => {
     expect(index.retainedBytes).toBeLessThanOrEqual(retainedManifestBudgetBytes);
   });
 });
+
+/* FW4 review m8: a warm pass reads evidence interactively, 16 directories at a time, and unretained directories in the
+ * background lane. */
+describe('a warm pass’s re-reads (FW4 review m8)', () => {
+  const build = async (
+    count: number,
+    budgetBytes?: number,
+  ): Promise<
+    Readonly<{
+      service: WorkspaceFileService;
+      registry: ProviderRegistry;
+      index: ProjectDirectoryIndex<ProjectDirectoryReading>;
+      rootKey: string;
+      names: string[];
+    }>
+  > => {
+    const home = createMockRootHandle();
+    const names = Array.from({ length: count }, (_, at) => `p-${String(at).padStart(3, '0')}`);
+    for (const [at, name] of names.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- Fixture setup.
+      const directory = await home.getDirectoryHandle(name, { create: true });
+      const write = async (handle: typeof directory, file: string, bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
+        const created = await handle.getFileHandle(file, { create: true });
+        const writable = await created.createWritable();
+        await writable.write(bytes);
+        await writable.close();
+      };
+      // oxlint-disable-next-line no-await-in-loop -- Fixture setup.
+      await write(
+        directory,
+        'tau.json',
+        serializeProjectManifest(
+          projectToManifest({ name, description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } }),
+        ),
+      );
+      // oxlint-disable-next-line no-await-in-loop -- Fixture setup.
+      const control = await directory.getDirectoryHandle('.tau', { create: true });
+      // oxlint-disable-next-line no-await-in-loop -- Fixture setup.
+      await write(
+        control,
+        projectIdentityPath.split('/').at(-1)!,
+        serializeProjectIdentity({ version: 1, projectId: projectId(at) }),
+      );
+    }
+    vi.stubGlobal('FileSystemObserver', undefined);
+    vi.stubGlobal('navigator', { storage: { getDirectory: async () => home } });
+    const registry = new ProviderRegistry({ databasePrefix: `tau-rereads-${randomUuid()}` });
+    const memoryKey = `memory:rereads-${randomUuid()}`;
+    const mountTable = new MountTable();
+    mountTable.mount('/', await registry.getProvider({ backend: 'memory', storageRootKey: memoryKey }), {
+      class: 'authored',
+      backend: 'memory',
+      storageRootKey: memoryKey,
+    });
+    const index = new ProjectDirectoryIndex<ProjectDirectoryReading>(budgetBytes === undefined ? {} : { budgetBytes });
+    const service = new WorkspaceFileService({
+      providerRegistry: registry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable,
+      discoveryIndex: index,
+    });
+    disposers.push(() => {
+      service.dispose();
+    });
+    await service.configureProjectRoots({ projects: [], roots: [{ backend: 'opfs' }] });
+    const [status] = await service.getRootStatuses();
+    return { service, registry, index, rootKey: status!.storageRootKey, names };
+  };
+
+  it('should re-read the directories evidence names 16 at a time, interactively', async () => {
+    const { service, registry, index, rootKey, names } = await build(60);
+    await service.listProjectManifests();
+    const home = await registry.getProvider({ backend: 'opfs' });
+    let inFlight = 0;
+    let peak = 0;
+    const readFile = Reflect.get(Object.getPrototypeOf(home) as Record<string, unknown>, 'readFile') as (
+      path: string,
+    ) => Promise<unknown>;
+    /* Defined through the view, on the provider itself, under the view's count. */
+    Object.defineProperty(home, 'readFile', {
+      configurable: true,
+      writable: true,
+      async value(this: unknown, path: string): Promise<unknown> {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+        try {
+          return await readFile.call(this, path);
+        } finally {
+          inFlight -= 1;
+        }
+      },
+    });
+    index.note(rootKey, names);
+    const settle = registry.ioScheduler.beginInteractive('elsewhere');
+
+    try {
+      const pass = await service.listProjectManifests();
+      expect(pass.entries).toHaveLength(60);
+    } finally {
+      settle();
+    }
+    /* Interactive, so not held behind the call in flight elsewhere; 16 directories of two reads each at most. */
+    expect(peak).toBe(32);
+    expect(registry.ioScheduler.backgroundQueued()).toBe(0);
+  });
+
+  it('should re-read the directories it did not retain in the background lane', async () => {
+    /* A budget too small for any reading: every directory is unretained, read again on each pass. */
+    const { service, registry, index, rootKey } = await build(10, 1);
+    await service.listProjectManifests();
+    expect(index.view(rootKey)?.unretained).toHaveLength(10);
+    const settle = registry.ioScheduler.beginInteractive('elsewhere');
+    let queuedPeak = 0;
+    const sample = setInterval(() => {
+      queuedPeak = Math.max(queuedPeak, registry.ioScheduler.backgroundQueued());
+    }, 1);
+
+    try {
+      const pass = await service.listProjectManifests();
+      expect(pass.entries).toHaveLength(10);
+    } finally {
+      clearInterval(sample);
+      settle();
+    }
+    expect(queuedPeak).toBeGreaterThan(0);
+  });
+});

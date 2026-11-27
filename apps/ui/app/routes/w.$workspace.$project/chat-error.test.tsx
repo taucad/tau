@@ -345,6 +345,37 @@ describe('ChatError', () => {
     expect(decisionIdOf(retried.container)).toBe('run:req_2:1');
   });
 
+  /* Staging QA 2026-11-27 (recheck 3): a refused send's turn leaves the transcript, so the chat's failure moves from the
+   * last turn to the slot under an empty transcript, and its alert was added twice, 80 ms apart. One failure is said
+   * once: where it lands again it is a labelled group. */
+  it('should say a failure once when it moves from the last turn to the empty transcript', () => {
+    const state = failedRunState('req_1');
+    vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
+    const Transcript = ({ hasTurn }: { readonly hasTurn: boolean }): ReactNode =>
+      hasTurn ? (
+        <div data-testid='turn'>
+          <ChatErrorBanner />
+        </div>
+      ) : (
+        <section data-testid='empty'>
+          <ChatErrorBanner />
+        </section>
+      );
+    const view = render(<Transcript hasTurn />);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    const title = screen.getByRole('alert').querySelector('p')?.textContent ?? '';
+
+    view.rerender(<Transcript hasTurn={false} />);
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('group', { name: title })).toBeInTheDocument();
+    view.unmount();
+
+    // Gone and back (a later failure in the same words, or the chat reopened): said again.
+    render(<Transcript hasTurn={false} />);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
   it('should identify a refused command by its request (I5)', () => {
     const projection = createActor(chatProjectionLogic).start();
     projection.send({

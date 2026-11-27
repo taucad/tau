@@ -101,4 +101,46 @@ describe('idle runtime client', () => {
     expect(() => runtime.open({ source: { path: 'main.ts' }, watch: false })).toThrow('terminated');
     expect(created).toHaveLength(1);
   });
+  /* WP-12 step 7 (HP-15): warm ahead of a likely use, kept while a chat view is visible. */
+  it('should start and connect the runtime on a warm-up, then idle out as after any use', async () => {
+    const runtime = createIdleRuntimeClient({ create, idleTimeout });
+
+    runtime.warm();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(created).toHaveLength(1);
+    expect(created[0]?.connect).toHaveBeenCalledOnce();
+    runtime.warm();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(created).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(idleTimeout);
+    expect(created[0]?.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('should keep a started runtime while a view is visible, and arm the idle window once none is', async () => {
+    const runtime = createIdleRuntimeClient({ create, idleTimeout, visible: true });
+
+    await runtime.describe({ source: { path: 'main.ts' } });
+    await vi.advanceTimersByTimeAsync(idleTimeout * 10);
+    expect(created[0]?.terminate).not.toHaveBeenCalled();
+    runtime.setVisible(false);
+    await vi.advanceTimersByTimeAsync(idleTimeout - 1);
+    expect(created[0]?.terminate).not.toHaveBeenCalled();
+    runtime.setVisible(true);
+    await vi.advanceTimersByTimeAsync(idleTimeout * 10);
+    expect(created[0]?.terminate).not.toHaveBeenCalled();
+    runtime.setVisible(false);
+    await vi.advanceTimersByTimeAsync(idleTimeout);
+    expect(created[0]?.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('should start nothing for a visible view alone, and nothing once terminated', async () => {
+    const runtime = createIdleRuntimeClient({ create, idleTimeout });
+
+    runtime.setVisible(true);
+    expect(created).toHaveLength(0);
+    runtime.terminate();
+    runtime.warm();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(created).toHaveLength(0);
+  });
 });

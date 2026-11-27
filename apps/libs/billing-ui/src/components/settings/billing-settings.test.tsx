@@ -134,6 +134,29 @@ describe('BillingSettings', () => {
     expect(followPaymentRedirect).toHaveBeenCalled();
   });
 
+  it('opens the website for the portal, automatic reload and cancellation in Tau Desktop, keeping Add credits', async () => {
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <SettingsSectionsProvider sections={createSettingsCatalogue([])}>
+            <BillingSettings webBillingUrl='https://tau.test/?settings=billing' />
+          </SettingsSectionsProvider>
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    const manage = screen.getByRole('link', { name: /manage subscription/i });
+    expect(manage).toHaveAttribute('href', 'https://tau.test/?settings=billing');
+    expect(manage).toHaveAttribute('target', '_blank');
+    for (const title of ['Automatic reload', 'Cancel plan']) {
+      const row = screen.getByRole('group', { name: title });
+      expect(row.querySelector('a')).toHaveAttribute('href', 'https://tau.test/?settings=billing');
+    }
+    await userEvent.click(manage);
+    expect(createPortalAction).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /add credits/i })).toBeInTheDocument();
+  });
+
   it('shows no stale balance when authority is unavailable but keeps Add credits and a retry', async () => {
     useCredits.mockReturnValue({
       availability: { state: 'unavailable' },

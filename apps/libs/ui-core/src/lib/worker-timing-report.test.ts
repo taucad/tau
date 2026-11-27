@@ -1,11 +1,30 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createWorkerTimings, workerTimingSpans } from '@taucad/filesystem';
 import { workerTimingSpanNames } from '@taucad/telemetry';
-import { logWorkerTimings, summarizeLast, withPendingGauge, workerSpanTotals } from '#lib/worker-timing-report.js';
+import {
+  logWorkerTimings,
+  summarizeLast,
+  unreportedWorkerSpans,
+  withPendingGauge,
+  workerSpanTotals,
+} from '#lib/worker-timing-report.js';
 
 describe('worker timing report', () => {
-  it('should name exactly the spans the telemetry ingest accepts', () => {
-    expect([...workerTimingSpans]).toEqual([...workerTimingSpanNames]);
+  it('should name exactly the spans the telemetry ingest accepts, beside the lane waits it does not take', () => {
+    expect([...workerTimingSpans]).toEqual([...workerTimingSpanNames, ...unreportedWorkerSpans]);
+  });
+
+  it('should leave the lane waits out of the totals the ingest receives', async () => {
+    let now = 10_000;
+    const timings = createWorkerTimings({ now: () => now, measure: false });
+    await timings.span('io.wait.background', async () => {
+      now += 40;
+    });
+    await timings.span('apply.hold', async () => {
+      now += 60;
+    });
+
+    expect(workerSpanTotals(summarizeLast(100, timings))).toEqual({ 'apply.hold': 60 });
   });
 
   it('should send each span total over the last window, and leave out spans that never ran', async () => {

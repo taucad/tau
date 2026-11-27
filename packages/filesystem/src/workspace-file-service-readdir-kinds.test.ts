@@ -18,29 +18,32 @@ import { contents } from '#content-ops/contents.js';
 type Counters = Record<'stat' | 'readFile' | 'readdir' | 'readdirEntries' | 'readdirWithStats', number>;
 
 /**
- * Wrap a provider so every routed call is counted.
+ * Count every call on a provider, the ones it makes on itself included: each method is replaced on the provider
+ * itself, where a batch that drives its own primitives through `this` reaches it. Defined through the registry's view,
+ * which forwards to the provider.
  *
- * @param target - Provider to observe.
- * @returns The observing provider and its live counters.
+ * @param target - Provider to observe, as the registry hands it out.
+ * @returns The same provider and its live counters.
  */
 const countingProvider = (target: FileSystemProvider): { provider: FileSystemProvider; counts: Counters } => {
   const counts: Counters = { stat: 0, readFile: 0, readdir: 0, readdirEntries: 0, readdirWithStats: 0 };
-  const provider = new Proxy(target, {
-    get(object, property) {
-      const value = Reflect.get(object, property, object) as unknown;
-      if (typeof value !== 'function') {
-        return value;
-      }
-      return (...args: unknown[]) => {
-        if (property in counts) {
-          counts[property as keyof Counters]++;
-        }
-        /* The proxy is the receiver, so a provider batch that drives its own primitives is counted too. */
-        return (value as (...callArgs: unknown[]) => unknown).apply(provider, args);
-      };
-    },
-  });
-  return { provider, counts };
+  for (const property of Object.keys(counts) as Array<keyof Counters>) {
+    const method = (Object.getOwnPropertyDescriptor(target, property)?.value ??
+      Reflect.get(Object.getPrototypeOf(target) as Record<string, unknown>, property)) as
+      | ((...callArgs: unknown[]) => unknown)
+      | undefined;
+    if (method !== undefined) {
+      Object.defineProperty(target, property, {
+        configurable: true,
+        writable: true,
+        value(this: unknown, ...args: unknown[]): unknown {
+          counts[property]++;
+          return method.apply(this, args);
+        },
+      });
+    }
+  }
+  return { provider: target, counts };
 };
 
 let databaseSequence = 0;

@@ -1,5 +1,6 @@
 import '#styles/global.css';
 import { useSyncExternalStore } from 'react';
+import type { ReactNode } from 'react';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
@@ -101,7 +102,11 @@ vi.doMock('#routes/w.$workspace.$project/chat-message.js', () => ({
   ChatMessage: ({ messageId }: { readonly messageId: string }) => <p className='px-3 py-2 text-sm'>{messageId}</p>,
 }));
 vi.doMock('#routes/w.$workspace.$project/chat-revision-marker.js', () => ({ ChatRevisionMarker: () => null }));
-vi.doMock('#routes/w.$workspace.$project/chat-error.js', () => ({ ChatError: () => null }));
+vi.doMock('#routes/w.$workspace.$project/chat-error.js', () => ({
+  ChatError: () => null,
+  // The lane's failure region adds no box of its own: the row measures the trays.
+  ChatErrorAnnouncement: ({ children }: { readonly children: ReactNode }) => children,
+}));
 // The zero-balance note has its own suite and reads the account's plan; the row measures the trays.
 vi.doMock('#components/chat/chat-credits-notice.js', () => ({ ChatCreditsNotice: () => null }));
 // A settled chat has no activity cue; the row measures the trays, not the activity line.

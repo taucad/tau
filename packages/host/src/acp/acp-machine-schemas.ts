@@ -215,4 +215,5 @@ export const parentEmittedSchemas = {
   turnSettled: z.object({ requestId: z.string(), outcome: json<AcpTurnResult>() }),
   chatClosed: z.object({ requestId: z.string() }),
   refused: z.object({ requestId: z.string(), failure: json<AcpFailure>() }),
+  warmClosed: z.object({ key: z.string(), failure: json<AcpFailure | undefined>() }),
 };

@@ -2623,6 +2623,54 @@ describe('restoring a session a cold start lost', () => {
     await port.closeChat?.('chat-prewarm-late');
   }, 30_000);
 
+  it.each([
+    ['session/new', 'auth-required'],
+    ['session/prompt', 'prompt-auth'],
+  ])(
+    'opens no prewarm for an agent whose %s said it is logged out (WP-18)',
+    async (_operation, mode) => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-prewarm-auth-'));
+      roots.push(workspaceRoot);
+      const frames: AcpWireFrame[] = [];
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- fixture environment variable.
+      const loggedOut: AcpAdapter = { ...fakeAgent, spawnEnv: { TAU_FAKE_AGENT_MODE: mode } };
+      const port = createAcpExternalAgentPort({
+        agents: [loggedOut],
+        workspaceRoot,
+        onFrame: (frame) => frames.push(frame),
+      });
+      const prewarm = async (chatId: string): Promise<void> =>
+        port.prewarm?.({ agentId: 'codex', agent: { kind: 'acp', id: 'codex' }, chatId, history: [] });
+      if (mode === 'auth-required') {
+        /* The prewarm's own open learns it: the adapter refuses `session/new` and the prewarm closes. */
+        await prewarm('chat-auth-a');
+        await until(
+          async () => frames.some((frame) => frame.direction === 'agent->client' && frame.frame.includes('-32000')),
+          'the adapter to refuse the session',
+        );
+        /* The refusal closes the child; its report reaches the facade within a few turns of the event loop. */
+        await new Promise((resolve) => {
+          setTimeout(resolve, 200);
+        });
+      } else {
+        /* `session/new` succeeds, so only a turn learns it: its prompt is refused. */
+        await expect(port.run(durableChat('chat-auth-a').turn('run-auth', 'noask'))).rejects.toMatchObject({
+          code: 'EXTERNAL_AGENT_AUTH_REQUIRED',
+        });
+      }
+      const initialized = sent(frames, 'initialize');
+      await prewarm('chat-auth-b');
+      await new Promise((resolve) => {
+        setTimeout(resolve, 300);
+      });
+      /* No adapter process was started for the later prewarms, and none asked to authenticate. */
+      expect(sent(frames, 'initialize')).toBe(initialized);
+      expect(sent(frames, 'authenticate')).toBe(0);
+      await port.closeChat?.('chat-auth-a');
+    },
+    30_000,
+  );
+
   it('falls back to session/load, and appends nothing it replays', async () => {
     const adapter = await withoutCapabilities({ resume: true });
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-load-'));

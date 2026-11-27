@@ -832,6 +832,19 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
   });
   const sessionsLogic = acpSessionsMachine.provide({ actors: { acpSession: sessionLogic } });
 
+  /* WP-18: agents (by host and id) whose last session open said they are logged out. Prewarm never opens one: a
+   * prewarm is a process the person did not ask for, and only a turn may surface a sign-in. A turn that succeeds
+   * clears the mark. */
+  const signInNeeded = new Set<string>();
+  const warmAgents = new Map<string, string>();
+  const agentMark = (hostId: string | undefined, agentId: string): string => JSON.stringify([hostId ?? null, agentId]);
+  const noteOutcome = (mark: string, failure: AcpFailure | undefined): void => {
+    if (failure?.code === 'EXTERNAL_AGENT_AUTH_REQUIRED') {
+      signInNeeded.add(mark);
+    } else if (failure === undefined) {
+      signInNeeded.delete(mark);
+    }
+  };
   let parent: Actor<typeof acpSessionsMachine> | undefined;
   /* A stopped actor is never restarted (MC-R24): a failed parent is replaced on the next call. */
   const sessions = (): Actor<typeof acpSessionsMachine> => {
@@ -851,6 +864,13 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
     created.on('refused', (event) => {
       settlements.get(event.requestId)?.({ ok: false, failure: event.failure });
       closes.get(event.requestId)?.(event.failure);
+    });
+    created.on('warmClosed', (event) => {
+      const mark = warmAgents.get(event.key);
+      warmAgents.delete(event.key);
+      if (mark !== undefined && event.failure !== undefined) {
+        noteOutcome(mark, event.failure);
+      }
     });
     created.on('chatClosed', (event) => {
       closes.get(event.requestId)?.(undefined);
@@ -887,6 +907,10 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
        * own session, as a turn with another tree always has (EA-R5). */
       const cwd = options.workspaceRoot;
       const { hostId, ownedState, cwdMoved, acpSessionId } = recordedSession(input, cwd);
+      const mark = agentMark(hostId, input.agentId);
+      if (signInNeeded.has(mark)) {
+        return;
+      }
       /* A capability for the chat, bound to a run only when a turn is lent the session (EA-R6). */
       const capability = options.mcp?.mint({ runId: `prewarm:${createId()}`, chatId: input.chatId });
       const sessionMessageId = committedSessionMessageId(input);
@@ -915,6 +939,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
           ...(capability === undefined ? {} : { capabilityToken: capability.token }),
         },
       };
+      warmAgents.set(prewarm.key, mark);
       sessions().send({ type: 'prewarm', prewarm });
     },
     run: async (turn: PlacedExternalAgentTurn) => {
@@ -1034,6 +1059,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
           onAbort();
         }
         const result = await outcome;
+        noteOutcome(agentMark(hostId, turn.agentId), result.ok ? undefined : result.failure);
         if (!result.ok) {
           throw failureError(result.failure);
         }

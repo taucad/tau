@@ -110,7 +110,9 @@ export type AcpSessionsInput = {
 export type AcpSessionsEmitted =
   | { readonly type: 'turnSettled'; readonly requestId: string; readonly outcome: AcpTurnResult }
   | { readonly type: 'chatClosed'; readonly requestId: string }
-  | { readonly type: 'refused'; readonly requestId: string; readonly failure: AcpFailure };
+  | { readonly type: 'refused'; readonly requestId: string; readonly failure: AcpFailure }
+  /** A prewarm closed before any turn was lent it, and why (WP-18: the facade stops prewarming a logged-out agent). */
+  | { readonly type: 'warmClosed'; readonly key: string; readonly failure: AcpFailure | undefined };
 
 type Slots = Readonly<Record<string, AcpSlot>>;
 type Enqueue = EnqueueObject<AcpSessionsEvent, AcpSessionsEmitted>;
@@ -454,6 +456,9 @@ export const acpSessionsMachine = machineDefinition.createMachine({
           if (slot.status === 'opening' || slot.status === 'lent') {
             /* Defensive: the child always ends its turn first. */
             settled(enq, slot.requestId, { ok: false, failure: event.failure ?? failed });
+          }
+          if (slot.status === 'warming' || (slot.status === 'resting' && slot.warm !== undefined)) {
+            enq.emit({ type: 'warmClosed', key: event.key, failure: event.failure });
           }
           enq.cancel(idleId(event.key));
           enq.stop(slot.ref);

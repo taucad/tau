@@ -198,6 +198,29 @@ describe('acpSessions prewarm (WP-18)', () => {
     expect(emitted).toEqual([]);
   });
 
+  it('reports a prewarm that closes before a turn is lent it, with its failure, and no adopted one', () => {
+    const { actor, emitted } = start(2);
+    const loggedOut = { code: 'EXTERNAL_AGENT_AUTH_REQUIRED', message: 'codex is not logged in.' };
+    actor.send({ type: 'prewarm', prewarm: prewarm('a') });
+    actor.send({ type: 'closed', key: 'fake:a', failure: loggedOut });
+    expect(emitted).toEqual([{ type: 'warmClosed', key: 'fake:a', failure: loggedOut }]);
+    expect(actor.getSnapshot().context.slots).toEqual({});
+
+    /* An adopted prewarm is a turn's session: its close reports nothing more. */
+    actor.send({ type: 'prewarm', prewarm: prewarm('b') });
+    actor.send({ type: 'opened', key: 'fake:b' });
+    actor.send({ type: 'acquire', acquire: acquire('b', 'run-b:0') });
+    actor.send({
+      type: 'turnEnded',
+      key: 'fake:b',
+      requestId: 'run-b:0',
+      outcome: { ok: true, stopReason: 'end_turn' },
+      resting: true,
+    });
+    actor.send({ type: 'closed', key: 'fake:b', failure: undefined });
+    expect(emitted.filter((event) => event.type === 'warmClosed')).toHaveLength(1);
+  });
+
   it('lends the turn that arrives while the prewarm opens, and once it is open', () => {
     const { actor, children, emitted, sent } = start(2);
     actor.send({ type: 'prewarm', prewarm: prewarm('a') });

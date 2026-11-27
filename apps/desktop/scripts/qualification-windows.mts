@@ -5,10 +5,14 @@ import { createReadStream } from 'node:fs';
 import { lstat, mkdtemp, readFile, readdir, realpath, rm, rmdir, unlink, writeFile, mkdir } from 'node:fs/promises';
 import { setTimeout as wait } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve, win32 } from 'node:path';
 import { extractFile, uncache } from '@electron/asar';
 import { z } from 'zod';
-import { verifyWindowsSignature } from '#main/windows-signature.js';
+import {
+  createWindowsPowerShellEnvironment,
+  verifyWindowsSignature,
+  windowsProductIdentity,
+} from '#main/windows-signature.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Native qualification scripts share one driver contract. */
@@ -70,7 +74,12 @@ const powershell = (script: string, environment: Record<string, string> = {}): u
       '-EncodedCommand',
       Buffer.from(`$ErrorActionPreference='Stop'; ${script}`, 'utf16le').toString('base64'),
     ],
-    { env: { ...process.env, ...environment }, encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024 },
+    {
+      env: { ...createWindowsPowerShellEnvironment(process.env), ...environment },
+      encoding: 'utf8',
+      timeout: 60_000,
+      maxBuffer: 1024 * 1024,
+    },
   );
   if (result.status !== 0) {
     throw new QualificationUnavailable(`Windows observation failed: ${result.stderr || result.error?.message}`);
@@ -128,6 +137,25 @@ if([Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0 -or ![Environment]
     Object.fromEntries([['TAU_Q_RUNNER', runner]]),
   );
   return assertWindowsConsumerHost(value, false);
+};
+
+/**
+ * The run's own per-user install directory, `%LOCALAPPDATA%\Programs\tau-q-<8 hex of the nonce>`: about as long as the
+ * installer's own default (`Tau Staging`). The app ships native addons deep in `app.asar.unpacked`, such as sharp's
+ * (`…\ndarray-pixels\node_modules\sharp\node_modules\@img\sharp-win32-x64\lib`), and the Windows loader cannot
+ * resolve an addon's sibling DLLs from a directory longer than `MAX_PATH`. A longer name than a person's install
+ * would fail those addons on the runner alone (`ERR_DLOPEN_FAILED`), so the row would not qualify what ships.
+ *
+ * @param localAppData - `%LOCALAPPDATA%`.
+ * @param nonce - The run's nonce, a UUID.
+ * @returns The absolute install directory.
+ */
+export const windowsQualificationInstallationPath = (localAppData: string, nonce: string): string => {
+  const suffix = /^[\da-f]{8}/iu.exec(nonce)?.[0];
+  if (!win32.isAbsolute(localAppData) || suffix === undefined) {
+    throw new Error('Windows qualification needs an absolute LOCALAPPDATA and a UUID nonce');
+  }
+  return win32.join(localAppData, 'Programs', `tau-q-${suffix.toLowerCase()}`);
 };
 /** Admit an absent native-selected destination, including an absent Programs root, without creating it. */
 export const admitWindowsConsumerDestination = async (programs: string, retained: boolean): Promise<string> => {
@@ -345,8 +373,7 @@ export const createWindowsQualificationDriver = (
     await verifyWindowsSignature({
       path: download.path,
       publisher: options.publisher!,
-      expectedVersion: manifest.version,
-      expectedProductName: 'Tau Staging',
+      ...windowsProductIdentity(manifest, 'installer'),
     });
     const zoneIdentifier = z
       .string()
@@ -443,13 +470,15 @@ $user=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninst
   const lifecycle = createQualificationReinstallGuard();
   let installed = false;
   let active: QualificationCandidate | undefined;
-  const verifyInstalledSignature = async (path: string, version: string, name: string): Promise<void> => {
+  const verifyInstalledSignature = async (
+    path: string,
+    release: Parameters<typeof windowsProductIdentity>[0],
+  ): Promise<void> => {
     if (options.mode === 'release') {
       await verifyWindowsSignature({
         path,
         publisher: options.publisher!,
-        expectedVersion: version,
-        expectedProductName: name,
+        ...windowsProductIdentity(release, 'executable'),
       });
     }
   };
@@ -490,7 +519,7 @@ $user=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninst
       throw new Error('Installed Windows trust/identity differs');
     }
     const name = manifest.channel === 'staging' ? 'Tau Staging' : 'Tau';
-    await verifyInstalledSignature(executablePath, manifest.version, name);
+    await verifyInstalledSignature(executablePath, manifest);
     const scheme = manifest.channel === 'staging' ? 'tau-staging' : 'tau';
     const registration = z
       .object({
@@ -579,8 +608,7 @@ $items=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Unins
         await verifyWindowsSignature({
           path,
           publisher: options.publisher!,
-          expectedVersion: manifest.version,
-          expectedProductName: manifest.channel === 'staging' ? 'Tau Staging' : 'Tau',
+          ...windowsProductIdentity(manifest, 'installer'),
         });
       }
       if (options.cleanHost) {
@@ -607,8 +635,7 @@ $items=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Unins
         await verifyWindowsSignature({
           path,
           publisher: options.publisher!,
-          expectedVersion: manifest.version,
-          expectedProductName: manifest.channel === 'staging' ? 'Tau Staging' : 'Tau',
+          ...windowsProductIdentity(manifest, 'installer'),
         });
       }
       if (options.cleanHost) {

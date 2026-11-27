@@ -1,5 +1,4 @@
-import { createElement } from 'react';
-import { Link2, ShieldCheck } from 'lucide-react';
+import { Link2 } from 'lucide-react';
 import { sharePasswordLimits } from '@taucad/project-core/share-artifact';
 import { createDirectShareUrlFromArchive } from '@taucad/project-core/share-direct';
 import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
@@ -25,15 +24,22 @@ const isDirectShareAnswer = (value: unknown): value is TauViewerDirectShare =>
   typeof fieldOf(value, 'encodedArchive') === 'string' &&
   Array.isArray(fieldOf(value, 'warnings'));
 
-const messageOf = (value: unknown): string | undefined =>
-  typeof value === 'object' && value !== null && typeof (value as { message?: unknown }).message === 'string'
-    ? (value as { message: string }).message
-    : undefined;
-
-const failureMessage = (failure: unknown): string => (failure instanceof Error ? failure.message : String(failure));
+const shareFailed = "Couldn't create the link. Try again.";
 
 /**
- * The desktop's sentence for unresolved dependencies, then any other warning the server gave, in its own words.
+ * The sentence for a refusal from the server: too large has its own, anything else is a failure to try again.
+ *
+ * @param answer - What the tool answered in place of a packed project.
+ * @returns One sentence for the pane.
+ */
+const refusalMessage = (answer: unknown): string =>
+  fieldOf(answer, 'errorCode') === 'SHARE_ARTIFACT_LIMIT'
+    ? 'This project is too large for a direct link.'
+    : shareFailed;
+
+/**
+ * The Tau app's sentence for imported files the link leaves out, then any other warning the server gave, in its own
+ * words.
  *
  * @param warnings - The packed project's warnings.
  * @returns The one warning the pane shows, or `undefined`.
@@ -42,7 +48,11 @@ const describeWarnings = (warnings: TauViewerDirectShare['warnings']): string | 
   const unresolved = warnings.filter(({ code }) => code === 'UNRESOLVED_DEPENDENCY').length;
   const sentences = [
     ...(unresolved > 0
-      ? [`Shared with ${String(unresolved)} unresolved ${unresolved === 1 ? 'dependency' : 'dependencies'}.`]
+      ? [
+          unresolved === 1
+            ? "1 imported file couldn't be found and isn't in the link. The model may not build for people who open it."
+            : `${String(unresolved)} imported files couldn't be found and aren't in the link. The model may not build for people who open it.`,
+        ]
       : []),
     ...warnings.filter(({ code }) => code !== 'UNRESOLVED_DEPENDENCY').map(({ message }) => message),
   ];
@@ -64,28 +74,20 @@ const directMethod = (bridge: HostBridge, model: TauViewerModel): ShareLinkMetho
   id: 'direct',
   label: 'Direct link',
   icon: directIcon,
-  description: 'Create a self-contained link that works without a Tau account or storage.',
-  notice: {
-    icon: createElement(ShieldCheck, { className: 'mt-0.5 size-5 text-primary', 'aria-hidden': true }),
-    title: 'No upload through Tau',
-    text: 'The compressed project stays in the URL. Anyone with the link can open it.',
-  },
+  description: 'The whole project travels in the link, so anyone with the link can open it. Nothing is uploaded.',
   encryption: {
     minBytes: sharePasswordLimits.minBytes,
     maxBytes: sharePasswordLimits.maxBytes,
-    notice: {
-      title: 'Password-encrypted in your browser',
-      text: 'The password can travel in the link or be shared separately. Files remain in memory until download or remix.',
-    },
   },
-  action: { label: 'Copy direct link', icon: directIcon },
-  copiedMessage: 'Direct link copied',
+  /* The link is the project as it is now, so every press packs it again and nothing is held. */
+  shouldRemakeLink: true,
+  action: { label: 'Copy link', icon: directIcon },
   share: async ({ protection, signal }: ShareLinkRequest): Promise<ShareLinkOutcome> => {
     let warning: string | undefined;
     try {
       const answer = await bridge.callTool(appShareLinkTool, { modelId: model.id });
       if (!isDirectShareAnswer(answer)) {
-        return { error: messageOf(answer) ?? 'Tau could not pack this project for a direct link.' };
+        return { error: refusalMessage(answer) };
       }
       warning = describeWarnings(answer.warnings);
       const { url } = await createDirectShareUrlFromArchive({
@@ -95,8 +97,8 @@ const directMethod = (bridge: HostBridge, model: TauViewerModel): ShareLinkMetho
         signal,
       });
       return { url, warning };
-    } catch (error) {
-      return { error: failureMessage(error), warning };
+    } catch {
+      return { error: shareFailed, warning };
     }
   },
 });

@@ -13,6 +13,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   // The observer can still be writing evidence as the test ends: retry the teardown rather than fail on ENOTEMPTY.
   await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
 });
@@ -121,15 +122,15 @@ describe('desktopChatObserver', () => {
       fetch: fetchMock,
     })(noRows);
 
-    /* One read for the summaries' grant and one for the ratings'. */
+    /* One read serves the summaries' grant and the ratings' (chat performance plan WP-02). */
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledOnce();
     });
     /* A refused grant purges the queue files; settle those writes before the directory is removed. */
     await Promise.all([observer.reporter.refresh(), observer.feedback?.refresh()]);
     observer.close();
 
-    for (const [url, init] of fetchMock.mock.calls.slice(0, 2)) {
+    for (const [url, init] of fetchMock.mock.calls) {
       expect(url).toBe('https://api.test/v1/telemetry-purposes?projectId=project-1');
       expect(new Headers(init?.headers).get('authorization')).toBe('Bearer session-token');
     }
@@ -157,7 +158,7 @@ describe('desktopChatObserver', () => {
   });
 });
 
-/** The build id the release workflow's checkout stamps into this bundle (`tauDesktopHostBuild`). */
+/** The build id packaging records and main passes to this utility (`TAU_DESKTOP_HOST_BUILD`). */
 const desktopBuild = '0123456789ab';
 
 /** One ended run of `chat-1` in this host's own rows, recorded after the grant is read. */
@@ -226,7 +227,7 @@ const api = (up: boolean) => {
 
 describe('desktopChatObserver — desktop parity (LW8)', () => {
   it('should report as the desktop build, with a rating plane beside the summaries', async () => {
-    vi.stubGlobal('tauDesktopHostBuild', desktopBuild);
+    vi.stubEnv('TAU_DESKTOP_HOST_BUILD', desktopBuild);
     const { fetchMock, sent } = api(true);
     const observer = desktopChatObserver({
       directory,
@@ -248,8 +249,8 @@ describe('desktopChatObserver — desktop parity (LW8)', () => {
     expect(sent.map(({ hostBuild }) => hostBuild)).toEqual(sent.map(() => desktopBuild));
   });
 
-  it('should report no build for a bundle stamped with none', async () => {
-    vi.stubGlobal('tauDesktopHostBuild', '');
+  it('should report no build for an app packaged with none', async () => {
+    vi.stubEnv('TAU_DESKTOP_HOST_BUILD', '');
     const { fetchMock, sent } = api(true);
     const observer = desktopChatObserver({
       directory,
@@ -271,7 +272,7 @@ describe('desktopChatObserver — desktop parity (LW8)', () => {
   });
 
   it('should queue a rating made in the desktop app in its own file, and send it after a restart', async () => {
-    vi.stubGlobal('tauDesktopHostBuild', desktopBuild);
+    vi.stubEnv('TAU_DESKTOP_HOST_BUILD', desktopBuild);
     const rows = rowsOf(endedRun(Date.now() + 1000));
     const options = {
       directory,

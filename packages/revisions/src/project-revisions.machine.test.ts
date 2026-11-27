@@ -1087,6 +1087,8 @@ describe('projectRevisionsMachine', () => {
         storage: undefined,
         overQuota: [],
         error: undefined,
+        /* The harness has not answered the remotes read: whether a remote is recorded is not known yet (I7). */
+        reading: true,
       },
       /* One row per branch, because one branch is one checkout (A2); the chips
        * are the chats whose turns were placed there (S26, W7). */
@@ -2807,7 +2809,7 @@ describe('projectRevisionsMachine', () => {
 
     expect(selectRevisionStatus(harness.actor.getSnapshot()).sync).toMatchObject({
       state: 'queued',
-      error: 'agent/b waits on your decision; its revisions back up once you choose.',
+      error: 'agent/b is waiting for your decision. It backs up once you choose.',
     });
 
     harness.actor.stop();

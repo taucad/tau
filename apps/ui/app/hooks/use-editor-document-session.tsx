@@ -5,18 +5,21 @@ import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import type { FlushPhase } from '#runtime/environment.js';
 import { useProject } from '#hooks/use-project.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import { readLfsPointer } from '@taucad/revisions';
 import {
   EditorDocumentSession,
   editorConflictRecordsSettled,
   editorTextDebts,
   isRecordingEditorConflict,
-} from '#lib/editor-document-session.js';
+} from '@taucad/editor-ui/lib/editor-document-session';
 import { confirmFlush } from '#workbench-records/record-health.js';
 import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
-import { clearEditorNavigation } from '#lib/editor-navigation-service.js';
-import type { EditorLanguageEnvironment, EditorNavigationTarget } from '#lib/editor-language-environment.js';
+import { clearEditorNavigation } from '@taucad/editor-ui/lib/editor-navigation-service';
+import type {
+  EditorLanguageEnvironment,
+  EditorNavigationTarget,
+} from '@taucad/editor-ui/lib/editor-language-environment';
 import { isVirtualDeclarationPath } from '@taucad/editor-ui/lib/virtual-declarations';
 import { URI } from 'vscode-uri';
 import { assertRootedPath } from '@taucad/utils/path';

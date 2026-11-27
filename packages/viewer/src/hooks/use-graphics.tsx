@@ -133,12 +133,25 @@ const createViewPresentation = (graphicsRef: GraphicsActorRef): Omit<GraphicsCon
 };
 
 /**
+ * The provider's presentation of a view's graphics actor.
+ *
+ * @param graphicsRef - The view's graphics actor, if any.
+ * @returns The presentation, or `undefined` while the view has no actor yet.
+ */
+const presentationOf = (graphicsRef: GraphicsActorRef | undefined): GraphicsContextValue | undefined =>
+  graphicsRef === undefined ? undefined : { graphicsRef, ...createViewPresentation(graphicsRef) };
+
+/**
  * Provider that makes a per-view graphics machine and its capabilities available to all descendants.
  *
  * The view's camera is the graphics actor's child, so a remounted provider finds the camera the person left. The
  * provider builds the native cameras that present it on this mount; they hold no subscription until a canvas's
  * controls adapter connects them, so a discarded render leaves nothing behind. A new `seed.identity` names the entry
  * the view's framing frames.
+ *
+ * A host whose view has no graphics actor yet (`undefined`, such as a project still opening) can render the provider
+ * already, so the content under it keeps its identity when the actor arrives. Until then the provider presents nothing:
+ * the graphics hooks that need the actor throw, and {@link useOptionalGraphics} returns `undefined`.
  * Placed in ChatViewer (and standalone viewers like hero-viewer, converter).
  * @public
  */
@@ -147,17 +160,19 @@ export function GraphicsProvider({
   seed,
   children,
 }: {
-  readonly graphicsRef: GraphicsActorRef;
+  readonly graphicsRef: GraphicsActorRef | undefined;
   readonly seed?: ViewCameraSeed;
   readonly children: React.ReactNode;
 }): React.JSX.Element {
   'use no memo';
 
-  deliverSeedEntry(graphicsRef, seed);
-  let [presentation, setPresentation] = useState(() => ({ graphicsRef, ...createViewPresentation(graphicsRef) }));
-  if (presentation.graphicsRef !== graphicsRef) {
+  if (graphicsRef !== undefined) {
+    deliverSeedEntry(graphicsRef, seed);
+  }
+  let [presentation, setPresentation] = useState(() => presentationOf(graphicsRef));
+  if (presentation?.graphicsRef !== graphicsRef) {
     // A new graphics actor is a new view: present its camera on new native cameras.
-    presentation = { graphicsRef, ...createViewPresentation(graphicsRef) };
+    presentation = presentationOf(graphicsRef);
     setPresentation(presentation);
   }
 
@@ -169,7 +184,7 @@ export function GraphicsProvider({
    */
   const { colorScheme, isHighContrast, accentColor } = useViewerEnvironment();
   useEffect(() => {
-    graphicsRef.send({ type: 'viewerEnvironmentChanged', environment: { colorScheme, isHighContrast, accentColor } });
+    graphicsRef?.send({ type: 'viewerEnvironmentChanged', environment: { colorScheme, isHighContrast, accentColor } });
   }, [accentColor, colorScheme, graphicsRef, isHighContrast]);
 
   return <GraphicsContext.Provider value={presentation}>{children}</GraphicsContext.Provider>;
@@ -187,6 +202,34 @@ export function useGraphics(): GraphicsActorRef {
   }
 
   return context.graphicsRef;
+}
+
+/**
+ * Returns the nearest provider's graphics actor, or `undefined` while that provider has none yet (or outside one), for
+ * content that is laid out before its view's graphics actor exists.
+ *
+ * @returns The graphics actor, if any.
+ * @public
+ */
+export function useOptionalGraphics(): GraphicsActorRef | undefined {
+  return useContext(GraphicsContext)?.graphicsRef;
+}
+
+/**
+ * Selects a value from the nearest per-view graphics machine, or gives `fallback` while the provider has no graphics
+ * actor yet (or outside one). Re-renders when the value changes, and when the actor arrives.
+ *
+ * @param selector - Reads the value from the graphics snapshot.
+ * @param fallback - The value while there is no graphics actor.
+ * @returns The selected value, or `fallback`.
+ * @public
+ */
+export function useOptionalGraphicsSelector<T>(
+  selector: (state: SnapshotFrom<typeof graphicsMachine>) => T,
+  fallback: T,
+): T {
+  const graphicsRef = useOptionalGraphics();
+  return useSelector(graphicsRef, (state) => (state === undefined ? fallback : selector(state)));
 }
 
 /**

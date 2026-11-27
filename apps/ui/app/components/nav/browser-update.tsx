@@ -1,17 +1,12 @@
-import { useEffect, useState } from 'react';
-import { ArrowUpCircle } from 'lucide-react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { ArrowUpCircle, RotateCw } from 'lucide-react';
 import { Topic } from '@taucad/events';
 import { useSidebar } from '@taucad/ui/components/sidebar';
-import {
-  describeSupersession,
-  haveWritesStopped,
-  isReloadOffered,
-  subscribeReloadOffer,
-} from '#filesystem/build-skew.js';
+import { haveWritesStopped, isReloadOffered, subscribeReloadOffer } from '#filesystem/build-skew.js';
 import { UpdateControl } from '#components/nav/update-control.js';
 import { useReloadOffered, useSupersedingBuild } from '#hooks/use-superseding-build.js';
 
-/** Set by {@link BrowserUpdateReveal} when writes stop; the next {@link BrowserUpdate} to look opens its popover. */
+/** Set by {@link BrowserUpdateReveal} when writes stop; the next {@link BrowserUpdate} to look opens its details. */
 let pendingReveal = false;
 const revealTopic = new Topic<void>({ name: 'browser-update-reveal' });
 
@@ -43,10 +38,62 @@ export function BrowserUpdateReveal(): undefined {
   return undefined;
 }
 
-const builtAt = (supersedingBuildId: number, isRolledBack: boolean): string | undefined =>
+const dateFormat = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+});
+
+/**
+ * The date line: when the version the reload switches to was published. The year is left out so the line fits the
+ * sidebar.
+ *
+ * @param supersedingBuildId - The build the reload switches to, a timestamp (`0` when unknown).
+ * @param isRolledBack - Whether that build is older than this one.
+ * @returns The line, or nothing without a build date.
+ */
+export const updateDateLine = (supersedingBuildId: number, isRolledBack: boolean): string | undefined =>
   supersedingBuildId > 0
-    ? `Tau · ${isRolledBack ? 'Built' : 'Updated'} ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(supersedingBuildId)}`
+    ? `Tau · ${isRolledBack ? 'Version from' : 'Updated'} ${dateFormat.format(supersedingBuildId)}`
     : undefined;
+
+/**
+ * The notice's title and detail. Saving stops only when another tab announced a different version
+ * (`#filesystem/build-skew`), and the only work it stops is the project library's discovery pass
+ * (`#runtime/project-library`), so "your project list" is the widest truthful claim. A replaced build may fail to
+ * load parts it has not loaded yet, since the deploy took its files away.
+ *
+ * @param state - Whether this tab stopped saving, and whether the reload goes back to an older version.
+ * @returns The copy for that state.
+ */
+export const updateCopy = ({
+  hasStoppedSaving,
+  isRolledBack,
+}: {
+  readonly hasStoppedSaving: boolean;
+  readonly isRolledBack: boolean;
+}): { readonly title: string; readonly detail: string } => {
+  if (hasStoppedSaving) {
+    return {
+      title: 'Reload needed',
+      detail: isRolledBack
+        ? 'This version of Tau was withdrawn, and this tab has stopped saving changes to your project list. Reload to resume.'
+        : 'A newer Tau is open in another tab, so this tab has stopped saving changes to your project list. Reload to resume.',
+    };
+  }
+  return isRolledBack
+    ? {
+        title: 'Version withdrawn',
+        detail: 'This version of Tau was withdrawn. Reload when you’re ready to switch to the current version.',
+      }
+    : {
+        title: 'Update ready',
+        detail: 'Reload when you’re ready to get the latest version. Until then, some parts of Tau may not load.',
+      };
+};
+
+const serverStopped = (): boolean => false;
 
 /**
  * Browser counterpart of `DesktopUpdate`: a tab whose bundle has been superseded
@@ -58,15 +105,15 @@ const builtAt = (supersedingBuildId: number, isRolledBack: boolean): string | un
  */
 export function BrowserUpdate(): React.JSX.Element | undefined {
   const superseded = useReloadOffered();
+  // The offer topic also fires when writes stop for good, so it drives this too.
+  const hasStoppedSaving = useSyncExternalStore(subscribeReloadOffer, haveWritesStopped, serverStopped);
   const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
   const [open, setOpen] = useState(false);
-  const [revealed, setRevealed] = useState(false);
   useEffect(() => {
-    // Opens the popover for a reveal, including one requested before this control mounted.
+    // Opens the details for a reveal, including one requested before this control mounted.
     const consumeReveal = (): void => {
       if (pendingReveal) {
         pendingReveal = false;
-        setRevealed(true);
         setOpen(true);
       }
     };
@@ -76,15 +123,14 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
   if (!superseded) {
     return undefined;
   }
+  const { title, detail } = updateCopy({ hasStoppedSaving, isRolledBack });
   return (
     <UpdateControl
-      title='Update ready'
-      version={builtAt(supersedingBuildId, isRolledBack)}
-      detail={describeSupersession(supersedingBuildId)}
-      icon={ArrowUpCircle}
-      isProminent
+      title={title}
+      version={updateDateLine(supersedingBuildId, isRolledBack)}
+      detail={detail}
+      icon={isRolledBack ? RotateCw : ArrowUpCircle}
       isOpen={open}
-      shouldFocusOnOpen={!revealed}
       action={{
         label: 'Reload now',
         variant: 'default',
@@ -92,10 +138,7 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
           globalThis.location.reload();
         },
       }}
-      onOpenChange={(next) => {
-        setRevealed(false);
-        setOpen(next);
-      }}
+      onOpenChange={setOpen}
     />
   );
 }

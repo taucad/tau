@@ -8,7 +8,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
-import { ConverterExportPanel, ConverterViewer } from '#routes/convert/route.js';
+import { ConversionWarnings, ConverterExportPanel, ConverterViewer } from '#routes/convert/route.js';
 
 vi.mock('@taucad/viewer/cad/cad-viewer', () => ({
   CadViewer: () => <div role='img' aria-label='Model' />,
@@ -108,5 +108,29 @@ describe('ConverterExportPanel', () => {
     await user.click(toggle);
 
     expect(panel).toHaveClass('max-md:hidden');
+  });
+});
+
+describe('ConversionWarnings', () => {
+  it('should list every warning behind a count that says data did not carry over', async () => {
+    const user = userEvent.setup();
+    render(
+      <ConversionWarnings messages={['Sketches were not imported', 'Sketches were not imported', 'PMI omitted']} />,
+    );
+
+    const summary = screen.getByText("3 warnings: some of the file's data didn't carry over");
+    await user.click(summary);
+
+    expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      'Sketches were not imported',
+      'Sketches were not imported',
+      'PMI omitted',
+    ]);
+  });
+
+  it('should render nothing when the file carried over whole', () => {
+    const { container } = render(<ConversionWarnings messages={[]} />);
+
+    expect(container).toBeEmptyDOMElement();
   });
 });

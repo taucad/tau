@@ -17,9 +17,11 @@ import type { TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { evaluatePose, resolveMechanismComponents, sampleAnimation } from '@taucad/kinematics';
+import { createHandleEpochs } from '#build-epochs.js';
 import { offersFor, replicadKernel } from '#replicad.kernel.js';
 import { normalizeRenderShapes } from '#utils/render-output.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
+import type { TopoDS_Shape } from 'replicad-opencascadejs';
 import {
   assertRenderingSuccess,
   createMockKernelRuntime,
@@ -3480,11 +3482,12 @@ describe('OC API Call Tracing', () => {
       prototypeCount: 1,
       instanceCount: 3,
       eligibleInstanceCount: 3,
-      missedContentHashGroups: 0,
     });
+    // Detection reads partner keys only: no BRep content hash reaches telemetry.
+    expect(detectSpan.detail).not.toHaveProperty('missedContentHashGroups');
     expect(faceSpans).toHaveLength(1);
+    expect(faceSpans[0]!.detail).not.toHaveProperty('prototypeHash');
     expect(faceSpans[0]!.detail).toMatchObject({
-      prototypeHash: expect.stringMatching(/^[\da-f]{64}$/),
       partnerKey: expect.any(String),
       instanceCount: 3,
       shapeNames: 'shaft-0,shaft-1,shaft-2',
@@ -4704,7 +4707,7 @@ describe('serializeNativeHandle', () => {
     const restored = replicadDefinition.deserializeHandle!(
       { serialized: structuredClone(snapshot) },
       createMockKernelRuntime(),
-      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad }, epochs: createHandleEpochs({ ...replicad }) }),
     );
 
     expect(snapshot.mechanism).toEqual(mechanism);
@@ -4726,7 +4729,7 @@ describe('serializeNativeHandle', () => {
     const restored = replicadDefinition.deserializeHandle!(
       { serialized: structuredClone(snapshot) },
       createMockKernelRuntime(),
-      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad }, epochs: createHandleEpochs({ ...replicad }) }),
     );
     const [entry] = restored.shapes;
     try {
@@ -4763,6 +4766,53 @@ describe('serializeNativeHandle', () => {
     }
   }, 30_000);
 
+  it('should snapshot a displayed shape without changing it, in the bytes of a shape never meshed (E10)', async () => {
+    const replicad = await import('replicad');
+    const oc = replicad.getOC();
+    /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
+    const triangulatedFaces = (shape: { wrapped: TopoDS_Shape }): number => {
+      let count = 0;
+      const explorer = new oc.TopExp_Explorer(shape.wrapped, oc.TopAbs_ShapeEnum.TopAbs_FACE);
+      try {
+        while (explorer.More()) {
+          const location = new oc.TopLoc_Location();
+          const triangulation = oc.BRep_Tool.Triangulation(oc.TopoDS.Face(explorer.Current()), location, 0);
+          // The binding returns null for a face without a triangulation.
+          // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- typed non-null, null at runtime
+          if (triangulation !== null && !triangulation.isNull()) {
+            count++;
+          }
+          location.delete();
+          explorer.Next();
+        }
+      } finally {
+        explorer.delete();
+      }
+      return count;
+    };
+    /* oxlint-enable new-cap */
+    const displayed = replicad.makeCylinder(10, 20).fillet(2);
+    const fresh = replicad.makeCylinder(10, 20).fillet(2);
+    try {
+      displayed.mesh({ tolerance: 0.1, angularTolerance: 0.3 });
+      const meshedFaces = triangulatedFaces(displayed);
+      expect(meshedFaces).toBe(displayed.faces.length);
+
+      const ofDisplayed = await serializeHandle(normalizeRenderShapes({ shape: displayed }));
+      const ofFresh = await serializeHandle(normalizeRenderShapes({ shape: fresh }));
+      const [snapshotOfDisplayed] = ofDisplayed.shapes;
+      const [snapshotOfFresh] = ofFresh.shapes;
+
+      // The displayed shape keeps its display mesh: the snapshot reads it and cleans nothing in place.
+      expect(triangulatedFaces(displayed)).toBe(meshedFaces);
+      expect(triangulatedFaces(fresh)).toBe(0);
+      expect(snapshotOfDisplayed).toStrictEqual(snapshotOfFresh);
+    } finally {
+      displayed.delete();
+      fresh.delete();
+    }
+  }, 30_000);
+
   it('should snapshot a drawing as its own serialisation and restore it as a drawing', async () => {
     const replicad = await import('replicad');
     const drawing = replicad.drawCircle(5);
@@ -4772,7 +4822,7 @@ describe('serializeNativeHandle', () => {
     const restored = replicadDefinition.deserializeHandle!(
       { serialized: structuredClone(snapshot) },
       createMockKernelRuntime(),
-      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad }, epochs: createHandleEpochs({ ...replicad }) }),
     );
 
     expect(snapshot.shapes[0]).toMatchObject({ drawing: drawing.serialize() });

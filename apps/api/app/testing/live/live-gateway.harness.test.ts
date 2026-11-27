@@ -5,7 +5,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { requestedMaxTokens } from '@taucad/agent-host';
 import type { AgentSession } from '@taucad/agent-host';
 import { createNodeEventLog } from '@taucad/agent-host/node';
@@ -127,5 +127,84 @@ describe('live prompt vocabulary', () => {
       await session.close();
     }
     expect(gatewayRequests - before).toBe(1);
+  });
+});
+
+/**
+ * Hermetic guard on `TAU_LIVE_EFFORT`: an effort study is only evidence when the level it names is the one the
+ * provider receives, so this reads the body the gateway is sent for one Vertex and one Anthropic row.
+ */
+describe('live effort override', () => {
+  const bodies: string[] = [];
+  let gateway: Server | undefined;
+  let baseUrl = '';
+  let root = '';
+
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), 'tau-api-live-effort-'));
+    const server = createServer((request, response) => {
+      let body = '';
+      request.setEncoding('utf8');
+      request.on('data', (chunk: string) => {
+        body += chunk;
+      });
+      request.on('end', () => {
+        bodies.push(body);
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ code: 'UPSTREAM_REJECTED', message: 'Hermetic gateway.' }));
+      });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    gateway = server;
+    baseUrl = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+  });
+
+  afterEach(() => {
+    delete process.env['TAU_LIVE_EFFORT'];
+  });
+
+  afterAll(async () => {
+    if (gateway) {
+      gateway.closeAllConnections();
+      gateway.close();
+      await once(gateway, 'close');
+    }
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const sentBody = async (modelId: string): Promise<string> => {
+    const chatId = `effort-${String(bodies.length)}-${modelId}`;
+    const session = await createLiveSession({
+      gateway: { baseUrl, bearer: 'hermetic', close: async () => undefined },
+      chatId,
+      runId: `${chatId}-run-1`,
+      leaderEpoch: `${chatId}-epoch-1`,
+      systemPrompt: 'Hermetic live effort check.',
+      model: liveSessionModel(modelId),
+      toolRegistry: createLiveToolRegistry({}),
+      eventLog: await createNodeEventLog({ filePath: join(root, chatId, 'events.jsonl'), access: 'write' }),
+    });
+    const before = bodies.length;
+    try {
+      await session.prompt({ id: `${chatId}-user-1`, role: 'user', content: 'Say hello.' });
+    } finally {
+      await session.close();
+    }
+    return bodies.slice(before).join('\n');
+  };
+
+  it('should send the Vertex thinking level the variable names', async () => {
+    process.env['TAU_LIVE_EFFORT'] = 'high';
+    expect(await sentBody('google-gemini-4-hydrogen')).toContain('"thinking_level":"HIGH"');
+  });
+
+  it('should send the Anthropic effort the variable names', async () => {
+    process.env['TAU_LIVE_EFFORT'] = 'high';
+    expect(await sentBody('anthropic-claude-opus-5.5')).toMatch(/"output_config":\{"effort":"high"\}/u);
+  });
+
+  it('should keep the catalog effort when the variable is unset', async () => {
+    expect(await sentBody('google-gemini-4-hydrogen')).toContain('"thinking_level":"MEDIUM"');
   });
 });

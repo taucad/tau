@@ -566,6 +566,7 @@ CoreWriters == Workers \cup {Follower}
 Core == INSTANCE LogFence WITH
     Writers <- CoreWriters,
     Conditional <- (Fence \notin {"mint", "lazynocas"}),
+    MaxBatch <- 2,
     log <- [i \in 1..Len(log) |-> [e |-> log[i].e, w |-> log[i].w]],
     vlen <- [w \in CoreWriters |-> IF w = Follower THEN 0 ELSE vlen[w]],
     mine <- [w \in CoreWriters |-> IF w = Follower THEN 0 ELSE mine[w]],

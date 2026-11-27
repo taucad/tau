@@ -129,11 +129,11 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ setChatOpen: mockSetChatOpen }),
 }));
 
-vi.mock('#components/files/file-link.js', () => ({
+vi.mock('@taucad/files-ui/components/files/file-link', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 
-vi.mock('#components/markdown/markdown-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/markdown/markdown-viewer', () => ({
   MarkdownViewer: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 
@@ -219,6 +219,7 @@ beforeEach(() => {
   mockHasCadActor = true;
   mockLatestGeometryOutcome = undefined;
   mockCadTags = new Set();
+  mockCadSend.mockClear();
 });
 
 describe('ViewerIssues — canonical issue selection', () => {
@@ -349,6 +350,51 @@ describe('ViewerIssues — disclosure', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Saved view “drawing” is unavailable');
     fireEvent.click(screen.getByRole('button', { name: 'Use default view' }));
     expect(onAct).toHaveBeenCalledOnce();
+  });
+
+  it('offers a retry for an engine the host could not deliver, and renders again on it', () => {
+    const refused: KernelIssue = {
+      message: 'cadmpeg could not load the sldprt engine from dependencies.taucad.dev: the host could not be reached.',
+      code: 'KERNEL_BINDING_FAILED',
+      type: 'kernel',
+      severity: 'error',
+      details: { producer: 'cadmpeg', engineFailure: 'unreachable', format: 'sldprt', host: 'dependencies.taucad.dev' },
+    };
+    mockKernelIssues = new Map([['main.scad', [refused]]]);
+    mockLatestGeometryOutcome = 'failure';
+    try {
+      render(<ViewerIssuesHost />);
+
+      expect(screen.getByRole('alert')).toHaveTextContent('Retry when dependencies.taucad.dev is reachable');
+      expect(screen.getByText(refused.message)).toBeInTheDocument();
+      expect(issuesSegment()).toHaveAccessibleName(/^Build failed\./);
+      expect(mockCadSend).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      expect(mockCadSend).toHaveBeenCalledExactlyOnceWith({ type: 'initializeModel', entryPath: 'main.scad' });
+    } finally {
+      mockLatestGeometryOutcome = undefined;
+    }
+  });
+
+  it('offers no retry while a retry renders, though the refusal stays listed', () => {
+    mockKernelIssues = new Map([
+      [
+        'main.scad',
+        [
+          {
+            message:
+              'cadmpeg could not load the sldprt engine from dependencies.taucad.dev: the host answered HTTP 503.',
+            code: 'KERNEL_BINDING_FAILED',
+            severity: 'error',
+            details: { producer: 'cadmpeg', engineFailure: 'status', status: 503, host: 'dependencies.taucad.dev' },
+          },
+        ],
+      ],
+    ]);
+    mockCadTags = new Set(['cad-loading']);
+    renderOpen();
+
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
   it('downloads a kernel the desktop has not prepared in place of its refusal, then renders again', async () => {

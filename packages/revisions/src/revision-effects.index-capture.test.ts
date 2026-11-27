@@ -96,9 +96,7 @@ const fixture = async (
       resourceQueue: new ResourceQueue(),
       eventBus: new ChangeEventBus(),
     });
-    cleanups.push(() => {
-      service.dispose();
-    });
+    cleanups.push(async () => service.close());
     return service.createRootedFileSystem('/', undefined, options?.raw === true ? { placeholders: 'raw' } : undefined);
   };
   const memory = new MemoryProvider();

@@ -25,9 +25,8 @@ const defaultTitle = 'Tau';
 
 /**
  * Opens `route` and says why it cannot be audited here, if it cannot: a sign-in
- * redirect, or the not-found page of a build that leaves the route out
- * (`apps/ui/app/routes.ts` drops `/usage` unless TAU_CLOUD_ENABLED, and this tier
- * builds the self-host variant).
+ * redirect, or the not-found page `/usage` shows when this tier's API is not funded
+ * (adaptive app deployment mode D8).
  */
 const openRoute = async (route: string, viewport: { width: number; height: number }): Promise<string | undefined> => {
   await target.setViewport(viewport);
@@ -41,7 +40,7 @@ const openRoute = async (route: string, viewport: { width: number; height: numbe
   await target.expectVisible(selectors.getByRole('heading', { level: 1 }), 30_000).catch(() => undefined);
   const { headingOnes } = await readPageSemantics();
   return headingOnes[0] === 'Page not found'
-    ? `${route} is not part of this build (self-host builds omit it).`
+    ? `${route} shows not-found here: this tier's API is not funded.`
     : undefined;
 };
 

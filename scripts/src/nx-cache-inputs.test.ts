@@ -39,7 +39,8 @@ const declaredEnvironment = new Set(
 
 /*
  * Values that change no task output: the cache transport itself, pnpm's install check, the lane
- * name the affected-lane step uses to pick its command, and the
+ * name the affected-lane step uses to pick its command, the shard list the Node floor step reads to pick
+ * its projects (`UNITS`; the floor Node itself reaches the hash through `node --version`), and the
  * S3 conformance credentials, whose suite is switched on by the endpoint and bucket that are
  * declared (hashing credential material into a cache key is avoided on purpose).
  */
@@ -48,6 +49,8 @@ const notTaskInputs = new Set([
   'NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN',
   'pnpm_config_verify_deps_before_run',
   'LANE',
+  'BUILD_TARGETS',
+  'UNITS',
   'TAU_S3_CONFORMANCE_ACCESS_KEY_ID',
   'TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY',
 ]);
@@ -186,7 +189,59 @@ const apiWorkspaceClosure = (tracked: readonly string[]): readonly string[] => {
   return [...seen];
 };
 
+/*
+ * ST-9: a value that changes on every commit makes a task miss the cache on every commit. `ui:build` and
+ * `desktop:build` keyed on `GITHUB_SHA`, `COMMIT_REF` and `git rev-parse HEAD`; both now stamp their build id after
+ * the build (`apps/ui/scripts/stamp-build-release.mts`, `apps/desktop/src/shared/desktop-host-build.ts`).
+ */
+const volatileEnvironment =
+  /^(?:GITHUB_SHA|COMMIT_REF|GITHUB_RUN_ID|GITHUB_RUN_NUMBER|GITHUB_RUN_ATTEMPT|GITHUB_REF|GITHUB_HEAD_REF|BUILD_ID)$/u;
+const volatileCommand = /\bgit\s+(?:rev-parse|log|describe|show)\b|\bdate\b|Date\.now/u;
+
+/** Every `env` and `runtime` input in nx.json and each project.json, with where it is declared. */
+const environmentAndRuntimeInputs = (): ReadonlyArray<{
+  readonly where: string;
+  readonly input: Record<string, string>;
+}> => {
+  const inputsOf = (where: string, inputs: readonly Input[] | undefined) =>
+    (inputs ?? []).flatMap((input) => (typeof input === 'object' ? [{ where, input }] : []));
+  const files = execFileSync('git', ['ls-files', '*project.json'], { cwd: root, encoding: 'utf8' })
+    .split('\n')
+    .filter((file) => file.endsWith('project.json'));
+  return [
+    ...Object.entries(nx.namedInputs).flatMap(([name, inputs]) => inputsOf(`nx.json namedInputs.${name}`, inputs)),
+    ...Object.entries(nx.targetDefaults).flatMap(([name, { inputs }]) =>
+      inputsOf(`nx.json targetDefaults.${name}`, inputs),
+    ),
+    ...files.flatMap((file) => {
+      const { targets, namedInputs } = JSON.parse(read(file)) as {
+        targets?: Record<string, { inputs?: readonly Input[] }>;
+        namedInputs?: Record<string, readonly Input[]>;
+      };
+      return [
+        ...Object.entries(targets ?? {}).flatMap(([target, { inputs }]) => inputsOf(`${file} ${target}`, inputs)),
+        ...Object.entries(namedInputs ?? {}).flatMap(([name, inputs]) =>
+          inputsOf(`${file} namedInputs.${name}`, inputs),
+        ),
+      ];
+    }),
+  ];
+};
+
 describe('nx cache inputs', () => {
+  it('should key no task on a value that changes on every commit', () => {
+    const inputs = environmentAndRuntimeInputs();
+
+    expect(inputs.length).toBeGreaterThan(20);
+    expect(
+      inputs.filter(
+        ({ input }) =>
+          (typeof input['env'] === 'string' && volatileEnvironment.test(input['env'])) ||
+          (typeof input['runtime'] === 'string' && volatileCommand.test(input['runtime'])),
+      ),
+    ).toEqual([]);
+  });
+
   it('should keep workflow files out of sharedGlobals and hash the runner Node version instead', () => {
     const shared = nx.namedInputs['sharedGlobals'] ?? [];
     expect(shared.filter((input) => typeof input === 'string' && input.includes('.github/'))).toEqual([]);
@@ -201,6 +256,18 @@ describe('nx cache inputs', () => {
     const imageNode = /^ARG NODE_VERSION=(\S+)$/mu.exec(read('apps/api/Dockerfile'))?.[1];
     expect(ciNode).toMatch(/^\d+\.\d+\.\d+$/u);
     expect(imageNode).toBe(ciNode);
+  });
+
+  it('should keep every Node base of the API image on bookworm, the release its pinned git packages come from', () => {
+    // From Node 26 the plain `-slim` tag is trixie, so a bare `-slim` base would silently drop the deb12 git pins.
+    const dockerfile = read('apps/api/Dockerfile');
+    const bases = [...dockerfile.matchAll(/^FROM node:(\S+)/gmu)].map(([, image]) => image);
+    expect(bases).toHaveLength(2);
+    for (const image of bases) {
+      expect(image).toMatch(/^\$\{NODE_VERSION\}-bookworm-slim$/u);
+    }
+    expect(/^ARG GIT_VERSION=\S+\+deb12u\d+$/mu.test(dockerfile)).toBe(true);
+    expect(/^ARG GIT_LFS_VERSION=\S+\+deb12u\d+$/mu.test(dockerfile)).toBe(true);
   });
 
   /*
@@ -240,6 +307,19 @@ describe('nx cache inputs', () => {
     expect(excludedFromContext(rules, 'apps/api-e2e/src/health.test.ts')).toBe(true);
     expect(excludedFromContext(rules, 'packages/runtime/dist/index.js')).toBe(true);
     expect(excludedFromContext(rules, 'node_modules/nx/package.json')).toBe(true);
+  });
+
+  /*
+   * A project's quarantine.json (testing policy § 16.3) decides its own test verdict and nothing else: it is an input
+   * of that project's test tasks, so a cached "passed with a quarantined failure" cannot outlive the entry, and it is
+   * out of `production`, so an entry re-runs no dependent's tests and no build.
+   */
+  it("should key a project's quarantine.json into its own test hash only", () => {
+    expect(nx.targetDefaults['test']?.inputs).toEqual(
+      expect.arrayContaining(['default', '{projectRoot}/quarantine.json']),
+    );
+    expect(nx.namedInputs['default']).toContain('{projectRoot}/**/*');
+    expect(nx.namedInputs['production']).toContain('!{projectRoot}/quarantine.json');
   });
 
   it('should declare every environment value ci.yml gives a test task as an input of the test default', () => {

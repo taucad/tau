@@ -68,19 +68,19 @@ describe('direct and Tau share providers', () => {
     );
   });
 
-  it('adapts Tau publication and resolution through the injected transport only', async () => {
-    const publish = vi.fn(async () => ({ publicationId: 'pub_1' }));
+  it('adapts cloud link publication and resolution through the injected transport only', async () => {
+    const publish = vi.fn(async () => ({ shareId: 'shr_1' }));
     const resolve = vi.fn(async () => opened);
     const providerContext = context({ tau: { publish, resolve } });
     await expect(tauShareProvider.publish!({ snapshot }, providerContext)).resolves.toMatchObject({
-      locator: { providerId: 'tau', reference: 'pub_1' },
+      locator: { providerId: 'tau', reference: 'shr_1' },
       secrets: {},
     });
     await expect(
-      tauShareProvider.resolve!({ locator: { providerId: 'tau', reference: 'pub_1' }, secrets: {} }, providerContext),
+      tauShareProvider.resolve!({ locator: { providerId: 'tau', reference: 'shr_1' }, secrets: {} }, providerContext),
     ).resolves.toBe(opened);
     expect(publish).toHaveBeenCalledWith({ snapshot, signal: undefined });
-    expect(resolve).toHaveBeenCalledWith({ publicationId: 'pub_1', signal: undefined });
+    expect(resolve).toHaveBeenCalledWith({ shareId: 'shr_1', signal: undefined });
   });
 
   it('fails closed when Tau authority or a direct secret is missing', async () => {

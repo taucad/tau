@@ -453,7 +453,7 @@ const admitMessage = (code: AdmitCode, checkoutId: string, reason: string): stri
       return `Checkout ${checkoutId} no longer exists in this project, so the agent did not start. Choose another checkout for this chat.`;
     }
     case 'BRANCH_UNAVAILABLE': {
-      return 'This chat works on a branch this device does not have yet, so the agent did not start. Send again once this project has synced, or choose another branch for this chat.';
+      return 'This chat works on a branch this device doesn’t have yet, so the agent didn’t start. Send again once this device has the latest changes, or choose another branch for this chat.';
     }
     case 'CHECKOUT_CONFLICT': {
       return `Checkout ${checkoutId} cannot take this turn: ${reason} Resolve the checkout, then send again.`;

@@ -2,6 +2,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
 import { tauRuntime } from '@taucad/runtime/vite';
+import { testReporters, testRetry } from '@taucad/vitest-ci';
 import { defineConfig } from 'vitest/config';
 import type { ViewerParityNanorasterEntry } from '#scripts/viewer-parity.js';
 import {
@@ -56,7 +57,8 @@ const headed = process.env['PARITY_HEADED'] === '1';
 
 export default defineConfig({
   test: {
-    reporters: ['verbose'],
+    reporters: testReporters('verbose'),
+    retry: testRetry(),
     projects: [
       {
         // The web app's bundling of runtime packages: package-owned WASM such as `@taucad/image`'s resvg.

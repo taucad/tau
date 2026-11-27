@@ -22,6 +22,9 @@ import { existsSync } from 'node:fs';
 import { chmod, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
+
+import { integrityFromHex, unattendedFetchRetry } from '@taucad/archive-core';
+import { fetchVerifiedFile } from '@taucad/archive-core/node';
 import { picogkRuntimeManifestSchema } from '@taucad/picogk';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
@@ -126,33 +129,21 @@ const parseTargets = (): string[] => {
   return selected.length > 0 ? selected : [`${process.platform}-${process.arch}`];
 };
 
+// Retried on the shared unattended schedule, verified against the pin, and renamed into the cache only when it matched.
 const download = async (options: {
   readonly algorithm: 'sha256' | 'sha512';
   readonly expected: string;
   readonly name: string;
   readonly url: string;
 }): Promise<string> => {
-  await mkdir(cacheRoot, { recursive: true });
   const path = resolve(cacheRoot, options.name);
-  await mkdir(resolve(path, '..'), { recursive: true });
-  try {
-    if ((await digest(path, options.algorithm)) === options.expected) {
-      return path;
-    }
-  } catch {
-    // Download below.
-  }
-  const response = await fetch(options.url);
-  if (!response.ok) {
-    throw new Error(`${options.name} download failed with HTTP ${String(response.status)}`);
-  }
-  const temporary = `${path}.${String(process.pid)}.tmp`;
-  await writeFile(temporary, new Uint8Array(await response.arrayBuffer()));
-  if ((await digest(temporary, options.algorithm)) !== options.expected) {
-    await rm(temporary, { force: true });
-    throw new Error(`${options.name} integrity mismatch`);
-  }
-  await rename(temporary, path);
+  await fetchVerifiedFile({
+    url: options.url,
+    path,
+    integrity: integrityFromHex(options.algorithm, options.expected),
+    retry: unattendedFetchRetry,
+    signal: AbortSignal.timeout(30 * 60 * 1000),
+  });
   return path;
 };
 

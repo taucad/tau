@@ -18,7 +18,7 @@ import cookie from '@fastify/cookie';
 import { ZodSerializerInterceptor, ZodValidationPipe } from 'nestjs-zod';
 import { idPrefix, publicationApiCode } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
-import { ProjectShareController } from '@taucad/api-projects/publications/project-share.controller';
+import { ProjectShareController, SharesController } from '@taucad/api-projects/publications/project-share.controller';
 import { PublicationsController } from '@taucad/api-projects/publications/publications.controller';
 import { PublicationsService } from '@taucad/api-projects/publications/publications.service';
 import { ViewerIdentityInterceptor } from '@taucad/api-projects/publications/viewer-identity.interceptor';
@@ -57,19 +57,19 @@ class PublicationsHttpTestAuthGuard implements CanActivate {
 }
 
 @Module({
-  controllers: [PublicationsController, ProjectShareController],
+  controllers: [PublicationsController, ProjectShareController, SharesController],
   providers: [
     Reflector,
     {
       provide: PublicationsService,
       useValue: {
         publishFromRevision: vi.fn(),
-        getPublicationForViewer: vi.fn(),
+        getShareForViewer: vi.fn(),
         getProjectShareEnvelope: vi.fn(),
-        listAccessGrants: vi.fn(),
-        inviteAccess: vi.fn(),
-        revokeAccess: vi.fn(),
-        updateVisibility: vi.fn(),
+        updateProjectShare: vi.fn(),
+        stopProjectShare: vi.fn(),
+        inviteProjectShareAccess: vi.fn(),
+        revokeProjectShareAccess: vi.fn(),
         recordView: vi.fn(),
         resolvePublicationFile: vi.fn(),
         openPublicationFile: vi.fn(),
@@ -109,12 +109,12 @@ describe('Publications HTTP integration', () => {
   let baseUrl: string;
   let publicationService: {
     publishFromRevision: ReturnType<typeof vi.fn>;
-    getPublicationForViewer: ReturnType<typeof vi.fn>;
+    getShareForViewer: ReturnType<typeof vi.fn>;
     getProjectShareEnvelope: ReturnType<typeof vi.fn>;
-    listAccessGrants: ReturnType<typeof vi.fn>;
-    inviteAccess: ReturnType<typeof vi.fn>;
-    revokeAccess: ReturnType<typeof vi.fn>;
-    updateVisibility: ReturnType<typeof vi.fn>;
+    updateProjectShare: ReturnType<typeof vi.fn>;
+    stopProjectShare: ReturnType<typeof vi.fn>;
+    inviteProjectShareAccess: ReturnType<typeof vi.fn>;
+    revokeProjectShareAccess: ReturnType<typeof vi.fn>;
     recordView: ReturnType<typeof vi.fn>;
     resolvePublicationFile: ReturnType<typeof vi.fn>;
     openPublicationFile: ReturnType<typeof vi.fn>;
@@ -122,12 +122,12 @@ describe('Publications HTTP integration', () => {
 
   beforeEach(() => {
     publicationService.publishFromRevision.mockClear();
-    publicationService.getPublicationForViewer.mockClear();
+    publicationService.getShareForViewer.mockClear();
     publicationService.getProjectShareEnvelope.mockClear();
-    publicationService.listAccessGrants.mockClear();
-    publicationService.inviteAccess.mockClear();
-    publicationService.revokeAccess.mockClear();
-    publicationService.updateVisibility.mockClear();
+    publicationService.updateProjectShare.mockClear();
+    publicationService.stopProjectShare.mockClear();
+    publicationService.inviteProjectShareAccess.mockClear();
+    publicationService.revokeProjectShareAccess.mockClear();
     publicationService.recordView.mockClear();
     publicationService.resolvePublicationFile.mockReset();
     publicationService.openPublicationFile.mockReset();
@@ -175,11 +175,13 @@ describe('Publications HTTP integration', () => {
     publicationService.publishFromRevision.mockResolvedValue({
       id: 'pub_integration',
       urls: {
-        view: 'https://app.example/s/tau~pub_integration',
-        share: 'https://app.example/s/tau~pub_integration',
+        view: 'https://app.example/s/tau~shr_integration',
+        share: 'https://app.example/s/tau~shr_integration',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
       },
+      share: { id: 'shr_integration', url: 'https://app.example/s/tau~shr_integration', visibility: 'public' },
+      version: { tag: 'v1' },
       extraLeak: 'must-not-serialize',
     });
 
@@ -194,14 +196,33 @@ describe('Publications HTTP integration', () => {
         entryPath: 'main.ts',
         visibility: 'public',
         title: 'Hello',
+        sharedEmails: ['friend@example.com'],
+        notifyRecipients: true,
       }),
     });
 
     expect(response.status).toBe(201);
     const body = (await response.json()) as Record<string, unknown>;
     expect(body['id']).toBe('pub_integration');
+    expect(body['share']).toEqual({
+      id: 'shr_integration',
+      url: 'https://app.example/s/tau~shr_integration',
+      visibility: 'public',
+    });
+    expect(body['version']).toEqual({ tag: 'v1' });
     expect(body['extraLeak']).toBeUndefined();
-    expect(publicationService.publishFromRevision).toHaveBeenCalled();
+    /* The title and the old invite fields are stripped at the boundary. */
+    expect(publicationService.publishFromRevision).toHaveBeenCalledWith({
+      ownerId: 'user-owner',
+      request: {
+        projectId: 'proj_integration',
+        projectName: 'Integration',
+        tag: 'v1',
+        revisionId: 'a'.repeat(40),
+        entryPath: 'main.ts',
+        visibility: 'public',
+      },
+    });
   });
 
   /*
@@ -220,7 +241,6 @@ describe('Publications HTTP integration', () => {
         projectName: 'Integration',
         entryPath: 'main.ts',
         visibility: 'public',
-        title: 'Hello',
       }),
     );
     form.append('main.ts', new Blob(['export default () => {}']), 'main.ts');
@@ -253,7 +273,6 @@ describe('Publications HTTP integration', () => {
           revisionId: 'a'.repeat(40),
           entryPath: 'main.ts',
           visibility: 'public',
-          title: 'Hello',
         }),
       });
 
@@ -271,7 +290,6 @@ describe('Publications HTTP integration', () => {
         projectName: 'Integration',
         entryPath: 'main.ts',
         visibility: 'public',
-        title: 'Hello',
       }),
     });
 
@@ -295,8 +313,8 @@ describe('Publications HTTP integration', () => {
     expect(publicationService.publishFromRevision).not.toHaveBeenCalled();
   });
 
-  it('GET /v1/publications/:id passes undefined viewer without Authorization', async () => {
-    publicationService.getPublicationForViewer.mockResolvedValue({
+  it('GET /v1/shares/:shareId passes undefined viewer without Authorization', async () => {
+    publicationService.getShareForViewer.mockResolvedValue({
       publication: {
         id: 'pub_view',
         projectId: 'proj',
@@ -321,8 +339,8 @@ describe('Publications HTTP integration', () => {
       },
       viewerRole: 'public',
       urls: {
-        view: 'https://app.example/s/tau~pub_view',
-        share: 'https://app.example/s/tau~pub_view',
+        view: 'https://app.example/s/tau~shr_view',
+        share: 'https://app.example/s/tau~shr_view',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
         manifest: 'https://cdn.example/manifest.json',
@@ -341,7 +359,7 @@ describe('Publications HTTP integration', () => {
       extraLeak: 'strip-me',
     });
 
-    const response = await fetch(`${baseUrl}/v1/publications/pub_view`);
+    const response = await fetch(`${baseUrl}/v1/shares/shr_view`);
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       publication: {
@@ -365,14 +383,14 @@ describe('Publications HTTP integration', () => {
     expect(body.publication['thumbnailKey']).toBeUndefined();
     expect(body.urls['manifest']).toBeUndefined();
 
-    expect(publicationService.getPublicationForViewer).toHaveBeenCalledWith({
-      publicationId: 'pub_view',
+    expect(publicationService.getShareForViewer).toHaveBeenCalledWith({
+      shareId: 'shr_view',
       viewerUserId: undefined,
     });
   });
 
-  it('GET /v1/publications/:id passes viewer id when Authorization is present', async () => {
-    publicationService.getPublicationForViewer.mockResolvedValue({
+  it('GET /v1/shares/:shareId passes viewer id when Authorization is present', async () => {
+    publicationService.getShareForViewer.mockResolvedValue({
       publication: {
         id: 'pub_auth',
         projectId: 'proj',
@@ -394,8 +412,8 @@ describe('Publications HTTP integration', () => {
       },
       viewerRole: 'owner',
       urls: {
-        view: 'https://app.example/s/tau~pub_auth',
-        share: 'https://app.example/s/tau~pub_auth',
+        view: 'https://app.example/s/tau~shr_auth',
+        share: 'https://app.example/s/tau~shr_auth',
         og: 'https://cdn.example/og.png',
         thumbnail: 'https://cdn.example/thumb.webp',
       },
@@ -412,63 +430,58 @@ describe('Publications HTTP integration', () => {
       files: { 'main.ts': 'https://blobs.example/o' },
     });
 
-    const response = await fetch(`${baseUrl}/v1/publications/pub_auth`, {
+    const response = await fetch(`${baseUrl}/v1/shares/shr_auth`, {
       headers: { Authorization: 'Bearer owner-token' },
     });
     expect(response.status).toBe(200);
 
-    expect(publicationService.getPublicationForViewer).toHaveBeenCalledWith({
-      publicationId: 'pub_auth',
+    expect(publicationService.getShareForViewer).toHaveBeenCalledWith({
+      shareId: 'shr_auth',
       viewerUserId: 'user-owner',
     });
   });
 
-  it('GET /v1/publications/:id/access lists owner grants', async () => {
-    publicationService.listAccessGrants.mockResolvedValue({
-      grants: [
-        {
-          id: 'pva_1',
-          publicationId: 'pub_auth',
-          recipientEmail: 'friend@example.com',
-          status: 'active',
-          createdAt: new Date().toISOString(),
-          revokedAt: null,
-          extraLeak: 'strip-me',
-        },
-      ],
-    });
+  it('GET /v1/publications/:id is gone: a cloud link is read at /v1/shares/:shareId', async () => {
+    const response = await fetch(`${baseUrl}/v1/publications/pub_view`);
 
-    const response = await fetch(`${baseUrl}/v1/publications/pub_auth/access`, {
-      headers: { Authorization: 'Bearer owner-token' },
-    });
-
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as { grants: Array<{ id: string; extraLeak?: string }> };
-    expect(body.grants).toHaveLength(1);
-    expect(body.grants[0]?.id).toBe('pva_1');
-    expect(body.grants[0]?.extraLeak).toBeUndefined();
-    expect(publicationService.listAccessGrants).toHaveBeenCalledWith({
-      publicationId: 'pub_auth',
-      ownerId: 'user-owner',
-    });
+    expect(response.status).toBe(404);
+    expect(publicationService.getShareForViewer).not.toHaveBeenCalled();
   });
 
-  it('GET /v1/projects/:projectId/share returns the owner share envelope', async () => {
+  it.each([
+    ['GET', '/v1/publications/pub_auth/access'],
+    ['POST', '/v1/publications/pub_auth/access'],
+    ['DELETE', '/v1/publications/pub_auth/access/sga_1'],
+    ['PATCH', '/v1/publications/pub_auth/visibility'],
+  ])('%s %s no longer exists', async (method, path) => {
+    const hasBody = method === 'POST' || method === 'PATCH';
+    const response = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers: {
+        Authorization: 'Bearer owner-token',
+        ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(hasBody ? { body: JSON.stringify({ visibility: 'public' }) } : {}),
+    });
+
+    expect(response.status).toBe(404);
+  });
+
+  it('GET /v1/projects/:projectId/share returns the owner cloud link envelope', async () => {
     publicationService.getProjectShareEnvelope.mockResolvedValue({
       project: { id: 'proj_share', name: 'Tray', description: null },
-      currentPublication: {
-        id: 'pub_share',
-        tag: 'v1',
-        title: 'Shared tray',
-        description: null,
+      share: {
+        id: 'shr_share',
+        url: 'https://app.example/s/tau~shr_share',
         visibility: 'private',
-        createdAt: '2026-01-02T00:00:00.000Z',
-        urls: { share: 'https://app.example/s/tau~pub_share' },
+        status: 'active',
+        stoppedAt: null,
+        publishedAt: '2026-01-02T00:00:00.000Z',
+        currentVersion: { publicationId: 'pub_share', tag: 'v1', revisionId: 'a'.repeat(40), extraLeak: 'strip-me' },
         access: {
           grants: [
             {
-              id: 'pva_1',
-              publicationId: 'pub_share',
+              id: 'sga_1',
               recipientEmail: 'friend@example.com',
               status: 'active',
               createdAt: '2026-01-03T00:00:00.000Z',
@@ -478,7 +491,7 @@ describe('Publications HTTP integration', () => {
           ],
         },
       },
-      snapshot: { state: 'published-current', lastPublishedAt: '2026-01-02T00:00:00.000Z' },
+      currentPublication: null,
       extraLeak: 'strip-me',
     });
 
@@ -488,12 +501,20 @@ describe('Publications HTTP integration', () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
-      currentPublication: { tag: string; access: { grants: Array<{ id: string; extraLeak?: string }> } };
+      share: {
+        id: string;
+        currentVersion: Record<string, unknown>;
+        access: { grants: Array<{ id: string; extraLeak?: string }> };
+      };
+      currentPublication?: unknown;
       extraLeak?: string;
     };
-    expect(body.currentPublication.access.grants).toHaveLength(1);
-    expect(body.currentPublication.tag).toBe('v1');
-    expect(body.currentPublication.access.grants[0]?.extraLeak).toBeUndefined();
+    expect(body.share.id).toBe('shr_share');
+    expect(body.share.currentVersion).toEqual({ publicationId: 'pub_share', tag: 'v1', revisionId: 'a'.repeat(40) });
+    expect(body.share.access.grants).toHaveLength(1);
+    expect(body.share.access.grants[0]?.extraLeak).toBeUndefined();
+    /* No compatibility fields: the old envelope's keys are not on the wire. */
+    expect(body.currentPublication).toBeUndefined();
     expect(body.extraLeak).toBeUndefined();
     expect(publicationService.getProjectShareEnvelope).toHaveBeenCalledWith({
       projectId: 'proj_share',
@@ -501,44 +522,104 @@ describe('Publications HTTP integration', () => {
     });
   });
 
-  it('POST /v1/publications/:id/access validates and forwards normalized email grants', async () => {
-    publicationService.inviteAccess.mockResolvedValue({
-      id: 'pva_2',
-      publicationId: 'pub_auth',
+  it('PATCH /v1/projects/:projectId/share validates and forwards who can open the link', async () => {
+    publicationService.updateProjectShare.mockResolvedValue({
+      id: 'shr_share',
+      url: 'https://app.example/s/tau~shr_share',
+      visibility: 'public',
+      status: 'active',
+      stoppedAt: null,
+      publishedAt: '2026-01-02T00:00:00.000Z',
+      currentVersion: null,
+      access: { grants: [] },
+    });
+
+    const response = await fetch(`${baseUrl}/v1/projects/proj_share/share`, {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer owner-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visibility: 'public' }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ id: 'shr_share', visibility: 'public' });
+    expect(publicationService.updateProjectShare).toHaveBeenCalledWith({
+      projectId: 'proj_share',
+      ownerId: 'user-owner',
+      visibility: 'public',
+    });
+  });
+
+  it('PATCH /v1/projects/:projectId/share rejects invalid visibility literals', async () => {
+    const response = await fetch(`${baseUrl}/v1/projects/proj_share/share`, {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer owner-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visibility: 'secret' }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(publicationService.updateProjectShare).not.toHaveBeenCalled();
+  });
+
+  it('DELETE /v1/projects/:projectId/share stops sharing with 204', async () => {
+    publicationService.stopProjectShare.mockResolvedValue(undefined);
+
+    const response = await fetch(`${baseUrl}/v1/projects/proj_share/share`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer owner-token' },
+    });
+
+    expect(response.status).toBe(204);
+    expect(publicationService.stopProjectShare).toHaveBeenCalledWith({
+      projectId: 'proj_share',
+      ownerId: 'user-owner',
+    });
+  });
+
+  it('DELETE /v1/projects/:projectId/share needs a signed-in owner', async () => {
+    const response = await fetch(`${baseUrl}/v1/projects/proj_share/share`, { method: 'DELETE' });
+
+    expect(response.status).toBe(403);
+    expect(publicationService.stopProjectShare).not.toHaveBeenCalled();
+  });
+
+  it('POST /v1/projects/:projectId/share/access forwards a normalized address and answers the email outcome', async () => {
+    publicationService.inviteProjectShareAccess.mockResolvedValue({
+      id: 'sga_2',
       recipientEmail: 'team@example.com',
       status: 'active',
       createdAt: new Date().toISOString(),
       revokedAt: null,
+      email: { status: 'skipped', reason: 'email_disabled' },
     });
 
-    const response = await fetch(`${baseUrl}/v1/publications/pub_auth/access`, {
+    const response = await fetch(`${baseUrl}/v1/projects/proj_share/share/access`, {
       method: 'POST',
       headers: { Authorization: 'Bearer owner-token', 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: ' Team@Example.com ', notifyRecipient: true }),
     });
 
     expect(response.status).toBe(201);
-    const body = (await response.json()) as { recipientEmail: string };
+    const body = (await response.json()) as { recipientEmail: string; email: unknown };
     expect(body.recipientEmail).toBe('team@example.com');
-    expect(publicationService.inviteAccess).toHaveBeenCalledWith({
-      publicationId: 'pub_auth',
+    expect(body.email).toEqual({ status: 'skipped', reason: 'email_disabled' });
+    expect(publicationService.inviteProjectShareAccess).toHaveBeenCalledWith({
+      projectId: 'proj_share',
       ownerId: 'user-owner',
       recipientEmail: 'team@example.com',
       notifyRecipient: true,
     });
   });
 
-  it('DELETE /v1/publications/:id/access/:accessId revokes owner grants', async () => {
-    publicationService.revokeAccess.mockResolvedValue({
-      id: 'pva_2',
-      publicationId: 'pub_auth',
+  it('DELETE /v1/projects/:projectId/share/access/:accessId removes an invited address', async () => {
+    publicationService.revokeProjectShareAccess.mockResolvedValue({
+      id: 'sga_2',
       recipientEmail: 'team@example.com',
       status: 'revoked',
       createdAt: new Date().toISOString(),
       revokedAt: new Date().toISOString(),
     });
 
-    const response = await fetch(`${baseUrl}/v1/publications/pub_auth/access/pva_2`, {
+    const response = await fetch(`${baseUrl}/v1/projects/proj_share/share/access/sga_2`, {
       method: 'DELETE',
       headers: { Authorization: 'Bearer owner-token' },
     });
@@ -546,44 +627,11 @@ describe('Publications HTTP integration', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as { status: string };
     expect(body.status).toBe('revoked');
-    expect(publicationService.revokeAccess).toHaveBeenCalledWith({
-      publicationId: 'pub_auth',
+    expect(publicationService.revokeProjectShareAccess).toHaveBeenCalledWith({
+      projectId: 'proj_share',
       ownerId: 'user-owner',
-      accessId: 'pva_2',
+      accessId: 'sga_2',
     });
-  });
-
-  it('PATCH /v1/publications/:id/visibility validates and forwards owner visibility updates', async () => {
-    publicationService.updateVisibility.mockResolvedValue({
-      id: 'pub_auth',
-      visibility: 'public',
-    });
-
-    const response = await fetch(`${baseUrl}/v1/publications/pub_auth/visibility`, {
-      method: 'PATCH',
-      headers: { Authorization: 'Bearer owner-token', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ visibility: 'public' }),
-    });
-
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as { id: string; visibility: string };
-    expect(body).toEqual({ id: 'pub_auth', visibility: 'public' });
-    expect(publicationService.updateVisibility).toHaveBeenCalledWith({
-      publicationId: 'pub_auth',
-      ownerId: 'user-owner',
-      visibility: 'public',
-    });
-  });
-
-  it('PATCH /v1/publications/:id/visibility rejects invalid visibility literals', async () => {
-    const response = await fetch(`${baseUrl}/v1/publications/pub_auth/visibility`, {
-      method: 'PATCH',
-      headers: { Authorization: 'Bearer owner-token', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ visibility: 'secret' }),
-    });
-
-    expect(response.status).toBe(400);
-    expect(publicationService.updateVisibility).not.toHaveBeenCalled();
   });
 
   it('PATCH /v1/publications/:id/views records an anonymous view without issuing a cookie', async () => {
@@ -680,7 +728,7 @@ describe('Publications HTTP integration', () => {
 
   it('GET /v1/publications/:id/files surfaces FORBIDDEN 403 for revoked grantees', async () => {
     publicationService.resolvePublicationFile.mockRejectedValue(
-      new ForbiddenException({ code: publicationApiCode.FORBIDDEN, message: 'Publication is private' }),
+      new ForbiddenException({ code: publicationApiCode.FORBIDDEN, message: 'This link is for invited people only' }),
     );
 
     const response = await fetch(`${baseUrl}/v1/publications/pub_files/files?path=main.ts`, {

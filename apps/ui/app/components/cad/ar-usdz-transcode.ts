@@ -1,5 +1,7 @@
 import { mimeTypes } from '@taucad/types/constants';
 import type { usdzRuntime } from '#runtime/usdz-runtime.definition.js';
+import { loadCode } from '@taucad/ui-core/lib/code-loading';
+import { createModuleWorker } from '@taucad/ui-core/lib/worker-factory';
 
 /** A USDZ conversion that failed or returned something other than one USDZ file. */
 export class UsdzTranscodeError extends Error {}
@@ -16,18 +18,22 @@ export class UsdzTranscodeError extends Error {}
 export async function transcodeGlbToUsdz(glb: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
   const [{ createRuntimeClient }, { webWorkerTransport }, { fromMemoryFs }, { observeRuntimeClient }] =
     await Promise.all([
-      import('@taucad/runtime/client'),
-      import('@taucad/runtime/transport/web'),
-      import('@taucad/runtime/filesystem'),
-      import('#telemetry/runtime-telemetry.js'),
+      loadCode(async () => import('@taucad/runtime/client')),
+      loadCode(async () => import('@taucad/runtime/transport/web')),
+      loadCode(async () => import('@taucad/runtime/filesystem')),
+      loadCode(async () => import('#telemetry/runtime-telemetry.js')),
     ]);
   const client = createRuntimeClient<typeof usdzRuntime>({
     transport: webWorkerTransport({
       createWorker: () =>
-        new Worker(new URL('../../runtime/usdz-runtime.worker.ts', import.meta.url), {
-          name: 'tau-ar-usdz-transcoder-worker',
-          type: 'module',
-        }),
+        createModuleWorker(
+          () =>
+            new Worker(new URL('../../runtime/usdz-runtime.worker.ts', import.meta.url), {
+              name: 'tau-ar-usdz-transcoder-worker',
+              type: 'module',
+            }),
+          { name: 'usdz-runtime' },
+        ),
       fileSystem: fromMemoryFs(),
     }),
   });

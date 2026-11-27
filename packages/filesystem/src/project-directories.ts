@@ -70,7 +70,7 @@ import type {
 } from '#mount-table.js';
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { ResourceQueue } from '#resource-queue.js';
-import type { CrossTabCoordinator, PhysicalAuthority } from '#cross-tab-coordinator.js';
+import type { ChangeNotification, CrossTabCoordinator, PhysicalAuthority } from '#cross-tab-coordinator.js';
 import type { MutationPipeline } from '#mutation-pipeline.js';
 import { isProjectDirectoryPath } from '#mutation-pipeline.js';
 import type { ProjectIndexes } from '#project-index/project-indexes.js';
@@ -91,12 +91,8 @@ import { importFactsPath } from '#importer/facts.js';
 import type { ImportFactsRecord, RecordedImportEntry, StagedImportEntry } from '#importer/facts.js';
 import { isReservedImportPath } from '#importer/path-policy.js';
 import { directoryConcurrency, mapConcurrent } from '#concurrency.js';
-
-/** A provider whose host copies a person's chosen source into it (the desktop node client, W7.4). */
-type HostImportCopier = Readonly<{ copyFromImportGrant: NonNullable<ImportStagingPort['copyHost']> }>;
-
-/** Concurrent `tau.json` probes while scanning a discovery root. */
-const manifestProbeConcurrency = 64;
+import { workerTimings } from '#worker-timings.js';
+import type { ProjectDirectoryIndex } from '#project-directory-index.js';
 
 /** Declaration or generated-identity failure affecting one discovery entry. @public */
 export type ProjectDiscoveryIssue =
@@ -104,6 +100,50 @@ export type ProjectDiscoveryIssue =
   | { readonly code: 'identity-invalid'; readonly message: string }
   | { readonly code: 'identity-unavailable'; readonly message: string }
   | { readonly code: 'identity-conflict'; readonly expectedProjectId: string; readonly actualProjectId: string };
+
+/** What one immediate child directory of a discovery root holds, as far as project identity goes. @public */
+export type ProjectDirectoryReading =
+  | { readonly kind: 'not-a-project' }
+  | {
+      readonly kind: 'identified';
+      readonly projectId: string;
+      readonly manifest: ProjectManifest;
+      readonly issue?: ProjectManifestParseIssue;
+    }
+  | { readonly kind: 'adoptable'; readonly manifest: ProjectManifest; readonly issue: ProjectManifestParseIssue }
+  | { readonly kind: 'invalid'; readonly issue: ProjectDiscoveryIssue };
+
+/** A provider whose host copies a person's chosen source into it (the desktop node client, W7.4). */
+/**
+ * When a discovered project's `tau.json` last changed, or nothing when its provider cannot say: a failed stat or a
+ * synthesised zero leaves the time out rather than inventing one.
+ *
+ * @param provider - The provider of the copy's root, as the scan resolved it.
+ * @param locator - The copy.
+ * @returns The manifest's modification time in milliseconds, when known.
+ */
+const manifestModifiedAt = async (
+  provider: FileSystemProvider | undefined,
+  locator: ProjectLocator,
+): Promise<number | undefined> => {
+  try {
+    const stat = await provider?.stat(`${locator.relativeDirectory}/tau.json`);
+    return stat !== undefined && stat.mtimeMs > 0 ? stat.mtimeMs : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** One exact physical directory: its storage root and its canonical path inside it. */
+type PhysicalDirectory = Readonly<{ storageRootKey: string; providerBasePath: string }>;
+
+type HostImportCopier = Readonly<{ copyFromImportGrant: NonNullable<ImportStagingPort['copyHost']> }>;
+
+/** What the sweep answers for a directory it could not read. */
+const unknownIdentity = '\0unknown';
+
+/** Concurrent `tau.json` probes while scanning a discovery root. */
+const manifestProbeConcurrency = 64;
 
 /** Resolved identity kept separate from the authored declaration. @public */
 export type ResolvedProjectManifest = {
@@ -113,7 +153,18 @@ export type ResolvedProjectManifest = {
 
 /** Read-only verification of an already installed project binding. @public */
 export type ProjectRouteVerification =
-  | { readonly status: 'verified'; readonly project: ResolvedProjectManifest }
+  | {
+      readonly status: 'verified';
+      readonly project: ResolvedProjectManifest;
+      /**
+       * The root of the directory the bytes were read from: the one the route bound when it was read. An authority
+       * older than this field leaves it and `providerBasePath` out, so a caller that needs a particular copy proven
+       * treats their absence as no proof.
+       */
+      readonly storageRootKey?: string;
+      /** That directory under its root, as a discovery locator's `relativeDirectory` names it. */
+      readonly providerBasePath?: string;
+    }
   | { readonly status: 'discovery-required' }
   | { readonly status: 'unavailable' }
   | { readonly status: 'superseded' };
@@ -134,6 +185,8 @@ export type ProjectDiscoveryEntry =
       readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
       readonly issue?: ProjectManifestParseIssue;
+      /** When this copy's `tau.json` last changed; read only while another directory carries the same id. */
+      readonly modifiedAt?: number;
     }
   | {
       readonly status: 'duplicate-id';
@@ -141,6 +194,8 @@ export type ProjectDiscoveryEntry =
       readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
       readonly issue?: ProjectManifestParseIssue;
+      /** When this copy's `tau.json` last changed, so a person can tell the copies apart. */
+      readonly modifiedAt?: number;
     }
   | {
       /**
@@ -293,17 +348,47 @@ export const pendingProjectCommitInputSchema: z.ZodType<CommitPendingProjectDire
 /** The last segment of a root-relative directory, clamped to the manifest's name bound. */
 const basenameOf = (directory: string): string => (directory.split('/').at(-1) ?? directory).slice(0, 200);
 
-/** What one immediate child directory of a discovery root holds, as far as project identity goes. */
-type ProjectDirectoryReading =
-  | { readonly kind: 'not-a-project' }
-  | {
-      readonly kind: 'identified';
-      readonly projectId: string;
-      readonly manifest: ProjectManifest;
-      readonly issue?: ProjectManifestParseIssue;
-    }
-  | { readonly kind: 'adoptable'; readonly manifest: ProjectManifest; readonly issue: ProjectManifestParseIssue }
-  | { readonly kind: 'invalid'; readonly issue: ProjectDiscoveryIssue };
+/** A reading, and whether the bytes read determined it: false for an I/O failure other than a not-found (A2 g). */
+type DirectoryRead = Readonly<{ reading: ProjectDirectoryReading; determined: boolean }>;
+
+/**
+ * Whether no configured root of a discovery carries an id (index-contract review A1). `unknown` when a root was not
+ * available or a read failed with anything but not-found: that proves nothing.
+ *
+ * @public
+ */
+export type ProjectAbsence =
+  | { readonly status: 'absent' }
+  | { readonly status: 'present'; readonly locators: readonly ProjectLocator[] }
+  | { readonly status: 'unknown'; readonly reason: string };
+
+/** What a discovery root's live channels say about how its index is kept current (A3). @public */
+export type DiscoveryRootChannels = Readonly<{
+  /** The root has a snapshot source a poll can walk. */
+  snapshot: boolean;
+  /** A native observer is delivering. */
+  native: boolean;
+  /** The interval between the last two discovery-wide polls, when known. */
+  pollPeriodMilliseconds?: number;
+}>;
+
+/** How long the audit takes to re-read every warm directory once (A4). @public */
+export const discoveryAuditIntervalMilliseconds = 10 * 60_000;
+
+/** A shared root served from the index is complete only inside its freshness window (A3). */
+const freshnessWindow = (channels: DiscoveryRootChannels | undefined): number => {
+  if (channels?.snapshot === true && channels.native) {
+    return 5 * 60_000;
+  }
+  if (channels?.snapshot === true) {
+    /* The page walks a whole unobserved folder every fifth poll: every 10 s focused, every 50 s blurred. The period is
+     * the time between two such walks, clamped to that cadence, so a longer gap (a hidden tab) never stretches the
+     * window (review m3) and a shorter one never shrinks it below what the page's walks keep (review N4). */
+    const pollPeriod = Math.min(Math.max(channels.pollPeriodMilliseconds ?? 10_000, 10_000), 50_000);
+    return Math.max(3 * pollPeriod, 30_000);
+  }
+  return discoveryAuditIntervalMilliseconds;
+};
 
 type DirectoryAuthority = {
   readonly provider: FileSystemProvider;
@@ -314,6 +399,49 @@ type DirectoryAuthority = {
 };
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/**
+ * A notice fact that names one physical path of a root for a sibling's discovery index (A2 b): its logical path is
+ * the root's, so no tab routes it, and its physical authority is the path itself.
+ *
+ * @param storageRootKey - The root.
+ * @param providerPath - The directory, or a file under it.
+ * @returns The fact.
+ */
+const namedDirectoryFact = (storageRootKey: string, providerPath: string): ChangeNotification => ({
+  type: 'directory-change',
+  path: '/',
+  authority: { storageRootKey, providerBasePath: assertRootedPath(providerPath) },
+});
+
+/**
+ * The discovery entry a directory's reading lists, or none for a directory that is not a project.
+ *
+ * @param reading - What the directory holds.
+ * @param locator - Where it is.
+ * @returns The entry.
+ */
+const discoveryEntryOf = (
+  reading: ProjectDirectoryReading,
+  locator: ProjectLocator,
+): ProjectDiscoveryEntry | undefined => {
+  switch (reading.kind) {
+    case 'not-a-project': {
+      return undefined;
+    }
+    case 'identified': {
+      return reading.issue === undefined
+        ? { status: 'valid', projectId: reading.projectId, manifest: reading.manifest, locator }
+        : { status: 'valid', projectId: reading.projectId, manifest: reading.manifest, locator, issue: reading.issue };
+    }
+    case 'adoptable': {
+      return { status: 'adoption-required', manifest: reading.manifest, locator, issue: reading.issue };
+    }
+    case 'invalid': {
+      return { status: 'invalid', locator, issue: reading.issue };
+    }
+  }
+};
 
 /**
  * The project-directory lifecycle over the authority's own collaborators.
@@ -332,8 +460,25 @@ export class ProjectDirectories {
   private readonly _discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
   /** A root's published state; a root that is not `available` is never scanned (blueprint D1). */
   private readonly _rootState: (storageRootKey: string) => RootState | 'pending' | undefined;
-  /** Retire one logical project route the authority installed, as a delete must. */
-  private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
+  /**
+   * Retire one logical project route the authority installed, as a delete must. With `boundTo`, only while the route
+   * is mounted on that exact directory: another copy of the id keeps the route it holds.
+   */
+  private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean, boundTo?: PhysicalDirectory) => void;
+  /** The discovery index: a listing cache that nominates and never decides (FW2). */
+  private readonly _index: ProjectDirectoryIndex<ProjectDirectoryReading>;
+  /** A root's live channels, from the external-change ingest. */
+  private readonly _rootChannels: (storageRootKey: string) => DiscoveryRootChannels | undefined;
+  /** One snapshot poll of a root that can be polled; resolves whether it ran. */
+  private readonly _validateRoot: (storageRootKey: string) => Promise<boolean>;
+  /** Resolves once a root's observer and poll baseline are in place, before its first read (A2 e, A3). */
+  private readonly _channelsArmed: (storageRootKey: string) => Promise<void>;
+  /** Tell the page what an audit found: the root's listing changed with no other evidence (A4). */
+  private readonly _onAuditChange: (storageRootKey: string) => void;
+  /** When each root's audit cycle began. */
+  private readonly _auditCycles = new Map<string, number>();
+  /** When each root's audit last completed a whole cycle. */
+  private readonly _auditCompleted = new Map<string, number>();
 
   /**
    * Create the project-directory lifecycle over the authority's collaborators.
@@ -349,7 +494,12 @@ export class ProjectDirectories {
     discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
     /** A root's admission state; `pending` while a non-Home root is still being admitted. */
     rootState?: (storageRootKey: string) => RootState | 'pending' | undefined;
-    revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
+    revokeProjectRoute: (path: string, notifyPeers: boolean, boundTo?: PhysicalDirectory) => void;
+    index: ProjectDirectoryIndex<ProjectDirectoryReading>;
+    rootChannels?: (storageRootKey: string) => DiscoveryRootChannels | undefined;
+    validateRoot?: (storageRootKey: string) => Promise<boolean>;
+    channelsArmed?: (storageRootKey: string) => Promise<void>;
+    onAuditChange?: (storageRootKey: string) => void;
   }) {
     this._observedIdentityResolver = createProjectIdentityResolver({
       capacity: 0,
@@ -380,6 +530,11 @@ export class ProjectDirectories {
     this._discoveryRoots = options.discoveryRoots;
     this._rootState = options.rootState ?? (() => undefined);
     this._revokeProjectRoute = options.revokeProjectRoute;
+    this._index = options.index;
+    this._rootChannels = options.rootChannels ?? (() => undefined);
+    this._validateRoot = options.validateRoot ?? (async () => false);
+    this._channelsArmed = options.channelsArmed ?? (async () => undefined);
+    this._onAuditChange = options.onAuditChange ?? (() => undefined);
   }
 
   /** Stop the bounded owner when its filesystem authority is disposed. */
@@ -398,10 +553,12 @@ export class ProjectDirectories {
   public async listProjectManifests(): Promise<ProjectDiscoveryResult> {
     const discovered: ProjectDiscoveryEntry[] = [];
     const roots: ProjectRootDiscoveryStatus[] = [];
-    /* oxlint-disable eslint/no-await-in-loop -- Root scans are deliberately serialized to bound filesystem-handle and IndexedDB pressure. */
+    /** The provider of each root this pass completed, for the copies told apart by time. */
+    const providers = new Map<string, FileSystemProvider>();
+    /* oxlint-disable eslint/no-await-in-loop -- Root passes are deliberately serialized to bound filesystem-handle and IndexedDB pressure. */
     for (const resolvedRoot of this._discoveryRoots()) {
-      const { root, scope, storageRootKey } = resolvedRoot;
-      /* Home is the first root and is scanned first; a root that is lost, hung
+      const { root, storageRootKey } = resolvedRoot;
+      /* Home is the first root and is read first; a root that is lost, hung
        * or still being admitted is reported by its state without resolving its
        * provider, so it cannot hold Home's project list. */
       const state = this._rootState(storageRootKey);
@@ -411,71 +568,23 @@ export class ProjectDirectories {
       }
       let provider: FileSystemProvider;
       try {
-        // Out-of-band writes reach the provider through the external-change path
-        // (native observer, safety poll, or a sibling-tab notification), so a scan
-        // never has to drop the handle cache to see them.
-        provider = await this._registry.getProvider(scope);
+        provider = await this._registry.getProvider(resolvedRoot.scope);
       } catch (error) {
-        roots.push({ status: 'inaccessible', root, reason: error instanceof Error ? error.message : String(error) });
+        roots.push({ status: 'inaccessible', root, reason: errorMessage(error) });
         continue;
       }
-      let directories: string[];
-      try {
-        // The workspace root exists by definition; a project is any immediate
-        // child directory carrying `tau.json`. Entry kinds come from the listing
-        // so files never cost a `stat`, and dotdirs are excluded by name alone.
-        const entries = await readDirectoryEntries(provider, '');
-        directories = entries
-          .filter((entry) => entry.kind === 'dir' && !entry.name.startsWith('.'))
-          .map((entry) => entry.name)
-          .sort();
-      } catch (error) {
-        roots.push({ status: 'inaccessible', root, reason: error instanceof Error ? error.message : String(error) });
+      const readings = await this._passRoot(resolvedRoot, provider);
+      if (readings.status === 'inaccessible') {
+        roots.push({ status: 'inaccessible', root, reason: readings.reason });
         continue;
       }
-      const probe = async (directory: string): Promise<ProjectDiscoveryEntry | undefined> => {
-        const relativeDirectory = assertRootedPath(directory);
-        const locator = projectLocatorFor(root, storageRootKey, relativeDirectory);
-        // One unreadable child must not blank an otherwise readable root: it is
-        // reported in place and the scan continues. `inaccessible` stays
-        // reserved for failures of the root listing or its provider.
-        const reading = await this._readProjectDirectory({
-          provider,
-          directory: relativeDirectory,
-          scope,
-          storageRootKey,
-        });
-        switch (reading.kind) {
-          case 'not-a-project': {
-            return undefined;
-          }
-          case 'identified': {
-            return reading.issue === undefined
-              ? { status: 'valid', projectId: reading.projectId, manifest: reading.manifest, locator }
-              : {
-                  status: 'valid',
-                  projectId: reading.projectId,
-                  manifest: reading.manifest,
-                  locator,
-                  issue: reading.issue,
-                };
-          }
-          case 'adoptable': {
-            return { status: 'adoption-required', manifest: reading.manifest, locator, issue: reading.issue };
-          }
-          case 'invalid': {
-            return { status: 'invalid', locator, issue: reading.issue };
-          }
+      for (const [directory, reading] of readings.readings) {
+        const entry = discoveryEntryOf(reading, projectLocatorFor(root, storageRootKey, assertRootedPath(directory)));
+        if (entry !== undefined) {
+          discovered.push(entry);
         }
-      };
-      // Chunked awaits bound the probe concurrency; the pre-sorted input keeps
-      // the result order independent of completion order.
-      for (let offset = 0; offset < directories.length; offset += manifestProbeConcurrency) {
-        const chunk = await Promise.all(
-          directories.slice(offset, offset + manifestProbeConcurrency).map(async (directory) => probe(directory)),
-        );
-        discovered.push(...chunk.filter((entry) => entry !== undefined));
       }
+      providers.set(storageRootKey, provider);
       roots.push({ status: 'complete', root });
     }
     /* oxlint-enable eslint/no-await-in-loop -- End bounded serial root scan. */
@@ -505,13 +614,150 @@ export class ProjectDirectories {
         occurrenceCount.set(entry.projectId, (occurrenceCount.get(entry.projectId) ?? 0) + 1);
       }
     }
-    const entries = discovered.map(
-      (entry): ProjectDiscoveryEntry =>
-        entry.status === 'valid' && (occurrenceCount.get(entry.projectId) ?? 0) > 1
-          ? { ...entry, status: 'duplicate-id' }
-          : entry,
+    /* Only copies that share an id are told apart by time: one stat each, never one per project. */
+    const entries = await Promise.all(
+      discovered.map(async (entry): Promise<ProjectDiscoveryEntry> => {
+        if (entry.status !== 'valid' || (occurrenceCount.get(entry.projectId) ?? 0) <= 1) {
+          return entry;
+        }
+        const { storageRootKey, relativeDirectory } = entry.locator;
+        const indexed = this._index.entry(storageRootKey, relativeDirectory);
+        let modifiedAt = indexed?.modifiedAt;
+        if (indexed === undefined || !('modifiedAt' in indexed)) {
+          const version = this._index.version(storageRootKey, relativeDirectory);
+          modifiedAt = await manifestModifiedAt(providers.get(storageRootKey), entry.locator);
+          this._index.installModifiedAt(storageRootKey, relativeDirectory, { version, modifiedAt });
+        }
+        return { ...entry, status: 'duplicate-id', ...(modifiedAt === undefined ? {} : { modifiedAt }) };
+      }),
     );
     return { entries, roots };
+  }
+
+  /**
+   * Prove from storage whether any configured root still carries `projectId` (index-contract review A1): the one
+   * question that needs every directory, and the one the index is never asked. Under `project:<id>`, which every Tau
+   * writer of the id holds; every configured root must be available, each root's names are listed afresh, and each
+   * directory's identity record is read through handles resolved for the sweep. A directory with no identity record
+   * counts by the id discovery would give it from `tau.json` (a legacy manifest's), writing nothing: a modern
+   * declaration with no record would be minted a new id, which is never this one. Any failure but a not-found answers
+   * `unknown`. What the sweep reads is evidence: a directory or a name the index has otherwise is read again by the
+   * next pass.
+   *
+   * @param projectId - The id.
+   * @param options - `alreadyLocked` when the caller holds `project:<id>`; `except` a directory to leave out (adopt's).
+   * @returns `absent`, `present` with every directory that carries the id, or `unknown`.
+   */
+  public async verifyAbsent(
+    projectId: string,
+    options?: Readonly<{ alreadyLocked?: boolean; except?: PhysicalDirectory }>,
+  ): Promise<ProjectAbsence> {
+    if (!projectIdSchema.safeParse(projectId).success) {
+      throw new TypeError(`Invalid project id: ${JSON.stringify(projectId)}`);
+    }
+    const sweep = async (): Promise<ProjectAbsence> => {
+      workerTimings.count('discovery.identitySweep');
+      const locators: ProjectLocator[] = [];
+      const roots = this._discoveryRoots();
+      /* Every root must be available, or the answer is unknown: checked before any I/O, so a lost folder costs the
+       * other roots no read (review M4). */
+      for (const { storageRootKey } of roots) {
+        const state = this._rootState(storageRootKey);
+        if (state !== undefined && state !== 'available') {
+          return { status: 'unknown', reason: `root ${state}` };
+        }
+      }
+      /* oxlint-disable eslint/no-await-in-loop -- Roots are swept one after another, as a pass reads them. */
+      for (const { root, scope, storageRootKey } of roots) {
+        let provider: FileSystemProvider;
+        try {
+          provider = await this._registry.getProvider(scope);
+        } catch (error) {
+          return { status: 'unknown', reason: errorMessage(error) };
+        }
+        const names = await this._listNames(provider);
+        if (!Array.isArray(names)) {
+          return { status: 'unknown', reason: errorMessage(names.error) };
+        }
+        const indexed = this._index.view(storageRootKey);
+        if (indexed?.currency === 'warm' && indexed.namesListed) {
+          const listed = new Set(names);
+          const differing = [
+            ...names.filter((name) => !indexed.names.includes(name)),
+            ...indexed.names.filter((name) => !listed.has(name)),
+          ];
+          if (differing.length > 0) {
+            this._index.note(storageRootKey, ['', ...differing]);
+          }
+        }
+        const swept = names.filter(
+          (name) => options?.except?.storageRootKey !== storageRootKey || options.except.providerBasePath !== name,
+        );
+        try {
+          await provider.refresh?.(swept);
+        } catch (error) {
+          return { status: 'unknown', reason: errorMessage(error) };
+        }
+        for (let offset = 0; offset < swept.length; offset += manifestProbeConcurrency) {
+          const ids = await Promise.all(
+            swept.slice(offset, offset + manifestProbeConcurrency).map(async (name) => {
+              const id = await this._sweptIdentity(provider, name);
+              const entry = this._index.entry(storageRootKey, name);
+              const entryId = entry?.reading.kind === 'identified' ? entry.reading.projectId : undefined;
+              if (id !== unknownIdentity && entry !== undefined && id !== entryId) {
+                this._index.note(storageRootKey, [name]);
+              }
+              return [name, id] as const;
+            }),
+          );
+          if (ids.some(([, id]) => id === unknownIdentity)) {
+            return { status: 'unknown', reason: 'A directory could not be read.' };
+          }
+          for (const [name, id] of ids) {
+            if (id === projectId) {
+              locators.push(projectLocatorFor(root, storageRootKey, assertRootedPath(name)));
+            }
+          }
+        }
+      }
+      /* oxlint-enable eslint/no-await-in-loop -- End serial root sweep. */
+      return locators.length === 0 ? { status: 'absent' } : { status: 'present', locators };
+    };
+    if (options?.alreadyLocked === true) {
+      return sweep();
+    }
+    const locks = [`project:${projectId}`];
+    return this._crossTabCoordinator.withLocks(locks, async () => this._resourceQueue.queueForMany(locks, sweep));
+  }
+
+  /**
+   * Re-read the next warm directories from content with no evidence asking (A4), and the root's names at the start of
+   * each root's cycle. A reading that differs from the index's entry is installed, counted under its root's kind and
+   * reported, since no evidence moved the page's epoch for it. A root whose cycle completes was compared with storage
+   * as a whole from when the cycle began.
+   *
+   * @param share - The share of each root's directories to re-read, from 0 to 1; a whole cycle when omitted.
+   * @returns When every warm root last completed a whole cycle (the oldest of them), or undefined while one has not
+   *   completed one yet. The rolling audit reports its own cycles, so the caller runs an overdue whole cycle only when
+   *   the rolling one fell behind (review M3).
+   */
+  public async auditDiscovery(share?: number): Promise<number | undefined> {
+    let oldestCycle = Number.POSITIVE_INFINITY;
+    /* oxlint-disable eslint/no-await-in-loop -- The audit is background work: one directory batch at a time. */
+    for (const { scope, storageRootKey } of this._discoveryRoots()) {
+      const view = this._index.view(storageRootKey);
+      const state = this._rootState(storageRootKey);
+      if (view?.currency !== 'warm' || (state !== undefined && state !== 'available')) {
+        continue;
+      }
+      const completed = await this._auditRoot({ scope, storageRootKey, view }, share);
+      /* A root whose audit failed this time is left out: it would hold every other root's cycle back (review N1). */
+      if (completed !== undefined) {
+        oldestCycle = Math.min(oldestCycle, completed);
+      }
+    }
+    /* oxlint-enable eslint/no-await-in-loop -- End audit. */
+    return Number.isFinite(oldestCycle) ? oldestCycle : undefined;
   }
 
   /**
@@ -542,8 +788,11 @@ export class ProjectDirectories {
     }
     const provider = await this._registry.getProvider(root.scope);
     const physicalLock = `${locator.storageRootKey}:${path}`;
-    return this._crossTabCoordinator.withLocks([physicalLock], async () =>
-      this._resourceQueue.queueForMany([physicalLock], async () => {
+    /* A remembered id is restored under its project lock, which every Tau writer of the id holds, so no delete of its
+     * last copy can decide meanwhile that none remains (blueprint, mutation protocols step 8). */
+    const locks = options?.id === undefined ? [physicalLock] : [`project:${options.id}`, physicalLock];
+    return this._crossTabCoordinator.withLocks(locks, async () =>
+      this._resourceQueue.queueForMany(locks, async () => {
         const authority = {
           provider,
           directory: path,
@@ -555,9 +804,18 @@ export class ProjectDirectories {
         if (reading.kind !== 'adoptable') {
           throw new TypeError(`Project directory is not adoptable: ${path}`);
         }
+        /* Storage decides (A1): the id is restored only while no other directory carries it; otherwise one is minted. */
+        const absence =
+          options?.id === undefined
+            ? undefined
+            : await this.verifyAbsent(options.id, {
+                alreadyLocked: true,
+                except: { storageRootKey: locator.storageRootKey, providerBasePath: path },
+              });
+        const restored = absence?.status === 'absent' ? options?.id : undefined;
         const identity = await this._resolveIdentity({
           ...authority,
-          preferredProjectId: options?.id,
+          preferredProjectId: restored,
           alreadyLocked: true,
         });
         if (identity.status !== 'resolved') {
@@ -565,7 +823,10 @@ export class ProjectDirectories {
         }
         const manifest = projectToManifest(reading.manifest);
         await provider.writeFile(`${path}/tau.json`, serializeProjectManifest(manifest));
-        this._crossTabCoordinator.notifyDirectoryChange('/', this._scopedPhysicalAuthority(root.scope, ''));
+        this._crossTabCoordinator.notifyChanges([
+          { type: 'directory-change', path: '/', authority: this._scopedPhysicalAuthority(root.scope, '') },
+          namedDirectoryFact(locator.storageRootKey, `${path}/tau.json`),
+        ]);
         return { projectId: identity.projectId, manifest };
       }),
     );
@@ -575,6 +836,8 @@ export class ProjectDirectories {
    * Permanently remove one exact physical project directory. Identity is
    * re-established under the same project-wide lock that all logical project
    * mutations acquire, so no write can race the verification/delete window.
+   * Other directories that carry the same id are untouched, and so is the
+   * project route while it is mounted on one of them.
    *
    * @param input - Exact project identity, physical path, and storage scope.
    * @returns Identity-safe deletion outcome.
@@ -601,17 +864,20 @@ export class ProjectDirectories {
     const scope: StorageRootConfig = { ...input.scope };
     const provider = await this._registry.getProvider(scope);
     const logicalRoot = projectRoute(projectId);
-    const physicalLock = `${this._registry.resolveStorageRootKey(scope)}:${path}`;
+    const storageRootKey = this._registry.resolveStorageRootKey(scope);
+    const physicalLock = `${storageRootKey}:${path}`;
     const locks = [`project:${projectId}`, physicalLock];
     return this._crossTabCoordinator.withLocks(locks, async () =>
       this._resourceQueue.queueForMany(locks, async () => {
         await provider.refresh?.([path]);
         if (!(await provider.exists(path))) {
+          this._contradicted(storageRootKey, path, (reading) => reading.kind === 'not-a-project');
           return { status: 'absent' };
         }
 
         const manifestPath = `${path}/tau.json`;
         if (!(await provider.exists(manifestPath))) {
+          this._contradicted(storageRootKey, path, (reading) => reading.kind !== 'identified');
           return { status: 'unidentifiable' };
         }
         const manifest = await provider.readFile(manifestPath);
@@ -621,13 +887,20 @@ export class ProjectDirectories {
           identityBytes = await provider.readFile(`${path}/${projectIdentityPath}`);
           identity = parseProjectIdentityBytes(identityBytes);
         } catch {
+          this._contradicted(storageRootKey, path, (reading) => reading.kind !== 'identified');
           return { status: 'unidentifiable' };
         }
         if (identity.projectId !== projectId) {
+          const actual = identity.projectId;
+          this._contradicted(
+            storageRootKey,
+            path,
+            (reading) => reading.kind !== 'identified' || reading.projectId === actual,
+          );
           return { status: 'identity-mismatch', actualProjectId: identity.projectId };
         }
 
-        this._revokeProjectRoute(logicalRoot, true);
+        this._revokeProjectRoute(logicalRoot, true, { storageRootKey, providerBasePath: path });
         const separator = path.lastIndexOf('/');
         const physicalParent = separator === -1 ? '' : path.slice(0, separator);
         const authorityParent = physicalParent === '' ? '/' : `/${physicalParent}`;
@@ -637,11 +910,18 @@ export class ProjectDirectories {
         } finally {
           this._projectIndexes.clear();
           this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
-          this._crossTabCoordinator.notifyDirectoryChange(authorityParent, parentAuthority);
+          /* The root fact is for an older tab; the named one tells a sibling's index which directory went (A2 b). */
+          this._crossTabCoordinator.notifyChanges([
+            { type: 'directory-change', path: authorityParent, authority: parentAuthority },
+            namedDirectoryFact(storageRootKey, path),
+          ]);
         }
+        /* Every write of the removal has settled: what the check below reads is installed if nothing moved since. */
+        const version = this._index.version(storageRootKey, path);
         if (await provider.exists(path)) {
           throw new Error(`Permanent delete did not remove ${path}`);
         }
+        this._index.installGone(storageRootKey, path, version);
         return { status: 'deleted' };
       }),
     );
@@ -808,10 +1088,21 @@ export class ProjectDirectories {
             );
           }
           await commitPhase([{ op: 'write', path: `${path}/tau.json`, data: manifest }]);
-          const committed = parseProjectManifestBytes(await provider.readFile(`${path}/tau.json`));
+          /* Every write of the commit has settled: its own check below is the directory's reading (A2 f). */
+          const version = this._index.version(storageRootKey, path);
+          const committedBytes = await provider.readFile(`${path}/tau.json`);
+          const committed = parseProjectManifestBytes(committedBytes);
           const committedIdentity = await this._readIdentity({ provider, directory: path, scope, storageRootKey });
           if (!committed.success || committedIdentity?.projectId !== projectId) {
             throw new Error(`Pending project manifest verification failed for ${projectId}`);
+          }
+          const read = readProjectManifestBytes(committedBytes);
+          if (read.success && read.issue === undefined) {
+            this._index.install(storageRootKey, path, {
+              version,
+              reading: { kind: 'identified', projectId, manifest: read.data },
+              determined: true,
+            });
           }
 
           if (staging !== undefined) {
@@ -888,6 +1179,7 @@ export class ProjectDirectories {
           const manifestBytes = await input.provider.readFile(joinRelativePath(directory, 'tau.json'));
           const manifest = parseProjectManifestBytes(manifestBytes);
           if (!manifest.success) {
+            this._contradicted(input.storageRootKey, directory, (reading) => reading.kind !== 'identified');
             return { status: 'discovery-required' };
           }
           const identityBytes = await input.provider.readFile(joinRelativePath(directory, projectIdentityPath));
@@ -895,16 +1187,287 @@ export class ProjectDirectories {
           try {
             identity = parseProjectIdentityBytes(identityBytes);
           } catch {
+            this._contradicted(input.storageRootKey, directory, (reading) => reading.kind !== 'identified');
             return { status: 'discovery-required' };
           }
+          /* What the read found is evidence: an entry it contradicts is read again by the next pass (A2 i). */
+          const found = identity.projectId;
+          this._contradicted(
+            input.storageRootKey,
+            directory,
+            (reading) =>
+              reading.kind === 'identified' &&
+              reading.projectId === found &&
+              (found !== input.projectId ||
+                reading.issue !== undefined ||
+                JSON.stringify(reading.manifest) === JSON.stringify(manifest.data)),
+          );
           return identity.projectId === input.projectId
-            ? { status: 'verified', project: { projectId: input.projectId, manifest: manifest.data } }
+            ? {
+                status: 'verified',
+                project: { projectId: input.projectId, manifest: manifest.data },
+                storageRootKey: input.storageRootKey,
+                providerBasePath: directory,
+              }
             : { status: 'discovery-required' };
         } catch (error) {
-          return { status: isNotFoundError(error) ? 'discovery-required' : 'unavailable' };
+          if (!isNotFoundError(error)) {
+            return { status: 'unavailable' };
+          }
+          this._contradicted(input.storageRootKey, directory, (reading) => reading.kind !== 'identified');
+          return { status: 'discovery-required' };
         }
       }),
     );
+  }
+
+  /**
+   * One root's share of the audit.
+   *
+   * @param root - The root, its scope and its index view.
+   * @param share - The share of its directories to re-read; all when omitted.
+   * @returns When the root last completed a whole cycle, `-Infinity` while it has not completed one, or undefined when its
+   *   audit could not run this time (its provider or its listing failed), which says nothing about its cycle (review N1).
+   */
+  private async _auditRoot(
+    root: Readonly<{
+      scope: WorkspaceScope;
+      storageRootKey: string;
+      view: NonNullable<ReturnType<ProjectDirectoryIndex<ProjectDirectoryReading>['view']>>;
+    }>,
+    share: number | undefined,
+  ): Promise<number | undefined> {
+    const { scope, storageRootKey, view } = root;
+    {
+      let provider: FileSystemProvider;
+      try {
+        provider = await this._registry.getProvider(scope);
+      } catch {
+        return undefined;
+      }
+      const channels = this._rootChannels(storageRootKey);
+      const kind =
+        provider.capabilities.externallyEdited === true
+          ? channels?.native === true
+            ? 'observed'
+            : 'polled'
+          : 'exclusive';
+      let mismatched = false;
+      if (!this._auditCycles.has(storageRootKey)) {
+        this._auditCycles.set(storageRootKey, this._index.now());
+        const namesVersion = this._index.namesVersion(storageRootKey);
+        const names = await this._listNames(provider);
+        if (!Array.isArray(names)) {
+          this._auditCycles.delete(storageRootKey);
+          return undefined;
+        }
+        if (view.namesListed && names.join('\0') !== view.names.join('\0')) {
+          mismatched = true;
+          this._index.countAuditMismatch(kind);
+        }
+        this._index.installNames(storageRootKey, namesVersion, names);
+      }
+      const count = share === undefined ? Number.POSITIVE_INFINITY : Math.max(1, Math.ceil(view.names.length * share));
+      const batch = this._index.auditBatch(storageRootKey, count);
+      const dirty = new Set(this._index.view(storageRootKey)?.dirty);
+      const audited = batch.names.filter((name) => !dirty.has(name));
+      workerTimings.count('discovery.auditRead', audited.length);
+      for (let offset = 0; offset < audited.length; offset += manifestProbeConcurrency) {
+        // oxlint-disable-next-line no-await-in-loop -- One bounded batch of directories at a time.
+        const outcomes = await Promise.all(
+          audited.slice(offset, offset + manifestProbeConcurrency).map(async (name) => {
+            const version = this._index.version(storageRootKey, name);
+            const { reading, determined } = await this._readDirectory({
+              provider,
+              scope,
+              storageRootKey,
+              directory: assertRootedPath(name),
+            });
+            return this._index.install(storageRootKey, name, { version, reading, determined });
+          }),
+        );
+        for (const outcome of outcomes) {
+          if (outcome.status === 'installed' && outcome.changed) {
+            mismatched = true;
+            this._index.countAuditMismatch(kind);
+          }
+        }
+      }
+      if (batch.wrapped) {
+        this._index.validated(storageRootKey, this._auditCycles.get(storageRootKey) ?? this._index.now());
+        this._auditCycles.delete(storageRootKey);
+        this._auditCompleted.set(storageRootKey, this._index.now());
+      }
+      if (mismatched) {
+        this._onAuditChange(storageRootKey);
+      }
+      return this._auditCompleted.get(storageRootKey) ?? Number.NEGATIVE_INFINITY;
+    }
+  }
+
+  /**
+   * One root's part of a pass (FW2). A root with no warm index (never read, reset since, past the bounds, or written by
+   * other programs with no channel to report them) is read in full. Otherwise a root other programs write is validated
+   * first when it is past its freshness window (A3), its child names are listed again when evidence unlisted them, and
+   * only the directories with evidence are read. Every read installs under the version rule.
+   *
+   * @param resolvedRoot - The root.
+   * @param provider - Its provider.
+   * @returns Each child directory and its reading, sorted; or why the root could not be listed.
+   */
+  private async _passRoot(
+    resolvedRoot: ResolvedDiscoveryRoot,
+    provider: FileSystemProvider,
+  ): Promise<
+    | Readonly<{ status: 'complete'; readings: ReadonlyArray<readonly [string, ProjectDirectoryReading]> }>
+    | Readonly<{ status: 'inaccessible'; reason: string }>
+  > {
+    const { scope, storageRootKey } = resolvedRoot;
+    await this._channelsArmed(storageRootKey);
+    const channels = this._rootChannels(storageRootKey);
+    const externallyEdited = provider.capabilities.externallyEdited === true;
+    const authority = { provider, scope, storageRootKey };
+    let view = this._index.view(storageRootKey);
+    if (view?.currency === 'warm' && externallyEdited && channels !== undefined) {
+      if (this._index.now() - view.validatedAt > freshnessWindow(channels) && channels.snapshot) {
+        await this._validateRoot(storageRootKey);
+        view = this._index.view(storageRootKey);
+      }
+      if (view !== undefined && this._index.now() - view.validatedAt > freshnessWindow(channels)) {
+        /* No snapshot source, or its poll failed: the audit's read, which is a full one. */
+        view = undefined;
+      }
+    }
+    if (
+      view?.currency !== 'warm' ||
+      (externallyEdited && (channels === undefined || (!channels.snapshot && !channels.native)))
+    ) {
+      const startedAt = this._index.now();
+      const namesVersion = this._index.beginColdRead(storageRootKey);
+      workerTimings.count('discovery.fullRead');
+      const names = await this._listNames(provider);
+      if (!Array.isArray(names)) {
+        this._index.cold(storageRootKey, 'reset');
+        return { status: 'inaccessible', reason: errorMessage(names.error) };
+      }
+      this._index.installNames(storageRootKey, namesVersion, names);
+      const readings = await this._readDirectories(authority, names);
+      this._index.warmed(storageRootKey, startedAt);
+      return { status: 'complete', readings };
+    }
+    let { names } = view;
+    if (!view.namesListed) {
+      const namesVersion = this._index.namesVersion(storageRootKey);
+      const listed = await this._listNames(provider);
+      if (!Array.isArray(listed)) {
+        return { status: 'inaccessible', reason: errorMessage(listed.error) };
+      }
+      /* A listing that evidence overtook is not installed; this pass lists it with the names own writes added since. */
+      names = this._index.installNames(storageRootKey, namesVersion, listed)
+        ? listed
+        : [...new Set([...listed, ...(this._index.view(storageRootKey)?.names ?? [])])].sort();
+    }
+    const dirty = new Set(this._index.view(storageRootKey)?.dirty);
+    const read = new Map(
+      await this._readDirectories(
+        authority,
+        names.filter((name) => dirty.has(name) || this._index.entry(storageRootKey, name) === undefined),
+      ),
+    );
+    return {
+      status: 'complete',
+      readings: names.flatMap((name) => {
+        const reading = read.get(name) ?? this._index.entry(storageRootKey, name)?.reading;
+        return reading === undefined ? [] : [[name, reading] as const];
+      }),
+    };
+  }
+
+  /** The root's child directories, dot-prefixed ones excluded, sorted; or the error the listing threw. */
+  private async _listNames(provider: FileSystemProvider): Promise<string[] | Readonly<{ error: unknown }>> {
+    workerTimings.count('discovery.listing');
+    try {
+      /* Entry kinds come from the listing, so files never cost a `stat`, and dotdirs are excluded by name alone. */
+      const entries = await readDirectoryEntries(provider, '');
+      return entries
+        .filter((entry) => entry.kind === 'dir' && !entry.name.startsWith('.'))
+        .map((entry) => entry.name)
+        .sort();
+    } catch (error) {
+      return { error };
+    }
+  }
+
+  /**
+   * Read directories of one root, a bounded number at a time, and install each under the counters it took before its
+   * first I/O. One unreadable child does not blank its root: it is reported in place and stays dirty.
+   */
+  private async _readDirectories(
+    authority: Omit<DirectoryAuthority, 'directory'>,
+    names: readonly string[],
+  ): Promise<Array<readonly [string, ProjectDirectoryReading]>> {
+    const read: Array<readonly [string, ProjectDirectoryReading]> = [];
+    /* oxlint-disable eslint/no-await-in-loop -- Chunked awaits bound the read concurrency; the input order is kept. */
+    for (let offset = 0; offset < names.length; offset += manifestProbeConcurrency) {
+      const chunk = await Promise.all(
+        names.slice(offset, offset + manifestProbeConcurrency).map(async (name) => {
+          const version = this._index.version(authority.storageRootKey, name);
+          const { reading, determined } = await this._readDirectory({
+            ...authority,
+            directory: assertRootedPath(name),
+          });
+          this._index.install(authority.storageRootKey, name, { version, reading, determined });
+          return [name, reading] as const;
+        }),
+      );
+      read.push(...chunk);
+    }
+    /* oxlint-enable eslint/no-await-in-loop -- End bounded directory reads. */
+    return read;
+  }
+
+  /** The id a directory carries as the sweep reads it: its record's, or a legacy manifest's; unknown on a failure. */
+  private async _sweptIdentity(provider: FileSystemProvider, name: string): Promise<string | undefined> {
+    let identityBytes: Uint8Array<ArrayBuffer> | undefined;
+    try {
+      identityBytes = await provider.readFile(`${name}/${projectIdentityPath}`);
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        return unknownIdentity;
+      }
+    }
+    if (identityBytes !== undefined) {
+      try {
+        return parseProjectIdentityBytes(identityBytes).projectId;
+      } catch {
+        /* Discovery lists an unparseable record as invalid, carrying no id. */
+        return undefined;
+      }
+    }
+    let manifestBytes: Uint8Array<ArrayBuffer>;
+    try {
+      manifestBytes = await provider.readFile(`${name}/tau.json`);
+    } catch (error) {
+      return isNotFoundError(error) ? undefined : unknownIdentity;
+    }
+    const legacy = convertLegacyProjectManifestBytes(manifestBytes);
+    return legacy.success ? legacy.data.projectId : undefined;
+  }
+
+  /**
+   * An authority read of a directory found what `consistent` says the index's entry should be, or not: an entry it
+   * contradicts is dirty and the root's names unlisted, so the next pass reads it again (A2 i).
+   */
+  private _contradicted(
+    storageRootKey: string,
+    directory: string,
+    consistent: (reading: ProjectDirectoryReading) => boolean,
+  ): void {
+    const name = directory.split('/')[0] ?? directory;
+    const entry = this._index.entry(storageRootKey, name);
+    if (entry !== undefined && !consistent(entry.reading)) {
+      this._index.note(storageRootKey, ['', name]);
+    }
   }
 
   private async _readIdentity(authority: DirectoryAuthority): Promise<ProjectIdentityRecord | undefined> {
@@ -1081,14 +1644,28 @@ export class ProjectDirectories {
       this._projectIndexes.invalidate(logicalPath);
       if (input.alreadyLocked !== true) {
         this._pipeline.emitChangeEvent({ type: 'fileWritten', path: logicalPath, backend: input.scope.backend });
-        this._crossTabCoordinator.notifyDirectoryChange('/', this._scopedPhysicalAuthority(input.scope, ''));
+        this._crossTabCoordinator.notifyChanges([
+          { type: 'directory-change', path: '/', authority: this._scopedPhysicalAuthority(input.scope, '') },
+          namedDirectoryFact(input.storageRootKey, input.path),
+        ]);
       }
     }
     return result;
   }
 
   private async _readProjectDirectory(authority: DirectoryAuthority): Promise<ProjectDirectoryReading> {
+    const { reading } = await this._readDirectory(authority);
+    return reading;
+  }
+
+  /**
+   * Read what one directory holds, and whether the bytes determined it (A2 g): a read that failed with anything but
+   * not-found, a listing that threw, an identity that could not be read or established, or a conversion that raced is
+   * uncertainty, and the index keeps the directory dirty so the next pass reads it again.
+   */
+  private async _readDirectory(authority: DirectoryAuthority): Promise<DirectoryRead> {
     const { provider, directory } = authority;
+    workerTimings.count('discovery.directoryRead');
     const [manifestResult, identityResult] = await Promise.allSettled([
       provider.readFile(`${directory}/tau.json`),
       this._readIdentity(authority),
@@ -1096,28 +1673,41 @@ export class ProjectDirectories {
     if (manifestResult.status === 'rejected') {
       if (!isNotFoundError(manifestResult.reason)) {
         return {
-          kind: 'invalid',
-          issue: { code: 'manifest-unreadable', message: errorMessage(manifestResult.reason) },
+          reading: {
+            kind: 'invalid',
+            issue: { code: 'manifest-unreadable', message: errorMessage(manifestResult.reason) },
+          },
+          determined: false,
         };
       }
-      const entries = await readDirectoryEntries(provider, directory).catch(() => []);
+      workerTimings.count('discovery.listing');
+      let entries: Awaited<ReturnType<typeof readDirectoryEntries>>;
+      try {
+        entries = await readDirectoryEntries(provider, directory);
+      } catch (error) {
+        /* Gone is a fact; any other failure of the listing is uncertainty, not a directory with no project. */
+        return { reading: { kind: 'not-a-project' }, determined: isNotFoundError(error) };
+      }
       if (!entries.some((entry) => entry.kind === 'dir' && entry.name === '.tau')) {
-        return { kind: 'not-a-project' };
+        return { reading: { kind: 'not-a-project' }, determined: true };
       }
       const mainFile = entries
         .filter((entry) => entry.kind === 'file' && /^main\.[^.]+$/.test(entry.name))
         .map((entry) => entry.name)
         .sort()[0];
       return {
-        kind: 'adoptable',
-        manifest: {
-          $schema: projectManifestSchemaUrl,
-          name: basenameOf(directory),
-          description: '',
-          tags: [],
-          assets: { main: { entryPath: mainFile ?? 'main.ts' } },
+        determined: true,
+        reading: {
+          kind: 'adoptable',
+          manifest: {
+            $schema: projectManifestSchemaUrl,
+            name: basenameOf(directory),
+            description: '',
+            tags: [],
+            assets: { main: { entryPath: mainFile ?? 'main.ts' } },
+          },
+          issue: { code: 'manifest-missing' },
         },
-        issue: { code: 'manifest-missing' },
       };
     }
     if (identityResult.status === 'rejected') {
@@ -1125,8 +1715,11 @@ export class ProjectDirectories {
       const invalid =
         typeof error === 'object' && error !== null && 'code' in error && error.code === 'IDENTITY_INVALID';
       return {
-        kind: 'invalid',
-        issue: { code: invalid ? 'identity-invalid' : 'identity-unavailable', message: errorMessage(error) },
+        reading: {
+          kind: 'invalid',
+          issue: { code: invalid ? 'identity-invalid' : 'identity-unavailable', message: errorMessage(error) },
+        },
+        determined: invalid,
       };
     }
     const bytes = manifestResult.value;
@@ -1191,7 +1784,7 @@ export class ProjectDirectories {
       try {
         const result = await toPromise(actor);
         if (result.status === 'converted' || result.status === 'unchanged') {
-          return { kind: 'identified', projectId, manifest };
+          return { reading: { kind: 'identified', projectId, manifest }, determined: true };
         }
         if (
           result.status === 'conflict' &&
@@ -1199,23 +1792,29 @@ export class ProjectDirectories {
           identityResult.value.projectId !== projectId
         ) {
           return {
-            kind: 'invalid',
-            issue: {
-              code: 'identity-conflict',
-              expectedProjectId: projectId,
-              actualProjectId: identityResult.value.projectId,
+            reading: {
+              kind: 'invalid',
+              issue: {
+                code: 'identity-conflict',
+                expectedProjectId: projectId,
+                actualProjectId: identityResult.value.projectId,
+              },
             },
+            determined: true,
           };
         }
         return {
-          kind: 'invalid',
-          issue: {
-            code: 'identity-unavailable',
-            message:
-              result.status === 'failed'
-                ? result.message
-                : 'Project declaration changed during conversion. Retry discovery.',
+          reading: {
+            kind: 'invalid',
+            issue: {
+              code: 'identity-unavailable',
+              message:
+                result.status === 'failed'
+                  ? result.message
+                  : 'Project declaration changed during conversion. Retry discovery.',
+            },
           },
+          determined: false,
         };
       } finally {
         this._lifetime.signal.removeEventListener('abort', cancel);
@@ -1223,13 +1822,13 @@ export class ProjectDirectories {
       }
     }
     if (!read.success) {
-      return { kind: 'invalid', issue: read.issue };
+      return { reading: { kind: 'invalid', issue: read.issue }, determined: true };
     }
     if (
       identityResult.value === undefined &&
       (read.issue?.code === 'manifest-invalid-json' || read.issue?.code === 'manifest-unknown-schema')
     ) {
-      return { kind: 'invalid', issue: read.issue };
+      return { reading: { kind: 'invalid', issue: read.issue }, determined: true };
     }
     const identity = await this._resolveIdentity({
       ...authority,
@@ -1239,29 +1838,41 @@ export class ProjectDirectories {
     switch (identity.status) {
       case 'resolved': {
         return {
-          kind: 'identified',
-          projectId: identity.projectId,
-          manifest: read.data,
-          ...(read.issue === undefined ? {} : { issue: read.issue }),
+          reading: {
+            kind: 'identified',
+            projectId: identity.projectId,
+            manifest: read.data,
+            ...(read.issue === undefined ? {} : { issue: read.issue }),
+          },
+          determined: true,
         };
       }
       case 'conflict': {
         return {
-          kind: 'invalid',
-          issue: {
-            code: 'identity-conflict',
-            expectedProjectId: identity.expectedProjectId,
-            actualProjectId: identity.actualProjectId,
+          reading: {
+            kind: 'invalid',
+            issue: {
+              code: 'identity-conflict',
+              expectedProjectId: identity.expectedProjectId,
+              actualProjectId: identity.actualProjectId,
+            },
           },
+          determined: true,
         };
       }
       case 'failed': {
-        return { kind: 'invalid', issue: { code: 'identity-unavailable', message: identity.message } };
+        return {
+          reading: { kind: 'invalid', issue: { code: 'identity-unavailable', message: identity.message } },
+          determined: false,
+        };
       }
       case 'missing': {
         return {
-          kind: 'invalid',
-          issue: { code: 'identity-unavailable', message: 'Project identity has not been persisted.' },
+          reading: {
+            kind: 'invalid',
+            issue: { code: 'identity-unavailable', message: 'Project identity has not been persisted.' },
+          },
+          determined: false,
         };
       }
     }

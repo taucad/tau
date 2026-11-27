@@ -44,10 +44,9 @@ export type ArmSpec = {
 
 /**
  * Every qualified arm. `off` is the corrected uninstrumented baseline: the
- * runner reaches it through the loader hook's `semanticDisabled` stub session,
- * because the shipped kernel has no supported switch (see
- * `packages/plugins/replicad/src/replicad.kernel.ts:486` -- recorded as a W1
- * collision, not fixed here).
+ * runner passes the kernel's `computeReuse: false`, so no live tier is built and
+ * no operation cache is installed; every other arm passes `computeReuse: true`
+ * (the live tier, which also follows the runtime's compute reuse when omitted).
  */
 export const arms: readonly ArmSpec[] = [
   {
@@ -55,7 +54,7 @@ export const arms: readonly ArmSpec[] = [
     runner: { arm: 'bypass', steps: ['cold', 'warm', 'late', 'early', 'unrelated'] },
     freshProcess: true,
     workers: [1],
-    proves: 'Zero-work baseline: no recipes, store calls, codec work or compute telemetry (T1/G-B2).',
+    proves: 'Zero-work baseline: no live tier, operation cache, tier counters or compute telemetry (T1/G-B2).',
   },
   {
     id: 'empty-durable-cold',
@@ -70,14 +69,16 @@ export const arms: readonly ArmSpec[] = [
     runner: { arm: 'memory', steps: ['cold', 'warm', 'late'] },
     freshProcess: false,
     workers: [1],
-    proves: 'No I/O or codec work on a local hit; only the changed cone is natively recomputed (T5).',
+    proves:
+      'No I/O or codec work on a local hit (a scene-table revisit runs no user code); only the changed cone is natively recomputed (T5).',
   },
   {
     id: 'durable-warm',
     runner: { arm: 'durable', steps: ['cold', 'warm', 'late'] },
     freshProcess: false,
     workers: [1],
-    proves: 'Actual batch fetch/import benefit against a populated store with an empty resident tier (T5/T9b).',
+    proves:
+      'The live tier over a durable store: Replicad builds made with the tier refuse their native snapshot, so the store adds no Replicad import (T5/T9b).',
   },
   {
     id: 'restart-warm',
@@ -85,7 +86,7 @@ export const arms: readonly ArmSpec[] = [
     freshProcess: true,
     workers: [1],
     proves:
-      'Startup, bind, discovery/import and solve as separate intervals over a store seeded by an earlier process (T6/G-B6/Q4).',
+      'Startup, bind and solve as separate intervals over a store seeded by an earlier process; the fresh process imports no Replicad operation and renders the seed bytes (T6/G-B6/Q4).',
   },
   {
     id: 'seeded-fanout',
@@ -93,7 +94,7 @@ export const arms: readonly ArmSpec[] = [
     freshProcess: true,
     workers: [2, 4, 8, 16],
     proves:
-      'A publisher fits a qualified prefix, then N independent variant workers reuse it: zero native solves for eligible unchanged actions (T14/G-A/U39).',
+      'N independent variant workers over a seeded store: with the live tier none imports a Replicad operation, each does the full native work and renders the seed bytes, and each reuses its own prefix on an edit (T14/G-A/U39).',
   },
   {
     id: 'simultaneously-cold',
@@ -118,7 +119,7 @@ export const arms: readonly ArmSpec[] = [
     freshProcess: true,
     workers: [1],
     proves:
-      'Fault injection: a deliberately wrong cached BRep must fail the parity oracle and collapse the work counters (Q1/T7/U41).',
+      "Fault injection: a deliberately wrong cached BRep, answered at the live tier's operation cache, must fail the parity oracle and collapse the work counters (Q1/T7/U41).",
   },
 ];
 
@@ -179,22 +180,22 @@ export const intervals: readonly IntervalSpec[] = [
     note: 'Dependency discovery, read, hash and content hash.',
   },
   {
-    id: 'warm-discovery',
-    source: { kind: 'counter', key: 'session.open' },
+    id: 'scene-revisit',
+    source: { kind: 'span', key: 'replicad.scene-table-hit' },
     phase: 'discovery',
-    note: 'Store bind plus prefetch of the prepared index (durable warm/restart arms).',
+    note: 'A build key the live tier has seen returns its scene without running user code (R16). Replaces the store bind/prefetch interval: the live tier opens no store session.',
   },
   {
-    id: 'warm-import',
-    source: { kind: 'counter', key: 'session.prepared.entries' },
-    phase: 'discovery',
-    note: 'Entries imported into the resident tier at session open.',
+    id: 'native-solve',
+    source: { kind: 'counter', key: 'native.solve' },
+    phase: 'solve',
+    note: 'Every native computation the live tier lets through its operation cache (misses and unkeyable calls), timed. Replaces warm import: the live tier imports nothing from a store.',
   },
   {
     id: 'main-program-execution',
     source: { kind: 'span', key: 'create.runOcMain' },
     phase: 'solve',
-    note: 'The whole model program: runOcMain wraps main(), so this span also contains every session.lookup, brep.serialize/restore and session.record made inside it. It BOUNDS native solve; it does NOT isolate it.',
+    note: 'The whole model program: runOcMain wraps main(), so this span also contains every operation the live tier answers or computes. It BOUNDS native solve; native.solve isolates it.',
   },
   {
     id: 'interface-resolution',
@@ -222,28 +223,28 @@ export const intervals: readonly IntervalSpec[] = [
   },
   { id: 'encode-glb', source: { kind: 'span', key: 'mesh.packGltf' }, phase: 'encode', note: 'GLB packing.' },
   {
-    id: 'brep-serialize',
-    source: { kind: 'counter', key: 'brep.serialize' },
-    phase: 'encode',
-    note: 'Codec cost paid to publish; counted in bytes as well as milliseconds.',
-  },
-  {
-    id: 'brep-restore',
-    source: { kind: 'counter', key: 'brep.restore' },
-    phase: 'encode',
-    note: 'Codec cost paid on a hit.',
-  },
-  {
-    id: 'store-lookup',
-    source: { kind: 'counter', key: 'session.lookup' },
+    id: 'tier-hits',
+    source: { kind: 'aggregate', key: 'lookups.hit' },
     phase: 'store',
-    note: 'Per-action lookup cost; T12 requires bounded indexed work.',
+    note: 'Operations the live tier answered with a native clone (no codec: the BRep serialize/restore intervals no longer exist), from the replicad.run-main span.',
   },
   {
-    id: 'store-record',
-    source: { kind: 'counter', key: 'session.record' },
+    id: 'tier-admissions',
+    source: { kind: 'aggregate', key: 'records.staged' },
     phase: 'store',
-    note: 'Staging cost and staged bytes.',
+    note: 'Operation results the live tier admitted, from the replicad.run-main span; native clones, so no bytes.',
+  },
+  {
+    id: 'tier-operation',
+    source: { kind: 'counter', key: 'tier.operation' },
+    phase: 'store',
+    note: "Per-operation cost at the live tier's operation cache, the compute included; T12 requires bounded indexed work.",
+  },
+  {
+    id: 'tier-cold-misses',
+    source: { kind: 'aggregate', key: 'lookups.miss' },
+    phase: 'store',
+    note: 'Keyed operations the live tier had not seen, from the replicad.run-main span.',
   },
   {
     id: 'publication-settlement',
@@ -379,10 +380,10 @@ export const thresholds: readonly Threshold[] = [
   {
     id: 'T1',
     gate: 'Off arm performs zero store calls and zero codec work',
-    value: 'session.lookup = 0, session.record = 0, brep.serialize/restore = 0, fs.writeFile to the store = 0',
+    value: 'tier.operation = 0, native.solve = 0 (no operation cache installed), tier lookups and admissions = 0',
     status: 'pinned',
     source:
-      'Structural: the off arm stubs the session; asserted by compute-baseline-parity.test.ts. Narrower than charter D14: the proxy/store-binding half (D14 also demands no proxies and no store bindings) is UNPROVEN here -- the bypass arm still records session.open.stub = 1 and the filesystem is Proxy-wrapped for every arm, so that half waits on the real off switch (W3 owns on/off, W4 owns the plugin hunk).',
+      'Structural: the off arm passes computeReuse: false, so the kernel builds no live tier and never calls setOperationCache; asserted by compute-baseline-parity.test.ts. The store-binding half of charter D14 is covered by the qualification matrix (compute-qualification.test.ts: no compute store writes with reuse off).',
   },
   {
     id: 'T2',

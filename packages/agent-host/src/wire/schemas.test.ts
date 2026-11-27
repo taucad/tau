@@ -40,6 +40,14 @@ describe('the wire module (SC-R1, SC-R2)', () => {
     );
   });
 
+  it('should take a cancel that withdraws the request, and refuse any other withdraw value', () => {
+    const base = { chatId: 'c', runId: 'r' };
+    expect(wire.commandPayloads.cancel.safeParse(base).success).toBe(true);
+    expect(wire.commandPayloads.cancel.safeParse({ ...base, withdraw: true }).success).toBe(true);
+    expect(wire.commandPayloads.cancel.safeParse({ ...base, withdraw: false }).success).toBe(false);
+    expect(wire.commandPayloads.cancel.safeParse({ ...base, reason: 'withdraw' }).success).toBe(false);
+  });
+
   /* W6.r1 round 5: a chat's log lives under its id, so the wire refuses an id a launcher could not store. */
   it('should refuse a chat id that is not one storage path segment', () => {
     for (const chatId of ['a/b', String.raw`a\b`, '.', '..', '']) {

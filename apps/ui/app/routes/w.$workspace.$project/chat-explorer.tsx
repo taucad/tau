@@ -1,5 +1,5 @@
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import { ProjectWaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { XIcon } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
@@ -30,9 +30,8 @@ import {
 } from '#components/geometry/cad/model-component-action-menu.js';
 import { useOpenPartGallery } from '#components/geometry/cad/part-gallery.js';
 import { useOptionalHeadlessImageService } from '#providers/headless-image-provider.js';
-import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
-import { PartThumbnailService } from '#services/part-thumbnail.service.js';
-import type { PartThumbnailRequest } from '#services/part-thumbnail.service.js';
+import { loadPartThumbnailService, useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
+import type { PartThumbnailRequest, PartThumbnailService } from '#services/part-thumbnail.service.js';
 import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
 import { useProject } from '#hooks/use-project.js';
 import { usePaneviewPersistence } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
@@ -94,12 +93,23 @@ function useExplorerPartThumbnails({
     if (!imageService || sharedThumbnails) {
       return undefined;
     }
-    const service = new PartThumbnailService(imageService);
-    // oxlint-disable-next-line react/set-state-in-effect -- This effect owns the service's StrictMode replay lifecycle.
-    setLocalThumbnails(service);
+    let service: PartThumbnailService | undefined;
+    const effectRelease = new AbortController();
+    const start = async (): Promise<void> => {
+      const Service = await loadPartThumbnailService();
+      if (effectRelease.signal.aborted || Service === undefined) {
+        return;
+      }
+      service = new Service(imageService);
+      setLocalThumbnails(service);
+    };
+    // async-iife: fire-and-forget; previews are optional code, and the pane shows none when it cannot load.
+    void start();
     return () => {
-      service.dispose();
-      setLocalThumbnails((current) => (current === service ? undefined : current));
+      effectRelease.abort();
+      const released = service;
+      released?.dispose();
+      setLocalThumbnails((current) => (current === released ? undefined : current));
     };
   }, [imageService, sharedThumbnails]);
 
@@ -107,7 +117,7 @@ function useExplorerPartThumbnails({
 
   useEffect(() => {
     if (previewRetry && previewRetry.sourceKey !== presentedKey) {
-      // Retire an unsubmitted retry when its presented-source lifetime ends.
+      // Retire an unsubmitted retry when its presented-source effectRelease ends.
       submittedRetryId.current = previewRetry.requestId;
     }
     if (!thumbnails) {
@@ -296,6 +306,6 @@ export function ModelPanelBody(props: Parameters<typeof ModelPanelBodyContent>[0
   return availability === 'ready' ? (
     <ModelPanelBodyContent {...props} />
   ) : (
-    <ProjectSyncPlaceholder state={availability} />
+    <ProjectWaitSkeleton state={availability} shape='tree' label='Model' />
   );
 }

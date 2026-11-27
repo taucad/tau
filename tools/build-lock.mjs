@@ -137,6 +137,13 @@ if (argv[0] === '--self-check') {
     process.exit(2);
   }
   acquire(lockPathFor(argv[0]));
-  const { status } = spawnSync(argv.slice(separator + 1).join(' '), { shell: true, stdio: 'inherit' });
+  const { status, signal, error } = spawnSync(argv.slice(separator + 1).join(' '), { shell: true, stdio: 'inherit' });
+  if (error !== undefined) {
+    console.error(`build-lock: the command could not run: ${error.message}`);
+  } else if (signal !== null) {
+    console.error(`build-lock: the command was ended by ${signal}`);
+  } else if (status !== 0) {
+    console.error(`build-lock: the command exited with status ${String(status)}`);
+  }
   process.exit(status ?? 1);
 }

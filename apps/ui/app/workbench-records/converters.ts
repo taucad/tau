@@ -200,7 +200,11 @@ export function fromDockview<L extends Lane>(
       used.add(id);
       const { params } = panel;
       const { contentComponent: component } = panel;
-      if (component === 'newTab' || (lane === 'workbench' && id === 'workbench:files')) {
+      // An external-agent sign-in lives for the page only (ACP agent policy rule 10); no record ever reopens one.
+      if (
+        component === 'newTab' ||
+        (lane === 'workbench' && (id === 'workbench:files' || component === 'agentSignIn'))
+      ) {
         continue;
       }
       // Browser URLs and native page ids are window-local; retain only the launcher in a shared layout.

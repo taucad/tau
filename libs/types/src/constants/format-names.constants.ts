@@ -275,12 +275,12 @@ export const formatConfigurations = {
       'Developed by RealityWave for use in web-based 3D visualization, providing an XML-based format for interactive 3D graphics.',
   },
   sldprt: {
-    name: 'SOLIDWORKS Part (SLDPRT)',
+    name: 'SolidWorks Part (SLDPRT)',
     description:
-      'Native part file of Dassault Systèmes SOLIDWORKS, holding the feature history and the exact boundary-representation solid.',
+      'Native part file of Dassault Systèmes SolidWorks, holding the feature history and the exact boundary-representation solid.',
   },
   catpart: {
-    name: 'CATIA V5 Part (CATPart)',
+    name: 'CATIA V5 Part (CATPART)',
     description:
       'Native part file of Dassault Systèmes CATIA V5, holding the feature specification tree and exact geometry.',
   },
@@ -301,7 +301,7 @@ export const formatConfigurations = {
     description: 'Autodesk Fusion bundle of a design together with the designs it references.',
   },
   fcstd: {
-    name: 'FreeCAD Document (FCStd)',
+    name: 'FreeCAD Document (FCSTD)',
     description:
       'Native document of the open-source FreeCAD modeler: a zip of the document graph and its OpenCASCADE shapes.',
   },

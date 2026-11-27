@@ -111,7 +111,7 @@ export const picovoxelOptionsSchema = z.object({
     .positive()
     .default(1.5 * 2 ** 30)
     .describe(
-      'WebAssembly heap size in bytes above which a runtime is recycled after its render, because linear memory never shrinks. Defaults to 1.5 GiB; a host on a memory-constrained device passes a lower one.',
+      "Bytes above which a runtime is recycled after its render: its WebAssembly heap, which never shrinks, plus what PicoVoxel's grid pager parked in its far store outside the heap. Defaults to 1.5 GiB; a host on a memory-constrained device passes a lower one.",
     ),
 });
 

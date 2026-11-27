@@ -8,6 +8,52 @@ import type { NodeFsPort } from '#backend/node/port.js';
 import type { WorkspaceScope } from '#mount-table.js';
 import { resolveStorageRootKey } from '#storage-root-key.js';
 import { MissingWorkspaceHandleError } from '#workspace-errors.js';
+import type { BatchEntry } from '#changeset.js';
+
+/**
+ * Told of every mutating call on a provider the registry hands out, before the call is issued (discovery index A2 a).
+ * Returns the call to make when the mutation settles, whether it resolved or rejected.
+ *
+ * @public
+ */
+export type ProviderWriteTap = (storageRootKey: string, paths: readonly string[]) => () => void;
+
+/**
+ * A path a file operation names. A file at the top of a root is never a project directory, so it is left out: the
+ * discovery index would otherwise take it for a directory (review N5). A path below the top names its directory.
+ */
+const filePath = (path: unknown): string[] => (String(path).replace(/^\/+/u, '').includes('/') ? [String(path)] : []);
+
+/** The paths each mutating provider method names, from its arguments; a directory operation names its path whatever its depth. */
+const mutatingMethods: Readonly<Record<string, (arguments_: readonly unknown[]) => string[]>> = {
+  writeFile: ([path]) => filePath(path),
+  appendFile: ([path]) => filePath(path),
+  writeFileStream: ([path]) => filePath(path),
+  writeFileChecked: ([input]) => filePath((input as { path: unknown }).path),
+  deleteFileChecked: ([input]) => filePath((input as { path: unknown }).path),
+  mkdir: ([path]) => [String(path)],
+  unlink: ([path]) => filePath(path),
+  rmdir: ([path]) => [String(path)],
+  setFileMode: ([path]) => filePath(path),
+  rename: ([from, to]) => [String(from), String(to)],
+  applyBatch: ([entries]) =>
+    (entries as readonly BatchEntry[]).flatMap((entry) => {
+      switch (entry.op) {
+        case 'move': {
+          return [entry.from, entry.to];
+        }
+        case 'mkdir': {
+          return [entry.path];
+        }
+        case 'delete': {
+          return entry.kind === 'file' ? filePath(entry.path) : [entry.path];
+        }
+        default: {
+          return filePath(entry.path);
+        }
+      }
+    }),
+};
 /**
  * Configuration for {@link ProviderRegistry}.
  * @public
@@ -48,6 +94,8 @@ export class ProviderRegistry {
   private _liveNodeFsChannel: NodeFsChannel | undefined;
   /** Told the provider paths a root's recovery removed (I1). */
   private _recoveryListener: ((storageRootKey: string, providerPaths: readonly string[]) => void) | undefined;
+  /** Told of every mutating provider call (FW2). */
+  private _writeTap: ProviderWriteTap | undefined;
   /** Recoveries that finished before a listener was set. */
   private readonly _pendingRecoveries: Array<Readonly<{ storageRootKey: string; providerPaths: readonly string[] }>> =
     [];
@@ -80,7 +128,7 @@ export class ProviderRegistry {
     const cacheKey = this.resolveStorageRootKey(scope);
     let pending = this._providers.get(cacheKey);
     if (!pending) {
-      pending = this._createProvider(scope);
+      pending = (async () => this._tapped(cacheKey, await this._createProvider(scope)))();
       this._providers.set(cacheKey, pending);
     }
 
@@ -106,6 +154,17 @@ export class ProviderRegistry {
    */
   public getOwnedProvider(storageRootKey: string): Promise<FileSystemProvider> | undefined {
     return this._providers.get(storageRootKey);
+  }
+
+  /**
+   * Set who is told of every mutating call on a provider this registry hands out, before the call is issued and when
+   * it settles: the discovery index's tap on this authority's own writes, taken where the bytes move rather than from
+   * the change bus, which carries only what each caller chose to emit (discovery index A2 a).
+   *
+   * @param tap - The tap.
+   */
+  public setWriteTap(tap: ProviderWriteTap): void {
+    this._writeTap = tap;
   }
 
   /**
@@ -193,16 +252,68 @@ export class ProviderRegistry {
     if (this._createNodeFsPort === undefined) {
       return undefined;
     }
-    this._nodeFsChannel ??= this._openNodeFsChannel(this._createNodeFsPort);
+    return new NodeFsImportSources(await this._nodeFsChannelFrom(this._createNodeFsPort));
+  }
+
+  /**
+   * The node transport's channel, opened once and shared by every node provider.
+   * Only a failed open drops the memo, so the next resolution asks the shell for
+   * a fresh port. A request that fails on an open channel leaves it memoized: the
+   * channel stays live for the providers bound to it, and a channel that closes
+   * drops itself through its close listener.
+   *
+   * @param createPort - The host's port factory.
+   * @returns The open channel.
+   */
+  private async _nodeFsChannelFrom(createPort: () => Promise<NodeFsPort>): Promise<NodeFsChannel> {
+    this._nodeFsChannel ??= this._openNodeFsChannel(createPort);
     const opening = this._nodeFsChannel;
     try {
-      return new NodeFsImportSources(await opening);
+      return await opening;
     } catch (error) {
       if (this._nodeFsChannel === opening) {
         this._nodeFsChannel = undefined;
       }
       throw error;
     }
+  }
+
+  /**
+   * Wrap each mutating method of a provider this registry made so the write tap hears it before it is issued and when
+   * it settles. Wrapped on the instance, once: every caller of this provider, the pipeline's unlocked batches and the
+   * lifecycle's own writes included, goes through it.
+   */
+  private _tapped(storageRootKey: string, provider: FileSystemProvider): FileSystemProvider {
+    for (const [name, pathsOf] of Object.entries(mutatingMethods)) {
+      const method: unknown = Reflect.get(provider, name);
+      if (typeof method !== 'function') {
+        continue;
+      }
+      const original = method as (...arguments_: unknown[]) => unknown;
+      const tap = (): ProviderWriteTap | undefined => this._writeTap;
+      Object.defineProperty(provider, name, {
+        configurable: true,
+        writable: true,
+        value: function tapped(this: unknown, ...arguments_: unknown[]): unknown {
+          const settle = tap()?.(storageRootKey, pathsOf(arguments_));
+          if (settle === undefined) {
+            return Reflect.apply(original, this, arguments_);
+          }
+          try {
+            const result = Reflect.apply(original, this, arguments_);
+            if (result instanceof Promise) {
+              return result.finally(settle);
+            }
+            settle();
+            return result;
+          } catch (error) {
+            settle();
+            throw error;
+          }
+        },
+      });
+    }
+    return provider;
   }
 
   private _recovered(storageRootKey: string, providerPaths: readonly string[]): void {
@@ -282,20 +393,12 @@ export class ProviderRegistry {
         if (this._createNodeFsPort === undefined) {
           throw new Error('This host has no node filesystem transport; a node storage root is unreachable.');
         }
-        this._nodeFsChannel ??= this._openNodeFsChannel(this._createNodeFsPort);
-        const opening = this._nodeFsChannel;
-        try {
-          const channel = await opening;
-          // The host may run in another process or on another machine: whether files
-          // keep a mode is its disk's answer, never this worker's platform.
-          const { fileModes } = await channel.describeHost();
-          return new NodeFsProviderClient(channel, scope.path, { fileModes });
-        } catch (error) {
-          if (this._nodeFsChannel === opening) {
-            this._nodeFsChannel = undefined;
-          }
-          throw error;
-        }
+        const channel = await this._nodeFsChannelFrom(this._createNodeFsPort);
+        // The host may run in another process or on another machine: whether files
+        // keep a mode is its disk's answer, never this worker's platform. A failed
+        // ask keeps the channel; the next resolution asks it again.
+        const { fileModes } = await channel.describeHost();
+        return new NodeFsProviderClient(channel, scope.path, { fileModes });
       }
       default: {
         throw new Error(`Unknown backend: ${(scope as { backend: string }).backend}`);

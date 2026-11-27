@@ -14,6 +14,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
 import { linuxInstallation } from '#shared/linux-installation.js';
+import { createWindowsPowerShellEnvironment } from '#main/windows-signature.js';
 import { promisify } from 'node:util';
 import { defaultDependencyStore } from '@taucad/host';
 import { assertQualificationConsumerScope, fetchQualificationCandidates } from './qualification-candidates.mjs';
@@ -26,7 +27,11 @@ import {
 } from './qualification-tls.mjs';
 import { observeLinuxCleanHost, startLinuxConsumer } from './qualification-linux-consumer.mjs';
 import type { LinuxConsumer } from './qualification-linux-consumer.mjs';
-import { createWindowsQualificationDriver, observeWindowsConsumerHost } from './qualification-windows.mjs';
+import {
+  createWindowsQualificationDriver,
+  observeWindowsConsumerHost,
+  windowsQualificationInstallationPath,
+} from './qualification-windows.mjs';
 import { createLinuxAptQualificationDriver, isAptLockRefusal } from './qualification-linux.mjs';
 import { prepareQualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { QualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
@@ -36,6 +41,7 @@ import { createMacosQualificationDriver } from './qualification-macos.mjs';
 import {
   assertBaselineShipsAutoInstall,
   assessRecovery,
+  recoveryFailure,
   brokenRendererDocument,
   qualificationScenario,
   rebuildAppImageWithEntry,
@@ -431,7 +437,7 @@ const main = async (): Promise<void> => {
     : route.startsWith('macos-')
       ? join(homedir(), 'Applications', `tau-qualification-${nonce}`, 'Tau.app')
       : route === 'windows-nsis'
-        ? join(required('LOCALAPPDATA'), 'Programs', `tau-qualification-${nonce}`)
+        ? windowsQualificationInstallationPath(required('LOCALAPPDATA'), nonce)
         : linuxInstallation(channel, route === 'linux-appimage').launcher;
   const candidate = (index: number): QualificationCandidate => ({ ...candidates[index]!, route });
   let tls: Awaited<ReturnType<typeof prepareQualificationTls>> | undefined;
@@ -632,7 +638,19 @@ const main = async (): Promise<void> => {
         } catch (error) {
           reason = error instanceof Error ? error.message : String(error);
           if (Date.now() >= deadline) {
-            throw new Error(`T-B22.4 recovery did not complete: ${reason}`);
+            // The verdict alone cannot say why: keep the app's own path-free account of A beside the row's observations.
+            await transport.flush();
+            const failure = recoveryFailure({
+              reason,
+              log,
+              ledgerText,
+              aAlive: currentPid !== undefined && (await files.alive(currentPid)),
+              mirrorRequests: transport.requests,
+            });
+            await writeFile(join(root, 'qualification-recovery.json'), JSON.stringify(failure.record, undefined, 2), {
+              flag: 'wx',
+            });
+            throw failure.error;
           }
           await wait(2000);
         }
@@ -1027,7 +1045,7 @@ const main = async (): Promise<void> => {
             await execFileAsync(
               'powershell.exe',
               ['-NoProfile', '-NonInteractive', '-Command', 'Start-Process -FilePath $env:TAU_Q_OPEN_URI'],
-              { env: { ...process.env, TAU_Q_OPEN_URI: uri }, timeout: 30_000 },
+              { env: { ...createWindowsPowerShellEnvironment(process.env), TAU_Q_OPEN_URI: uri }, timeout: 30_000 },
             );
           } else if (linuxConsumer) {
             // The consumer's own session opens the link and the file, as a second instance of their running app.

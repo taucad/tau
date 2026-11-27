@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { startRuntimeChild } from '#runtime-child-supervisor.js';
+import { exitsWithin, startRuntimeChild } from '#runtime-child-supervisor.js';
 import type {
   RuntimeChildNativeKernels,
   RuntimeChildWorker,
@@ -54,6 +54,23 @@ afterEach(async () => {
     await rm(temporaryDirectory, { recursive: true });
     temporaryDirectory = undefined;
   }
+});
+
+describe('runtime child close grace', () => {
+  const pendingTimeouts = (): number =>
+    process.getActiveResourcesInfo().filter((resource) => resource === 'Timeout').length;
+
+  it('should leave no grace timer pending once the child has exited, so the daemon can exit at once', async () => {
+    const before = pendingTimeouts();
+
+    expect(await exitsWithin(Promise.resolve(), 60_000)).toBe(true);
+
+    expect(pendingTimeouts()).toBe(before);
+  });
+
+  it('should answer false once the grace passes without an exit', async () => {
+    expect(await exitsWithin(Promise.withResolvers<void>().promise, 10)).toBe(false);
+  });
 });
 
 describe('runtime child permission boundary', () => {

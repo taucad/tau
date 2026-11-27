@@ -31,6 +31,7 @@ const workerUrlPlugin = {
 const baseConfig: UserConfig = {
   entry: [
     'src/cad/cad-viewer.tsx',
+    'src/cad/comment-pins.tsx',
     'src/cad/fit-view-control.tsx',
     'src/cad/fullscreen-view-control.tsx',
     'src/cad/kernel-settings.tsx',
@@ -71,6 +72,7 @@ const baseConfig: UserConfig = {
     'src/graphics/three/react/gltf-mesh.tsx',
     'src/graphics/three/render-frame-timing.ts',
     'src/graphics/three/render-loop-observer.ts',
+    'src/graphics/three/render-tier.ts',
     'src/graphics/three/renderer.ts',
     'src/graphics/three/scene-overlay.tsx',
     'src/graphics/three/stage-options.ts',

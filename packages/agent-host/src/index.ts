@@ -51,7 +51,7 @@ export {
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
 export { createTauAgentHost, pausedRunHoldMilliseconds, runHeartbeatMilliseconds } from '#host/tau-agent-host.js';
-export { isResumableRun, isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
+export { isResumableRun, isResumableRunFailure, isUserStoppedRun, turnWithdrawnCode } from '#log/resumable.js';
 export {
   emptyChatLedger,
   foldChatLedger,
@@ -72,6 +72,8 @@ export type {
   RunEntry,
 } from '#log/chat-ledger.js';
 export { followChat, readFolded } from '#log/follow-chat.js';
+export { unsettledLogRun } from '#log/unsettled-run.js';
+export type { UnsettledLogRun } from '#log/unsettled-run.js';
 export type { ChatRead, FoldedRead } from '#log/follow-chat.js';
 /* The seam's owner half, shared by the daemon launcher and the browser worker. The wire vocabulary itself ships
  * from `@taucad/agent-host/wire`. */
@@ -96,7 +98,7 @@ export type { PrefixBreakCause, PrefixStamp } from '#log/prefix-stamp.js';
 export { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
 export { normalizeLatexDelimiters, trimToolResultContext } from '#harness/cad-middleware.js';
 export { HostCompactionError } from '#harness/compaction.js';
-export { defaultSafeguardThresholds, summarizeToolEvents } from '#harness/safeguards.js';
+export { defaultSafeguardThresholds, pollingToolNames, summarizeToolEvents } from '#harness/safeguards.js';
 export { canonicalJson } from '#log/canonical-json.js';
 export { normalizeToolInput, tauToolKinds, toPiToolContent } from '#harness/tools.js';
 export type { EventLogErrorCode } from '#log/event-log-error.js';
@@ -167,6 +169,9 @@ export type {
   ModelInvocationBinding,
   ModelStreamRequest,
   ModelTransport,
+  ModelDeployment,
+  DeploymentModeAnswer,
+  RunBillingMode,
   InvocationFunding,
   InvocationResolutionRequest,
   TurnAttemptKey,
@@ -210,6 +215,7 @@ export type {
 export type { CommandKey, CreateTauAgentHostOptions, TauAgentHost, TauAgentTurnRequest } from '#host/tau-agent-host.js';
 export type {
   CachedSystemPromptOptions,
+  GatewayBillingOptions,
   GatewayModelErrorCode,
   GatewayModelTransportOptions,
 } from '#transport/gateway-model-transport.js';

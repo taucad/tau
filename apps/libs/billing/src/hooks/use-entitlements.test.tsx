@@ -37,7 +37,7 @@ describe('useEntitlements', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const { result } = renderHook(() => useEntitlements(), { wrapper: queryWrapper });
-    expect(result.current).toEqual({ ...entitlementsFromTier('free'), isResolved: false });
+    expect(result.current).toEqual({ ...entitlementsFromTier('free'), isResolved: false, isError: false });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -46,7 +46,7 @@ describe('useEntitlements', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => serializeEntitlements(expected) }));
     const { result } = renderHook(() => useEntitlements(), { wrapper });
     await waitFor(() => {
-      expect(result.current).toEqual({ ...expected, isResolved: true });
+      expect(result.current).toEqual({ ...expected, isResolved: true, isError: false });
     });
     expect(fetch).toHaveBeenCalledWith('https://api.example/v1/billing/entitlements', {
       credentials: 'include',
@@ -61,7 +61,7 @@ describe('useEntitlements', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledOnce();
     });
-    expect(result.current).toEqual({ ...entitlementsFromTier('free'), isResolved: false });
+    expect(result.current).toEqual({ ...entitlementsFromTier('free'), isResolved: false, isError: false });
   });
 });
 

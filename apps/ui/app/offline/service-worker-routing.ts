@@ -1,0 +1,243 @@
+/**
+ * What the web app's one service worker does with a request (progressive loading PL7, Brain
+ * `research/progressive-loading-architecture.md`, "Progressive web app and the single service worker").
+ *
+ * Pure decisions, so the worker's routing and update rule are unit-tested without a worker: `service-worker.ts` binds
+ * them to Workbox. Product rules no library knows live here:
+ *
+ * - A document is answered only for a class of the route-class registry that names a {@link WorkerDelivery}, and only
+ *   with that class's precached document of this worker's deploy, replayed whole (headers included, so
+ *   cross-origin isolation holds). Home (`/`) only for a visit the deployed site gives the app (`homeAppEntry`).
+ * - A cache-first document asks the network first instead on a reload, while a newer worker is installing or
+ *   waiting, so neither a reload nor the update rule ever lands on a replaced deploy (ruling OD3), and while this
+ *   worker's build is below the last build floor the server reported (FP2, {@link isShellInBounds}).
+ * - A class whose closure the worker does not wholly hold is never answered from the cache: its navigation is the
+ *   network's (FP1 of Brain `research/pl7-service-worker-staging-defects-blueprint.md`).
+ * - Every network answer to a navigation is the browser's own request (navigation preload), never one the worker
+ *   re-issues.
+ * - Hashed and digest-addressed static files are cached on first use ({@link isCachedOnFirstUse}), copied from the
+ *   HTTP cache after the page loaded them; everything else, API, auth, payment, `.data`, `/__manifest`, marketing pages,
+ *   writes and every cross-origin request, is never answered by the worker and reaches the browser untouched.
+ *
+ * Imports only the registry, which imports nothing, so the worker bundle stays small.
+ */
+import { homeAppEntry, workerRouteClasses } from '#lib/route-classes.js';
+import type { WorkerRouteClass } from '#lib/route-classes.js';
+import {
+  activateIfBuildMessageType,
+  buildFloorMessageType,
+  serviceWorkerMessageType,
+  skipWaitingMessageType,
+} from '#offline/pwa-messages.js';
+import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
+
+/** Milliseconds a network-first document waits for the network before the precached one answers (B5's bound). */
+export const navigationNetworkTimeout = 3000;
+
+/** The classes the worker answers, from the registry. */
+export const workerClasses: readonly WorkerRouteClass[] = workerRouteClasses();
+
+/** Minimal view of an intercepted request. */
+export type RequestFacts = Readonly<{
+  url: string;
+  method: string;
+  mode: string;
+  /** The request's cache mode: a reload asks `no-cache` (or `reload` when forced). */
+  cache: string;
+}>;
+
+/** A document class the worker answers a navigation for, before the per-request facts are read. */
+export type NavigationCandidate = Readonly<{ workerClass: WorkerRouteClass }>;
+
+/**
+ * The class whose document may answer a navigation: a same-origin GET navigation to a URL a worker class matches,
+ * whose document, and everything its class needs to boot, this worker holds.
+ *
+ * @param request - The intercepted request.
+ * @param origin - The worker's origin.
+ * @param isPrecached - Whether this worker holds a document's whole class.
+ * @returns The candidate, or `undefined` to leave the request to the browser.
+ */
+export const navigationCandidate = (
+  request: RequestFacts,
+  origin: string,
+  isPrecached: (document: string) => boolean,
+): NavigationCandidate | undefined => {
+  if (request.method !== 'GET' || request.mode !== 'navigate') {
+    return undefined;
+  }
+  const url = new URL(request.url);
+  if (url.origin !== origin) {
+    return undefined;
+  }
+  const workerClass = workerClasses.find((candidate) => candidate.matches(url.pathname));
+  if (workerClass === undefined || !isPrecached(workerClass.document)) {
+    return undefined;
+  }
+  return { workerClass };
+};
+
+/**
+ * How one navigation is answered. `network` is the browser's own navigation (the worker's navigation preload
+ * response); the other two name the precached document and the order to try it in.
+ */
+export type NavigationAnswer =
+  | Readonly<{ kind: 'network' }>
+  | Readonly<{ kind: 'cache-first' | 'network-first'; document: string }>;
+
+/**
+ * Whether the worker may serve its cached shells online without asking the network first (FP2 of Brain
+ * `research/pl7-service-worker-staging-defects-blueprint.md`, the operator's ruling on OD3 as amended 2026-11-20): its
+ * build is not below the last build floor (`minBuildId`) the server reported, the oldest build the site still serves
+ * assets for and supports. No clock is read. With no floor reported the shells hold, as cache-first always did; an
+ * unknown build (`0`) is below any floor.
+ *
+ * @param input - The worker's build id and the last floor the server reported, if any.
+ * @returns `true` while the cached shells are in bounds.
+ */
+export const isShellInBounds = (input: Readonly<{ buildId: number; floor: number | undefined }>): boolean =>
+  input.floor === undefined || input.buildId >= input.floor;
+
+/**
+ * The build floor a page hands its worker (`buildFloorMessageType`), from its own `/health/build` check
+ * (`pwa-registration.ts`).
+ *
+ * @param data - The message.
+ * @returns The floor (`undefined` when the server reported none), or `undefined` for any other message or a floor
+ *   that is no build id.
+ */
+export const readBuildFloorMessage = (data: unknown): Readonly<{ minBuildId: number | undefined }> | undefined => {
+  if (typeof data !== 'object' || data === null) {
+    return undefined;
+  }
+  const { type, minBuildId } = data as { type?: unknown; minBuildId?: unknown };
+  if (type !== buildFloorMessageType) {
+    return undefined;
+  }
+  if (minBuildId === undefined) {
+    return { minBuildId: undefined };
+  }
+  return typeof minBuildId === 'number' && Number.isSafeInteger(minBuildId) && minBuildId > 0
+    ? { minBuildId }
+    : undefined;
+};
+
+/** Cache modes a navigation carries when the user asked for a fresh page (a reload). */
+const freshCacheModes = new Set(['reload', 'no-cache', 'no-store']);
+
+/**
+ * How a candidate navigation is answered, from the facts read after the worker chose to respond.
+ *
+ * @param input - The candidate, the request, the `tau-entry` cookie (Home only) and whether a newer worker of this
+ *   registration is installing or waiting, and whether the cached shells are in bounds ({@link isShellInBounds}).
+ * @returns `network` answers with the browser's own request; otherwise the document and the order to try.
+ */
+export const answerNavigation = (
+  input: Readonly<{
+    candidate: NavigationCandidate;
+    request: RequestFacts;
+    tauEntry: string | undefined;
+    updatePending: boolean;
+    /** Below the server's build floor, a cache-first class asks the network first within the 3 s bound (FP2). */
+    shellInBounds: boolean;
+  }>,
+): NavigationAnswer => {
+  const { workerClass } = input.candidate;
+  const url = new URL(input.request.url);
+  if (workerClass.routeClass.id === 'home' && !homeAppEntry(url.searchParams, input.tauEntry)) {
+    return { kind: 'network' };
+  }
+  if (workerClass.delivery === 'network-first') {
+    return { kind: 'network-first', document: workerClass.document };
+  }
+  if (input.updatePending || !input.shellInBounds || freshCacheModes.has(input.request.cache)) {
+    return { kind: 'network-first', document: workerClass.document };
+  }
+  return { kind: 'cache-first', document: workerClass.document };
+};
+
+/**
+ * Whether a request is for a file the worker caches on first use: a same-origin GET of a content-hashed build asset
+ * (`/assets/*`) or a digest-addressed runtime file (`/csharp-language/<sha>/…`), immutable by URL. This is the seam the
+ * kernel asset delivery programme replaces with its digest-keyed store (KA4, KA5); nothing else may grow here.
+ *
+ * @param request - The intercepted request.
+ * @param origin - The worker's origin.
+ * @returns `true` when the worker keeps a copy for offline use once the page has loaded it.
+ */
+export const isCachedOnFirstUse = (request: Pick<RequestFacts, 'url' | 'method'>, origin: string): boolean => {
+  if (request.method !== 'GET') {
+    return false;
+  }
+  const url = new URL(request.url);
+  return url.origin === origin && (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/csharp-language/'));
+};
+
+/**
+ * Whether a precache install failure was the origin's storage quota.
+ *
+ * @param error - The install's rejection.
+ * @returns `true` for a quota error in any engine.
+ */
+export const isQuotaError = (error: unknown): boolean => {
+  // A `DOMException` is not an `Error` instance in every engine.
+  const name = typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
+  return name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED';
+};
+
+const describeError = (error: unknown): string => {
+  const message = typeof error === 'object' && error !== null ? (error as { message?: unknown }).message : error;
+  return typeof message === 'string' ? message : 'unknown error';
+};
+
+/**
+ * The message a finished install posts to its pages.
+ *
+ * @param error - The install's rejection, or `undefined` when it completed.
+ * @returns The message.
+ */
+export const installMessage = (error?: unknown): ServiceWorkerMessage =>
+  error === undefined
+    ? { type: serviceWorkerMessageType, status: 'ready' }
+    : {
+        type: serviceWorkerMessageType,
+        status: isQuotaError(error) ? 'quota-exceeded' : 'failed',
+        detail: describeError(error),
+      };
+
+/**
+ * Whether a navigation asks for safe mode (`?safe=1`, `boot-signals.ts`'s `safeModeHref`): the worker never answers it,
+ * so safe mode reaches the network as if no worker were there (FP5), and its page unregisters the worker.
+ *
+ * @param url - The navigation's URL.
+ * @returns `true` for a safe-mode navigation.
+ */
+export const isSafeModeNavigation = (url: string): boolean => {
+  try {
+    return new URL(url).searchParams.get('safe') === '1';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Whether a message from a page activates this worker (FP3 of Brain
+ * `research/pl7-service-worker-staging-defects-blueprint.md`): the update rule's `SKIP_WAITING` always does; an
+ * activate-if-build message does when the page is already on this worker's build, which is then the live one, so
+ * activation loses that page nothing (a reload under the previous worker lands there, and its worker would otherwise
+ * wait for the tab's lifetime). A build id of `0` is unknown and never matches.
+ *
+ * @param data - The message.
+ * @param buildId - This worker's build id (`__TAU_BUILD_ID`, written by the build), or `0`.
+ * @returns `true` to skip waiting.
+ */
+export const activatesWorker = (data: unknown, buildId: number): boolean => {
+  if (typeof data !== 'object' || data === null) {
+    return false;
+  }
+  const { type, buildId: pageBuildId } = data as { type?: unknown; buildId?: unknown };
+  if (type === skipWaitingMessageType) {
+    return true;
+  }
+  return type === activateIfBuildMessageType && buildId !== 0 && pageBuildId === buildId;
+};

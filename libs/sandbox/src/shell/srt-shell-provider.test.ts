@@ -25,7 +25,13 @@ import { seatbeltDecision, seatbeltProfileOf } from '#shell/seatbelt.fixture.js'
 import type { ProfileFilesystem } from '#shell/seatbelt.fixture.js';
 import { createShellCustody } from '#shell/shell-custody.js';
 import { holdProtectedStandIns } from '#shell/shell-stand-ins.js';
-import type { ShellLaunch, ShellLaunchOutcome, ShellPipesProcess, ShellProcess } from '#shell/shell-provider.js';
+import type {
+  ShellLaunch,
+  ShellLaunchOutcome,
+  ShellPipesProcess,
+  ShellProcess,
+  ShellProvider,
+} from '#shell/shell-provider.js';
 import {
   bindOwnPty,
   createSandboxShellProvider,
@@ -48,7 +54,10 @@ const supervisor = {
 const posix = process.platform === 'linux' || process.platform === 'darwin';
 
 const roots: string[] = [];
-afterEach(() => {
+/* Custodial providers, closed after each test: a custody lock left to garbage collection is an uncaught error on Node 26. */
+const opened: ShellProvider[] = [];
+afterEach(async () => {
+  await Promise.all(opened.splice(0).map(async (provider) => provider.close?.()));
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -324,6 +333,7 @@ const custodial = (overrides: Omit<SandboxShellProviderOptions, 'custody'> = {})
   const base = fixtureRoot();
   const custody = { directory: join(base, 'custody'), sessionDirectory: base };
   const provider = createSandboxShellProvider({ supervisor, custody, ...overrides });
+  opened.push(provider);
   const executions: string[] = [];
   const privateRoots: string[] = [];
   return {

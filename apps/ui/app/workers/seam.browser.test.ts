@@ -100,6 +100,24 @@ const harness = async (): Promise<Harness> => {
     let dead = false;
     /** Rpc ids of `start` calls whose answer this owner dies before sending. */
     const dieBeforeAnswering = new Set<string>();
+    /* As the resident worker's `serial`: the page sends a connect right behind its provide, before that answered, and
+     * the worker answers it from the host that provide opened (STO-25 SP6). This worker serves one project. */
+    let controls: Promise<void> = Promise.resolve();
+    const inOrder = async <Result>(call: () => Promise<Result>): Promise<Result> => {
+      const previous = controls;
+      const answering = (async () => {
+        await previous;
+        return call();
+      })();
+      controls = (async () => {
+        try {
+          await answering;
+        } catch {
+          /* Reported to the call that made it. */
+        }
+      })();
+      return answering;
+    };
     const terminate = (): void => {
       if (dead) {
         return;
@@ -197,26 +215,30 @@ const harness = async (): Promise<Harness> => {
                   return undefined;
                 }
                 case 'provide': {
-                  await succession;
-                  const provide = args as AgentHostWorkerProtocol['calls']['provide']['args'];
-                  const previous = host;
-                  host = await openBrowserProjectHost(provide, {
-                    tabId,
-                    visibility: { visible: () => true, subscribe: () => () => undefined },
+                  return inOrder(async () => {
+                    await succession;
+                    const provide = args as AgentHostWorkerProtocol['calls']['provide']['args'];
+                    const previous = host;
+                    host = await openBrowserProjectHost(provide, {
+                      tabId,
+                      visibility: { visible: () => true, subscribe: () => () => undefined },
+                    });
+                    await previous?.close();
+                    return previous === undefined ? {} : { replaced: previous.hostId };
                   });
-                  await previous?.close();
-                  return previous === undefined ? {} : { replaced: previous.hostId };
                 }
                 case 'connect': {
-                  const { hostId, port: stream } = args as AgentHostWorkerProtocol['calls']['connect']['args'];
-                  const status: AgentHostWorkerProtocol['calls']['connect']['result']['status'] =
-                    host?.hostId === hostId ? 'connected' : 'needs';
-                  if (host === undefined || status === 'needs') {
-                    stream.close();
-                  } else {
-                    host.connect(relay(stream));
-                  }
-                  return { status } satisfies AgentHostWorkerProtocol['calls']['connect']['result'];
+                  return inOrder(async () => {
+                    const { hostId, port: stream } = args as AgentHostWorkerProtocol['calls']['connect']['args'];
+                    const status: AgentHostWorkerProtocol['calls']['connect']['result']['status'] =
+                      host?.hostId === hostId ? 'connected' : 'needs';
+                    if (host === undefined || status === 'needs') {
+                      stream.close();
+                    } else {
+                      host.connect(relay(stream));
+                    }
+                    return { status } satisfies AgentHostWorkerProtocol['calls']['connect']['result'];
+                  });
                 }
                 case 'visibility': {
                   return undefined;

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are snake_case. */
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -9,6 +9,7 @@ import {
   forwardRendererDiagnostics,
   forwardUtilityDiagnostics,
   kernelUtilityDiagnostics,
+  pagesThatCanSave,
   watchRendererHangs,
 } from '#main/diagnostics.js';
 
@@ -108,6 +109,60 @@ describe('createDiagnosticsLog', () => {
     expect(readFileSync(log.filePath, 'utf8')).toContain('after.rotation');
   });
 
+  it('should keep three rotated generations and drop the oldest', async () => {
+    const directory = logDirectory();
+    const log = createDiagnosticsLog({ directory, echo: false, maxBytes: 32 });
+    for (let generation = 1; generation <= 4; generation += 1) {
+      writeFileSync(log.filePath, `generation ${String(generation)} `.padEnd(64, 'x'));
+      log.log('info', 'after.rotation', { generation });
+      // oxlint-disable-next-line no-await-in-loop -- each rotation must land before the next file is written
+      await log.flush();
+    }
+    expect(readFileSync(join(directory, 'desktop.1.log'), 'utf8')).toContain('generation 4');
+    expect(readFileSync(join(directory, 'desktop.2.log'), 'utf8')).toContain('generation 3');
+    expect(readFileSync(join(directory, 'desktop.3.log'), 'utf8')).toContain('generation 2');
+    expect(existsSync(join(directory, 'desktop.4.log'))).toBe(false);
+  });
+
+  it('should open the log under the system temporary folder when its directory cannot be created', () => {
+    const parent = logDirectory();
+    /* A file where the log directory's parent should be: `mkdir` fails whatever the account's privileges. */
+    const blocked = join(parent, 'not-a-directory');
+    writeFileSync(blocked, 'occupied');
+    let log: ReturnType<typeof createDiagnosticsLog> | undefined;
+    expect(() => {
+      log = createDiagnosticsLog({ directory: join(blocked, 'logs'), echo: false });
+    }).not.toThrow();
+    expect(log?.filePath.startsWith(tmpdir())).toBe(true);
+    log?.log('error', 'main.bootstrap-failed', { step: 'home-directory' });
+    expect(readFileSync(log!.filePath, 'utf8')).toContain('main.bootstrap-failed');
+  });
+
+  it('should fall back when the log file cannot be opened for append in a directory that exists', () => {
+    const directory = logDirectory();
+    /* A directory where the log file should be: the open fails whatever the account's privileges. */
+    mkdirSync(join(directory, 'desktop.log'));
+    const log = createDiagnosticsLog({ directory, echo: false });
+    expect(log.filePath.startsWith(tmpdir())).toBe(true);
+    expect(dirname(log.filePath)).not.toBe(directory);
+    log.log('error', 'main.bootstrap-failed');
+    expect(readFileSync(log.filePath, 'utf8')).toContain('main.bootstrap-failed');
+  });
+
+  it('should keep the fallback log in a fresh private folder no other account can name in advance', () => {
+    const parent = logDirectory();
+    const blocked = join(parent, 'not-a-directory');
+    writeFileSync(blocked, 'occupied');
+    const first = createDiagnosticsLog({ directory: join(blocked, 'logs'), echo: false });
+    const second = createDiagnosticsLog({ directory: join(blocked, 'logs'), echo: false });
+    first.log('error', 'main.bootstrap-failed');
+    const folder = dirname(first.filePath);
+    expect(folder).not.toBe(dirname(second.filePath));
+    expect(lstatSync(folder).isSymbolicLink()).toBe(false);
+    expect(lstatSync(folder).mode % 0o1000).toBe(0o700);
+    expect(statSync(first.filePath).mode % 0o1000).toBe(0o600);
+  });
+
   it('never throws when the log cannot be written', () => {
     const log = createDiagnosticsLog({ directory: logDirectory(), echo: false });
     expect(() => {
@@ -133,7 +188,8 @@ describe('createDiagnosticsLog main-thread cost', () => {
       log.log('warn', 'kernel.stderr', { chunk: `line ${String(index)}` });
     }
 
-    expect(existsSync(log.filePath)).toBe(false);
+    /* Opening the log creates the file empty; no record lands until the flush. */
+    expect(readFileSync(log.filePath, 'utf8')).toBe('');
     await log.flush();
     const lines = readFileSync(log.filePath, 'utf8').trim().split('\n');
     expect(lines).toHaveLength(100);
@@ -255,6 +311,167 @@ describe('forwarders', () => {
     ]);
     expect(report).toHaveBeenCalledOnce();
     expect(report.mock.calls[0]?.[0]).toMatchObject({ message: 'Renderer unresponsive', tags: { hang_seconds: '9' } });
+  });
+
+  describe('the hang rule (T-B24.1)', () => {
+    type Timer = { readonly callback: () => void; readonly at: number };
+    const setup = (
+      response: number | ((options: { readonly signal?: AbortSignal }) => Promise<{ response: number }>) = 0,
+    ) => {
+      const handlers = new Map<string, () => void>();
+      const log = { filePath: '', log: vi.fn() };
+      const report = vi.fn();
+      const reload = vi.fn();
+      const restartInSafeMode = vi.fn();
+      const endHungPage = vi.fn();
+      const showMessageBox = vi.fn(typeof response === 'function' ? response : async () => ({ response }));
+      let now = 0;
+      const timers = new Set<Timer>();
+      watchRendererHangs(
+        {
+          on: (event: string, listener: () => void) => {
+            handlers.set(event, listener);
+          },
+        },
+        log,
+        {
+          report,
+          now: () => now,
+          hangRule: {
+            setTimeout: (callback, milliseconds) => {
+              const timer = { callback, at: now + milliseconds };
+              timers.add(timer);
+              return timer;
+            },
+            clearTimeout: (handle) => {
+              timers.delete(handle as Timer);
+            },
+            showMessageBox,
+            reload,
+            restartInSafeMode,
+            endHungPage,
+          },
+        },
+      );
+      const advance = async (milliseconds: number): Promise<void> => {
+        now += milliseconds;
+        for (const timer of timers) {
+          if (timer.at <= now) {
+            timers.delete(timer);
+            timer.callback();
+          }
+        }
+        await Promise.resolve();
+        await Promise.resolve();
+      };
+      return { handlers, log, report, reload, restartInSafeMode, endHungPage, showMessageBox, advance, timers };
+    };
+
+    it('should report an ongoing hang at 30 s and offer Wait, Reload and Restart in Safe Mode', async () => {
+      const { handlers, report, showMessageBox, advance } = setup();
+      handlers.get('unresponsive')?.();
+      await advance(29_999);
+      expect(showMessageBox).not.toHaveBeenCalled();
+
+      await advance(1);
+
+      expect(report).toHaveBeenCalledOnce();
+      expect(report.mock.calls[0]?.[0]).toMatchObject({
+        level: 'error',
+        fingerprint: ['desktop-renderer-hang'],
+        tags: { hang_seconds: '30', ongoing: 'true' },
+      });
+      expect(showMessageBox).toHaveBeenCalledOnce();
+      expect(showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        buttons: ['Wait', 'Reload', 'Restart in Safe Mode'],
+        cancelId: 0,
+      });
+    });
+
+    it('should show nothing for a page that answers before 30 s', async () => {
+      const { handlers, report, showMessageBox, advance, timers } = setup();
+      handlers.get('unresponsive')?.();
+      await advance(20_000);
+      handlers.get('responsive')?.();
+      await advance(60_000);
+
+      expect(showMessageBox).not.toHaveBeenCalled();
+      expect(timers.size).toBe(0);
+      /* The ended hang is still reported as before, without `ongoing`. */
+      expect(report).toHaveBeenCalledOnce();
+      expect(report.mock.calls[0]?.[0]).toMatchObject({ tags: { hang_seconds: '20' } });
+    });
+
+    it('should reload or restart in safe mode as chosen', async () => {
+      const reloading = setup(1);
+      reloading.handlers.get('unresponsive')?.();
+      await reloading.advance(30_000);
+      expect(reloading.reload).toHaveBeenCalledOnce();
+      expect(reloading.restartInSafeMode).not.toHaveBeenCalled();
+
+      const restarting = setup(2);
+      restarting.handlers.get('unresponsive')?.();
+      await restarting.advance(30_000);
+      expect(restarting.restartInSafeMode).toHaveBeenCalledOnce();
+      expect(restarting.reload).not.toHaveBeenCalled();
+    });
+
+    it('should end the hung page before a safe-mode restart, so the quit owner never waits on it', async () => {
+      const restarting = setup(2);
+      restarting.handlers.get('unresponsive')?.();
+      await restarting.advance(30_000);
+
+      expect(restarting.endHungPage).toHaveBeenCalledOnce();
+      expect(restarting.endHungPage.mock.invocationCallOrder[0]).toBeLessThan(
+        restarting.restartInSafeMode.mock.invocationCallOrder[0]!,
+      );
+
+      const waiting = setup(0);
+      waiting.handlers.get('unresponsive')?.();
+      await waiting.advance(30_000);
+      expect(waiting.endHungPage).not.toHaveBeenCalled();
+    });
+
+    it('should ask again after another 30 s when the person waits and the page still hangs, reporting once', async () => {
+      const { handlers, report, showMessageBox, advance } = setup(0);
+      handlers.get('unresponsive')?.();
+      await advance(30_000);
+      await advance(30_000);
+
+      expect(showMessageBox).toHaveBeenCalledTimes(2);
+      expect(report).toHaveBeenCalledOnce();
+    });
+
+    it('should close the choice when the page answers while it is showing', async () => {
+      let signal: AbortSignal | undefined;
+      const { handlers, advance, timers } = setup(
+        async (options) =>
+          new Promise<{ response: number }>((resolve) => {
+            ({ signal } = options);
+            signal?.addEventListener('abort', () => {
+              resolve({ response: 0 });
+            });
+          }),
+      );
+      handlers.get('unresponsive')?.();
+      await advance(30_000);
+      expect(signal?.aborted).toBe(false);
+
+      handlers.get('responsive')?.();
+      await advance(0);
+
+      expect(signal?.aborted).toBe(true);
+      expect(timers.size).toBe(0);
+    });
+  });
+
+  it("should leave a page that was ended or has crashed out of the quit owner's wait", () => {
+    const page = (id: number, crashed = false) => ({ webContents: { id, isCrashed: () => crashed } });
+    const live = page(1);
+    const ended = page(2);
+    const crashed = page(3, true);
+
+    expect(pagesThatCanSave([live, ended, crashed], new Set([2]))).toStrictEqual([live]);
   });
 
   it('should collapse a renderer console message repeated back-to-back', () => {

@@ -16,10 +16,21 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-import { z } from 'zod';
+/* oxlint-disable no-restricted-imports -- Operational scripts are outside the library's # source alias. */
+import {
+  crateNotice,
+  ensureToolchain,
+  linkedCrates,
+  payloadManifest,
+  pinnedToolchain,
+  rustLibraryCopyright,
+  toolchainDocuments,
+  toolchainLicence,
+} from './rust-payload.mjs';
+/* oxlint-enable no-restricted-imports -- End operational script import exception. */
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const crateRoot = resolve(workspaceRoot, 'libs/sandbox/store-guard');
@@ -63,16 +74,6 @@ const cargo = (args: readonly string[]): void => {
   });
 };
 
-/** Install the toolchain `rust-toolchain.toml` pins, with its musl target and components; a no-op once present. */
-const ensureToolchain = (): void => {
-  try {
-    execFileSync('rustup', ['--version'], { stdio: 'ignore' });
-  } catch {
-    throw new Error('rustup is required to build the store guard: https://rustup.rs');
-  }
-  execFileSync('rustup', ['toolchain', 'install'], { cwd: crateRoot, stdio: 'inherit' });
-};
-
 /**
  * Whether an ELF image is a static linux-x64 executable: 64-bit little-endian, machine x86-64, and no `PT_INTERP`
  * program header, so it needs no dynamic loader and runs on every supported distribution.
@@ -96,94 +97,13 @@ const staticElfProblem = (image: Uint8Array<ArrayBuffer>): string | undefined =>
   return undefined;
 };
 
-const cargoPackage = z.object({
-  id: z.string(),
-  name: z.string(),
-  version: z.string(),
-  license: z.string().nullish(),
-  repository: z.string().nullish(),
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- cargo metadata's wire name.
-  manifest_path: z.string(),
-});
-type CargoPackage = z.infer<typeof cargoPackage>;
-const cargoMetadata = z.object({
-  packages: z.array(cargoPackage),
-  resolve: z.object({
-    root: z.string(),
-    nodes: z.array(
-      z.object({
-        id: z.string(),
-        deps: z.array(
-          z.object({
-            pkg: z.string(),
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- cargo metadata's wire name.
-            dep_kinds: z.array(z.object({ kind: z.string().nullable() })),
-          }),
-        ),
-      }),
-    ),
-  }),
-});
-
-const byNameAndVersion = (left: CargoPackage, right: CargoPackage): number =>
-  left.name.localeCompare(right.name) || left.version.localeCompare(right.version);
-
-/** Every crate the guard is built from: the normal dependency closure of the crate for the musl target. */
-const linkedCrates = (): readonly CargoPackage[] => {
-  const metadata = cargoMetadata.parse(
-    JSON.parse(
-      execFileSync('cargo', ['metadata', '--format-version', '1', '--filter-platform', target, '--locked'], {
-        cwd: crateRoot,
-        encoding: 'utf8',
-        maxBuffer: 64 * 1024 * 1024,
-      }),
-    ),
-  );
-  const packages = new Map(metadata.packages.map((entry) => [entry.id, entry]));
-  const nodes = new Map(metadata.resolve.nodes.map((node) => [node.id, node]));
-  const seen = new Set<string>();
-  const pending = [metadata.resolve.root];
-  while (pending.length > 0) {
-    const id = pending.pop()!;
-    if (seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-    for (const dependency of nodes.get(id)?.deps ?? []) {
-      /* A normal dependency has no kind; dev and build dependencies are not linked into the guard. */
-      if (dependency.dep_kinds.some(({ kind }) => kind === null)) {
-        pending.push(dependency.pkg);
-      }
-    }
-  }
-  const crates = [...seen].map((id) => packages.get(id)).filter((entry) => entry !== undefined);
-  // oxlint-disable-next-line no-array-sort -- sorting a fresh copy.
-  return crates.sort(byNameAndVersion);
-};
-
 /**
  * What the static executable links from the toolchain itself: the Rust standard library (`std`, `core`, `alloc`, with
  * the notices the toolchain ships for it), LLVM's libunwind, and musl libc with its C runtime objects.
  */
 const toolchainNotice = async (): Promise<string[]> => {
-  const sysroot = execFileSync('rustc', ['--print', 'sysroot'], { cwd: crateRoot, encoding: 'utf8' }).trim();
-  const documents = join(sysroot, 'share/doc/rust');
-  const html = await readFile(join(documents, 'COPYRIGHT-library.html'), 'utf8');
-  const library = html
-    .replaceAll(/<[^>]*>/gu, '')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&amp;', '&')
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter((line, index, lines) => line !== '' || lines[index - 1] !== '')
-    .join('\n')
-    .trim();
-  const licence = async (name: string): Promise<string> => {
-    const text = await readFile(join(documents, 'licenses', name), 'utf8');
-    return text.trimEnd();
-  };
-  const mit = await licence('MIT.txt');
+  const documents = toolchainDocuments(crateRoot);
+  const mit = await toolchainLicence(documents, 'MIT.txt');
   return [
     '',
     '===== Toolchain components linked into the executable =====',
@@ -194,7 +114,7 @@ const toolchainNotice = async (): Promise<string[]> => {
     '',
     '===== Rust standard library: COPYRIGHT-library =====',
     '',
-    library,
+    await rustLibraryCopyright(documents),
     '',
     '===== musl libc =====',
     '',
@@ -204,46 +124,28 @@ const toolchainNotice = async (): Promise<string[]> => {
     '',
     '===== Apache-2.0 =====',
     '',
-    await licence('Apache-2.0.txt'),
+    await toolchainLicence(documents, 'Apache-2.0.txt'),
     '',
     '===== LLVM-exception =====',
     '',
-    await licence('LLVM-exception.txt'),
+    await toolchainLicence(documents, 'LLVM-exception.txt'),
     '',
     '===== Unicode-3.0 =====',
     '',
-    await licence('Unicode-3.0.txt'),
+    await toolchainLicence(documents, 'Unicode-3.0.txt'),
   ];
 };
 
 /** The NOTICE: every crate with its licence expression, then the licence and notice texts each crate ships. */
-const notice = async (crates: readonly CargoPackage[]): Promise<string> => {
-  const sections = [
-    `tau-store-guard: the git store guard for Tau's Linux Terminal (libs/sandbox/store-guard in taucad/tau).`,
-    `It is one static executable built from the Rust crates below, each under its own licence.`,
-    '',
-    ...crates.map(
-      (entry) =>
-        `- ${entry.name} ${entry.version}: ${entry.license ?? 'no licence expression'}${entry.repository ? ` (${entry.repository})` : ''}`,
-    ),
-  ];
-  for (const entry of crates) {
-    const directory = resolve(entry.manifest_path, '..');
-    // oxlint-disable-next-line no-await-in-loop -- one listing per crate, in order, so the NOTICE is deterministic.
-    const listing = await readdir(directory);
-    // oxlint-disable-next-line no-array-sort -- sorting the filtered copy.
-    const files = listing.filter((name) => /^(?:licen[cs]e|copying|notice)/iu.test(name)).sort();
-    for (const file of files) {
-      // oxlint-disable-next-line no-await-in-loop -- see above.
-      const text = await readFile(join(directory, file), 'utf8').catch(() => undefined);
-      if (text !== undefined) {
-        sections.push('', `===== ${entry.name} ${entry.version}: ${file} =====`, '', text.trimEnd());
-      }
-    }
-  }
-  sections.push(...(await toolchainNotice()));
-  return `${sections.join('\n')}\n`;
-};
+const notice = async (crates: Parameters<typeof crateNotice>[1]): Promise<string> =>
+  crateNotice(
+    [
+      `tau-store-guard: the git store guard for Tau's Linux Terminal (libs/sandbox/store-guard in taucad/tau).`,
+      `It is one static executable built from the Rust crates below, each under its own licence.`,
+    ],
+    crates,
+    await toolchainNotice(),
+  );
 
 const { test, resources } = parseArguments();
 /* The guard is Linux-only code: its checks run wherever `test` runs on Linux (CI's affected lanes), and a macOS or
@@ -257,7 +159,7 @@ if (process.platform !== 'linux' || process.arch !== 'x64') {
     `The store guard is built on linux-x64 for linux-x64; this host is ${process.platform}-${process.arch}.`,
   );
 }
-ensureToolchain();
+ensureToolchain(crateRoot, 'the store guard');
 if (test) {
   cargo(['test', '--all-targets']);
   cargo(['clippy', '--all-targets', '--', '-D', 'warnings']);
@@ -271,8 +173,7 @@ if (test) {
     throw new Error(`${built} is ${problem}; the guard must be a static linux-x64 executable.`);
   }
   const version = execFileSync(built, ['--version'], { encoding: 'utf8' }).trim();
-  const crates = linkedCrates();
-  const toolchain = /channel = "([^"]+)"/u.exec(await readFile(resolve(crateRoot, 'rust-toolchain.toml'), 'utf8'))?.[1];
+  const crates = linkedCrates(crateRoot, target);
   await rm(stageRoot, { recursive: true, force: true });
   await mkdir(stageRoot, { recursive: true });
   await copyFile(built, join(stageRoot, executableName));
@@ -280,22 +181,14 @@ if (test) {
   await writeFile(join(stageRoot, 'NOTICE'), await notice(crates));
   await writeFile(
     join(stageRoot, 'manifest.json'),
-    `${JSON.stringify(
-      {
-        version,
-        target,
-        rust: toolchain ?? 'unknown',
-        sha256: createHash('sha256').update(image).digest('hex'),
-        bytes: image.byteLength,
-        crates: crates.map(({ name, version: crateVersion, license }) => ({
-          name,
-          version: crateVersion,
-          license: license ?? null,
-        })),
-      },
-      undefined,
-      2,
-    )}\n`,
+    payloadManifest({
+      version,
+      target,
+      rust: await pinnedToolchain(crateRoot),
+      sha256: createHash('sha256').update(image).digest('hex'),
+      bytes: image.byteLength,
+      crates,
+    }),
   );
   console.log(`Staged ${version} (${String(image.byteLength)} bytes) at ${stageRoot}`);
   if (resources !== undefined) {

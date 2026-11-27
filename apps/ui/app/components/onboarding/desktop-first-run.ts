@@ -34,7 +34,7 @@ export const isDesktopFirstRun = ({
  * @returns Whether setup opens before home.
  */
 export const useIsDesktopFirstRun = (): boolean => {
-  const { projects, isListed, error } = useProjects({ includeDeleted: true });
+  const { projects, isListed, error } = useProjects({ scope: 'all' });
   return isDesktopFirstRun({
     isFirstLaunch: desktopBridge()?.firstRun === true,
     isListed,

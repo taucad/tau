@@ -16,7 +16,7 @@ const storedSections = (): Record<string, string | undefined> =>
 
 let callbacks: { onSuccess: () => void } | undefined;
 
-vi.mock('#providers/financial-session-provider.js', () => ({
+vi.mock('@taucad/billing-ui/providers/financial-session-provider', () => ({
   useOptionalFinancialSession: () => ({ purge: vi.fn(), bind: vi.fn(), capture: vi.fn() }),
 }));
 vi.mock('@better-auth-ui/react', () => ({

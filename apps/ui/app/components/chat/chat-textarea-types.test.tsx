@@ -16,7 +16,7 @@ import type { CadAgentExecution } from '@taucad/chat';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
-import type { DraftAttachment, DraftAttachmentSource, PendingDraftImage } from '#hooks/draft.machine.js';
+import type { DraftAttachment, DraftAttachmentSource, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
 import type { ChatTextareaSubmitPayload } from '#components/chat/chat-textarea-types.js';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 

@@ -51,6 +51,7 @@ import { preserveMethodNames } from '#framework/named.js';
 import { isWebAssemblyException } from '#framework/wasm-exception.js';
 import { createKernelError } from '#kernels/kernel-helpers.js';
 import { admitKernelOptions } from '#framework/kernel-option-admission.js';
+import { admitKernelBuildReport } from '#framework/kernel-build-report.js';
 import type { KernelPlugin } from '#plugins/plugin-types.js';
 import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
 import type { RenderRequest } from '#types/runtime-middleware-v2.types.js';
@@ -145,6 +146,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return true;
   }
 
+  /** The kernel that registered each built-in module during its initialize, by module name. */
+  private readonly moduleOwners = new Map<string, string>();
+
   private readonly runtime: AnyRuntimeDefinition;
   private readonly loadedKernels = new Map<string, LoadedKernel>();
   private activeKernelId: string | undefined;
@@ -153,7 +157,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   private readonly selectionCache = new Map<string, { id: string; method: SelectionMethod }>();
   private readonly selectionErrors = new Map<string, unknown>();
   private kernelPlugins: readonly KernelPluginEntry[] = [];
-  private cachedDetectionDeps?: GetDependenciesResult;
   private initialized = false;
 
   public constructor(options: KernelRuntimeWorkerOptions) {
@@ -206,6 +209,28 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   // Protected overrides (must precede private methods per linter rules)
   // =====================================================================
 
+  protected override kernelSourceIdentity(owner: OperationOwner): 'files' | 'bundle' {
+    return this.lookupKernelForOwner(owner)?.definition.sourceIdentity ?? 'files';
+  }
+
+  /**
+   * An entry's bundle binds the globals of its selected kernel's modules and of modules no kernel
+   * claimed at initialize, never another kernel's.
+   *
+   * @param entryPath - The entry being bundled.
+   * @returns The module filter, or `undefined` before the entry has a kernel.
+   */
+  protected override bundleModuleScope(entryPath: string): ((name: string) => boolean) | undefined {
+    const selected = this.selectionCache.get(entryPath)?.id;
+    if (selected === undefined) {
+      return undefined;
+    }
+    return (name) => {
+      const owner = this.moduleOwners.get(name);
+      return owner === undefined || owner === selected;
+    };
+  }
+
   protected override async onInitialize(
     _input: { options: RuntimeWorkerOptions },
     _runtime: KernelRuntime,
@@ -230,7 +255,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     this.lastOwnerKernel = undefined;
     this.selectionCache.clear();
     this.selectionErrors.clear();
-    this.cachedDetectionDeps = undefined;
   }
 
   protected override async onGetDependencies(
@@ -246,12 +270,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     input: GetDependenciesInput,
     runtime: KernelRuntime,
   ): Promise<GetDependenciesResult> {
-    if (this.cachedDetectionDeps) {
-      const deps = this.cachedDetectionDeps;
-      this.cachedDetectionDeps = undefined;
-      return deps;
-    }
-
+    /* Always the kernel's own resolve, never the selection pass's import detection: a bundled
+     * kernel resolves from the bundle its describe and evaluate use next, and the build key can then
+     * stand on that bundle's output (R24). */
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
       return { resolved: [input.entryPath], unresolved: [] };
@@ -439,6 +460,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       };
       slot.offers = offers;
       slot.nativeBuildInput = input;
+      slot.kernelBuild = admitKernelBuildReport(output.build);
       const defaultViewId = viewIds[0];
       const defaultView = defaultViewId ? kernel.definition.views[defaultViewId] : undefined;
       if (defaultView) {
@@ -517,6 +539,10 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         ],
       };
     }
+  }
+
+  protected override kernelStoresNativeHandleForOwner(owner: OperationOwner): boolean {
+    return this.getKernelForOwner(owner)?.definition.serializeHandle !== undefined;
   }
 
   protected override kernelHasMeshPhaseForOwner(owner: OperationOwner): boolean {
@@ -1115,7 +1141,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   private clearFileDerivedKernelState(): void {
     this.selectionCache.clear();
     this.selectionErrors.clear();
-    this.cachedDetectionDeps = undefined;
   }
 
   // =====================================================================
@@ -1265,7 +1290,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     this.logger.trace(`Initializing kernel: ${kernel.entry.id}`);
 
     try {
-      kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
+      const { bundler } = runtime;
+      kernel.ctx = await kernel.definition.initialize(kernel.options, {
+        ...runtime,
+        bundler: {
+          ...bundler,
+          registerModule: (name, entry) => {
+            this.moduleOwners.set(name, kernel.entry.id);
+            bundler.registerModule(name, entry);
+          },
+        },
+      });
     } catch (error) {
       // A typed refusal (e.g. KERNEL_REALM_CONFLICT) reaches the client as is; name the refusing kernel on a copy,
       // since one rejected realm creation may reach several kernels.
@@ -1383,13 +1418,12 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
           const detectSpan = runtime.tracer.startSpan('kernel.detect-bundle', {
             entryPath,
           });
-          const { detectedModules, dependencies } = await bundler.definition.detectImports(
+          const { detectedModules } = await bundler.definition.detectImports(
             { entryPath },
             { signal: runtime.signal },
             bundler.ctx,
           );
           detectSpan.end();
-          this.cachedDetectionDeps = { resolved: dependencies, unresolved: [] };
 
           matchingConfigs = configsWithBuiltins.filter((config) =>
             config.builtinModuleNames!.some((name) =>

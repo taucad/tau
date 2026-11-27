@@ -6,10 +6,19 @@ import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from 'r
 import { ChatErrorUnauthorized } from '#routes/w.$workspace.$project/chat-error-unauthorized.js';
 
 const continueChat = vi.fn();
+const regenerate = vi.fn();
+const identity = vi.hoisted(() => ({ state: 'signed-out' as 'verified' | 'unverified' | 'signed-out' | 'unknown' }));
 
 vi.mock('#hooks/use-chat.js', () => ({
-  useChatActions: () => ({ continueChat }),
+  useChatActions: () => ({ continueChat, regenerate }),
 }));
+
+vi.mock('#hooks/use-identity.js', () => ({
+  useIdentity: () => ({ state: identity.state, user: undefined }),
+}));
+
+/* The paused-turn card's model picker is not this suite's subject. */
+vi.mock('#components/chat/chat-model-selector.js', () => ({ ChatModelSelector: () => null }));
 
 /* The real hook only percent-encodes what it is handed; this suite asserts the
  * return URL the card arms, so the mock keeps it readable. */
@@ -25,10 +34,10 @@ function LocationProbe(): React.JSX.Element {
   return <output data-testid='location'>{`${pathname}${search}`}</output>;
 }
 
-const renderAt = (entry: string) =>
+const renderAt = (entry: string, resumable = true) =>
   render(
     <MemoryRouter initialEntries={[entry]}>
-      <ChatErrorUnauthorized />
+      <ChatErrorUnauthorized resumable={resumable} />
       <LocationProbe />
     </MemoryRouter>,
   );
@@ -36,6 +45,7 @@ const renderAt = (entry: string) =>
 describe('ChatErrorUnauthorized', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    identity.state = 'signed-out';
   });
 
   it('should offer sign-in first and account creation second', () => {
@@ -65,7 +75,7 @@ describe('ChatErrorUnauthorized', () => {
     const destination = Promise.withResolvers<void>();
     const router = createMemoryRouter(
       [
-        { path: '/w/home/p', element: <ChatErrorUnauthorized /> },
+        { path: '/w/home/p', element: <ChatErrorUnauthorized resumable /> },
         {
           path,
           loader: async () => {
@@ -102,11 +112,52 @@ describe('ChatErrorUnauthorized', () => {
     expect(continueChat).not.toHaveBeenCalled();
   });
 
-  it('should resume the paused turn on return from sign-in and strip the armed parameter', () => {
+  /* Launch audit N-2: the card used to resume from its own mount effect, on every mount, and to navigate to the URL
+   * it was on. The resume after sign-in has one owner, `ChatSignInReturn`. */
+  it('should neither resume nor navigate when it mounts on a return URL', () => {
     renderAt('/w/home/p?chat=chat_1&chatResume=1');
 
+    expect(continueChat).not.toHaveBeenCalled();
+    expect(screen.getByTestId('location')).toHaveTextContent('/w/home/p?chat=chat_1&chatResume=1');
+  });
+
+  it('should promise no resume and arm none for a turn that never started', () => {
+    renderAt('/w/home/p?chat=chat_1&chatResume=1', false);
+
+    expect(screen.getByText('Nothing has run yet. Sign in, then send your message.')).toBeInTheDocument();
+    expect(screen.queryByText(/resumes where it stopped/u)).not.toBeInTheDocument();
+    const links = screen.getAllByRole('link');
+    expect(links[0]).toHaveAttribute('href', '/auth/sign-in?redirectTo=/w/home/p?chat=chat_1');
+    expect(links[1]).toHaveAttribute('href', '/auth/sign-up?redirectTo=/w/home/p?chat=chat_1');
+  });
+
+  it.each(['unknown', 'unverified'] as const)('should keep offering sign-in while the identity is %s', (state) => {
+    identity.state = state;
+    renderAt('/w/home/p');
+
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Sign in', 'Create account']);
+  });
+
+  /* The failure can be older than the session: the sign-in page sends a signed-in person straight back. */
+  it('should offer Resume, and no sign-in, to a person who is signed in', async () => {
+    const user = userEvent.setup();
+    identity.state = 'verified';
+    renderAt('/w/home/p?chat=chat_1');
+
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sign in to continue')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+
     expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('location')).toHaveTextContent('/w/home/p?chat=chat_1');
-    expect(screen.getByTestId('location').textContent).not.toContain('chatResume');
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it('should ask a signed-in person only to send, for a turn that never started', () => {
+    identity.state = 'verified';
+    renderAt('/w/home/p?chat=chat_1', false);
+
+    expect(screen.getByText('Send your message to continue.')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 });

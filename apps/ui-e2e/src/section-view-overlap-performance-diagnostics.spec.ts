@@ -24,24 +24,6 @@ type SectionCapStencilDiagnostics = Readonly<{
     | undefined;
 }>;
 
-type SectionPlaneCut = Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>;
-
-type SectionViewBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST__?: {
-    setSectionCuts(cuts: readonly SectionPlaneCut[]): string[];
-    updateSectionCut(id: string, patch: Readonly<{ offset: number }>): void;
-    getSectionState(): { cuts: ReadonlyArray<{ id: string }> };
-    setCamera(camera: {
-      position: readonly [number, number, number];
-      target?: readonly [number, number, number];
-      fov?: number;
-      zoom?: number;
-    }): void;
-    getSectionCapStencilDiagnostics(): SectionCapStencilDiagnostics | undefined;
-    getRenderFrame(): { metersPerRenderUnit: number };
-  };
-};
-
 type SectionCapDiagnosticsFixture = Readonly<{
   id: string;
   projectId: string;
@@ -122,7 +104,7 @@ const webGpuValidationFailures = async (from: number): Promise<string[]> => {
 const driveSectionView = async (fixture: SectionCapDiagnosticsFixture, offset: number): Promise<void> => {
   await target.evaluate(
     ({ nextFixture, nextOffset }) => {
-      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       if (!bridge) {
         throw new Error('Section view e2e bridge is not installed.');
       }
@@ -146,7 +128,7 @@ const driveSectionView = async (fixture: SectionCapDiagnosticsFixture, offset: n
 
 const getPerformanceDiagnostics = async (): Promise<SectionCapStencilDiagnostics | undefined> =>
   target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -159,7 +141,7 @@ const driveAndReadPerformance = async (
   offset: number,
 ): Promise<SectionCapStencilDiagnostics> => {
   const previousSequence = await target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     return bridge?.getSectionCapStencilDiagnostics()?.sequence ?? 0;
   });
 
@@ -167,7 +149,7 @@ const driveAndReadPerformance = async (
   // A cap frame drew these cuts.
   await target.waitFor(
     (sequence) => {
-      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       return (bridge?.getSectionCapStencilDiagnostics()?.sequence ?? 0) > sequence;
     },
     previousSequence,

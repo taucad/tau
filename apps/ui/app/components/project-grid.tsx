@@ -1,5 +1,5 @@
 import { ArrowRight } from 'lucide-react';
-import { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react';
+import { Suspense, useState, useCallback, useMemo, useRef } from 'react';
 import { resolveKernel } from '@taucad/types/constants';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
@@ -11,16 +11,21 @@ import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import type { BuiltinProjectCardModel, ProjectFiles } from '#constants/project-examples.js';
 import { loadBuiltinProjectFiles } from '#constants/project-examples.js';
 import { ProjectCard, ProjectCardMedia } from '#components/project-card.js';
-import { RemixDialog } from '#components/share/fork-action.js';
+import { useRemix } from '#components/share/fork-action.js';
 import type { RemixSource } from '#components/share/fork-action.js';
 
 import { projectGridClassName } from '#components/project-grid-layout.js';
+import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 
 /* A card's live model preview, with its CAD and graphics machines, loads when it is first turned on (PL5). */
-const CommunityCardLivePreview = lazy(async () => {
-  const module = await import('#components/community-card-live-preview.js');
-  return { default: module.CommunityCardLivePreview };
-});
+const CommunityCardLivePreview = lazyCode(
+  async () => {
+    const module = await import('#components/community-card-live-preview.js');
+    return { default: module.CommunityCardLivePreview };
+  },
+  // Optional code (FP9): without it the page keeps working, so a failed load renders nothing instead of an error.
+  { fallback: (): undefined => undefined },
+);
 
 export type CommunityProjectGridProperties = {
   readonly projects: readonly BuiltinProjectCardModel[];
@@ -93,6 +98,7 @@ function CommunityProjectCard({
     () => ({ project: { name, description, tags: [...tags], assets }, loadFiles: ensureFiles }),
     [assets, description, ensureFiles, name, tags],
   );
+  const { isBusy: isRemixing, remix } = useRemix(remixSource);
 
   const handlePreviewVisibilityChange = useCallback(
     (isVisible: boolean) => {
@@ -155,15 +161,20 @@ function CommunityProjectCard({
           </p>
         </div>
         <div className='relative z-20 sm:shrink-0'>
-          <RemixDialog source={remixSource}>
-            {(isBusy) => (
-              <Button variant='outline' size='sm' className='max-sm:w-full' aria-busy={isBusy} disabled={isBusy}>
-                Remix
-                {isBusy ? <Loader /> : <ArrowRight aria-hidden />}
-                <span className='sr-only'> {name}</span>
-              </Button>
-            )}
-          </RemixDialog>
+          <Button
+            variant='outline'
+            size='sm'
+            className='max-sm:w-full'
+            aria-busy={isRemixing}
+            disabled={isRemixing}
+            onClick={() => {
+              void remix();
+            }}
+          >
+            Remix
+            {isRemixing ? <Loader /> : <ArrowRight aria-hidden />}
+            <span className='sr-only'> {name}</span>
+          </Button>
         </div>
       </div>
     </ProjectCard>

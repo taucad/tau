@@ -8,7 +8,7 @@ import { join, relative } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPackage } from '@electron/asar';
-import { inspectDesktopPayload } from '#scripts/check-desktop-payload.mjs';
+import { carriesDeploymentOwner, inspectDesktopPayload } from '#scripts/check-desktop-payload.mjs';
 
 const roots: string[] = [];
 const require = createRequire(import.meta.url);
@@ -552,5 +552,31 @@ describe('Desktop renderer ownership', () => {
     await writeFile(join(packaged, 'clipper2z.wasm'), Buffer.from([0, 97, 115, 109, 2, 0, 0, 0]));
     const changed = await inspectDesktopPayload({ ...paths, app });
     expect(changed.violations).toContain('Packaged renderer differs from loose build: clipper2z.wasm');
+  });
+});
+
+describe('Desktop renderer display-mode owner (adaptive app deployment mode W6, W12)', () => {
+  it('reads the owner from the module graph', () => {
+    expect(carriesDeploymentOwner(['apps/ui/app/runtime/deployment.machine.ts'])).toBe(true);
+    expect(carriesDeploymentOwner([String.raw`C:\tau\apps\ui\app\runtime\deployment.machine.ts`])).toBe(true);
+    expect(carriesDeploymentOwner(['apps/ui/app/root-layout.tsx'])).toBe(false);
+  });
+
+  it('reports the owner and refuses a renderer without one when it is required', async () => {
+    const paths = await fixture();
+    const graph = async (moduleIds: string[]): Promise<void> =>
+      writeFile(
+        join(paths.renderer, 'tau-module-graph-123.json'),
+        JSON.stringify({ chunks: [{ fileName: 'renamed.js', moduleIds }] }),
+      );
+    await graph(['apps/ui/app/root-layout.tsx', 'apps/ui/app/runtime/deployment.machine.ts']);
+    const owned = await inspectDesktopPayload({ ...paths, expectDeploymentOwner: true });
+    expect(owned.deploymentOwner).toBe(true);
+    expect(owned.violations).toEqual([]);
+    await graph(['apps/ui/app/root-layout.tsx']);
+    const ownerless = await inspectDesktopPayload({ ...paths, expectDeploymentOwner: true });
+    expect(ownerless.violations).toEqual([
+      'Renderer carries no display-mode owner (apps/ui/app/runtime/deployment.machine.ts)',
+    ]);
   });
 });

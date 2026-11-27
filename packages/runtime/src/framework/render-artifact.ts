@@ -1,6 +1,6 @@
 import type { Dependency } from '#types/runtime-dependency.types.js';
 import type { KernelIssue, KernelResult } from '#types/runtime.types.js';
-import type { KernelOffers } from '#types/runtime-kernel-v2.types.js';
+import type { KernelBuildReport, KernelOffers } from '#types/runtime-kernel-v2.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import { nativeBuildInputSymbol as nativeBuildInputIdentity } from '#types/runtime-kernel.types.js';
@@ -97,6 +97,17 @@ export type EvaluationSlot = {
   handle: unknown;
   liveNativeHandleSlot?: NativeHandleSlot;
   serializedNativeHandleSlot?: SerializedNativeHandleSlot;
+  /** Makes this build's snapshot on demand, so a reuse of the live handle can still publish it. */
+  serializeHandleSnapshot?: () => unknown;
+  /**
+   * Whether the compute store holds this build or has it queued: a reuse of the live handle
+   * then needs no lookup and no publication of its own (R3).
+   */
+  buildPublication?: 'pending' | 'stored';
+  /** Queued publications whose snapshot reads this handle; it is released only after they settle (R1). */
+  pendingPublications?: number;
+  /** What the kernel reported about the build it delivered into this slot, admitted. */
+  kernelBuild?: KernelBuildReport;
 };
 
 /**

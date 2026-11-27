@@ -358,7 +358,7 @@ describe('RevisionRestore', () => {
     render(<RevisionRestore />);
 
     for (const listener of revisionStatusHarness.toasts) {
-      listener({ type: 'notice', subject: 'remote', tone: 'info', message: 'Backed up to Tau Cloud.' });
+      listener({ type: 'notice', subject: 'remote', tone: 'info', message: 'Backed up to the cloud.' });
       listener({ type: 'notice', subject: 'resolution', tone: 'error', message: 'That file could not be opened.' });
       listener({ type: 'notice', subject: 'remote', tone: 'error', message: 'The backup could not finish.' });
     }
@@ -461,7 +461,7 @@ describe('RevisionRestore', () => {
 
     const [title, options] = toastError.mock.calls[0] ?? [];
     expect(title).toBe('Couldn’t save');
-    expect(options?.description).toBe('Tau could not record this change. Reload the page and try again.');
+    expect(options?.description).toBe('Couldn’t save this change. Reload the page and try again.');
     // SB4: the product event keeps outcome fields; the diagnostic goes to error reporting (`reportRevisionToast`).
     expect(capture).toHaveBeenCalledWith('revision_save_failed', { code: undefined });
     expect(consoleError).toHaveBeenCalledWith('[revisions]', 'save', undefined, 'Buffer is not defined');

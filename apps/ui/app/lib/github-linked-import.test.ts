@@ -5,7 +5,8 @@ import type { RevisionRow } from '@taucad/revisions';
 import type * as GithubConnections from '#lib/github-connections.js';
 import { githubConnections } from '#lib/github-connections.js';
 import { prepareLinkedGithubImport, readLinkedGithubManifest } from '#lib/github-linked-import.js';
-import { revisionWho, setRevisionSessionUser } from '#lib/revision-actor.js';
+import { revisionWho } from '@taucad/revisions-ui/lib/revision-who';
+import { setRevisionSessionUser } from '@taucad/revisions-ui/lib/revision-actor';
 
 vi.mock('#lib/github-connections.js', () => ({
   githubConnections: { token: vi.fn() },

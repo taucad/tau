@@ -98,11 +98,11 @@ describe('SidebarRowActions', () => {
   /* D13: a project's sync exception sits in the slot over the name, shown at rest; the actions join it on reach. */
   it('keeps a standing status shown at rest and reveals the actions beside it on reach', () => {
     render(
-      <SidebarRowActions status={<button type='button'>Project sync: Offline</button>}>
+      <SidebarRowActions status={<button type='button'>Offline</button>}>
         <button type='button'>More actions for Bracket</button>
       </SidebarRowActions>,
     );
-    const status = screen.getByRole('button', { name: 'Project sync: Offline' });
+    const status = screen.getByRole('button', { name: 'Offline' });
     const slot = status.parentElement;
     expect(slot).toHaveClass('fade-action', 'absolute', 'flex');
     expect(slot).not.toHaveClass('hidden');

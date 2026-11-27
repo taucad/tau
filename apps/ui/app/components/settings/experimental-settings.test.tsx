@@ -7,8 +7,10 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
+import { DeploymentSettingsProvider } from '#components/settings/deployment-settings-provider.js';
 import { featureFlagDefaults } from '#flags/flag.constants.js';
 import type { FeatureFlags } from '#flags/flag.constants.js';
+import { hardwareRenderTier } from '@taucad/viewer/graphics/three/render-tier';
 
 const mockState = vi.hoisted(() => ({
   flags: undefined as FeatureFlags | undefined,
@@ -60,7 +62,7 @@ describe('ExperimentalSettings', () => {
   });
 
   it('should render only the exposed feature flags from the registry', () => {
-    render(<ExperimentalSettings />);
+    render(<ExperimentalSettings />, { wrapper: DeploymentSettingsProvider });
 
     expect(screen.getByRole('switch', { name: 'Prefer WebGPU' })).toBeChecked();
     expect(screen.getByText('Falls back to WebGL2 when WebGPU is unavailable')).toBeInTheDocument();
@@ -78,7 +80,7 @@ describe('ExperimentalSettings', () => {
   });
 
   it('should report no active viewer without a project', () => {
-    render(<ExperimentalSettings />);
+    render(<ExperimentalSettings />, { wrapper: DeploymentSettingsProvider });
     expect(screen.getByText('No active 3D viewer.')).toBeInTheDocument();
   });
 
@@ -94,7 +96,7 @@ describe('ExperimentalSettings', () => {
     );
     actor.start();
     mockState.graphics = actor;
-    const view = render(<ExperimentalSettings />);
+    const view = render(<ExperimentalSettings />, { wrapper: DeploymentSettingsProvider });
     try {
       expect(screen.getByText('No active 3D viewer.')).toBeInTheDocument();
       const host = (canvasId: string, backend: 'webgl' | 'webgpu'): void => {
@@ -102,6 +104,7 @@ describe('ExperimentalSettings', () => {
         actor.getSnapshot().context.canvas?.ref.send({
           type: 'hostCreated',
           backend,
+          tier: hardwareRenderTier(backend),
           surface: { width: 800, height: 600, pixelRatio: 1 },
           domElement: document.createElement('canvas'),
           host: createCallbackLogic<CanvasHostCommand, undefined>(() => undefined),
@@ -135,13 +138,13 @@ describe('ExperimentalSettings', () => {
   });
 
   it('should let the user prefer WebGL without disabling the viewer', () => {
-    render(<ExperimentalSettings />);
+    render(<ExperimentalSettings />, { wrapper: DeploymentSettingsProvider });
     fireEvent.click(screen.getByRole('switch', { name: 'Prefer WebGPU' }));
     expect(mockState.setFlag).toHaveBeenCalledExactlyOnceWith('webGpu', false);
   });
 
   it('should toggle a flag when its row text is tapped', async () => {
-    render(<ExperimentalSettings />);
+    render(<ExperimentalSettings />, { wrapper: DeploymentSettingsProvider });
 
     await userEvent.click(screen.getByText('Debug tools'));
 
@@ -150,7 +153,7 @@ describe('ExperimentalSettings', () => {
   });
 
   it('should toggle a flag once when the switch itself is tapped inside its row', async () => {
-    render(<ExperimentalSettings />);
+    render(<ExperimentalSettings />, { wrapper: DeploymentSettingsProvider });
 
     await userEvent.click(screen.getByRole('switch', { name: 'Debug tools' }));
 

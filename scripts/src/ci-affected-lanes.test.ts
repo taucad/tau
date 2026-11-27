@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
@@ -64,8 +64,14 @@ const draftGuard = expression('!github.event.pull_request.draft');
 
 const isTestTarget = (target: string): boolean => /^test(?:$|[:-])/u.test(target);
 
-/** The Nx targets a shell command runs, and whether its projects are selected by `affected` there. */
-const nxTargets = (command: string): ReadonlyArray<{ readonly target: string; readonly affected: boolean }> => {
+/**
+ * The Nx targets a shell command runs, and whether its projects are selected by `affected` there. `job` is every
+ * command of the command's job: a lane deals the projects of the task graph an earlier step's `nx affected` wrote.
+ */
+const nxTargets = (
+  command: string,
+  job: string = command,
+): ReadonlyArray<{ readonly target: string; readonly affected: boolean }> => {
   const found: Array<{ target: string; affected: boolean }> = [];
   for (const [line] of command.matchAll(/\bnx\s+(?:run-many|affected)\b[^\n]*/gu)) {
     // `nx affected`, or `run-many` over a `--projects` list this script took from `nx show projects --affected`
@@ -73,7 +79,7 @@ const nxTargets = (command: string): ReadonlyArray<{ readonly target: string; re
     const affected =
       /\bnx\s+affected\b/u.test(line) ||
       (/\s--projects\s+"\$\w+"/u.test(line) &&
-        /\bnx (?:show projects --affected\b|affected\b[^\n]*\s--graph=)/u.test(command));
+        /\bnx (?:show projects --affected\b|affected\b[^\n]*\s--graph=)/u.test(job));
     const flag = /\s(?:-t|--targets?)[\s=]+(.*)/u.exec(line);
     // Targets run up to the next flag (`--parallel`, `--projects`, or `--` before forwarded arguments).
     for (const target of flag?.[1]?.split(/[\s,]+/u) ?? []) {
@@ -102,7 +108,8 @@ const laneSelectors = JSON.parse(planStep?.env?.['LANE_SELECTORS'] ?? '{}') as R
     readonly type?: string;
     readonly tags?: readonly string[];
     readonly targets?: readonly string[];
-    readonly pr?: 'queue' | 'touched';
+    readonly pr?: 'queue' | 'touched' | 'paths';
+    readonly queue?: 'touched' | 'any-touched' | 'closure' | 'never';
   }
 >;
 
@@ -117,6 +124,10 @@ const affectedPlanOutputs = (): ReadonlySet<string> => {
       outputs.add(key);
     }
   }
+  // The burn-in (FQ-10): computed from the pull request's own changed test files and the same graph, in its own step.
+  if (ci.jobs['plan']?.outputs?.['burn-in'] === expression('steps.burn-in.outputs.burn-in')) {
+    outputs.add('burn-in');
+  }
   return outputs;
 };
 
@@ -125,7 +136,7 @@ const testJobs = Object.entries(ci.jobs)
     name,
     definition,
     targets: (definition.steps ?? [])
-      .flatMap((step) => nxTargets(step.run ?? ''))
+      .flatMap((step) => nxTargets(step.run ?? '', (definition.steps ?? []).map(({ run }) => run ?? '').join('\n')))
       .filter(({ target }) => isTestTarget(target)),
   }))
   .filter(({ targets }) => targets.length > 0);
@@ -136,7 +147,7 @@ describe('ci.yml affected-only lanes', () => {
       expect.arrayContaining(['api', 'billing', 'cli-e2e', 'size', 'formal', 'browser', 'geospec-examples']),
     );
     expect(testJobs.map(({ name }) => name)).toEqual(
-      expect.arrayContaining(['affected-lane', 'api', 'billing-e2e', 'cli-e2e']),
+      expect.arrayContaining(['affected-lane', 'api-shard', 'billing-e2e', 'cli-e2e']),
     );
   });
 
@@ -146,7 +157,10 @@ describe('ci.yml affected-only lanes', () => {
     expect(planScript.match(/\bnx show projects\b/gu)).toHaveLength(1);
     // A selector naming a tag or target that no project has fails the plan instead of leaving its lane off.
     expect(planScript).toContain('error("lane selectors name a tag or target no project has');
-    expect(planScript).toContain('error("lane selectors name a pull-request rule other than queue or touched")');
+    expect(planScript).toContain('error("lane selectors name a pull-request rule other than queue, touched or paths")');
+    expect(planScript).toContain(
+      'error("lane selectors name a merge-queue rule other than touched, any-touched, closure or never")',
+    );
     expect(laneSelectors).toEqual({
       apps: { type: 'app' },
       api: { tags: ['scope:api'], pr: 'touched' },
@@ -155,17 +169,20 @@ describe('ci.yml affected-only lanes', () => {
       'cli-e2e': { targets: ['test:scenarios'], pr: 'queue' },
       size: { targets: ['size'] },
       formal: { targets: ['formal:tla'], pr: 'queue' },
-      'formal-nightly': { targets: ['formal:nightly'], pr: 'queue' },
+      'formal-nightly': { targets: ['formal:nightly'], pr: 'queue', queue: 'touched' },
       'geospec-examples': { targets: ['test-geospec'], pr: 'queue' },
-      browser: { tags: ['ci:browser'], targets: ['verify-browser'], pr: 'queue' },
-      'native-hosts': { tags: ['ci:native-hosts'], pr: 'queue' },
-      'native-linux': { targets: ['test:native-linux'], pr: 'queue' },
+      browser: { tags: ['ci:browser'], targets: ['verify-browser'], pr: 'touched' },
+      'native-hosts': { tags: ['ci:native-hosts'], pr: 'queue', queue: 'closure' },
+      'native-linux': { targets: ['test:native-linux'], pr: 'queue', queue: 'closure' },
       'native-darwin': { targets: ['test:native-darwin'], pr: 'queue' },
-      'viewer-parity': { targets: ['test:viewer-parity'], pr: 'queue' },
+      'viewer-parity': { targets: ['test:viewer-parity'], pr: 'paths', queue: 'never' },
       desktop: { tags: ['ci:desktop'] },
-      shell: { tags: ['ci:shell'], pr: 'queue' },
+      shell: { tags: ['ci:shell'], pr: 'queue', queue: 'any-touched' },
       'windows-unit': { tags: ['ci:windows-unit'], pr: 'touched' },
-      'e2e-queue': { targets: ['test:e2e:queue'], pr: 'queue' },
+      'e2e-queue': { targets: ['test:e2e:queue'], pr: 'touched' },
+      'e2e-shadow': { targets: ['test:e2e:shadow'], pr: 'queue' },
+      'compute-qualify': { targets: ['compute-qualify-ci'] },
+      'node-floor': { tags: ['type:package'], targets: ['test'], pr: 'touched' },
     });
   });
 
@@ -217,6 +234,7 @@ describe('ci.yml affected-only lanes', () => {
     expect(gate?.needs).toEqual([
       'plan',
       'affected-lane',
+      'pkgcheck',
       'browser',
       'geospec-examples',
       'cli-e2e',
@@ -230,6 +248,9 @@ describe('ci.yml affected-only lanes', () => {
       'windows-unit',
       'formal-nightly',
       'e2e-queue',
+      'compute-qualify',
+      'node-floor',
+      'burn-in',
     ]);
     const check = gate?.steps?.[0]?.run ?? '';
     expect(check).toContain('test "$PLAN_RESULT" = success');
@@ -242,10 +263,18 @@ describe('ci.yml affected-only lanes', () => {
     // targets that depend on the check never run for it. The build lane's `nx affected` runs it instead.
     const steps = ci.jobs['affected-lane']?.steps ?? [];
     const run = steps.find((step) => step.name === "Run the lane's tasks")?.run ?? '';
-    const build = /^\s*build\) (.*) ;;$/mu.exec(run)?.[1] ?? '';
-    expect(build).toBe(
-      'pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output --parallel=1',
+    const lane = ci.jobs['affected-lane'];
+    const targets = lane?.env?.['BUILD_TARGETS'] ?? '';
+    expect(targets).toBe(
+      'build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch check-cadmpeg-engine-absence check-serve-ui-layer',
     );
+    // Both build shards take their projects from one `nx affected` over these targets, and run them all.
+    const pins = steps.find((step) => step.id === 'pins')?.run ?? '';
+    expect(pins).toContain('build-*) pnpm nx affected -t $BUILD_TARGETS --graph="$graph" > /dev/null ;;');
+    expect(run).toContain('if [ "$kind" = build ]; then targets=$(tr \' \' \',\' <<< "$BUILD_TARGETS"); fi');
+    expect(run).toContain('pnpm nx run-many -t "$targets" --projects "$shard" --parallel=1');
+    expect(lane?.strategy?.matrix?.['lane']).toEqual(expect.arrayContaining(['build-1', 'build-2']));
+    const build = `pnpm nx affected -t ${targets} --parallel=1`;
     expect(nxTargets(build)).toContainEqual({ target: 'check-desktop-payload', affected: true });
     // The critical-path budget (PL0) runs beside it in the same lane, so a ui change is held to its budget.
     expect(nxTargets(build)).toContainEqual({ target: 'check-critical-budget', affected: true });
@@ -254,6 +283,12 @@ describe('ci.yml affected-only lanes', () => {
     // The SSR bundle budget (`ui:size`) and the server-output check (RR0) run there too.
     expect(nxTargets(build)).toContainEqual({ target: 'size', affected: true });
     expect(nxTargets(build)).toContainEqual({ target: 'check-server-output', affected: true });
+    // And the check that every client build ships the patched React Router route-module loader (RR8).
+    expect(nxTargets(build)).toContainEqual({ target: 'check-route-module-patch', affected: true });
+    // And the check that no client build holds a cadmpeg engine, recognised by its installed digest (cadmpeg D16, I1).
+    expect(nxTargets(build)).toContainEqual({ target: 'check-cadmpeg-engine-absence', affected: true });
+    // And the serve UI layer's size line, per pull request as well as at release (X2, cadmpeg D16, I11).
+    expect(nxTargets(build)).toContainEqual({ target: 'check-serve-ui-layer', affected: true });
     // The target belongs to `ui`, so `nx affected` selects it exactly when `ui` is affected, and it brings
     // the renderer and desktop main/preload builds it reads.
     const ui = JSON.parse(read('apps/ui/project.json')) as {
@@ -268,6 +303,9 @@ describe('ci.yml affected-only lanes', () => {
     expect(ui.targets['size']?.dependsOn).toEqual(['build']);
     expect(ui.targets['check-static-shells']?.dependsOn).toEqual(['build']);
     expect(ui.targets['check-server-output']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
+    expect(ui.targets['check-route-module-patch']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
+    expect(ui.targets['check-cadmpeg-engine-absence']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
+    expect(ui.targets['check-serve-ui-layer']?.dependsOn).toEqual(['build:serve']);
     const docs = JSON.parse(read('apps/docs/project.json')) as {
       targets: Record<string, { readonly dependsOn?: readonly unknown[] }>;
     };
@@ -315,10 +353,15 @@ describe('ci.yml affected-only lanes', () => {
     // The plan reads only the verdict's run id: no per-lane conclusions of the queue run.
     expect(planStep?.env?.['REUSED']).toBe(expression('steps.queue.outputs.run-id'));
     expect(Object.keys(planStep?.env ?? {}).sort()).toEqual([
+      'COMPUTE_QUALIFY_LANE_PATHS',
+      'COMPUTE_QUALIFY_LANE_PROJECTS',
       'LANE_SELECTORS',
       'NATIVE_DARWIN_LANE_PATHS',
+      'QUEUE_HUBS',
       'REUSED',
       'SHELL_LANE_PATHS',
+      'VIEWER_PARITY_LANE_PATHS',
+      'VIEWER_PARITY_PINS',
     ]);
     const reused = planScript.slice(planScript.indexOf('if [ -n "$REUSED" ]; then'));
     const block = reused.slice(0, reused.indexOf('\nfi\n'));
@@ -349,7 +392,7 @@ describe('ci.yml affected-only lanes', () => {
     );
     expect(affectedJobs.map(([name]) => name).sort()).toEqual([
       'affected-lane',
-      'api',
+      'api-shard',
       'formal',
       'geospec-examples',
       'plan',
@@ -418,14 +461,24 @@ describe('ci.yml affected-only lanes', () => {
   });
 
   it('should run the API suites of the affected scope:api projects one at a time', () => {
-    const lane = ci.jobs['api'];
+    const lane = ci.jobs['api-shard'];
     const steps = lane?.steps ?? [];
     const suites = steps.filter((step) => /\bnx\s+(?:run-many|affected)\s+-t\s+test(?:\s|$)/u.test(step.run ?? ''));
     // One step runs `test`, selected by `nx affected` over the tag: never every API suite with `run-many`.
     // `nx affected` ignores `--projects`; excluding every project but the tag is what narrows it.
     expect(suites.map((step) => step.run?.trim())).toEqual([
-      "pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1",
+      `pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1 -- --shard=${expression('matrix.shard')}/2 --passWithNoTests`,
     ]);
+    // Two shards, each with its own services, and the required check passes only when both did (ST-3).
+    expect(lane?.strategy?.matrix?.['shard']).toEqual([1, 2]);
+    expect(lane?.if).toBe(
+      expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true'"),
+    );
+    const required = ci.jobs['api'];
+    expect(required?.name).toBe('API tests (Postgres + MinIO)');
+    expect(required?.needs).toEqual(['plan', 'api-shard']);
+    expect(required?.steps?.map((step) => step.run)).toEqual(['test "$SHARDS_RESULT" = success']);
+    expect(required?.steps?.[0]?.env?.['SHARDS_RESULT']).toBe(expression('needs.api-shard.result'));
     // `nx affected` needs the base `nx-set-shas` finds: two commits in a queue run, full history otherwise.
     const checkout = steps.find((step) => step.name === 'Checkout');
     expect(checkout?.with?.['fetch-depth']).toBe(expression("github.event_name == 'merge_group' && 2 || 0"));
@@ -481,15 +534,14 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     expect(affectedPlanOutputs()).toContain(job);
   });
 
-  it('should pass the affected test:native-linux projects and the Intel row to the native host rows', () => {
+  it('should pass the affected test:native-linux projects and the Linux hosts alone to the native host rows', () => {
     expect(ci.jobs['native-hosts']?.with).toEqual({
+      hosts: 'linux',
       'native-linux': expression('needs.plan.outputs.native-linux'),
-      intel: expression('needs.plan.outputs.native-intel'),
     });
-    // The Intel row runs when a tag:ci:native-hosts project (Build123d, PicoGK, the CLI) is affected (Q-3).
-    expect(ci.jobs['plan']?.outputs?.['native-intel']).toBe(expression('steps.plan.outputs.native-intel'));
-    expect(planScript).toContain('native_intel=$(flag native-hosts)');
-    expect(planScript).toContain('echo "native-intel=$native_intel"');
+    // The darwin-x64 rows run at the desktop candidate gate, never in the merge queue (INTEL-1).
+    expect(ci.jobs['plan']?.outputs).not.toHaveProperty('native-intel');
+    expect(planScript).not.toContain('native-intel');
     expect(ci.jobs['plan']?.outputs?.['native-linux']).toBe(expression('steps.plan.outputs.native-linux'));
     expect(planScript).toContain(`native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")`);
     // The Linux rows run when a native host project or a native-linux project is affected.
@@ -509,6 +561,8 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
       ['API', 'api', 'api'],
       ['BILLING', 'billing-e2e', 'billing'],
       ['WINDOWS_UNIT', 'windows-unit', 'windows-unit'],
+      ['COMPUTE_QUALIFY', 'compute-qualify', 'compute-qualify'],
+      ['NODE_FLOOR', 'node-floor', 'node-floor'],
     ] as const) {
       expect(gateStep?.env?.[`${key}_REQUIRED`]).toBe(expression(`needs.plan.outputs.${output}`));
       expect(gateStep?.env?.[`${key}_RESULT`]).toBe(expression(`needs.${job}.result`));
@@ -538,31 +592,80 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     expect(nativeHosts.on?.pull_request).toBeUndefined();
   });
 
-  it('should run viewer parity on a pull request only while it carries the viewer-parity label', () => {
+  it('should run viewer parity on a labelled pull request on demand, and never stop a call at the label guard', () => {
     expect(viewerParity.on?.pull_request).toEqual({ types: ['opened', 'synchronize', 'reopened', 'labeled'] });
-    // One guard on the first job: `viewer` and `gate` need it, so they skip with it.
+    // One guard on the first job: `viewer` and `gate` need it, so they skip with it. A call from a pull request's CI
+    // run sees `pull_request` as its event, so the call's `ref` passes it first.
     expect(viewerParity.jobs['fixtures']?.if).toBe(
-      "github.event_name != 'pull_request' || " +
+      "inputs.ref != '' || " +
+        "github.event_name != 'pull_request' || " +
         "(contains(github.event.pull_request.labels.*.name, 'viewer-parity') && " +
         "(github.event.action != 'labeled' || github.event.label.name == 'viewer-parity') && " +
         "github.triggering_actor != 'dependabot[bot]')",
     );
     expect(viewerParity.jobs['viewer']?.needs).toBe('fixtures');
     expect(viewerParity.jobs['gate']?.needs).toEqual(['fixtures', 'viewer']);
-    // Only a labelled pull request's own runs share a group and cancel; a call from ci.yml or a dispatch gets its
-    // run's own group, so a newer push never cancels a `main` run's parity jobs.
+    // Only a labelled pull request's own runs share a group and cancel; a call, a push or a dispatch gets its run's
+    // own group, so neither a labelled run nor a newer push cancels a called run's parity jobs.
     expect(viewerParity.concurrency?.group).toContain(
-      "format('pr-{0}', github.event.pull_request.number) || github.run_id",
+      "github.event_name == 'pull_request' && inputs.ref == '' && format('pr-{0}', github.event.pull_request.number) || github.run_id",
     );
     expect(viewerParity.concurrency?.group).toContain("github.event.label.name != 'viewer-parity' && '-other-label'");
-    expect(viewerParity.concurrency?.['cancel-in-progress']).toBe(expression("github.event_name == 'pull_request'"));
-    // The plan never selects the lane on a pull request, so ci.yml's call never meets the label guard.
-    expect(laneSelectors['viewer-parity']).toEqual({ targets: ['test:viewer-parity'], pr: 'queue' });
+    expect(viewerParity.concurrency?.['cancel-in-progress']).toBe(
+      expression("github.event_name == 'pull_request' && inputs.ref == ''"),
+    );
+    // The ci.yml call names the commit on its call, which is what tells a call from a labelled run.
+    expect(ci.jobs['viewer-parity']?.with).toEqual({ ref: expression('github.sha') });
+    expect(viewerParity.on?.workflow_call?.inputs?.['ref']).toMatchObject({ type: 'string', required: true });
   });
 
-  it('should select viewer parity through the graph, not hand-kept paths', () => {
-    expect(viewerParity.on?.push).toBeUndefined();
-    expect(read('.github/workflows/viewer-parity.yml')).not.toMatch(/^\s+paths:/mu);
+  it('should take viewer parity out of the merge queue and run it on pull requests by their own paths (VP-1)', () => {
+    expect(laneSelectors['viewer-parity']).toEqual({ targets: ['test:viewer-parity'], pr: 'paths', queue: 'never' });
+    const paths = JSON.parse(planStep?.env?.['VIEWER_PARITY_LANE_PATHS'] ?? '[]') as string[];
+    // The viewer and its capture code, the packages it renders through, the image plugin, the render profile and
+    // capture options, the parity scripts, manifest and committed fixtures, and the workflow; no kernel plugin.
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        '.github/workflows/viewer-parity.yml',
+        'packages/viewer',
+        'packages/three',
+        'packages/camera',
+        'packages/plugins/image',
+        'libs/types/src/constants/viewer-render-profile.constants.ts',
+        'libs/agent-tools/src/capture',
+        'libs/tau-examples/fixtures/viewer-parity',
+        'libs/tau-examples/scripts/export-parity-fixtures.mts',
+        'libs/tau-examples/vitest.viewer-parity.config.ts',
+      ]),
+    );
+    expect(paths.filter((path) => /^packages\/plugins\/(?!image$)/u.test(path))).toEqual([]);
+    for (const path of paths) {
+      expect(existsSync(resolve(root, path)), path).toBe(true);
+    }
+    // The committed fixture GLBs lie under a listed path; the generated ones come from the manifest's sources.
+    const manifest = JSON.parse(read('libs/tau-examples/fixtures/viewer-parity/fixtures.json')) as {
+      readonly fixtures: ReadonlyArray<{ readonly glb: string }>;
+    };
+    for (const { glb } of manifest.fixtures.filter((fixture) => !fixture.glb.startsWith('out/'))) {
+      expect(
+        paths.some((path) => glb === path || glb.startsWith(`${path}/`)),
+        glb,
+      ).toBe(true);
+    }
+    expect(JSON.parse(planStep?.env?.['VIEWER_PARITY_PINS'] ?? '[]')).toEqual(['three', 'nanoraster(-[a-z0-9-]+)?']);
+  });
+
+  it('should push only to save the fixture cache, and still select viewer parity on a push through the graph', () => {
+    expect(viewerParity.on?.push).toEqual({
+      branches: ['main'],
+      paths: [
+        'libs/tau-examples/src/kernels/**',
+        'libs/tau-examples/scripts/export-parity-fixtures.mts',
+        'libs/tau-examples/fixtures/viewer-parity/fixtures.json',
+        'pnpm-lock.yaml',
+      ],
+    });
+    expect(viewerParity.jobs['viewer']?.if).toBe("inputs.ref != '' || github.event_name != 'push'");
     const examples = JSON.parse(read('libs/tau-examples/project.json')) as {
       readonly targets: Record<string, { readonly inputs?: readonly string[] }>;
     };
@@ -575,21 +678,25 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
 
   it('should skip the native-hosts plan when ci.yml calls it and take the rows from ci.yml', () => {
     expect(nativeHosts.on?.workflow_call?.inputs?.['native-linux']?.type).toBe('string');
-    expect(nativeHosts.on?.workflow_call?.inputs?.['intel']?.type).toBe('string');
-    // `inputs.intel` is set only on a call, so it tells a call from the nightly and a dispatch.
-    expect(nativeHosts.jobs['plan']?.if).toBe("inputs.intel == ''");
+    expect(nativeHosts.on?.workflow_call?.inputs?.['hosts']?.type).toBe('string');
+    expect(nativeHosts.on?.workflow_call?.inputs?.['ref']?.type).toBe('string');
+    expect(nativeHosts.on?.workflow_call?.inputs).not.toHaveProperty('intel');
+    // `inputs.hosts` is set only on a call, so it tells a call from a dispatch.
+    expect(nativeHosts.jobs['plan']?.if).toBe("inputs.hosts == ''");
     expect(nativeHosts.jobs['linux']?.if).toBe(
-      expression("!cancelled() && (inputs.intel != '' || needs.plan.outputs.linux == 'true')"),
+      expression("!cancelled() && (inputs.hosts == 'linux' || needs.plan.outputs.linux == 'true')"),
     );
-    expect(nativeHosts.jobs['linux']?.env?.['NATIVE_LINUX']).toBe(
-      expression('inputs.native-linux || needs.plan.outputs.native-linux'),
-    );
-    // The Intel row joins the queue when ci.yml's plan selects it (Q-3).
+    // The `test:native-linux` rows, one job per project (ST-3), from the same selection.
+    expect(nativeHosts.jobs['native-linux-rows']?.if).toBe(nativeHosts.jobs['linux']?.if);
+    expect(
+      nativeHosts.jobs['native-linux-rows']?.steps?.find((step) => step.env?.['NATIVE_LINUX'])?.env?.['NATIVE_LINUX'],
+    ).toBe(expression('inputs.native-linux || needs.plan.outputs.native-linux'));
+    // The Intel rows run only for the desktop candidate gate's call (`hosts: intel`) and a dispatch (INTEL-1).
     expect(nativeHosts.jobs['intel']?.if).toBe(
-      expression("!cancelled() && (inputs.intel == 'true' || needs.plan.outputs.intel == 'true')"),
+      expression("!cancelled() && (inputs.hosts == 'intel' || needs.plan.outputs.intel == 'true')"),
     );
     // A called run gets its own group, so a newer push never replaces a `main` run's rows.
-    expect(nativeHosts.concurrency?.group).toContain("inputs.intel != '' && github.run_id");
+    expect(nativeHosts.concurrency?.group).toContain("inputs.hosts != '' && github.run_id");
   });
 });
 
@@ -659,7 +766,7 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
     "!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.shell == 'true' && github.event_name == 'merge_group'";
 
   it('should plan the shell lane from tag:ci:shell, in the merge queue only', () => {
-    expect(laneSelectors['shell']).toEqual({ tags: ['ci:shell'], pr: 'queue' });
+    expect(laneSelectors['shell']).toEqual({ tags: ['ci:shell'], pr: 'queue', queue: 'any-touched' });
     expect(affectedPlanOutputs()).toContain('shell');
     expect(planScript).toContain('shell=$(flag shell)');
     expect(planScript).toContain(`shell_projects=$(jq -c '.shell' <<< "$lanes")`);
@@ -733,8 +840,13 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
     expect(lane?.uses).toBeDefined();
     const rest = condition.replace(" && github.event_name == 'merge_group'", '');
     expect(rest).not.toMatch(/\|\||\bgithub\.(?:ref|ref_name|event_name|base_ref|head_ref)\b/u);
+    // The required gate and the fail-fast jobs run no lane (ci-fail-fast.test.ts), and neither does `queue-builds`,
+    // which only fills the remote cache the queue's end-to-end rows restore from (end-to-end-ratchet.test.ts).
     for (const [name, definition] of Object.entries(ci.jobs)) {
-      if ((definition.if ?? '').includes("github.event_name == 'merge_group'")) {
+      if (
+        !/^(?:affected|fail-fast-.*|queue-builds)$/u.test(name) &&
+        (definition.if ?? '').includes("github.event_name == 'merge_group'")
+      ) {
         expect(definition.uses, name).toBeDefined();
       }
     }
@@ -772,6 +884,7 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
     expect(select?.outputs).toEqual({
       tier: expression('steps.select.outputs.tier'),
       projects: expression('steps.select.outputs.projects'),
+      'macos-rows': expression('steps.select.outputs.macos-rows'),
     });
     const step = select?.steps?.find((candidate) => candidate.id === 'select');
     expect(step?.env?.['TIER']).toBe(expression("inputs.tier || 'full'"));
@@ -779,6 +892,42 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
     for (const name of ['linux', 'macos']) {
       expect(shellWorkflow.jobs[name]?.needs, name).toBe('select');
     }
+  });
+
+  it('should run MAC-X in the full tier only, so the merge queue never waits on macos-26-intel', () => {
+    const step = shellWorkflow.jobs['select']?.steps?.find((candidate) => candidate.id === 'select');
+    expect(shellWorkflow.jobs['macos']?.strategy?.matrix).toEqual({
+      include: expression('fromJSON(needs.select.outputs.macos-rows)'),
+    });
+    const rowsFor = (tier: string): unknown => {
+      const directory = mkdtempSync(join(tmpdir(), 'shell-select-'));
+      try {
+        const output = join(directory, 'output');
+        writeFileSync(output, '');
+        const result = spawnSync('bash', ['-c', step?.run ?? ''], {
+          encoding: 'utf8',
+          env: Object.fromEntries([
+            ...Object.entries(process.env),
+            ['TIER', tier],
+            ['PROJECTS', JSON.stringify(allProjects)],
+            ['GITHUB_OUTPUT', output],
+          ]),
+        });
+        expect(result.status, result.stderr).toBe(0);
+        const line = readFileSync(output, 'utf8')
+          .split('\n')
+          .find((entry) => entry.startsWith('macos-rows='));
+        return JSON.parse(line?.slice('macos-rows='.length) ?? 'null') as unknown;
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    };
+    const macA = { runner: 'macos-26', row: 'MAC-A' };
+    const macX = { runner: 'macos-26-intel', row: 'MAC-X' };
+    // The candidate gate, a dispatch, the drift check and the label pass no tier: both rows, fresh.
+    expect(rowsFor('full')).toEqual([macA, macX]);
+    // The merge queue's call: MAC-A alone (merge-queue defects MQ-1).
+    expect(rowsFor('semantics')).toEqual([macA]);
   });
 
   it('should guard every nx run step by its project and read no input directly', () => {
@@ -796,8 +945,9 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
         }
       }
     }
-    // Six macOS steps: the sandbox, the service, the host's two targets and the two Terminal targets.
-    expect(guarded).toBe(6);
+    // Six macOS steps (the sandbox, the service, the host's two targets and the two Terminal targets) and the
+    // Windows helper build.
+    expect(guarded).toBe(7);
     expect(shellText).not.toMatch(/fromJSON\(inputs\./u);
   });
 
@@ -1070,7 +1220,10 @@ describe('queue-verdict action', () => {
   });
 });
 
-describe('plan lane selection', () => {
+// Each case runs ci.yml's real plan script (bash, jq and the fixture graph) in a child process. They take 1–2 s alone,
+// but `scripts:validate-workspace-tests` runs this file beside 28 others, and on a loaded runner one case passed
+// 5 s (PR #2581, job 134621798477). The budget covers that contention; it does not wait on any race.
+describe('plan lane selection', { timeout: 30_000 }, () => {
   /** A project of the fixture graph: its root, tags, target names and any target's configuration. */
   type Node = {
     readonly root: string;
@@ -1113,10 +1266,20 @@ describe('plan lane selection', () => {
     sandbox: { root: 'libs/sandbox', type: 'lib', tags: ['ci:shell'], targets: ['test:shell-conformance'] },
     'ui-e2e': {
       root: 'apps/ui-e2e',
-      targets: ['test:e2e', 'test:e2e:development', 'test:e2e:daemon-host', 'test:e2e:queue'],
+      targets: [
+        'test:e2e',
+        'test:e2e:development',
+        'test:e2e:daemon-host',
+        'test:e2e:journey-a',
+        'test:e2e:service-worker',
+        'test:e2e:queue',
+        'test:e2e:shadow',
+      ],
       config: {
         'test:e2e': { metadata: { shards: 12 } },
+        'test:e2e:journey-a': { metadata: { browsers: ['chromium', 'firefox'] } },
         'test:e2e:queue': { executor: 'nx:noop', dependsOn: ['test:e2e:daemon-host', 'test:e2e:development'] },
+        'test:e2e:shadow': { executor: 'nx:noop', dependsOn: ['test:e2e:journey-a', 'test:e2e:service-worker'] },
       },
     },
     host: {
@@ -1125,6 +1288,8 @@ describe('plan lane selection', () => {
       tags: ['ci:shell', 'ci:windows-unit'],
       targets: ['test:shell-conformance', 'formal:nightly'],
     },
+    replicad: { root: 'packages/plugins/replicad', type: 'lib', tags: ['type:package'], targets: ['test'] },
+    'runtime-e2e': { root: 'apps/runtime-e2e', tags: ['ci:nightly-only'], targets: ['test', 'compute-qualify-ci'] },
   };
   const everything = Object.keys(nodes).filter((name) => name !== 'workspace');
 
@@ -1136,11 +1301,16 @@ describe('plan lane selection', () => {
       files,
       selectors = planStep?.env?.['LANE_SELECTORS'] ?? '',
       graphNodes = nodes,
+      dependencies = {},
+      workspaceDiff = '',
     }: {
       readonly affected: readonly string[];
       readonly files: readonly string[];
       readonly selectors?: string;
       readonly graphNodes?: Record<string, Node>;
+      readonly dependencies?: Record<string, readonly string[]>;
+      /** The pull request's `git diff -U0` of `pnpm-workspace.yaml`, which the viewer parity pin check reads. */
+      readonly workspaceDiff?: string;
     },
   ): {
     readonly status: number | undefined;
@@ -1168,11 +1338,29 @@ describe('plan lane selection', () => {
               },
             ]),
           ),
+          dependencies: Object.fromEntries(
+            Object.entries(dependencies).map(([name, targets]) => [
+              name,
+              targets.map((target) => ({ source: name, target, type: 'static' })),
+            ]),
+          ),
         },
       };
       writeFileSync(join(directory, 'fixture-graph.json'), JSON.stringify(graph));
+      // The plan deals the package-check and Node floor shards with the dealer and their snapshots.
+      mkdirSync(join(directory, 'scripts/src'), { recursive: true });
+      for (const file of ['test-shard-dealer.ts', 'pkgcheck-shard-durations.json', 'test-shard-durations.json']) {
+        copyFileSync(resolve(root, 'scripts/src', file), join(directory, 'scripts/src', file));
+      }
       writeFileSync(join(directory, 'affected.json'), JSON.stringify(affected));
       writeFileSync(join(directory, 'files'), files.map((file) => `${file}\n`).join(''));
+      writeFileSync(join(directory, 'workspace-diff'), workspaceDiff);
+      // The viewer parity check reads the checked-in manifest's example sources from the checkout.
+      mkdirSync(join(directory, 'libs/tau-examples/fixtures/viewer-parity'), { recursive: true });
+      writeFileSync(
+        join(directory, 'libs/tau-examples/fixtures/viewer-parity/fixtures.json'),
+        read('libs/tau-examples/fixtures/viewer-parity/fixtures.json'),
+      );
       writeFileSync(
         join(directory, 'pnpm'),
         [
@@ -1198,6 +1386,7 @@ describe('plan lane selection', () => {
           '  merge-base) [ "$2 $3" = "base-sha head-sha" ] && echo merge-base-sha ;;',
           '  diff) case "$*" in',
           '    "diff --name-only --no-renames --relative merge-base-sha head-sha" | "diff --name-only --no-renames base-sha head-sha") cat "$FIXTURES/files" ;;',
+          '    "diff --no-renames -U0 merge-base-sha head-sha -- pnpm-workspace.yaml") cat "$FIXTURES/workspace-diff" ;;',
           '    *) echo "unexpected git $*" >&2; exit 1 ;;',
           '  esac ;;',
           '  *) echo "unexpected git $*" >&2; exit 1 ;;',
@@ -1223,6 +1412,11 @@ describe('plan lane selection', () => {
           ['LANE_SELECTORS', selectors],
           ['SHELL_LANE_PATHS', planStep?.env?.['SHELL_LANE_PATHS'] ?? '[]'],
           ['NATIVE_DARWIN_LANE_PATHS', planStep?.env?.['NATIVE_DARWIN_LANE_PATHS'] ?? '[]'],
+          ['COMPUTE_QUALIFY_LANE_PROJECTS', planStep?.env?.['COMPUTE_QUALIFY_LANE_PROJECTS'] ?? '[]'],
+          ['COMPUTE_QUALIFY_LANE_PATHS', planStep?.env?.['COMPUTE_QUALIFY_LANE_PATHS'] ?? '[]'],
+          ['VIEWER_PARITY_LANE_PATHS', planStep?.env?.['VIEWER_PARITY_LANE_PATHS'] ?? '[]'],
+          ['VIEWER_PARITY_PINS', planStep?.env?.['VIEWER_PARITY_PINS'] ?? '[]'],
+          ['QUEUE_HUBS', planStep?.env?.['QUEUE_HUBS'] ?? '[]'],
         ]),
       });
       const outputs = Object.fromEntries(
@@ -1244,6 +1438,166 @@ describe('plan lane selection', () => {
     });
     expect(status, stderr).toBe(0);
     expect(outputs).toMatchObject({ api: 'true', billing: 'true', formal: 'true', browser: 'true', 'cli-e2e': 'true' });
+  });
+
+  describe('package-check shards (ST-3, ST-4)', () => {
+    // Measured snapshot seconds: cli 333, host 218, skills 201, warehouse 148, opencascade 139, viewer 124.
+    const checked = (root: string): Node => ({ root, type: 'lib', targets: ['pkgcheck'] });
+    const graphNodes: Record<string, Node> = {
+      ...nodes,
+      cli: { ...nodes['cli']!, targets: [...(nodes['cli']?.targets ?? []), 'pkgcheck', 'readme-quickstart'] },
+      host: { ...nodes['host']!, targets: [...(nodes['host']?.targets ?? []), 'audit-public-surface'] },
+      skills: checked('packages/skills'),
+      warehouse: checked('packages/warehouse'),
+      opencascade: checked('packages/plugins/opencascade'),
+      viewer: checked('packages/viewer'),
+    };
+    type Shard = { readonly shard: number; readonly shards: number; readonly projects: string };
+    const shards = (outputs: Record<string, string>): Shard[] =>
+      JSON.parse(outputs['pkgcheck-shards'] ?? 'null') as Shard[];
+
+    it('should run one package-check job for a narrow entry', () => {
+      const { status, stderr, outputs } = plan('merge_group', {
+        affected: ['core', 'viewer'],
+        files: ['packages/viewer/src/index.ts'],
+        graphNodes,
+      });
+      expect(status, stderr).toBe(0);
+      expect(outputs['pkgcheck']).toBe('true');
+      expect(shards(outputs)).toEqual([{ shard: 1, shards: 1, projects: 'viewer' }]);
+    });
+
+    it('should choose the shard count from the measured seconds and partition the projects (C5)', () => {
+      const affected = [...everything, 'skills', 'warehouse', 'opencascade', 'viewer'];
+      const { status, stderr, outputs } = plan('merge_group', { affected, files: ['package.json'], graphNodes });
+      expect(status, stderr).toBe(0);
+      // 1,163 measured seconds at 600 s a shard: two jobs, every checked project in exactly one.
+      const matrix = shards(outputs);
+      expect(matrix.map(({ shard, shards: count }) => [shard, count])).toEqual([
+        [1, 2],
+        [2, 2],
+      ]);
+      const union = matrix.flatMap(({ projects }) => projects.split(','));
+      expect(union.toSorted()).toEqual(['cli', 'host', 'opencascade', 'skills', 'viewer', 'warehouse']);
+      expect(new Set(union).size).toBe(union.length);
+    });
+
+    it('should run no package check for an entry that affects none, on a pull request as in the queue', () => {
+      for (const event of ['merge_group', 'pull_request']) {
+        const { status, stderr, outputs } = plan(event, {
+          affected: ['core'],
+          files: ['packages/core/x.ts'],
+          graphNodes,
+        });
+        expect(status, stderr).toBe(0);
+        expect(outputs['pkgcheck']).toBe('false');
+        expect(outputs['pkgcheck-shards']).toBe('[]');
+      }
+    });
+
+    it('should gate every shard in the required check', () => {
+      const job = ci.jobs['pkgcheck'];
+      expect(job?.needs).toEqual(['plan']);
+      expect(job?.if).toBe(
+        expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.pkgcheck == 'true'"),
+      );
+      expect(job?.strategy?.matrix?.['shard']).toBe(expression('fromJSON(needs.plan.outputs.pkgcheck-shards)'));
+      const gate = ci.jobs['affected']?.steps?.[0];
+      expect(gate?.env?.['PKGCHECK_REQUIRED']).toBe(expression('needs.plan.outputs.pkgcheck'));
+      expect(gate?.env?.['PKGCHECK_RESULT']).toBe(expression('needs.pkgcheck.result'));
+      expect(gate?.run).toContain('if [ "$PKGCHECK_REQUIRED" = true ]; then test "$PKGCHECK_RESULT" = success; fi');
+      expect(planScript).toContain(
+        '--max-shards 4 --shard-seconds 600 --durations scripts/src/pkgcheck-shard-durations.json',
+      );
+    });
+  });
+
+  describe('Node floor lane (node-26-ci-migration R2)', () => {
+    // Measured snapshot seconds: replicad 316, opencascade 76; revisions deals as its three shard tasks.
+    const published = (root: string, targets: readonly string[] = ['test']): Node => ({
+      root,
+      type: 'lib',
+      tags: ['type:package'],
+      targets,
+    });
+    const graphNodes: Record<string, Node> = {
+      ...nodes,
+      opencascade: published('packages/plugins/opencascade'),
+      revisions: published('packages/revisions', ['test', 'test:shard-1', 'test:shard-2', 'test:shard-3']),
+      unpublished: { root: 'libs/unpublished', type: 'lib', targets: ['test'] },
+      untested: published('packages/untested', ['build']),
+    };
+    type Shard = { readonly shard: number; readonly shards: number; readonly projects: string };
+    const shards = (outputs: Record<string, string>): Shard[] =>
+      JSON.parse(outputs['node-floor-shards'] ?? 'null') as Shard[];
+    const affected = [...everything, 'opencascade', 'revisions', 'unpublished', 'untested'];
+
+    it('should run every affected published package with a test, sharded packages as their shard tasks, in the queue', () => {
+      const { status, stderr, outputs } = plan('merge_group', { affected, files: ['package.json'], graphNodes });
+      expect(status, stderr).toBe(0);
+      expect(outputs['node-floor']).toBe('true');
+      const union = shards(outputs).flatMap(({ projects }) => projects.split(','));
+      expect(union.toSorted()).toEqual([
+        'opencascade:test',
+        'replicad:test',
+        'revisions:test:shard-1',
+        'revisions:test:shard-2',
+        'revisions:test:shard-3',
+      ]);
+      expect(new Set(union).size).toBe(union.length);
+      // 316 + 76 + 109 + 186 + 160 = 847 measured seconds at 600 s a shard: two jobs.
+      expect(shards(outputs).map(({ shard, shards: count }) => [shard, count])).toEqual([
+        [1, 2],
+        [2, 2],
+      ]);
+    });
+
+    it('should run only the published packages a pull request touches', () => {
+      const { status, stderr, outputs } = plan('pull_request', {
+        affected,
+        files: ['packages/plugins/opencascade/vitest.config.ts', 'packages/core/src/index.ts'],
+        graphNodes,
+      });
+      expect(status, stderr).toBe(0);
+      expect(shards(outputs)).toEqual([{ shard: 1, shards: 1, projects: 'opencascade:test' }]);
+      const untouched = plan('pull_request', { affected, files: ['packages/core/src/index.ts'], graphNodes });
+      expect(untouched.status, untouched.stderr).toBe(0);
+      expect(untouched.outputs['node-floor']).toBe('false');
+      expect(untouched.outputs['node-floor-shards']).toBe('[]');
+    });
+
+    it('should run the floor shards and the package checks on Node 24 while setup-nx defaults to Node 26', () => {
+      const setupNx = load(read('.github/actions/setup-nx/action.yml')) as {
+        readonly inputs: Record<string, { readonly default?: string }>;
+      };
+      const ciNode = setupNx.inputs['node-version']?.default ?? '';
+      expect(ciNode).toMatch(/^26\.\d+\.\d+$/u);
+      const floorNodes = ['node-floor', 'pkgcheck'].map(
+        (job) =>
+          ci.jobs[job]?.steps?.find((step) => step.uses === './.github/actions/setup-nx')?.with?.['node-version'],
+      );
+      expect(floorNodes[0]).toMatch(/^24\.\d+\.\d+$/u);
+      expect(floorNodes[1]).toBe(floorNodes[0]);
+      // No other ci.yml job overrides setup-nx's Node.
+      const overrides = Object.entries(ci.jobs).flatMap(([name, job]) =>
+        (job.steps ?? []).some((step) => step.uses === './.github/actions/setup-nx' && step.with?.['node-version'])
+          ? [name]
+          : [],
+      );
+      expect(overrides.toSorted()).toEqual(['node-floor', 'pkgcheck']);
+    });
+
+    it('should gate every floor shard in the required check', () => {
+      const job = ci.jobs['node-floor'];
+      expect(job?.needs).toEqual(['plan']);
+      expect(job?.if).toBe(
+        expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.node-floor == 'true'"),
+      );
+      expect(job?.strategy?.matrix?.['shard']).toBe(expression('fromJSON(needs.plan.outputs.node-floor-shards)'));
+      expect(planScript).toContain(
+        '--max-shards 4 --shard-seconds 600 --durations scripts/src/test-shard-durations.json',
+      );
+    });
   });
 
   it('should leave a touched-rule lane to the queue on a pull request that affects it only through a dependency', () => {
@@ -1273,6 +1627,17 @@ describe('plan lane selection', () => {
     }
     expect(outputs['native-linux']).toBe('');
     expect(outputs['browser-projects']).toBe('[]');
+  });
+
+  it('should run the browser lane on a pull request only for the browser projects its diff touches (MQ-5)', () => {
+    const touched = plan('pull_request', { affected: everything, files: ['apps/ui/app/root.tsx'] });
+    expect(touched.status, touched.stderr).toBe(0);
+    expect(touched.outputs['browser']).toBe('true');
+    expect(touched.outputs['browser-projects']).toBe('["ui"]');
+    const untouched = plan('pull_request', { affected: everything, files: ['packages/core/src/index.ts'] });
+    expect(untouched.status, untouched.stderr).toBe(0);
+    expect(untouched.outputs['browser']).toBe('false');
+    expect(untouched.outputs['browser-projects']).toBe('[]');
   });
 
   it('should own a file by the deepest project root above it, as Nx does', () => {
@@ -1338,7 +1703,13 @@ describe('plan lane selection', () => {
     expect(queue.status, queue.stderr).toBe(0);
     expect(queue.outputs['formal-nightly']).toBe('true');
     expect(queue.outputs['formal-nightly-projects']).toBe('["host"]');
-    const both = plan('merge_group', { affected: everything, files: ['packages/core/src/index.ts'] });
+    // A dependency-only change leaves the nightly tiers to the release gate (merge-queue defects MQ-2).
+    const dependency = plan('merge_group', { affected: everything, files: ['packages/core/src/index.ts'] });
+    expect(dependency.outputs['formal-nightly-projects']).toBe('[]');
+    const both = plan('merge_group', {
+      affected: everything,
+      files: ['packages/host/src/acp/server.ts', 'apps/libs/api-billing/src/ledger.ts'],
+    });
     expect(both.outputs['formal-nightly-projects']).toBe('["api-billing","host"]');
     const pullRequest = plan('pull_request', { affected: ['host'], files: ['packages/host/src/acp/server.ts'] });
     expect(pullRequest.status, pullRequest.stderr).toBe(0);
@@ -1347,6 +1718,41 @@ describe('plan lane selection', () => {
     const unrelated = plan('merge_group', { affected: ['api'], files: ['apps/api/app/main.ts'] });
     expect(unrelated.status, unrelated.stderr).toBe(0);
     expect(unrelated.outputs['formal-nightly']).toBe('false');
+  });
+
+  it('should run the whole shell selection in the merge queue only when the entry touches a shell project', () => {
+    // A hub change (`agent-host` reaching `host`) selects no shell row (merge-queue defects MQ-2).
+    const hub = plan('merge_group', { affected: ['host', 'sandbox'], files: ['packages/core/src/index.ts'] });
+    expect(hub.status, hub.stderr).toBe(0);
+    expect(hub.outputs['shell']).toBe('false');
+    expect(hub.outputs['shell-projects']).toBe('[]');
+    expect(hub.stdout).toContain('Merge queue (any-touched) shell: []');
+    // A shell change keeps every affected shell project, as before.
+    const shell = plan('merge_group', { affected: ['host', 'sandbox'], files: ['libs/sandbox/src/shell/run.ts'] });
+    expect(shell.status, shell.stderr).toBe(0);
+    expect(shell.outputs['shell-projects']).toBe('["host","sandbox"]');
+  });
+
+  it('should run the native host rows in the merge queue only for the projects the entry touches', () => {
+    const hub = plan('merge_group', { affected: everything, files: ['packages/core/src/index.ts'] });
+    expect(hub.status, hub.stderr).toBe(0);
+    expect(hub.outputs['native-hosts']).toBe('false');
+    expect(hub.outputs).not.toHaveProperty('native-intel');
+    expect(hub.outputs['native-linux']).toBe('');
+    const own = plan('merge_group', { affected: everything, files: ['packages/plugins/picogk/src/index.ts'] });
+    expect(own.status, own.stderr).toBe(0);
+    expect(own.outputs['native-hosts']).toBe('true');
+    // A project the row depends on outside a hub selects it; the same project reached only through a hub does not.
+    const dependencies = { cli: ['host', 'build123d'], host: ['sandbox'], build123d: ['core'] };
+    const direct = plan('merge_group', { affected: everything, files: ['packages/core/src/index.ts'], dependencies });
+    expect(direct.status, direct.stderr).toBe(0);
+    expect(direct.stdout).toContain('Merge queue (closure) native-hosts: ["cli"]');
+    const throughHub = plan('merge_group', { affected: everything, files: ['libs/sandbox/src/a.ts'], dependencies });
+    expect(throughHub.stdout).toContain('Merge queue (closure) native-hosts: []');
+    // A lockfile change applies no merge-queue rule.
+    const lockfile = plan('merge_group', { affected: everything, files: ['pnpm-lock.yaml'] });
+    expect(lockfile.stdout).toContain('The entry changes pnpm-lock.yaml: no merge-queue rule applies.');
+    expect(lockfile.outputs['native-hosts']).toBe('true');
   });
 
   it('should not select the shell lane for a file beside the fixture paths', () => {
@@ -1388,14 +1794,119 @@ describe('plan lane selection', () => {
     expect(queue.outputs['native-darwin']).toBe('false');
   });
 
+  it('should run the compute qualification lane only when a measured project is affected or a qualification path changed', () => {
+    // The runtime-e2e project is affected through almost any dependency; a measured project (the Replicad plugin) keeps it.
+    for (const event of ['merge_group', 'pull_request']) {
+      const measured = plan(event, {
+        affected: ['replicad', 'runtime-e2e'],
+        files: ['packages/plugins/replicad/src/a.ts'],
+      });
+      expect(measured.status, measured.stderr).toBe(0);
+      expect(measured.outputs['compute-qualify'], event).toBe('true');
+    }
+    const harness = plan('pull_request', {
+      affected: ['runtime-e2e'],
+      files: ['apps/runtime-e2e/src/compute-baseline/qualification-baselines.json'],
+    });
+    expect(harness.status, harness.stderr).toBe(0);
+    expect(harness.outputs['compute-qualify']).toBe('true');
+    const model = plan('merge_group', {
+      affected: ['core', 'runtime-e2e'],
+      files: ['libs/tau-examples/src/kernels/replicad/six-axis-arm/main.ts'],
+    });
+    expect(model.outputs['compute-qualify']).toBe('true');
+    // Affected only through an unmeasured dependency, or a sibling suite of the project: no lane.
+    const unrelated = plan('merge_group', { affected: ['core', 'runtime-e2e'], files: ['packages/core/src/index.ts'] });
+    expect(unrelated.status, unrelated.stderr).toBe(0);
+    expect(unrelated.outputs['compute-qualify']).toBe('false');
+    const sibling = plan('pull_request', {
+      affected: ['runtime-e2e'],
+      files: ['apps/runtime-e2e/src/host-relay.test.ts'],
+    });
+    expect(sibling.outputs['compute-qualify']).toBe('false');
+  });
+
+  it.each([
+    'packages/viewer/src/graphics/three/renderer.ts',
+    'packages/viewer/src/graphics/three/utils/fixtures/flanged-housing.glb',
+    'packages/three/src/camera/index.ts',
+    'packages/plugins/image/src/nanoraster-camera.ts',
+    'libs/agent-tools/src/capture/viewer-capture-options.ts',
+    'libs/types/src/constants/viewer-render-profile.constants.ts',
+    'libs/tau-examples/fixtures/viewer-parity/capture-seconds.json',
+    'libs/tau-examples/scripts/viewer-parity.gate.test.ts',
+    'libs/tau-examples/src/kernels/replicad/heat-exchanger/main.ts',
+    'apps/ui/app/routes/convert/gear-8.glb',
+    '.github/workflows/viewer-parity.yml',
+    'tools/pnpm/patches/three@0.184.0.patch',
+  ])('should run viewer parity on a pull request whose own diff touches %s, and never in the merge queue', (file) => {
+    const pullRequest = plan('pull_request', { affected: [], files: [file] });
+    expect(pullRequest.status, pullRequest.stderr).toBe(0);
+    expect(pullRequest.outputs['viewer-parity']).toBe('true');
+    expect(pullRequest.stdout).toContain('Viewer parity inputs changed');
+    const queue = plan('merge_group', { affected: everything, files: [file] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['viewer-parity']).toBe('false');
+    expect(queue.stdout).toContain('Merge queue (never) viewer-parity: []');
+  });
+
+  it.each([
+    // Kernel code: the viewer and nanoraster draw the same GLB bytes, so a kernel change moves both sides alike.
+    'packages/plugins/replicad/src/kernel.ts',
+    'packages/plugins/picovoxel/src/index.ts',
+    // An example that is no parity fixture, a sibling of a fixture path, and the hubs that select it by graph.
+    'libs/tau-examples/src/kernels/replicad/birdhouse/main.ts',
+    'libs/tau-examples/src/kernels/replicad/ibeam-extra/main.ts',
+    'libs/tau-examples/scripts/test-geospec.mts',
+    'packages/ui/src/components/button.tsx',
+    'packages/runtime/src/index.ts',
+    'pnpm-lock.yaml',
+  ])('should leave viewer parity off a pull request that touches only %s', (file) => {
+    const pullRequest = plan('pull_request', { affected: everything, files: [file] });
+    expect(pullRequest.status, pullRequest.stderr).toBe(0);
+    expect(pullRequest.outputs['viewer-parity']).toBe('false');
+  });
+
+  it('should run viewer parity on a pull request that moves a three or nanoraster pin, and not another pin', () => {
+    const pin = (workspaceDiff: string) =>
+      plan('pull_request', { affected: [], files: ['pnpm-workspace.yaml'], workspaceDiff }).outputs['viewer-parity'];
+    const header = '--- a/pnpm-workspace.yaml\n+++ b/pnpm-workspace.yaml\n@@ -283 +283 @@\n';
+    expect(pin(`${header}-  three: 0.184.0\n+  three: 0.185.0\n`)).toBe('true');
+    expect(pin(`${header}-  nanoraster: ^0.9.0\n+  nanoraster: ^0.10.0\n`)).toBe('true');
+    expect(pin(`${header}-  nanoraster-darwin-arm64: 0.9.0\n+  nanoraster-darwin-arm64: 0.10.0\n`)).toBe('true');
+    expect(pin(`${header}+  three@0.185.0: tools/pnpm/patches/three@0.185.0.patch\n`)).toBe('true');
+    expect(pin(`${header}-  three-mesh-bvh: 0.9.0\n+  three-mesh-bvh: 0.9.1\n`)).toBe('false');
+    expect(pin(`${header}-  vitest: 4.1.11\n+  vitest: 4.1.12\n`)).toBe('false');
+  });
+
+  it('should keep viewer parity out of a merge-queue entry that changes the lockfile', () => {
+    const queue = plan('merge_group', { affected: everything, files: ['pnpm-lock.yaml', 'packages/viewer/src/a.ts'] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.stdout).toContain('The entry changes pnpm-lock.yaml: no merge-queue rule applies.');
+    expect(queue.outputs['viewer-parity']).toBe('false');
+  });
+
+  it('should still run viewer parity on a push the queue did not prove, through the graph', () => {
+    const push = plan('push', { affected: everything, files: ['packages/runtime/src/index.ts'] });
+    expect(push.status, push.stderr).toBe(0);
+    expect(push.outputs['viewer-parity']).toBe('true');
+  });
+
+  it('should fail the plan when a lane other than viewer parity names the paths rule', () => {
+    const selectors = JSON.stringify({ ...laneSelectors, api: { tags: ['scope:api'], pr: 'paths' } });
+    const { status, stderr } = plan('merge_group', { affected: everything, files: [], selectors });
+    expect(status).not.toBe(0);
+    expect(stderr).toContain('only the viewer-parity lane has a pull-request path list');
+  });
+
   it('should fail the plan on a pull-request rule it does not know', () => {
     const selectors = JSON.stringify({ ...laneSelectors, api: { tags: ['scope:api'], pr: 'sometimes' } });
     const { status, stderr } = plan('merge_group', { affected: everything, files: [], selectors });
     expect(status).not.toBe(0);
-    expect(stderr).toContain('lane selectors name a pull-request rule other than queue or touched');
+    expect(stderr).toContain('lane selectors name a pull-request rule other than queue, touched or paths');
   });
 
-  it('should run one row per ratcheted suite of an affected project in the merge queue and none on a pull request', () => {
+  it('should run one row per ratcheted suite of an affected project in the merge queue, and on a pull request only when its diff touches the project', () => {
     const queue = plan('merge_group', { affected: ['ui-e2e'], files: ['apps/ui-e2e/src/smoke.test.ts'] });
     expect(queue.status, queue.stderr).toBe(0);
     expect(queue.outputs['e2e-queue']).toBe('true');
@@ -1413,10 +1924,16 @@ describe('plan lane selection', () => {
         slug: 'ui-e2e-test-e2e-development',
       },
     ]);
+    // MQ-5: a pull request that touches the project runs its suites before it queues.
     const pullRequest = plan('pull_request', { affected: ['ui-e2e'], files: ['apps/ui-e2e/src/smoke.test.ts'] });
     expect(pullRequest.status, pullRequest.stderr).toBe(0);
-    expect(pullRequest.outputs['e2e-queue']).toBe('false');
-    expect(pullRequest.outputs['e2e-queue-suites']).toBe('[]');
+    expect(pullRequest.outputs['e2e-queue']).toBe('true');
+    expect(pullRequest.outputs['e2e-queue-suites']).toBe(queue.outputs['e2e-queue-suites']);
+    // A pull request that reaches the project only through a dependency runs none.
+    const dependency = plan('pull_request', { affected: ['ui-e2e', 'ui'], files: ['apps/ui/app/root.tsx'] });
+    expect(dependency.status, dependency.stderr).toBe(0);
+    expect(dependency.outputs['e2e-queue']).toBe('false');
+    expect(dependency.outputs['e2e-queue-suites']).toBe('[]');
     const unrelated = plan('merge_group', { affected: ['api'], files: ['apps/api/app/main.ts'] });
     expect(unrelated.status, unrelated.stderr).toBe(0);
     expect(unrelated.outputs['e2e-queue']).toBe('false');
@@ -1436,6 +1953,128 @@ describe('plan lane selection', () => {
         ...endToEnd,
         root: endToEnd?.root ?? '',
         config: { ...endToEnd?.config, 'test:e2e:queue': { dependsOn } },
+      },
+    };
+    const { status, stderr } = plan('merge_group', { affected: ['ui-e2e'], files: [], graphNodes });
+    expect(status).not.toBe(0);
+    expect(stderr).toContain(message);
+  });
+
+  it('should run one shadow row per shadow suite of an affected project in the merge queue and on a push, never on a pull request (Q1)', () => {
+    const rows = [
+      {
+        project: 'ui-e2e',
+        target: 'test:e2e:journey-a',
+        label: 'ui-e2e test:e2e:journey-a',
+        slug: 'ui-e2e-test-e2e-journey-a',
+        browsers: 'chromium firefox',
+      },
+      {
+        project: 'ui-e2e',
+        target: 'test:e2e:service-worker',
+        label: 'ui-e2e test:e2e:service-worker',
+        slug: 'ui-e2e-test-e2e-service-worker',
+        // A suite that names no browsers installs all three, as an e2e-queue row does.
+        browsers: 'chromium firefox webkit',
+      },
+    ];
+    // Affected through a dependency is enough: the shadow bar counts every run that affects the project.
+    for (const event of ['merge_group', 'push']) {
+      const run = plan(event, { affected: ['ui-e2e', 'ui'], files: ['apps/ui/app/root.tsx'] });
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.outputs['e2e-shadow'], event).toBe('true');
+      expect(JSON.parse(run.outputs['e2e-shadow-suites'] ?? ''), event).toEqual(rows);
+    }
+    // A pull request runs none, even one that touches the project: a shadow row proves nothing there.
+    const pullRequest = plan('pull_request', { affected: ['ui-e2e'], files: ['apps/ui-e2e/src/smoke.test.ts'] });
+    expect(pullRequest.status, pullRequest.stderr).toBe(0);
+    expect(pullRequest.outputs['e2e-shadow']).toBe('false');
+    expect(pullRequest.outputs['e2e-shadow-suites']).toBe('[]');
+    const unrelated = plan('merge_group', { affected: ['api'], files: ['apps/api/app/main.ts'] });
+    expect(unrelated.outputs['e2e-shadow']).toBe('false');
+    expect(unrelated.outputs['e2e-shadow-suites']).toBe('[]');
+  });
+
+  it('should run the desktop shadow rows only when the desktop lane is selected or the entry touches desktop-e2e (DC-27)', () => {
+    const desktopNodes = (lane: string): Record<string, Node> => ({
+      ...nodes,
+      'desktop-e2e': {
+        root: 'apps/desktop-e2e',
+        targets: ['test:e2e', 'test:e2e:chat', 'test:e2e:project', 'test:e2e:shadow'],
+        config: {
+          'test:e2e:chat': { metadata: { browsers: ['chromium'] } },
+          'test:e2e:project': { metadata: { browsers: ['chromium'] } },
+          'test:e2e:shadow': {
+            executor: 'nx:noop',
+            dependsOn: ['test:e2e:chat', 'test:e2e:project'],
+            metadata: { lane },
+          },
+        },
+      },
+    });
+    const graphNodes = desktopNodes('desktop');
+    const rows = ['test:e2e:chat', 'test:e2e:project'].map((target) => ({
+      project: 'desktop-e2e',
+      target,
+      label: `desktop-e2e ${target}`,
+      slug: `desktop-e2e-${target.replaceAll(':', '-')}`,
+      browsers: 'chromium',
+    }));
+    const desktopRows = (run: ReturnType<typeof plan>): unknown[] =>
+      (JSON.parse(run.outputs['e2e-shadow-suites'] ?? '[]') as Array<{ readonly project: string }>).filter(
+        ({ project }) => project === 'desktop-e2e',
+      );
+    for (const event of ['merge_group', 'push']) {
+      // A tag:ci:desktop project (`ui` in this fixture) is affected: the desktop lane is selected.
+      const desktopLane = plan(event, { affected: ['desktop-e2e', 'ui'], files: ['apps/ui/app/root.tsx'], graphNodes });
+      expect(desktopLane.status, desktopLane.stderr).toBe(0);
+      expect(desktopRows(desktopLane), event).toEqual(rows);
+      // The entry changes a file desktop-e2e owns, and no desktop project is affected.
+      const own = plan(event, { affected: ['desktop-e2e'], files: ['apps/desktop-e2e/src/a.spec.ts'], graphNodes });
+      expect(own.status, own.stderr).toBe(0);
+      expect(desktopRows(own), event).toEqual(rows);
+      // Affected through another dependency only (here the API): no desktop row, and the lane is off when no other
+      // project has shadow rows.
+      const through = plan(event, { affected: ['desktop-e2e', 'api'], files: ['apps/api/app/main.ts'], graphNodes });
+      expect(through.status, through.stderr).toBe(0);
+      expect(through.outputs['e2e-shadow'], event).toBe('false');
+      expect(through.outputs['e2e-shadow-suites'], event).toBe('[]');
+      // A project that names no lane keeps its rows whenever it is affected.
+      const both = plan(event, {
+        affected: ['desktop-e2e', 'ui-e2e'],
+        files: ['apps/ui-e2e/src/a.spec.ts'],
+        graphNodes,
+      });
+      expect(both.outputs['e2e-shadow'], event).toBe('true');
+      expect(desktopRows(both), event).toEqual([]);
+      expect(JSON.parse(both.outputs['e2e-shadow-suites'] ?? '[]'), event).toHaveLength(2);
+    }
+    const pullRequest = plan('pull_request', {
+      affected: ['desktop-e2e', 'ui'],
+      files: ['apps/desktop-e2e/src/a.spec.ts'],
+      graphNodes,
+    });
+    expect(pullRequest.outputs['e2e-shadow']).toBe('false');
+    const unknown = plan('merge_group', { affected: ['desktop-e2e'], files: [], graphNodes: desktopNodes('electron') });
+    expect(unknown.status).not.toBe(0);
+    expect(unknown.stderr).toContain(
+      'desktop-e2e:test:e2e:shadow names lane "electron", which is not a lane of this plan',
+    );
+  });
+
+  it.each([
+    [['test:e2e:missing'], 'ui-e2e:test:e2e:shadow depends on "test:e2e:missing", which is not a target of ui-e2e'],
+    [['test:e2e'], 'ui-e2e:test:e2e declares shards; the e2e-shadow lane runs a suite as one job'],
+    // Ruling 7: a suite gates or is on probation, never both.
+    [['test:e2e:development'], 'ui-e2e:test:e2e:development is in both test:e2e:shadow and test:e2e:queue'],
+  ])('should fail the plan when the shadow rows list %j', (dependsOn, message) => {
+    const endToEnd = nodes['ui-e2e'];
+    const graphNodes = {
+      ...nodes,
+      'ui-e2e': {
+        ...endToEnd,
+        root: endToEnd?.root ?? '',
+        config: { ...endToEnd?.config, 'test:e2e:shadow': { dependsOn } },
       },
     };
     const { status, stderr } = plan('merge_group', { affected: ['ui-e2e'], files: [], graphNodes });
@@ -1507,7 +2146,7 @@ describe('ci.yml formal nightly lane (CI throughput review Q-4 step 2)', () => {
     "!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.formal-nightly == 'true' && github.event_name == 'merge_group'";
 
   it('should plan the lane from formal:nightly, in the merge queue only', () => {
-    expect(laneSelectors['formal-nightly']).toEqual({ targets: ['formal:nightly'], pr: 'queue' });
+    expect(laneSelectors['formal-nightly']).toEqual({ targets: ['formal:nightly'], pr: 'queue', queue: 'touched' });
     expect(planScript).toContain('formal_nightly=$(flag formal-nightly)');
     expect(planScript).toContain('echo "formal-nightly-projects=$formal_nightly_projects"');
     expect(ci.jobs['plan']?.outputs?.['formal-nightly-projects']).toBe(
@@ -1539,7 +2178,7 @@ describe('ci.yml formal nightly lane (CI throughput review Q-4 step 2)', () => {
 
   it('should take ref, projects and seed as workflow_call inputs and give each caller its own group', () => {
     const inputs = nightly.on.workflow_call?.inputs ?? {};
-    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref', 'seed']);
+    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref', 'seed', 'uncached']);
     expect(inputs['ref']).toMatchObject({ type: 'string', required: true });
     expect(inputs['projects']).toMatchObject({ type: 'string', required: false });
     expect(inputs['seed']).toMatchObject({ type: 'string', required: false });
@@ -1585,5 +2224,148 @@ describe('ci.yml formal nightly lane (CI throughput review Q-4 step 2)', () => {
       expect(seedOf(source)).toBeLessThan(2_147_483_647);
     }
     expect(run?.run).toContain('if [ -n "$TAU_FORMAL_SEED" ]; then');
+  });
+});
+
+describe('ci.yml test lanes (CI throughput review ST-1)', () => {
+  const lane = ci.jobs['affected-lane'];
+  const rows = ((lane?.strategy?.matrix?.['lane'] ?? []) as readonly string[]).filter((row) => row.startsWith('test-'));
+  const script = lane?.steps?.find((step) => step.name === "Run the lane's tasks")?.run ?? '';
+  const uiTargets = Object.keys(
+    (JSON.parse(read('apps/ui/project.json')) as { targets: Record<string, unknown> }).targets,
+  ).filter((target) => /^test:shard-\d+$/u.test(target));
+
+  it('should deal over exactly the test rows of the matrix', () => {
+    // A row the deal does not know runs nothing; a deal over more shards than rows drops their projects.
+    expect(rows).toEqual(Array.from({ length: rows.length }, (_, index) => `test-${index + 1}`));
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    expect(script).toMatch(
+      new RegExp(
+        String.raw`node scripts/src/test-shard-dealer\.ts --shard "\$\{LANE#test-\}" --shards ${String(rows.length)} \\\n\s+` +
+          String.raw`--graph "\$RUNNER_TEMP/test-graph\.json" --targets test\)`,
+        'u',
+      ),
+    );
+    expect(uiTargets.length).toBeGreaterThanOrEqual(4);
+  });
+
+  /** Run every test row's script against a task graph of `projects`; returns each row's `nx run-many` calls. */
+  const runRows = (
+    projects: Readonly<Record<string, { readonly tags?: readonly string[]; readonly targets: readonly string[] }>>,
+  ): string[][] => {
+    const directory = mkdtempSync(join(tmpdir(), 'ci-test-lanes-'));
+    try {
+      writeFileSync(
+        join(directory, 'graph.json'),
+        JSON.stringify({
+          graph: {
+            nodes: Object.fromEntries(
+              Object.entries(projects).map(([name, { tags = [], targets }]) => [
+                name,
+                { data: { tags, targets: Object.fromEntries(targets.map((target) => [target, {}])) } },
+              ]),
+            ),
+          },
+          tasks: {
+            tasks: Object.fromEntries(
+              Object.keys(projects).flatMap((name) => [
+                [`${name}:test`, { target: { project: name, target: 'test' } }],
+                [`${name}:copy-assets`, { target: { project: name, target: 'copy-assets' } }],
+              ]),
+            ),
+            dependencies: Object.fromEntries(
+              Object.keys(projects).flatMap((name) => [
+                [`${name}:test`, [`${name}:copy-assets`]],
+                [`${name}:copy-assets`, []],
+              ]),
+            ),
+          },
+        }),
+      );
+      writeFileSync(
+        join(directory, 'pnpm'),
+        [
+          '#!/usr/bin/env bash',
+          'set -euo pipefail',
+          'case "$*" in',
+          '  "nx affected -t test --exclude tag:scope:api,tag:ci:nightly-only --graph="*) cp "$FIXTURES/graph.json" "$(cut -d= -f2- <<< "$7")" ;;',
+          '  "nx run-many "*) echo "$*" >> "$FIXTURES/calls" ;;',
+          '  *) echo "unexpected pnpm $*" >&2; exit 1 ;;',
+          'esac',
+          '',
+        ].join('\n'),
+        { mode: 0o700 },
+      );
+      return rows.map((row) => {
+        writeFileSync(join(directory, 'calls'), '');
+        const result = spawnSync('bash', ['-e', '-c', script], {
+          cwd: root,
+          encoding: 'utf8',
+          env: Object.fromEntries([
+            ['PATH', `${directory}:${process.env['PATH'] ?? ''}`],
+            ['FIXTURES', directory],
+            ['RUNNER_TEMP', directory],
+            ['LANE', row],
+          ]),
+        });
+        expect(result.status, result.stderr).toBe(0);
+        return readFileSync(join(directory, 'calls'), 'utf8')
+          .split('\n')
+          .filter((line) => line !== '');
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  };
+
+  /** The `<project>:<target>` tasks one `nx run-many -t <targets> --projects <projects>` call runs. */
+  const tasksOf = (call: string): string[] => {
+    const match =
+      /^nx run-many -t (?<targets>.+?) --projects (?<projects>\S+) --parallel=1 --outputStyle=stream$/u.exec(call);
+    expect(match, call).not.toBeNull();
+    const targets = match?.groups?.['targets']?.split(' ') ?? [];
+    return (match?.groups?.['projects']?.split(',') ?? []).flatMap((project) =>
+      targets.map((target) => `${project}:${target}`),
+    );
+  };
+
+  const ui = { targets: ['test', 'test:e2e', ...uiTargets] };
+
+  it('should run every ui shard once across the rows and never the whole ui:test', { timeout: 60_000 }, () => {
+    const calls = runRows({
+      ui,
+      cli: { targets: ['test'] },
+      host: { targets: ['test'] },
+      scripts: { targets: ['test'] },
+      viewer: { targets: ['test'] },
+      'small-a': { targets: ['test'] },
+      'small-b': { targets: ['test'] },
+      'api-like': { tags: ['scope:api'], targets: ['test'] },
+    });
+    const tasks = calls.flat().flatMap((call) => tasksOf(call));
+    expect(tasks.toSorted()).toEqual(
+      [
+        ...uiTargets.map((target) => `ui:${target}`),
+        'cli:test',
+        'host:test',
+        'scripts:test',
+        'viewer:test',
+        'small-a:test',
+        'small-b:test',
+      ].toSorted(),
+    );
+    expect(tasks).not.toContain('ui:test');
+  });
+
+  it('should spread ui alone over the rows, one shard per row while the rows last', { timeout: 60_000 }, () => {
+    const perRow = runRows({ ui }).map((row) => row.flatMap((call) => tasksOf(call)));
+    expect(perRow.flat().toSorted()).toEqual(uiTargets.map((target) => `ui:${target}`).toSorted());
+    expect(Math.max(...perRow.map((row) => row.length))).toBe(Math.ceil(uiTargets.length / rows.length));
+  });
+
+  it('should run a project without shard targets as its whole test', { timeout: 60_000 }, () => {
+    expect(runRows({ scripts: { targets: ['test'] } }).flat()).toEqual([
+      'nx run-many -t test --projects scripts --parallel=1 --outputStyle=stream',
+    ]);
   });
 });

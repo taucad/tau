@@ -1,3 +1,5 @@
+import { withAnnotations, withoutAnnotatedImage } from '@taucad/chat/annotations';
+import type { MessageAnnotations } from '@taucad/chat/annotations';
 import type { ToolUIPart } from 'ai';
 import type {
   CadAgentExecution,
@@ -18,6 +20,7 @@ import {
 } from '@taucad/chat/references';
 import type { CadReference } from '@taucad/chat/references';
 import type { ExportValidation } from '@taucad/chat/schemas/tools/export-model';
+import type { EvaluateModelOutput } from '@taucad/chat/schemas/tools/evaluate-model';
 import { isUndecidedFailure, summarizeTestModelOutput } from '@taucad/chat/schemas/tools/test-model-summary';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -26,7 +29,7 @@ import { formatExportDate } from '@taucad/ui-core/utils/date.utils';
 import { getRpcOutcome } from '@taucad/chat-ui/services/rpc-ledger';
 import { attachmentKind, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 import type { AttachmentName, StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
-import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
+import type { RequestTerminationCause } from '@taucad/chat-ui/hooks/chat-persistence.machine';
 import type { ResolvedModel } from '#hooks/use-models.js';
 
 /**
@@ -110,6 +113,25 @@ type ToolPartFor<Name extends keyof MyTools> = ToolUIPart<Pick<MyTools, Name>>;
 /** The machine tools answer in text; an old chat's object answer is kept readable rather than `[object Object]`. */
 const machineTextOf = (output: unknown): string =>
   typeof output === 'string' ? output : JSON.stringify(output, undefined, 2);
+
+/**
+ * The evaluate_model build report as one line: reused or computed, its milliseconds, and the operations when reported.
+ * @param build - The report.
+ * @returns The line.
+ */
+const buildLine = (build: NonNullable<EvaluateModelOutput['build']>): string => {
+  const { reused, elapsed, operations, costliest } = build;
+  const facts = [
+    `${reused ? 'reused' : 'computed'}, ${Math.round(elapsed)} ms`,
+    operations === undefined ? undefined : `operations ${operations.reused} reused, ${operations.computed} computed`,
+    costliest === undefined || costliest.length === 0
+      ? undefined
+      : `costliest ${costliest
+          .map(({ operation, elapsed: spent, calls }) => `${operation} ${Math.round(spent)} ms (${calls} calls)`)
+          .join(', ')}`,
+  ].filter(Boolean);
+  return `Build: ${facts.join('; ')}`;
+};
 
 const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
   [toolName.getParameters]: {
@@ -243,9 +265,7 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     output: (output) =>
       joinLines(
         `Total: ${output.totalMatches}`,
-        output.pendingFiles?.length
-          ? `Not searched (large object not on this device yet): ${output.pendingFiles.join(', ')}`
-          : undefined,
+        output.pendingFiles?.length ? `Not searched (still downloading): ${output.pendingFiles.join(', ')}` : undefined,
         output.matches
           .flatMap((match) => {
             const firstLine = match.line - (match.before?.length ?? 0);
@@ -276,6 +296,9 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     input: (input) => `targetFile: ${input.targetFile}`,
     output(output) {
       const lines = [`Status: ${output.status}`];
+      if (output.build) {
+        lines.push(buildLine(output.build));
+      }
       if (output.tessellation) {
         const {
           triangles,
@@ -303,6 +326,10 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
         ].filter(Boolean);
         if (resolution.length > 0) {
           lines.push(`Resolution: ${resolution.join(', ')}`);
+        }
+        if (output.tessellation.meshes) {
+          const { reused, computed } = output.tessellation.meshes;
+          lines.push(`Meshes: ${reused} reused, ${computed} computed`);
         }
       }
       if (output.mechanism?.declared) {
@@ -826,6 +853,18 @@ export function stampMessageCreatedAt(messages: MyUIMessage[]): MyUIMessage[] {
 }
 
 /**
+ * The text a draft becomes when it is sent.
+ *
+ * The editor's draft keeps the whitespace the person typed around it (a Shift+Enter, a trailing space, a pasted
+ * newline); the message does not. Whoever asks "is this draft the text that message took?" composes the draft the same
+ * way first, so the answer cannot differ from the message by the builder's own normalisation.
+ *
+ * @param draftText - The composer's text, as the editor holds it.
+ * @returns The text the message carries.
+ */
+export const composeDraftText = (draftText: string): string => draftText.trim();
+
+/**
  * The one user-message builder for every chat verb that sends what the person
  * composed (submit, edit).
  *
@@ -843,8 +882,10 @@ export function buildUserMessage(input: {
   readonly attachments?: readonly StoredAttachmentRef[];
   /** Structured references the composer's chips held; matched to the text's `@cad[...]` tokens. */
   readonly references?: readonly CadReference[];
+  /** The draft's comments and annotated pictures. */
+  readonly annotations?: MessageAnnotations;
 }): MyUIMessage {
-  const text = input.text.trim();
+  const text = composeDraftText(input.text);
   const references = messageReferences(text, input.references ?? []);
   return {
     id: generatePrefixedId(idPrefix.message),
@@ -864,7 +905,10 @@ export function buildUserMessage(input: {
       ),
       ...(text.length > 0 ? [{ type: 'text', text } as const] : []),
     ],
-    metadata: { createdAt: Date.now(), status: 'pending', ...(references.length === 0 ? {} : { references }) },
+    metadata: withAnnotations(
+      { createdAt: Date.now(), status: 'pending', ...(references.length === 0 ? {} : { references }) } as const,
+      input.annotations,
+    ),
   };
 }
 
@@ -883,11 +927,20 @@ export function buildEditedUserMessage(
     readonly text: string;
     readonly attachments?: readonly StoredAttachmentRef[];
     readonly references?: readonly CadReference[];
+    /** The edit's comments and annotated pictures. Without them the original's stay, less any whose image the edit removed. */
+    readonly annotations?: MessageAnnotations;
   },
 ): MyUIMessage {
-  const { references: previous = [], ...metadata } = original.metadata ?? {};
+  const { references: previous = [], annotations: sent, ...metadata } = original.metadata ?? {};
+  const kept = new Set((input.attachments ?? []).map((attachment) => attachmentUrl(attachment)));
+  const annotations =
+    input.annotations ??
+    (input.attachments === undefined
+      ? sent
+      : withoutAnnotatedImage(sent, (image) => image.attachment === undefined || !kept.has(image.attachment)));
   const built = buildUserMessage({
     text: input.text,
+    ...(annotations === undefined ? {} : { annotations }),
     ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
     // A later reference wins its token, so the edit composer's chips go last.
     references: [...previous, ...(input.references ?? [])],

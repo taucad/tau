@@ -5,8 +5,11 @@ import type { Expectation, ExpectedLocation, Outcome, Tier } from '#expected.js'
 import { compareOutcome, describeOutcome, findExpectedFiles, lintExpectedFile } from '#expected.js';
 import { exportGraph, generatedFiles, simulateBehaviours, staleFiles } from '#export.js';
 import { checkLean, leanMutantChecker } from '#lean.js';
+import type { MutantShard } from '#mutant-shard.js';
 import { findMutantFiles, runMutants } from '#mutants.js';
 import { sanitizeLog } from '#sanitize.js';
+import type { Shard } from '#shard.js';
+import { dealRuns, readRunSeconds } from '#shard.js';
 import type { JavaResult } from '#tlc.js';
 import { compressTrace, runApalacheCase, runJava, runTlcCase, sanyCommand } from '#tlc.js';
 import type { FormalContext, LocatedTools } from '#toolchain.js';
@@ -177,12 +180,21 @@ const planDirectory = (
   return { jobs: [...sany, ...configJobs, ...graphJobs, ...logJobs, ...apalacheJobs], problems };
 };
 
+/**
+ * Runs `jobs` (all of them, or the indices in `startOrder`, which start in that order) and returns
+ * their records and failures in `jobs` order.
+ */
 const runJobs = async (
   jobs: readonly Job[],
   log: (line: string) => void,
+  startOrder: readonly number[] = jobs.map((_job, index) => index),
 ): Promise<{ records: RunRecord[]; failures: string[] }> => {
-  const results = await Promise.all(
-    jobs.map(async (job) => {
+  const started = await Promise.all(
+    startOrder.map(async (index) => {
+      const job = jobs[index];
+      if (job === undefined) {
+        throw new Error(`no job ${String(index)}`);
+      }
       const { outcome, result } = await job.run();
       const mismatch = job.expectation
         ? compareOutcome(job.expectation, outcome)
@@ -203,9 +215,10 @@ const runJobs = async (
           log(`     ${line}`);
         }
       }
-      return { record, failure: mismatch ? `${job.name}: ${mismatch}` : undefined };
+      return { index, record, failure: mismatch ? `${job.name}: ${mismatch}` : undefined };
     }),
   );
+  const results = started.toSorted((left, right) => left.index - right.index);
   return {
     records: results.map((entry) => entry.record),
     failures: results.flatMap((entry) => (entry.failure ? [entry.failure] : [])),
@@ -214,7 +227,12 @@ const runJobs = async (
 
 export const writeSummary = (
   context: FormalContext,
-  { projectRoot, tier, family }: { readonly projectRoot: string; readonly tier: string; readonly family?: string },
+  {
+    projectRoot,
+    tier,
+    family,
+    shard,
+  }: { readonly projectRoot: string; readonly tier: string; readonly family?: string; readonly shard?: Shard },
   report: CheckReport,
 ): string => {
   const directory = path.join(
@@ -223,6 +241,7 @@ export const writeSummary = (
     path.relative(context.root, projectRoot),
     tier,
     ...(family === undefined ? [] : [family]),
+    ...(shard === undefined ? [] : [`shard-${String(shard.index)}-of-${String(shard.count)}`]),
   );
   mkdirSync(directory, { recursive: true });
   const file = path.join(directory, 'summary.json');
@@ -245,6 +264,13 @@ export type CheckOptions = {
    * policy § 6). Without it the check reads every `expected.json` under `specs/`.
    */
   readonly family?: string;
+  /**
+   * One of several runners: the check plans every run of the tier as without it, deals them to
+   * `count` shards by the measured seconds in `run-seconds.json` (`dealRuns`), and runs only shard
+   * `index`'s, longest first. The shards partition the runs, so all of them together run every run
+   * once; each writes its summary under `<tier>/shard-<index>-of-<count>/`.
+   */
+  readonly shard?: Shard;
   readonly log?: (line: string) => void;
   readonly tools?: LocatedTools;
 };
@@ -308,11 +334,15 @@ const checkLeanProject = (
 /** `formal check --tier pr|nightly|lean <projectRoot>`: SANY, every config and log case of the tier, against `expected.json`. */
 export const checkProject = async (context: FormalContext, options: CheckOptions): Promise<number> => {
   const log = options.log ?? ((line: string) => process.stdout.write(`${line}\n`));
-  const { family } = options;
+  const { family, shard } = options;
   const target = `${path.relative(context.root, options.projectRoot)}:formal:${options.tier === 'pr' ? 'tla' : options.tier}${family === undefined ? '' : `:${family}`}`;
   if (options.tier === 'lean') {
     if (family !== undefined) {
       log(`${target}: --family selects a TLA+ family; the lean tier has none`);
+      return 2;
+    }
+    if (shard !== undefined) {
+      log(`${target}: --shard deals TLA+ runs; the lean tier has none`);
       return 2;
     }
     return checkLeanProject(context, options, { log, target });
@@ -346,17 +376,35 @@ export const checkProject = async (context: FormalContext, options: CheckOptions
   for (const problem of problems) {
     log(`FAIL ${problem}`);
   }
-  const { records, failures } = await runJobs(
-    plans.flatMap((plan) => plan.jobs),
-    log,
-  );
+  const planned = plans.flatMap((plan) => plan.jobs);
+  // A shard's runs, heaviest first; the records keep plan order.
+  const mine = shard
+    ? (dealRuns(
+        planned.map((job) => job.name),
+        shard.count,
+        readRunSeconds(),
+      )[shard.index - 1] ?? [])
+    : undefined;
+  const inPlanOrder = mine?.toSorted((left, right) => left - right);
+  const jobs = inPlanOrder ? inPlanOrder.flatMap((index) => planned[index] ?? []) : planned;
+  // Within a shard the longest runs start first, so no long run waits behind short ones for a JVM.
+  const startOrder = mine && inPlanOrder ? mine.map((index) => inPlanOrder.indexOf(index)) : undefined;
+  const { records, failures } = await runJobs(jobs, log, startOrder);
   const report: CheckReport = { records, failures: [...problems, ...failures] };
   const summary = writeSummary(
     context,
-    { projectRoot: options.projectRoot, tier: options.tier, ...(family === undefined ? {} : { family }) },
+    {
+      projectRoot: options.projectRoot,
+      tier: options.tier,
+      ...(family === undefined ? {} : { family }),
+      ...(shard === undefined ? {} : { shard }),
+    },
     report,
   );
-  log(`${target}: ${records.length} runs, ${report.failures.length} failures; ${path.relative(context.root, summary)}`);
+  const runs = shard
+    ? `shard ${String(shard.index)}/${String(shard.count)}: ${records.length} of ${planned.length} runs`
+    : `${records.length} runs`;
+  log(`${target}: ${runs}, ${report.failures.length} failures; ${path.relative(context.root, summary)}`);
   return report.failures.length === 0 ? 0 : 1;
 };
 
@@ -541,16 +589,32 @@ const simulateProject = async (
   return { status, directory: output };
 };
 
-/** `formal mutants <projectRoot>`: machine mutants through Vitest, Lean mutants through the oracle when Lean is present. */
+/**
+ * `formal mutants <projectRoot>`: machine mutants through Vitest, Lean mutants through the oracle when Lean is present.
+ * With `shard`, only that shard's mutants and their controls (`dealMutants`).
+ */
 export const mutantsProject = async (
   context: FormalContext,
   projectRoot: string,
-  log?: (line: string) => void,
+  {
+    log = (line) => process.stdout.write(`${line}\n`),
+    shard,
+  }: { readonly log?: (line: string) => void; readonly shard?: MutantShard } = {},
 ): Promise<number> => {
   const { lean } = locateTools(context);
   const spec = findExpectedFiles(projectRoot).find((location) => location.file.lean !== undefined)?.file.lean;
   const checker = lean && spec ? { lean: leanMutantChecker(context, { projectRoot, lean, spec }) } : {};
-  const { failures } = await runMutants(context, { projectRoot, ...checker, ...(log ? { log } : {}) });
+  const { results, failures } = await runMutants(context, {
+    projectRoot,
+    ...checker,
+    log,
+    ...(shard ? { shard } : {}),
+  });
+  if (shard) {
+    log(
+      `${path.relative(context.root, projectRoot)} mutants shard ${String(shard.index)}/${String(shard.count)}: ${String(results.length)} mutants, ${String(failures)} failures`,
+    );
+  }
   return failures === 0 ? 0 : 1;
 };
 
@@ -560,6 +624,9 @@ export const mutantsProject = async (
  * mutant matrix (whose runs replay the simulated behaviours). Each part runs; any failure fails.
  * `--without-check` leaves out the configs and Apalache commands, for an owner whose
  * `formal:nightly:check` target runs them (`formal check --tier nightly`) in a job of its own.
+ * `--without-mutants` leaves out the mutant matrices, for an owner whose `formal:nightly:mutants`
+ * target runs them; `--mutants-only` (that target) runs the same-seed simulation and the mutants
+ * alone, and with `--shard k/N` only that shard's mutants, so N jobs together run every mutant once.
  */
 export const nightlyProject = async (
   context: FormalContext,
@@ -567,7 +634,18 @@ export const nightlyProject = async (
   {
     log = (line) => process.stdout.write(`${line}\n`),
     check = true,
-  }: { readonly log?: (line: string) => void; readonly check?: boolean } = {},
+    lean = true,
+    mutants = true,
+    shard,
+  }: {
+    readonly log?: (line: string) => void;
+    readonly check?: boolean;
+    /** The Lean tier with its fresh-seed differential. */
+    readonly lean?: boolean;
+    readonly mutants?: boolean;
+    /** This runner's share of the mutants (`dealMutants`). */
+    readonly shard?: MutantShard;
+  } = {},
 ): Promise<number> => {
   const locations = findExpectedFiles(projectRoot);
   const target = `${path.relative(context.root, projectRoot)}:formal:nightly`;
@@ -575,7 +653,7 @@ export const nightlyProject = async (
   if (check && locations.some((location) => location.file.lean === undefined)) {
     statuses.push(await checkProject(context, { tier: 'nightly', projectRoot, log }));
   }
-  if (locations.some((location) => location.file.lean !== undefined)) {
+  if (lean && locations.some((location) => location.file.lean !== undefined)) {
     statuses.push(
       checkLeanProject(
         context,
@@ -586,9 +664,9 @@ export const nightlyProject = async (
   }
   const simulation = await simulateProject(context, projectRoot, log);
   statuses.push(simulation.status);
-  if (findMutantFiles(projectRoot).length > 0) {
+  if (mutants && findMutantFiles(projectRoot).length > 0) {
     const env = simulation.directory ? { ...context.env, FORMAL_SIMULATED: simulation.directory } : context.env; // eslint-disable-line @typescript-eslint/naming-convention -- environment variable
-    statuses.push(await mutantsProject({ ...context, env }, projectRoot, log));
+    statuses.push(await mutantsProject({ ...context, env }, projectRoot, { log, ...(shard ? { shard } : {}) }));
   }
   return statuses.every((status) => status === 0) ? 0 : 1;
 };

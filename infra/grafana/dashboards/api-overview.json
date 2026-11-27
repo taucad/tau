@@ -251,6 +251,10 @@
         {
           "expr": "sum by (trigger, outcome) (increase(publication_invite_emails_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
           "legendFormat": "{{trigger}} {{outcome}}"
+        },
+        {
+          "expr": "sum by (outcome) (increase(project_invite_emails_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "legendFormat": "collaborator {{outcome}}"
         }
       ],
       "id": 14

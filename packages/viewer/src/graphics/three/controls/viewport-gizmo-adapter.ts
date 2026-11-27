@@ -142,22 +142,17 @@ const selectSectionViewActive = (graphics: GraphicsActorRef): boolean =>
   (graphics.getSnapshot() as GraphicsSnapshot).context.isSectionViewActive;
 
 /**
- * How far a view straight along the up axis is tilted off it, toward the camera's own screen up: the camera takes no
- * view parallel to its up (as `camera-controls` keeps a polar margin), and this keeps the roll the cube turned to.
- */
-const poleTilt = 1e-3;
-
-/**
  * Reads the pose the cube reported (controlled mode), in the view's physical frame. The cube orbits its target at a
- * fixed distance, so the camera's span is kept. A view along the up axis (a top or bottom face) is tilted off it by
- * {@link poleTilt}, further the way the cube already leans off the pole, so the camera does not refuse it.
+ * fixed distance, so the camera's span is kept. The direction and up go to the camera as the cube reported them: the
+ * cube keeps a top or bottom view a hair off the pole, which the camera and `camera-controls` both take, so the view
+ * the camera presents is the cube's, roll included (TA carry-over 1).
  *
  * @param options - The reported pose, the cube's target (render units), the view's render frame and the presented span.
  * @returns The pose for the camera actor.
  * @public
  */
 export const readViewportGizmoPose = ({
-  pose,
+  pose: { direction, up },
   target,
   renderFrame,
   verticalSpan,
@@ -166,21 +161,12 @@ export const readViewportGizmoPose = ({
   direction: CameraVector;
   up: CameraVector;
   verticalSpan: number;
-}> => {
-  const direction = pose.direction.clone();
-  const { up } = pose;
-  const lean = direction.clone().addScaledVector(up, -direction.dot(up));
-  // ponytail: the library keeps poses 1e-4 rad off the poles, so `lean` is never zero there.
-  if (lean.length() < poleTilt && lean.lengthSq() > 0) {
-    direction.addScaledVector(lean.normalize(), poleTilt).normalize();
-  }
-  return {
-    target: fromThreeRenderPoint({ renderFrame, point: target }),
-    direction: [direction.x, direction.y, direction.z],
-    up: [up.x, up.y, up.z],
-    verticalSpan,
-  };
-};
+}> => ({
+  target: fromThreeRenderPoint({ renderFrame, point: target }),
+  direction: [direction.x, direction.y, direction.z],
+  up: [up.x, up.y, up.z],
+  verticalSpan,
+});
 
 /** The cube's label up for the view's up axis. */
 const upVectors = {
@@ -196,8 +182,8 @@ const navigationOffset = 24;
 
 /**
  * The cube's `ViewportGizmo` options for a style, an up axis and an orbit style. Turntable keeps the view upright
- * (`roll: false`, no roll arrows or roll keys); Tumble turns every click, side triangle and roll by the single shortest
- * rotation (`roll: 'free'`), roll ruling E. The side triangles, the roll arrows while the view may roll and Home are
+ * (`roll: false`, no roll arrows or roll keys); Free orbit turns every click, side triangle and roll by the single
+ * shortest rotation (`roll: 'free'`), roll ruling E. The side triangles, the roll arrows while the view may roll and Home are
  * the library's own navigation buttons.
  *
  * @param options - The cube's style, up axis, orbit style, placement container and size.
@@ -224,7 +210,7 @@ export const viewportGizmoOptions = ({
   up: upVectors[upDirection],
   // Every pose goes through the camera actor (TA1).
   controlled: true,
-  roll: orbitStyle === 'tumble' ? 'free' : false,
+  roll: orbitStyle === 'free' ? 'free' : false,
   navigation: { enabled: true },
   placement: placeTopRight ? 'top-right' : 'bottom-right',
   size,

@@ -16,8 +16,17 @@ import { describe, expect, it } from 'vitest';
  */
 const root = resolve(import.meta.dirname, '../..');
 type Step = { name?: string; id?: string; run?: string; env?: Record<string, string> };
+type Job = {
+  name?: string;
+  needs?: string[];
+  if?: string;
+  uses?: string;
+  with?: Record<string, string>;
+  secrets?: unknown;
+  steps?: Step[];
+};
 const workflow = load(readFileSync(join(root, '.github/workflows/release-desktop-staging.yml'), 'utf8')) as {
-  jobs: { prerelease: { steps: Step[] } };
+  jobs: { prerelease: { steps: Step[] } } & Record<string, Job>;
 };
 const selector = workflow.jobs.prerelease.steps.find((step) => step.id === 'selected');
 
@@ -114,6 +123,33 @@ describe('staging desktop candidate selector', () => {
     expect(status).toBe(0);
     expect(outputs['release']).toBe('false');
     expect(calls).not.toContain('pnpm');
+  });
+});
+
+/*
+ * INTEL-1 (operator approval 2026-11-18, ping 2): the darwin-x64 native rows left the merge queue for this gate, so
+ * no candidate is tagged without every Intel row green on its own commit. `native-hosts-workflow.test.ts` pins that
+ * the call runs every darwin-x64 check of the old queue job exactly once.
+ */
+describe('Intel native gate', () => {
+  const gate = workflow.jobs['intel-native'];
+  const { tag } = workflow.jobs;
+
+  it('calls the darwin-x64 native rows alone on the candidate commit, with no cache token', () => {
+    expect(gate?.name).toBe('Intel native gate');
+    expect(gate?.uses).toBe('./.github/workflows/native-hosts.yml');
+    expect(gate?.needs).toEqual(['prerelease']);
+    expect(gate?.if).toBe("needs.prerelease.outputs.release == 'true'");
+    expect(gate?.with).toEqual({ hosts: 'intel', ref: ['$', '{{ needs.prerelease.outputs.sha }}'].join('') });
+    expect(gate?.secrets).toBeUndefined();
+  });
+
+  it('blocks the tag until the gate is green', () => {
+    expect(tag?.needs).toContain('intel-native');
+    expect(tag?.if).toContain("needs.intel-native.result == 'success'");
+    expect(tag?.steps?.find((step) => step.id === 'release')?.run).toMatch(
+      /^\s*Intel native gate: run \$\{RUN_ID\}$/mu,
+    );
   });
 });
 

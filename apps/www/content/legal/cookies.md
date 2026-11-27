@@ -1,6 +1,6 @@
 # Storage and Cookie Policy
 
-*Effective date: November 9, 2026*
+*Effective date: November 26, 2026*
 
 This page explains what TAUCAD LIMITED ("Tau", "we") stores in your browser and on your device, and how to change your analytics choice. Read it with our [Privacy Policy](/legal/privacy).
 
@@ -23,7 +23,7 @@ Interface choices (sidebar state, kernel, model, editor and display preferences)
 
 ## Optional analytics
 
-On the web, Tau asks on your first visit whether to allow analytics. If you accept, PostHog Cloud records page views, browser and device information, feature use, your account identity when you are signed in, error events and session replays, and stores its own first-party cookies and local storage. Replays mask all text and inputs. If your choice is unknown, declined or withdrawn, PostHog is not started and nothing is sent.
+On the web, Tau asks on your first visit whether to allow analytics. If you accept, PostHog Cloud records page views, browser and device information, feature use, your account identity when you are signed in, error events and session replays, and stores its own first-party cookies and local storage. Replays show the pages as you saw them. They never include what you type into a field or the chat box before you send it, API keys, sign-in codes or invitation links. They include your chats and code only while **Improve Tau for everyone** is on for your account; see the [Privacy Policy](/legal/privacy#2-improving-tau-with-your-chats). If your choice is unknown, declined or withdrawn, PostHog is not started and nothing is sent.
 
 The desktop app sends the same analytics, without session replay, unless you turn it off in **Settings → Data controls**, and keeps its analytics identity in the app's local storage rather than in a cookie.
 

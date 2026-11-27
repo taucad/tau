@@ -37,7 +37,7 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 
 `machines/revision-compute.ts` starts `revision-compute.worker.ts` by URL; the worker entry has no subpath.
 
-The app makes one `createRevisionClients` over `RevisionStatusServices` in `apps/ui/app/hooks/use-revision-status.ts`: the API origin (`window.ENV`), the GitHub connections API and the credential renewal machine that counts each lease's re-mint wait (I15), the desktop agent host channel, error reporting, the page's telemetry consent and the build target. Each is read when it is used.
+The app makes one `createRevisionClients` over `RevisionStatusServices` in `apps/ui/app/hooks/use-revision-status.ts`: the API origin (`window.ENV`), the GitHub connections API, the desktop agent host channel, error reporting, the page's telemetry consent and the build target. Each is read when it is used.
 
 The app makes one `createRevisionHistoryHooks` over `RevisionHistoryServices` in `apps/ui/app/hooks/use-revisions.ts`: the open project, the revision client and projection, the chat session store (a structural `RevisionSettlementStore`), who made each entry (`RevisionAuthorship`, bound to this library's `revisionWho` over `lib/revision-actor`'s `useRevisionWhoContext`) and Tau Cloud's push records (`RevisionPushRecords`, bound to `lib/revision-pushes`). Each is read when it is used.
 

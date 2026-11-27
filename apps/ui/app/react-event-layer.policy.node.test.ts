@@ -49,7 +49,6 @@ const zeroScope = [
   new URL('lib/frame-hint.ts', import.meta.url),
   new URL('machines/focus.machine.ts', import.meta.url),
   new URL('machines/focus.route-state.ts', import.meta.url),
-  new URL('machines/github-credential-renewal.machine.ts', import.meta.url),
   new URL('machines/project-session.machine.ts', import.meta.url),
   new URL('machines/project.machine.ts', import.meta.url),
   new URL('machines/session-file-check.machine.ts', import.meta.url),

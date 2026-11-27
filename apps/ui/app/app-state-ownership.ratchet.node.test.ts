@@ -23,7 +23,10 @@
  * End state (A10, reached): `.start()` at 1 in `apps/ui/app/runtime/app-runtime-provider.tsx`, in `components`: the
  * runtime's one start after hydration (charter D5, D15 boundary 2). One accepted line arrived on main after the
  * programme's lanes: `setTimeout` at 1 in `runtime/file-manager-host.ts`, Home's file service start deadline (#2422,
- * desktop resilient startup WP2), a page-time bound kept off the runtime's clock. Another line needs a ruling.
+ * desktop resilient startup WP2), a page-time bound kept off the runtime's clock. The close keeps one more:
+ * `setTimeout` at 1 in `apps/libs/revisions-ui/src/hooks/use-revision-status.ts`, the GitHub credential lease's re-mint
+ * wait, a module timer outside the runtime handed back to the revisions owner as I15 debt (A10 D21 ruling). Another
+ * line needs a ruling.
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -57,8 +60,9 @@ type OwnershipManifest = Readonly<{
 const testFilePattern = /\.(?:test|spec)(?:-d)?\./u;
 /** A component or hook module: it belongs in `components`, where actor creation and starts are counted. */
 const componentFilePattern = /(?:\.tsx|(?:^|\/)use-[^/]*\.ts)$/u;
-/** The lines left at A10: the runtime's start after hydration, and Home's file service start deadline (#2422). */
+/** The lines left at A10: the runtime's start, Home's file service deadline (#2422) and the GitHub lease's wait. */
 const endStateCounts = {
+  'apps/libs/revisions-ui/src/hooks/use-revision-status.ts#setTimeout': 1,
   'apps/ui/app/runtime/app-runtime-provider.tsx#.start()': 1,
   'apps/ui/app/runtime/file-manager-host.ts#setTimeout': 1,
 } as const;
@@ -457,40 +461,11 @@ describe('app state ownership ratchet', () => {
     expect(problems, problems.join('\n')).toEqual([]);
   }, 60_000);
 
-  it('should hold the end state: the runtime start after hydration and the file service start deadline (A10)', () => {
+  it('should hold the end state: the runtime start after hydration, the file service start deadline and the GitHub lease wait (A10)', () => {
     const manifest = JSON.parse(
       readFileSync(fileURLToPath(new URL('app-state-ownership.ratchet.json', import.meta.url)), 'utf8'),
     ) as OwnershipManifest;
     expect(manifest.counts).toEqual(endStateCounts);
     expect(manifest.components.files).toContain('apps/ui/app/runtime/app-runtime-provider.tsx');
-  });
-
-  it('should hold the GitHub renewal factory, the one long-lived module start a component reaches, to its one binding (A10 debt)', () => {
-    const appRoot = fileURLToPath(new URL('.', import.meta.url));
-    const callers: string[] = [];
-    const visit = (directory: string): void => {
-      for (const entry of readdirSync(directory, { withFileTypes: true })) {
-        const path = join(directory, entry.name);
-        if (entry.isDirectory()) {
-          visit(path);
-        } else if (
-          sourceFilePattern.test(entry.name) &&
-          !testFilePattern.test(entry.name) &&
-          entry.name !== 'github-credential-renewal.machine.ts' &&
-          /\bstartGithubCredentialRenewal\b/u.test(readFileSync(path, 'utf8'))
-        ) {
-          callers.push(relative(appRoot, path).split(sep).join('/'));
-        }
-      }
-    };
-    visit(appRoot);
-    expect(callers).toEqual(['hooks/use-revision-status.ts']);
-    /* The binding hands it to the revision clients, whose lease starts it once per project and nowhere else. */
-    const clients = readFileSync(
-      join(findWorkspaceRoot(appRoot), 'apps/libs/revisions-ui/src/hooks/use-revision-status.ts'),
-      'utf8',
-    );
-    expect(clients.match(/\bstartRenewal\(/gu)).toHaveLength(1);
-    expect(clients).toContain('lease.renewal ??= services.github.startRenewal(');
   });
 });

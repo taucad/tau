@@ -149,7 +149,7 @@ const githubRenewWindowMilliseconds = 5 * 60_000;
  * held token working until it expires. Either way: ask again in a minute.
  */
 const githubRenewRetryMilliseconds = 60_000;
-/** The renewal's clock wraps `setTimeout`, which fires at once past this, turning a far deadline into a loop. */
+/** `setTimeout` fires at once past this, which would turn a far deadline into a loop. */
 const longestTimerMilliseconds = 2_147_483_647;
 
 /**
@@ -294,20 +294,6 @@ export type RevisionCommands = Readonly<{
   resetPublish: () => void;
 }>;
 /**
- * One project's GitHub credential re-mint wait: arm, drop, and stop when the lease is let go.
- *
- * @public
- */
-export type GithubCredentialRenewal = Readonly<{
-  /** Re-mint after `delayMilliseconds`, replacing a wait already armed. */
-  schedule: (delayMilliseconds: number) => void;
-  /** Drop the armed wait. */
-  cancel: () => void;
-  /** Stop the wait for good; nothing runs after this. */
-  stop: () => void;
-}>;
-
-/**
  * What the page's revision clients need from the app that hosts them.
  *
  * Each is read when it is used, never when the clients are made, so a value
@@ -334,11 +320,6 @@ export type RevisionStatusServices = Readonly<{
     failureStatus: (error: unknown) => number | undefined;
     /** The sentence the Sync region shows for a failed mint. */
     errorMessage: (error: unknown) => string;
-    /**
-     * Start one project's re-mint wait, counted on the app's clock (I15): the lease holds no timer of its own.
-     * Called once per project, for the clients' life; `onDue` runs each time an armed wait runs out.
-     */
-    startRenewal: (onDue: () => void) => GithubCredentialRenewal;
   }>;
   /** Open the desktop agent host's channel for one project's on-disk root. */
   openDesktopChannel: (projectId: string) => Promise<AgentChannelClient>;
@@ -748,12 +729,9 @@ export const createRevisionClients = (services: RevisionStatusServices): Revisio
    * One project's pending re-mint; `epoch` retires every mint already in flight.
    * `withdrawn` is set while the root holds an `unavailable` frame from a failed
    * mint, so the retry that succeeds also has the refused remote try again.
-   * `renewal` is the wait, started on the first schedule; `due` is what the armed
-   * wait runs, set by that schedule.
    */
   type GithubCredentialLease = {
-    renewal: GithubCredentialRenewal | undefined;
-    due: (() => void) | undefined;
+    timer: ReturnType<typeof setTimeout> | undefined;
     epoch: number;
     withdrawn: boolean;
   };
@@ -764,7 +742,7 @@ export const createRevisionClients = (services: RevisionStatusServices): Revisio
     if (held !== undefined) {
       return held;
     }
-    const lease: GithubCredentialLease = { renewal: undefined, due: undefined, epoch: 0, withdrawn: false };
+    const lease: GithubCredentialLease = { timer: undefined, epoch: 0, withdrawn: false };
     githubCredentialLeases.set(projectId, lease);
     return lease;
   };
@@ -779,8 +757,8 @@ export const createRevisionClients = (services: RevisionStatusServices): Revisio
     if (lease === undefined) {
       return;
     }
-    lease.renewal?.cancel();
-    lease.due = undefined;
+    globalThis.clearTimeout(lease.timer);
+    lease.timer = undefined;
     lease.epoch += 1;
     lease.withdrawn = false;
   };
@@ -921,8 +899,9 @@ export const createRevisionClients = (services: RevisionStatusServices): Revisio
    */
   function scheduleGithubCredential(client: RevisionClient, projectId: string, renewDelay: number): void {
     const lease = githubCredentialLease(projectId);
-    lease.due = () => {
-      lease.due = undefined;
+    globalThis.clearTimeout(lease.timer);
+    lease.timer = globalThis.setTimeout(() => {
+      lease.timer = undefined;
       const { withdrawn } = lease;
       // async-iife: bootstrap -- a renewal reports through the frame it sends, or retries.
       void (async (): Promise<void> => {
@@ -930,9 +909,7 @@ export const createRevisionClients = (services: RevisionStatusServices): Revisio
           resumeRefusedRemote(client);
         }
       })();
-    };
-    lease.renewal ??= services.github.startRenewal(() => lease.due?.());
-    lease.renewal.schedule(renewDelay);
+    }, renewDelay);
   }
 
   /**
@@ -1672,9 +1649,8 @@ export const createRevisionClients = (services: RevisionStatusServices): Revisio
       revisionIdentityCommands(projectId, () => client),
     reset: (): void => {
       revisionClients.clear();
-      for (const [projectId, lease] of githubCredentialLeases) {
+      for (const projectId of githubCredentialLeases.keys()) {
         stopGithubCredential(projectId);
-        lease.renewal?.stop();
       }
       githubCredentialLeases.clear();
       for (const projectId of pendingReplacements.keys()) {

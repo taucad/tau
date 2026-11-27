@@ -29,7 +29,6 @@ import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import { GithubRequestError, githubConnections, githubErrorMessage } from '#lib/github-connections.js';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { reportUiError } from '#lib/error-reporting.js';
-import { startGithubCredentialRenewal } from '#machines/github-credential-renewal.machine.js';
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
 
 /* Every service is read when it is used, so a module mock or a stubbed `window.ENV` is seen as it stands then. */
@@ -41,7 +40,6 @@ const revisionClients = createRevisionClients({
     connections: async () => githubConnections.list(),
     failureStatus: (error) => (error instanceof GithubRequestError ? error.status : undefined),
     errorMessage: (error) => githubErrorMessage(error),
-    startRenewal: startGithubCredentialRenewal,
   },
   openDesktopChannel: async (projectId) =>
     openAgentHostChannel('desktop', { projectId, workspaceRoot: await desktopWorkspaceRoot(projectId) }),

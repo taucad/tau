@@ -50,7 +50,6 @@
       "apps/ui/app/lib/frame-hint.ts",
       "apps/ui/app/machines/focus.machine.ts",
       "apps/ui/app/machines/focus.route-state.ts",
-      "apps/ui/app/machines/github-credential-renewal.machine.ts",
       "apps/ui/app/machines/session-file-check.machine.ts",
       "apps/ui/app/routes/w.$workspace.$project/focused-project-view.session.ts",
       "apps/ui/app/routes/w.$workspace.$project/workbench-layout-controller.shim.ts",
@@ -117,6 +116,7 @@
     ]
   },
   "counts": {
+    "apps/libs/revisions-ui/src/hooks/use-revision-status.ts#setTimeout": 1,
     "apps/ui/app/runtime/app-runtime-provider.tsx#.start()": 1,
     "apps/ui/app/runtime/file-manager-host.ts#setTimeout": 1
   }

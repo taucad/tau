@@ -63,6 +63,7 @@ import type { ImportStagingPort } from '#importer/staging.js';
 import type { HostImportSourcePort } from '#importer/sources.js';
 import type {
   ProjectAbsence,
+  VerifyAbsentLane,
   ProjectDirectoryProbe,
   ProjectDirectoryProbeRequest,
   ProjectDirectoryReading,
@@ -321,6 +322,7 @@ export class WorkspaceFileService {
       watchRegistry: this._watchRegistry,
       projectIndexes: this._projectIndexes,
       pendingSource: () => this._pendingSource,
+      inBackground: (provider, signal) => this._registry.backgroundCalls(provider, signal),
       ...(options.pendingStallMilliseconds === undefined
         ? {}
         : { pendingStallMilliseconds: options.pendingStallMilliseconds }),
@@ -1322,11 +1324,18 @@ export class WorkspaceFileService {
    * Prove from storage whether any configured root still carries a project id: every root available, every
    * directory's identity record read, under the project's lock. The discovery index is never asked (A1).
    *
+   * The caller says whether a person waits on it (FW4): `sweep`, the default, runs in its own bounded window behind
+   * interactive calls; `background` (the orphan sweep) yields to interactive calls until it holds the id's lock.
+   *
    * @param projectId - The id.
+   * @param options - The sweep's lane.
    * @returns `absent`, `present` with the directories that carry it, or `unknown`.
    */
-  public async verifyAbsent(projectId: string): Promise<ProjectAbsence> {
-    return this._projectDirectories.verifyAbsent(projectId);
+  public async verifyAbsent(
+    projectId: string,
+    options?: Readonly<{ lane?: VerifyAbsentLane }>,
+  ): Promise<ProjectAbsence> {
+    return this._projectDirectories.verifyAbsent(projectId, { lane: options?.lane ?? 'sweep' });
   }
 
   /**
@@ -2255,6 +2264,7 @@ export class WorkspaceFileService {
    */
   private _indexRoot(root: string): {
     provider: FileSystemProvider;
+    background: () => FileSystemProvider;
     path: string;
     persist?: { lockName: string };
   } {
@@ -2267,6 +2277,7 @@ export class WorkspaceFileService {
       provider.capabilities.trustworthyMtime === true;
     return {
       provider,
+      background: () => this._registry.backgroundOperation(provider),
       path,
       ...(persists ? { persist: { lockName: `tau-index:${entry.storageRootKey}:${path}` } } : {}),
     };

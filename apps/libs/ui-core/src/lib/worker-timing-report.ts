@@ -9,7 +9,14 @@ import { formatWorkerTimingSummary, workerTimingSpans, workerTimings } from '@ta
 import type { WorkerTimingSpan, WorkerTimingSummary, WorkerTimings } from '@taucad/filesystem';
 
 /**
- * Total milliseconds per span, as the ingest's `spans` detail carries them; a span that never ran is absent.
+ * Worker spans the telemetry ingest does not take: the I/O lanes' waits (project-library fast path FW4), read from
+ * the worker's own summary line and its `tau:` measures only.
+ */
+export const unreportedWorkerSpans: readonly WorkerTimingSpan[] = ['io.wait.background', 'io.wait.interactive'];
+
+/**
+ * Total milliseconds per span, as the ingest's `spans` detail carries them; a span that never ran is absent, and so is
+ * every {@link unreportedWorkerSpans} span.
  *
  * @param summary - One window's summary.
  * @returns The totals.
@@ -17,7 +24,7 @@ import type { WorkerTimingSpan, WorkerTimingSummary, WorkerTimings } from '@tauc
 export const workerSpanTotals = (summary: WorkerTimingSummary): Partial<Record<WorkerTimingSpan, number>> =>
   Object.fromEntries(
     workerTimingSpans.flatMap((span) => {
-      const row = summary.spans[span];
+      const row = unreportedWorkerSpans.includes(span) ? undefined : summary.spans[span];
       return row === undefined ? [] : [[span, row.totalMilliseconds]];
     }),
   );

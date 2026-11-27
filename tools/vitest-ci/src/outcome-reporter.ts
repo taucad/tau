@@ -55,7 +55,8 @@ export type OutcomeExecution = {
  *
  * `id` is `<project> › <file relative to the project> > <suite> > <title>`, the identity a ledger joins history on.
  * `targetKey` is the target with a `:shard-<n>` suffix removed, so a re-deal keeps a history. `state` is the final
- * state after any in-process retry; `retryCount` and `flaky` say whether it took more than one attempt. `errors`
+ * state after any in-process retry; `retryCount` and `flaky` say whether it took more than one attempt. `flaky` is a
+ * pass after a failed attempt, never an expected failure (`it.fails`) that failed every attempt as expected. `errors`
  * holds the first line of each error the test raised, one per failed attempt. A field that is `undefined` here is
  * written as `null`, so every line carries every key.
  *
@@ -103,6 +104,7 @@ type ErrorLike = { readonly message?: string; readonly name?: string };
 type TestCaseLike = {
   readonly fullName: string;
   readonly module: { readonly moduleId: string };
+  readonly options?: { readonly fails?: boolean | undefined };
   readonly project: {
     readonly name: string;
     readonly config: { readonly browser?: { readonly enabled?: boolean; readonly name?: string } };
@@ -154,6 +156,15 @@ const errorLines = (errors: readonly ErrorLike[] | undefined): string[] =>
   (errors ?? []).slice(0, maximumErrorsPerRow).map((error) => firstLine(error));
 
 const toPosix = (path: string): string => path.replaceAll('\\', '/');
+
+/**
+ * Whether a test case is a retried pass, a flake event. Vitest's `diagnostic().flaky` is a pass after a retry, but
+ * Vitest inverts an expected failure (`it.fails`) only after its retry loop: a raw pass ends the loop and becomes a
+ * failure, a raw failure is retried. So an `it.fails` row that reaches the reporter as a retried pass failed every
+ * attempt, as expected. It is classified by that final outcome and is never a flake event.
+ */
+const retriedPass = (testCase: Pick<TestCaseLike, 'options'>, flaky: boolean | undefined): boolean =>
+  flaky === true && testCase.options?.fails !== true;
 
 const parseInteger = (value: string | undefined): number | undefined => {
   if (value === undefined || !/^\d+$/.test(value)) {
@@ -327,7 +338,7 @@ export class OutcomeReporter implements Reporter {
         browser: browser?.enabled === true ? nonEmpty(browser.name) : undefined,
         state: result.state,
         retryCount: diagnostic?.retryCount ?? 0,
-        flaky: diagnostic?.flaky ?? false,
+        flaky: retriedPass(testCase, diagnostic?.flaky),
         durationMs: Math.round(diagnostic?.duration ?? 0),
         errors: errorLines(result.errors),
       }),

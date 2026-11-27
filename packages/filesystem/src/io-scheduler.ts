@@ -92,14 +92,18 @@ type InteractiveEntry = { readonly storageRootKey: string; readonly startedAt: n
 type Waiter = {
   readonly storageRootKey: string;
   readonly queuedAt: number;
-  readonly operation: IoOperation | undefined;
+  readonly operation: IoOperation;
   readonly admit: () => void;
   readonly reject: (error: unknown) => void;
   admitted: boolean;
 };
 
-/** A root's background accounting. */
-type RootLane = { counted: number; stalled: number; deadline: number };
+/**
+ * A root's background accounting: its counted calls, its stalled ones, and the ones abandoned after
+ * {@link ioMaxStallMilliseconds} stalled, which still keep it to one call at a time until a call settles in time
+ * (`generation` moves then, so an abandoned call that settles later changes nothing).
+ */
+type RootLane = { counted: number; stalled: number; abandoned: number; generation: number; deadline: number };
 
 const abortError = (): DOMException => new DOMException('The background call was cancelled.', 'AbortError');
 
@@ -258,27 +262,40 @@ export class IoScheduler {
     await this._enqueue(this._backgroundQueue, { storageRootKey, operation });
     this._timings.record('io.wait.background', issuedAt);
     const root = this._root(storageRootKey);
-    let stalled = false;
+    let state: 'counted' | 'stalled' | 'abandoned' = 'counted';
+    let abandonedIn = 0;
     return this._run(call, {
       deadline: root.deadline,
       release: () => {
-        if (stalled) {
-          root.stalled -= 1;
-        } else {
+        if (state === 'counted') {
           this._background -= 1;
           root.counted -= 1;
-          /* Settled within its deadline: the root answers again. */
+          /* Settled within its deadline: the root answers again, and what it abandoned no longer holds it back. */
           root.deadline = ioStallMilliseconds;
+          root.abandoned = 0;
+          root.generation += 1;
+        } else if (state === 'stalled') {
+          root.stalled -= 1;
+        } else if (abandonedIn === root.generation) {
+          root.abandoned -= 1;
         }
         this._dropRoot(storageRootKey, root);
       },
       stall: () => {
-        stalled = true;
+        state = 'stalled';
         this._background -= 1;
         root.counted -= 1;
         root.stalled += 1;
         root.deadline = Math.min(root.deadline * 2, ioMaxStallMilliseconds);
         this._timings.count('io.background.stalled');
+      },
+      /* Stalled for the longest deadline: it stops holding the root's ceiling, so a root still configured is probed
+       * one call at a time and can recover (re-review B). */
+      abandon: () => {
+        state = 'abandoned';
+        abandonedIn = root.generation;
+        root.stalled -= 1;
+        root.abandoned += 1;
       },
     });
   }
@@ -319,6 +336,24 @@ export class IoScheduler {
         this._uncount(entry!);
       },
     });
+  }
+
+  /**
+   * Forget a root, as its provider is disposed: its lane's stalled and abandoned calls stop holding it back and its
+   * deadline starts again, and its queued calls are rejected with an `AbortError`. Calls of it in flight run on; a
+   * counted one still counts toward the lane's limit until it settles or stalls, and settles into the dropped lane.
+   *
+   * @param storageRootKey - The root.
+   */
+  public forgetRoot(storageRootKey: string): void {
+    this._roots.delete(storageRootKey);
+    for (const queue of [this._backgroundQueue, this._sweepQueue]) {
+      for (const waiter of queue.filter((queued) => queued.storageRootKey === storageRootKey)) {
+        queue.splice(queue.indexOf(waiter), 1);
+        waiter.reject(abortError());
+      }
+    }
+    this._pump();
   }
 
   /**
@@ -371,22 +406,32 @@ export class IoScheduler {
   private _root(storageRootKey: string): RootLane {
     let root = this._roots.get(storageRootKey);
     if (root === undefined) {
-      root = { counted: 0, stalled: 0, deadline: ioStallMilliseconds };
+      root = { counted: 0, stalled: 0, abandoned: 0, generation: 0, deadline: ioStallMilliseconds };
       this._roots.set(storageRootKey, root);
     }
     return root;
   }
 
   private _dropRoot(storageRootKey: string, root: RootLane): void {
-    if (root.counted === 0 && root.stalled === 0 && root.deadline === ioStallMilliseconds) {
+    /* Only the root's current lane: a call of a lane `forgetRoot` dropped settles into that lane alone. */
+    if (
+      this._roots.get(storageRootKey) === root &&
+      root.counted === 0 &&
+      root.stalled === 0 &&
+      root.abandoned === 0 &&
+      root.deadline === ioStallMilliseconds
+    ) {
       this._roots.delete(storageRootKey);
     }
   }
 
-  /** Make one admitted call: `release` once when it settles, `stall` once if it is in flight past `deadline`. */
+  /**
+   * Make one admitted call: `release` once when it settles, `stall` once if it is in flight past `deadline`, and then
+   * `abandon` once if it is still in flight {@link ioMaxStallMilliseconds} later.
+   */
   private async _run<Result>(
     call: () => Result | Promise<Result>,
-    lifecycle: Readonly<{ deadline: number; release: () => void; stall: () => void }>,
+    lifecycle: Readonly<{ deadline: number; release: () => void; stall: () => void; abandon?: () => void }>,
   ): Promise<Awaited<Result>> {
     const ticket = this._nextTicket;
     this._nextTicket += 1;
@@ -401,21 +446,31 @@ export class IoScheduler {
         }
       }
     };
-    const timer = this._disposed
-      ? undefined
-      : setTimeout(() => {
-          this._stallTimers.delete(timer!);
-          if (!done) {
-            done = true;
-            unrank();
-            lifecycle.stall();
-            this._pump();
-          }
-        }, lifecycle.deadline);
-    if (timer !== undefined) {
-      this._stallTimers.add(timer);
-    }
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const watch = (after: number, fire: () => void): void => {
+      if (this._disposed) {
+        return;
+      }
+      timer = setTimeout(() => {
+        this._stallTimers.delete(timer!);
+        timer = undefined;
+        if (!settled) {
+          fire();
+          this._pump();
+        }
+      }, after);
+      this._stallTimers.add(timer);
+    };
+    watch(lifecycle.deadline, () => {
+      done = true;
+      unrank();
+      lifecycle.stall();
+      const { abandon } = lifecycle;
+      if (abandon !== undefined) {
+        watch(ioMaxStallMilliseconds, abandon);
+      }
+    });
     const settle = (): void => {
       if (settled) {
         return;
@@ -446,23 +501,25 @@ export class IoScheduler {
     }
   }
 
-  /** Whether the root of a queued background call may take a slot now. */
+  /**
+   * Whether the root of a queued background call may take a slot now: always while none of its calls stalled; one at a
+   * time while some stalled or were abandoned; never while {@link backgroundIoConcurrency} of them are stalled.
+   */
   private _rootAdmits(storageRootKey: string): boolean {
     const root = this._roots.get(storageRootKey);
-    return root === undefined || root.stalled === 0 || (root.stalled < backgroundIoConcurrency && root.counted === 0);
-  }
-
-  /** Whether a queued background call has waited out aging: its operation's first wait, or its own. */
-  private _aged(waiter: Waiter): boolean {
-    if (waiter.operation?.promoted === true) {
+    if (root === undefined || (root.stalled === 0 && root.abandoned === 0)) {
       return true;
     }
-    return this._clock() - (waiter.operation?.blockedSince ?? waiter.queuedAt) >= backgroundIoAgingMilliseconds;
+    return root.stalled < backgroundIoConcurrency && root.counted === 0;
   }
 
-  /** The time a queued background call ages at. */
-  private _agesAt(waiter: Waiter): number {
-    return (waiter.operation?.blockedSince ?? waiter.queuedAt) + backgroundIoAgingMilliseconds;
+  /**
+   * Whether a queued background call has waited out aging: its operation has been held back by interactive calls for
+   * {@link backgroundIoAgingMilliseconds}. Waiting on a full lane is not being held back (re-review A).
+   */
+  private _aged(waiter: Waiter): boolean {
+    const { promoted, blockedSince } = waiter.operation;
+    return promoted || (blockedSince !== undefined && this._clock() - blockedSince >= backgroundIoAgingMilliseconds);
   }
 
   /**
@@ -473,8 +530,10 @@ export class IoScheduler {
     queue: Waiter[],
     call: Readonly<{ storageRootKey: string; operation?: IoOperation | undefined; onAdmitted?: () => void }>,
   ): Promise<void> {
-    const { storageRootKey, operation, onAdmitted } = call;
-    const signal = operation?.signal;
+    const { storageRootKey, onAdmitted } = call;
+    /* A call of no operation is an operation of its own: it ages alone. */
+    const operation = call.operation ?? this.operation();
+    const { signal } = operation;
     if (signal?.aborted === true) {
       throw abortError();
     }
@@ -497,15 +556,15 @@ export class IoScheduler {
         onAdmitted?.();
         admitted.resolve();
       },
-      reject: admitted.reject,
+      reject: (error) => {
+        signal?.removeEventListener('abort', cancel);
+        admitted.reject(error);
+      },
       admitted: false,
     };
     signal?.addEventListener('abort', cancel, { once: true });
     queue.push(waiter);
     this._pump();
-    if (!waiter.admitted && operation !== undefined) {
-      operation.blockedSince ??= waiter.queuedAt;
-    }
     return admitted.promise;
   }
 
@@ -525,9 +584,15 @@ export class IoScheduler {
       if (!this._rootAdmits(waiter.storageRootKey)) {
         index += 1;
       } else if (this._interactive.size > 0 && !this._aged(waiter)) {
-        agesAt = Math.min(agesAt, this._agesAt(waiter));
+        /* Held back by interactive calls: the operation's aging starts now, once (re-review A). */
+        waiter.operation.blockedSince ??= this._clock();
+        agesAt = Math.min(agesAt, waiter.operation.blockedSince + backgroundIoAgingMilliseconds);
         index += 1;
       } else {
+        if (this._interactive.size === 0) {
+          /* Admitted with nothing interactive in flight: the operation is not being held back, so its aging ends. */
+          waiter.operation.blockedSince = undefined;
+        }
         this._background += 1;
         this._root(waiter.storageRootKey).counted += 1;
         this._backgroundQueue.splice(index, 1);

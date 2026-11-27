@@ -103,6 +103,10 @@
 \* their capture before their first call and the tap still fires before a write. The index keeps which dirty
 \* directories are dirty only because the budget did not retain them (`unretained`), which evidence or an install
 \* clears; it moves no counter. Every action and verdict is unchanged.
+\* FW4 re-review (2026-11-27): an operation ages only while interactive calls hold it back, a disposed root's lane is
+\* forgotten and its queued calls cancelled, a call stalled past the longest deadline stops holding its root's ceiling,
+\* and a background orphan sweep waits once for the lane before it takes its lock. Timing and cancellation only: every
+\* action and verdict is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

@@ -113,6 +113,53 @@ describe('I/O lanes on the 386-directory profile', () => {
     profile.dispose();
   });
 
+  /* Re-review A: a full read that has waited 250 ms on its own full lane has not waited behind anyone; it still yields. */
+  it('should admit none of a full read’s calls while an interactive read issued 300 ms into it is in flight', async () => {
+    const held: Gate[] = [];
+    let holdDiscovery = true;
+    let interactiveGate: Gate | undefined;
+    aroundReads(profile, async (path) => {
+      if (path === interactivePath || (holdDiscovery && isDiscoveryRead(path))) {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        const gate = { path, release: resolve };
+        if (path === interactivePath) {
+          interactiveGate = gate;
+        } else {
+          held.push(gate);
+        }
+        await promise;
+      }
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+
+    const pass = track(profile.service.listProjectManifests());
+    await flush();
+    expect(held).toHaveLength(backgroundIoConcurrency);
+    /* The full read queues on its own full lane for 300 ms, with nothing interactive in flight. */
+    await vi.advanceTimersByTimeAsync(300);
+
+    const read = track(profile.service.readFile(`/projects/${homeProjectId}/notes.txt`, 'utf8'));
+    await flush();
+    expect(profile.ioScheduler.interactiveInFlight()).toBe(1);
+    for (const gate of held.splice(0)) {
+      gate.release();
+    }
+    await flush();
+    expect(held).toHaveLength(0);
+    expect(profile.ioScheduler.backgroundInFlight()).toBe(0);
+
+    interactiveGate!.release();
+    await flush();
+    expect(read.value()).toBe('notes');
+    expect(held).toHaveLength(backgroundIoConcurrency);
+    holdDiscovery = false;
+    for (const gate of held.splice(0)) {
+      gate.release();
+    }
+    await advanceUntil(pass.settled, 1000);
+    expect(pass.value()?.entries).toHaveLength(directories);
+  });
+
   it('should keep at most four background calls outstanding when an interactive read is issued during a full read, and admit none until it settles', async () => {
     const held: Gate[] = [];
     let holdDiscovery = true;
@@ -352,10 +399,20 @@ describe('I/O lanes on the 386-directory profile', () => {
     it('should not deadlock an interactive operation behind a background sweep that holds the project lock while an interactive call stays in flight', async () => {
       await profile.service.listProjectManifests();
       let interactiveGate: Gate | undefined;
+      /* The sweep's first identity read is held once, so the sweep holds its lock when the probe arrives. */
+      let sweepGate: Gate | undefined;
+      let sweepHolding = false;
       aroundReads(profile, async (path) => {
-        if (path === interactivePath) {
+        if (
+          path === interactivePath ||
+          (sweepHolding && sweepGate === undefined && path.endsWith('.tau/project.json'))
+        ) {
           const { promise, resolve } = Promise.withResolvers<void>();
-          interactiveGate = { path, release: resolve };
+          if (path === interactivePath) {
+            interactiveGate = { path, release: resolve };
+          } else {
+            sweepGate = { path, release: resolve };
+          }
           await promise;
         }
       });
@@ -368,17 +425,24 @@ describe('I/O lanes on the 386-directory profile', () => {
 
       /* The orphan sweep takes `project:<id>` and reads every directory in the background lane. */
       const order: string[] = [];
+      sweepHolding = true;
       const sweep = track(profile.service.verifyAbsent(homeProjectId, { lane: 'background' }), () => {
         order.push('sweep');
       });
+      /* One wait for the lane before it takes the lock (re-review C); then it holds the lock, its first read held. */
+      const waited = await advanceUntil(() => sweepGate !== undefined, 30_000, 1);
+      expect(waited).toBe(backgroundIoAgingMilliseconds);
       /* An interactive operation on the same id waits for the lock the sweep holds. */
       const probed = track(profile.service.probeProjectDirectories({ projectId: homeProjectId, known: true }), () => {
         order.push('probe');
       });
-      /* The sweep holds a lock other work waits on, so it is promoted: it never waits on aging, only for the lane's
-       * four slots (review minor 6). Aged per call it took about 2.5 s here; the fixture's I/O is instant. */
+      await flush();
+      expect(probed.settled()).toBe(false);
+      sweepGate!.release();
+      /* The sweep holds a lock other work waits on, so it is promoted: once it holds the lock it never waits on aging,
+       * only for the lane's four slots (review minor 6). Aged per call it took about 2.5 s here; the I/O is instant. */
       const took = await advanceUntil(sweep.settled, 30_000, 1);
-      expect(took).toBeLessThan(backgroundIoAgingMilliseconds);
+      expect(took).toBeLessThan(20);
       await advanceUntil(probed.settled, 1000);
 
       expect(sweep.value()).toEqual({
@@ -395,6 +459,32 @@ describe('I/O lanes on the 386-directory profile', () => {
       interactiveGate!.release();
       await flush();
       expect(read.value()).toBe('notes');
+    });
+
+    /* Re-review C: consecutive orphan sweeps each yield to interactive calls before they take their lock. */
+    it('should make each of two consecutive orphan sweeps wait for the lane before it takes its lock', async () => {
+      await profile.service.listProjectManifests();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      const settleInteractive = profile.ioScheduler.beginInteractive('load');
+      const startedAt = Date.now();
+      const settled: number[] = [];
+      const sweepOne = async (projectId: string): Promise<void> => {
+        await profile.service.verifyAbsent(projectId, { lane: 'background' });
+        settled.push(Date.now() - startedAt);
+      };
+      const both = track(
+        (async () => {
+          await sweepOne(discoveryProfileHomeId(1));
+          await sweepOne(discoveryProfileHomeId(2));
+        })(),
+      );
+      await advanceUntil(both.settled, 30_000, 1);
+      settleInteractive();
+
+      expect(settled[0]).toBeGreaterThanOrEqual(backgroundIoAgingMilliseconds);
+      expect(settled[1]! - settled[0]!).toBeGreaterThanOrEqual(backgroundIoAgingMilliseconds);
+      /* Each holds its lock only for its own reads, four at a time: here, with instant I/O, well under the aging. */
+      expect(settled[1]! - settled[0]!).toBeLessThanOrEqual(backgroundIoAgingMilliseconds + 20);
     });
 
     it('should let an interactive operation that holds the project lock finish while a background sweep waits for it', async () => {
@@ -418,8 +508,9 @@ describe('I/O lanes on the 386-directory profile', () => {
       /* The background sweep waits for the lock, not for the lane: it has issued nothing. */
       const sweep = track(profile.service.verifyAbsent(homeProjectId, { lane: 'background' }));
       await flush();
+      /* At most its one pre-lock wait for the lane (re-review C); none of its reads. */
       expect(profile.ioScheduler.backgroundInFlight()).toBe(0);
-      expect(profile.ioScheduler.backgroundQueued()).toBe(0);
+      expect(profile.ioScheduler.backgroundQueued()).toBeLessThanOrEqual(1);
 
       probeGate!.release();
       await advanceUntil(probe.settled, 1000);

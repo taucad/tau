@@ -364,6 +364,8 @@ export class ProviderRegistry {
   public disposeRoot(storageRootKey: string): void {
     const pending = this._providers.get(storageRootKey);
     this._providers.delete(storageRootKey);
+    /* A root revoked or reconnected starts its lane afresh; its queued background calls end (FW4 re-review B). */
+    this.ioScheduler.forgetRoot(storageRootKey);
     if (pending) {
       // async-iife: bootstrap -- revocation is synchronous; a provider still initializing is disposed on settlement.
       void (async () => {
@@ -542,11 +544,17 @@ export class ProviderRegistry {
     const plain = new WeakMap<AnyFunction, AnyFunction>();
     const openStream = (path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> => {
       let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
+      /* Set once the stream is cancelled: a reader opened after that, by an open that was still queued, is cancelled. */
+      let cancelled: { reason: unknown } | undefined;
       return new ReadableStream<Uint8Array<ArrayBuffer>>(
         {
           async pull(controller) {
             /* The open waits for the lane, as a read does; the chunks it then streams are pulled unranked. */
             reader ??= await admit(() => provider.readFileStream!(path, options).getReader());
+            if (cancelled !== undefined) {
+              await reader.cancel(cancelled.reason);
+              return;
+            }
             const chunk = await reader.read();
             if (chunk.done) {
               controller.close();
@@ -555,6 +563,7 @@ export class ProviderRegistry {
             }
           },
           async cancel(reason) {
+            cancelled = { reason };
             await reader?.cancel(reason);
           },
         },

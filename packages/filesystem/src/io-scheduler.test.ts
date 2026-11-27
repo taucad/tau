@@ -519,8 +519,9 @@ describe('IoScheduler', () => {
       expect(scheduler.interactiveInFlight('home')).toBe(1);
     });
 
-    /* Major 2 (probe P2): a hung root never has more than four real calls outstanding. */
-    it('should admit nothing new to a root with four stalled calls in flight, however long it hangs', async () => {
+    /* Major 2 (probe P2): a hung root holds four stalled calls at most; with the re-review's abandonment, it is then
+     * probed one call per longest deadline, never flooded. */
+    it('should admit nothing new to a root with four stalled calls until they are abandoned, then one at a time', async () => {
       const started = { count: 0 };
       const hangs = async (): Promise<void> => {
         started.count += 1;
@@ -530,11 +531,16 @@ describe('IoScheduler', () => {
         void scheduler.runBackground('hung', hangs);
       }
       await drain();
-      await vi.advanceTimersByTimeAsync(5 * 60_000);
-
+      /* Stalled at 5 s; nothing new until they are abandoned at 65 s. */
+      await vi.advanceTimersByTimeAsync(ioStallMilliseconds + ioMaxStallMilliseconds - 1);
       expect(started.count).toBe(backgroundIoConcurrency);
       expect(scheduler.backgroundStalled('hung')).toBe(backgroundIoConcurrency);
       expect(scheduler.backgroundInFlight()).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(started.count).toBeLessThanOrEqual(backgroundIoConcurrency + 5);
+      expect(scheduler.backgroundStalled('hung')).toBeLessThanOrEqual(backgroundIoConcurrency);
+      expect(scheduler.backgroundInFlight()).toBeLessThanOrEqual(1);
     });
 
     /* Major 2 (probe P2b): a slow live root stays within four counted and four stalled calls. */
@@ -593,7 +599,8 @@ describe('IoScheduler', () => {
         await drain();
         // oxlint-disable-next-line no-await-in-loop -- One stall after another.
         await vi.advanceTimersByTimeAsync(Math.min(deadline, ioMaxStallMilliseconds));
-        expect(scheduler.backgroundStalled('flaky')).toBe(stalls + 1);
+        /* Counted by the stall counter: the first stall is abandoned 60 s after it stalled, meanwhile (re-review B). */
+        expect(timings.summarize(0).counters['io.background.stalled']?.total).toBe(stalls + 1);
         deadline *= 2;
       }
       expect(scheduler.backgroundDeadline('flaky')).toBe(Math.min(deadline, ioMaxStallMilliseconds));
@@ -735,6 +742,177 @@ describe('IoScheduler', () => {
       settleInteractive();
       await drain();
       expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
+  describe('re-review fixes (FW4 re-review)', () => {
+    const neverSettles = async (): Promise<void> =>
+      new Promise<void>(() => {
+        /* Never settles. */
+      });
+
+    /* A (probe N1): waiting on a full lane is not waiting behind interactive calls, and ages nothing. */
+    it('should not age an operation that only waited on a full lane, so it yields to an interactive call that comes later', async () => {
+      const operation = scheduler.operation();
+      const calls: HeldCall[] = [];
+      const started = { count: 0 };
+      const step = async (): Promise<void> => {
+        started.count += 1;
+        const call = held();
+        calls.push(call);
+        await call.promise;
+      };
+      for (let index = 0; index < 64; index += 1) {
+        void scheduler.runBackground('home', step, operation);
+      }
+      await drain();
+      await vi.advanceTimersByTimeAsync(300);
+      expect(operation.blockedSince).toBeUndefined();
+
+      const settleInteractive = scheduler.beginInteractive('home');
+      for (const call of calls.splice(0)) {
+        call.settle();
+      }
+      await drain();
+      expect(started.count).toBe(backgroundIoConcurrency);
+      expect(scheduler.backgroundInFlight()).toBe(0);
+
+      /* Held behind the interactive call now: it ages from here. */
+      await vi.advanceTimersByTimeAsync(backgroundIoAgingMilliseconds - 1);
+      expect(started.count).toBe(backgroundIoConcurrency);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(started.count).toBe(2 * backgroundIoConcurrency);
+      settleInteractive();
+    });
+
+    /* A (probe N1b): an operation's aging ends once it runs with no interactive call counted. */
+    it('should yield again after an operation that aged once was admitted with no interactive call in flight', async () => {
+      const operation = scheduler.operation();
+      const admitted: number[] = [];
+      const startedAt = Date.now();
+      const record = async (): Promise<void> => {
+        admitted.push(Date.now() - startedAt);
+      };
+      const first = scheduler.beginInteractive('home');
+      const aged = scheduler.runBackground('home', record, operation);
+      await vi.advanceTimersByTimeAsync(backgroundIoAgingMilliseconds);
+      await aged;
+      first();
+      /* A quiet period: the operation runs with nothing interactive in flight, which ends its aging. */
+      await scheduler.runBackground('home', record, operation);
+      expect(operation.blockedSince).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(3000);
+
+      const second = scheduler.beginInteractive('home');
+      void scheduler.runBackground('home', record, operation);
+      await drain();
+      expect(admitted).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(backgroundIoAgingMilliseconds);
+      expect(admitted).toHaveLength(3);
+      second();
+    });
+
+    it('should age a call of no operation only from when an interactive call holds it back', async () => {
+      const calls: HeldCall[] = [];
+      const started = { count: 0 };
+      for (let index = 0; index < backgroundIoConcurrency + 1; index += 1) {
+        void issueBackground(calls, started);
+      }
+      await drain();
+      await vi.advanceTimersByTimeAsync(300);
+      const settleInteractive = scheduler.beginInteractive('home');
+      calls[0]!.settle();
+      await drain();
+      expect(started.count).toBe(backgroundIoConcurrency);
+      await vi.advanceTimersByTimeAsync(backgroundIoAgingMilliseconds);
+      expect(started.count).toBe(backgroundIoConcurrency + 1);
+      settleInteractive();
+    });
+
+    /* B (probe N2): a forgotten root starts afresh; its queued calls are cancelled and its old calls settle late. */
+    it('should forget a root: cancel its queued calls, drop its stalled accounting, and keep late settles exact', async () => {
+      const hung: HeldCall[] = [];
+      for (let index = 0; index < backgroundIoConcurrency; index += 1) {
+        void scheduler.runBackground('folder', async () => {
+          const call = held();
+          hung.push(call);
+          await call.promise;
+        });
+      }
+      await drain();
+      await vi.advanceTimersByTimeAsync(ioStallMilliseconds);
+      const queued = scheduler.runBackground('folder', async () => 'old');
+      await drain();
+      expect(scheduler.backgroundStalled('folder')).toBe(backgroundIoConcurrency);
+
+      scheduler.forgetRoot('folder');
+      await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+      expect(scheduler.backgroundStalled('folder')).toBe(0);
+      expect(scheduler.backgroundDeadline('folder')).toBe(ioStallMilliseconds);
+
+      /* The folder reconnected under the same key: its calls run at once. */
+      const ran = { count: 0 };
+      const answers = async (): Promise<void> => {
+        ran.count += 1;
+      };
+      for (let index = 0; index < 8; index += 1) {
+        void scheduler.runBackground('folder', answers);
+      }
+      await drain();
+      expect(ran.count).toBe(8);
+      for (const call of hung) {
+        call.settle();
+      }
+      await drain();
+      expect(scheduler.backgroundStalled()).toBe(0);
+      expect(scheduler.backgroundInFlight()).toBe(0);
+      expect(scheduler.backgroundDeadline('folder')).toBe(ioStallMilliseconds);
+    });
+
+    /* B: a root still configured whose calls never settle is probed about once a minute, and recovers. */
+    it('should give a root whose calls hang forever about one call per cap interval, and recover when they settle', async () => {
+      const mode = { hang: true };
+      const started = { count: 0, settled: 0 };
+      const probe = async (): Promise<void> => {
+        started.count += 1;
+        if (mode.hang) {
+          await neverSettles();
+        }
+        started.settled += 1;
+      };
+      for (let index = 0; index < 100; index += 1) {
+        void scheduler.runBackground('folder', probe);
+      }
+      await drain();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      /* Four at once, then one per 60 s once their stalls are abandoned: never zero, never a flood. */
+      expect(started.count).toBeGreaterThanOrEqual(backgroundIoConcurrency + 8);
+      expect(started.count).toBeLessThanOrEqual(backgroundIoConcurrency + 10);
+      expect(scheduler.backgroundStalled('folder')).toBeLessThanOrEqual(backgroundIoConcurrency);
+
+      const hung = started.count;
+      mode.hang = false;
+      await vi.advanceTimersByTimeAsync(2 * ioMaxStallMilliseconds);
+      /* Every call left runs and settles; only the hung ones never do. */
+      expect(started.count).toBe(100);
+      expect(started.settled).toBe(100 - hung);
+      expect(scheduler.backgroundQueued()).toBe(0);
+      expect(scheduler.backgroundDeadline('folder')).toBe(ioStallMilliseconds);
+    });
+
+    it('should never let a root with calls hung forever starve the lane for another root', async () => {
+      for (let index = 0; index < 64; index += 1) {
+        void scheduler.runBackground('hung', neverSettles);
+      }
+      await drain();
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      let other = false;
+      void scheduler.runBackground('home', async () => {
+        other = true;
+      });
+      await drain();
+      expect(other).toBe(true);
+      expect(scheduler.backgroundInFlight()).toBeLessThanOrEqual(1);
     });
   });
 
@@ -887,6 +1065,95 @@ describe('ProviderRegistry lanes', () => {
     await expect(reading).resolves.toBe('six');
     expect(registry.ioScheduler.backgroundQueued()).toBe(0);
     registry.disposeAll();
+  });
+
+  /* Re-review D: a stream cancelled while its open waits for the lane leaves no reader open. */
+  it('should cancel the stream a background view opens after its reader cancelled it while queued', async () => {
+    const registry = new ProviderRegistry();
+    const provider = await registry.getProvider({
+      backend: 'webaccess',
+      directoryHandle: createMockRootHandle() as unknown as FileSystemDirectoryHandle,
+      workspaceId: '',
+    });
+    await provider.writeFile('g/seven.txt', 'seven');
+    const opened = { count: 0, cancelled: 0 };
+    const readFileStream = Reflect.get(
+      Object.getPrototypeOf(provider) as Record<string, unknown>,
+      'readFileStream',
+    ) as NonNullable<FileSystemProvider['readFileStream']>;
+    Object.defineProperty(provider, 'readFileStream', {
+      configurable: true,
+      writable: true,
+      value(this: FileSystemProvider, path: string): ReadableStream<Uint8Array<ArrayBuffer>> {
+        opened.count += 1;
+        const reader = readFileStream.call(this, path).getReader();
+        return new ReadableStream<Uint8Array<ArrayBuffer>>({
+          async pull(controller) {
+            const chunk = await reader.read();
+            if (chunk.done) {
+              controller.close();
+            } else {
+              controller.enqueue(chunk.value);
+            }
+          },
+          async cancel(reason) {
+            opened.cancelled += 1;
+            await reader.cancel(reason);
+          },
+        });
+      },
+    });
+    const background = registry.inLane(provider, 'background');
+    const settle = registry.ioScheduler.beginInteractive('x');
+    const stream = background.readFileStream!('g/seven.txt');
+    const reader = stream.getReader();
+    const pending = reader.read();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(registry.ioScheduler.backgroundQueued()).toBe(1);
+
+    await reader.cancel('gone');
+    settle();
+    await expect(pending).resolves.toMatchObject({ done: true });
+    await vi.waitFor(() => {
+      expect(opened).toEqual({ count: 1, cancelled: 1 });
+    });
+    registry.disposeAll();
+  });
+
+  /* Re-review B (probe N2): a root disposed and reconnected under the same key starts its lane afresh. */
+  it('should list a reconnected root whose old calls hung, once its provider was disposed', async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = new ProviderRegistry();
+      const folder = { backend: 'memory', storageRootKey: 'memory:reconnected' } as const;
+      const lost = await registry.getProvider(folder);
+      Object.defineProperty(lost, 'readdir', {
+        configurable: true,
+        writable: true,
+        value: async (): Promise<string[]> =>
+          new Promise<string[]>(() => {
+            /* The folder went away mid-call: this never answers. */
+          }),
+      });
+      const background = registry.inLane(lost, 'background');
+      for (let index = 0; index < backgroundIoConcurrency; index += 1) {
+        void background.readdir('');
+      }
+      const queued = background.readdir('');
+      await vi.advanceTimersByTimeAsync(ioStallMilliseconds);
+      expect(registry.ioScheduler.backgroundStalled(folder.storageRootKey)).toBe(backgroundIoConcurrency);
+
+      registry.disposeRoot(folder.storageRootKey);
+      await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+      const reconnected = await registry.getProvider(folder);
+      await reconnected.mkdir('listed');
+      await expect(registry.inLane(reconnected, 'background').readdir('')).resolves.toEqual(['listed']);
+      registry.disposeAll();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should forward a property set on a lane view to the provider', async () => {

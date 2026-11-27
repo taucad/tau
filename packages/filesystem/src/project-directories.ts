@@ -738,8 +738,12 @@ export class ProjectDirectories {
       for (const { root, scope, storageRootKey } of roots) {
         let provider: FileSystemProvider;
         try {
-          /* A background sweep holds `project:<id>` across tabs, which an interactive operation may be waiting on: it is
-           * promoted, so its calls wait only for the lane's slots and never on aging (FW4 review m6). */
+          /* A background sweep holds `project:<id>` across tabs, which an interactive operation may be waiting on, and
+           * no lock layer here says cheaply whether one is (Web Locks' `query()` is asynchronous and cross-tab, the
+           * resource queue counts no waiters per key). So it is promoted while it holds the lock: its calls wait only
+           * for the lane's four slots, never on aging. The bound: the lock is held for one sweep's I/O, a listing per
+           * root and one identity read per directory four at a time (about 97 rounds of calls on the 386-directory
+           * profile), however busy the interactive lane is (FW4 review m6, re-review C). */
           provider =
             options?.lane === 'background'
               ? this._registry.backgroundOperation(await this._registry.getProvider(scope), { promoted: true })
@@ -787,6 +791,12 @@ export class ProjectDirectories {
     };
     if (options?.alreadyLocked === true) {
       return sweep();
+    }
+    if (options?.lane === 'background') {
+      /* A promoted sweep yields before it takes its lock: one call's wait for the lane, aging behind interactive calls
+       * as any background call does, so consecutive orphan sweeps never run back to back past them (re-review C). */
+      const [first] = this._discoveryRoots();
+      await this._registry.ioScheduler.runBackground(first?.storageRootKey ?? 'discovery', () => undefined);
     }
     const locks = [`project:${projectId}`];
     return this._crossTabCoordinator.withLocks(locks, async () => this._resourceQueue.queueForMany(locks, sweep));

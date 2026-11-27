@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T17:05:39.312Z",
+  "updatedAt": "2026-11-27T17:07:38.216Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -6743,6 +6743,19 @@
       "lineage": "pr-2991",
       "sha": "de54284d237e7e08303cb62283b6f2f6849c90c9",
       "at": "2026-11-27T17:03:49Z",
+      "conclusion": "cancelled",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 46038538762,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2987",
+      "sha": "2e66aa79c08fa3bf9e1acd2aedb12ec6e2df1b5b",
+      "at": "2026-11-27T17:07:14Z",
       "conclusion": "cancelled",
       "artifacts": 0,
       "counted": 0,

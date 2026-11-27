@@ -22,6 +22,8 @@ export function DepartingFirstMessage({
     <div
       aria-hidden='true'
       data-slot='departing-first-message'
+      /* Session replay blocks it like the transcript it stands in for (`replay-content.lib`). */
+      data-replay-content='chat'
       className={cn('pointer-events-none mt-1 overflow-hidden [scrollbar-gutter:stable]', className)}
     >
       <div className='mx-auto flex w-[calc(100%_-_1rem)] max-w-xl flex-col gap-1 py-1'>

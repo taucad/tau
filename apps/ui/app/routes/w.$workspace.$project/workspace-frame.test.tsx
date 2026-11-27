@@ -11,6 +11,7 @@ import { frameTabAttribute, writePhoneFrameHint, writeWideFrameHint } from '#lib
 import type { WideFrameHint } from '#lib/frame-hint.js';
 import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { arriveFirstMessage, departFirstMessage } from '#lib/departing-first-message.js';
+import { replayContentSelector } from '#lib/replay-content.lib.js';
 
 /*
  * The persisted `workbenchOpen` lives in the project's own layout record and is read only once the session is live.
@@ -416,6 +417,8 @@ describe('WorkspaceFrame', () => {
     const chatLane = document.querySelector<HTMLElement>('[data-slot=workspace-lane][data-lane=chat]')!;
     const departing = chatLane.querySelector('[data-slot=departing-first-message]');
     expect(departing).not.toBeNull();
+    // Session replay blocks the stand-in as it blocks the transcript.
+    expect(departing!.matches(replayContentSelector)).toBe(true);
     expect([...departing!.querySelectorAll('p')].map((row) => row.textContent)).toEqual([
       'A wall bracket',
       'for a pipe',

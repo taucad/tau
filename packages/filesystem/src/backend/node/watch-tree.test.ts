@@ -83,7 +83,7 @@ describe('watchTree', () => {
     expect(watch.changes).toContain('parts/deep/gear.ts');
   });
 
-  it('should report a directory moved in after the watch started, and on Linux each entry in it', async () => {
+  it('should report each entry of a directory found after the watch started', async () => {
     watch = watched(root);
     const staged = await mkdtemp(join(tmpdir(), 'tau-watch-tree-staged-'));
     mkdirSync(join(staged, 'nested'));

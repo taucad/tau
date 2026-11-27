@@ -2,7 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { retryBudget } from '@taucad/vitest-ci/retry-policy';
+import { pathToFileURL } from 'node:url';
+import { readChangedFiles, retryBudget } from '@taucad/vitest-ci/retry-policy';
 import { load } from 'js-yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -158,6 +159,112 @@ describe("ci.yml's run budget for retried passes (RT-4)", () => {
     const result = runCheck({});
     expect(result.status).toBe(0);
     expect(result.summary).toContain('### Retried passes in this run: 0 (budget 5)');
+  });
+});
+
+type ActionStep = Step & { readonly if?: string; readonly shell?: string };
+const setupNx = load(read('.github/actions/setup-nx/action.yml')) as {
+  readonly runs: { readonly steps: readonly ActionStep[] };
+};
+const setupSteps = setupNx.runs.steps;
+const fetchBase = setupSteps.find((step) => step.name === 'Fetch the merge-queue base');
+
+/*
+ * RT-3 diffs a merge-queue entry from `NX_BASE` (`HEAD^1`, set by `nx-set-shas` on `merge_group`) to `NX_HEAD`. A job
+ * whose checkout keeps the default depth of one commit has no `HEAD^1`, so every retried pass there failed its task as
+ * "the changed files are unknown (Command failed: git merge-base HEAD^1 <sha>)" (run 45991511410, job 140482464115).
+ * `setup-nx` fetches the parent, whatever depth the job checked out.
+ */
+describe("setup-nx's merge-queue base (RT-3)", () => {
+  let directory: string;
+
+  beforeEach(() => {
+    directory = mkdtempSync(join(tmpdir(), 'merge-queue-base-'));
+  });
+
+  afterEach(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const git = (cwd: string, ...args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+  /** A queue entry as GitHub builds it: one commit on `main`'s tip, the entry's change. */
+  const queueEntry = () => {
+    const origin = join(directory, 'origin');
+    mkdirSync(join(origin, 'src'), { recursive: true });
+    git(origin, 'init', '--quiet', '--initial-branch=main');
+    git(origin, 'config', 'user.email', 'ci@example.invalid');
+    git(origin, 'config', 'user.name', 'CI');
+    // GitHub serves any reachable commit by its id, as `actions/checkout` fetches one.
+    git(origin, 'config', 'uploadpack.allowReachableSHA1InWant', 'true');
+    writeFileSync(join(origin, 'src', 'kept.test.ts'), 'kept\n');
+    writeFileSync(join(origin, 'src', 'entry.test.ts'), 'before\n');
+    git(origin, 'add', '-A');
+    git(origin, 'commit', '--quiet', '-m', 'main');
+    const base = git(origin, 'rev-parse', 'HEAD');
+    git(origin, 'switch', '--quiet', '-c', `gh-readonly-queue/main/pr-1-${base}`);
+    writeFileSync(join(origin, 'src', 'entry.test.ts'), 'after\n');
+    git(origin, 'commit', '--quiet', '-am', 'entry');
+    return { origin, base, head: git(origin, 'rev-parse', 'HEAD') };
+  };
+
+  /** Checks the entry out as `actions/checkout` does at `fetch-depth` `depth`: its commit, detached. */
+  const checkout = (origin: string, head: string, depth: number): string => {
+    const clone = join(directory, `checkout-${depth}`);
+    mkdirSync(clone);
+    git(clone, 'init', '--quiet');
+    git(clone, 'remote', 'add', 'origin', pathToFileURL(origin).href);
+    git(clone, 'fetch', '--quiet', '--no-tags', `--depth=${depth}`, 'origin', `+${head}:refs/remotes/origin/queue`);
+    git(clone, 'checkout', '--quiet', '--detach', head);
+    return clone;
+  };
+
+  const runFetchBase = (clone: string) =>
+    execFileSync('bash', ['-c', fetchBase?.run ?? 'exit 2'], {
+      cwd: clone,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        PATH: process.env['PATH'],
+        HOME: directory,
+        GITHUB_ACTION_PATH: resolve(root, '.github/actions/setup-nx'),
+      },
+    });
+
+  it('runs on a merge-queue entry, after nx-set-shas names the base', () => {
+    expect(fetchBase?.shell).toBe('bash');
+    expect(fetchBase?.if).toBe("github.event_name == 'merge_group' && inputs.affected-base == ''");
+    const setShas = setupSteps.findIndex((step) => step.uses?.startsWith('nrwl/nx-set-shas@'));
+    expect(setShas).toBeGreaterThan(0);
+    expect(setupSteps.indexOf(fetchBase ?? {})).toBe(setShas + 1);
+  });
+
+  it('gives a one-commit checkout the parent RT-3 diffs from, so the entry’s changed files are known', () => {
+    const { origin, base, head } = queueEntry();
+    const clone = checkout(origin, head, 1);
+    const env = { GITHUB_EVENT_NAME: 'merge_group', NX_BASE: 'HEAD^1', NX_HEAD: head };
+    // The failure CI printed: a checkout of one commit has no HEAD^1.
+    expect(readChangedFiles(env, clone)).toEqual({
+      kind: 'unknown',
+      reason: `Command failed: git merge-base HEAD^1 ${head}`,
+    });
+
+    runFetchBase(clone);
+
+    expect(git(clone, 'rev-parse', 'HEAD^1')).toBe(base);
+    expect(git(clone, 'rev-parse', 'HEAD')).toBe(head);
+    const top = git(clone, 'rev-parse', '--show-toplevel');
+    expect(readChangedFiles(env, clone)).toEqual({ kind: 'known', files: new Set([`${top}/src/entry.test.ts`]) });
+  });
+
+  it('fetches nothing when the checkout already has the parent', () => {
+    const { origin, base, head } = queueEntry();
+    const clone = checkout(origin, head, 2);
+    // No remote to fetch from: the step must not try.
+    git(clone, 'remote', 'remove', 'origin');
+    runFetchBase(clone);
+    expect(git(clone, 'rev-parse', 'HEAD^1')).toBe(base);
   });
 });
 

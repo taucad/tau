@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-27T17:08:25.301Z",
+  "updatedAt": "2026-11-27T17:13:01.617Z",
   "ingested": [
     {
       "run": 45148261735,
@@ -6776,6 +6776,19 @@
       "rejected": 0
     },
     {
+      "run": 46038545387,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2990",
+      "sha": "0ecad7b5a7d5f142a4fda4230ff17b56c0eeccf1",
+      "at": "2026-11-27T17:12:42Z",
+      "conclusion": "cancelled",
+      "artifacts": 4,
+      "counted": 1068,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
       "run": 46038547278,
       "attempt": 1,
       "event": "merge_group",
@@ -6783,6 +6796,19 @@
       "sha": "514fbdbc00d672d9516f60ace07595514d5cd9ca",
       "at": "2026-11-27T17:07:57Z",
       "conclusion": "cancelled",
+      "artifacts": 0,
+      "counted": 0,
+      "replayed": 0,
+      "rejected": 0
+    },
+    {
+      "run": 46039223944,
+      "attempt": 1,
+      "event": "merge_group",
+      "lineage": "pr-2991",
+      "sha": "d730efca5e9f208958cd80655317ab469faa950b",
+      "at": "2026-11-27T17:12:39Z",
+      "conclusion": "success",
       "artifacts": 0,
       "counted": 0,
       "replayed": 0,
@@ -7292,25 +7318,25 @@
       }
     },
     "chat-surfaces:test": {
-      "executions": 125,
-      "tests": 7875,
+      "executions": 126,
+      "tests": 7938,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T17:01:29Z",
+      "lastSeen": "2026-11-27T17:12:42Z",
       "targets": {
-        "test linux-x64": 105
+        "test linux-x64": 106
       }
     },
     "chat-ui:test": {
-      "executions": 108,
-      "tests": 82897,
+      "executions": 109,
+      "tests": 83670,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T17:03:09Z",
+      "lastSeen": "2026-11-27T17:12:42Z",
       "targets": {
-        "test linux-x64": 90
+        "test linux-x64": 91
       }
     },
     "chat:test": {
@@ -8387,14 +8413,14 @@
       }
     },
     "ui-e2e:test": {
-      "executions": 190,
-      "tests": 18810,
+      "executions": 191,
+      "tests": 18909,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-26T11:39:59Z",
-      "lastSeen": "2026-11-27T17:08:07Z",
+      "lastSeen": "2026-11-27T17:12:42Z",
       "targets": {
-        "test linux-x64": 190
+        "test linux-x64": 191
       }
     },
     "ui-e2e:test:e2e:adaptive": {
@@ -8853,14 +8879,14 @@
       }
     },
     "ui:verify-browser": {
-      "executions": 221,
-      "tests": 29180,
+      "executions": 222,
+      "tests": 29313,
       "failures": 0,
       "otherFailures": 0,
       "firstSeen": "2026-11-25T06:23:35Z",
-      "lastSeen": "2026-11-27T17:08:07Z",
+      "lastSeen": "2026-11-27T17:12:42Z",
       "targets": {
-        "verify-browser linux-x64 browser=chromium": 184
+        "verify-browser linux-x64 browser=chromium": 185
       }
     },
     "units:test": {

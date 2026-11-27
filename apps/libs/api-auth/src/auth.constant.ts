@@ -5,6 +5,8 @@ export const isPublicAuth = 'isPublicAuth';
 export const isOptionalAuth = 'isOptionalAuth';
 /** Metadata key of `@AuthoritativeSession()`: the route reads the session from the store, never a snapshot. */
 export const isAuthoritativeSession = 'isAuthoritativeSession';
+/** Metadata key of `@RequireWebSession()`: the route refuses Tau Desktop's OAuth access token (ruling D1=A). */
+export const isWebSessionRequired = 'isWebSessionRequired';
 
 // Hook metadata keys for Better Auth
 export const hookKey = 'hook';

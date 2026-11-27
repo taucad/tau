@@ -39,6 +39,7 @@ import { MetricsService } from '@taucad/api-observability/metrics';
 import { invocationEvidenceRecorderToken } from '@taucad/api-llm-gateway';
 import type { InvocationEvidenceRecorder } from '@taucad/api-llm-gateway';
 import type { ObservedSettlement } from '#observed-settlement.js';
+import type { PreviousSettledInput } from '#billable-model-invocation.types.js';
 import { BillingPolicyService, PolicyRouteUnavailableError } from '#billing-policy.service.js';
 import {
   billingFinancialCase,
@@ -179,6 +180,13 @@ const supplierRateSchema = z
   })
   .strict();
 const supplierRatesSchema = z.array(supplierRateSchema).min(1).max(128);
+const inputPrefixSchema = z
+  .object({
+    version: z.literal('input-prefix-v1'),
+    digest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    items: z.number().int().min(1).max(4096),
+  })
+  .strict();
 const invocationSchema = z
   .object({
     contractVersion: financialIdentitySchema,
@@ -214,6 +222,9 @@ const invocationSchema = z
       })
       .strict()
       .optional(),
+    /* WP-15 step 6: the conversation prefix this request offers the next step. Never priced. */
+    inputPrefix: inputPrefixSchema.optional(),
+    holdBasis: z.enum(['prefix', 'bytes', 'context', 'count']).optional(),
     // Matches the BILLING_INVOCATION_DEADLINE schema maximum (deploy-cut charter D15).
     executionTimeout: z.number().int().min(1).max(600_000),
   })
@@ -1154,6 +1165,61 @@ export class CreditLedgerService {
     });
   }
 
+  /**
+   * The chat's latest settled model step within the hour, with the prefix its request offered and every input token
+   * the supplier reported for it (chat performance WP-15 step 6, ruling O-6). It walks the account's usage index
+   * newest first, so it reads only the recent rows of one account. The match itself is the digest, so a wrong or
+   * forged chat hint can only find no match: the bound it earns is still that exact prefix's own reported count.
+   *
+   * @param input - The owner and the chat.
+   * @returns The step, or `undefined` when the chat has none this hour.
+   */
+  public async previousSettledInput(input: {
+    environment: BillingEnvironment;
+    authUserId: string;
+    chatHint: string;
+  }): Promise<PreviousSettledInput | undefined> {
+    const [row] = await this.databaseService.database
+      .select({
+        modelId: creditOperation.modelId,
+        providerId: creditOperation.providerId,
+        prefix: sql<unknown>`${creditOperation.invocation} -> 'inputPrefix'`,
+        inputTokens: creditOperation.inputTokens,
+      })
+      .from(creditOperation)
+      .innerJoin(
+        billingOwnerBinding,
+        and(
+          eq(billingOwnerBinding.accountId, creditOperation.accountId),
+          eq(billingOwnerBinding.environment, creditOperation.environment),
+        ),
+      )
+      .where(
+        and(
+          eq(billingOwnerBinding.environment, input.environment),
+          eq(billingOwnerBinding.authUserId, input.authUserId),
+          sql`${billingOwnerBinding.revokedAt} is null`,
+          eq(creditOperation.category, 'llm'),
+          sql`${creditOperation.terminalRevision} is not null`,
+          eq(creditOperation.customerState, 'settled'),
+          eq(creditOperation.chatHint, input.chatHint),
+          sql`${creditOperation.inputTokens} is not null`,
+          sql`${creditOperation.invocation} ? 'inputPrefix'`,
+          sql`${creditOperation.usageOccurredAt} > now() - interval '1 hour'`,
+        ),
+      )
+      .orderBy(desc(creditOperation.usageOccurredAt), desc(creditOperation.terminalRevision), desc(creditOperation.id))
+      .limit(1);
+    const prefix = inputPrefixSchema.safeParse(row?.prefix);
+    if (row === undefined) {
+      return undefined;
+    }
+    if (row.providerId === null || row.inputTokens === null || !prefix.success) {
+      return undefined;
+    }
+    return { modelId: row.modelId, providerId: row.providerId, prefix: prefix.data, inputTokens: row.inputTokens };
+  }
+
   /** Finds the authenticated attempt without creating a financial account. */
   public async getOperationForAttempt(input: {
     environment: BillingEnvironment;
@@ -1654,6 +1720,18 @@ export class CreditLedgerService {
             reasonRequestDigest: operation.requestDigest,
           },
         );
+      }
+      /* WP-15 step 6 (O-6): the hold is meant to be a true upper bound; this count must stay 0 for every basis. */
+      for (const kind of [
+        ...(priced.reportedRetailAtoms > operation.authorizedAtoms ? (['customer_bound'] as const) : []),
+        ...(priced.inputOverflow === undefined ? [] : (['input_bound'] as const)),
+      ]) {
+        this.metrics?.billingFundedOperationAboveHold.add(1, {
+          'deployment.environment': operation.environment as BillingEnvironment,
+          'tau.billing.hold_basis': operation.invocation?.holdBasis ?? 'unknown',
+          'tau.billing.above_hold.kind': kind,
+          'tau.billing.sku': operation.sku,
+        });
       }
       if (priced.reportedRetailAtoms > operation.authorizedAtoms) {
         await tx

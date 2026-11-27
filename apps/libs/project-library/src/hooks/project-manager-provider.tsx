@@ -21,6 +21,7 @@ import {
   selectDiscoveryObservationError,
   selectLibraryError,
   selectLibraryIsLoading,
+  selectLibraryCancelledDeletes,
   selectLibraryRecoveries,
   selectLibraryRevision,
   selectLibraryWorkspaceConnection,
@@ -77,6 +78,7 @@ export function ProjectManagerProvider<
   const error = selectLibraryError(librarySnapshot);
   const isLoading = selectLibraryIsLoading(librarySnapshot);
   const recoveries = selectLibraryRecoveries(librarySnapshot);
+  const cancelledDeletes = selectLibraryCancelledDeletes(librarySnapshot);
   /*
    * Moves whenever a project moves in or out of the Trash. `getProjectRouteAccess` reads `deletedAt` once per call, so
    * the route depends on this counter, which makes that a live transition (blueprint Finding 2).
@@ -96,6 +98,7 @@ export function ProjectManagerProvider<
     commands,
     workspaceCommands,
     discardRecovery,
+    dismissCancelledDelete,
     getProjectListing,
     getReadiedWorker,
     invalidateChatQueries,
@@ -367,6 +370,8 @@ export function ProjectManagerProvider<
       chooseProjectDirectory,
       recoveries,
       discardRecovery,
+      cancelledDeletes,
+      dismissCancelledDelete,
       assertWorkspaceMutationAllowed,
       readFolderEvidence,
       getAppUiPreferences,
@@ -428,6 +433,8 @@ export function ProjectManagerProvider<
     chooseProjectDirectory,
     recoveries,
     discardRecovery,
+    cancelledDeletes,
+    dismissCancelledDelete,
     assertWorkspaceMutationAllowed,
     readFolderEvidence,
     getAppUiPreferences,

@@ -209,6 +209,17 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
   }
 
   /**
+   * Whether the root's names hold `name`, spelled exactly: a probe installs only under a listed name (FW3 review N4).
+   *
+   * @param storageRootKey - The root.
+   * @param name - The directory.
+   * @returns Whether it is listed.
+   */
+  public hasName(storageRootKey: string, name: string): boolean {
+    return this._roots.get(storageRootKey)?.names.has(name) === true;
+  }
+
+  /**
    * The clean entry of one directory.
    *
    * @param storageRootKey - The root.
@@ -218,6 +229,25 @@ export class ProjectDirectoryIndex<Reading extends IndexedReading = IndexedReadi
   public entry(storageRootKey: string, name: string): Readonly<IndexedDirectory<Reading>> | undefined {
     const root = this._roots.get(storageRootKey);
     return root === undefined || root.dirty.has(name) ? undefined : root.entries.get(name);
+  }
+
+  /**
+   * The directories whose last reading `match` accepts, dirty ones included (fast-path FW3, `locationsOf`). A
+   * nomination: what the index last read, which a caller proves by reading the directory before anything rests on it.
+   *
+   * @param match - Which readings to nominate.
+   * @returns Each matching directory and its root.
+   */
+  public find(match: (reading: Reading) => boolean): Array<Readonly<{ storageRootKey: string; name: string }>> {
+    const found: Array<Readonly<{ storageRootKey: string; name: string }>> = [];
+    for (const [storageRootKey, root] of this._roots) {
+      for (const [name, entry] of root.entries) {
+        if (match(entry.reading)) {
+          found.push({ storageRootKey, name });
+        }
+      }
+    }
+    return found;
   }
 
   /**

@@ -32,7 +32,12 @@ import type {
 } from '@taucad/files-ui/filesystem/handle-store';
 import type { ScopedStorageClient } from '@taucad/fs-client/file-system-client';
 import { parseWorkspaceMarker, workspaceMarkerPath } from '@taucad/types';
-import { deriveWorkspaceBindingRepairs, routeConfigFor } from '#runtime/project-library-storage.js';
+import {
+  deriveWorkspaceBindingRepairs,
+  isProbeNotServed,
+  pendingDeleteExclusions,
+  routeConfigFor,
+} from '#runtime/project-library-storage.js';
 import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryFileManager } from '#types/project-library-io.types.js';
 import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
@@ -213,9 +218,16 @@ export type WorkspaceJournal = Readonly<{
 /** What the workspace commands read from the library that builds them. @public */
 export type WorkspaceCommandsHost = Readonly<{
   workspaceConnection: Actor<typeof workspaceConnectionMachine>;
-  /** The root file facade, once there is one; the commands resync its project roots and read a picked folder. */
+  /**
+   * The root file facade, once there is one; the commands resync its project roots, read a picked folder and probe a
+   * chosen directory.
+   */
   facade: () => Promise<
-    Pick<ProjectLibraryFileManager, 'workspace'> & Readonly<{ scopedStorage: ScopedStorageClient }>
+    Pick<ProjectLibraryFileManager, 'workspace'> &
+      Readonly<{
+        scopedStorage: ScopedStorageClient;
+        client: Pick<ProjectLibraryFileManager['client'], 'probeProjectDirectories'>;
+      }>
   >;
   /** The object-store worker, ready; the commands only read its pending-operation journal. */
   readiedWorker: () => Promise<WorkspaceJournal>;
@@ -227,6 +239,8 @@ export type WorkspaceCommandsHost = Readonly<{
   invalidateProject: (projectId: string) => void;
   /** The connection's telemetry; a library built without it reports none. */
   telemetry: Pick<WorkspaceTelemetry, 'workspaceConnection'> | undefined;
+  /** The journal rows this tab saw fail, which are not left out of a probe (review N2). */
+  failedDeletes: () => ReadonlySet<string>;
 }>;
 
 /**
@@ -371,21 +385,47 @@ export class WorkspaceCommands {
    */
   public readonly chooseProjectDirectory = async (locator: ProjectLocator, projectId: string): Promise<void> => {
     await this.#host.whenDiscoveryReady();
-    // Re-verify on a fresh scan: the folder may have changed since the card
-    // rendered. Only the route binding moves; no project file is written (R7).
-    const discovery = await this.#host.discover();
-    const chosen = discovery.entries.find(
-      (entry) =>
-        (entry.status === 'duplicate-id' || entry.status === 'valid') &&
-        entry.projectId === projectId &&
-        entry.locator.storageRootKey === locator.storageRootKey &&
-        entry.locator.relativeDirectory === locator.relativeDirectory,
-    );
+    // The folder may have changed since the card rendered: it is read now, under the project's locks, and only a
+    // folder that holds the id is bound (fast-path FW3, a probe of the chosen directory and no scan). Only the route
+    // binding moves; no project file is written (R7).
+    const fileManager = await this.#host.facade();
+    /* A copy another delete is removing is not offered (FW3 review): it is left out of the probe, so it is not bound. */
+    const exclude = await pendingDeleteExclusions(await this.#host.readiedWorker(), {
+      failed: this.#host.failedDeletes(),
+    });
+    const sameDirectory = (other: ProjectLocator): boolean =>
+      other.storageRootKey === locator.storageRootKey && other.relativeDirectory === locator.relativeDirectory;
+    let chosen: Readonly<{ locator: ProjectLocator }> | undefined;
+    try {
+      const { locations } = await fileManager.client.probeProjectDirectories({
+        projectId,
+        locators: [locator],
+        ...(exclude.length === 0 ? {} : { exclude }),
+      });
+      chosen = locations.find((location) => location.status === 'held' && sameDirectory(location.locator));
+    } catch (error) {
+      /* Only an authority from before FW3, which does not serve the probe, falls back to a pass (review m3, N3); a probe
+       * that failed for another reason binds nothing. */
+      if (!isProbeNotServed(error)) {
+        throw error;
+      }
+      const discovery = await this.#host.discover();
+      chosen = exclude.some(
+        (left) =>
+          left.storageRootKey === locator.storageRootKey && left.relativeDirectory === locator.relativeDirectory,
+      )
+        ? undefined
+        : discovery.entries.find(
+            (entry) =>
+              (entry.status === 'duplicate-id' || entry.status === 'valid') &&
+              entry.projectId === projectId &&
+              sameDirectory(entry.locator),
+          );
+    }
     if (!chosen) {
       throw new Error('This folder no longer holds that project.');
     }
     await setProjectFileSystemConfig(routeConfigFor(projectId, chosen.locator));
-    const fileManager = await this.#host.facade();
     await fileManager.workspace.syncProjectRoots();
     this.#host.invalidateListing();
     this.#host.invalidateProject(projectId);

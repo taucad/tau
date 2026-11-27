@@ -284,6 +284,30 @@ async function compareCanvasFrames(
   );
 }
 
+/**
+ * How a clip control cuts the reference grid from the bottom of the analysed rows (the band `sampleGridFadeRows` reads,
+ * 12% to 88% of the height): `emptyRows` below the clip keep under a tenth of the reference's detail, and the next
+ * `onsetRows` reach six tenths of it. Each row is read against the same row of the reference, so the onset is the clip's
+ * own edge; read against the frame's peak it would also count the rows over which perspective packs the grid lines
+ * closer, which depends on the camera height and the rasterizer's line contrast, not on the clip.
+ */
+function clipOnsetFromBottom(
+  control: GridFadeRowProfile,
+  reference: GridFadeRowProfile,
+): Readonly<{ emptyRows: number; onsetRows: number }> {
+  const height = reference.rowDetail.length;
+  const rows = Array.from(
+    { length: Math.floor(height * 0.88) - Math.floor(height * 0.12) },
+    (_, index) => Math.floor(height * 0.88) - 1 - index,
+  );
+  const share = (row: number): number =>
+    reference.rowDetail[row]! > 0 ? control.rowDetail[row]! / reference.rowDetail[row]! : 1;
+  const clip = rows.findIndex((row) => share(row) >= 0.1);
+  const emptyRows = clip === -1 ? rows.length : clip;
+  const onset = clip === -1 ? -1 : rows.slice(clip).findIndex((row) => share(row) >= 0.6);
+  return { emptyRows, onsetRows: onset === -1 ? rows.length - emptyRows : onset };
+}
+
 async function sampleGridFadeRows(pngBase64: string): Promise<GridFadeRowProfile> {
   return target.evaluate(async (png) => {
     const image = new Image();
@@ -1053,9 +1077,14 @@ test.describe('Graphics backend regression guard', () => {
         nearClippedProfile.maximumNegativeNormalizedStep,
         `${backend}: no-near positive control did not reproduce the lower row-wide clip. ${context}`,
       ).toBeGreaterThan(restoredProfile.maximumNegativeNormalizedStep * 1.4);
+      const nearClipOnset = clipOnsetFromBottom(nearClippedProfile, restoredProfile);
       expect(
-        nearClippedProfile.fallRows,
-        `${backend}: no-near positive control did not collapse the lower fade envelope. ${context}`,
+        nearClipOnset.emptyRows,
+        `${backend}: no-near positive control did not clip the lower grid. ${JSON.stringify(nearClipOnset)} ${context}`,
+      ).toBeGreaterThan(0);
+      expect(
+        nearClipOnset.onsetRows,
+        `${backend}: no-near positive control did not collapse the lower fade envelope. ${JSON.stringify(nearClipOnset)} ${context}`,
       ).toBeLessThan(restoredProfile.fallRows * 0.25);
       expect(
         farClippedProfile.maximumPositiveNormalizedStep,
@@ -1272,18 +1301,26 @@ test.describe('Graphics backend regression guard', () => {
           throw new Error('Graphics e2e bridge is not installed.');
         }
 
+        // The front view, so the cube is at a face and shows its side triangles.
         bridge.setCamera({
-          position: [125, -180, 95],
+          position: [0, -239, 0],
           target: [0, 0, 0],
           zoom: 1,
         });
       });
 
       await waitForCameraToSettle();
-      const samples = await target.sampleCameraDuringClick<GraphicsTestCameraState>(
-        selectors.getByCss('.viewport-gizmo-cube').first(),
-        20,
-      );
+      /*
+       * A turn lasts its angle over one turn per second (three-viewport-gizmo `speed` 1). A click on the cube's middle
+       * turns to the face, edge or corner nearest the view, at most a few tens of degrees: from the old oblique pose,
+       * 15 degrees in 41 ms, one frame on CI's software rasterizer, so the row could not tell an animation from a snap.
+       * A side triangle turns 90 degrees in 250 ms, several frames on any adapter.
+       */
+      const cube = selectors.getByCss('.viewport-gizmo-cube').first();
+      await target.focus(cube);
+      const turn = selectors.getByRole('button', { name: /^Turn to /u }).first();
+      await target.expectVisible(turn);
+      const samples = await target.sampleCameraDuringClick<GraphicsTestCameraState>(turn, 20);
 
       expectGizmoAnimationProgress(samples, backend);
 

@@ -15,7 +15,8 @@
  * `released-ui-writer.test.ts` in `api-git-core` pushes every pinned object through the hook (P8).
  *
  * Usage: node packages/revisions/scripts/pin-writer-corpus.ts [--release <tag>]... [--check]
- *   --release <tag>  Pin only these releases (and the working tree). Defaults to every `ui@*` and `desktop@*` tag.
+ *   --release <tag>  Pin only these releases (and the working tree). Defaults to every `ui@*` and `desktop@*` tag
+ *                    merged into `HEAD` that does not point at it (a tag on `HEAD` is the working tree's writer).
  *   --check          Write nothing; exit 1 when a known release or the working tree is not pinned as it writes.
  * Exit codes: 0 written or current; 1 stale (`--check`); 2 usage, git or writer failure.
  */
@@ -32,17 +33,41 @@ const packageRoot = path.resolve(import.meta.dirname, '..');
 const repoRoot = path.resolve(packageRoot, '../..');
 const writersDirectory = path.join(packageRoot, 'src/provenance/corpus/writers');
 
-const git = (...args: readonly string[]): string =>
-  execFileSync('git', [...args], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
+const gitAt = (cwd: string, ...args: readonly string[]): string =>
+  execFileSync('git', [...args], { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
 
-/** Every `ui@*` and `desktop@*` tag, fetched first so a shallow checkout does not miss one. */
-const releaseTags = (): string[] => {
+const git = (...args: readonly string[]): string => gitAt(repoRoot, ...args);
+
+/**
+ * The `ui@*` and `desktop@*` releases this commit must still read: tags merged into `HEAD` that do not point at it.
+ *
+ * A tag on `HEAD` is the candidate being gated, whose writer is the working tree's (`current.json`, which G2
+ * regenerates): its tree cannot hold a file naming its own commit. A tag on a later commit is not this commit's to
+ * read. Fetched first, so a shallow checkout does not miss one.
+ *
+ * @param cwd - The repository; this one by default.
+ * @returns The tags, oldest version first.
+ */
+export const releaseTags = (cwd: string = repoRoot): string[] => {
   try {
-    git('fetch', '--quiet', '--tags', 'origin');
+    gitAt(cwd, 'fetch', '--quiet', '--tags', 'origin');
   } catch {
-    /* Offline: the local tags are the best answer there is. */
+    /* Offline, or no remote: the local tags are the best answer there is. */
   }
-  return git('tag', '--list', 'ui@*', 'desktop@*', '--sort=v:refname').split('\n').filter(Boolean);
+  return gitAt(
+    cwd,
+    'tag',
+    '--list',
+    'ui@*',
+    'desktop@*',
+    '--merged',
+    'HEAD',
+    '--no-contains',
+    'HEAD',
+    '--sort=v:refname',
+  )
+    .split('\n')
+    .filter(Boolean);
 };
 
 const loadWriter = async (root: string): Promise<WriterFunctions> => {

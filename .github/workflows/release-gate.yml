@@ -258,7 +258,8 @@ jobs:
               pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=static
               ;;
             cross-root-reads) pnpm nx run scripts:validate-cross-root-reads ;;
-            # G2: a client release adds its writer's pin (revisions rule 21); a desktop candidate without one fails here.
+            # G2: every earlier ui@/desktop@ release this commit contains is pinned (revisions rule 21); a tag on the
+            # candidate itself is the working tree's writer (current.json), so tagging the candidate keeps this green.
             writer-corpus) pnpm nx run revisions:check-writer-corpus ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac

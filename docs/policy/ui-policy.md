@@ -3,11 +3,12 @@ title: 'UI Policy'
 description: 'Design system entry point: principles, token architecture, typography, spacing, motion, and component composition for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-11-25'
+updated: '2026-11-27'
 related:
   - docs/policy/color-policy.md
   - docs/policy/diagram-policy.md
   - docs/policy/accessibility-policy.md
+  - docs/policy/mobile-ui-policy.md
   - docs/policy/rendering-pipeline-policy.md
   - docs/policy/rendering-policy.md
   - docs/policy/react-policy.md
@@ -172,6 +173,8 @@ A piece of UI that appears on more than one surface has one implementation, and 
 
 A dialog or sheet closes from one control: a ghost icon button (`variant='ghost'`, `size='icon-sm'`) in the top inline-end corner, with the `X` glyph, `text-muted-foreground`, and the screen-reader name "Close". It is the same control, with the same hover and focus treatment, as "Close settings". `DialogContent` and `SheetContent` render it; never restyle it, reposition it or add a second bare `X`.
 
+This rule covers a centred dialog at every width and a side sheet from `md` up. Under `md`, a bottom drawer and a surface that fills the screen take the header of [Mobile UI Policy](mobile-ui-policy.md) Rule 6 instead: the control that leaves the surface is a 44 px chrome circle at the inline start of the header, in the start slot of `DrawerBar` (a drawer) or `HeaderBar` (a full-screen surface).
+
 **Why**: the old close mark was a bare, half-opaque glyph with no hover surface and a 16px target; it read as decoration and was hard to hit.
 
 ### Icon Beside Text
@@ -262,6 +265,7 @@ Use `0.01ms` rather than `0s` to preserve `transitionend` and `animationend` eve
 - [Color Policy](color-policy.md) — OKLCH system, chroma ranges, contrast requirements
 - [Diagram Policy](diagram-policy.md) — Mermaid diagram styling and authoring
 - [Accessibility Policy](accessibility-policy.md) — ARIA conventions, E2E selectors
+- [Mobile UI Policy](mobile-ui-policy.md) — Touch targets, phone-width sizes, shapes and surface styles, drawer and header geometry, trigger open state
 - [Rendering Pipeline Policy](rendering-pipeline-policy.md) — PBR defaults, materials, tone mapping
 - [Rendering Policy](rendering-policy.md) — Virtualization, content budgets, scroll management
 - [React Policy](react-policy.md) — Component memoization, state management, hook patterns

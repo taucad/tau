@@ -3,7 +3,7 @@ title: 'Design Policy'
 description: 'Canonical Tau design principles, governance and review guidance.'
 status: active
 created: '2026-10-15'
-updated: '2026-11-25'
+updated: '2026-11-27'
 ---
 
 # Design Policy
@@ -91,9 +91,14 @@ measurements remain explicit.
 - **Narrow means rearranged.** Stack, wrap or provide a visibly labelled alternate
   view. Preserve orientation and access to the same capabilities. Tooltips do
   not recover information hidden from touch users.
-  The composer is one ghost row on every device: one + for attachments and
+  The composer is one row on every device: one + for attachments and
   context, and one agent control beside Send that opens the model, its reasoning
-  level and the agent's own settings. As the row narrows, measured labels give
+  level and the agent's own settings. Its controls are ghost under a fine
+  pointer and filled and outline-free under a coarse pointer at any width,
+  where a control's edge has to show without hover; their drawn size and shape
+  follow the viewport, so a touch tablet at desktop width keeps the desktop
+  layout ([Mobile UI Policy](mobile-ui-policy.md) Rules 2, 4 and 10).
+  As the row narrows, measured labels give
   way to their glyphs; the reasoning level stays. Readiness may be summarized in
   its accessible tooltip, never the sole approval or recovery surface. Verify
   actual fit with all controls enabled; do not hide capabilities or let controls
@@ -262,7 +267,7 @@ The token architecture is three-tier — primitive → semantic → component �
 - **Contrast is verified on rendered pairs.** The lightness scale is Tau's version of the USWDS grade system: grades guide selection, but token pairs used as text-on-surface must pass measured WCAG 2.2 AA contrast (4.5:1 body, 3:1 large text) in every theme, including opacity and layered surfaces. When placing or moving a lightness step, check dark-theme pairs with APCA Lc values as a design-time instrument (Lc 75+ body, Lc 60+ secondary text) — WCAG 2.x remains the conformance claim, APCA never is. Rationale and thresholds: research doc Findings 3 and 5.
 - Opacity modifiers: 5–90 in steps of 10, on semantic tokens only.
 
-**Radius** is a calc-derived ladder (`--radius-xs` → `--radius-4xl`); under `corner-shape: superellipse(1.5)` support the whole scale upgrades to squircles globally. Never hand-pick a radius outside the ladder.
+**Radius** is a calc-derived ladder (`--radius-xs` → `--radius-4xl`); under `corner-shape: superellipse(1.5)` support the whole scale upgrades to squircles globally. Never hand-pick a radius outside the ladder. Two shapes sit beside it, each with one owner: `rounded-full` for a true circle or capsule, and the drawer's `--drawer-radius`, which follows the screen's curve ([Mobile UI Policy](mobile-ui-policy.md) Rules 3 and 5).
 
 **Spacing** is a 4px base; multiples of 4 only.
 
@@ -323,7 +328,7 @@ Verify both desktop and browser behavior, not a screenshot from a stale build.
 
 ## Accessibility
 
-- **WCAG 2.2 Level AA is the normative floor** for all web surfaces. Two of its newest criteria bite hardest on a CAD app and get explicit treatment: **2.5.7 Dragging Movements** — every drag interaction (viewport orbit, gizmo transforms, sliders, panel resize) has a non-drag path (typed input, keyboard nudge, menu command); **2.5.8 Target Size** — interactive targets are ≥24×24 CSS px or spaced per the exception; the icon-button `xs` size is the sanctioned minimum, nothing smaller ships.
+- **WCAG 2.2 Level AA is the normative floor** for all web surfaces. Two of its newest criteria bite hardest on a CAD app and get explicit treatment: **2.5.7 Dragging Movements** — every drag interaction (viewport orbit, gizmo transforms, sliders, panel resize) has a non-drag path (typed input, keyboard nudge, menu command); **2.5.8 Target Size** — interactive targets are ≥24×24 CSS px or spaced per the exception; the icon-button `xs` size is the sanctioned minimum, nothing smaller ships. Under a coarse pointer a target's hit area grows to 44×44, or to the room its bar declares, through one shared utility and never per component ([Mobile UI Policy](mobile-ui-policy.md) Rule 1).
 - **The component library is the choke point.** Accessibility work lands in `packages/ui`, so `apps/ui`, `apps/docs`, and external consumers inherit fixes from one place. Every `@taucad/ui` component names the APG pattern it implements (or states that none exists and documents its own keyboard/AT contract); the keyboard contract is part of the component's public API. Radix supplies the base semantics — prefer native HTML semantics first, and never add ARIA that the primitive already provides; incorrect ARIA is worse than none.
 - **Enforcement**: role-based selectors are mandatory in tests (`getByRole`/`getByLabel`; class and testid selectors are forbidden — `docs/policy/accessibility-policy.md`), which makes a11y a side effect of testability. `packages/ui` component tests include axe-core smoke checks (jsdom). Automated checks catch only a subset: new interactive patterns get a manual keyboard + screen-reader pass before they ship.
 - Codified ARIA per `docs/policy/accessibility-policy.md`: loading = `role="status"` + `aria-busy`, errors = `role="alert"`, canvas/preview = `role="img"` + label, toggles carry `aria-expanded`/`aria-pressed`, dialogs are labelled. Focus is always visible, and its geometry has exactly one owner: the `focus-outline` utility in `@taucad/ui`'s `tokens.css`, composed under whatever variant a control needs (`focus-visible:focus-outline`, `has-[…:focus-visible]:focus-outline`, `focus-within:focus-outline`). It renders a 2px inset outline in the `ring` token; `focus-outline-outside` is the only exception, for controls too thin to host an inset outline. Never restate the geometry in a component, and never use a box-shadow ring. Focus is never fully obscured by sticky chrome (2.4.11).
@@ -342,7 +347,7 @@ Verify both desktop and browser behavior, not a screenshot from a stale build.
 - Pointer cursors are native hyperlink affordances by default. Actions use `--cursor-action` through the shared semantic selector or `cursor-action` utility, every action keeps visible hover and focus feedback, and specialized text/drag/resize/help/disabled cursors remain semantic. Sidebar navigation, including anchor-backed project/chat rows, follows the shared action-cursor preference; content hyperlinks retain native pointers. Enforced by `tau-lint/no-authored-pointer-cursor` and the computed-style sidebar regression.
 - Boolean props are named `is/has/should/enable/…` (lint-enforced); keyboard handling goes through the keyboard service (`event.key`, never `event.code`; the `mod` abstraction for Cmd/Ctrl).
 
-A repeated piece has one owner and every surface imports it; dialogs and sheets close from one ghost icon button; an icon beside text sits on the centre line of the text's first line; loading content is drawn as its own shape; and a feature that is not available yet carries the coming-soon icon with a legend. [UI Policy](ui-policy.md) §5 states each rule and names the owners.
+A repeated piece has one owner and every surface imports it; dialogs and sheets close from one ghost icon button (a phone drawer or full-screen surface closes from the start circle of its header: [Mobile UI Policy](mobile-ui-policy.md) Rule 6); an icon beside text sits on the centre line of the text's first line; loading content is drawn as its own shape; and a feature that is not available yet carries the coming-soon icon with a legend. [UI Policy](ui-policy.md) §5 states each rule and names the owners.
 
 ## Surfaces
 
@@ -351,6 +356,8 @@ A repeated piece has one owner and every surface imports it; dialogs and sheets 
 Dense, dark-first, keyboard-first. Panels and floating surfaces come from the shared primitives; pane headers retain visible contextual actions or a named overflow trigger, with optional hover shortcuts under the affordance rules above. The sidebar, command palette, and keyboard service are the three navigation spines; a feature that only exists behind a pointer gesture is unfinished (2.5.7).
 
 Route-level pages compose from one recipe per part — frame, title row, view controls, collection grid and pagination, cards and their states, busy and collection states, view URL state and the first-viewport budget — owned with its gates by `docs/policy/page-composition-policy.md`.
+
+Phone-width chrome and touch (the one touch-target mechanism, the drawn-size ladder, the radius language, the surface-to-style mapping, drawer and header geometry, and which of these follow the pointer and which the viewport) and the open-trigger, shortcut-hint and sidebar rules that hold at every width are owned with their gates by `docs/policy/mobile-ui-policy.md`.
 
 Workbench empty states use the shared clean panel presentation, not decorative
 dashed boxes; intentional dropzones retain their functional boundaries. Settings

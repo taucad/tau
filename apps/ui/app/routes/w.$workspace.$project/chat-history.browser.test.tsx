@@ -362,10 +362,11 @@ describe('chat composer across the transcript load', () => {
 });
 
 describe('transcript shape while the transcript loads', () => {
-  /* QA on an iPhone 13: in the chat sheet (279 px tall) the transcript's bars hung below the header at their own height
-   * and ran behind the composer. The bars belong to the feed, above the composer region (Progressive Loading Policy
-   * rule 15). */
-  it('keeps every bar above the composer in a short lane', async () => {
+  /* Staging QA on an iPhone 13 (viewport 390 x 664): the chat sheet's surface spans y 341 to 620, its composer 566 to
+   * 612. The transcript's bars ran past the feed's foot: one crossed the composer's top edge and one sat behind it.
+   * Clipping hid only part of a bar, so a bar is measured as drawn (its own box, as `checkVisibility` sees it): every
+   * bar in the feed's box ends above the composer, and one that does not fit is outside that box altogether. */
+  it('draws every bar whole above the composer in the phone sheet', async () => {
     await page.viewport(390, 664);
     publishChatSession({
       messages: [],
@@ -375,27 +376,34 @@ describe('transcript shape while the transcript loads', () => {
     });
     render(
       <TooltipProvider>
-        <div style={{ display: 'flex', height: 279 }}>
-          <ChatHistory />
-        </div>
+        {/* The live sheet's surface at half: fixed at the detent, the sheet's height less its grabber and the nav. */}
+        <section
+          data-slot='mobile-surface'
+          className='flex flex-col overflow-hidden'
+          style={{ position: 'fixed', top: 341, left: 0, width: 390, height: 279 }}
+        >
+          <div className='relative flex h-full flex-1 flex-col'>
+            <ChatHistory />
+          </div>
+        </section>
       </TooltipProvider>,
     );
 
-    const composerTop = screen.getByRole('region', { name: 'Chat composer' }).getBoundingClientRect().top;
+    const composer = screen.getByRole('region', { name: 'Chat composer' }).getBoundingClientRect();
+    expect(Math.round(composer.bottom)).toBeLessThanOrEqual(620);
+    const shape = document.querySelector<HTMLElement>('[data-slot="transcript-shape"]');
+    const feed = (shape ?? document.querySelector<HTMLElement>('[data-slot="project-wait"]'))!.getBoundingClientRect();
     const bars = [
       ...document.querySelectorAll<HTMLElement>('[data-slot="project-wait-skeleton"] [data-slot="skeleton"]'),
-    ];
-    expect(bars.length).toBeGreaterThan(0);
-    /* A bar the feed clips is not drawn; every bar drawn ends above the composer. */
-    const drawn = bars.filter((bar) => {
-      const box = bar.getBoundingClientRect();
-      const clip = bar.closest<HTMLElement>('[data-slot="project-wait"]')!.getBoundingClientRect();
-      return box.top < clip.bottom;
-    });
-    expect(drawn.length).toBeGreaterThan(0);
-    for (const bar of drawn) {
-      const clip = bar.closest<HTMLElement>('[data-slot="project-wait"]')!.getBoundingClientRect();
-      expect(Math.min(bar.getBoundingClientRect().bottom, clip.bottom)).toBeLessThanOrEqual(composerTop);
+    ]
+      .map((bar) => bar.getBoundingClientRect())
+      .filter((box) => box.width > 0 && box.height > 0);
+    const inFeed = bars.filter((box) => box.left < feed.right && box.right > feed.left);
+    /* The request card at least is drawn. */
+    expect(inFeed.length).toBeGreaterThan(0);
+    for (const box of inFeed) {
+      expect(box.bottom).toBeLessThanOrEqual(composer.top);
+      expect(box.bottom).toBeLessThanOrEqual(feed.bottom);
     }
   });
 });

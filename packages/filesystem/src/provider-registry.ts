@@ -9,6 +9,8 @@ import type { WorkspaceScope } from '#mount-table.js';
 import { resolveStorageRootKey } from '#storage-root-key.js';
 import { MissingWorkspaceHandleError } from '#workspace-errors.js';
 import type { BatchEntry } from '#changeset.js';
+import { IoScheduler } from '#io-scheduler.js';
+import type { IoLane } from '#io-scheduler.js';
 
 /**
  * Told of every mutating call on a provider the registry hands out, before the call is issued (discovery index A2 a).
@@ -55,6 +57,44 @@ const mutatingMethods: Readonly<Record<string, (arguments_: readonly unknown[]) 
     }),
 };
 /**
+ * The provider methods that do I/O: counted while in flight when an interactive caller makes them, and admitted by the
+ * lane when a background or sweep caller does (fast path FW4). `refresh`, `observe`, `readFileStream` and `dispose` are
+ * neither: a cache drop, a subscription, a stream pulled later, and a release.
+ */
+const ioMethods = [
+  'readdirWithStats',
+  'readFile',
+  'writeFile',
+  'writeFileChecked',
+  'deleteFileChecked',
+  'appendFile',
+  'writeFileStream',
+  'readdir',
+  'stat',
+  'mkdir',
+  'unlink',
+  'rmdir',
+  'rename',
+  'exists',
+  'lstat',
+  'getFileMode',
+  'setFileMode',
+  'hashFiles',
+  'applyBatch',
+  'readdirEntries',
+] as const;
+
+const ioMethodNames: ReadonlySet<string | symbol> = new Set(ioMethods);
+
+/**
+ * Which lane a caller's provider calls run in: `interactive` and `background` (FW4), or `sweep`, an identity sweep a
+ * person is waiting on, which runs in its own bounded window ({@link IoScheduler.runSweep}).
+ *
+ * @public
+ */
+export type ProviderLane = IoLane | 'sweep';
+
+/**
  * Configuration for {@link ProviderRegistry}.
  * @public
  */
@@ -67,6 +107,8 @@ export type ProviderRegistryOptions = {
    * Absent on the web build, where a `node` scope is simply unreachable.
    */
   createNodeFsPort?: () => Promise<NodeFsPort>;
+  /** The lanes' admission rule (FW4); one is made when omitted. */
+  ioScheduler?: IoScheduler;
 };
 
 /**
@@ -85,6 +127,8 @@ export type ProviderRegistryOptions = {
  * @public
  */
 export class ProviderRegistry {
+  /** The lanes' admission rule: interactive calls are counted, background and sweep calls admitted (FW4). */
+  public readonly ioScheduler: IoScheduler;
   private readonly _providers = new Map<string, Promise<FileSystemProvider>>();
   private readonly _databasePrefix: string;
   private readonly _createNodeFsPort: (() => Promise<NodeFsPort>) | undefined;
@@ -96,6 +140,13 @@ export class ProviderRegistry {
   private _recoveryListener: ((storageRootKey: string, providerPaths: readonly string[]) => void) | undefined;
   /** Told of every mutating provider call (FW2). */
   private _writeTap: ProviderWriteTap | undefined;
+  /** Each provider's gated views, made once per provider and lane. */
+  private readonly _laneViews = new WeakMap<
+    FileSystemProvider,
+    Map<Exclude<ProviderLane, 'interactive'>, FileSystemProvider>
+  >();
+  /** The root each provider this registry made serves. */
+  private readonly _rootOf = new WeakMap<FileSystemProvider, string>();
   /** Recoveries that finished before a listener was set. */
   private readonly _pendingRecoveries: Array<Readonly<{ storageRootKey: string; providerPaths: readonly string[] }>> =
     [];
@@ -108,6 +159,7 @@ export class ProviderRegistry {
   public constructor(options?: ProviderRegistryOptions) {
     this._databasePrefix = options?.databasePrefix ?? 'tau';
     this._createNodeFsPort = options?.createNodeFsPort;
+    this.ioScheduler = options?.ioScheduler ?? new IoScheduler();
   }
 
   /**
@@ -144,6 +196,45 @@ export class ProviderRegistry {
       }
       throw error;
     }
+  }
+
+  /**
+   * The provider of a root as a caller in `lane` sees it (FW4): the provider itself for an interactive caller, whose
+   * calls it counts, or a view whose every I/O call waits for the lane to admit it.
+   *
+   * @param scope - Workspace scope.
+   * @param lane - The caller's lane.
+   * @returns The provider, or its gated view.
+   */
+  public async getLaneProvider(scope: WorkspaceScope, lane: ProviderLane): Promise<FileSystemProvider> {
+    return this.inLane(await this.getProvider(scope), lane);
+  }
+
+  /**
+   * A provider as a caller in `lane` sees it (FW4). A background or sweep view admits each I/O call through
+   * {@link ProviderRegistry.ioScheduler} and then makes it on the provider itself, so the write tap still hears its
+   * writes; the provider's own nested calls are neither gated nor counted. Every other member reads through to the
+   * provider. Gating sits at the provider call, below every lock a caller holds.
+   *
+   * @param provider - A provider, normally one this registry made.
+   * @param lane - The caller's lane.
+   * @returns The provider for `interactive`, otherwise its view for the lane, the same object each time.
+   */
+  public inLane(provider: FileSystemProvider, lane: ProviderLane): FileSystemProvider {
+    if (lane === 'interactive') {
+      return provider;
+    }
+    let views = this._laneViews.get(provider);
+    if (views === undefined) {
+      views = new Map();
+      this._laneViews.set(provider, views);
+    }
+    let view = views.get(lane);
+    if (view === undefined) {
+      view = this._gatedView(provider, lane);
+      views.set(lane, view);
+    }
+    return view;
   }
 
   /**
@@ -218,6 +309,7 @@ export class ProviderRegistry {
   public disposeAll(): void {
     const pending = [...this._providers.values()];
     this._providers.clear();
+    this.ioScheduler.dispose();
     for (const provider of pending) {
       // async-iife: bootstrap -- registry teardown cannot await providers that are still initializing.
       void (async () => {
@@ -313,7 +405,82 @@ export class ProviderRegistry {
         },
       });
     }
+    this._counted(storageRootKey, provider);
     return provider;
+  }
+
+  /**
+   * Count each I/O call on a provider this registry made while it is in flight (FW4): the interactive lane's count,
+   * which a background call waits on. Wrapped on the instance over the write tap, once, like the tap.
+   */
+  private _counted(storageRootKey: string, provider: FileSystemProvider): void {
+    this._rootOf.set(provider, storageRootKey);
+    const scheduler = this.ioScheduler;
+    for (const name of ioMethods) {
+      const method: unknown = Reflect.get(provider, name);
+      if (typeof method !== 'function') {
+        continue;
+      }
+      const original = method as (...arguments_: unknown[]) => unknown;
+      Object.defineProperty(provider, name, {
+        configurable: true,
+        writable: true,
+        value: function counted(this: unknown, ...arguments_: unknown[]): unknown {
+          const settle = scheduler.beginInteractive(storageRootKey);
+          try {
+            const result = Reflect.apply(original, this, arguments_);
+            if (result instanceof Promise) {
+              return result.finally(settle);
+            }
+            settle();
+            return result;
+          } catch (error) {
+            settle();
+            throw error;
+          }
+        },
+      });
+    }
+  }
+
+  /** A view of `provider` whose I/O calls the lane admits; see {@link ProviderRegistry.inLane}. */
+  private _gatedView(provider: FileSystemProvider, lane: Exclude<ProviderLane, 'interactive'>): FileSystemProvider {
+    const scheduler = this.ioScheduler;
+    const storageRootKey = this._rootOf.get(provider) ?? provider.id;
+    const admit = async <Result>(call: () => Result): Promise<Awaited<Result>> =>
+      lane === 'sweep' ? scheduler.runSweep(storageRootKey, call) : scheduler.runBackground(call);
+    const gated = new Map<string | symbol, (...arguments_: unknown[]) => unknown>();
+    const bound = new WeakMap<(...arguments_: unknown[]) => unknown, unknown>();
+    return new Proxy(provider, {
+      get(target, property) {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        if (ioMethodNames.has(property)) {
+          let call = gated.get(property);
+          if (call === undefined) {
+            /* The method is looked up when admitted, so a replaced one (a test's spy) is the one called. */
+            call = async (...arguments_: unknown[]) =>
+              admit(() =>
+                Reflect.apply(Reflect.get(target, property) as (...a: unknown[]) => unknown, target, arguments_),
+              );
+            gated.set(property, call);
+          }
+          return call;
+        }
+        const method = value as (...arguments_: unknown[]) => unknown;
+        let member = bound.get(method);
+        if (member === undefined) {
+          member = method.bind(target);
+          bound.set(method, member);
+        }
+        return member;
+      },
+      set() {
+        return false;
+      },
+    });
   }
 
   private _recovered(storageRootKey: string, providerPaths: readonly string[]): void {

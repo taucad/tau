@@ -18,6 +18,7 @@ import { joinRelativePath, normalizePath } from '@taucad/utils/path';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { factsConcurrency, getFileContentMetadata, measureContentFacts } from '#content-metadata.js';
 import { directoryConcurrency, mapConcurrent, statConcurrency } from '#concurrency.js';
+import type { IoLane } from '#io-scheduler.js';
 import { workerTimings } from '#worker-timings.js';
 import type { ContentFacts, ContentFactsOptions, FileStatEntry, FileSystemProvider, PathPolicy } from '#types.js';
 import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
@@ -57,6 +58,11 @@ export const isReservedIndexPath = (relative: string): boolean =>
 /** How the indexes reach one root's bytes. @public */
 export type IndexRootResolution = Readonly<{
   provider: FileSystemProvider;
+  /**
+   * The same provider as a background caller sees it (fast path FW4): a poll's compare lists through it, so an
+   * interactive call waits behind at most the few listings its lane admitted. `provider` when absent.
+   */
+  background?: FileSystemProvider;
   /** The root's provider-relative path. */
   path: string;
   /**
@@ -389,17 +395,18 @@ export class ProjectIndexes {
    * regain, after a sequence gap. Reads no file content.
    *
    * @param root - Absolute root.
+   * @param options - `lane: 'background'` for a compare nobody waits on (a poll's, FW4); a cut's is interactive.
    * @returns What changed and what is racy.
    */
-  public async compare(root: string): Promise<IndexCompareResult> {
+  public async compare(root: string, options?: Readonly<{ lane?: IoLane }>): Promise<IndexCompareResult> {
     const key = normalizePath(root);
     const state = this._states.get(key);
     if (state?.index.isComplete !== true) {
-      /* Opening a root is its compare. */
+      /* Opening a root is its compare, and a reader waits on it. */
       await this.ready(key);
       return this._states.get(key)?.lastCompare ?? { checked: 0, mismatched: [], racy: [] };
     }
-    return this._observe(key, state.index, '');
+    return this._observe(key, state.index, '', options?.lane);
   }
 
   /**
@@ -418,7 +425,8 @@ export class ProjectIndexes {
         .filter(
           (key) => this.get(key) !== undefined && this._resolve(key).provider.capabilities.externallyEdited === true,
         )
-        .map(async (key) => this.compare(key)),
+        /* Nobody waits on a poll's compare call by call: its listings run in the background lane (FW4). */
+        .map(async (key) => this.compare(key, { lane: 'background' })),
     );
   }
 
@@ -1773,14 +1781,23 @@ export class ProjectIndexes {
 
   /**
    * One observation of a subtree: a head listing per directory, policy
-   * applied before descent, merged with mutations recorded meanwhile.
+   * applied before descent, merged with mutations recorded meanwhile; listed in `lane` (FW4).
    */
-  private async _observe(root: string, index: ProjectIndex, prefix: string): Promise<IndexCompareResult> {
+  // oxlint-disable-next-line max-params -- the observation's root, index and prefix, and the lane its listings run in.
+  private async _observe(
+    root: string,
+    index: ProjectIndex,
+    prefix: string,
+    lane: IoLane = 'interactive',
+  ): Promise<IndexCompareResult> {
     const resolution = this._resolve(root);
     const start = index.beginObservation();
     let rows: ObservedRow[] | undefined;
     try {
-      rows = await this._list(resolution, prefix);
+      rows = await this._list(
+        lane === 'background' ? { ...resolution, provider: resolution.background ?? resolution.provider } : resolution,
+        prefix,
+      );
     } catch (error) {
       index.completeObservation(start, prefix, undefined);
       throw error;

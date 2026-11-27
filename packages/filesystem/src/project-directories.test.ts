@@ -7,6 +7,7 @@ import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { MountTable } from '#mount-table.js';
 import type { CommitPendingProjectDirectoryResult, StorageRootConfig } from '#mount-table.js';
 import { ProviderRegistry } from '#provider-registry.js';
+import { backgroundIoConcurrency } from '#io-scheduler.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { createWorkspaceFileService, decoder, encoder, waitFor } from '#testing/workspace-service-harness.js';
 import type { ChangeEvent, FileSystemProvider } from '#types.js';
@@ -465,7 +466,7 @@ describe('WorkspaceFileService', () => {
       expect(stat).not.toHaveBeenCalled();
     });
 
-    it('probes manifests with bounded concurrency in deterministic order', async () => {
+    it('probes manifests of a cold root through the background lane, in deterministic order (FW4)', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
       const names = Array.from({ length: 150 }, (_, index) => `p${String(index).padStart(3, '0')}`);
       for (const [index, name] of names.entries()) {
@@ -492,8 +493,9 @@ describe('WorkspaceFileService', () => {
       const result = await service.listProjectManifests();
 
       expect(result.entries.map((entry) => entry.locator.relativeDirectory)).toEqual(names);
-      // Sixty-four directories each read declaration and identity concurrently.
-      expect(maxInFlight).toBe(128);
+      // A cold root's full read is background work: the lane admits at most four of its reads at once (FW4), where
+      // sixty-four directories each read declaration and identity concurrently before it.
+      expect(maxInFlight).toBe(backgroundIoConcurrency);
     });
 
     it('discovers out-of-band project creation from the external-change path without refreshing per scan', async () => {

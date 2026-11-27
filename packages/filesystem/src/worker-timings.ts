@@ -28,6 +28,11 @@
  * - `capture.tree`: one checkout comparison capture.
  * - `apply.hold`: one tree apply, from its first write to its release.
  * - `records.project`: the opening pull's chat and evidence fetch and projection.
+ * - `io.wait.background`: one background provider call, from when it was issued to when its lane admitted it
+ *   (project-library fast path FW4).
+ * - `io.wait.interactive`: one interactive provider call issued while background or sweep calls were in flight, from
+ *   when it was issued until those calls settled or it did, whichever came first: the most it could have waited behind
+ *   ranked work (FW4, S10). A call issued with none in flight waits for none and records nothing.
  *
  * @public
  */
@@ -41,6 +46,8 @@ export const workerTimingSpans = [
   'capture.tree',
   'apply.hold',
   'records.project',
+  'io.wait.background',
+  'io.wait.interactive',
 ] as const;
 
 /** One timed span's name. @public */

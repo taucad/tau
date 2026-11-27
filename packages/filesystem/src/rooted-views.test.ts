@@ -745,3 +745,50 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     });
   });
 });
+
+describe('a rooted connection that declared the background lane (fast path FW4)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should read through the background lane, and write through the provider itself', async () => {
+    const providerRegistry = new ProviderRegistry();
+    const scope = { backend: 'memory', storageRootKey: 'memory:rooted-views-lanes' } as const;
+    const provider = await providerRegistry.getProvider(scope);
+    const mountTable = new MountTable();
+    mountTable.mount('/', provider, { class: 'authored', ...scope });
+    const owner = new WorkspaceFileService({
+      providerRegistry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable,
+    });
+    openServices.push(owner);
+    await owner.configureProjectRoots({ projects: [{ projectId, ...scope, providerBasePath: 'lanes' }], roots: [] });
+    const interactive = owner.createRootedFileSystem(projectRoute);
+    const background = owner.createRootedFileSystem(projectRoute, { lane: 'background' });
+    await interactive.writeFile('a.txt', 'a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const { ioScheduler } = providerRegistry;
+
+    /* Another interactive call is in flight: the background connection's read waits for the lane. */
+    const settleInteractive = ioScheduler.beginInteractive('elsewhere');
+    let answered: string | undefined;
+    const read = (async () => {
+      answered = await background.readFile('a.txt', 'utf8');
+      return answered;
+    })();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ioScheduler.backgroundQueued()).toBe(1);
+    expect(answered).toBeUndefined();
+
+    /* Its writes are never deferred by the lane. */
+    await background.writeFile('b.txt', 'b');
+    expect(answered).toBeUndefined();
+    await expect(interactive.readFile('b.txt', 'utf8')).resolves.toBe('b');
+
+    settleInteractive();
+    await expect(read).resolves.toBe('a');
+    expect(ioScheduler.backgroundQueued()).toBe(0);
+  });
+});

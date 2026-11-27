@@ -87,6 +87,12 @@
 \* FW3 re-review (2026-11-27): the probe's install guard asks the index whether the root's names hold the directory
 \* (`hasName`); a same-root surviving copy is listed, one in another root or found by the sweep is not. Reads only;
 \* every action and verdict is unchanged.
+\* FW4 (2026-11-27, I/O lanes): a full read, the audit, a snapshot poll and the orphan sweep issue their provider calls
+\* through the background lane, and a sole copy's sweep through its own window (`io-scheduler.ts`); the registry counts
+\* interactive calls and gates background ones at the provider call, below every lock. A read still takes its capture
+\* before its first call is issued and a write's tap still fires before its bytes move, so the lane only delays a
+\* `ReadStart`'s I/O or a write, which the model already lets interleave arbitrarily (untimed). Every action and verdict
+\* is unchanged.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Dirs,         \* project directories: the immediate children of one root

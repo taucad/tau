@@ -309,6 +309,12 @@ export type MkdirOptions = {
  */
 export type WorkspaceMutationContext = {
   originClientId?: string;
+  /**
+   * The I/O lane the connection declared when it opened (fast path FW4): `'background'` makes a rooted view read
+   * through the background lane, for a reader nobody waits on call by call (the all-chats read, library-state
+   * recovery). Absent is interactive. It orders reads only; writes are never deferred by it.
+   */
+  lane?: 'interactive' | 'background';
 };
 
 /**

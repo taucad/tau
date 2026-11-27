@@ -85,7 +85,8 @@ export type { BulkMoveEdit, BulkMoveResult } from '#mutation-pipeline.js';
 export type { PrivateStore, RootedFileSystem, RootedPorcelain } from '#rooted-views.js';
 
 export { ProviderRegistry } from '#provider-registry.js';
-export type { ProviderRegistryOptions } from '#provider-registry.js';
+export type { ProviderLane, ProviderRegistryOptions } from '#provider-registry.js';
+export type { IoLane } from '#io-scheduler.js';
 
 export { resolveStorageRootKey } from '#storage-root-key.js';
 export type { StorageRootIdentity } from '#storage-root-key.js';

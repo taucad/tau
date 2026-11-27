@@ -143,7 +143,11 @@ type HostImportCopier = Readonly<{ copyFromImportGrant: NonNullable<ImportStagin
 /** What the sweep answers for a directory it could not read. */
 const unknownIdentity = '\0unknown';
 
-/** Concurrent `tau.json` probes while scanning a discovery root. */
+/**
+ * Directories one walk reads at once, two files each. A full read, the audit and a sweep read through a lane's view
+ * (FW4), which admits their provider calls a few at a time, so over those this bounds only the calls queued; a warm
+ * pass's evidence reads are interactive and few.
+ */
 const manifestProbeConcurrency = 64;
 
 /** Resolved identity kept separate from the authored declaration. @public */
@@ -686,13 +690,18 @@ export class ProjectDirectories {
    * `unknown`. What the sweep reads is evidence: a directory or a name the index has otherwise is read again by the
    * next pass.
    *
+   * The sweep's reads run in `lane` (FW4): `sweep`, its own bounded window, for a person waiting on it (a delete, an
+   * adopt, an import), and `background` for the orphan sweep nobody waits on. The lane only orders provider calls below
+   * the id's lock: every read the answer rests on is still made under it.
+   *
    * @param projectId - The id.
-   * @param options - `alreadyLocked` when the caller holds `project:<id>`; `except` a directory to leave out (adopt's).
+   * @param options - `alreadyLocked` when the caller holds `project:<id>`; `except` a directory to leave out (adopt's);
+   *   `lane`, `sweep` when omitted.
    * @returns `absent`, `present` with every directory that carries the id, or `unknown`.
    */
   public async verifyAbsent(
     projectId: string,
-    options?: Readonly<{ alreadyLocked?: boolean; except?: PhysicalDirectory }>,
+    options?: Readonly<{ alreadyLocked?: boolean; except?: PhysicalDirectory; lane?: 'sweep' | 'background' }>,
   ): Promise<ProjectAbsence> {
     if (!projectIdSchema.safeParse(projectId).success) {
       throw new TypeError(`Invalid project id: ${JSON.stringify(projectId)}`);
@@ -713,7 +722,7 @@ export class ProjectDirectories {
       for (const { root, scope, storageRootKey } of roots) {
         let provider: FileSystemProvider;
         try {
-          provider = await this._registry.getProvider(scope);
+          provider = await this._registry.getLaneProvider(scope, options?.lane ?? 'sweep');
         } catch (error) {
           return { status: 'unknown', reason: errorMessage(error) };
         }
@@ -883,6 +892,7 @@ export class ProjectDirectories {
             : await this.verifyAbsent(options.id, {
                 alreadyLocked: true,
                 except: { storageRootKey: locator.storageRootKey, providerBasePath: path },
+                lane: 'sweep',
               });
         const restored = absence?.status === 'absent' ? options?.id : undefined;
         const identity = await this._resolveIdentity({
@@ -1369,9 +1379,10 @@ export class ProjectDirectories {
   ): Promise<number | undefined> {
     const { scope, storageRootKey, view } = root;
     {
+      /* The audit is background work: its listings and reads wait for the lane (FW4). */
       let provider: FileSystemProvider;
       try {
-        provider = await this._registry.getProvider(scope);
+        provider = await this._registry.getLaneProvider(scope, 'background');
       } catch {
         return undefined;
       }
@@ -1475,13 +1486,16 @@ export class ProjectDirectories {
       const startedAt = this._index.now();
       const namesVersion = this._index.beginColdRead(storageRootKey);
       workerTimings.count('discovery.fullRead');
-      const names = await this._listNames(provider);
+      /* A full read is background work (FW4): each of its provider calls waits for the lane, so an interactive call
+       * waits behind at most the few it admitted. Every capture is still taken before its call is issued. */
+      const background = this._registry.inLane(provider, 'background');
+      const names = await this._listNames(background);
       if (!Array.isArray(names)) {
         this._index.cold(storageRootKey, 'reset');
         return { status: 'inaccessible', reason: errorMessage(names.error) };
       }
       this._index.installNames(storageRootKey, namesVersion, names);
-      const readings = await this._readDirectories(authority, names);
+      const readings = await this._readDirectories({ ...authority, provider: background }, names);
       this._index.warmed(storageRootKey, startedAt);
       return { status: 'complete', readings };
     }
@@ -1927,7 +1941,7 @@ export class ProjectDirectories {
     }>
   > {
     const { except, excluded, probed } = leftOut;
-    const absence = await this.verifyAbsent(projectId, { alreadyLocked: true, except });
+    const absence = await this.verifyAbsent(projectId, { alreadyLocked: true, except, lane: 'sweep' });
     if (absence.status !== 'present') {
       return { held: [], unreadable: [], unknown: absence.status === 'unknown', present: false, leftOut: false };
     }

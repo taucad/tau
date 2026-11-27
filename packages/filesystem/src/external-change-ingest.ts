@@ -36,7 +36,10 @@ import type { ProjectIndexes } from '#project-index/project-indexes.js';
 import { projectIndexDirectory } from '#project-index/index-snapshot.js';
 import { isNotFoundError } from '#workspace-errors.js';
 
-/** Concurrent `getFile()` calls per directory while walking an external snapshot. */
+/**
+ * Rows one directory of a snapshot walk resolves at once. The walk is background work (FW4): the lane admits its
+ * browser calls a few at a time, so this bounds only the calls queued.
+ */
 const externalSnapshotConcurrency = 16;
 
 /**
@@ -1218,13 +1221,20 @@ export class ExternalChangeIngest {
     type IterableDirectoryHandle = FileSystemDirectoryHandle & {
       entries(): AsyncIterableIterator<[string, EntryHandle]>;
     };
+    /* A snapshot walk is background work (fast path FW4): each browser call it makes, and each directory's listing as
+     * one, waits for the lane, so an interactive call waits behind at most the few it admitted. */
+    const background = async <Result>(call: () => Promise<Result>): Promise<Result> =>
+      this._registry.ioScheduler.runBackground(call);
     const admittedEntries = async (handle: FileSystemDirectoryHandle): Promise<Array<[string, EntryHandle]>> => {
-      const entries: Array<[string, EntryHandle]> = [];
-      for await (const entry of (handle as IterableDirectoryHandle).entries()) {
-        if (!isChromiumSwapArtifactName(entry[0])) {
-          entries.push(entry);
+      const entries = await background(async () => {
+        const listed: Array<[string, EntryHandle]> = [];
+        for await (const entry of (handle as IterableDirectoryHandle).entries()) {
+          if (!isChromiumSwapArtifactName(entry[0])) {
+            listed.push(entry);
+          }
         }
-      }
+        return listed;
+      });
       return entries.toSorted(([left], [right]) => left.localeCompare(right));
     };
     // Resolve one row per name in chunks, so metadata reads overlap without unbounded handle pressure.
@@ -1239,7 +1249,7 @@ export class ExternalChangeIngest {
     const capturedAt = Date.now();
     const unsettled: string[] = [];
     const fileRow = async (name: string, relative: string, handle: FileSystemFileHandle): Promise<[string, string]> => {
-      const file = await handle.getFile();
+      const file = await background(async () => handle.getFile());
       const readAt = Date.now();
       const row = `${relative}\0file\0${file.size}\0${file.lastModified}`;
       /* Only the discovery-wide walk: its rows are the declarations discovery reads. A rooted poll feeds the Project
@@ -1288,8 +1298,9 @@ export class ExternalChangeIngest {
         const parts = providerBasePath.split('/').filter(Boolean);
         let handle = rootHandle;
         for (const part of parts) {
+          const parent = handle;
           // oxlint-disable-next-line no-await-in-loop -- Directory-handle traversal is necessarily ordered.
-          handle = await handle.getDirectoryHandle(part);
+          handle = await background(async () => parent.getDirectoryHandle(part));
         }
         await walk(handle, parts.join('/'));
         this._noteUnsettled(state, unsettled);
@@ -1306,7 +1317,8 @@ export class ExternalChangeIngest {
         const declarationRows = await Promise.all([
           (async () => {
             try {
-              const [, row] = await fileRow(name, `${name}/tau.json`, await child.getFileHandle('tau.json'));
+              const manifest = await background(async () => child.getFileHandle('tau.json'));
+              const [, row] = await fileRow(name, `${name}/tau.json`, manifest);
               return row;
             } catch (error) {
               if (!isNotFoundError(error)) {
@@ -1317,12 +1329,9 @@ export class ExternalChangeIngest {
           })(),
           (async () => {
             try {
-              const control = await child.getDirectoryHandle('.tau');
-              const [, row] = await fileRow(
-                name,
-                `${name}/.tau/project.json`,
-                await control.getFileHandle('project.json'),
-              );
+              const control = await background(async () => child.getDirectoryHandle('.tau'));
+              const identity = await background(async () => control.getFileHandle('project.json'));
+              const [, row] = await fileRow(name, `${name}/.tau/project.json`, identity);
               return row;
             } catch (error) {
               if (!isNotFoundError(error)) {

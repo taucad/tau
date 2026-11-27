@@ -128,7 +128,15 @@ const countMethod = (
  */
 export const countProviderCalls = (provider: FileSystemProvider): CountingProvider => {
   const tally = { calls: new Map<string, number>(), kinds: new Map<ProviderCallKind, number>() };
-  const names = methodNames(provider).filter((name) => !Object.hasOwn(provider, name));
+  const names = methodNames(provider);
+  /* The registry wraps some methods on the instance (the write tap, the interactive lane's count, FW4): those are
+   * counted over, and put back as they were. */
+  const own = new Map(
+    names.flatMap((name) => {
+      const descriptor = Object.getOwnPropertyDescriptor(provider, name);
+      return descriptor === undefined ? [] : [[name, descriptor] as const];
+    }),
+  );
   for (const name of names) {
     countMethod(provider, name, tally);
   }
@@ -161,7 +169,12 @@ export const countProviderCalls = (provider: FileSystemProvider): CountingProvid
     },
     restore: () => {
       for (const name of names) {
-        Reflect.deleteProperty(provider, name);
+        const descriptor = own.get(name);
+        if (descriptor === undefined) {
+          Reflect.deleteProperty(provider, name);
+        } else {
+          Object.defineProperty(provider, name, descriptor);
+        }
       }
     },
   };

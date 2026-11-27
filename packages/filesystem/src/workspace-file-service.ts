@@ -22,6 +22,7 @@ import type { BulkMoveEdit, BulkMoveResult } from '#mutation-pipeline.js';
 import { RootedViews } from '#rooted-views.js';
 import type { RootedFileSystem } from '#rooted-views.js';
 import type { ProviderRegistry } from '#provider-registry.js';
+import type { IoLane } from '#io-scheduler.js';
 import type { ResourceQueue } from '#resource-queue.js';
 import type { ChangeEventBus } from '#change-event-bus.js';
 import { ProjectIndexes } from '#project-index/project-indexes.js';
@@ -321,6 +322,7 @@ export class WorkspaceFileService {
       watchRegistry: this._watchRegistry,
       projectIndexes: this._projectIndexes,
       pendingSource: () => this._pendingSource,
+      inLane: (provider, lane) => this._registry.inLane(provider, lane),
       ...(options.pendingStallMilliseconds === undefined
         ? {}
         : { pendingStallMilliseconds: options.pendingStallMilliseconds }),
@@ -1322,11 +1324,17 @@ export class WorkspaceFileService {
    * Prove from storage whether any configured root still carries a project id: every root available, every
    * directory's identity record read, under the project's lock. The discovery index is never asked (A1).
    *
+   * The caller says whether a person waits on it (FW4): by default the sweep runs in its own bounded window behind
+   * interactive calls; `lane: 'background'` (the orphan sweep) yields to every interactive call.
+   *
    * @param projectId - The id.
+   * @param options - `lane: 'background'` for a sweep nobody waits on.
    * @returns `absent`, `present` with the directories that carry it, or `unknown`.
    */
-  public async verifyAbsent(projectId: string): Promise<ProjectAbsence> {
-    return this._projectDirectories.verifyAbsent(projectId);
+  public async verifyAbsent(projectId: string, options?: Readonly<{ lane?: IoLane }>): Promise<ProjectAbsence> {
+    return this._projectDirectories.verifyAbsent(projectId, {
+      lane: options?.lane === 'background' ? 'background' : 'sweep',
+    });
   }
 
   /**
@@ -2255,6 +2263,7 @@ export class WorkspaceFileService {
    */
   private _indexRoot(root: string): {
     provider: FileSystemProvider;
+    background: FileSystemProvider;
     path: string;
     persist?: { lockName: string };
   } {
@@ -2267,6 +2276,7 @@ export class WorkspaceFileService {
       provider.capabilities.trustworthyMtime === true;
     return {
       provider,
+      background: this._registry.inLane(provider, 'background'),
       path,
       ...(persists ? { persist: { lockName: `tau-index:${entry.storageRootKey}:${path}` } } : {}),
     };

@@ -112,14 +112,14 @@ export function openSessionFileManager(projectId: string, ports: SessionFileMana
   });
 
   /* The scope's fallback, without React: read the opener when a connection opens, after the services wait. */
-  const fallback: RecordBridgeOpener = (root, consumer) => {
+  const fallback: RecordBridgeOpener = (root, consumer, options) => {
     const opener = fileManagerRef.getSnapshot().context.openFileSystemBridge;
     if (!opener) {
       throw new FileManagerNotReadyError('proxy-timeout', {
         cause: new Error('File Manager filesystem bridge is not ready.'),
       });
     }
-    return opener(root, consumer);
+    return options === undefined ? opener(root, consumer) : opener(root, consumer, options);
   };
   /* As the scope's `whenServicesReady`: services already bound serve at once; otherwise a wait that settles on a file
    * manager in `error`, or without its services, refuses, so a record read fails fast rather than opening a bridge the

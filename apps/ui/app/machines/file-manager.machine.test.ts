@@ -749,6 +749,13 @@ describe('fileManagerMachine', () => {
       root: '/projects/project-a',
       consumer: 'working-copy',
     });
+    /* A connection that declares the background lane says so in its envelope (FW4); one that does not, says nothing. */
+    actor.getSnapshot().context.openFileSystemBridge?.('/projects/project-a', 'working-copy', { lane: 'background' });
+    expect(mockOpenFileSystemBridge).toHaveBeenLastCalledWith(expect.anything(), {
+      root: '/projects/project-a',
+      consumer: 'working-copy',
+      lane: 'background',
+    });
     expect(workerTestState.instances[0]?.postMessage).toHaveBeenCalledWith(
       // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally untyped.
       expect.objectContaining({ type: 'computeStoreConnect', projectId: 'project-a' }),

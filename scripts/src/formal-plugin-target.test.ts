@@ -268,7 +268,6 @@ const trackedSpecFiles = (): string[] =>
   execFileSync('git', ['ls-files', '-z'], {
     cwd: repositoryRoot,
     encoding: 'utf8',
-    /* The index's path list is past execFileSync's 1 MiB default buffer. */
     maxBuffer: 64 * 1024 * 1024,
   })
     .split('\0')

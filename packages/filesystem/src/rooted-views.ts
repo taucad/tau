@@ -306,6 +306,7 @@ export class RootedViews {
   /** Where a read of a pending entry gets its object (D9). */
   private readonly _pendingSource: () => PendingObjectSource | undefined;
   private readonly _pendingStallMilliseconds: number | undefined;
+  private readonly _inBackground: (provider: FileSystemProvider, signal: AbortSignal | undefined) => FileSystemProvider;
 
   /**
    * Create the rooted-view factory over the authority's own collaborators.
@@ -319,6 +320,11 @@ export class RootedViews {
     projectIndexes: ProjectIndexes;
     pendingSource?: () => PendingObjectSource | undefined;
     pendingStallMilliseconds?: number;
+    /**
+     * A background view of a provider whose queued calls `signal` cancels (FW4): the registry's `backgroundCalls`. The
+     * provider itself when absent.
+     */
+    inBackground?: (provider: FileSystemProvider, signal: AbortSignal | undefined) => FileSystemProvider;
   }) {
     this._mountTable = options.mountTable;
     this._pipeline = options.pipeline;
@@ -326,6 +332,7 @@ export class RootedViews {
     this._projectIndexes = options.projectIndexes;
     this._pendingSource = options.pendingSource ?? (() => undefined);
     this._pendingStallMilliseconds = options.pendingStallMilliseconds;
+    this._inBackground = options.inBackground ?? ((provider) => provider);
   }
 
   /**
@@ -351,6 +358,16 @@ export class RootedViews {
       throw new RootedFileSystemError('ROOT_UNAVAILABLE');
     }
     const projectIndexes = this._projectIndexes;
+    /*
+     * What this view reads through (fast path FW4): the root's provider, or, for a connection that declared itself
+     * background (`mutationContext.lane`), its gated view, so each read waits for the background lane and a read still
+     * queued when the connection closes (`mutationContext.signal`) is cancelled. A stream's open waits too; its chunks
+     * are pulled unranked. Writes go through the pipeline on the provider itself either way.
+     */
+    const readProvider =
+      mutationContext?.lane === 'background'
+        ? this._inBackground(captured.provider, mutationContext.signal)
+        : captured.provider;
     if (raw) {
       /*
        * A configured route is known already, and keeps what it is. A root a host mounted itself (a checkout the
@@ -477,7 +494,7 @@ export class RootedViews {
               authorityPath: at.authorityPath,
               size: row.size,
               mtimeMs: row.mtimeMs,
-              bytes: async () => at.resolution.provider.readFile(at.resolution.path).catch(() => undefined),
+              bytes: async () => readProvider.readFile(at.resolution.path).catch(() => undefined),
             }),
           );
     /* One file's bytes on disk, and what the path answers: through to its object when it is a placeholder. */
@@ -485,7 +502,7 @@ export class RootedViews {
       at: ReturnType<typeof resolveLocal>,
       signal?: AbortSignal,
     ): Promise<Readonly<{ bytes: Uint8Array<ArrayBuffer>; answer: Uint8Array<ArrayBuffer> }>> => {
-      const bytes = await at.resolution.provider.readFile(at.resolution.path);
+      const bytes = await readProvider.readFile(at.resolution.path);
       if (raw) {
         return { bytes, answer: bytes };
       }
@@ -496,7 +513,7 @@ export class RootedViews {
         bytes,
         mtimeMs: async () => {
           try {
-            const head = await at.resolution.provider.stat(at.resolution.path);
+            const head = await readProvider.stat(at.resolution.path);
             return head.mtimeMs;
           } catch {
             return undefined;
@@ -583,7 +600,7 @@ export class RootedViews {
           return false;
         }
         try {
-          const { size } = await resolution.provider.stat(resolution.path);
+          const { size } = await readProvider.stat(resolution.path);
           return size <= 1024;
         } catch {
           return false;
@@ -597,8 +614,8 @@ export class RootedViews {
           return bufferToStream(answer, options).getReader();
         }
         return (
-          resolution.provider.readFileStream?.(resolution.path, options) ??
-          bufferToStream(await resolution.provider.readFile(resolution.path), options)
+          readProvider.readFileStream?.(resolution.path, options) ??
+          bufferToStream(await readProvider.readFile(resolution.path), options)
         ).getReader();
       };
       const cancelAfterFailure = async (reason: unknown): Promise<void> => {
@@ -635,7 +652,7 @@ export class RootedViews {
     const readdir = async (path: string): Promise<string[]> => {
       const at = resolveLocal(path);
       await landed(at, { listing: true });
-      return at.resolution.provider.readdir(at.resolution.path);
+      return readProvider.readdir(at.resolution.path);
     };
     /*
      * What a tree write has yet to land under a directory (D10, I7): a listing shows each such entry as a pending row
@@ -675,7 +692,7 @@ export class RootedViews {
           const arriving = arrivingIn(authorityPath);
           let rows: DirectoryStatRow[];
           try {
-            rows = await resolution.provider.readdirWithStats!(resolution.path);
+            rows = await readProvider.readdirWithStats!(resolution.path);
           } catch (error) {
             if (arriving.length === 0 || !isMissing(error)) {
               throw error;
@@ -700,19 +717,19 @@ export class RootedViews {
     const stat = async (path: string): Promise<FileStat> => {
       const at = resolveLocal(path);
       await landed(at);
-      return settledStat(at, await at.resolution.provider.stat(at.resolution.path));
+      return settledStat(at, await readProvider.stat(at.resolution.path));
     };
     const readdirEntries = captured.provider.readdirEntries
       ? async (path: string): Promise<DirectoryEntry[]> => {
           const at = resolveLocal(path);
           await landed(at, { listing: true });
-          return at.resolution.provider.readdirEntries!(at.resolution.path);
+          return readProvider.readdirEntries!(at.resolution.path);
         }
       : undefined;
     const getFileMode = captured.provider.getFileMode
       ? async (path: string) => {
           const { resolution } = resolveLocal(path);
-          return resolution.provider.getFileMode!(resolution.path);
+          return readProvider.getFileMode!(resolution.path);
         }
       : undefined;
     const setFileMode = captured.provider.setFileMode
@@ -994,7 +1011,7 @@ export class RootedViews {
     const exists = async (path: string): Promise<boolean> => {
       const at = resolveLocal(path);
       await landed(at);
-      return at.resolution.provider.exists(at.resolution.path);
+      return readProvider.exists(at.resolution.path);
     };
     /* Resolved and confined: the control plane only, never a project file. */
     const resolvePrivate = (path: string): Readonly<{ provider: FileSystemProvider; path: string }> => {
@@ -1094,7 +1111,7 @@ export class RootedViews {
     const lstat = async (path: string): Promise<FileStat> => {
       const at = resolveLocal(path);
       await landed(at);
-      return settledStat(at, await at.resolution.provider.lstat(at.resolution.path));
+      return settledStat(at, await readProvider.lstat(at.resolution.path));
     };
     const search = async (query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]> => {
       assertCurrent();

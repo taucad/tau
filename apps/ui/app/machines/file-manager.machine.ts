@@ -157,7 +157,12 @@ type FileManagerContext = {
   worker: Worker | undefined;
   proxy: FileManagerWorkerProxy | undefined;
   bridgeDispose?: () => void;
-  openFileSystemBridge?: (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
+  /** Open a rooted connection; `lane: 'background'` ranks its reads behind every interactive call (FW4). */
+  openFileSystemBridge?: (
+    root: string,
+    consumer: RootedBridgeConsumer,
+    options?: Readonly<{ lane?: 'interactive' | 'background' }>,
+  ) => FileSystemBridgeConnection;
   openComputeBinding?: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
   openComputeStorePort?: (projectId: string) => MessagePort;
   computeControl?: ReturnType<typeof computeOpeners>['computeControl'];
@@ -295,7 +300,11 @@ type WorkerConnectedEvent = {
   worker: Worker;
   proxy: FileManagerWorkerProxy;
   bridgeDispose: () => void;
-  openFileSystemBridge: (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
+  openFileSystemBridge: (
+    root: string,
+    consumer: RootedBridgeConsumer,
+    options?: Readonly<{ lane?: 'interactive' | 'background' }>,
+  ) => FileSystemBridgeConnection;
   openComputeBinding: (projectId: string) => { compute: ComputeBinding; dispose: () => void };
   openComputeStorePort: (projectId: string) => MessagePort;
   computeControl: ReturnType<typeof computeOpeners>['computeControl'];
@@ -588,8 +597,12 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
         class: 'authored',
       });
     }
-    const openBridge = (root: string, consumer: RootedBridgeConsumer): FileSystemBridgeConnection =>
-      openFileSystemBridge(worker, { root, consumer });
+    const openBridge = (
+      root: string,
+      consumer: RootedBridgeConsumer,
+      options?: Readonly<{ lane?: 'interactive' | 'background' }>,
+    ): FileSystemBridgeConnection =>
+      openFileSystemBridge(worker, { root, consumer, ...(options?.lane === undefined ? {} : { lane: options.lane }) });
     worker.postMessage({ type: 'computeStoreAdmission', projectId: context.projectId });
     const { openComputeBinding, openComputeStorePort, computeControl, openRevisionSessionPort } = computeOpeners(
       worker,

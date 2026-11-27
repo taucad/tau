@@ -69,10 +69,8 @@ it('should reject pending calls when disposed');
 it('should skip fetch for recently failed packages');
 it('should preserve error name across the bridge');
 
-// INCORRECT: imperative without "should"
-it('renders single-key code object'); // unclear what's being asserted
-
-// INCORRECT: vague
+// INCORRECT: imperative without "should" (unclear what's being asserted), or vague
+it('renders single-key code object');
 it('works correctly');
 it('handles errors');
 ```
@@ -165,9 +163,7 @@ function getFirstTriangulatedEdge(shape: TopoDS_Shape): DisposableStack & {
     const face = iterStack.use(oc.TopoDS.Face(explorer.Current()));
     const triangulation = iterStack.use(BRep_Tool.Triangulation(face, location));
     if (!triangulation.IsNull()) {
-      // Transfer ownership: iterStack disposers move to a fresh stack the
-      // caller receives. The helper's `using` declarations no longer dispose
-      // the moved handles at scope exit.
+      // Transfer ownership to a stack the caller receives: `using` here no longer disposes the moved handles
       const moved = iterStack.move();
       return Object.assign(moved, { edge, triangulation, location });
     }
@@ -180,7 +176,6 @@ function getFirstTriangulatedEdge(shape: TopoDS_Shape): DisposableStack & {
 it('does the thing', () => {
   using bundle = getFirstTriangulatedEdge(shape);
   expect(bundle.edge).toBeDefined();
-  // ...
 }); // bundle.dispose() runs all the moved disposers in LIFO order
 ```
 
@@ -190,27 +185,21 @@ Canonical reference: [`smoke-brep-tool-overloads.test.ts:28-103`](https://github
 
 Use `mock<T>()` from `vitest-mock-extended` where the package already depends on it to create typed test doubles. Never use `as unknown as T` to cast partial objects to full types. A dedicated testing package may instead expose an explicit, Vitest-backed object literal when doing so removes `vitest-mock-extended` from the production package's dependency surface; keep the one necessary interface assertion inside that shared factory.
 
-**Why**: `as unknown as` bypasses the compiler entirely. `mock<T>()` returns a deep Proxy that satisfies the full interface, auto-stubbing methods with `vi.fn()` and properties with `undefined`, while allowing overrides.
+**Why**: `as unknown as` bypasses the compiler entirely: when the real type changes, tests using it still compile and pass with stale shapes, hiding regressions. `mock<T>()` returns a deep Proxy that satisfies the full interface, auto-stubbing methods with `vi.fn()` and properties with `undefined`, while allowing overrides.
 
 ```typescript
-import { mock } from 'vitest-mock-extended';
+import { mock, mockDeep } from 'vitest-mock-extended';
 
 // CORRECT: typed mock with overrides
 const client = mock<RuntimeClient>({ terminate: vi.fn() });
 const options = mock<RuntimeClientOptions>();
 const ref = mock<ProjectContext['fileManagerRef']>({ send: vi.fn() });
 
+// CORRECT: `mockDeep<T>()` for deeply nested mocks (NestJS services, complex interfaces)
+const mockResult = mockDeep<StreamTextResult>();
+
 // INCORRECT: bypasses type system
 const client = {} as unknown as RuntimeClient;
-const options = {} as unknown as RuntimeClientOptions;
-```
-
-For deeply nested mocks (NestJS services, complex interfaces), use `mockDeep<T>()`:
-
-```typescript
-import { mockDeep } from 'vitest-mock-extended';
-
-const mockResult = mockDeep<StreamTextResult>();
 ```
 
 For domain objects with sensible defaults, use shared factory functions:
@@ -226,25 +215,9 @@ filesystem.mocks.exists.mockResolvedValue(true);
 
 ## 6. Async Patterns
 
-Prefer `await expect(promise).rejects.toThrow()` over try/catch for simple rejection tests. Use try/catch only when inspecting multiple error properties. (the multi-property form is in § 3).
+Prefer `await expect(promise).rejects.toThrow()` over try/catch for simple rejection tests. Use try/catch only when inspecting multiple error properties. Both forms are the examples in § 3.
 
-```typescript
-// CORRECT: for simple cases
-await expect(proxy.readFile('/missing.txt')).rejects.toThrow('ENOENT');
-```
-
-For fake timers with async operations:
-
-```typescript
-vi.useFakeTimers();
-try {
-  const pendingCall = proxy.readFile('/path');
-  await vi.advanceTimersByTimeAsync(30_000);
-  await expect(pendingCall).rejects.toThrow('timed out');
-} finally {
-  vi.useRealTimers();
-}
-```
+For fake timers with async operations, start the call without awaiting it, advance with `await vi.advanceTimersByTimeAsync(...)`, then await the assertion on the pending promise, and restore real timers in `finally`. The § 1 example shows the whole sequence.
 
 ## 7. Immutability and Side-Effect Checks
 
@@ -264,15 +237,7 @@ it('should not mutate the original array', async () => {
 
 ## 8. Avoid Console Output in Tests
 
-Do not leave `console.log` or `console.error` in test files. If diagnostic output is needed during development, remove it before committing.
-
-```typescript
-// INCORRECT
-console.log(`[debug] ${entries.length} files survived`);
-
-// CORRECT: remove it, or use expect() to assert the value
-expect(entries).toHaveLength(fileCount);
-```
+Do not leave `console.log` or `console.error` in test files. If diagnostic output is needed during development, remove it before committing, or turn it into an assertion: `expect(entries).toHaveLength(fileCount)` instead of logging `entries.length`.
 
 ## 9. Structure Assertions Over Existence Assertions
 
@@ -304,9 +269,7 @@ expect(result.data[0]).toEqual(
 
 ## 11. No Type Assertions for Mocks
 
-Never use `as unknown as T` to create mock objects or cast return values.
-
-**Why**: Double assertions erase all type information. When the real type changes, tests using `as unknown as` continue to compile and pass with stale shapes, hiding regressions.
+Never use `as unknown as T` to create mock objects or cast return values. The reason and the CORRECT and INCORRECT forms are in § 5.
 
 | Scenario                    | Pattern                                  | Notes                                          |
 | --------------------------- | ---------------------------------------- | ---------------------------------------------- |
@@ -315,8 +278,6 @@ Never use `as unknown as T` to create mock objects or cast return values.
 | Deep nested mock            | `mockDeep<ComplexType>()`                | Recursively mocks nested objects               |
 | Serialized data             | `{ field: 'value' } as DataType`         | Single assertion for plain data                |
 | Intentionally invalid input | `'bad' as unknown as ValidType`          | Error-path tests only; requires oxlint-disable |
-
-The CORRECT and INCORRECT forms are the examples in § 5.
 
 ## 12. Geometry-Test Surface
 
@@ -469,20 +430,14 @@ CORRECT:
 // Reads store-wide state (every tag): runs on a store of its own
 it('should list only the version it tagged', async () => {
   await onItsOwnStore(async ({ port, child }) => {
-    const created = await port.tag({
-      name: 'Ready for print',
-      revisionId: child,
-    });
+    const created = await port.tag({ name: 'Ready for print', revisionId: child });
     expect(await port.listTags()).toStrictEqual([created]);
   });
 });
 
 // Shares the beforeAll store: writes a name of its own, asserts on that name
 it('should list a version it tagged', async () => {
-  const created = await port.tag({
-    name: 'Lid of this row',
-    revisionId: child,
-  });
+  const created = await port.tag({ name: 'Lid of this row', revisionId: child });
   expect(await port.listTags()).toContainEqual(created);
 });
 
@@ -498,10 +453,7 @@ INCORRECT:
 // Pinned so that earlier tests have tagged and cleaned up the shared store
 describe('RevisionPort conformance', { shuffle: false }, () => {
   it('should number the first version after Start 2', async () => {
-    const created = await port.tag({
-      name: 'Ready for print',
-      revisionId: child,
-    });
+    const created = await port.tag({ name: 'Ready for print', revisionId: child });
     expect(created.number).toBe(2); // 3 when another test tagged first
   });
 });

@@ -7,7 +7,7 @@ import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import { createNodeChatStore } from '@taucad/agent-host/node';
 import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import { createActor } from 'xstate';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectionFact, KnownProjectionEvent, AgentChannelClient } from '@taucad/agent-host';
 import type { AgentWireProtocol, CatchUpFrame, ReadAnswer } from '@taucad/agent-host/wire';
 import { catchUpFrameSchema, agentWireVersion, agentWireProtocolSchemas } from '@taucad/agent-host/wire';
@@ -17,7 +17,7 @@ import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chunksOf, chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
-import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
+import { hostAttachment, remoteReadRetryMilliseconds } from '#chat-clients/_internal/host-attachment.js';
 
 const healthy = { historyIntact: true, newerHistory: false, quarantined: false };
 const lifecycleFact = (
@@ -34,6 +34,13 @@ const writerOwnedCatchUp = async function* ({ chatId }: { chatId: string }): Asy
 };
 
 describe('hostAttachment', () => {
+  /* The remote read retry draws full jitter (HA3); pin it to its ceiling so the delays these rows count are exact. */
+  beforeEach(() => {
+    vi.spyOn(Math, 'random').mockReturnValue(1);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   it('should recapture a followed generation reset over the real channel without ordinary page replay', async () => {
     const chatId = 'recaptured';
     const root = await mkdtemp(join(tmpdir(), 'tau-attachment-recapture-'));
@@ -616,7 +623,7 @@ describe('hostAttachment', () => {
         });
         expect(subscribe).not.toHaveBeenCalled();
         expect(catchUp).not.toHaveBeenCalled();
-        actor.send({ type: 'retry-read' });
+        /* A fenced reader reads again on its own backoff (D17, HA3); an unreadable log is terminal. */
         if (reason === 'owner-fenced') {
           await vi.waitFor(() => {
             expect(subscribe).toHaveBeenCalledOnce();
@@ -625,6 +632,9 @@ describe('hostAttachment', () => {
           expect(subscribeLive).toHaveBeenCalledOnce();
           expect(onStatus).toHaveBeenCalledWith({ type: 'attachment.attached' });
         } else {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 2 * remoteReadRetryMilliseconds.first);
+          });
           expect(read).toHaveBeenCalledOnce();
           expect(projection.getSnapshot().context.fault).toBe('unreadable');
           expect(onStatus).not.toHaveBeenCalledWith({ type: 'attachment.attached' });
@@ -1884,8 +1894,9 @@ describe('hostAttachment', () => {
       },
     }).start();
 
+    /* At least: the remote read loop retries the loss on its jittered backoff, which may already have begun. */
     await vi.waitFor(() => {
-      expect(onStatus).toHaveBeenCalledTimes(2);
+      expect(onStatus.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
     expect(onStatus).toHaveBeenNthCalledWith(1, {
       type: 'attachment.lost',

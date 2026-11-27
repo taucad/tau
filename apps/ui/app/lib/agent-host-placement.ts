@@ -1123,6 +1123,10 @@ const relayedAgentUrl = async (deviceId: string, options: OpenAgentHostChannelOp
       options.runtimeVersion ?? packageVersion,
     );
   } catch (error) {
+    if (error instanceof RemoteHostApiError && error.code === 'AGENT_NOT_FOUND') {
+      /* The API no longer knows the device for this account: revoked or unpaired, as a missing list entry says. */
+      throw new AgentHostPlacementError('HOST_NOT_PAIRED', 2, error.message);
+    }
     throw new AgentHostPlacementError(
       'HOST_SESSION_REFUSED',
       2,
@@ -1140,6 +1144,30 @@ const relayedAgentUrl = async (deviceId: string, options: OpenAgentHostChannelOp
   }
   return session.agentUrl;
 };
+
+/**
+ * How a daemon's socket closed: its WebSocket code and reason. The channel records every such close as `PEER_GONE`, so
+ * this is where a revocation (4003) or a refused grant (1008 by its reason) can still be told apart (HA3).
+ *
+ * @public
+ */
+export type AgentHostSocketClose = Readonly<{ code: number; reason: string }>;
+
+/** Each socket-dialled channel's close listeners, by the client {@link openAgentHostChannel} returned. */
+const socketCloses = new WeakMap<AgentChannelClient, Topic<AgentHostSocketClose>>();
+
+/**
+ * Hear every close of the sockets a daemon channel dials, with the socket's own code and reason.
+ *
+ * @param client - A client {@link openAgentHostChannel} returned; the desktop placement dials no socket.
+ * @param handler - Called once per socket close.
+ * @returns An unsubscribe.
+ * @public
+ */
+export const onAgentHostSocketClose = (
+  client: AgentChannelClient,
+  handler: (info: AgentHostSocketClose) => void,
+): (() => void) => socketCloses.get(client)?.subscribe(handler) ?? (() => undefined);
 
 /** The client's liveness bound on a daemon that keeps alive every two seconds (T9 E3, E4). Milliseconds. */
 const daemonLivenessTimeout = 10_000;
@@ -1166,6 +1194,7 @@ export const openAgentHostChannel = async (
   hostId: TauAgentHostId,
   options: OpenAgentHostChannelOptions = {},
 ): Promise<AgentChannelClient> => {
+  const closes = new Topic<AgentHostSocketClose>({ name: 'agentHostPlacement.socketCloses' });
   const dial = async (): Promise<AgentChannelEndpoint> => {
     if (hostId === 'desktop') {
       /* Wrapped the instant the port arrives: the utility posts its channel
@@ -1196,6 +1225,9 @@ export const openAgentHostChannel = async (
       options.createSocket ??
       ((next: string, offered?: readonly string[]) => new WebSocket(next, offered ? [...offered] : undefined))
     )(url, protocols);
+    socket.addEventListener('close', (event: CloseEvent) => {
+      closes.emit({ code: event.code, reason: event.reason });
+    });
     /* Wrapped before `open`, deliberately: the daemon posts its channel hello the
      * instant the upgrade completes, and a listener attached later never sees it. */
     const port = agentChannelPort(socket);
@@ -1213,7 +1245,7 @@ export const openAgentHostChannel = async (
   };
   const first = await dial();
   let firstUnused = true;
-  return createAgentChannelClient({
+  const client = createAgentChannelClient({
     connect: async () => {
       if (firstUnused) {
         firstUnused = false;
@@ -1224,6 +1256,8 @@ export const openAgentHostChannel = async (
     livenessTimeout: daemonLivenessTimeout,
     sessionKey: 'tau-agent',
   });
+  socketCloses.set(client, closes);
+  return client;
 };
 
 /**

@@ -867,9 +867,9 @@
     },
     {
       "id": "D17",
-      "bound": "Observed chat attachment retry after loss (250 ms doubling to a 30 s delay ceiling)",
-      "site": "apps/ui/app/services/chat-session-store.ts",
-      "token": "const retry = setTimeout",
+      "bound": "Remote read retry after loss (remoteReadRetryMilliseconds: full jitter over 250 ms doubling to a 30 s delay ceiling, no give-up; online, visibilitychange to visible and pageshow retry at once; the curve resets only after an attach held 2 s)",
+      "site": "apps/ui/app/chat-clients/_internal/host-attachment.ts",
+      "token": "remoteReadRetryMilliseconds",
       "class": "Backoff",
       "owner": "W9"
     },

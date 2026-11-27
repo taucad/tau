@@ -430,7 +430,7 @@ describe('useContextPayload', () => {
           name: 'create-skill',
           resourceUri: 'system:skills/create-skill/SKILL.md',
           source: 'system',
-          version: '1.0.0',
+          version: '1.1.0',
         }),
       ]),
     );

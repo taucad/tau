@@ -5,6 +5,12 @@ import z from 'zod';
  * Schema for a single skill's metadata as discovered from `.agents/skills/`
  * SKILL.md frontmatter — the only filesystem skills root.
  *
+ * `name` and `description` are the Agent Skills specification's own fields;
+ * `source`, `version` and `enabled` are read from the frontmatter's `metadata`
+ * mapping. `diagnostics` lists where a loaded skill departs from the
+ * specification: such a skill still loads, and the list is there to show its
+ * author.
+ *
  * @public
  */
 export const skillMetadataSchema = z.object({
@@ -18,6 +24,7 @@ export const skillMetadataSchema = z.object({
   whenToUse: z.string().optional(),
   fingerprint: z.string().optional(),
   enabled: z.boolean().optional(),
+  diagnostics: z.array(z.string()).optional(),
   shadowedSources: z
     .array(
       z.object({

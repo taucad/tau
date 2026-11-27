@@ -5801,6 +5801,9 @@ importers:
       geospec:
         specifier: 'catalog:'
         version: 0.6.0(vitest@4.1.11)
+      js-yaml:
+        specifier: 'catalog:'
+        version: 4.3.2
     devDependencies:
       '@gltf-transform/core':
         specifier: 'catalog:'
@@ -5811,6 +5814,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@types/js-yaml':
+        specifier: 'catalog:'
+        version: 4.0.9
       geospec-engine:
         specifier: 'catalog:'
         version: 0.6.0

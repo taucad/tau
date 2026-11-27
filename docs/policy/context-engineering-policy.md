@@ -3,7 +3,7 @@ title: 'Context Engineering Policy'
 description: 'Comprehensive guide to optimizing system prompts, tool definitions, and context pipelines for LLM agents. Covers foundational principles, placement framework, cache economics, compaction safety, subagent criteria, untrusted content, and eval discipline.'
 status: active
 created: '2026-03-09'
-updated: '2026-11-10'
+updated: '2026-11-26'
 related:
   - docs/policy/agent-observability-policy.md
   - docs/policy/filesystem-context-policy.md
@@ -124,6 +124,8 @@ Decide where content lives by how it is consumed. A permanent prompt slot is ear
 | Mechanics of one tool                                                     | Tool description                        | With the toolbelt                      |
 
 Skill tier budgets (`claude-docs-2025-skill-authoring-best-practices`, `agentskills-2025-specification`): frontmatter `name` ≤64 chars and `description` ≤1024 chars are the only always-loaded parts; keep the SKILL.md body under 500 lines and split overflow into separate reference files loaded on demand.
+
+Skills Tau ships or writes into a project follow the Agent Skills specification as written (`agentskills-2025-specification`): the frontmatter carries only `name`, `description`, `license`, `compatibility`, `metadata` and `allowed-tools`, `name` equals the skill's directory, and `description` says both what the skill does and when to use it. Tau's own keys (`source`, `version`, `enabled`) are strings under `metadata`, never top-level fields. Read leniently, as the specification's client guide asks: load a skill that departs from the specification and record how (`validateSkillFrontmatter` in `libs/agent-tools/src/skills/skill-metadata.ts`); skip one only when its YAML cannot be parsed or it lacks a name or a description. Leave a skill whose `metadata.enabled` is `"false"` out of the catalog the model sees.
 
 **Provenance caution**: 26.1% of community-contributed skills contain vulnerabilities, and skills bundling executable scripts are 2.12× more likely to be vulnerable than instruction-only skills (`agent-skills-2026-survey`). Audit third-party skills before install; prefer instruction-only skills unless a script is essential.
 

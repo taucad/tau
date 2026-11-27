@@ -201,6 +201,32 @@
 \* answer naming another directory) instead of a pass, which reads the index (B1); `project-library.ts` remembers an
 \* orphan nominee's undecided proof until the listing changes (M4). Both read storage, `AbsenceProof = "storage"`; the
 \* precheck runs before `MutationJournaled`. No action or correspondence changes.
+\* Fast-path FW3 (2026-11-26, targeted verification): the authority's permanent delete answers what remains of the id
+\* under the same hold of `project:<id>` as the removal: it probes the id's known locations and, when none holds it,
+\* runs `verifyAbsent`, and the settle reads that answer (`project-library-storage.ts`'s `remainingCopiesAfterDelete`
+\* is gone). The removal and the proof of absence were two holds of the lock; they are one now, which is what
+\* `ReplaySettled` already assumed by taking `Applied` and `Absent` over `storage'` in one step, so that residual is
+\* closed and the step is the code's. With `copy` set the authority proves the surviving copy again in that hold and
+\* refuses when none holds the id: a settle that fails `terminal` or `workspace` with storage unchanged, which
+\* `Outcomes` already allows. The permanent-delete precheck proves another copy with a probe in place of
+\* `verifyProjectRoute` and `verifyAbsent`, before `MutationJournaled`; "Use this folder" binds a directory a probe
+\* reads holding the id instead of starting a pass, one fewer environment `EpochBumped`; the manifest read's fallback
+\* probes the known locations before its pass, and a create allocates against a fresh listing of its root's names.
+\* No action or correspondence changes.
+\* FW3 sole-copy cancel (2026-11-26, the operator's ruling "Cancel and say so"): a copy delete the authority refuses
+\* because no other copy holds the id, or none could be read, no longer fails its row. It settles `cancelled`: the row
+\* leaves the journal, storage, device state (`kept`) and the catalog are unchanged, and this tab holds nothing for the
+\* project, which the person is told about. `ReplaySettled` gains that outcome for a delete row (`Outcomes(r)`),
+\* `RowStates` and `Reasons` gain `cancelled`, and `CancelLeavesProjectReachable` is new, with the constant `CancelHolds`
+\* and its witness `cancel-holds`. Every earlier configuration sets `CancelHolds = FALSE`.
+\* FW3 sole-copy cancel code (2026-11-26): `library-recovery.machine` settles a `cancelled` outcome to its row state
+\* `cancelled`, which holds nothing, and emits `rowCancelled`; `project-library.ts` returns the outcome to the delete's
+\* caller and keeps a replay's cancel for the person until dismissed; the permanent-delete precheck and "Use this
+\* folder" leave out the directories other deletes in the journal are removing (review M2) and degrade to their earlier
+\* reads when the authority refuses the probe (review m3). `ReplaySettled`'s `cancelled` branch is the code's, as formatted.
+\* FW3 re-review (2026-11-27): a cancel carries whether no other copy holds the id or none could be counted (N1); a row
+\* this tab saw fail is not left out of a delete's proof (N2); only the probe's not-served refusal degrades (N3). Every
+\* change sits before `MutationJournaled` or inside the authority's answer; no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids
@@ -229,7 +255,8 @@ CONSTANTS Projects,        \* project ids
           MaxUnheard,      \* storage changes no evidence reports to the index (FW2): a lost fact, an offline edit
           AbsenceProof,    \* "storage": a reclaim asks `verifyAbsent`, a read of storage; "index": it trusts the index
           VerifyFeedsIndex,\* TRUE: an access read that contradicts the index corrects it and owes a pass
-          AuditOn          \* TRUE: this tab's audit re-reads what the index holds (`Audited`)
+          AuditOn,         \* TRUE: this tab's audit re-reads what the index holds (`Audited`)
+          CancelHolds      \* FALSE: a delete the authority cancels clears its row (FW3); TRUE (witness): it is held failed
 
 ASSUME /\ InitRows \subseteq Rows
        /\ Ops \subseteq {"create", "delete"} /\ Ops # {}
@@ -244,7 +271,7 @@ ASSUME /\ InitRows \subseteq Rows
        /\ AccessLoop = "today" => Reads = 2
        /\ MaxUnheard \in Nat
        /\ AbsenceProof \in {"storage", "index"}
-       /\ VerifyFeedsIndex \in BOOLEAN /\ AuditOn \in BOOLEAN
+       /\ VerifyFeedsIndex \in BOOLEAN /\ AuditOn \in BOOLEAN /\ CancelHolds \in BOOLEAN
 
 None == "none"
 MaxAttempts == 3
@@ -276,9 +303,9 @@ vars == <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, held, stopp
 
 Label(l) == IF Labelled THEN l ELSE "-"
 
-RowStates == {"unseen", "waiting", "replaying", "recovered", "failed", "discarded"}
+RowStates == {"unseen", "waiting", "replaying", "recovered", "cancelled", "failed", "discarded"}
 Active == {"waiting", "replaying"}
-Reasons == {"none", "terminal", "workspace"}
+Reasons == {"none", "terminal", "workspace", "cancelled"}
 Answers == {"recovering", "recovery-failed", "unavailable", "ready", "missing"}
 Open == {"asking", "reading", "between"}
 
@@ -462,7 +489,10 @@ ReplayStarted(r) ==
   /\ UNCHANGED <<storage, journal, rowProj, rowOp, ws, owed, pass, catalog, stopped, skipped, redo, replies, deliveries, n,
                  stale, kept>>
 
-Outcomes == IF ws = "unavailable" THEN {"workspace"} ELSE {"ok", "terminal"}
+\* FW3, sole copy: a delete whose journal row waived the Trash for another copy is cancelled by the authority when no
+\* other copy holds the id under the lock of its removal, or none could be read. Nothing is removed.
+Outcomes(r) == IF ws = "unavailable" THEN {"workspace"}
+               ELSE {"ok", "terminal"} \cup (IF rowOp[r] = "delete" THEN {"cancelled"} ELSE {})
 
 \* A replay, or a mutation applying its own row (MutationApplied), settles. `settleRecovery` and
 \* `resumePendingProjectOperation`: success removes the row and applies it (`Applied`); any failure marks
@@ -471,17 +501,23 @@ Outcomes == IF ws = "unavailable" THEN {"workspace"} ELSE {"ok", "terminal"}
 \* `workspace-unavailable` keeps its attempts and waits for WorkspaceReturned. Only the recovery loop's
 \* replays count an attempt (ReplayStarted, `settleRecovery`); a mutation's own settle counts none.
 \* A settled row read its project's directory, so the index holds it as it is (FW2). A settled delete reclaims the
-\* id's device state when `AbsenceProof` says no directory still carries it, read after the delete: `verifyAbsent`
-\* holds `project:<id>`, which every Tau writer of the id takes, so the step is atomic for them.
+\* id's device state when `AbsenceProof` says no directory still carries it, read after the delete: the authority
+\* removes the directory and runs `verifyAbsent` in one hold of `project:<id>` (FW3), which every Tau writer of the id
+\* takes, so the removal and its proof are one step for them, as here.
+\* A cancelled delete (FW3) removes nothing and changes no device state: its row leaves the journal and this tab holds
+\* nothing for it, so the project stays listed and reachable. `CancelHolds` keeps it failed instead, which is the
+\* witness that holding it would answer the project's route `recovery-failed` while the project is whole.
 ReplaySettled(r) ==
   /\ rec[r].st = "replaying"
-  /\ \E out \in Outcomes :
+  /\ \E out \in Outcomes(r) :
      \E s \in IF out = "ok" THEN Applied(rowOp[r], rowProj[r], storage) ELSE {storage} :
        /\ rec' = [rec EXCEPT ![r] =
                     CASE out = "ok" -> [Unseen EXCEPT !.st = "recovered"]
                       [] out = "terminal" -> [Unseen EXCEPT !.st = "failed", !.why = "terminal"]
-                      [] out = "workspace" -> [@ EXCEPT !.st = "failed", !.why = "workspace", !.via = "journal"]]
-       /\ journal' = IF out = "ok" THEN journal \ {r} ELSE journal
+                      [] out = "workspace" -> [@ EXCEPT !.st = "failed", !.why = "workspace", !.via = "journal"]
+                      [] out = "cancelled" -> [Unseen EXCEPT !.st = IF CancelHolds THEN "failed" ELSE "cancelled",
+                                                             !.why = "cancelled"]]
+       /\ journal' = IF out = "ok" \/ (out = "cancelled" /\ ~CancelHolds) THEN journal \ {r} ELSE journal
        /\ storage' = s
        /\ stale' = IF out = "ok" THEN stale \ {rowProj[r]} ELSE stale
        /\ kept' = IF out = "ok" /\ rowOp[r] = "delete"
@@ -826,7 +862,7 @@ RowAccounted ==
   /\ [][\A r \in Rows :
           /\ (rec[r].st # "unseen" /\ rec'[r].st = "unseen") => n'.crash > n.crash
           /\ (rec[r].st # "failed" /\ rec'[r].st = "failed")
-               => (rec'[r].why \in {"terminal", "workspace"} \/ rec[r].att = MaxAttempts)
+               => (rec'[r].why \in {"terminal", "workspace", "cancelled"} \/ rec[r].att = MaxAttempts)
           /\ (rec[r].st # "discarded" /\ rec'[r].st = "discarded")
                => (r \notin journal' /\ UNCHANGED <<storage, rowProj>>)]_vars
 
@@ -894,10 +930,17 @@ SingleReplay == \A r \in Rows : rec[r].st = "replaying" => r \in journal
 
 \* Liveness. Under weak fairness of storage and the replay, with the workspace available and the
 \* environment quiet, every row becomes recovered, failed or discarded. Quiescence: `RowsQuiescent`.
-RowSettled(r) == rec[r].st \in {"unseen", "recovered", "failed", "discarded"}
+RowSettled(r) == rec[r].st \in {"unseen", "recovered", "cancelled", "failed", "discarded"}
 RowsQuiescent == \A r \in Rows : RowSettled(r)
 Calm == ws = "available"
 RowEventuallySettled == <>[]Calm => <>[]RowsQuiescent
+
+\* FW3. A delete the authority cancelled removed nothing, so its project stays reachable: a route question is never
+\* answered `recovery-failed` on a row that was cancelled. `cancel-holds` shows holding the row would break it.
+CancelLeavesProjectReachable ==
+  [][\A q \in Questions :
+       (acc[q].st # "answered" /\ acc'[q].st = "answered" /\ acc'[q].ans = "recovery-failed")
+         => \E r \in Rows : rowProj[r] = acc[q].p /\ rec[r].st = "failed" /\ rec[r].why # "cancelled"]_vars
 
 \* S2, S11 (FW2). An id's device state is dropped only in a step after which no directory carries it.
 NoReclaimWhileCopy == [][\A p \in Projects : (p \in kept /\ p \notin kept') => p \notin storage']_vars

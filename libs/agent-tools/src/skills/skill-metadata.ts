@@ -1,5 +1,11 @@
 /**
- * Skill frontmatter parsing, fingerprinting and shadow merging.
+ * Skill frontmatter parsing, validation, fingerprinting and shadow merging.
+ *
+ * A `SKILL.md` follows the Agent Skills specification (agentskills.io): its
+ * frontmatter is YAML with `name` and `description`, and optionally `license`,
+ * `compatibility`, `metadata` and `allowed-tools`. Nothing else is a top-level
+ * field. What Tau itself keeps about a skill (`source`, `version`, `enabled`)
+ * lives under `metadata`, the specification's own extension point.
  *
  * Pure over strings, so the same rules apply whether the SKILL.md came off a
  * browser filesystem bridge, a daemon's disk, or a compiled-in catalog.
@@ -7,31 +13,141 @@
  * @module
  */
 
+import { load } from 'js-yaml';
 import type { SkillMetadata } from '@taucad/chat';
 import { hashString } from '@taucad/utils/hash';
 
-const frontmatterMatch = /^---\n([\S\s]*?)\n---/;
+const frontmatterMatch = /^---\r?\n([\S\s]*?)\r?\n---(?:\r?\n|$)/;
 const skillFileSuffix = /\/SKILL\.md$/;
 
 /** The one workspace directory a host discovers authored skills in. @public */
 export const canonicalSkillsDirectory = '.agents/skills';
 
-function parseScalar(frontmatter: string, key: string): string | undefined {
-  return new RegExp(`^${key}:\\s*["']?(.+?)["']?\\s*$`, 'm').exec(frontmatter)?.[1];
-}
+/** The top-level frontmatter fields the Agent Skills specification defines. @public */
+export const skillFrontmatterFields: readonly string[] = [
+  'name',
+  'description',
+  'license',
+  'compatibility',
+  'metadata',
+  'allowed-tools',
+];
 
-function parseBoolean(frontmatter: string, key: string): boolean | undefined {
-  const value = parseScalar(frontmatter, key);
-  if (value === undefined) {
+const nameMaxLength = 64;
+const descriptionMaxLength = 1024;
+const compatibilityMaxLength = 500;
+/* Lowercase letters, digits and single hyphens, neither leading nor trailing. */
+const namePattern = /^[\da-z]+(?:-[\da-z]+)*$/;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Quote plain scalars that hold `: `, the one malformation skills written for
+ * other clients commonly carry (`description: Use when: the user asks`). The
+ * specification's client guide suggests this retry before giving a file up.
+ */
+const quoteColonValues = (yaml: string): string =>
+  yaml.replaceAll(/^([A-Za-z][\w-]*):[\t ]+(?!["'>|])(.*:\s.*)$/gmu, (_line, key: string, value: string) => {
+    return `${key}: ${JSON.stringify(value)}`;
+  });
+
+/**
+ * Read a SKILL.md's YAML frontmatter.
+ *
+ * @param content - Raw SKILL.md text.
+ * @returns The frontmatter mapping, or `undefined` when the file has none or it cannot be parsed.
+ * @public
+ */
+export function readSkillFrontmatter(content: string): Record<string, unknown> | undefined {
+  const block = frontmatterMatch.exec(content)?.[1];
+  if (block === undefined) {
     return undefined;
   }
-  if (value === 'true') {
-    return true;
-  }
-  if (value === 'false') {
-    return false;
+  for (const candidate of [block, quoteColonValues(block)]) {
+    try {
+      const parsed = load(candidate);
+      if (isRecord(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // Unparseable as written: the quoted retry follows, then the file is skipped.
+    }
   }
   return undefined;
+}
+
+/**
+ * A frontmatter `metadata` mapping as the specification types it: string keys to string values.
+ *
+ * @param frontmatter - Parsed frontmatter.
+ * @returns Every scalar entry as a string; nested values are left out.
+ */
+const metadataOf = (frontmatter: Record<string, unknown>): Record<string, string> => {
+  const { metadata } = frontmatter;
+  if (!isRecord(metadata)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(metadata)
+      .filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value))
+      .map(([key, value]) => [key, String(value)]),
+  );
+};
+
+/**
+ * Check a skill's frontmatter against the Agent Skills specification.
+ *
+ * These never stop a skill loading: the specification's client guide asks a
+ * client to warn and load, so skills written for other clients keep working.
+ * Only a missing `name` or `description`, or YAML that cannot be parsed, skips
+ * a skill, and {@link parseSkillFrontmatter} decides that.
+ *
+ * @param frontmatter - Parsed frontmatter.
+ * @param directoryName - The skill's parent directory name, when it has one.
+ * @returns One sentence per departure from the specification; empty when it conforms.
+ * @public
+ */
+export function validateSkillFrontmatter(frontmatter: Record<string, unknown>, directoryName?: string): string[] {
+  const diagnostics: string[] = [];
+  const { name, description, compatibility, metadata } = frontmatter;
+  if (typeof name === 'string') {
+    if (name.length > nameMaxLength) {
+      diagnostics.push(`name is ${String(name.length)} characters; the limit is ${String(nameMaxLength)}.`);
+    }
+    if (!namePattern.test(name)) {
+      diagnostics.push(
+        'name may hold only lowercase letters, digits and single hyphens, and may not start or end with a hyphen.',
+      );
+    }
+    if (directoryName !== undefined && name !== directoryName) {
+      diagnostics.push(`name "${name}" does not match its directory "${directoryName}".`);
+    }
+  }
+  if (typeof description === 'string' && description.length > descriptionMaxLength) {
+    diagnostics.push(
+      `description is ${String(description.length)} characters; the limit is ${String(descriptionMaxLength)}.`,
+    );
+  }
+  if (compatibility !== undefined && (typeof compatibility !== 'string' || compatibility.length === 0)) {
+    diagnostics.push('compatibility must be a non-empty string when present.');
+  } else if (typeof compatibility === 'string' && compatibility.length > compatibilityMaxLength) {
+    diagnostics.push(
+      `compatibility is ${String(compatibility.length)} characters; the limit is ${String(compatibilityMaxLength)}.`,
+    );
+  }
+  if (
+    metadata !== undefined &&
+    (!isRecord(metadata) || Object.values(metadata).some((value) => typeof value !== 'string'))
+  ) {
+    diagnostics.push('metadata must map string keys to string values.');
+  }
+  for (const key of Object.keys(frontmatter)) {
+    if (!skillFrontmatterFields.includes(key)) {
+      diagnostics.push(`"${key}" is not a field of the Agent Skills specification; put client data under metadata.`);
+    }
+  }
+  return diagnostics;
 }
 
 /**
@@ -47,14 +163,18 @@ export function fingerprintSkillContent(content: string): string {
 }
 
 /**
- * Parse YAML frontmatter from a SKILL.md file to extract skill metadata.
- * Uses a small scalar parser because skill metadata only needs flat string and
- * boolean fields; the markdown body stays untouched for the agent.
+ * Parse a SKILL.md's frontmatter into the skill's catalog metadata.
+ *
+ * `name` and `description` come from the specification's own fields. Tau's
+ * `source`, `version` and `enabled` are read from `metadata`, each a string as
+ * the specification types that mapping (`enabled: "false"` hides a skill). The
+ * markdown body stays untouched for the agent.
  *
  * @param content - Raw file content of the SKILL.md
  * @param filePath - Path to the SKILL.md file (e.g. `.agents/skills/my-skill/SKILL.md`)
  * @param options - Source, resource URI and path overrides for virtual skills.
- * @returns Parsed skill metadata, or undefined if frontmatter is missing or incomplete
+ * @returns Parsed skill metadata, or undefined when the frontmatter is missing,
+ *   unparseable, or lacks a name or a description.
  * @public
  */
 export function parseSkillFrontmatter(
@@ -62,33 +182,32 @@ export function parseSkillFrontmatter(
   filePath: string,
   options?: { source?: string; resourceUri?: string; path?: string; skillPath?: string },
 ): SkillMetadata | undefined {
-  const match = frontmatterMatch.exec(content);
-  if (!match?.[1]) {
+  const frontmatter = readSkillFrontmatter(content);
+  if (frontmatter === undefined) {
     return undefined;
   }
 
-  const frontmatter = match[1];
-  const name = parseScalar(frontmatter, 'name');
-  const description = parseScalar(frontmatter, 'description');
-
-  if (!name || !description) {
+  const { name, description } = frontmatter;
+  if (typeof name !== 'string' || name === '' || typeof description !== 'string' || description.trim() === '') {
     return undefined;
   }
 
   const skillPath = options?.skillPath ?? (filePath.endsWith('/SKILL.md') ? filePath : undefined);
   const path = options?.path ?? (skillPath ? filePath.replace(skillFileSuffix, '') : undefined);
+  const metadata = metadataOf(frontmatter);
+  const diagnostics = validateSkillFrontmatter(frontmatter, path?.slice(path.lastIndexOf('/') + 1));
 
   return {
     name,
-    description,
+    description: description.trim(),
     resourceUri: options?.resourceUri ?? `file:${filePath}`,
     ...(path !== undefined && { path }),
     ...(skillPath !== undefined && { skillPath }),
-    source: parseScalar(frontmatter, 'source') ?? options?.source,
-    version: parseScalar(frontmatter, 'version'),
-    whenToUse: parseScalar(frontmatter, 'when_to_use') ?? parseScalar(frontmatter, 'whenToUse'),
+    source: metadata['source'] ?? options?.source,
+    version: metadata['version'],
     fingerprint: fingerprintSkillContent(content),
-    enabled: parseBoolean(frontmatter, 'enabled') ?? true,
+    enabled: metadata['enabled'] !== 'false',
+    ...(diagnostics.length > 0 && { diagnostics }),
   };
 }
 
@@ -137,9 +256,6 @@ function sourcePriority(source: string | undefined): number {
     }
     case 'system': {
       return 60;
-    }
-    case 'legacy': {
-      return 10;
     }
     default: {
       return 50;

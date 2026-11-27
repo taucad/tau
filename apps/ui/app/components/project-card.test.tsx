@@ -2,7 +2,11 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
+import { createIsometricCaptureCamera } from '@taucad/agent-tools/capture';
+import { defaultStageOptions } from '@taucad/viewer/graphics/three/stage-options';
+import { cameraPresetOrientations } from '@taucad/workbench';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
+import { projectCardVerticalFieldOfView } from '#components/project-card-camera.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const { cadPreviewViewerMock, warmProjectWorkspaceMock } = vi.hoisted(() => ({
@@ -157,5 +161,26 @@ describe('ProjectCardCadPreview', () => {
       }),
       undefined,
     );
+  });
+});
+
+describe('card framing', () => {
+  /* The card thumbnail and a capture frame with `createIsometricCaptureCamera()`; the card's live preview frames its first
+   * frame from the viewer's default stage at the card's field of view, through the same `frameCameraBounds`. With
+   * equal inputs the preview draws the model where the thumbnail did (#2295). */
+  it('should give the live preview the thumbnail camera direction, margin and field of view', () => {
+    const { side, vertical } = defaultStageOptions.rotation;
+    const stageDirection = [
+      Math.cos(vertical) * Math.cos(side),
+      Math.cos(vertical) * Math.sin(side),
+      Math.sin(vertical),
+    ];
+
+    for (const [index, component] of createIsometricCaptureCamera().direction.entries()) {
+      expect(stageDirection[index]).toBeCloseTo(component, 9);
+      expect(cameraPresetOrientations.isometric.direction[index]).toBeCloseTo(component, 9);
+    }
+    expect(defaultStageOptions.fitMargin).toBe(createIsometricCaptureCamera().margin);
+    expect(projectCardVerticalFieldOfView).toBe(createIsometricCaptureCamera().projection.verticalFieldOfView);
   });
 });

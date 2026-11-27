@@ -62,8 +62,23 @@ describe('auth config modules', () => {
     const schema = readFileSync(fileURLToPath(new URL('../auth-schema.generated.ts', import.meta.url)), 'utf8');
     const tables = [...schema.matchAll(/pgTable\(\s*'([^']+)'/g)].map(([, name]) => name);
 
-    // `deviceCode` is newer than the generated file and is declared by hand in `@taucad/api-database/schema` (`auth.schema.ts`).
-    expect(models.toSorted()).toEqual(['account', 'apikey', 'deviceCode', 'session', 'user', 'verification']);
+    // `deviceCode` and the `oauth*` models are newer than the generated file and are declared by hand in
+    // `@taucad/api-database/schema` (`auth.schema.ts`).
+    expect(models.toSorted()).toEqual([
+      'account',
+      'apikey',
+      'deviceCode',
+      'oauthAccessToken',
+      'oauthClient',
+      'oauthClientAssertion',
+      'oauthClientResource',
+      'oauthConsent',
+      'oauthRefreshToken',
+      'oauthResource',
+      'session',
+      'user',
+      'verification',
+    ]);
     expect(models).toEqual(expect.arrayContaining(tables));
   });
 });

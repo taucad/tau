@@ -22,7 +22,9 @@
  * marks the projects the packaged desktop gate keys on; `ci:shell` marks the
  * shell conformance lane's projects once the shell split tags them;
  * `ci:native-hosts` marks the projects whose change selects the Linux native
- * host rows (`native-hosts.yml`, which `ci.yml`'s plan calls in the merge queue).
+ * host rows (`native-hosts.yml`, which `ci.yml`'s plan calls in the merge queue);
+ * `ci:windows-unit` marks the projects whose `test` target runs on Windows
+ * (`windows-unit.yml`), added once a project's suite is green there.
  *
  * @public
  */
@@ -71,5 +73,5 @@ export const projectTagVocabulary = {
     'unlayered',
   ],
   protocol: ['agent'],
-  ci: ['browser', 'standalone', 'nightly-only', 'shell', 'desktop', 'native-hosts'],
+  ci: ['browser', 'standalone', 'nightly-only', 'shell', 'desktop', 'native-hosts', 'windows-unit'],
 } as const;

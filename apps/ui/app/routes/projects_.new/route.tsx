@@ -34,6 +34,7 @@ import {
   projectLocationFullLabel,
 } from '@taucad/files-ui/utils/project-creation-location.utils';
 import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
+import { defaultWideFrameHint, frameHintKey, writeWideFrameHint } from '#lib/frame-hint.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { focusProjectNameScript } from '#routes/projects_.new/focus-project-name-script.js';
 import { reportProjectCreationFailure } from '#lib/project-creation-failure-reporting.js';
@@ -92,6 +93,13 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
 }
 
 // Custom hook for project creation logic
+/*
+ * Desktop starts in the code-oriented Workbench lane. A phone starts on the chat over the empty stage (WB-10), never on
+ * the Editor: that surface is the dockview workbench, which a phone loads only when a file is opened there, so opening
+ * the new project paints the phone layout without it (D13, T8).
+ */
+const newProjectDesktopLayout = { workbenchOpen: true, compactAuxiliary: 'workbench' } as const;
+
 function useProjectCreation() {
   const navigate = useNavigate();
   const [isCreating, setIsCreating] = useState(false);
@@ -126,18 +134,24 @@ function useProjectCreation() {
           },
           chatName: 'Initial design',
           location: projectData.location,
-          // Desktop starts in the code-oriented Workbench lane. A phone starts on the chat over the empty stage
-          // (WB-10), never on the Editor: that surface is the dockview workbench, which a phone loads only when a
-          // file is opened there, so opening the new project paints the phone layout without it (D13, T8).
           editorState: {
             panelState: {
-              desktopLayout: { workbenchOpen: true, compactAuxiliary: 'workbench' },
+              desktopLayout: newProjectDesktopLayout,
               mobileActiveTab: 'chat',
             },
           },
         });
 
-        await navigate(projectUrl(createProject.slugs));
+        const url = projectUrl(createProject.slugs);
+        /* The workspace frame draws a project's lanes from its hint until the live layout takes over (A15b). A new
+         * project has none, so the frame would draw the default lanes: at a compact width the chat lane and its
+         * composer box, which the live layout then replaces with the Workbench, taking a draft typed there out of
+         * sight. The frame draws the lanes the project opens with instead. */
+        const hintKey = frameHintKey(url);
+        if (hintKey !== undefined) {
+          writeWideFrameHint(hintKey, { ...defaultWideFrameHint, ...newProjectDesktopLayout });
+        }
+        await navigate(url);
       } catch (error) {
         setIsCreating(false);
         console.error('Failed to create project:', error);

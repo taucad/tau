@@ -90,6 +90,8 @@ jobs:
       desktop-projects: ${{ steps.plan.outputs.desktop-projects }}
       shell: ${{ steps.plan.outputs.shell }}
       shell-projects: ${{ steps.plan.outputs.shell-projects }}
+      windows-unit: ${{ steps.plan.outputs.windows-unit }}
+      windows-unit-projects: ${{ steps.plan.outputs.windows-unit-projects }}
       e2e-queue: ${{ steps.plan.outputs.e2e-queue }}
       e2e-queue-suites: ${{ steps.plan.outputs.e2e-queue-suites }}
       e2e-shadow: ${{ steps.plan.outputs.e2e-shadow }}
@@ -218,6 +220,7 @@ jobs:
              "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "paths", "queue": "never"},
              "desktop": {"tags": ["ci:desktop"]},
              "shell": {"tags": ["ci:shell"], "pr": "queue", "queue": "any-touched"},
+             "windows-unit": {"tags": ["ci:windows-unit"], "pr": "touched"},
              "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "touched"},
              "e2e-shadow": {"targets": ["test:e2e:shadow"], "pr": "queue"},
              "compute-qualify": {"targets": ["compute-qualify-ci"]},
@@ -459,6 +462,8 @@ jobs:
           desktop_projects=$(jq -c '.desktop' <<< "$lanes")
           shell=$(flag shell)
           shell_projects=$(jq -c '.shell' <<< "$lanes")
+          windows_unit=$(flag windows-unit)
+          windows_unit_projects=$(jq -c '."windows-unit"' <<< "$lanes")
           e2e_queue=$(flag e2e-queue)
           # One row per ratcheted suite of the selected projects: each entry of a project's `test:e2e:queue`
           # `dependsOn` is a target of that project, run unsharded (an `e2e-chat-logs` merge of shards is the
@@ -537,6 +542,8 @@ jobs:
             echo "desktop-projects=$desktop_projects"
             echo "shell=$shell"
             echo "shell-projects=$shell_projects"
+            echo "windows-unit=$windows_unit"
+            echo "windows-unit-projects=$windows_unit_projects"
             echo "e2e-queue=$e2e_queue"
             echo "e2e-queue-suites=$e2e_queue_suites"
             echo "e2e-shadow=$e2e_shadow"
@@ -1367,6 +1374,26 @@ jobs:
     secrets:
       NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
+  # The Windows unit rows (`windows-unit.yml`, Windows desktop production readiness R2): the `test` target of
+  # each affected `tag:ci:windows-unit` project on `windows-2025`, one job per project. A pull request runs the
+  # projects that own a file of its diff (`pr: touched`); the merge queue runs every affected one, so a change
+  # that reaches a tagged project only through a dependency is caught before it lands. Hosted Windows runners
+  # only, never macOS. A push to `main` reuses the queue verdict. The required check waits for it.
+  windows-unit:
+    name: Windows unit
+    needs: [plan]
+    if: needs.plan.outputs.windows-unit == 'true'
+    permissions: # The called workflow's plan job declares these
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
+    uses: ./.github/workflows/windows-unit.yml
+    with:
+      ref: ${{ github.sha }}
+      projects: ${{ needs.plan.outputs.windows-unit-projects }}
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+
   # The formal nightly tiers (`formal-nightly.yml`: mutants, fresh-seed differentials and simulations, nightly
   # configs), in the merge queue only, one job per affected `formal:nightly` project and target, each with
   # its own 120-minute budget. The seed source is the queue commit's sha, so each landing explores a fresh
@@ -1746,7 +1773,7 @@ jobs:
 
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (every package-check shard, browser, GeoSpec example
-  # contracts, CLI end-to-end, the end-to-end ratchet, compute reuse qualification, native hosts, viewer parity, formal, API tests, billing
+  # contracts, CLI end-to-end, the end-to-end ratchet, compute reuse qualification, native hosts, viewer parity, Windows unit, formal, API tests, billing
   # contracts, the Node 24 floor shards, and the shell rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected
   # fails it. Viewer parity is planned on pull requests and pushes only (VP-1), so on a pull request that touches
   # its inputs this check, which the queue's auto-merge waits for, holds the pull request until parity passes. It
@@ -1778,6 +1805,7 @@ jobs:
         api,
         billing-e2e,
         shell,
+        windows-unit,
         formal-nightly,
         e2e-queue,
         compute-qualify,
@@ -1813,6 +1841,8 @@ jobs:
           BILLING_RESULT: ${{ needs.billing-e2e.result }}
           SHELL_REQUIRED: ${{ needs.plan.outputs.shell }}
           SHELL_RESULT: ${{ needs.shell.result }}
+          WINDOWS_UNIT_REQUIRED: ${{ needs.plan.outputs.windows-unit }}
+          WINDOWS_UNIT_RESULT: ${{ needs.windows-unit.result }}
           FORMAL_NIGHTLY_REQUIRED: ${{ needs.plan.outputs.formal-nightly }}
           FORMAL_NIGHTLY_RESULT: ${{ needs.formal-nightly.result }}
           E2E_QUEUE_REQUIRED: ${{ needs.plan.outputs.e2e-queue }}
@@ -1848,6 +1878,7 @@ jobs:
           if [ "$API_REQUIRED" = true ]; then test "$API_RESULT" = success; fi
           if [ "$BILLING_REQUIRED" = true ]; then test "$BILLING_RESULT" = success; fi
           if [ "$SHELL_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$SHELL_RESULT" = success; fi
+          if [ "$WINDOWS_UNIT_REQUIRED" = true ]; then test "$WINDOWS_UNIT_RESULT" = success; fi
           if [ "$FORMAL_NIGHTLY_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$FORMAL_NIGHTLY_RESULT" = success; fi
           if [ "$E2E_QUEUE_REQUIRED" = true ]; then test "$E2E_QUEUE_RESULT" = success; fi
           if [ "$COMPUTE_QUALIFY_REQUIRED" = true ]; then test "$COMPUTE_QUALIFY_RESULT" = success; fi
@@ -2037,6 +2068,15 @@ jobs:
     name: Fail fast (shell)
     needs: [shell]
     if: ${{ failure() && github.event_name == 'merge_group' && needs.shell.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-windows-unit:
+    name: Fail fast (windows-unit)
+    needs: [windows-unit]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.windows-unit.result == 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: *fail-fast-permissions
@@ -2519,6 +2559,23 @@ jobs:
           echo "::error::/health/live did not respond with 200 within 60s"
           docker logs tau-api-smoke || true
           exit 1
+
+      # The built image, not the source tests, decides which copy of each package the bundle loads: on 2026-11-27
+      # staging answered 500 on every `/oauth2/*` route because the bundle inlined `@better-auth/oauth-provider` and
+      # resolved its `zod` to the app's older copy. A signed-out Tau Desktop authorization must reach the sign-in page.
+      - name: Answer a Tau Desktop authorization
+        run: |
+          challenge=$(printf 'smoke-verifier-0123456789-0123456789-abcdef' | openssl dgst -sha256 -binary | basenc --base64url | tr -d '=')
+          location=$(curl --silent --max-time 5 --output /dev/null --write-out '%{http_code} %{redirect_url}' \
+            "http://localhost:3000/v1/auth/oauth2/authorize?response_type=code&client_id=tau-desktop&redirect_uri=http%3A%2F%2F127.0.0.1%3A53682%2Fcb%2Fsmoke0123456789abcdefghij&scope=openid+profile+email+offline_access&state=smoke-state-0123456789abcdef&code_challenge=${challenge}&code_challenge_method=S256&prompt=consent")
+          case "$location" in
+            "302 http://localhost/auth/sign-in?"*) echo "Authorization reached the sign-in page" ;;
+            *)
+              echo "::error::Tau Desktop authorization answered '${location%% *}' instead of a redirect to the sign-in page"
+              docker logs tau-api-smoke 2>&1 | tail -50 || true
+              exit 1
+              ;;
+          esac
 
       - name: Cleanup
         if: always()

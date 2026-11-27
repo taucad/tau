@@ -77,7 +77,6 @@ export const workspaceRootInventoryErrors = (inventory: WorkspaceRootInventory):
 
 const main = (): void => {
   const workspaceRoot = resolve(import.meta.dirname, '../..');
-  /* The index's path list passed execFileSync's 1 MiB default buffer (ENOBUFS) at about 1,048,600 bytes. */
   const trackedPaths = execFileSync('git', ['ls-files', '-z'], {
     cwd: workspaceRoot,
     encoding: 'utf8',

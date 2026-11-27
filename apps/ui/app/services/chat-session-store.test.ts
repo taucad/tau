@@ -5402,7 +5402,8 @@ describe('ChatSessionStore', () => {
       }
     });
 
-    it('should retain a prepared message when retry has no durable host decision', async () => {
+    /* HA-I4 (HA4): applied with nothing to do is the host's decision, so the item ends and is never sent again. */
+    it('should end a prepared message the host applied with nothing to do', async () => {
       const chatId = 'queue_no_decision';
       const { store, session, hostCommand, unpublish } = await open(chatId, 'queue_project');
       const unadmit = queueAdmission(chatId);
@@ -5426,8 +5427,9 @@ describe('ChatSessionStore', () => {
           expect(hostCommand).toHaveBeenCalledTimes(2);
         });
         await settle();
-        expect(session.messageQueueRef.getSnapshot().context.items[0]?.command).toEqual(original);
-        expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+        expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+        expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(false);
+        expect(hostCommand).toHaveBeenCalledTimes(2);
       } finally {
         unadmit();
         unpublish();

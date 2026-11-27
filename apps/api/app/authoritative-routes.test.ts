@@ -64,7 +64,6 @@ const cachedReadAllowlist: Readonly<Record<string, string>> = {
   '../libs/api-billing/src/billing.controller.ts#GET entitlements': 'Entitlements, read from the database on use',
   '../libs/api-billing/src/billing.controller.ts#GET credits': 'Credit balance read',
   '../libs/api-billing/src/billing.controller.ts#GET model-estimates': 'Price estimates read',
-  '../libs/api-billing/src/billing.controller.ts#GET holds': 'Credit holds read',
   '../libs/api-billing/src/billing.controller.ts#GET usage': 'Usage read',
   '../libs/api-billing/src/billing.controller.ts#GET operations': 'Funded operation states read, as the single route',
   '../libs/api-billing/src/billing.controller.ts#GET operations/:operationId': 'Funded operation state read',

@@ -19,7 +19,10 @@ export const monthlyPlanCreditAtomsByTier: Readonly<Record<BillingTier, bigint |
  * @public
  */
 export type MonthlyCredits = {
-  /** Unheld monthly credit atoms the account can spend now; zero while in debt. */
+  /**
+   * Monthly credit atoms left; zero while in debt. Credits held for work still running are not subtracted: holds are
+   * internal to the ledger and never shown, so the figure only falls when a charge settles.
+   */
   readonly availableCreditAtoms: bigint;
   /** The plan allotment; zero when the contract-specific allowance is unknown. */
   readonly scaleCreditAtoms: bigint;
@@ -48,12 +51,11 @@ export const monthlyCreditsFromBalance = (
   tier: BillingTier,
 ): MonthlyCredits | undefined => {
   const assets = BigInt(balance.planGrantCreditAtoms);
-  const held = BigInt(balance.planHeldCreditAtoms);
   const allotment = monthlyPlanCreditAtomsByTier[tier];
   if (tier === 'free' && assets === 0n) {
     return undefined;
   }
-  const availableCreditAtoms = BigInt(balance.debtCreditAtoms) > 0n ? 0n : assets - held;
+  const availableCreditAtoms = BigInt(balance.debtCreditAtoms) > 0n ? 0n : assets;
   const scaleCreditAtoms = allotment ?? 0n;
   const fraction =
     scaleCreditAtoms === 0n ? 0 : Math.min(1, Number((availableCreditAtoms * 10_000n) / scaleCreditAtoms) / 10_000);

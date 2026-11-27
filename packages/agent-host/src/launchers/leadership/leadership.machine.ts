@@ -146,6 +146,12 @@ type LeadershipContext = Readonly<{
   claimRetry: number;
   /** HA4: this term's claim was refused `WRITER_LOCKED` and no retry has opened the writer yet. */
   refusedClaim: boolean;
+  /**
+   * HA4 (review I1): the refused term is owed a release, held while a command runs here: that command may open the
+   * writer and admit a run, which a relinquish would abandon. The last answer releases it, unless it proves the writer
+   * open.
+   */
+  releaseRefused: boolean;
 }>;
 
 /** `claiming` and `leading` hold a granted lock: no read or claim runs without its correlation (finding 1). */
@@ -582,7 +588,34 @@ const releaseNow = (
   const next = release(context, enq, actions);
   /* Last: a follower that hears it finds the writer relinquished and the lock released (the binding orders it so). */
   run(enq, actions, 'broadcast', { kind: 'hb', epoch: context.epoch, body: { state: 'released' } });
-  return { target: '#ready', context: { ...next, refusedClaim: false } };
+  return { target: '#ready', context: { ...next, refusedClaim: false, releaseRefused: false } };
+};
+
+/** HA4 (review I1): release a refused term now, or once the commands running here are answered. */
+const releaseRefusedTerm = (
+  context: LeadingContext,
+  enq: { cancel: (id: string) => void },
+  actions: Effects,
+): Readonly<{ context: LeadingContext }> | Readonly<{ target: '#ready'; context: LeadershipContext }> => {
+  enq.cancel(claimRetryId(context.lock.corr));
+  enq.cancel(claimRefusalId(context.lock.corr));
+  return context.running.length === 0 && context.writes.length === 0
+    ? releaseNow(context, enq, actions)
+    : { context: { ...context, refusedClaim: true, releaseRefused: true } };
+};
+
+/** HA4 (review I1): a durable answer here proves the writer open, so a refused term's retry and bound are off. */
+const writerProven = (
+  context: LeadingContext,
+  answer: CommandAnswer,
+  enq: { cancel: (id: string) => void },
+): LeadingContext => {
+  if (!context.refusedClaim || answer.status === 'refused' || answer.effect !== 'durable') {
+    return context;
+  }
+  enq.cancel(claimRetryId(context.lock.corr));
+  enq.cancel(claimRefusalId(context.lock.corr));
+  return { ...context, refusedClaim: false, releaseRefused: false };
 };
 
 /** A claim report or retry for the term this worker leads now: its grant and its epoch (HA4). */
@@ -700,6 +733,7 @@ export const leadershipMachine = machineDefinition.createMachine({
     claimRefusalRetry: input.claimRefusalRetry ?? claimRefusalRetryMilliseconds,
     claimRetry: input.claimRetry ?? claimRetryMilliseconds,
     refusedClaim: false,
+    releaseRefused: false,
   }),
   initial: 'idle',
   /* A fault (MC-R12, D-092): everything owed is answered, the lock and the writer are let go, and the project host
@@ -863,6 +897,7 @@ export const leadershipMachine = machineDefinition.createMachine({
               floor: Math.max(context.floor, event.epoch),
               reconcile: false,
               refusedClaim: false,
+              releaseRefused: false,
             },
             enq,
             actions,
@@ -947,9 +982,12 @@ export const leadershipMachine = machineDefinition.createMachine({
         claimRefused: branches(
           refines('Unmodelled', ({ context, event }) => (thisTerm(context, event) ? undefined : {})),
           refines('ReleaseRefused', ({ context, event, actions }, enq) =>
-            event.code === 'WRITER_LOCKED' ? undefined : releaseNow(context, enq, actions),
+            event.code === 'WRITER_LOCKED' ? undefined : releaseRefusedTerm(context, enq, actions),
           ),
           refines('RefuseClaim', ({ context, event }, enq) => {
+            if (context.releaseRefused) {
+              return {};
+            }
             const { corr, epoch } = event;
             enq.cancel(claimRetryId(corr));
             enq.raise({ type: 'claimRetry', corr, epoch }, { id: claimRetryId(corr), delay: context.claimRetry }); // Bound: claimRetryMilliseconds.
@@ -969,22 +1007,22 @@ export const leadershipMachine = machineDefinition.createMachine({
           }
           enq.cancel(claimRetryId(event.corr));
           enq.cancel(claimRefusalId(event.corr));
-          return { context: { ...context, refusedClaim: false } };
+          return { context: { ...context, refusedClaim: false, releaseRefused: false } };
         }),
         claimRetry: refines('Unmodelled', ({ context, event, actions }, enq) => {
-          if (!thisTerm(context, event) || !context.refusedClaim) {
+          if (!thisTerm(context, event) || !context.refusedClaim || context.releaseRefused) {
             return {};
           }
           run(enq, actions, 'claim', { corr: context.lock.corr, epoch: context.epoch });
           return {};
         }),
-        /* HA4 (AR3-6): still refused at the still-closing bound: the lock goes, and the orphan waits for the next claim. */
+        /* HA4 (AR3-6): still refused at the still-closing bound: the lock goes, once nothing runs here, and the orphan
+         * waits for the next claim. */
         claimRefusalBound: refines('ReleaseRefused', ({ context, event, actions }, enq) => {
           if (!thisTerm(context, event) || !context.refusedClaim) {
             return {};
           }
-          enq.cancel(claimRetryId(event.corr));
-          return releaseNow(context, enq, actions);
+          return releaseRefusedTerm(context, enq, actions);
         }),
         /* EQ4: quiescent with nothing in flight releases the lock and closes the writer (RH-R8). */
         quiescent: branches(
@@ -998,17 +1036,25 @@ export const leadershipMachine = machineDefinition.createMachine({
         /* The answer (`Answer`), and when it was the last thing in flight while M1 is quiescent, the release after it
          * (`Release`, which the spec enables once nothing is pending). A stale report stays under `Answer`. */
         executed: branches(
-          refines('Answer', ({ context, event, actions }, enq) => {
+          /* HA4 (review I1): the last answer a refused term waited on releases it, unless it proved the writer open. */
+          refines('ReleaseRefused', ({ context, event, actions }, enq) => {
+            const proven = writerProven(context, event.answer, enq);
+            const answered = proven.releaseRefused ? answerRunning(proven, event, enq, actions) : undefined;
+            return answered?.running.length === 0 ? releaseNow(answered, enq, actions) : undefined;
+          }),
+          refines('Answer', ({ context: held, event, actions }, enq) => {
+            const context = writerProven(held, event.answer, enq);
             const running = context.running.filter((entry) => entry.corr !== event.corr);
             if (running.length < context.running.length && releasable({ ...context, running })) {
               return undefined;
             }
             const answered = answerRunning(context, event, enq, actions);
-            return answered === undefined ? {} : { context: answered };
+            return answered === undefined ? { context } : { context: answered };
           }),
-          refines('Release', ({ context, event, actions }, enq) =>
-            releaseIfQuiet(answerRunning(context, event, enq, actions) ?? context, enq, actions),
-          ),
+          refines('Release', ({ context, event, actions }, enq) => {
+            const proven = writerProven(context, event.answer, enq);
+            return releaseIfQuiet(answerRunning(proven, event, enq, actions) ?? proven, enq, actions);
+          }),
         ),
         /* RH-R9: a fenced append rereads while the lock is held. */
         fenced: refines('Refused', ({ context, actions }, enq) => {

@@ -481,6 +481,40 @@ describe('leadership (M2)', () => {
       expect(leader.actor.getSnapshot().value).toEqual({ idle: 'ready' });
     });
 
+    /* Review I1: a command running here may open the writer and admit a run; the bound must not relinquish it. */
+    it('should not relinquish at the bound while a command runs, and keep leading once it proves the writer open', async () => {
+      const leader = harness({ claimRefusalRetry: 3000 });
+      const corr = leading(leader);
+      leader.actor.send({ type: 'quiescent', quiescent: false });
+      leader.actor.send({ type: 'claimRefused', corr, epoch: 2, code: 'WRITER_LOCKED' });
+      leader.actor.send({ type: 'command', corr: 'c1', command: command('c1') });
+      const [running] = leader.take('runLocal');
+      expect(running?.corr).toBe('c1');
+      await leader.clock.advanceAsync(3000);
+      expect(leader.of('relinquish')).toEqual([]);
+      expect(leader.of('releaseLock')).toEqual([]);
+      leader.actor.send({ type: 'executed', corr: 'c1', answer: applied('c1', 2) });
+      leader.effects.length = 0;
+      leader.actor.send({ type: 'claimRefused', corr, epoch: 2, code: 'WRITER_LOCKED' });
+      leader.actor.send({ type: 'claimed', corr, epoch: 2 });
+      await leader.clock.advanceAsync(10_000);
+      expect(leader.of('relinquish')).toEqual([]);
+      expect(leader.actor.getSnapshot().value).toBe('leading');
+    });
+
+    it('should release a refused term once the command it waited on is refused too', async () => {
+      const leader = harness({ claimRefusalRetry: 3000 });
+      const corr = leading(leader);
+      leader.actor.send({ type: 'quiescent', quiescent: false });
+      leader.actor.send({ type: 'command', corr: 'c1', command: command('c1') });
+      leader.actor.send({ type: 'claimRefused', corr, epoch: 2, code: 'LOG_POISONED' });
+      expect(leader.of('relinquish')).toEqual([]);
+      leader.actor.send({ type: 'executed', corr: 'c1', answer: refusal('c1', 'LOG_POISONED', 2) });
+      expect(leader.of('answer')).toHaveLength(1);
+      expect(leader.of('relinquish')).toHaveLength(1);
+      expect(leader.actor.getSnapshot().value).toEqual({ idle: 'ready' });
+    });
+
     it("should drop a refusal from an earlier term's claim", async () => {
       const leader = harness({ claimRefusalRetry: 3000 });
       const corr = leading(leader);

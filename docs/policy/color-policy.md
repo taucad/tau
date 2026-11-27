@@ -247,7 +247,7 @@ CORRECT:
 <span className="text-muted-foreground">
 ```
 
-**Known violations**: MagicUI components (`safari.tsx`, `border-beam.tsx`, `animated-gradient-text.tsx`) use hardcoded hex. These should accept optional color props with semantic token fallbacks.
+**Known violations**: MagicUI components (`safari.tsx`, `border-beam.tsx`) use hardcoded hex. These should accept optional color props with semantic token fallbacks.
 
 ### Inline OKLCH in Components
 

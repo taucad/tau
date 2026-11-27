@@ -622,22 +622,19 @@
   }
 }
 
-/* A spinning glyph turns its drawing about the viewBox centre instead of turning its own box. WebKit
-   rotates a spinning box about that box's pixel-snapped centre, so a glyph whose box lands on a
-   fractional size (`size-[0.9rem]`, page zoom) orbits its true centre and wobbles. Turning the
-   children in the SVG's own coordinates keeps the spin concentric at every size. Apply it to the
-   `<svg>`; `--spin-glyph-duration` sets the pace. */
+/* A spinning glyph turns its own box on its own compositor layer, so a spinner that runs for minutes costs no style,
+   layout or paint on the main thread (UI Policy, steady-state decorations). Turning the SVG's children instead keeps
+   the spin concentric when WebKit pixel-snaps a fractional box, but SVG child transforms are not composited: every
+   frame re-runs layout and paint for the whole page. Spinners therefore take whole-pixel sizes (`size-3`, `size-3.5`,
+   `size-4`), where the snapped centre is the true centre. Apply it to the `<svg>`; `--spin-glyph-duration` sets the
+   pace. */
 @utility spin-glyph {
-  & > * {
-    transform-box: view-box;
-    transform-origin: center;
-    animation: spin-glyph var(--spin-glyph-duration, 1s) linear infinite;
-  }
+  transform-origin: center;
+  will-change: transform;
+  animation: spin-glyph var(--spin-glyph-duration, 1s) linear infinite;
 
   @media (prefers-reduced-motion: reduce) {
-    & > * {
-      animation: none;
-    }
+    animation: none;
   }
 }
 

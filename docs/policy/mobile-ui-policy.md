@@ -3,7 +3,7 @@ title: 'Mobile UI Policy'
 description: 'Touch targets, drawn sizes, radius, surface styles, drawer and header geometry, trigger open state, shortcut hints and responsive rules for phone-width Tau UI, with the sidebar and no-desktop-regression rules.'
 status: active
 created: '2026-11-27'
-updated: '2026-11-27'
+updated: '2026-11-28'
 related:
   - docs/policy/design-policy.md
   - docs/policy/ui-policy.md
@@ -57,7 +57,7 @@ Under a coarse pointer, every interactive control accepts a tap on 44×44 CSS px
 | `touch-reach-*`, `touch-reach-x-*`, `touch-reach-y-*` | Declares free room by hand where no gap owns it: across a bar's axis, and around a control that stands alone. The hit area grows by the smaller of what 44 px needs and the reach. **Reach is zero unless set** |
 | `touch-target-none`                                   | Releases the pseudo-element on a host that needs its own `::after`                                                                                                                                              |
 
-A bar owns its gap and its reach together: `flex touch-gap-1 max-md:touch-gap-2 md:pointer-coarse:touch-gap-4`. A joined group (`ButtonGroup`, `ToggleGroup`, `TabsList`) sets its inline reach to zero in its own class, so a surrounding bar's reach never enters it. A shared layout part (`HeaderBar`, `DrawerBar`, `DialogFooter`, `InputGroup`) sets its own. Every control system other than `Button` (`PaneButton`, `PaneviewHeaderAction`, `SidebarMenuAction`, `InputGroupButton`, a raw `<button>`) applies the same `touch-target` class.
+A bar owns its gap and its reach together: `flex touch-gap-1 max-md:touch-gap-2 md:pointer-coarse:touch-gap-4`. The reach a bar sets reaches its direct children only, never a control inside a plain wrapper or a joined group (`ButtonGroup`, `ToggleGroup`, `TabsList`, whose inline reach is zero): a wrapper that holds controls side by side is itself a bar and uses `touch-gap-*`. A shared layout part (`HeaderBar`, `DrawerBar`, `DialogFooter`, `InputGroup`) sets its own. Every control system other than `Button` (`PaneButton`, `PaneviewHeaderAction`, `SidebarMenuAction`, `InputGroupButton`, a raw `<button>`) applies the same `touch-target` class.
 
 | Control                                               | Tool                                                                                                                                                                  |
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -102,13 +102,15 @@ INCORRECT:
 
 Choose a control's drawn height from its context. Width follows the label, or equals the height for an icon control. A field in a bar of ladder controls takes the bar's height. Never author another height.
 
+**A pane body's fields are in-content controls.** A field in a labelled row of a pane body (the Parameters pane, the panes of the All drawer, in a phone drawer or not) is drawn 36 px with its 44 px target (Rule 1), like a settings row's control; only a stand-alone form field (sign-in, a dialog's form) is drawn 44. A long list of parameters drawn at 44 would add 8 px per field for no gain in reach, against the operator's "not oversizing our buttons unnecessarily".
+
 Phone width:
 
 | Drawn height | `surface`         | Context                                                                          | Examples                                                                                                                          |
 | ------------ | ----------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| 44           | `chrome`          | Page, sidebar, drawer and dialog chrome; a full-width field                      | Header circles, title pill, grouped pill, drawer header actions, primary page action, a dialog's or a form's actions, form fields |
+| 44           | `chrome`          | Page, sidebar, drawer and dialog chrome; a stand-alone full-width field          | Header circles, title pill, grouped pill, drawer header actions, primary page action, a dialog's or a form's actions, form fields |
 | 40           | `floating`        | Floating over page content                                                       | Scroll to latest                                                                                                                  |
-| 36           | `card`, `toolbar` | On a card, a composer, a toolbar, a settings row, a table toolbar or a pane body | Composer controls, viewer tools, card actions, a pane's buttons, pagination, a centred dialog's close                             |
+| 36           | `card`, `toolbar` | On a card, a composer, a toolbar, a settings row, a table toolbar or a pane body | Composer controls, viewer tools, card actions, a pane's buttons and fields, pagination, a centred dialog's close                  |
 | 24           | `content`         | Inside content, and nested in a row                                              | Chips, inline actions in recovery, decision and permission cards, a row's own actions                                             |
 | 44 (row)     | —                 | Full-width rows, by coarse pointer                                               | Menu, picker, drawer, navigation, file and settings rows                                                                          |
 
@@ -214,7 +216,7 @@ Under `md`, every bottom drawer sits `--drawer-inset` (8 px) from the left, righ
 | Settings at phone width                                                           | A page, not a drawer: it takes Rule 6's page header                                                                                  |
 | The sidebar `Sheet`                                                               | Edge-anchored from the inline start (Rule 11)                                                                                        |
 
-**Operator-facing choice (2026-11-27)**: there is no edge-anchored bottom drawer. The operator asked that "our drawer" look like the reference sheet, "that little margin away from the edges and it follows the curvature of the screen", and the drawer in their screenshot is the chat drawer. A drawer's header follows Rule 6 and its rows follow Rule 1.
+**Operator-facing choice (2026-11-27)**: there is no edge-anchored bottom drawer. The operator asked that "our drawer" look like the reference sheet, "that little margin away from the edges and it follows the curvature of the screen", and the drawer in their screenshot is the chat drawer. A drawer's header follows Rule 6 and its rows follow Rule 1. A pane that opens in a drawer (Parameters, Model, the All drawer) brings its body, not its own chrome bar: its header merges into the drawer's header (Rule 6).
 
 **Why**: the reference sheet is inset 8 pt and concentric with the display. CSS cannot read a display's corner radius, so the curve is one fixed value: 44 px is within 3 px of the reference's 47 (a 55 pt display corner less the 8 pt inset), and it is the drawer's existing radius.
 
@@ -233,12 +235,13 @@ Under `md`, every bottom drawer sits `--drawer-inset` (8 px) from the left, righ
 - A title capsule takes its content's width, grows until 12 px remains to each side control, then truncates.
 - Related actions share one 44 px capsule with a 44 px slot each and no divider: `ButtonGroup appearance='capsule'`.
 - A surface that fills the screen at phone width (Settings, the search palette) is a page for this rule. When a nested view offers both, Back is at the start and Close is an end circle.
+- **A pane shown in a drawer has one header, the drawer's.** The pane's title is the drawer's title, and the pane header's actions move into the drawer header's end slot as one circle or one grouped pill, with further actions behind a ⋯ circle. The All drawer's pane switcher is the title control (a chrome capsule) or a segmented group below the header, never a second chrome bar above the body.
 - A centred dialog keeps [UI Policy](ui-policy.md) §5's close control in its corner at every width; at phone width that control is a 36 px circle (Rule 2). A side sheet keeps §5's control from `md` up.
 - **The desktop app's titlebar row is exempt.** In a narrow desktop-app window that row drags the window and keeps its 36 px height and its controls; this rule governs the web build's page header and every drawer header.
 
 **Why**: Tau's phone headers had five layouts across three size systems; one layout puts the way out and the title in the same place on every screen.
 
-**Check**: at 390 px wide, the start control's left edge and the end control's right edge are 16 px from the bar's edges, and the title's centre is within 1 px of the bar's centre. At 320 px wide the title truncates and nothing overflows.
+**Check**: at 390 px wide, the start control's left edge and the end control's right edge are 16 px from the bar's edges, and the title's centre is within 1 px of the bar's centre. At 320 px wide the title truncates and nothing overflows. In the Parameters and All drawers, exactly one element above the body carries 44 px chrome controls.
 
 ### 7. Give a view one primary capsule
 
@@ -257,6 +260,11 @@ A control that opens a menu, popover, drawer, dialog or picker shows that it is 
 - **Key the state on ARIA**: `[aria-haspopup]:not([aria-haspopup='false'])[aria-expanded='true']`, and `[role='combobox'][aria-expanded='true']` for select triggers, which carry no `aria-haspopup`; an `input` never matches. `tokens.css` defines that selector once as the `trigger-open` variant, and `has-trigger-open` for an ancestor.
 - **A trigger with no expanded state keys on its primitive.** `ContextMenuTrigger` renders neither attribute, so the `@taucad/ui` wrapper sets `data-context-menu-open` on it while its menu is open, and that attribute is the selector's third arm. A right-clicked row stays lit through the same variant.
 - **The open style is the control's hover fill plus the open ring.** The ring is 1.5 px, inset, in `--trigger-open-ring`: the foreground colour at an opacity that reaches 3:1 against the control's fill and against the surface beside it, in every theme. A plain or a filled control takes the `accent` fill and the ring; a solid control takes its hover finish and a ring in its own foreground. Hover alone has no ring, and a selected row that is also open shows its selection fill and the ring. Never author another open tint.
+- **The ring is Tailwind's inset ring**, `trigger-open:inset-ring-[1.5px] trigger-open:inset-ring-(--trigger-open-ring)`, which composes with whatever shadow the control has. A utility that only sets `--tw-inset-ring-shadow` paints nothing on a control without a shadow utility (a ghost Button, a sidebar row, a toggle, a pane button), so it is not the mechanism.
+- **Under `forced-colors: active`** the browser drops the fill and the ring, so the `trigger-open` owner adds `outline: 1.5px solid Highlight` with `outline-offset: -1.5px`, and an open trigger stays distinct from a closed one.
+- **An obscured trigger is exempt from the 3:1.** WCAG 1.4.11 does not apply to content under a modal scrim: at phone width an open drawer's scrim covers its trigger, where the ring measures 1.4–2.3:1, and the open drawer carries the state. The ring's 3:1 is measured without the scrim and asserted for unobscured triggers (desktop, and a popover on a touch tablet).
+
+**Operator-facing choice (2026-11-28)**: the ring departs from the reference, whose open More row is a plain fill with no ring. The recommendation keeps it because the fill alone measures at most 1.54:1; the alternative is a fill-only open state like Claude's, under 3:1, with the open menu beside the trigger carrying the state.
 - `Button`, `SidebarMenuButton`, `Toggle`, `SelectTrigger`, `PaneButton` and the composer's controls each pair `trigger-open` with their hover classes and the ring. A row that contains the trigger lights through `has-trigger-open:`, never a hand-written `:has()`.
 - A control that opens a surface sets both attributes. One that sets neither (a Share button that opens a drawer, a Search row that opens the palette) gains them first.
 - An expanded section is not an open trigger: a collapsible, an accordion, a navigation-menu trigger and a pane's expanded header keep their own `data-state` styles.
@@ -266,7 +274,7 @@ A control that opens a menu, popover, drawer, dialog or picker shows that it is 
 CORRECT:
 
 ```tsx
-'hover:bg-accent trigger-open:bg-accent trigger-open:open-ring';
+'hover:bg-accent trigger-open:bg-accent trigger-open:inset-ring-[1.5px] trigger-open:inset-ring-(--trigger-open-ring)';
 ```
 
 INCORRECT:
@@ -275,9 +283,10 @@ INCORRECT:
 'hover:bg-accent data-[state=open]:bg-accent'; // a tooltip's data-state wins; collapsibles light up
 'data-[state=open]:hover:bg-sidebar-accent'; // gated on hover: lost once the pointer is in the menu
 'hover:bg-accent trigger-open:bg-accent'; // no ring: open is as faint as hover, and equals selected
+'trigger-open:[--tw-inset-ring-shadow:inset_0_0_0_1.5px_var(--trigger-open-ring)]'; // paints nothing without a shadow utility
 ```
 
-**Check**: open each trigger at 1440 px wide and move the pointer into its surface: the trigger's computed background equals its hover background, and its ring measures 3:1 or more against that fill and against the adjacent surface in the light, dark, black and high-contrast themes. A row stays lit while its context menu is open. An expanded collapsible's trigger and a command field are unchanged.
+**Check**: open each trigger at 1440 px wide and move the pointer into its surface: the trigger's computed background equals its hover background, and its ring measures 3:1 or more against that fill and against the adjacent surface in the light, dark, black and high-contrast themes, on an open ghost Button and an open sidebar row as well as an outlined control. Under forced colours an open trigger has a `Highlight` outline and a closed one has none. A row stays lit while its context menu is open. An expanded collapsible's trigger and a command field are unchanged.
 
 ### 9. Reveal shortcut hints on hover and on focus
 
@@ -408,7 +417,7 @@ The asks are quoted from the program's operator input (2026-11-26 and 2026-11-27
 | "sometimes we've got rounded buttons, sometimes we don't. Sometimes the height is different … square buttons"    | 2, 3                                                                                          |
 | "a complete UI surface audit and redesign for all of the buttons across mobile"                                  | 10 (no exempt surface at phone width)                                                         |
 | "maintain as much visual consistency with the web as possible … okay with diverging where it makes sense"        | 10 (viewport decides layout, size and shape; same tokens and components); 4 (Send)            |
-| "lean into the Claude UI style … create our own mobile UI policy … future reference for agents"                  | This policy; routes in DESIGN, UI Policy and `packages/AGENTS.md`                             |
+| "lean into the Claude UI style … create our own mobile UI policy … future reference for agents"                  | This policy; routes in root `AGENTS.md`, DESIGN, UI Policy and `packages/AGENTS.md`           |
 | "all of the mobile surfaces, also … the drawer and the combo box responsive"                                     | 5 (every drawer), 10                                                                          |
 | "our drawer … that little margin away from the edges and it follows the curvature of the screen"                 | 5 (every bottom drawer, the chat drawer included)                                             |
 | "buttons to be precisely placed in the same way … Claude is using"                                               | 6, 7 (the capsule at the bottom trailing edge), 2 (insets and gaps)                           |

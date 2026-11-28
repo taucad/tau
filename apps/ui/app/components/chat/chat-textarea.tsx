@@ -145,7 +145,7 @@ const useComposerMarkUp = ({
     },
     [owner],
   );
-  const index = chosen?.owner === owner ? chosen.index : undefined;
+  const index = chosen !== undefined && chosen.owner === owner ? chosen.index : undefined;
   return {
     props: isOffered ? { markUpAttachment, markupByAttachment } : {},
     dialog:

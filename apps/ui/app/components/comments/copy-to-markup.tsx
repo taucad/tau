@@ -74,7 +74,7 @@ export function useMarkUpCopy(): Readonly<{
   return {
     markUp: isOffered ? markUp : undefined,
     dialog:
-      opened?.draft !== draftRef || directories === undefined ? null : (
+      opened === undefined || opened.draft !== draftRef || directories === undefined ? null : (
         <Suspense fallback={null}>
           <DraftImageMarkup
             mode='main'

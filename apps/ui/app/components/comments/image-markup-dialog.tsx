@@ -160,7 +160,7 @@ function useNaturalSize(imageSource: string | undefined): { width: number; heigh
       isActive = false;
     };
   }, [imageSource]);
-  if (size?.imageSource !== imageSource) {
+  if (size === undefined || size.imageSource !== imageSource) {
     return undefined;
   }
   return 'failed' in size ? 'failed' : size;

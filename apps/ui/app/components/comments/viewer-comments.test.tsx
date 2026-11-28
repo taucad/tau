@@ -155,7 +155,9 @@ describe('withoutFailedRetake', () => {
       { number: 1, text: 'Taller', image: 'old', model: { point: [0, 0, 0] } },
       { number: 2, text: 'Here', image: 'old', model: { point: [1, 0, 0] } },
     ],
-    images: [{ id: 'old', width: 10, height: 10, attachment: 'a-old', forPin: true, view: { camera }, marks: [] }],
+    images: [
+      { id: 'old', width: 10, height: 10, attachment: 'a-old', forPin: true, view: { ...scene, camera }, marks: [] },
+    ],
   };
   const applied: MessageAnnotations = {
     ...previous,

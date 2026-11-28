@@ -415,7 +415,12 @@ export function ViewerComments({
           pick,
           placed.retakenAttachment === undefined
             ? undefined
-            : { attachment: placed.retakenAttachment, previous: draft },
+            : {
+                attachment: placed.retakenAttachment,
+                number: placed.number,
+                previous: draft,
+                applied: placed.annotations,
+              },
         );
       }
     },

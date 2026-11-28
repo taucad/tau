@@ -7,5 +7,5 @@ attachments and annotations; nothing enqueues, delivers, persists or cancels dif
 ```
 
 ```sha256
-2415f2b15b1cf5219dadd3079179186e7a047622b00c61b98a1e3ef6f0d96185  apps/ui/app/components/chat/chat-textarea.tsx
+e2a8a71c10424550587dda69e909da7f710efabf9a9d944dce0e7dbc270595f4  apps/ui/app/components/chat/chat-textarea.tsx
 ```

@@ -54,6 +54,7 @@ export function CommentCard({
   onDone,
   onMove,
   isOutdated,
+  hasDoneButton = false,
 }: {
   readonly comment: AnnotationComment;
   readonly onText: (text: string) => void;
@@ -62,6 +63,8 @@ export function CommentCard({
   /** Starts a move without a drag; a pin that cannot move has none. */
   readonly onMove?: () => void;
   readonly isOutdated: boolean;
+  /** A Done button beside the microphone, for a phone, whose keyboard's return key is not always Enter. */
+  readonly hasDoneButton?: boolean;
 }): React.JSX.Element {
   // The composer's microphone, here for the comment's words (charter D15). Final text joins what is typed.
   const latestText = useRef(comment.text);
@@ -137,6 +140,17 @@ export function CommentCard({
             onStop={dictation.stop}
             onCancel={dictation.cancel}
           />
+        ) : null}
+        {hasDoneButton ? (
+          <Button
+            variant='secondary'
+            size='sm'
+            onClick={() => {
+              void finish();
+            }}
+          >
+            Done
+          </Button>
         ) : null}
       </div>
     </div>

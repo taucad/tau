@@ -1,7 +1,7 @@
 import type { AnnotationVec2, AnnotationView } from '@taucad/chat/annotations';
 import type { CommentSurfacePick } from '@taucad/viewer/cad/comment-pins';
 import { rayThroughImage } from '#components/comments/image-projection.js';
-import { useViewerSurfaces } from '#components/comments/viewer-surfaces.js';
+import { useViewerSurfaces } from '#hooks/viewer-surfaces.js';
 
 /** The surface under a point of a picture, as a pane showing its scene finds it. */
 export type ImageLift = (at: AnnotationVec2) => CommentSurfacePick | undefined;

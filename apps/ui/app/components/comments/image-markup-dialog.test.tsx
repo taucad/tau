@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MessageAnnotations } from '@taucad/chat/annotations';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -29,6 +29,8 @@ const store = vi.hoisted(() => {
 vi.mock('@taucad/chat-ui/hooks/use-attachment-source', () => ({
   useAttachmentSource: () => ({ status: 'ready', src: 'data:image/png;base64,AAAA' }),
 }));
+const phone = vi.hoisted(() => ({ isPhone: false }));
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => phone.isPhone }));
 vi.mock('#components/dictation/use-dictation.js', () => ({
   useDictation: () => ({ available: false, phase: 'idle', transcript: '', waveform: [] }),
 }));
@@ -53,25 +55,35 @@ const blank = (): MessageAnnotations => ({
   images: [{ id: 'img-1', width: 1000, height: 500, attachment: url, marks: [] }],
 });
 
+const dropAttachments = vi.fn<(urls: readonly string[]) => void>();
+
 const renderDialog = (): HTMLElement => {
-  function Harness(): React.JSX.Element {
+  function Harness({ isOpen = true }: { readonly isOpen?: boolean }): React.JSX.Element {
     const annotations = useSyncExternalStore(store.subscribe, () => store.state.annotations);
     return (
       <ImageMarkupDialog
-        image={{ url, mediaType: 'image/png' }}
+        image={isOpen ? { url, mediaType: 'image/png' } : undefined}
         directory={undefined}
-        record={{ annotations, setAnnotations: store.set, dropAttachments: vi.fn() }}
+        record={{ annotations, setAnnotations: store.set, dropAttachments }}
         onClose={vi.fn()}
       />
     );
   }
-  render(
+  const { rerender } = render(
     <TooltipProvider>
       <Harness />
     </TooltipProvider>,
   );
+  closeDialog = () => {
+    rerender(
+      <TooltipProvider>
+        <Harness isOpen={false} />
+      </TooltipProvider>,
+    );
+  };
   return screen.getByRole('img', { name: /^Image with/u });
 };
+let closeDialog = (): void => undefined;
 
 /** A press, travel and release on the surface, at fractions of its 1000 by 500 box. */
 const drag = (surface: HTMLElement, from: [number, number], to: [number, number]): void => {
@@ -93,6 +105,8 @@ const marks = () => store.state.annotations?.images[0]?.marks ?? [];
 
 describe('ImageMarkupDialog', () => {
   beforeEach(() => {
+    phone.isPhone = false;
+    dropAttachments.mockReset();
     store.set(blank());
     HTMLElement.prototype.setPointerCapture = vi.fn();
     // The painter is tested on its own; here the canvas has no context to draw on.
@@ -163,6 +177,79 @@ describe('ImageMarkupDialog', () => {
     expect(store.state.annotations?.comments).toEqual([]);
   });
 
+  it('should keep a pin picture while an undo can bring back its last pin, and drop it when mark up closes', async () => {
+    const user = userEvent.setup();
+    store.set({
+      version: 1,
+      comments: [{ number: 1, text: 'Here', image: 'img-1', at: [0.2, 0.2] }],
+      images: [{ id: 'img-1', width: 1000, height: 500, attachment: url, forPin: true, marks: [] }],
+    });
+    renderDialog();
+    screen.getByRole('button', { name: 'Comment 1: Here' }).focus();
+    await user.keyboard('{Enter}');
+    await user.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(store.state.annotations?.comments).toEqual([]);
+    expect(dropAttachments).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(store.state.annotations?.comments).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Redo' }));
+    act(() => {
+      closeDialog();
+    });
+    expect(dropAttachments).toHaveBeenCalledWith([url]);
+  });
+
+  it('should discard an empty pin when mark up closes or another card opens, and keep one with words', () => {
+    const surface = renderDialog();
+    click(surface, [0.25, 0.5]);
+    click(surface, [0.75, 0.5]);
+    // The first card had no words: the second pin took its place.
+    expect(store.state.annotations?.comments.map(({ number }) => number)).toEqual([2]);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Comment 2' }), { target: { value: 'Keep' } });
+    click(surface, [0.5, 0.2]);
+    act(() => {
+      closeDialog();
+    });
+    expect(store.state.annotations?.comments.map(({ number, text }) => ({ number, text }))).toEqual([
+      { number: 2, text: 'Keep' },
+    ]);
+  });
+
+  it('should hold undo while a pin is being dragged', () => {
+    store.set({ ...blank(), comments: [{ number: 1, text: 'Here', image: 'img-1', at: [0.2, 0.2] }] });
+    const surface = renderDialog();
+    fireEvent.keyDown(globalThis.document.body, { key: 'p' });
+    drag(surface, [0.5, 0.5], [0.6, 0.6]);
+    act(() => {
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Comment 1: Here' }), {
+        button: 0,
+        clientX: 200,
+        clientY: 100,
+      });
+      fireEvent.pointerMove(surface, { clientX: 600, clientY: 300 });
+      fireEvent.keyDown(globalThis.document.body, { key: 'z', ctrlKey: true });
+      fireEvent.pointerMove(surface, { clientX: 700, clientY: 300 });
+      fireEvent.pointerUp(surface, { clientX: 700, clientY: 300 });
+    });
+    // The pen stroke drawn before the drag is still there, and the pin moved.
+    expect(marks()).toHaveLength(1);
+    expect(store.state.annotations?.comments[0]?.at).toEqual([0.7, 0.6]);
+  });
+
+  it('should close the open card before a half drawn shape on Escape', async () => {
+    const user = userEvent.setup();
+    const surface = renderDialog();
+    click(surface, [0.25, 0.5]);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Comment 1' }), { target: { value: 'Here' } });
+    await user.click(screen.getByRole('button', { name: 'Arrow (A)' }));
+    click(surface, [0.6, 0.6]);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('textbox', { name: 'Comment 1' })).not.toBeInTheDocument();
+    click(surface, [0.9, 0.9]);
+    // The shape was still half drawn after the first Escape: the next click finished it.
+    expect(marks().map((mark) => mark.kind)).toEqual(['arrow']);
+  });
+
   it('should move a picture pin by dragging its head', () => {
     store.set({ ...blank(), comments: [{ number: 1, text: 'Here', image: 'img-1', at: [0.2, 0.2] }] });
     const surface = renderDialog();
@@ -187,5 +274,32 @@ describe('ImageMarkupDialog', () => {
     const at = store.state.annotations?.comments[0]?.at;
     expect(at?.[0]).toBeCloseTo(0.51);
     expect(at?.[1]).toBeCloseTo(0.55);
+  });
+
+  it('should dock the open card under the picture on a phone, with its own Done', async () => {
+    phone.isPhone = true;
+    const user = userEvent.setup();
+    const surface = renderDialog();
+    click(surface, [0.25, 0.5]);
+    const card = screen.getByRole('group', { name: 'Comment 1' });
+    expect(card).toContainElement(screen.getByRole('textbox', { name: 'Comment 1' }));
+    await user.click(within(card).getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('group', { name: 'Comment 1' })).not.toBeInTheDocument();
+  });
+
+  it('should zoom by a two finger pinch, which neither draws nor pins', () => {
+    const surface = renderDialog();
+    const touch = { pointerType: 'touch', button: 0 } as const;
+    act(() => {
+      fireEvent.pointerDown(surface, { ...touch, pointerId: 1, clientX: 400, clientY: 250 });
+      fireEvent.pointerDown(surface, { ...touch, pointerId: 2, isPrimary: false, clientX: 600, clientY: 250 });
+      fireEvent.pointerMove(surface, { ...touch, pointerId: 2, clientX: 800, clientY: 250 });
+      fireEvent.pointerUp(surface, { ...touch, pointerId: 2, clientX: 800, clientY: 250 });
+      fireEvent.pointerUp(surface, { ...touch, pointerId: 1, clientX: 400, clientY: 250 });
+    });
+    expect(store.state.annotations?.comments).toEqual([]);
+    expect(marks()).toEqual([]);
+    // The fingers spread from 200 to 400 pixels apart: twice the size.
+    expect(surface.parentElement?.style.width).toMatch(/^calc\(2 \*/u);
   });
 });

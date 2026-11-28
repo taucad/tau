@@ -1,10 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AnnotationCamera, MessageAnnotations } from '@taucad/chat/annotations';
 import { useCommentPins } from '@taucad/viewer/cad/comment-pins';
 import type { CommentSurfacePick } from '@taucad/viewer/cad/comment-pins';
-import { ViewerCommentHeads, ViewerComments } from '#components/comments/viewer-comments.js';
+import { ViewerCommentHeads, ViewerComments, withoutFailedRetake } from '#components/comments/viewer-comments.js';
 import { ShownCommentsProvider, useShownComments } from '#components/comments/shown-comments.js';
 
 const camera: AnnotationCamera = {
@@ -52,6 +52,8 @@ const graphics = vi.hoisted(() => ({
   actor: { send: vi.fn(), getSnapshot: () => ({ context: {} }), subscribe: () => ({ unsubscribe: vi.fn() }) },
 }));
 
+const phone = vi.hoisted(() => ({ isPhone: false }));
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => phone.isPhone }));
 vi.mock('#flags/use-feature.js', () => ({ useFeatureState: () => 'on' }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useOptionalChatComposer: () => ({
@@ -146,10 +148,47 @@ const sentAnnotations = (): MessageAnnotations | undefined =>
     .map(([event]) => event as { type: string; annotations?: MessageAnnotations })
     .findLast((event) => event.type === 'setDraftAnnotations')?.annotations;
 
+describe('withoutFailedRetake', () => {
+  const previous: MessageAnnotations = {
+    version: 1,
+    comments: [
+      { number: 1, text: 'Taller', image: 'old', model: { point: [0, 0, 0] } },
+      { number: 2, text: 'Here', image: 'old', model: { point: [1, 0, 0] } },
+    ],
+    images: [
+      { id: 'old', width: 10, height: 10, attachment: 'a-old', forPin: true, view: { ...scene, camera }, marks: [] },
+    ],
+  };
+  const applied: MessageAnnotations = {
+    ...previous,
+    comments: [{ ...previous.comments[0]!, image: 'new', model: { point: [5, 5, 5] } }, previous.comments[1]!],
+    images: [...previous.images, { id: 'new', width: 10, height: 10, forPin: true, marks: [] }],
+  };
+  const retake = { attachment: 'a-old', number: 1, previous, applied };
+
+  it('should restore the earlier record when nothing changed meanwhile', () => {
+    expect(withoutFailedRetake(applied, retake, 'new')).toBe(previous);
+  });
+
+  it('should undo only the moved pin and its new picture, keeping words typed meanwhile', () => {
+    const typed: MessageAnnotations = {
+      ...applied,
+      comments: applied.comments.map((comment) => ({ ...comment, text: `${comment.text}!` })),
+    };
+    const restored = withoutFailedRetake(typed, retake, 'new');
+    expect(restored?.comments).toEqual([
+      { ...previous.comments[0]!, text: 'Taller!' },
+      { ...previous.comments[1]!, text: 'Here!' },
+    ]);
+    expect(restored?.images.map(({ id }) => id)).toEqual(['old']);
+  });
+});
+
 describe('ViewerComments', () => {
   beforeEach(() => {
     // The jsdom environment has no pointer capture.
     HTMLElement.prototype.setPointerCapture = vi.fn();
+    phone.isPhone = false;
     draft.actor.send.mockClear();
     graphics.actor.send.mockClear();
     const context: DraftContext = { draftAnnotations: annotations, draftAttachments: [] };
@@ -164,6 +203,20 @@ describe('ViewerComments', () => {
     await user.click(screen.getByRole('button', { name: 'Move' }));
     expect(screen.getByRole('status')).toHaveTextContent('Click the model where comment 1 goes');
     expect(graphics.actor.send).toHaveBeenCalledWith({ type: 'setCommentActive', payload: true });
+  });
+
+  it("should open a pin's card as a sheet on a phone, which Done and Escape close", async () => {
+    phone.isPhone = true;
+    const user = userEvent.setup();
+    renderViewer();
+    await user.click(await screen.findByRole('button', { name: 'Comment 1: Taller' }));
+    const sheet = screen.getByRole('dialog', { name: 'Comment 1' });
+    expect(sheet.parentElement).toBe(document.body);
+    await user.click(within(sheet).getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('dialog', { name: 'Comment 1' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Comment 1: Taller' }));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Comment 1' })).not.toBeInTheDocument();
   });
 
   it('should move a draft pin when its head is dragged onto the model', async () => {

@@ -70,7 +70,22 @@ describe('shiftMark', () => {
   it('should move one end alone, or the whole mark, and keep it on the image', () => {
     const line: AnnotationMark = { kind: 'line', from: { at: [0.1, 0.1] }, to: { at: [0.5, 0.5] } };
     expect(shiftMark(line, 'to', [0.1, 0])).toEqual({ kind: 'line', from: { at: [0.1, 0.1] }, to: { at: [0.6, 0.5] } });
-    expect(shiftMark(line, 'all', [-0.3, 0])).toEqual({ kind: 'line', from: { at: [0, 0.1] }, to: { at: [0.2, 0.5] } });
+    // The whole mark stops at the edge with its shape kept: the step is cut to 0.1, not each end.
+    expect(shiftMark(line, 'all', [-0.3, 0])).toEqual({ kind: 'line', from: { at: [0, 0.1] }, to: { at: [0.4, 0.5] } });
+  });
+
+  it('should grab the nearer end of a short line, and a thin ellipse by its outline', () => {
+    const size = { width: 1000, height: 1000 };
+    const short: AnnotationMark = { kind: 'line', from: { at: [0.5, 0.5] }, to: { at: [0.51, 0.5] } };
+    expect(grabMark([short], [0.5, 0.5], { size, slop: 8 })).toEqual({ index: 0, grip: 'from' });
+    expect(grabMark([short], [0.511, 0.5], { size, slop: 8 })).toEqual({ index: 0, grip: 'to' });
+    const flat: AnnotationMark = { kind: 'ellipse', from: [0.5, 0.2], to: [0.5, 0.8] };
+    expect(grabMark([flat], [0.5, 0.5], { size, slop: 8 })).toEqual({ index: 0, grip: 'all' });
+    expect(grabMark([flat], [0.3, 0.5], { size, slop: 8 })).toBeUndefined();
+    const thin: AnnotationMark = { kind: 'ellipse', from: [0.1, 0.49], to: [0.9, 0.51] };
+    // On its long side the outline is 2 pixels away; well off it, the image is clear.
+    expect(grabMark([thin], [0.5, 0.508], { size, slop: 8 })).toEqual({ index: 0, grip: 'all' });
+    expect(grabMark([thin], [0.5, 0.6], { size, slop: 8 })).toBeUndefined();
   });
 });
 

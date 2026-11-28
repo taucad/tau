@@ -13,7 +13,13 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { annotationLimits } from '@taucad/chat/annotations';
-import type { AnnotatedImage, AnnotationMark, AnnotationVec2, MessageAnnotations } from '@taucad/chat/annotations';
+import type {
+  AnnotatedImage,
+  AnnotationComment,
+  AnnotationMark,
+  AnnotationVec2,
+  MessageAnnotations,
+} from '@taucad/chat/annotations';
 import { useAttachmentSource } from '@taucad/chat-ui/hooks/use-attachment-source';
 import type { AttachmentDirectories } from '@taucad/chat-ui/hooks/use-attachment-source';
 import { Button } from '@taucad/ui/components/button';
@@ -21,10 +27,12 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@taucad/u
 import { Separator } from '@taucad/ui/components/separator';
 import { toast } from '@taucad/ui/components/sonner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
 import { randomUuid } from '@taucad/utils/id';
 import { drawAnnotations, pinsOnImage } from '#components/comments/annotation-painter.js';
 import { CommentCard } from '#components/comments/comment-card.js';
+import { useKeyboardInset } from '#components/comments/comment-sheet.js';
 import { removeComments, setCommentText } from '#components/comments/draft-comments.js';
 import {
   addPictureComment,
@@ -69,6 +77,9 @@ const toolKeys: Readonly<Record<string, Tool>> = {
 
 /** How far a press travels, in CSS pixels, before it draws or drags (D23). */
 const travel = 4;
+
+/** Mark up's zoom stays between the fitted image and four times it. */
+const clampZoom = (zoom: number): number => Math.min(4, Math.max(1, zoom));
 
 /** The grab distance, in CSS pixels, whatever the zoom (D23). */
 const grabDistance = (pointerType: string): number => (pointerType === 'mouse' ? 8 : 16);
@@ -123,9 +134,11 @@ function ToolButton({
   );
 }
 
-/** The natural size of an image source, once it has loaded. */
-function useNaturalSize(imageSource: string | undefined): { width: number; height: number } | undefined {
-  const [size, setSize] = useState<{ imageSource: string; width: number; height: number }>();
+/** The natural size of an image source once it has loaded, or `'failed'` when it cannot be decoded. */
+function useNaturalSize(imageSource: string | undefined): { width: number; height: number } | 'failed' | undefined {
+  const [size, setSize] = useState<
+    { imageSource: string; width: number; height: number } | { imageSource: string; failed: true }
+  >();
   useEffect(() => {
     if (imageSource === undefined) {
       return undefined;
@@ -137,12 +150,20 @@ function useNaturalSize(imageSource: string | undefined): { width: number; heigh
         setSize({ imageSource, width: image.naturalWidth, height: image.naturalHeight });
       }
     });
+    image.addEventListener('error', () => {
+      if (isActive) {
+        setSize({ imageSource, failed: true });
+      }
+    });
     image.src = imageSource;
     return () => {
       isActive = false;
     };
   }, [imageSource]);
-  return size?.imageSource === imageSource ? size : undefined;
+  if (size === undefined || size.imageSource !== imageSource) {
+    return undefined;
+  }
+  return 'failed' in size ? 'failed' : size;
 }
 
 /** The record a mark up session reads and changes: a draft's, or a test's. */
@@ -227,7 +248,8 @@ function MarkupSurface({
 
   const source = useAttachmentSource(directory, { url, mediaType });
   const imageSource = source.status === 'ready' ? source.src : undefined;
-  const natural = useNaturalSize(imageSource);
+  const naturalSize = useNaturalSize(imageSource);
+  const natural = naturalSize === 'failed' ? undefined : naturalSize;
   // oxlint-disable-next-line react/hook-use-state -- the id a first mark gives the image; chosen once.
   const [newImageId] = useState(randomUuid);
   const stored = annotatedImageOf(annotations, url);
@@ -267,7 +289,6 @@ function MarkupSurface({
   );
 
   const [tool, setTool] = useState<Tool>('comment');
-  const [shape, setShape] = useState<ShapeTool>('rectangle');
   const [zoom, setZoom] = useState(1);
   const [openNumber, setOpenNumber] = useState<number>();
   const [relocating, setRelocating] = useState<number>();
@@ -277,10 +298,16 @@ function MarkupSurface({
     gestureRef.current = next;
     setGestureState(next);
   }, []);
+  /*
+   * Pictures a removal left with nothing pinned on them. They leave the draft when mark up closes, and only if
+   * still unpinned then, so an undo can bring their pins back.
+   */
+  const orphans = useRef(new Set<string>());
   const [past, setPast] = useState<ReadonlyArray<MessageAnnotations | undefined>>([]);
   const [future, setFuture] = useState<ReadonlyArray<MessageAnnotations | undefined>>([]);
   const surface = useRef<HTMLDivElement>(null);
-  const canvas = useRef<HTMLCanvasElement>(null);
+  // State, not a ref: the canvas mounts once the image source is ready, and that must repaint the stored marks.
+  const [canvas, setCanvas] = useState<HTMLCanvasElement>();
 
   /** One undo step: the record before it is kept. */
   const commit = useCallback(
@@ -291,8 +318,9 @@ function MarkupSurface({
     },
     [annotations, setRecord],
   );
+  // History waits for a gesture to end: a drag in progress holds the record it would write back.
   const undo = useCallback((): void => {
-    if (past.length === 0) {
+    if (past.length === 0 || gestureRef.current) {
       return;
     }
     setPast(past.slice(0, -1));
@@ -300,7 +328,7 @@ function MarkupSurface({
     setRecord(past.at(-1));
   }, [annotations, future, past, setRecord]);
   const redo = useCallback((): void => {
-    if (future.length === 0) {
+    if (future.length === 0 || gestureRef.current) {
       return;
     }
     setFuture(future.slice(1));
@@ -336,7 +364,12 @@ function MarkupSurface({
       if (!image) {
         return;
       }
-      const base = withImage(annotations, image);
+      let base = withImage(annotations, image);
+      const open = comments.find(({ number }) => number === openNumber);
+      if (relocating === undefined && open?.text.trim() === '') {
+        // The open card had no words: a new pin replaces it rather than leaving it empty.
+        base = removeComments(base, (comment) => comment.number === open.number).annotations;
+      }
       if (relocating !== undefined) {
         const moved = pinnedAt(base, relocating, at);
         if (moved) {
@@ -345,7 +378,7 @@ function MarkupSurface({
         }
         return;
       }
-      if (comments.length >= annotationLimits.comments) {
+      if (base.comments.length >= annotationLimits.comments) {
         toast.error(`A message holds up to ${annotationLimits.comments} comments.`);
         return;
       }
@@ -357,7 +390,7 @@ function MarkupSurface({
       commit(pinnedAt(added.annotations, added.number, at) ?? added.annotations);
       setOpenNumber(added.number);
     },
-    [annotations, commit, comments.length, image, pinnedAt, relocating],
+    [annotations, commit, comments, image, openNumber, pinnedAt, relocating],
   );
 
   const removeComment = useCallback(
@@ -367,20 +400,56 @@ function MarkupSurface({
       }
       const removed = removeComments(annotations, (comment) => comment.number === number);
       commit(removed.annotations);
-      dropAttachments(removed.orphanedAttachments);
+      for (const orphan of removed.orphanedAttachments) {
+        orphans.current.add(orphan);
+      }
       setOpenNumber((current) => (current === number ? undefined : current));
     },
-    [annotations, commit, dropAttachments],
+    [annotations, commit],
   );
 
+  /** Opens a card, or none: a pin with no words says nothing, so it goes when its card closes. */
+  const showCard = useCallback(
+    (next: number | undefined): void => {
+      const comment = comments.find(({ number }) => number === openNumber);
+      if (comment && comment.number !== next && comment.text.trim() === '') {
+        removeComment(comment.number);
+      }
+      setOpenNumber(next);
+    },
+    [comments, openNumber, removeComment],
+  );
   const closeCard = useCallback((): void => {
-    const comment = comments.find(({ number }) => number === openNumber);
-    // A pin with no words says nothing: it goes when its card closes.
-    if (comment?.text.trim() === '') {
-      removeComment(comment.number);
+    showCard(undefined);
+  }, [showCard]);
+
+  // Closing mark up, by any path, finishes it: the open card closes, and pictures left unpinned leave the draft.
+  const finish = useRef<() => void>(undefined);
+  const finishNow = (): void => {
+    const open = comments.find(({ number }) => number === openNumber);
+    let final = annotations;
+    if (final && open?.text.trim() === '') {
+      const removed = removeComments(final, (comment) => comment.number === open.number);
+      final = removed.annotations;
+      setRecord(final);
+      for (const orphan of removed.orphanedAttachments) {
+        orphans.current.add(orphan);
+      }
     }
-    setOpenNumber(undefined);
-  }, [comments, openNumber, removeComment]);
+    const unpinned = [...orphans.current].filter((orphan) => annotatedImageOf(final, orphan) === undefined);
+    if (unpinned.length > 0) {
+      dropAttachments(unpinned);
+    }
+  };
+  useEffect(() => {
+    finish.current = finishNow;
+  });
+  useEffect(
+    () => () => {
+      finish.current?.();
+    },
+    [],
+  );
 
   // What the canvas shows: the stored marks, with the one being moved or drawn in its live place.
   const shownMarks = useMemo(() => {
@@ -396,14 +465,14 @@ function MarkupSurface({
   const pins = useMemo(() => (image ? pinsOnImage(image, comments) : []), [comments, image]);
 
   useEffect(() => {
-    const context = canvas.current?.getContext('2d');
+    const context = canvas?.getContext('2d');
     if (!context || !image) {
       return;
     }
     context.clearRect(0, 0, image.width, image.height);
     // Model pins stand on the image with a stem and foot; their heads are the buttons drawn over it.
     drawAnnotations(context, image, { marks: shownMarks, pins: pins.filter((pin) => pin.foot !== undefined) });
-  }, [image, pins, shownMarks]);
+  }, [canvas, image, pins, shownMarks]);
 
   // Mark up owns its keys while open: tools, undo and redo, and Escape in order (I8).
   useEffect(() => {
@@ -426,9 +495,6 @@ function MarkupSurface({
       if (!isModified && !event.altKey && next !== undefined) {
         event.stopPropagation();
         setTool(next);
-        if (next === 'line' || next === 'rectangle' || next === 'ellipse') {
-          setShape(next);
-        }
       }
     };
     globalThis.addEventListener('keydown', onKey, true);
@@ -448,12 +514,91 @@ function MarkupSurface({
   /** Image pixels per CSS pixel. */
   const scale = (): number => (image?.width ?? 1) / (surface.current?.getBoundingClientRect().width ?? 1);
 
+  /*
+   * Two fingers pan and zoom, and never draw: the second finger down drops whatever the first began. Pinch is the
+   * only zoom on a phone, where the zoom buttons are hidden; ctrl-wheel (a trackpad pinch) zooms on a desktop.
+   */
+  const touches = useRef(new Map<number, AnnotationVec2>());
+  const pinch = useRef<{ distance: number; zoom: number; mid: AnnotationVec2; scroll: AnnotationVec2 }>(undefined);
+  const scroller = useRef<HTMLDivElement>(undefined);
+  const attachScroller = useCallback((element: HTMLDivElement): (() => void) => {
+    scroller.current = element;
+    const onWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey) {
+        return;
+      }
+      event.preventDefault();
+      setZoom((previous) => clampZoom(previous * Math.exp(-event.deltaY / 100)));
+    };
+    element.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      element.removeEventListener('wheel', onWheel);
+      scroller.current = undefined;
+    };
+  }, []);
+  const pinchFrame = (): { distance: number; mid: AnnotationVec2 } | undefined => {
+    const [first, second] = [...touches.current.values()];
+    return first && second
+      ? {
+          distance: Math.max(1, Math.hypot(first[0] - second[0], first[1] - second[1])),
+          mid: [(first[0] + second[0]) / 2, (first[1] + second[1]) / 2],
+        }
+      : undefined;
+  };
+  const startPinch = (event: React.PointerEvent<HTMLDivElement>): boolean => {
+    if (event.pointerType !== 'touch') {
+      return false;
+    }
+    touches.current.set(event.pointerId, [event.clientX, event.clientY]);
+    const frame = pinchFrame();
+    if (touches.current.size !== 2 || !frame) {
+      return false;
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onPointerCancel();
+    const view = scroller.current;
+    pinch.current = { ...frame, zoom, scroll: [view?.scrollLeft ?? 0, view?.scrollTop ?? 0] };
+    return true;
+  };
+  const movePinch = (event: React.PointerEvent<HTMLDivElement>): boolean => {
+    if (!touches.current.has(event.pointerId)) {
+      return false;
+    }
+    touches.current.set(event.pointerId, [event.clientX, event.clientY]);
+    const start = pinch.current;
+    const frame = pinchFrame();
+    if (!start || !frame) {
+      return false;
+    }
+    setZoom(clampZoom((start.zoom * frame.distance) / start.distance));
+    const view = scroller.current;
+    if (view) {
+      view.scrollLeft = start.scroll[0] - (frame.mid[0] - start.mid[0]);
+      view.scrollTop = start.scroll[1] - (frame.mid[1] - start.mid[1]);
+    }
+    return true;
+  };
+  const endPinch = (event: React.PointerEvent<HTMLDivElement>): boolean => {
+    touches.current.delete(event.pointerId);
+    if (pinch.current === undefined) {
+      return false;
+    }
+    if (touches.current.size < 2) {
+      pinch.current = undefined;
+    }
+    return true;
+  };
+
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
-    if (!image || event.button !== 0 || !event.isPrimary) {
+    if (startPinch(event)) {
+      return;
+    }
+    const { current } = gestureRef;
+    // One pointer at a time: a press from another, while a gesture is held, is not a new gesture.
+    if (!image || event.button !== 0 || !event.isPrimary || (current && 'pointerId' in current)) {
       return;
     }
     const at = pointOf(event);
-    const { current } = gestureRef;
     if (current?.kind === 'anchored') {
       // The second click of a click-then-click shape puts its far end down.
       setGesture(undefined);
@@ -482,6 +627,9 @@ function MarkupSurface({
   };
 
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (movePinch(event)) {
+      return;
+    }
     const { current } = gestureRef;
     if (!image || !current) {
       return;
@@ -521,6 +669,9 @@ function MarkupSurface({
   };
 
   const onPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (endPinch(event)) {
+      return;
+    }
     const { current } = gestureRef;
     if (!image || !current || current.kind === 'anchored' || current.pointerId !== event.pointerId) {
       return;
@@ -546,7 +697,7 @@ function MarkupSurface({
         setPast((previous) => [...previous, current.base]);
         setFuture([]);
       } else {
-        setOpenNumber((open) => (open === current.number ? undefined : current.number));
+        showCard(openNumber === current.number ? undefined : current.number);
       }
       return;
     }
@@ -560,32 +711,68 @@ function MarkupSurface({
     }
   };
 
-  const onPointerCancel = (): void => {
+  const onPointerCancel = (event?: React.PointerEvent<HTMLDivElement>): void => {
     const { current } = gestureRef;
+    if (event) {
+      endPinch(event);
+      // A cancel ends only its own pointer's gesture.
+      if (current && 'pointerId' in current && current.pointerId !== event.pointerId) {
+        return;
+      }
+    }
     if (current?.kind === 'movePin' && current.hasTravelled) {
       setRecord(current.base);
     }
     setGesture(undefined);
   };
 
-  const ActiveShape = shapeTools.find((entry) => entry.tool === shape)!;
+  const isPhone = useIsMobile();
+  const keyboardInset = useKeyboardInset();
+  const cardOf = (comment: AnnotationComment, isMovable: boolean): React.JSX.Element => (
+    <CommentCard
+      comment={comment}
+      isOutdated={false}
+      hasDoneButton={isPhone}
+      onText={(text) => {
+        if (annotations) {
+          setRecord(setCommentText(annotations, comment.number, text));
+        }
+      }}
+      onRemove={() => {
+        removeComment(comment.number);
+      }}
+      onDone={closeCard}
+      {...(isMovable
+        ? {
+            onMove() {
+              setOpenNumber(undefined);
+              setRelocating(comment.number);
+            },
+          }
+        : {})}
+    />
+  );
+  const phoneCard = isPhone ? comments.find((comment) => comment.number === openNumber) : undefined;
+
   const relocatingLabel = relocating === undefined ? undefined : `Click the new place for comment ${relocating}.`;
 
   return (
     <DialogContent
       scroll='contained'
       className='flex h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] flex-col gap-0 p-0 sm:max-w-[calc(100vw-2rem)]'
+      // A phone's keyboard covers the bottom of the screen: the docked card and the toolbar stay above it.
+      style={keyboardInset > 0 ? { paddingBottom: Math.max(0, keyboardInset - 16) } : undefined}
       onEscapeKeyDown={(event) => {
-        // Escape order (I8): a gesture, then a move, then the open card, then the dialog.
-        if (gestureRef.current) {
+        // Escape order (I8): the open card, then a half drawn mark, then a move, then the dialog.
+        if (openNumber !== undefined) {
+          event.preventDefault();
+          closeCard();
+        } else if (gestureRef.current) {
           event.preventDefault();
           onPointerCancel();
         } else if (relocating !== undefined) {
           event.preventDefault();
           setRelocating(undefined);
-        } else if (openNumber !== undefined) {
-          event.preventDefault();
-          closeCard();
         }
       }}
       onFocusOutside={(event) => {
@@ -596,7 +783,7 @@ function MarkupSurface({
       <DialogDescription className='sr-only'>
         Pin comments on the image and draw on it. The marks are sent with your next message.
       </DialogDescription>
-      <div className='@container-[size] min-h-0 flex-1 overflow-auto'>
+      <div ref={attachScroller} className='@container-[size] min-h-0 flex-1 overflow-auto'>
         <div className='flex min-h-full min-w-full items-center justify-center p-6'>
           {image && imageSource ? (
             <div
@@ -619,7 +806,9 @@ function MarkupSurface({
                 onPointerCancel={onPointerCancel}
               >
                 <canvas
-                  ref={canvas}
+                  ref={(element) => {
+                    setCanvas(element ?? undefined);
+                  }}
                   width={image.width}
                   height={image.height}
                   className='pointer-events-none size-full rounded-md'
@@ -654,10 +843,10 @@ function MarkupSurface({
                       type='button'
                       aria-label={`Comment ${pin.number}${comment.text ? `: ${comment.text}` : ''}`}
                       aria-expanded={isOpen}
-                      className='flex size-6 touch-none items-center justify-center rounded-full border-2 border-white bg-markup-ink text-xs font-semibold text-white shadow-sm outline-none focus-visible:focus-outline'
+                      className='relative flex size-6 touch-none items-center justify-center rounded-full border-2 border-white bg-markup-ink text-xs font-semibold text-white shadow-sm outline-none focus-visible:focus-outline pointer-coarse:before:absolute pointer-coarse:before:-inset-2.5'
                       onPointerDown={(event) => {
                         event.stopPropagation();
-                        if (!isMovable || event.button !== 0 || !annotations) {
+                        if (!isMovable || event.button !== 0 || !annotations || gestureRef.current) {
                           return;
                         }
                         surface.current?.setPointerCapture(event.pointerId);
@@ -675,7 +864,7 @@ function MarkupSurface({
                         // A movable pin's press is handled by the surface it captured; another, or a key, opens here.
                         if (!isMovable || event.detail === 0) {
                           event.stopPropagation();
-                          setOpenNumber(isOpen ? undefined : pin.number);
+                          showCard(isOpen ? undefined : pin.number);
                         }
                       }}
                       onKeyDown={(event) => {
@@ -698,7 +887,7 @@ function MarkupSurface({
                     >
                       {pin.number}
                     </button>
-                    {isOpen ? (
+                    {isOpen && !isPhone ? (
                       <div
                         className={cn(
                           'absolute z-20 w-72 rounded-lg border bg-popover p-3 shadow-md',
@@ -709,27 +898,7 @@ function MarkupSurface({
                           event.stopPropagation();
                         }}
                       >
-                        <CommentCard
-                          comment={comment}
-                          isOutdated={false}
-                          onText={(text) => {
-                            if (annotations) {
-                              setRecord(setCommentText(annotations, comment.number, text));
-                            }
-                          }}
-                          onRemove={() => {
-                            removeComment(comment.number);
-                          }}
-                          onDone={closeCard}
-                          {...(isMovable
-                            ? {
-                                onMove() {
-                                  setOpenNumber(undefined);
-                                  setRelocating(comment.number);
-                                },
-                              }
-                            : {})}
-                        />
+                        {cardOf(comment, isMovable)}
                       </div>
                     ) : null}
                   </div>
@@ -738,11 +907,20 @@ function MarkupSurface({
             </div>
           ) : (
             <p role='status' className='text-sm text-muted-foreground'>
-              {source.status === 'absent' ? 'This image is not on this device.' : 'Loading image…'}
+              {source.status === 'absent'
+                ? 'This image is not on this device.'
+                : naturalSize === 'failed' && !stored
+                  ? 'This image could not be opened. Close mark up and attach it again.'
+                  : 'Loading image…'}
             </p>
           )}
         </div>
       </div>
+      {phoneCard === undefined ? null : (
+        <div role='group' aria-label={`Comment ${phoneCard.number}`} className='border-t border-border bg-popover p-3'>
+          {cardOf(phoneCard, phoneCard.model === undefined || lift !== undefined)}
+        </div>
+      )}
       {relocatingLabel === undefined ? null : (
         <div role='status' className='flex items-center justify-center gap-2 border-t px-3 py-1.5 text-xs'>
           {relocatingLabel}
@@ -794,9 +972,7 @@ function MarkupSurface({
             key={entry.tool}
             label={`${entry.label} (${entry.key})`}
             isActive={tool === entry.tool}
-            className={cn(entry.tool !== ActiveShape.tool && 'max-sm:hidden')}
             onClick={() => {
-              setShape(entry.tool);
               setTool(entry.tool);
             }}
           >
@@ -825,7 +1001,7 @@ function MarkupSurface({
           className='max-sm:hidden'
           disabled={zoom <= 1}
           onClick={() => {
-            setZoom(Math.max(1, zoom / 1.5));
+            setZoom(clampZoom(zoom / 1.5));
           }}
         >
           <ZoomOut />
@@ -835,7 +1011,7 @@ function MarkupSurface({
           className='max-sm:hidden'
           disabled={zoom >= 4}
           onClick={() => {
-            setZoom(Math.min(4, zoom * 1.5));
+            setZoom(clampZoom(zoom * 1.5));
           }}
         >
           <ZoomIn />

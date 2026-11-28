@@ -139,7 +139,7 @@
       "executor": "nx:run-commands",
       "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
       "metadata": {
-        "description": "A journey family of test:e2e (CI decomposition DC-25, global review ruling 5): 7 spec files that passed on nights M and N, about 5.11 min of specs (at most 6.5). It lists its files, so a spec joins a family on purpose; the specs run as test:e2e runs them (same env fixture, same ui:build first), and test:e2e still runs them all. browsers names the Playwright browsers its files' Vitest instances launch, the only ones its CI row installs. external-agent.spec.ts starts a `tau serve` daemon over apps/ui/serve/build, hence the ui:build:serve dependency, as test:e2e has.",
+        "description": "A journey family of test:e2e (CI decomposition DC-25, global review ruling 5): 8 spec files that passed on nights M and N, about 5.11 min of specs (at most 6.5). It lists its files, so a spec joins a family on purpose; the specs run as test:e2e runs them (same env fixture, same ui:build first), and test:e2e still runs them all. browsers names the Playwright browsers its files' Vitest instances launch, the only ones its CI row installs. external-agent.spec.ts starts a `tau serve` daemon over apps/ui/serve/build, hence the ui:build:serve dependency, as test:e2e has.",
         "browsers": ["chromium"]
       },
       "options": {
@@ -147,7 +147,7 @@
         "parallel": false,
         "commands": [
           { "command": "pnpm exec nx run ui:build", "forwardAllArgs": false },
-          "vitest run --config apps/ui-e2e/vitest.config.ts src/chat-attachments.spec.ts src/chat-compaction.spec.ts src/chat-image-carousel.spec.ts src/external-agent.spec.ts src/first-turn-admission.spec.ts src/headless-chat-image-capture.development.spec.ts src/homepage-first-turn-admission.spec.ts"
+          "vitest run --config apps/ui-e2e/vitest.config.ts src/chat-attachments.spec.ts src/chat-compaction.spec.ts src/chat-image-carousel.spec.ts src/image-markup.spec.ts src/external-agent.spec.ts src/first-turn-admission.spec.ts src/headless-chat-image-capture.development.spec.ts src/homepage-first-turn-admission.spec.ts"
         ],
         "env": {
           "TAU_CLOUD_ENABLED": "false",

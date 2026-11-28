@@ -34,6 +34,8 @@ function FileManagerWrapper({ children }: { readonly children: ReactNode }): Rea
 const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
 
 beforeEach(() => {
+  // A tile's drawing is TileMarkup's own test; here the canvas has no context, whichever test loads it first.
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
   let created = 0;
   vi.stubGlobal(
     'URL',
@@ -48,8 +50,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+
+const pinnedUrl = `attachments/${'2'.repeat(64)}.png`;
 
 describe('ChatTextareaAttachmentRail', () => {
   it('should offer mark up on each image and show the numbers of the comments pinned on it', () => {
@@ -61,13 +66,57 @@ describe('ChatTextareaAttachmentRail', () => {
         size='desktop'
         onRemove={vi.fn()}
         onMarkUp={onMarkUp}
-        pinNumbersByAttachment={new Map([[`attachments/${'2'.repeat(64)}.png`, [1, 3]]])}
+        markupByAttachment={
+          new Map([
+            [
+              pinnedUrl,
+              {
+                image: { id: 'img-1', width: 400, height: 300, attachment: pinnedUrl, marks: [] },
+                comments: [
+                  { number: 1, text: 'Here', image: 'img-1', at: [0.2, 0.2] },
+                  { number: 3, text: 'There', image: 'img-1', at: [0.6, 0.4] },
+                ],
+              },
+            ],
+          ])
+        }
       />,
     );
     expect(screen.queryByRole('button', { name: /Mark up bracket-spec/u })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Mark up uploaded image 2' }));
     expect(onMarkUp).toHaveBeenCalledWith(2);
     expect(screen.getByLabelText('Comments 1, 3')).toBeInTheDocument();
+  });
+
+  it('should draw the pins and marks of a marked up image over its tile only', async () => {
+    render(
+      <ChatTextareaAttachmentRail
+        attachments={images}
+        directory={directory}
+        size='desktop'
+        onRemove={vi.fn()}
+        markupByAttachment={
+          new Map([
+            [
+              pinnedUrl,
+              {
+                image: {
+                  id: 'img-1',
+                  width: 400,
+                  height: 300,
+                  attachment: pinnedUrl,
+                  marks: [{ kind: 'rectangle', from: [0.1, 0.1], to: [0.4, 0.4] }],
+                },
+                comments: [],
+              },
+            ],
+          ])
+        }
+      />,
+    );
+    const drawing = await screen.findByTestId('tile-markup');
+    expect(drawing.closest('button')).toHaveAccessibleName('Open uploaded image 2');
+    expect(screen.getAllByTestId('tile-markup')).toHaveLength(1);
   });
 
   it('should offer no mark up while comment pins are off', () => {

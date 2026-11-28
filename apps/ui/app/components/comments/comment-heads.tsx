@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { Popover, PopoverAnchor, PopoverContent } from '@taucad/ui/components/popover';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { CommentSurfacePick, useCommentPins } from '@taucad/viewer/cad/comment-pins';
 import { CommentCard, ReadOnlyCommentCard } from '#components/comments/comment-card.js';
+import { CommentSheet } from '#components/comments/comment-sheet.js';
 import type { ViewerCommentsValue } from '#components/comments/viewer-comments.js';
 
 /*
@@ -13,7 +15,7 @@ import type { ViewerCommentsValue } from '#components/comments/viewer-comments.j
 const pinId = String;
 
 const headClass =
-  'pointer-events-auto absolute top-0 left-0 flex size-6 items-center justify-center rounded-full border-2 border-white bg-markup-ink text-xs font-semibold text-white shadow-sm outline-none focus-visible:focus-outline data-[occluded=true]:opacity-40 data-[sent=true]:border-markup-ink data-[sent=true]:bg-background data-[sent=true]:text-markup-ink data-[outdated=true]:border-dashed data-[moving=true]:animate-pulse';
+  'pointer-events-auto absolute top-0 left-0 flex size-6 items-center justify-center rounded-full border-2 border-white bg-markup-ink text-xs font-semibold text-white shadow-sm outline-none pointer-coarse:before:absolute pointer-coarse:before:-inset-2.5 focus-visible:focus-outline data-[occluded=true]:opacity-40 data-[sent=true]:border-markup-ink data-[sent=true]:bg-background data-[sent=true]:text-markup-ink data-[outdated=true]:border-dashed data-[moving=true]:animate-pulse';
 
 /** How far a press on a head travels, in CSS pixels, before it is a drag and not a click (charter D23). */
 const dragSlop = 4;
@@ -146,6 +148,28 @@ export function CommentHeads({
     outdated,
   } = value;
   const dragProps = usePinHeadDrag(heads, isReadOnly ? undefined : move);
+  const isPhone = useIsMobile();
+  const cardOf = (comment: (typeof comments)[number]): React.JSX.Element =>
+    isReadOnly ? (
+      <ReadOnlyCommentCard comment={comment} isOutdated={outdated.has(comment.number)} />
+    ) : (
+      <CommentCard
+        comment={comment}
+        isOutdated={outdated.has(comment.number)}
+        hasDoneButton={isPhone}
+        onText={(text) => {
+          setText(comment.number, text);
+        }}
+        onRemove={() => {
+          remove(comment.number);
+        }}
+        onDone={close}
+        onMove={() => {
+          startMove(comment.number);
+        }}
+      />
+    );
+  const openComment = isPhone ? comments.find((comment) => comment.number === openNumber) : undefined;
   return (
     <div className='pointer-events-none absolute inset-0 z-10' data-comment-ui=''>
       {movingNumber === undefined ? null : (
@@ -212,29 +236,19 @@ export function CommentHeads({
             }}
           >
             <PopoverAnchor asChild>{head}</PopoverAnchor>
-            <PopoverContent side='right' align='start' className='w-72 p-3' updatePositionStrategy='always'>
-              {isReadOnly ? (
-                <ReadOnlyCommentCard comment={comment} isOutdated={outdated.has(comment.number)} />
-              ) : (
-                <CommentCard
-                  comment={comment}
-                  isOutdated={outdated.has(comment.number)}
-                  onText={(text) => {
-                    setText(comment.number, text);
-                  }}
-                  onRemove={() => {
-                    remove(comment.number);
-                  }}
-                  onDone={close}
-                  onMove={() => {
-                    startMove(comment.number);
-                  }}
-                />
-              )}
-            </PopoverContent>
+            {isPhone ? null : (
+              <PopoverContent side='right' align='start' className='w-72 p-3' updatePositionStrategy='always'>
+                {cardOf(comment)}
+              </PopoverContent>
+            )}
           </Popover>
         );
       })}
+      {openComment === undefined ? null : (
+        <CommentSheet label={`Comment ${openComment.number}`} onClose={close}>
+          {cardOf(openComment)}
+        </CommentSheet>
+      )}
     </div>
   );
 }

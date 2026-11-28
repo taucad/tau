@@ -200,6 +200,8 @@ const recipeSize = (recipe: HeadlessCaptureRecipe, cameraState?: CameraState): r
 };
 
 const captureBackground = '#242424';
+/** A pin's picture is light, as the viewer it was pinned in (operator choice, 2026-11-28); other captures stay dark. */
+const pinCaptureBackground = '#fafafa';
 const tauWorld = { up: '+z', forward: '-y', unit: 'meter' } as const;
 type GlbCaptureOptions = Extract<HeadlessImageJob, { sourceFormat: 'glb' }>['exportOptions'];
 type SingleGlbCamera = Extract<GlbCaptureOptions, { mode?: 'single' }>['camera'];
@@ -260,6 +262,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
   const [width, height] = recipeSize(recipe, artifact.mimeType === 'image/svg+xml' ? undefined : cameraState);
   // A pin's picture carries no label, axes or scale bar: its pins are painted over it when the message is sent.
   const annotated = recipe.purpose !== 'utility' && recipe.purpose !== 'pin';
+  const background = recipe.purpose === 'pin' ? pinCaptureBackground : captureBackground;
 
   if (artifact.mimeType === 'image/svg+xml') {
     const files = await imageService.export({
@@ -273,7 +276,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
         width,
         height,
         margin: 0.1,
-        background: captureBackground,
+        background,
         ...(annotated ? { label: normalizeImageLabel(entryPath), axes: true, scaleBar: true } : {}),
         ...(annotated ? { lengthSymbol: artifact.units?.length ?? 'mm' } : {}),
       },
@@ -306,9 +309,9 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
   const common = {
     width,
     height,
-    // The light-scheme viewer's look, chosen by the operator on 2026-11-05 for black edges, on the dark capture background.
+    // The light-scheme viewer's look, chosen by the operator on 2026-11-05 for black edges, on the capture background.
     ...buildViewerCaptureImageOptions({ width, height, colorScheme: 'light' }),
-    background: captureBackground,
+    background,
     ...(presentation?.enableSurfaces === false ? { surfaces: false } : {}),
     ...(!includeEdges || presentation?.enableLines === false ? { lines: false } : {}),
     world: tauWorld,

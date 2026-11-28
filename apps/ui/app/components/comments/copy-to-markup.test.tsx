@@ -6,6 +6,13 @@ const state = vi.hoisted(() => ({
   flag: 'on' as 'on' | 'off',
   send: vi.fn(),
   attachments: [{ url: 'attachments/a.png' }] as unknown[],
+  queue: [] as Array<{ target: string }>,
+}));
+const draftActorRef = vi.hoisted(() => ({
+  send: (...args: unknown[]): void => {
+    state.send(...args);
+  },
+  getSnapshot: () => ({ context: { draftAttachments: state.attachments, attachmentQueue: state.queue } }),
 }));
 
 vi.mock('#flags/use-feature.js', () => ({ useFeatureState: () => state.flag }));
@@ -14,14 +21,10 @@ vi.mock('#components/chat/attachment-preview.js', () => ({
 }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useOptionalChatComposer: () => ({
-    draftActorRef: { send: state.send },
+    draftActorRef,
     execution: { execution: 'browser' },
     model: { model: { id: 'model' } },
   }),
-}));
-vi.mock('@xstate/react', () => ({
-  useSelector: (_ref: unknown, select: (snapshot: unknown) => unknown) =>
-    select({ context: { draftAttachments: state.attachments } }),
 }));
 vi.mock('#utils/chat.utils.js', () => ({ attachmentModelForExecution: () => ({ id: 'model' }) }));
 vi.mock('#components/comments/draft-image-markup.js', () => ({
@@ -50,6 +53,17 @@ describe('useMarkUpCopy', () => {
     expect(event.dataUrl).toMatch(/^data:image\/png;base64,/u);
     render(<div>{result.current.dialog}</div>);
     expect(await screen.findByTestId('markup')).toHaveTextContent('1 Add to chat /composer,/transcript');
+  });
+
+  it('should open mark up after the images still queued for the draft', async () => {
+    state.queue = [{ target: 'main' }, { target: 'edit' }];
+    const { result } = renderHook(() => useMarkUpCopy());
+    await act(async () => {
+      await result.current.markUp?.({ src: 'blob:shown', mediaType: 'image/png' });
+    });
+    render(<div>{result.current.dialog}</div>);
+    expect(await screen.findByTestId('markup')).toHaveTextContent(/^2 /u);
+    state.queue = [];
   });
 
   it('should offer nothing while the flag is off', () => {

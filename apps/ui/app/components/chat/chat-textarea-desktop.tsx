@@ -43,6 +43,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { ChatContextIndicator } from '#components/chat/chat-context-indicator.js';
 import { ChatTextareaBorderBeam } from '@taucad/chat-ui/components/chat-textarea-border-beam';
 import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
+import type { TileMarkupInput } from '#components/chat/chat-textarea-image-strip.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
 import { ChatDropOverlay, useChatDropZone } from '#components/chat/chat-drop-zone.js';
@@ -171,7 +172,7 @@ type ChatTextareaDesktopProperties = {
   /** Opens mark up on a draft image; absent while comment pins are off. */
   readonly markUpAttachment?: (index: number) => void;
   /** The comment numbers pinned on each draft image, by attachment URL. */
-  readonly pinNumbersByAttachment?: ReadonlyMap<string, readonly number[]>;
+  readonly markupByAttachment?: ReadonlyMap<string, TileMarkupInput>;
   /** The draft's comments, drawn under its attachments. */
   readonly comments?: React.ReactNode;
 };
@@ -372,7 +373,7 @@ export const ChatTextareaDesktop = memo(function ({
   handleTextareaBlur,
   removeAttachment,
   markUpAttachment,
-  pinNumbersByAttachment,
+  markupByAttachment,
   comments,
 }: ChatTextareaDesktopProperties): React.JSX.Element {
   const catalog = useSkillsCatalogState();
@@ -1028,7 +1029,7 @@ export const ChatTextareaDesktop = memo(function ({
           size='desktop'
           onRemove={removeAttachment}
           onMarkUp={markUpAttachment}
-          pinNumbersByAttachment={pinNumbersByAttachment}
+          markupByAttachment={markupByAttachment}
         />
         {comments}
 

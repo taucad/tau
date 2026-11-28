@@ -31,7 +31,7 @@
  */
 
 import { ShownCommentsProvider } from '#components/comments/shown-comments.js';
-import { ViewerSurfacesProvider } from '#components/comments/viewer-surfaces.js';
+import { ViewerSurfacesProvider } from '#hooks/viewer-surfaces.js';
 import { useActorRef, useSelector } from '@xstate/react';
 import {
   createContext,

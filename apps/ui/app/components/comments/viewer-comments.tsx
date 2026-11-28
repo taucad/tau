@@ -5,6 +5,7 @@ import type { Rendering } from '@taucad/runtime';
 import { annotationLimits } from '@taucad/chat/annotations';
 import type { AnnotationCamera, AnnotationComment, MessageAnnotations } from '@taucad/chat/annotations';
 import { attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
+import type { draftMachine } from '@taucad/chat-ui/hooks/draft.machine';
 import { toast } from '@taucad/ui/components/sonner';
 import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
 import { randomUuid } from '@taucad/utils/id';
@@ -45,6 +46,11 @@ import { attachmentModelForExecution } from '#utils/chat.utils.js';
  */
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
+type DraftActorRef = ActorRefFrom<typeof draftMachine>;
+
+/** The draft as it is now: a capture may have changed it since the last render. */
+const selectDraftNow = (draftRef: DraftActorRef): ReturnType<DraftActorRef['getSnapshot']>['context'] =>
+  draftRef.getSnapshot().context;
 
 /** Which model a viewer shows: a pin belongs to the viewer that shows the model it was placed on. */
 type ViewerScope = Readonly<{
@@ -286,7 +292,7 @@ export function ViewerComments({
   const dropTiles = useCallback(
     (urls: readonly string[]): void => {
       // The list as it is now: a capture may have changed it since this render.
-      const current = draftRef?.getSnapshot().context.draftAttachments ?? [];
+      const current = draftRef === undefined ? [] : selectDraftNow(draftRef).draftAttachments;
       const indices = urls
         .map((url) => current.findIndex((attachment) => attachmentUrl(attachment) === url))
         .filter((index) => index !== -1)
@@ -328,7 +334,7 @@ export function ViewerComments({
       } catch (error) {
         if (retake) {
           // Only the retake's own change goes back: words typed and pins moved meanwhile stay.
-          const current = draftRef.getSnapshot().context.draftAnnotations;
+          const current = selectDraftNow(draftRef).draftAnnotations;
           draftRef.send({ type: 'setDraftAnnotations', annotations: withoutFailedRetake(current, retake, imageId) });
         }
         toast.error(error instanceof Error ? error.message : "Couldn't take the comment's picture");

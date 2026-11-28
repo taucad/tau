@@ -1,4 +1,6 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import type { ActorRefFrom } from 'xstate';
+import type { draftMachine } from '@taucad/chat-ui/hooks/draft.machine';
 import { readFileAsDataUrl } from '@taucad/chat-ui/utils/attachment-intake';
 import { toast } from '@taucad/ui/components/sonner';
 import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
@@ -12,6 +14,12 @@ const DraftImageMarkup = lazyCode(async () => {
   const module = await import('#components/comments/draft-image-markup.js');
   return { default: module.DraftImageMarkup };
 });
+
+/** Where a copied image lands: after the draft's attachments and every image still queued for it. */
+const selectCopyIndex = (draftRef: ActorRefFrom<typeof draftMachine>): number => {
+  const { draftAttachments, attachmentQueue } = draftRef.getSnapshot().context;
+  return draftAttachments.length + attachmentQueue.filter((entry) => entry.target === 'main').length;
+};
 
 /** An image shown somewhere other than the composer, by a URL the page can read now. */
 export type MarkUpSource = Readonly<{ src: string; mediaType: string }>;
@@ -55,9 +63,7 @@ export function useMarkUpCopy(): Readonly<{
           toast.error('The image was not copied: the chat changed before it was ready. Mark it up again here.');
           return;
         }
-        // It lands after the draft's attachments and every image still queued for it.
-        const { draftAttachments, attachmentQueue } = draftRef.getSnapshot().context;
-        const index = draftAttachments.length + attachmentQueue.filter((entry) => entry.target === 'main').length;
+        const index = selectCopyIndex(draftRef);
         draftRef.send({
           type: 'addDraftAttachment',
           dataUrl,

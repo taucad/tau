@@ -1,5 +1,5 @@
 /* oxlint-disable no-bitwise -- permission bits are a bit field. */
-import { chmod, lstat, readdir, readlink, stat } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, readdir, readlink, rm, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import { hashFile } from '#preparation/preparation-store.js';
@@ -93,6 +93,8 @@ export const runSealStep = async (input: {
   readonly dependency: string;
   readonly target: DependencyTarget;
   readonly root: string;
+  /** The attempt's staging directory, which holds the step's scratch directory. */
+  readonly staging: string;
   readonly files: readonly InstalledFile[];
   readonly signal: AbortSignal;
 }): Promise<{ readonly rows: readonly InstalledFile[] } | { readonly refusal: SealClosureRefusal }> => {
@@ -100,14 +102,18 @@ export const runSealStep = async (input: {
   if (plugin.seal === undefined) {
     return { rows: [] };
   }
-  const refusal = await plugin.seal({
-    package: plugin.package,
-    dependency: input.dependency,
-    target: input.target,
-    root,
-    files,
-    signal,
-  });
+  const scratch = await mkdtemp(join(input.staging, 'seal-'));
+  const refusal = await plugin
+    .seal({
+      package: plugin.package,
+      dependency: input.dependency,
+      target: input.target,
+      root,
+      scratch,
+      files,
+      signal,
+    })
+    .finally(async () => rm(scratch, { recursive: true, force: true }));
   signal.throwIfAborted();
   if (refusal !== undefined) {
     return { refusal };

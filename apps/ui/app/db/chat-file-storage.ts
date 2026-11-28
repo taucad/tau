@@ -118,6 +118,8 @@ export type ChatStoreClient = {
 export type ChatFileStoreOptions = {
   readonly queueLock?: QueueLock;
   readonly client: ChatStoreClient;
+  /** The same records over connections that declared the background lane (FW4): the all-chats reads use it. */
+  readonly backgroundClient?: ChatStoreClient;
   /** Every project this profile knows about, deleted ones included. */
   readonly projectIds: () => Promise<readonly string[]>;
 };
@@ -146,14 +148,6 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
   const mutex = new KeyedMutex<string>();
   /** `chatId -> projectId`, filled by every read and every create. */
   const located = new Map<string, string>();
-
-  const readText = async (path: string): Promise<string | undefined> => {
-    try {
-      return await options.client.readFile(path, 'utf8');
-    } catch {
-      return undefined;
-    }
-  };
 
   const hydrate = async (record: ChatRecord): Promise<Chat> => {
     const request: unknown = record.startupRequest;
@@ -191,25 +185,122 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
   const legacyHosts = new Map<string, TauAgentHostId | undefined>();
 
   /**
-   * A chat record as `chat.json` holds it, a placement written before placement moved to the device included. Only
-   * the write path and {@link ChatStorage.adoptLegacyChatPlacement} read it so: everything else reads {@link readRecord}.
+   * The record reads, through one client: the store's own, or the one whose connections declared the background
+   * lane (FW4), for the all-chats reads nobody waits on one by one. Both fill the same caches.
    */
-  const readStoredRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
-    const text = await readText(recordPath(projectId, chatId));
-    const record = text === undefined ? undefined : parseChatRecord(text);
-    if (record === undefined) {
-      legacyHosts.delete(chatId);
-      return undefined;
-    }
-    located.set(record.id, projectId);
-    legacyHosts.set(record.id, chatPlacementOf(record.activeExecution));
-    return record;
-  };
+  const readsThrough = (client: ChatStoreClient) => {
+    const readText = async (path: string): Promise<string | undefined> => {
+      try {
+        return await client.readFile(path, 'utf8');
+      } catch {
+        return undefined;
+      }
+    };
 
-  const readRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
-    const record = await readStoredRecord(projectId, chatId);
-    return record === undefined ? undefined : withPortableExecution(record);
+    /**
+     * A chat record as `chat.json` holds it, a placement written before placement moved to the device included. Only
+     * the write path and {@link ChatStorage.adoptLegacyChatPlacement} read it so: everything else reads {@link readRecord}.
+     */
+    const readStoredRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
+      const text = await readText(recordPath(projectId, chatId));
+      const record = text === undefined ? undefined : parseChatRecord(text);
+      if (record === undefined) {
+        legacyHosts.delete(chatId);
+        return undefined;
+      }
+      located.set(record.id, projectId);
+      legacyHosts.set(record.id, chatPlacementOf(record.activeExecution));
+      return record;
+    };
+
+    const readRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
+      const record = await readStoredRecord(projectId, chatId);
+      return record === undefined ? undefined : withPortableExecution(record);
+    };
+
+    /**
+     * One chat directory, record or no record.
+     *
+     * Fetch projects segments and `chat.json` as separate writes. A log-only
+     * directory stays discoverable, but its transcript belongs to the projection
+     * subscriber, not this metadata store.
+     */
+    const readChatDirectory = async (projectId: string, chatId: string): Promise<Chat | undefined> => {
+      // The registration probe is one id in every project. A leftover empty log is not a chat.
+      if (chatId === registrationProbeChatId) {
+        return undefined;
+      }
+      const record = await readRecord(projectId, chatId);
+      if (record !== undefined) {
+        return hydrate(record);
+      }
+      const directory = chatDirectory(projectId, chatId);
+      const ownLog = await client.exists(`${directory}/${chatLogFileName}`);
+      let foreignLog = false;
+      if (!ownLog) {
+        try {
+          const entries = await client.readdir(`${directory}/events`);
+          foreignLog = entries.some((name) => name.endsWith('.jsonl'));
+        } catch {
+          // This chat has no projected foreign segment yet.
+        }
+      }
+      if (!ownLog && !foreignLog) {
+        return undefined;
+      }
+      located.set(chatId, projectId);
+      return placeholderRecord(projectId, chatId);
+    };
+
+    /** Read navigation metadata without deriving a host-log transcript. */
+    const readChatRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
+      const record = await readRecord(projectId, chatId);
+      if (record !== undefined) {
+        return record.recencyAt === undefined ? { ...record, recencyAt: getChatRecencyAt(record) } : record;
+      }
+      const chat = await readChatDirectory(projectId, chatId);
+      if (chat === undefined) {
+        return undefined;
+      }
+      const { messages: _messages, ...metadata } = chat;
+      return { ...metadata, recencyAt: getChatRecencyAt(chat) };
+    };
+
+    const listProjectChats = async (projectId: string): Promise<Chat[]> => {
+      let ids: string[];
+      try {
+        ids = await client.readdir(chatsDirectory(projectId));
+      } catch {
+        return [];
+      }
+      const chats = await Promise.all(ids.map(async (chatId) => readChatDirectory(projectId, chatId)));
+      return chats.filter((chat): chat is Chat => chat !== undefined && chat.purgedAt === undefined);
+    };
+
+    const listProjectChatRecords = async (projectId: string): Promise<ChatRecord[]> => {
+      let ids: string[];
+      try {
+        ids = await client.readdir(chatsDirectory(projectId));
+      } catch {
+        return [];
+      }
+      const records = await Promise.all(ids.map(async (chatId) => readChatRecord(projectId, chatId)));
+      return records.filter((record): record is ChatRecord => record !== undefined && record.purgedAt === undefined);
+    };
+
+    return {
+      readStoredRecord,
+      readRecord,
+      readChatDirectory,
+      listProjectChats,
+      listProjectChatRecords,
+    };
   };
+  const { readStoredRecord, readRecord, readChatDirectory, listProjectChats, listProjectChatRecords } = readsThrough(
+    options.client,
+  );
+  /** The all-chats reads' lane: background when the caller gave a background client. */
+  const allChatsReads = options.backgroundClient === undefined ? undefined : readsThrough(options.backgroundClient);
 
   /**
    * Write a chat record. A caller's execution is stored portable; `legacy`, a device-relative host the stored record
@@ -224,76 +315,6 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
         : { ...portable, activeExecution: withChatPlacement(portable.activeExecution, legacy) };
     await options.client.writeFile(recordPath(projectId, chat.id), serializeChatRecord(stored));
     located.set(chat.id, projectId);
-  };
-
-  /**
-   * One chat directory, record or no record.
-   *
-   * Fetch projects segments and `chat.json` as separate writes. A log-only
-   * directory stays discoverable, but its transcript belongs to the projection
-   * subscriber, not this metadata store.
-   */
-  const readChatDirectory = async (projectId: string, chatId: string): Promise<Chat | undefined> => {
-    // The registration probe is one id in every project. A leftover empty log is not a chat.
-    if (chatId === registrationProbeChatId) {
-      return undefined;
-    }
-    const record = await readRecord(projectId, chatId);
-    if (record !== undefined) {
-      return hydrate(record);
-    }
-    const directory = chatDirectory(projectId, chatId);
-    const ownLog = await options.client.exists(`${directory}/${chatLogFileName}`);
-    let foreignLog = false;
-    if (!ownLog) {
-      try {
-        const entries = await options.client.readdir(`${directory}/events`);
-        foreignLog = entries.some((name) => name.endsWith('.jsonl'));
-      } catch {
-        // This chat has no projected foreign segment yet.
-      }
-    }
-    if (!ownLog && !foreignLog) {
-      return undefined;
-    }
-    located.set(chatId, projectId);
-    return placeholderRecord(projectId, chatId);
-  };
-
-  /** Read navigation metadata without deriving a host-log transcript. */
-  const readChatRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
-    const record = await readRecord(projectId, chatId);
-    if (record !== undefined) {
-      return record.recencyAt === undefined ? { ...record, recencyAt: getChatRecencyAt(record) } : record;
-    }
-    const chat = await readChatDirectory(projectId, chatId);
-    if (chat === undefined) {
-      return undefined;
-    }
-    const { messages: _messages, ...metadata } = chat;
-    return { ...metadata, recencyAt: getChatRecencyAt(chat) };
-  };
-
-  const listProjectChats = async (projectId: string): Promise<Chat[]> => {
-    let ids: string[];
-    try {
-      ids = await options.client.readdir(chatsDirectory(projectId));
-    } catch {
-      return [];
-    }
-    const chats = await Promise.all(ids.map(async (chatId) => readChatDirectory(projectId, chatId)));
-    return chats.filter((chat): chat is Chat => chat !== undefined && chat.purgedAt === undefined);
-  };
-
-  const listProjectChatRecords = async (projectId: string): Promise<ChatRecord[]> => {
-    let ids: string[];
-    try {
-      ids = await options.client.readdir(chatsDirectory(projectId));
-    } catch {
-      return [];
-    }
-    const records = await Promise.all(ids.map(async (chatId) => readChatRecord(projectId, chatId)));
-    return records.filter((record): record is ChatRecord => record !== undefined && record.purgedAt === undefined);
   };
 
   /**
@@ -679,7 +700,8 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
 
     getAllChats: async (listOptions) => {
       const projects = await options.projectIds();
-      const perProject = await Promise.all(projects.map(async (projectId) => listProjectChats(projectId)));
+      const list = allChatsReads?.listProjectChats ?? listProjectChats;
+      const perProject = await Promise.all(projects.map(async (projectId) => list(projectId)));
       const chats = perProject.flat();
       return listOptions?.includeDeleted === true ? chats : chats.filter((chat) => !isDeleted(chat));
     },
@@ -691,7 +713,8 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
 
     getAllChatRecords: async (listOptions) => {
       const projects = await options.projectIds();
-      const perProject = await Promise.all(projects.map(async (projectId) => listProjectChatRecords(projectId)));
+      const list = allChatsReads?.listProjectChatRecords ?? listProjectChatRecords;
+      const perProject = await Promise.all(projects.map(async (projectId) => list(projectId)));
       const records = perProject.flat();
       return listOptions?.includeDeleted === true ? records : records.filter((record) => !isDeleted(record));
     },

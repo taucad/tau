@@ -5,7 +5,7 @@ import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { connect, createServer as createTcpServer } from 'node:net';
 import type { AddressInfo, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { createServer } from 'node:tls';
 import type { Server } from 'node:tls';
 
@@ -51,6 +51,74 @@ socket.once('data', (reply) => {
 socket.write('OPTIONS rtsp://127.0.0.1:' + url.port + url.pathname + ' RTSP/1.0\\r\\nCSeq: 1\\r\\n\\r\\n');
 `;
 
+/*
+ * The same stand-in for Windows, which runs no shebang script and from which Tau starts only a real `ffmpeg.exe`.
+ * A launcher that ran Node.js would leave a grandchild holding ffmpeg's stdout pipe after Tau kills it, so the
+ * stand-in is compiled whole with the C# compiler every Windows .NET Framework installation ships.
+ */
+const fakeFfmpegCs = `
+using System;
+using System.IO;
+using System.Net.Sockets;
+using System.Text;
+static class FakeFfmpeg {
+  static string Quote(string value) {
+    var text = new StringBuilder("\\"");
+    foreach (var c in value) { if (c == '"' || c == '\\\\') { text.Append('\\\\'); } text.Append(c); }
+    return text.Append('"').ToString();
+  }
+  static int Main(string[] args) {
+    var directory = Path.GetDirectoryName(System.Reflection.Assembly.GetEntryAssembly().Location);
+    var quoted = new string[args.Length];
+    for (var i = 0; i < args.Length; i++) { quoted[i] = Quote(args[i]); }
+    File.AppendAllText(Path.Combine(directory, "runs.jsonl"), "[" + string.Join(",", quoted) + "]\\n");
+    var url = new Uri(args[Array.IndexOf(args, "-i") + 1]);
+    try {
+      using (var client = new TcpClient(url.Host, url.Port)) {
+        var stream = client.GetStream();
+        var request = Encoding.ASCII.GetBytes("OPTIONS rtsp://127.0.0.1:" + url.Port + url.AbsolutePath + " RTSP/1.0\\r\\nCSeq: 1\\r\\n\\r\\n");
+        stream.Write(request, 0, request.Length);
+        var reply = new byte[4096];
+        var read = stream.Read(reply, 0, reply.Length);
+        if (read <= 0 || !Encoding.GetEncoding(28591).GetString(reply, 0, read).StartsWith("RTSP/1.0 200", StringComparison.Ordinal)) { return 1; }
+        var frame = new byte[] { ${jpeg.join(', ')} };
+        using (var output = Console.OpenStandardOutput()) { output.Write(frame, 0, frame.Length); output.Flush(); }
+        return 0;
+      }
+    } catch (Exception) {
+      return 1;
+    }
+  }
+}
+`;
+
+/**
+ * Write the fake ffmpeg where Tau would find it: a shebang script on macOS and Linux, a compiled `ffmpeg.exe` on
+ * Windows.
+ * @param folder - The directory to write it into.
+ * @returns The executable's path.
+ */
+const writeFakeFfmpeg = async (folder: string): Promise<string> => {
+  if (process.platform === 'win32') {
+    const source = join(folder, 'fake-ffmpeg.cs');
+    const executable = join(folder, 'ffmpeg.exe');
+    await writeFile(source, fakeFfmpegCs);
+    const compiler = join(
+      process.env['SystemRoot'] ?? String.raw`C:\Windows`,
+      'Microsoft.NET',
+      'Framework64',
+      'v4.0.30319',
+      'csc.exe',
+    );
+    execFileSync(compiler, ['/nologo', `/out:${executable}`, source], { stdio: 'ignore' });
+    return executable;
+  }
+  const executable = join(folder, 'ffmpeg');
+  await writeFile(executable, `#!${process.execPath}\n${fakeFfmpeg}`);
+  await chmod(executable, 0o755);
+  return executable;
+};
+
 let directory: string;
 let ffmpeg: string;
 let camera: Server;
@@ -61,9 +129,7 @@ let tlsConnections = 0;
 
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'tau-rtsps-still-'));
-  ffmpeg = join(directory, 'ffmpeg');
-  await writeFile(ffmpeg, `#!${process.execPath}\n${fakeFfmpeg}`);
-  await chmod(ffmpeg, 0o755);
+  ffmpeg = await writeFakeFfmpeg(directory);
   /* The only way Node gets a self-signed certificate without a dependency. */
   execFileSync(
     'openssl',
@@ -668,8 +734,8 @@ describe('findFfmpeg', () => {
   });
 
   it('should return the first executable ffmpeg on the search path', async () => {
-    await expect(findFfmpeg(process.platform, Object.fromEntries([['PATH', `relative:${directory}`]]))).resolves.toBe(
-      ffmpeg,
-    );
+    await expect(
+      findFfmpeg(process.platform, Object.fromEntries([['PATH', `relative${delimiter}${directory}`]])),
+    ).resolves.toBe(ffmpeg);
   });
 });

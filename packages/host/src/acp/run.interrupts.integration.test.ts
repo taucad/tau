@@ -13,6 +13,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -32,7 +33,7 @@ const fakeAgent: AcpAdapter = {
   version: '0.0.0',
   configEnv: [],
   displayName: 'Codex',
-  modulePath: new URL('fixtures/fake-agent.ts', import.meta.url).pathname,
+  modulePath: fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url)),
 };
 
 const registry: ToolRegistry = {
@@ -148,6 +149,17 @@ describe('an approval nobody answers', () => {
       'the failed lifecycle marker',
       async () => readLog(workspaceRoot, chatId),
     );
+    /* The file shows a batch's rows as they are written, before their flush; the host's index folds them once they are
+     * durable, which a slow flush (Windows) holds back. Nothing is left in that live index either, so the `waiting` map
+     * does not leak: an interrupt the ending missed stays pending for good and times this out. */
+    await until(
+      async () => {
+        const pending = await launcher.pendingInterrupts(runId);
+        return pending.length === 0;
+      },
+      'the host to settle the interrupt',
+      async () => launcher.pendingInterrupts(runId),
+    );
 
     const events = await readLog(workspaceRoot, chatId);
     const interrupts = interruptsOf(events);
@@ -164,8 +176,6 @@ describe('an approval nobody answers', () => {
     expect(events.findIndex((event) => event.type === 'interrupt.recorded' && event.phase === 'resolved')).toBeLessThan(
       events.findIndex((event) => event.type === 'run.lifecycle' && event.state === 'failed'),
     );
-    // Nothing is left in the live index either, so the `waiting` map does not leak.
-    expect(await launcher.pendingInterrupts(runId)).toEqual([]);
   }, 90_000);
 
   it('reaches a terminal state when a cancel arrives with a permission outstanding', async () => {
@@ -242,7 +252,9 @@ describe('an approval nobody answers', () => {
     if (samePath) {
       const log = join(restarted.workspaceRoot, '.tau', 'chats', chatId, 'events.jsonl');
       const copied = await readFile(log, 'utf8');
-      await writeFile(log, copied.replaceAll(first.workspaceRoot, restarted.workspaceRoot));
+      /* The log is JSON lines, which escape a Windows path's backslashes. */
+      const escaped = (path: string): string => JSON.stringify(path).slice(1, -1);
+      await writeFile(log, copied.replaceAll(escaped(first.workspaceRoot), escaped(restarted.workspaceRoot)));
     }
     /* `attach` is a read (RH-R1), but a paused external run with no driver is an orphan (M1's `isOrphaned`): the
      * attach asks leadership to claim, and the claim's rehydration settles it (W7 RA-S14, RH-R9). */

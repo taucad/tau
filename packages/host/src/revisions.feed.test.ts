@@ -6,7 +6,7 @@
  * waits for the watcher first. A watcher that loses track makes the next save
  * read everything.
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import type * as nodeFs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,17 +28,28 @@ import type { ProjectRevisions } from '#revisions.js';
 
 type WatchListener = nodeFs.WatchListener<string>;
 
-/* Every listener the host hands `fs.watch`, so a row can speak for the platform. */
+/* Every listener the host hands `fs.watch`, so a row can speak for the platform, and the path it watches. */
 const watched = vi.hoisted((): WatchListener[] => []);
+const watchedPaths = vi.hoisted((): string[] => []);
+/* What the platform reported, in order, so a failed row names what the watcher saw. */
+const reported = vi.hoisted((): string[] => []);
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof nodeFs>();
   const recorded = (...arguments_: Parameters<typeof nodeFs.watch>): ReturnType<typeof nodeFs.watch> => {
     const listener = arguments_.at(-1);
-    if (typeof listener === 'function') {
-      watched.push(listener as WatchListener);
+    watchedPaths.push(String(arguments_[0]));
+    if (typeof listener !== 'function') {
+      return actual.watch(...arguments_);
     }
-    return actual.watch(...arguments_);
+    watched.push(listener as WatchListener);
+    const report: WatchListener = (event, filename) => {
+      reported.push(`${event}:${String(filename)}`);
+      (listener as WatchListener)(event, filename);
+    };
+    const watcher = actual.watch(...(arguments_.slice(0, -1) as [string, nodeFs.WatchOptions]), report);
+    watcher.on('error', (error) => reported.push(`error:${String(error)}`));
+    return watcher;
   };
   return { ...actual, watch: recorded };
 });
@@ -50,6 +61,8 @@ afterEach(async () => {
   await Promise.all(hosts.splice(0).map(async (host) => host.release().catch(() => undefined)));
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
   watched.length = 0;
+  watchedPaths.length = 0;
+  reported.length = 0;
 });
 
 const fileCount = 40;
@@ -108,14 +121,34 @@ describe('the disk host’s change feed (E1)', () => {
   it('should re-read only the written file, and record a write the watcher had not reported yet', async () => {
     const host = await open();
     await host.save();
+    /* The first save writes some fifty objects into the watched `.git`. On Windows that burst overflows the
+     * watcher's buffer, which libuv reports as a change with no file name (run 44010131728: three `change:null`
+     * after the first save's cookie), so the next save rightly reads everything. A one-file save consumes that
+     * loss and writes too little to overflow, leaving the feed exact for the row's write. */
+    await writeFile(join(host.workspaceRoot, 'f6.txt'), 'edited\n');
+    await host.save();
+    reported.length = 0;
 
     await writeFile(join(host.workspaceRoot, 'f7.txt'), 'edited\n');
     host.reads.length = 0;
     /* Asked at once: the watcher's event for that write is still on its way. */
     const head = await host.save();
 
-    expect(host.reads).toEqual(['f7.txt']);
+    expect(host.reads, reported.join(' ')).toEqual(['f7.txt']);
     expect(await host.contentAt(head, 'f7.txt')).toBe('edited\n');
+  }, 60_000);
+
+  it('should watch the workspace by its long real path, which an 8.3 short Windows temp path is not', async () => {
+    /* The workspace is spelled as `tmpdir()` gives it: `C:\Users\RUNNER~1\...` on the Windows runner, where libuv
+     * aborts the process on the first event under a root watched by that spelling. */
+    const host = await open();
+    await host.save();
+
+    await writeFile(join(host.workspaceRoot, 'f3.txt'), 'edited\n');
+    const head = await host.save();
+
+    expect(watchedPaths).toContain(await realpath(host.workspaceRoot));
+    expect(await host.contentAt(head, 'f3.txt')).toBe('edited\n');
   }, 60_000);
 
   it('should read everything after the watcher loses track', async () => {

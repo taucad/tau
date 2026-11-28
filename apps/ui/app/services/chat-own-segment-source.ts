@@ -24,7 +24,12 @@ import type { ProjectionBatch, ReplayFacts } from '@taucad/agent-host';
 import { agentWireLimits } from '@taucad/agent-host/wire';
 import { getErrno } from '@taucad/utils/error';
 import { randomUuid } from '@taucad/utils/id';
-import { initialChatProjection, reduceChatProjection, selectRunPhase } from '#machines/chat-projection.logic.js';
+import {
+  initialChatProjection,
+  reduceChatProjection,
+  selectCurrentRun,
+  selectRunPhase,
+} from '#machines/chat-projection.logic.js';
 import type { ChatProjection, ChatProjectionEvent } from '#machines/chat-projection.logic.js';
 
 /** How often an unsettled own run's segment is read again while the page is visible. Milliseconds. @public */
@@ -330,22 +335,36 @@ export const createOwnSegmentSource = (input: OwnSegmentSourceInput): OwnSegment
     nextAttachAt = 0;
   };
 
+  /** When a live writer last touched the log's marker, or `undefined` when it has none. */
+  const markerTime = async (): Promise<number | undefined> => {
+    try {
+      const stat = await input.client().stat?.(`${directory}/events.jsonl.lock`);
+      return stat?.mtimeMs;
+    } catch {
+      return undefined;
+    }
+  };
+
   /** HA-I5: whether an unsettled own run has looked stale long enough for an in-page `attach`. */
   const checkSpan = async (): Promise<boolean> => {
     const phase = selectRunPhase(projection());
     if (view === undefined || ended.has(phase)) {
       restartSpan();
       lastChange = undefined;
-      return false;
+      /*
+       * The lifecycle ends before the settlement row is appended (W8 TS-S4), and the turn's Save status waits on that
+       * row. Unread, only the watch could deliver it, and a missed watch event left the marker on `Saving…` for good
+       * (desktop shell rows: `turn.finalized` 0.5-0.66 s after `completed`). So an ended run without its settlement is
+       * read while its writer is live, by the same staleness a running run's span uses. Nothing is claimed for it.
+       */
+      if (view === undefined || missingSaid || selectCurrentRun(projection())?.appendState !== 'terminal') {
+        return false;
+      }
+      const [rowAt, markerAt] = [newestRowAt(view, chatId), await markerTime()];
+      return now() - Math.max(rowAt ?? 0, markerAt ?? 0) < foreignRunStaleMilliseconds;
     }
     const rowAt = newestRowAt(view, chatId);
-    const markerAt = await input
-      .client()
-      .stat?.(`${directory}/events.jsonl.lock`)
-      .then(
-        (stat) => stat.mtimeMs,
-        () => undefined,
-      );
+    const markerAt = await markerTime();
     const change = `${String(rowAt)}:${String(markerAt)}`;
     if (change !== lastChange) {
       /* Any change restarts the span: a live writer's touch can never let it complete. */

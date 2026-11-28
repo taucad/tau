@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
-import { useChatContext } from '#hooks/use-chat.js';
+import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
+import { selectVisibleChatErrorEntry } from '#utils/run-auto-resume-plan.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { selectQueueStrip } from '#services/outbox-gate.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
@@ -22,11 +23,14 @@ function ConnectedQueue({
   const readUnqueued = useCallback(() => store.unqueuedSendOf(chatId), [chatId, store]);
   const unqueuedId = useSyncExternalStore(subscribe, readUnqueued, readUnqueued);
   const { items, sendingId } = useMemo(() => selectQueueStrip(context, unqueuedId), [context, unqueuedId]);
+  /* A refused send's reason is the chat's failure region's to say, once (Progressive Loading Policy rule 21). */
+  const isChatFailureShown = useChatSelector((state) => selectVisibleChatErrorEntry(state) !== undefined);
   return (
     <ChatMessageQueueView
       items={items}
       {...(sendingId === undefined ? {} : { sendingId })}
       {...(context.error === undefined ? {} : { error: context.error })}
+      isErrorAnnounced={isChatFailureShown}
       onEdit={async (id, text) => store.editQueuedMessage(chatId, id, text)}
       onSteer={async (id) => store.steerQueuedMessage(chatId, id)}
       onMove={async (id, beforeId) => store.moveQueuedMessage(chatId, id, beforeId)}

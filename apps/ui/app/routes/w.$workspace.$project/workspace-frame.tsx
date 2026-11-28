@@ -8,6 +8,8 @@ import type { OpenWait } from '#hooks/use-wait-start.js';
 import { WaitSkeleton } from '#routes/w.$workspace.$project/project-wait-skeleton.js';
 import { ProjectComposerHandOff, useProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
 import { useHandOffAdopted } from '#components/hand-off/hand-off-store.js';
+import { DepartingFirstMessage } from '#components/chat/departing-first-message.js';
+import { useDepartingFirstMessage } from '#lib/departing-first-message.js';
 import {
   defaultPhoneFrameHint,
   defaultWideFrameHint,
@@ -195,7 +197,11 @@ export function WorkspaceFrame({
          * chunk's) shows alone, as it did before the frame: no lane or composer box under it. Not while pending: the
          * content is then the page being left, hidden, and an alert of its own is not the destination's. */
         '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
-        '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
+        /* Literal for Tailwind: the phone workspace's `data-mobile-workspace`; its own regions are not a failure in its place. */
+        '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*):not([data-mobile-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
+        /* Literal for Tailwind: the phone workspace's `data-mobile-tab`. On a phone the composer box stays past the
+         * workspace's reveal until a composer adopts its input, but not once the live sheet shows another surface. */
+        'max-md:[&:has([data-mobile-workspace=ready]:not([data-mobile-tab=chat]))>[data-slot=workspace-frame-composer]]:hidden',
       )}
       style={
         wide === undefined || phone === undefined ? undefined : (frameVariables(wide, phone) as React.CSSProperties)
@@ -205,8 +211,8 @@ export function WorkspaceFrame({
        * over their bars (Progressive Loading Policy rule 16). */}
       <openWaitContext.Provider value={open}>
         {/* No hint yet (the server, the hydrating render) serves the input; the pre-paint script's variable hides a
-         * lane remembered closed, and the client then drops it. */}
-        <WorkspaceFrameLanes isChatServed={wide?.chatOpen !== false} pathname={pathname} />
+         * lane remembered closed, and the client then drops it unless a phone's chat sheet serves it. */}
+        <WorkspaceFrameLanes isChatServed={wide?.chatOpen !== false || phone?.tab === 'chat'} pathname={pathname} />
         {children}
       </openWaitContext.Provider>
     </div>
@@ -226,6 +232,10 @@ export function WorkspaceFrame({
  * are laid out: the chat lane may show a status instead of a composer for a while (chats loading, sync off, a failed
  * load), and the text stays where it can be seen and edited until a composer can take it. Where none can, under a
  * failure in the workspace's place or with the live chat lane closed, the box hides and the text waits in the store.
+ *
+ * On a phone the same box, with the same one input, is the chat sheet's foot above the tab bar, where the live chat
+ * composer rests, while the frame draws the chat sheet; the phone's chat composer adopts it when the workspace shows,
+ * and the box hides, keeping the text, while the live sheet shows another surface.
  *
  * @param props - Whether the chat lane serves the input (not when this project remembers the lane closed), and the
  *   destination's pathname when the frame is drawn ahead of the route.
@@ -252,7 +262,7 @@ function WorkspaceFrameLanes({
           data-lane='chat'
           className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 border-r border-border @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'
         >
-          <ChatLaneFrame>
+          <ChatLaneFrame pathname={pathname}>
             <FrameWaitSkeleton shape='transcript' label='Chat' />
           </ChatLaneFrame>
         </div>
@@ -272,20 +282,47 @@ function WorkspaceFrameLanes({
       </div>
       <div
         data-slot='workspace-frame-composer'
-        className='@container pointer-events-none absolute inset-0 z-10 flex max-md:hidden'
+        className={cn(
+          /* On a phone the box stays over the live sheet until its composer adopts the input: above the sheet (z-40),
+           * under the tab bar (z-50). */
+          '@container pointer-events-none absolute inset-0 z-10 flex max-md:z-45',
+          /* On a phone, the chat sheet's foot: shown while the frame draws the chat sheet (the tab the pre-paint script
+           * selected on `<html>`), above the tab bar, whose height it takes. */
+          'max-md:[:root:not([data-frame-tab=chat])_&]:hidden',
+          mobileWorkbenchNavigationHeight,
+        )}
       >
-        {/* The chat lane's box, border included, so the composer box lands on the lane frame's own. */}
-        <div className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 flex-col justify-end border-r border-transparent @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'>
+        {/* The chat lane's box, border included, so the composer box lands on the lane frame's own. On a phone, the live
+         * chat surface's box: it ends at the tab bar, and the composer rests at its foot. */}
+        <div
+          className={cn(
+            '[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 flex-col justify-end border-r border-transparent @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]',
+            'max-md:fixed max-md:inset-x-0 max-md:bottom-(--nav-offset) max-md:h-auto max-md:w-auto max-md:border-r-0 max-md:[display:flex]!',
+          )}
+        >
           {isChatServed && !isAdopted ? (
             <div className='pointer-events-auto mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
-              <div className='flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md has-[textarea:focus-visible]:focus-outline'>
+              <div
+                className={cn(
+                  /* The anchor the phone frame's transcript ends at (`frameTranscriptClassName`). */
+                  'flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md [anchor-name:--frame-composer] has-[textarea:focus-visible]:focus-outline',
+                  /* On a phone at rest (empty and unfocused) the box is the live phone composer's one row: Add, the
+                   * input and Send on one line, the other controls hidden, as its collapsed composer draws it. */
+                  'max-md:[&:not(:focus-within):has(textarea:placeholder-shown)]:min-h-0 max-md:[&:not(:focus-within):has(textarea:placeholder-shown)]:rounded-[calc(var(--spacing)*5.5+1px)]',
+                  'max-md:[&:not(:focus-within):has(textarea:placeholder-shown)_[data-hand-off-box]]:pt-2.5',
+                  'max-md:[&:not(:focus-within):has(textarea:placeholder-shown)_[data-hand-off]]:max-h-6 max-md:[&:not(:focus-within):has(textarea:placeholder-shown)_[data-hand-off]]:overflow-hidden max-md:[&:not(:focus-within):has(textarea:placeholder-shown)_[data-hand-off]]:px-7',
+                  'max-md:[&:not(:focus-within):has(textarea:placeholder-shown)_textarea]:pb-0 max-md:[&:not(:focus-within):has(textarea:placeholder-shown)_textarea]:leading-6',
+                  'max-md:[&:not(:focus-within):has(textarea:placeholder-shown)_[data-slot=composer-bar]]:-mt-6.5',
+                  'max-md:[&:not(:focus-within):has(textarea:placeholder-shown)_[data-slot=composer-collapsible]]:invisible',
+                )}
+              >
                 <ProjectComposerHandOff target={target} />
               </div>
             </div>
           ) : null}
         </div>
       </div>
-      <PhoneFrame />
+      <PhoneFrame pathname={pathname} />
       {/* Hoisted to the head by React. Until the parser reaches the marker after the lanes, Chromium holds rendering,
        * so a project load's first paint is never a document cut above the frame: no lanes, or the shell alone (the
        * blank first paint A11 reported, and F15's lane-less first frame). The held region ends at the lanes, not the
@@ -295,6 +332,19 @@ function WorkspaceFrameLanes({
     </>
   );
 }
+
+/**
+ * The phone frame's transcript: between the chat header's box and the composer box's top, as the live sheet lays its
+ * transcript out above its composer. A draft grows the box upwards, and the transcript's last bars go with it rather
+ * than sit behind the box (staging re-check 7). Without anchor positioning it keeps the resting composer's box.
+ */
+const frameTranscriptClassName = cn(
+  'mt-1 min-h-0 flex-1',
+  'supports-[anchor-name:--a]:fixed supports-[anchor-name:--a]:h-auto supports-[anchor-name:--a]:flex-none',
+  'supports-[anchor-name:--a]:top-[anchor(--frame-chat-header_bottom)] supports-[anchor-name:--a]:left-[anchor(--frame-chat-header_left)] supports-[anchor-name:--a]:right-[anchor(--frame-chat-header_right)]',
+  /* The box's top, less its own bottom margin's gap; the resting composer's box when the box is not drawn. */
+  'supports-[anchor-name:--a]:bottom-[anchor(--frame-composer_top,calc(var(--nav-offset)_+_3.375rem))]',
+);
 
 /**
  * The phone frame (blueprint P-h, § Editor frame, phone; A15c): the top bar with its controls' places, the viewer's
@@ -309,9 +359,11 @@ function WorkspaceFrameLanes({
  * It is inert and hidden from assistive technology: the route's busy state is the gates' `WorkspaceOpening`. A
  * failure or a notice that stands in the workspace's place shows alone, as on a wide screen.
  *
+ * @param props - The destination's pathname when the frame is drawn ahead of the route.
  * @returns The phone frame.
  */
-function PhoneFrame(): React.JSX.Element {
+function PhoneFrame({ pathname }: { readonly pathname?: string }): React.JSX.Element {
+  const departing = useDepartingFirstMessage(useProjectComposerHandOff(pathname).scope);
   return (
     <div
       aria-hidden='true'
@@ -357,8 +409,21 @@ function PhoneFrame(): React.JSX.Element {
         <div className='relative h-2 shrink-0'>
           <div className='absolute inset-x-0 bottom-0 mx-auto h-1 w-15 rounded-full bg-sidebar-primary/15' />
         </div>
-        {/* The remembered surface's shape, chosen by the tab the pre-paint script selected on `<html>`. */}
-        <FrameWaitSkeleton shape='transcript' label='Chat' className='hidden flex-1 [[data-frame-tab=chat]_&]:block' />
+        {/* The remembered surface's shape, chosen by the tab the pre-paint script selected on `<html>`. The chat's is
+         * the live chat surface's box (the visible sheet less its grabber row, its top border and the tab bar), with its
+         * header's and resting composer's boxes, so the transcript's bars are where the live ones will be. */}
+        <div
+          data-frame-chat='surface'
+          className='hidden h-[calc(var(--frame-sheet-height,0px)_-_var(--spacing)*2_-_var(--nav-offset)_-_1px)] shrink-0 flex-col [[data-frame-tab=chat]_&]:flex'
+        >
+          <div data-frame-chat='header' className='h-15 shrink-0 [anchor-name:--frame-chat-header]' />
+          {departing === undefined ? (
+            <FrameWaitSkeleton shape='transcript' label='Chat' className={frameTranscriptClassName} />
+          ) : (
+            <DepartingFirstMessage text={departing} className={frameTranscriptClassName} />
+          )}
+          <div data-frame-chat='composer' className='mx-auto mb-2 h-11.5 w-[calc(100%_-_1rem)] max-w-xl shrink-0' />
+        </div>
         <FrameWaitSkeleton
           shape='fields'
           label='Parameters'
@@ -432,18 +497,26 @@ function FrameViewerStatus(): React.JSX.Element {
  * (its feed then draws the transcript's shape) and while the focused chat is re-established, so the lane keeps one
  * frame through every wait (Progressive Loading Policy rule 15). In a phone sheet its header is the sheet's bar height.
  *
- * @param props - What its feed draws while the lane waits, and a status for its header's trailing slot.
+ * A new project's first message on its way from Home takes the feed's place (WP-12 with WP-07 step 5): the person's
+ * words stay in view, at the transcript's first row, through every wait of the open.
+ *
+ * @param props - What its feed draws while the lane waits, a status for its header's trailing slot, and the
+ *   destination's pathname when the frame is drawn ahead of the route.
  * @returns The chat lane frame.
  */
 export function ChatLaneFrame({
   children,
   headerStatus,
+  pathname,
 }: {
   /** The feed's content while the lane waits, such as the transcript's shape. Empty by default. */
   readonly children?: React.ReactNode;
   /** The header's trailing slot, such as the open's status where the lane covers the viewer. */
   readonly headerStatus?: React.ReactNode;
+  /** The project's pathname when the frame is drawn ahead of the route; the route's params otherwise. */
+  readonly pathname?: string;
 }): React.JSX.Element {
+  const departing = useDepartingFirstMessage(useProjectComposerHandOff(pathname).scope);
   return (
     <div
       className='flex size-full flex-col bg-sidebar/50'
@@ -454,7 +527,9 @@ export function ChatLaneFrame({
       <div className='flex h-9 shrink-0 items-center justify-end border-b bg-sidebar px-2 [[data-slot=drawer-content]_&]:h-(--drawer-bar-height) [[data-slot=drawer-content]_&]:px-4'>
         {headerStatus}
       </div>
-      <div className='relative min-h-0 flex-1'>{children}</div>
+      <div className='relative min-h-0 flex-1'>
+        {departing === undefined ? children : <DepartingFirstMessage text={departing} />}
+      </div>
       <div className='mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
         <div
           data-testid='chat-lane-frame-composer'

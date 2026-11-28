@@ -74,7 +74,9 @@ vi.mock('#machines/inspector.js', () => ({
   inspect: undefined,
 }));
 
-const { ChatSessionStore, presentMessages } = await import('#services/chat-session-store.js');
+const { queuedSendOutcome } = await import('#lib/queued-send-outcome.js');
+const { ChatSessionStore, outboxWaitLineMilliseconds, presentMessages, reconnectingCueMilliseconds } =
+  await import('#services/chat-session-store.js');
 const { selectVisibleChatError } = await import('#routes/w.$workspace.$project/chat-error.js');
 const { attachmentSendBlockReason, buildUserMessage } = await import('#utils/chat.utils.js');
 type StoreType = InstanceType<typeof ChatSessionStore>;
@@ -4856,11 +4858,13 @@ describe('ChatSessionStore', () => {
       return { store, deps, session, hostCommand, unpublish };
     };
 
-    const queueAdmission = (chatId: string) =>
+    const queueAdmission = (chatId: string, hold?: { readonly started: () => void; readonly release: Promise<void> }) =>
       publishChatTurnAdmission(chatId, async (gesture) => {
         if (gesture.kind !== 'send' || gesture.requestId === undefined) {
           throw new Error('Expected queued send');
         }
+        hold?.started();
+        await hold?.release;
         const command = gesture.command ?? {
           type: 'start',
           commandId: gesture.requestId,
@@ -5362,6 +5366,8 @@ describe('ChatSessionStore', () => {
       }
     });
 
+    /* HA-I4: `CHAT_RUN_LIVE` is a `wait` code, so the command stays queued to be sent again by its id; it never
+     * fails, and the gate holds it while the other run is live. */
     it('should never cancel an unrelated live run when retrying a prepared command', async () => {
       const chatId = 'queue_refused';
       const projectId = 'queue_refused_project';
@@ -5379,12 +5385,18 @@ describe('ChatSessionStore', () => {
         publishLogRows(store, chatId, []);
         await store.requestTurn(chatId, queuedGesture('wait'));
         await vi.waitFor(() => {
-          expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(true);
+          expect(hostCommand).toHaveBeenCalledTimes(1);
         });
         publishLogRows(store, chatId, runningRows('other'));
+        /* A retry, and the first re-send's 250 ms backoff: the other run's gate still holds it. */
         store.retryMessageQueue(chatId);
         await settle();
+        await new Promise((resolve) => {
+          setTimeout(resolve, 600);
+        });
         expect(hostCommand).toHaveBeenCalledTimes(1);
+        expect(hostCommand.mock.calls.every(([command]) => command.type === 'start')).toBe(true);
+        expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(false);
         expect(session.messageQueueRef.getSnapshot().context.items[0]?.command?.commandId).toBe('req_wait');
       } finally {
         unadmit();
@@ -5582,6 +5594,31 @@ describe('ChatSessionStore', () => {
     });
 
     describe('a send with nothing running (chat UX F1, F2)', () => {
+      /* The queue write lands and the record's watcher wakes the outbox; the write's own promise returns only later. */
+      const watchedWrite = ({
+        store,
+        client,
+        path,
+        chatId,
+      }: {
+        readonly store: StoreType;
+        readonly client: MemoryClient;
+        readonly path: string;
+        readonly chatId: string;
+      }) => {
+        const persisted = Promise.withResolvers<void>();
+        const write = client.writeFile.bind(client);
+        let isFirst = true;
+        vi.spyOn(client, 'writeFile').mockImplementation(async (target, data) => {
+          await write(target, data);
+          if (isFirst && target === path) {
+            isFirst = false;
+            store.retryMessageQueue(chatId);
+            await persisted.promise;
+          }
+        });
+        return persisted;
+      };
       const pending = <T>() => {
         let resolve!: (value: T) => void;
         const promise = new Promise<T>((_resolve) => {
@@ -5759,8 +5796,10 @@ describe('ChatSessionStore', () => {
           publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
           await store.requestTurn(chatId, queuedGesture('waits'));
           await vi.waitFor(() => {
-            expect(store.hostWaitOf(chatId)).toMatch(/^Queued\. Another tab still has this chat open/u);
+            expect(hostCommand).toHaveBeenCalled();
           });
+          /* HA-I4: the code's line waits for its bound (outboxWaitLineMilliseconds); the send is queued meanwhile. */
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
           /* Not failed: the send is in the thread, the chat reads as on its way, and nothing offers Try again. */
           expect(store.departingSendOf(chatId)).toBe('waits');
           expect(store.getChatStatus(chatId)).toBe('submitted');
@@ -5790,6 +5829,186 @@ describe('ChatSessionStore', () => {
         }
       });
 
+      it("should show a waiting send's line only once it has waited its bound (HA-I4)", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_host_wait_line';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async (command) => writerLocked(command.commandId));
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('line'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalled();
+          });
+          await vi.advanceTimersByTimeAsync(outboxWaitLineMilliseconds / 2);
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          /* Re-sent by its key meanwhile, never failed. */
+          expect(new Set(hostCommand.mock.calls.map(([command]) => command.commandId)).size).toBe(1);
+
+          await vi.advanceTimersByTimeAsync(outboxWaitLineMilliseconds / 2);
+
+          expect(store.hostWaitOf(chatId)).toMatch(/^Queued\. Another tab still has this chat open/u);
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* HA-I4: an answer lost past the command's bound (U21) is a `wait`, not a failure: the command is sent again by
+       * its key, and the host's answer ends it. */
+      it('should keep a send whose answer was lost and send it again by its key until the host answers', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_host_lost';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        let reachable = false;
+        hostCommand.mockImplementation(async (command) => {
+          if (!reachable) {
+            throw Object.assign(new Error('The host stopped answering.'), { code: 'PEER_UNRESPONSIVE' });
+          }
+          return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 3 };
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('lost'));
+          /* Past the send's own 30 s bound: the answer is lost, and the outbox keeps the command. */
+          await vi.advanceTimersByTimeAsync(31_000);
+          expect(session.messageQueueRef.getSnapshot().matches('failed')).toBe(false);
+          expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
+          expect(session.messageQueueRef.getSnapshot().context.items.map(({ id }) => id)).toEqual(['lost']);
+
+          reachable = true;
+          await vi.advanceTimersByTimeAsync(31_000);
+
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          expect(new Set(hostCommand.mock.calls.map(([command]) => command.commandId)).size).toBe(1);
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* The host applied the first send, but its answer was lost: the log's `applied[commandId]` ends the item on the
+       * next pass, with no second send and so no second run. */
+      it('should end a send the host applied but whose answer was lost, without sending it again', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_host_applied_lost';
+        const { store, session, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async () => {
+          throw Object.assign(new Error('The host stopped answering.'), { code: 'PEER_UNRESPONSIVE' });
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          const settled = [...runningRows('old'), lifecycleRow(2, 'completed', 'old')];
+          publishLogRows(store, chatId, settled);
+          await store.requestTurn(chatId, queuedGesture('applied'));
+          await vi.advanceTimersByTimeAsync(31_000);
+          const sent = hostCommand.mock.calls[0]![0];
+          expect(sent.type).toBe('start');
+          const runId = sent.type === 'start' ? sent.payload.runId : '';
+          publishLogRows(store, chatId, [
+            ...settled,
+            logRow(3, { runId, type: 'run.lifecycle', state: 'admitted', attempt: 1, commandId: sent.commandId }),
+          ]);
+          store.refreshMessageQueue(chatId);
+          /* A re-send already out runs to its bound; the next pass reads `applied` and ends the item. */
+          await vi.advanceTimersByTimeAsync(31_000);
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+          });
+          const calls = hostCommand.mock.calls.length;
+          await vi.advanceTimersByTimeAsync(31_000);
+          expect(hostCommand).toHaveBeenCalledTimes(calls);
+          /* One command id throughout: no second run was ever asked for. */
+          expect(new Set(hostCommand.mock.calls.map(([command]) => command.commandId))).toEqual(
+            new Set([sent.commandId]),
+          );
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* HA5 table: a transport wait code has no line of its own; "Reconnecting…" says it while the send re-sends. */
+      it('should say "Reconnecting…", and show no line, over a send refused with a transport wait code', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const chatId = 'departing_cue_transport';
+        const { store, hostCommand, unpublish } = await open(chatId, 'departing_project');
+        hostCommand.mockImplementation(async (command) => ({
+          commandId: command.commandId,
+          generation: 1,
+          status: 'refused',
+          effect: 'not-applied',
+          code: 'PEER_GONE',
+          message: 'The host went away.',
+        }));
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('transport'));
+          await vi.waitFor(() => {
+            expect(hostCommand).toHaveBeenCalled();
+          });
+          await vi.advanceTimersByTimeAsync(reconnectingCueMilliseconds + 100);
+          expect(store.isReconnecting(chatId)).toBe(true);
+          await vi.advanceTimersByTimeAsync(outboxWaitLineMilliseconds);
+          expect(store.hostWaitOf(chatId)).toBeUndefined();
+          expect(store.isReconnecting(chatId)).toBe(true);
+        } finally {
+          vi.useRealTimers();
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should say "Reconnecting…" over a send whose answer was lost, never over a coded wait or a pause', async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const lost = await open('departing_cue_lost', 'departing_project');
+        const coded = await open('departing_cue_coded', 'departing_project');
+        lost.hostCommand.mockImplementation(async () => {
+          throw Object.assign(new Error('The host stopped answering.'), { code: 'PEER_UNRESPONSIVE' });
+        });
+        coded.hostCommand.mockImplementation(async (command) => writerLocked(command.commandId));
+        const unadmitLost = queueAdmission('departing_cue_lost');
+        const unadmitCoded = queueAdmission('departing_cue_coded');
+        try {
+          const settled = [...runningRows('old'), lifecycleRow(2, 'completed', 'old')];
+          publishLogRows(lost.store, 'departing_cue_lost', settled);
+          publishLogRows(coded.store, 'departing_cue_coded', settled);
+          await lost.store.requestTurn('departing_cue_lost', queuedGesture('cue_lost'));
+          await coded.store.requestTurn('departing_cue_coded', queuedGesture('cue_coded'));
+          await vi.advanceTimersByTimeAsync(31_000 + reconnectingCueMilliseconds);
+          expect(lost.store.isReconnecting('departing_cue_lost')).toBe(true);
+          expect(coded.store.isReconnecting('departing_cue_coded')).toBe(false);
+          /* A run that pauses on an approval meanwhile: no cue in a `paused` phase. */
+          publishLogRows(lost.store, 'departing_cue_lost', [
+            ...settled,
+            ...runningRows('paused_run').map((row, index) => ({ ...row, sequence: 3 + index })),
+            lifecycleRow(5, 'paused', 'paused_run'),
+          ]);
+          await vi.advanceTimersByTimeAsync(100);
+          expect(lost.store.isReconnecting('departing_cue_lost')).toBe(false);
+        } finally {
+          vi.useRealTimers();
+          unadmitLost();
+          unadmitCoded();
+          lost.unpublish();
+          coded.unpublish();
+          lost.store.release('departing_cue_lost');
+          coded.store.release('departing_cue_coded');
+        }
+      });
+
       it('should take a send that waits for its host back to the composer on Stop, with no cancel sent', async () => {
         const chatId = 'departing_host_wait_stopped';
         const projectId = 'departing_project';
@@ -5799,8 +6018,9 @@ describe('ChatSessionStore', () => {
         try {
           publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
           await store.requestTurn(chatId, queuedGesture('stopped'));
+          /* Sent again by its key: the send waits for its host between re-sends. */
           await vi.waitFor(() => {
-            expect(store.hostWaitOf(chatId)).toBeDefined();
+            expect(hostCommand).toHaveBeenCalledTimes(2);
           });
           expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'dispatched' } })).toBe(true);
 
@@ -5830,6 +6050,95 @@ describe('ChatSessionStore', () => {
         }
       });
 
+      /* Staging re-check 7: the composer replays a send queued during an open with a signal. The queue write lands, the
+       * record's watcher wakes the outbox, and the outbox admits the send before the write's own promise returns; an
+       * Escape or an edit then reached `requestTurn` after the write, which took the entry out of the record while the
+       * outbox, under the delivery lock, sent it anyway. Past the write, the cancel takes the send back as Stop does. */
+      it('should take back a send the outbox is admitting, keep the draft and report it cancelled', async () => {
+        const chatId = 'composer_cancel_admitting';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admitting = Promise.withResolvers<void>();
+        const admitted = Promise.withResolvers<void>();
+        const unadmit = queueAdmission(chatId, { started: admitting.resolve, release: admitted.promise });
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          session.draftActorRef.send({ type: 'setDraftText', text: 'queued_during_open abc' });
+          const persisted = watchedWrite({
+            store,
+            client: deps.client,
+            path: chatMessageQueuePath(projectId, chatId),
+            chatId,
+          });
+          const cancel = new AbortController();
+
+          const requested = store.requestTurn(chatId, queuedGesture('queued_during_open'), { signal: cancel.signal });
+          await admitting.promise;
+          cancel.abort();
+          persisted.resolve();
+          /* Admission waits on the opening project (seconds on staging): the cancel settles first. */
+          await vi.waitFor(() => {
+            expect(queuedSendOutcome(cancel.signal)).toBeDefined();
+          });
+          admitted.resolve();
+          await requested;
+
+          await vi.waitFor(() => {
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          await settle();
+          expect(hostCommand).not.toHaveBeenCalled();
+          /* Taken back, not failed: no queue error and no failed turn (locally the old removal failed the delivery). */
+          expect(session.messageQueueRef.getSnapshot().context.error).toBeUndefined();
+          expect(session.stateActorRef.getSnapshot().context.failureReason).toBeUndefined();
+          expect(queuedSendOutcome(cancel.signal)).toBe('cancelled');
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('queued_during_open abc');
+          expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should report a send its host was already handed as sent, and leave it to Stop', async () => {
+        const chatId = 'composer_cancel_handed';
+        const projectId = 'departing_project';
+        const { store, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const handed = Promise.withResolvers<void>();
+        const answered = Promise.withResolvers<void>();
+        hostCommand.mockImplementationOnce(async (command) => {
+          handed.resolve();
+          await answered.promise;
+          return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 3 };
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          const persisted = watchedWrite({
+            store,
+            client: deps.client,
+            path: chatMessageQueuePath(projectId, chatId),
+            chatId,
+          });
+          const cancel = new AbortController();
+
+          const requested = store.requestTurn(chatId, queuedGesture('already_handed'), { signal: cancel.signal });
+          persisted.resolve();
+          await handed.promise;
+          cancel.abort();
+          await requested;
+          answered.resolve();
+
+          expect(queuedSendOutcome(cancel.signal)).toBe('sent');
+          expect(hostCommand).toHaveBeenCalledOnce();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
       it('should return a send its host refused without applying it to the composer, sent once (H-1)', async () => {
         const chatId = 'departing_host_refusal';
         const projectId = 'departing_project';
@@ -6042,6 +6351,43 @@ describe('ChatSessionStore', () => {
           expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
           expect(session.messageQueueRef.getSnapshot().context.items.map(({ id }) => id)).toEqual(['closing']);
           expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* Staging re-check 7: a refused send kept in the outbox (the composer held other text) named its reason in the
+       * strip as the gateway's raw JSON, read aloud as a second alert. The chat's failure region already says why. */
+      it("should say a kept refused send wasn't sent without the failure's raw text", async () => {
+        const chatId = 'departing_refused_coded';
+        const projectId = 'departing_project';
+        const { store, session, unpublish } = await open(chatId, projectId);
+        const coded = JSON.stringify({
+          category: 'auth',
+          title: 'Authentication Error',
+          message: 'Sign in to use Opus 5.5.',
+          code: 'AUTH_REQUIRED',
+        });
+        let refuse: (error: Error) => void = () => undefined;
+        const refusal = new Promise<never>((_resolve, reject) => {
+          refuse = reject;
+        });
+        const unadmit = publishChatTurnAdmission(chatId, async () => refusal);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('refused_coded'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          session.draftActorRef.send({ type: 'setDraftText', text: 'refused_coded abc' });
+          refuse(new Error(coded));
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.error).toBeDefined();
+          });
+          expect(session.stateActorRef.getSnapshot().context.failureReason).toContain('Authentication Error');
+          expect(session.messageQueueRef.getSnapshot().context.error).toBe('This message wasn’t sent.');
         } finally {
           unadmit();
           unpublish();
@@ -8292,6 +8638,35 @@ describe('ChatSessionStore — composer records (W7)', () => {
 
     expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
     store.release(chatId);
+  });
+
+  /* Staging re-check 5: a queued send the composer replays during an open can wait seconds for the queue; Escape
+   * cancels it until it is queued, and then nothing is queued and the draft stays. */
+  it('queues nothing and keeps the draft for a send cancelled before it reached the queue', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    session.draftActorRef.send({ type: 'setDraftText', text: 'model the bracket' });
+    const cancel = new AbortController();
+
+    const requested = store.requestTurn(
+      chatId,
+      { kind: 'send', message: buildUserMessage({ text: 'model the bracket' }) },
+      { signal: cancel.signal },
+    );
+    cancel.abort();
+    await requested;
+
+    expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+    expect(session.draftActorRef.getSnapshot().context.draftText).toBe('model the bracket');
+    store.release(chatId);
+    const reopened = openStore(client).store;
+    const restored = reopened.acquire(chatId, projectId);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    expect(restored.messageQueueRef.getSnapshot().context.items).toEqual([]);
+    reopened.release(chatId);
   });
 
   it('keeps text typed after a send was composed, though it differs only past the sent text', async () => {

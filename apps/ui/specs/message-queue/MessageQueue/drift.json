@@ -21,23 +21,9 @@
     "watchFailed",
     "withdrawTurn"
   ],
-  "sources": {
-    "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx": "906912b6183fd14c754d80e5ca84b67daacdbf20d260bbb42335d1a7ea7d7db1",
-    "apps/libs/chat-ui/src/db/chat-message-queue-store.ts": "7f5887a1f65eea460b3463f445a3aef19dd7843ea1b379940e0273eebc1c32f7",
-    "apps/libs/chat-ui/src/machines/chat-message-queue.machine.ts": "b8ff03658a2db816af1d7e34ad621d548653e48784d5c7b2ce7801a26bbfeb0f",
-    "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "53443348c954ec1cb4656dda9569385dd0af65c39356e1cfadd5ddb44ded8d0a",
-    "apps/ui/app/chat-clients/chat-turn-host.tsx": "510ba16659e8e911bb799579d8d3adeb2ce47364b4e0445b97e0847af6dd5be9",
-    "apps/ui/app/chat-clients/use-cad-chat-client.ts": "3749ada815f745fed131d6990868df4733e3279a16f073a780a34513c6b3cbff",
-    "apps/ui/app/components/chat/chat-message-queue.tsx": "77c8164d742b8c64dc79ae0969fa71721be0c3bc64ea908cb0b812b8c42c081b",
-    "apps/ui/app/components/chat/chat-textarea.tsx": "70d5ab569c5b4d60786a52633d4b316a5bca26af4fa37a5f191f8327d14f39df",
-    "apps/ui/app/hooks/use-chat.tsx": "62ae68a00adebfe89e6c620421d5a9d447135ac81b8c4e0cfd885f1d1c933f40",
-    "apps/ui/app/machines/chat-session.machine.ts": "2076bc41cb203f45c0049297df17be9a4a4eed966d704f34423e3a2aa3f733cf",
-    "apps/ui/app/services/chat-session-store.ts": "4ded84aa282a7c4ff711cd0bb79324715c3bfb95f448b9b411bf36e71b226145",
-    "apps/ui/app/services/outbox-gate.ts": "c9d5a33f02c06d6bb45657f76e30a6c3a28b31bf6403d7dc0e9d3c840c4e357e"
-  },
   "specs": {
-    "MessageQueue.tla": "068f3e6df821f4074295d5802dae82a8feb0322b95934b2bc503baf5762e0070",
-    "QueuePlacement.tla": "b4c85bb439e54faeef87790711cc1da9f5a3e21be4f589c58b83069f15f86c47"
+    "MessageQueue.tla": "c2e8e647a088b51144402e0070656c9406013b85821eadf8a8c42bd928d3ad1e",
+    "QueuePlacement.tla": "deb7d4f4fcd0de459b5c490eae7ec417bffb9ed99f7eca969e0141443648c952"
   },
   "tables": {
     "MessageQueue.duplicate.cfg": "9a060cee1fba0e82b4fc1bf8cc144722a79d66f274e7f7ca3f280ce5f2d45f1b",

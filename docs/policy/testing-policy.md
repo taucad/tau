@@ -3,7 +3,7 @@ title: 'Testing Policy'
 description: 'Writing high-quality tests across the Tau monorepo. Assert observable behavior, error assertions, resource cleanup, mock factories, and async patterns. Covers Vitest, kernel tests, and API tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-11-25'
+updated: '2026-11-27'
 related:
   - docs/policy/react-testing-policy.md
   - docs/policy/typescript-policy.md
@@ -25,9 +25,7 @@ Tests that assert implementation details become brittle when refactoring and pro
 
 ## 1. Assert Observable Behavior, Not Implementation
 
-Every assertion must verify something a consumer or collaborator can observe.
-A test that only checks "does not throw" without verifying the resulting state
-is incomplete.
+Every assertion must verify something a consumer or collaborator can observe. A test that only checks "does not throw" without verifying the resulting state is incomplete.
 
 ```typescript
 // INCORRECT: asserts nothing meaningful
@@ -59,8 +57,7 @@ it('should close both ports on dispose, preventing further communication', async
 });
 ```
 
-**Rule of thumb:** If you remove the function under test and the test still
-passes, the test is broken.
+**Rule of thumb:** If you remove the function under test and the test still passes, the test is broken.
 
 ## 2. Test Naming
 
@@ -72,10 +69,8 @@ it('should reject pending calls when disposed');
 it('should skip fetch for recently failed packages');
 it('should preserve error name across the bridge');
 
-// INCORRECT: imperative without "should"
-it('renders single-key code object'); // unclear what's being asserted
-
-// INCORRECT: vague
+// INCORRECT: imperative without "should" (unclear what's being asserted), or vague
+it('renders single-key code object');
 it('works correctly');
 it('handles errors');
 ```
@@ -92,8 +87,7 @@ describe('ModuleManager', () => {
 
 ## 3. Error Assertions
 
-Always assert both the error message and the error type when testing error
-propagation. Use `rejects.toThrow` for async rejections.
+Always assert both the error message and the error type when testing error propagation. Use `rejects.toThrow` for async rejections. Use `expect.fail('reason')` after a call that should throw, so the test fails with a clear message if the exception is not raised.
 
 ```typescript
 // CORRECT: asserts message and type
@@ -116,13 +110,9 @@ try {
 }
 ```
 
-Use `expect.fail('reason')` after a call that should throw, so the test
-fails with a clear message if the exception is not raised.
-
 ## 4. Resource Cleanup
 
-Always clean up resources (timers, workers, ports, mocks) in `afterEach` or
-`finally` blocks. Never rely on the happy path reaching a manual cleanup call.
+Always clean up resources (timers, workers, ports, mocks) in `afterEach` or `finally` blocks. Never rely on the happy path reaching a manual cleanup call. Cleanup does not make sharing safe: no test depends on what another left behind (§ 16.7).
 
 ```typescript
 // INCORRECT: cleanup only runs if the test passes
@@ -156,19 +146,9 @@ afterEach(() => {
 
 ### 4.1 Returning Multiple Disposables From a Test Helper
 
-When a helper produces several owning handles that the caller needs to use
-together (e.g. an explorer iteration that yields a face, an edge, a
-triangulation, and a location), do NOT bundle them with a `cleanup: () => void`
-callback returned alongside the handles. The pattern is fragile: any
-intermediate handle bound by `using` inside the helper is disposed at helper
-return, leaving the outer-scope bindings the caller is expected to use as
-references to disposed objects (use-after-dispose on the consumer side).
-The disposer-idempotency guard from the unified RBV work only covers
-`val::object` envelopes, not raw embind handles.
+When a helper produces several owning handles that the caller needs to use together (e.g. an explorer iteration that yields a face, an edge, a triangulation, and a location), do NOT bundle them with a `cleanup: () => void` callback returned alongside the handles. The pattern is fragile: any intermediate handle bound by `using` inside the helper is disposed at helper return, leaving the outer-scope bindings the caller is expected to use as references to disposed objects (use-after-dispose on the consumer side). The disposer-idempotency guard from the unified RBV work only covers `val::object` envelopes, not raw embind handles.
 
-Use `DisposableStack.move()` to transfer ownership of every accumulated
-handle from the helper's local stack to a caller-owned stack returned to
-the test:
+Use `DisposableStack.move()` to transfer ownership of every accumulated handle from the helper's local stack to a caller-owned stack returned to the test:
 
 ```typescript
 function getFirstTriangulatedEdge(shape: TopoDS_Shape): DisposableStack & {
@@ -183,9 +163,7 @@ function getFirstTriangulatedEdge(shape: TopoDS_Shape): DisposableStack & {
     const face = iterStack.use(oc.TopoDS.Face(explorer.Current()));
     const triangulation = iterStack.use(BRep_Tool.Triangulation(face, location));
     if (!triangulation.IsNull()) {
-      // Transfer ownership: iterStack disposers move to a fresh stack the
-      // caller receives. The helper's `using` declarations no longer dispose
-      // the moved handles at scope exit.
+      // Transfer ownership to a stack the caller receives: `using` here no longer disposes the moved handles
       const moved = iterStack.move();
       return Object.assign(moved, { edge, triangulation, location });
     }
@@ -198,43 +176,30 @@ function getFirstTriangulatedEdge(shape: TopoDS_Shape): DisposableStack & {
 it('does the thing', () => {
   using bundle = getFirstTriangulatedEdge(shape);
   expect(bundle.edge).toBeDefined();
-  // ...
 }); // bundle.dispose() runs all the moved disposers in LIFO order
 ```
 
-Canonical reference:
-[`tests/smoke/smoke-brep-tool-overloads.test.ts:28-103`](https://github.com/taucad/opencascade.js/blob/main/tests/smoke/smoke-brep-tool-overloads.test.ts).
-Prior art for adopting an RBV container via `stack.use(...)`:
-[`tests/smoke/smoke-output-params-disposal.test.ts`](https://github.com/taucad/opencascade.js/blob/main/tests/smoke/smoke-output-params-disposal.test.ts)
-(around line 122).
+Canonical reference: [`smoke-brep-tool-overloads.test.ts:28-103`](https://github.com/taucad/opencascade.js/blob/main/tests/smoke/smoke-brep-tool-overloads.test.ts); prior art for adopting an RBV container via `stack.use(...)`: [`smoke-output-params-disposal.test.ts`](https://github.com/taucad/opencascade.js/blob/main/tests/smoke/smoke-output-params-disposal.test.ts) (around line 122).
 
 ## 5. Type-Safe Mocks with `mock<T>()`
 
 Use `mock<T>()` from `vitest-mock-extended` where the package already depends on it to create typed test doubles. Never use `as unknown as T` to cast partial objects to full types. A dedicated testing package may instead expose an explicit, Vitest-backed object literal when doing so removes `vitest-mock-extended` from the production package's dependency surface; keep the one necessary interface assertion inside that shared factory.
 
-**Why**: `as unknown as` bypasses the compiler entirely. `mock<T>()` returns a
-deep Proxy that satisfies the full interface, auto-stubbing methods with
-`vi.fn()` and properties with `undefined`, while allowing overrides.
+**Why**: `as unknown as` bypasses the compiler entirely: when the real type changes, tests using it still compile and pass with stale shapes, hiding regressions. `mock<T>()` returns a deep Proxy that satisfies the full interface, auto-stubbing methods with `vi.fn()` and properties with `undefined`, while allowing overrides.
 
 ```typescript
-import { mock } from 'vitest-mock-extended';
+import { mock, mockDeep } from 'vitest-mock-extended';
 
 // CORRECT: typed mock with overrides
 const client = mock<RuntimeClient>({ terminate: vi.fn() });
 const options = mock<RuntimeClientOptions>();
 const ref = mock<ProjectContext['fileManagerRef']>({ send: vi.fn() });
 
+// CORRECT: `mockDeep<T>()` for deeply nested mocks (NestJS services, complex interfaces)
+const mockResult = mockDeep<StreamTextResult>();
+
 // INCORRECT: bypasses type system
 const client = {} as unknown as RuntimeClient;
-const options = {} as unknown as RuntimeClientOptions;
-```
-
-For deeply nested mocks (NestJS services, complex interfaces), use `mockDeep<T>()`:
-
-```typescript
-import { mockDeep } from 'vitest-mock-extended';
-
-const mockResult = mockDeep<StreamTextResult>();
 ```
 
 For domain objects with sensible defaults, use shared factory functions:
@@ -246,49 +211,17 @@ const filesystem = createMockFileSystem();
 filesystem.mocks.exists.mockResolvedValue(true);
 ```
 
-**Limitation**: `mock<T>()` returns a Proxy. Objects that must be serialized
-(`JSON.stringify`, `postMessage`, `structuredClone`) cannot use `mock<T>()`.
-In those cases, use a plain object with a single `as T` assertion.
-
-See `docs/research/typescript-overloads.md` for why overloaded function types
-are incompatible with `vi.fn()` mapped types.
+**Limitation**: `mock<T>()` returns a Proxy. Objects that must be serialized (`JSON.stringify`, `postMessage`, `structuredClone`) cannot use `mock<T>()`. In those cases, use a plain object with a single `as T` assertion. See `docs/research/typescript-overloads.md` for why overloaded function types are incompatible with `vi.fn()` mapped types.
 
 ## 6. Async Patterns
 
-Prefer `await expect(promise).rejects.toThrow()` over try/catch for simple
-rejection tests. Use try/catch only when inspecting multiple error properties.
+Prefer `await expect(promise).rejects.toThrow()` over try/catch for simple rejection tests. Use try/catch only when inspecting multiple error properties. Both forms are the examples in § 3.
 
-```typescript
-// CORRECT: for simple cases
-await expect(proxy.readFile('/missing.txt')).rejects.toThrow('ENOENT');
-
-// Use try/catch when asserting multiple properties
-try {
-  await call('fail', []);
-  expect.fail('should have thrown');
-} catch (error) {
-  expect((error as NodeJS.ErrnoException).code).toBe('ENOENT');
-  expect((error as Error).message).toContain('not found');
-}
-```
-
-For fake timers with async operations:
-
-```typescript
-vi.useFakeTimers();
-try {
-  const pendingCall = proxy.readFile('/path');
-  await vi.advanceTimersByTimeAsync(30_000);
-  await expect(pendingCall).rejects.toThrow('timed out');
-} finally {
-  vi.useRealTimers();
-}
-```
+For fake timers with async operations, start the call without awaiting it, advance with `await vi.advanceTimersByTimeAsync(...)`, then await the assertion on the pending promise, and restore real timers in `finally`. The § 1 example shows the whole sequence.
 
 ## 7. Immutability and Side-Effect Checks
 
-When a function must not mutate its inputs, verify the original values
-are unchanged after the call. Verify that outputs are new references.
+When a function must not mutate its inputs, verify the original values are unchanged after the call. Verify that outputs are new references.
 
 ```typescript
 it('should not mutate the original array', async () => {
@@ -304,21 +237,11 @@ it('should not mutate the original array', async () => {
 
 ## 8. Avoid Console Output in Tests
 
-Do not leave `console.log` or `console.error` in test files. If diagnostic
-output is needed during development, remove it before committing.
-
-```typescript
-// INCORRECT
-console.log(`[debug] ${entries.length} files survived`);
-
-// CORRECT: remove it, or use expect() to assert the value
-expect(entries).toHaveLength(fileCount);
-```
+Do not leave `console.log` or `console.error` in test files. If diagnostic output is needed during development, remove it before committing, or turn it into an assertion: `expect(entries).toHaveLength(fileCount)` instead of logging `entries.length`.
 
 ## 9. Structure Assertions Over Existence Assertions
 
-When testing structured data (objects, arrays, geometry), assert the shape
-and specific values, not just that the result exists or has length > 0.
+When testing structured data (objects, arrays, geometry), assert the shape and specific values, not just that the result exists or has length > 0.
 
 ```typescript
 // INCORRECT: only checks existence
@@ -346,11 +269,7 @@ expect(result.data[0]).toEqual(
 
 ## 11. No Type Assertions for Mocks
 
-Never use `as unknown as T` to create mock objects or cast return values.
-
-**Why**: Double assertions erase all type information. When the real type changes,
-tests using `as unknown as` continue to compile and pass with stale shapes,
-hiding regressions.
+Never use `as unknown as T` to create mock objects or cast return values. The reason and the CORRECT and INCORRECT forms are in § 5.
 
 | Scenario                    | Pattern                                  | Notes                                          |
 | --------------------------- | ---------------------------------------- | ---------------------------------------------- |
@@ -359,22 +278,6 @@ hiding regressions.
 | Deep nested mock            | `mockDeep<ComplexType>()`                | Recursively mocks nested objects               |
 | Serialized data             | `{ field: 'value' } as DataType`         | Single assertion for plain data                |
 | Intentionally invalid input | `'bad' as unknown as ValidType`          | Error-path tests only; requires oxlint-disable |
-
-CORRECT:
-
-```typescript
-import { mock } from 'vitest-mock-extended';
-
-const client = mock<RuntimeClient>({ terminate: vi.fn() });
-const options = mock<RuntimeClientOptions>();
-```
-
-INCORRECT:
-
-```typescript
-const client = {} as unknown as RuntimeClient;
-const options = {} as unknown as RuntimeClientOptions;
-```
 
 ## 12. Geometry-Test Surface
 
@@ -444,7 +347,7 @@ A task is green when every gating test passed, at most on its second attempt; ev
 | Infrastructure steps       | Non-test steps (apt, downloads, browser install) retry up to three times with backoff, each retry recorded as a job-level event |
 | No other retry             | No task-level or job-level automatic re-run, no automatic re-queue, and no manual re-queue of an affected project               |
 
-A retried pass is debt, not a home: a test that keeps needing it is quarantined and fixed (§ 16.3). Changed and new test files run ten times with shuffled order on the pull request, capped at 5 minutes, and a failure there fails the pull request. Do not knowingly land a new or changed test that flakes.
+A retried pass is debt, not a home: a test that keeps needing it is quarantined and fixed (§ 16.3). Changed and new test files run ten times with shuffled order on the pull request, capped at 5 minutes, and a failure there fails the pull request and is fixed under § 16.7. Do not knowingly land a new or changed test that flakes.
 
 ### 16.3 Quarantine
 
@@ -477,9 +380,84 @@ An agent reproduces, classifies and fixes the flake through the normal merge que
 | Test-only, reproduced, with the stress proof and a green `validate-flake-fix`                                     | Auto-merges through the queue   |
 | Touches product code, widens a tolerance (including a raised timeout) or loosens a matcher, or was not reproduced | Waits for the operator's review |
 
-A flake fix never skips or disables a test (`skip`, `todo`, `fails`, a false `runIf`), deletes a test or assertions, raises `retry` or any other retry count, adds a fixed sleep instead of awaiting the condition, or edits `quarantine.json`, the ledger, the reporter, the validators or a workflow. `validate-flake-fix` rejects each of these. A fix may raise a test or hook timeout only when its pull request states the measured p99 that justifies the new value on a `Timeout-budget:` line; such a fix is classed tolerance, never auto-merges and needs the operator's review.
+A flake fix never skips or disables a test (`skip`, `todo`, `fails`, a false `runIf`), deletes a test or assertions, raises `retry` or any other retry count, pins test order (§ 16.7), adds a fixed sleep instead of awaiting the condition, or edits `quarantine.json`, the ledger, the reporter, the validators or a workflow. `validate-flake-fix` rejects each of these but the pin, which lint rejects in test options and in config. A fix may raise a test or hook timeout only when its pull request states the measured p99 that justifies the new value on a `Timeout-budget:` line; such a fix is classed tolerance, never auto-merges and needs the operator's review.
 
 Release is mechanical, by the ledger job: 100 consecutive executions without a failure after a linked fix lands, over at least two days, or 300 without a fix. A failure during verification returns the test to quarantine.
+
+### 16.6 Shadow Rows
+
+A shadow row is an end-to-end suite on probation for the merge-queue gate. It runs and reports, but none of its tests gate. Probation and quarantine are one mechanism. Both run and report, and both leave on 100 straight passes. The rulings are Q1 and global review ruling 8 in the [CI decomposition blueprint](../research/ci-decomposition-blueprint.md#resolved--no-clear-alternative), and D5 and FQ-13 in the [CI flake quarantine blueprint](../research/ci-flake-quarantine-blueprint.md).
+
+| Rule               | Requirement                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Where it is listed | In the `dependsOn` of the project's `test:e2e:shadow` target. A suite is in `test:e2e:shadow` or in `test:e2e:queue`, never both                                                                                                                                                                                                                                         |
+| Where it runs      | One row per suite in the `e2e-shadow` lane of `ci.yml`. It runs in the merge queue, and on a push to `main` the queue did not prove, whenever its project (or its `metadata.lane`) is selected, and never on a pull request                                                                                                                                              |
+| Never gates        | The required gate does not need the lane, `Fail fast` does not watch it, and `continue-on-error` keeps a failure out of the run's conclusion. Its retried passes do not count toward the run's § 16.2 budget                                                                                                                                                             |
+| Counted            | The flake ledger counts each row's consecutive passing runs (`shadowRows` in `ledger.json`) from the same outcome rows as every test. Any failure of the row resets the count to 0, including a failure the entry under test caused, because that failure lands on `main` with the entry. A pass on the recorded retry counts as a pass and is reported beside the count |
+| Never quarantined  | Flake events from a shadow row never count toward the § 16.3 entry rule, so a shadow row is never quarantined                                                                                                                                                                                                                                                            |
+| Promotion          | At 100 consecutive passing runs, `shadow-row-promotion.yml` opens a pull request that moves the suite to `test:e2e:queue`. The pull request is never auto-merged, because promotion changes the gate                                                                                                                                                                     |
+| Red tests          | A red test is never skipped, disabled or quarantined to keep its row green. Its file is held out of the row, keeps running where it ran before, and gets an owner issue. The target's `metadata.description` names every held-out file with that issue                                                                                                                   |
+
+The held-out files now:
+
+| Project                                 | Held out                                                      | Owner issues |
+| --------------------------------------- | ------------------------------------------------------------- | ------------ |
+| `desktop-e2e`                           | desktop-adaptive-mode                                         | #2891        |
+| `desktop-e2e`                           | desktop-onboarding-offline, two-client                        | #2285        |
+| `desktop-e2e`                           | desktop-share-link-copy, sync-refusals, desktop-print-dry-run | #2754        |
+| `ui-e2e` (`test:e2e:browser-host-chat`) | chat-isolated-workspace                                       | #2283        |
+| `ui-e2e` (`test:e2e:browser-host-chat`) | browser-agent-host                                            | #2890, #2297 |
+
+A held-out file joins its row when its issue closes. The project's `metadata.description` is the source of truth, and this table follows it.
+
+### 16.7 Order Independence
+
+Make every test pass alone and in any order. Never let a test depend on state another test created, changed or left behind.
+
+**Why**: An order dependence is a failure waiting for a different order; burn-in shuffles changed files (§ 16.2) to find it on the pull request, not on `main` later.
+
+**Enforced by**: `tau-lint/no-pinned-test-order` (flags `shuffle: false` in Vitest test and suite options, and `sequence.shuffle: false` or `sequence.shuffle.tests: false` in Vitest config)
+
+- **Shared fixtures are read-only.** Treat what `beforeAll` builds as read-only. Create whatever a test mutates (stores, refs, tags, remotes, files, module state, globals, timers) per test, in `beforeEach` or as a per-test copy of a template built once. Otherwise write only under names the test owns, and assert on those names or relative to the state the test found.
+- **Never pin order.** `{ shuffle: false }` on `describe`, `it` or `test`, `sequence.shuffle: false` or `sequence.shuffle: { tests: false }` in a config, or a raised retry count never fixes an order dependence; each only switches off the check that reports it.
+- **Fix it before merge.** Fix a shuffled burn-in failure at the fixture, in that pull request or a linked one, before merge. This includes a failure that predates the pull request and that its change only exposed.
+
+Motivating case: `packages/revisions/src/revision-port.conformance.test.ts` built one store per adapter in `beforeAll` (the transport suite, one git http-backend remote), and its tests read and moved that store's tags, refs and checkouts. "The first version after Start is V2" held only because earlier tests ran first and cleaned up. Shuffled with no retry, 17 tests failed, on `main` too; nobody saw it until taucad/tau#2909 touched the file and burn-in selected it. The suites were then pinned with `{ shuffle: false }` to unblock that pull request, which hid the dependence. taucad/tau#2523 fixed the fixtures as below and the pins were removed.
+
+CORRECT:
+
+```typescript
+// Reads store-wide state (every tag): runs on a store of its own
+it('should list only the version it tagged', async () => {
+  await onItsOwnStore(async ({ port, child }) => {
+    const created = await port.tag({ name: 'Ready for print', revisionId: child });
+    expect(await port.listTags()).toStrictEqual([created]);
+  });
+});
+
+// Shares the beforeAll store: writes a name of its own, asserts on that name
+it('should list a version it tagged', async () => {
+  const created = await port.tag({ name: 'Lid of this row', revisionId: child });
+  expect(await port.listTags()).toContainEqual(created);
+});
+
+// Every test mutates the remote: one per test
+beforeEach(async () => {
+  fixture = await startGitHttpBackend({ root });
+});
+```
+
+INCORRECT:
+
+```typescript
+// Pinned so that earlier tests have tagged and cleaned up the shared store
+describe('RevisionPort conformance', { shuffle: false }, () => {
+  it('should number the first version after Start 2', async () => {
+    const created = await port.tag({ name: 'Ready for print', revisionId: child });
+    expect(created.number).toBe(2); // 3 when another test tagged first
+  });
+});
+```
 
 ## Summary Checklist
 
@@ -495,3 +473,4 @@ Before merging a test:
 - [ ] Test names follow `should <verb> <outcome>` pattern
 - [ ] Structured data assertions check shape, not just existence
 - [ ] A flaky test is fixed at its cause, not skipped, slept on or given more retries, and any longer timeout carries a measured `Timeout-budget:`
+- [ ] The test passes alone and in any order: a shared `beforeAll` fixture is read-only or written only under names the test owns, and no order is pinned (§ 16.7)

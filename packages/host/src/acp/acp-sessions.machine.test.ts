@@ -15,7 +15,7 @@ import { unansweredEvents } from '@taucad/xstate-testing/paths';
 
 import type { acpSessionMachine } from '#acp/acp-session.machine.js';
 import { acpSessionsIgnoredEvents, acpSessionsMachine, evictionVictims } from '#acp/acp-sessions.machine.js';
-import type { AcpAcquire, AcpSlot } from '#acp/acp-sessions.machine.js';
+import type { AcpAcquire, AcpPrewarm, AcpSlot } from '#acp/acp-sessions.machine.js';
 import type { AcpAdapter } from '#acp/registry.js';
 
 const adapter: AcpAdapter = {
@@ -37,6 +37,15 @@ const acquire = (chatId: string, requestId: string, overrides: Partial<AcpAcquir
   at: 0,
   opening: { adapter, cwd: '/work', mcpServers: [], sessionMessageId: 'm', sessionCommitted: false, notices: true },
   lend: { requestId, prompt: { fresh: [{ type: 'text', text: 'hi' }] } },
+  ...overrides,
+});
+
+const prewarm = (chatId: string, overrides: Partial<AcpPrewarm> = {}): AcpPrewarm => ({
+  key: `fake:${chatId}`,
+  chatId,
+  cwd: '/work',
+  at: 0,
+  opening: { adapter, cwd: '/work', mcpServers: [], sessionMessageId: 'w', sessionCommitted: false, notices: true },
   ...overrides,
 });
 
@@ -173,6 +182,119 @@ describe('acpSessions', () => {
   });
 });
 
+describe('acpSessions prewarm (WP-18)', () => {
+  it('opens a session with no turn, rests it once open and idle-expires it', () => {
+    const { actor, children, clock, emitted, sent } = start(1);
+    actor.send({ type: 'prewarm', prewarm: prewarm('a') });
+    expect(children.inputsFor('acpSession')).toHaveLength(1);
+    expect(children.inputsFor('acpSession')[0]).not.toHaveProperty('lend');
+    expect(actor.getSnapshot().context.slots['fake:a']?.status).toBe('warming');
+
+    actor.send({ type: 'opened', key: 'fake:a' });
+    expect(actor.getSnapshot().context.slots['fake:a']?.status).toBe('resting');
+    clock.advance(idleTimeout);
+
+    expect(sent('fake:a')).toEqual(['close']);
+    expect(emitted).toEqual([]);
+  });
+
+  it('reports a prewarm that closes before a turn is lent it, with its failure, and no adopted one', () => {
+    const { actor, emitted } = start(2);
+    const loggedOut = { code: 'EXTERNAL_AGENT_AUTH_REQUIRED', message: 'codex is not logged in.' };
+    actor.send({ type: 'prewarm', prewarm: prewarm('a') });
+    actor.send({ type: 'closed', key: 'fake:a', failure: loggedOut });
+    expect(emitted).toEqual([{ type: 'warmClosed', key: 'fake:a', failure: loggedOut }]);
+    expect(actor.getSnapshot().context.slots).toEqual({});
+
+    /* An adopted prewarm is a turn's session: its close reports nothing more. */
+    actor.send({ type: 'prewarm', prewarm: prewarm('b') });
+    actor.send({ type: 'opened', key: 'fake:b' });
+    actor.send({ type: 'acquire', acquire: acquire('b', 'run-b:0') });
+    actor.send({
+      type: 'turnEnded',
+      key: 'fake:b',
+      requestId: 'run-b:0',
+      outcome: { ok: true, stopReason: 'end_turn' },
+      resting: true,
+    });
+    actor.send({ type: 'closed', key: 'fake:b', failure: undefined });
+    expect(emitted.filter((event) => event.type === 'warmClosed')).toHaveLength(1);
+  });
+
+  it('lends the turn that arrives while the prewarm opens, and once it is open', () => {
+    const { actor, children, emitted, sent } = start(2);
+    actor.send({ type: 'prewarm', prewarm: prewarm('a') });
+    actor.send({ type: 'acquire', acquire: acquire('a', 'run-a:0') });
+    expect(sent('fake:a')).toEqual(['lend']);
+    expect(actor.getSnapshot().context.slots['fake:a']).toMatchObject({ status: 'opening', requestId: 'run-a:0' });
+    actor.send({ type: 'opened', key: 'fake:a' });
+    expect(actor.getSnapshot().context.slots['fake:a']?.status).toBe('lent');
+
+    actor.send({ type: 'prewarm', prewarm: prewarm('b') });
+    actor.send({ type: 'opened', key: 'fake:b' });
+    actor.send({ type: 'acquire', acquire: acquire('b', 'run-b:0') });
+
+    expect(sent('fake:b')).toEqual(['lend']);
+    expect(children.inputsFor('acpSession')).toHaveLength(2);
+    expect(emitted).toEqual([]);
+  });
+
+  it('closes a prewarm the turn cannot use, and opens the turn after closed', () => {
+    const { actor, children } = start(2);
+    actor.send({ type: 'prewarm', prewarm: prewarm('a') });
+    /* The turn's record names a vendor session the prewarm did not restore. */
+    const resumed = acquire('a', 'run-a:0');
+    actor.send({
+      type: 'acquire',
+      acquire: { ...resumed, opening: { ...resumed.opening, acpSessionId: 'vendor-1' } },
+    });
+    expect(actor.getSnapshot().context.slots['fake:a']).toMatchObject({ status: 'closing' });
+
+    actor.send({ type: 'closed', key: 'fake:a', failure: undefined });
+
+    expect(children.inputsFor('acpSession')[1]).toMatchObject({ lend: { requestId: 'run-a:0' } });
+  });
+
+  it('opens one prewarm at a time, never by closing a lent child, and evicts another resting one first', () => {
+    const { actor, children, sent, rest } = start(1);
+    actor.send({ type: 'acquire', acquire: acquire('a', 'run-a:0') });
+    actor.send({ type: 'opened', key: 'fake:a' });
+    /* The limit is full with a lent child: no prewarm. */
+    actor.send({ type: 'prewarm', prewarm: prewarm('b') });
+    expect(children.inputsFor('acpSession')).toHaveLength(1);
+
+    actor.send({
+      type: 'turnEnded',
+      key: 'fake:a',
+      requestId: 'run-a:0',
+      outcome: { ok: true, stopReason: 'end_turn' },
+      resting: true,
+    });
+    actor.send({ type: 'prewarm', prewarm: prewarm('b') });
+    actor.send({ type: 'prewarm', prewarm: prewarm('c') });
+    expect(children.inputsFor('acpSession')).toHaveLength(2);
+
+    actor.send({ type: 'opened', key: 'fake:b' });
+    expect(sent('fake:a')).toEqual(['close']);
+    expect(sent('fake:b')).toEqual([]);
+
+    /* The prewarm now rests oldest: the next open evicts it first. */
+    rest('d', 'run-d:0');
+    expect(sent('fake:b')).toEqual(['close']);
+  });
+
+  it('abandons a prewarm still opening when its chat closes', () => {
+    const { actor, emitted, sent } = start(1);
+    actor.send({ type: 'prewarm', prewarm: prewarm('a') });
+    actor.send({ type: 'closeChat', requestId: 'close-a', chatId: 'a' });
+    expect(sent('fake:a')).toEqual(['close']);
+
+    actor.send({ type: 'closed', key: 'fake:a', failure: undefined });
+
+    expect(emitted).toEqual([{ type: 'chatClosed', requestId: 'close-a' }]);
+  });
+});
+
 describe('evictionVictims', () => {
   const slot = (status: 'lent' | 'resting' | 'closing'): AcpSlot =>
     status === 'lent'
@@ -216,6 +338,7 @@ describe('acpSessions enumeration', () => {
         { type: 'cancel', requestId: `run-${chatId}:1` },
         { type: 'closeChat', requestId: `close-${chatId}`, chatId },
         { type: 'idleExpired', key },
+        { type: 'prewarm', prewarm: prewarm(chatId) },
       ];
     };
     const events = [...report('a'), ...report('b')];

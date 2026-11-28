@@ -6,6 +6,13 @@
  * provider's batched stats, the index build's recursion, the snapshot rows)
  * ever needed.
  *
+ * The constants yield to the I/O lanes (fast path FW4): a walk over a
+ * background view issues its chunk at once and the lane admits at most
+ * `backgroundIoConcurrency` of its provider calls (`io-scheduler.ts`), and
+ * none while an interactive call is in flight unless it has aged, so over such
+ * a view a constant here bounds only the calls queued. An interactive walk
+ * keeps its constant as its bound.
+ *
  * @module
  */
 

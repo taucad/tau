@@ -104,9 +104,17 @@ vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
 vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({
   ViewerDockview: () => <button type='button'>Viewer controls</button>,
 }));
-vi.mock('#routes/w.$workspace.$project/chat-history.js', () => ({
-  ChatHistory: () => <textarea aria-label='Message' />,
-}));
+vi.mock('#routes/w.$workspace.$project/chat-history.js', async () => {
+  const { useContext } = await import('react');
+  const { handOffRevealContext } = await import('#components/hand-off/hand-off-store.js');
+  return {
+    ChatHistory: function ChatHistory() {
+      /* Whether the composer may adopt the frame's native input yet (PL6). */
+      const isRevealed = useContext(handOffRevealContext);
+      return <textarea aria-label='Message' data-hand-off-revealed={String(isRevealed)} />;
+    },
+  };
+});
 vi.mock('#routes/w.$workspace.$project/chat-file-tree.js', () => ({ ChatFileTree: () => <p>File tree</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-parameters.js', () => ({ ChatParameters: () => <p>Parameter form</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-editor-layout.js', () => ({ ChatEditorLayout: () => null }));
@@ -1283,17 +1291,27 @@ describe('ChatInterfaceMobile on load', () => {
     /* Beside the hidden workspace, not in it, so assistive technology hears it. */
     expect(workspace()).not.toContainElement(screen.getByRole('status', { name: 'Opening project' }));
 
+    /* The frame's composer box keeps the text until the shown workspace's composer adopts it (Staging QA 2026-11-27). */
+    expect(workspace()).not.toHaveAttribute('data-mobile-tab');
+    const composer = screen.queryByRole('textbox', { name: 'Message' });
+    if (composer !== null) {
+      expect(composer).toHaveAttribute('data-hand-off-revealed', 'false');
+    }
+
     act(() => {
       state.isEditorReady = true;
       notify();
     });
     expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'chat', snap: 0.5 });
     expect(workspace()).toHaveAttribute('data-mobile-workspace', 'ready');
+    expect(workspace()).toHaveAttribute('data-mobile-tab', 'chat');
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute('data-hand-off-revealed', 'true');
     expect(screen.queryByRole('status', { name: 'Opening project' })).toBeNull();
 
     act(() => {
       selectSurface('editor');
     });
     expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'editor', snap: 1 });
+    expect(workspace()).toHaveAttribute('data-mobile-tab', 'editor');
   });
 });

@@ -70,7 +70,7 @@ export function ProjectComposerHandOff({ target }: { readonly target: HandOffTar
     /* The composer's own column inside the frame's box, with the composer frame's top inset, so the input row and the
      * bar sit where the rich composer's do (F7b). The served recorder marks it before React hydrates it. */
     <div className='flex min-h-0 flex-1 flex-col pt-3' suppressHydrationWarning {...projectComposerBox}>
-      {/* Says a queued send aloud, as Send's pending state shows it; the served recorder writes it. */}
+      {/* Says a queued send's cancellation aloud (the send itself is shown by Send's pending state); the served recorder writes it. */}
       <span
         data-slot={queuedSendStatusSlot}
         role='status'

@@ -4,7 +4,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -47,7 +47,8 @@ const git = (cwd: string, ...args: string[]): string =>
 
 /** A Hosted Remote holding one revision on `main`, where `TAU_API_URL` says the project lives. */
 const hostedRemote = async (): Promise<string> => {
-  const apiUrl = `file://${join(root, 'api')}`;
+  /* A real file URL: `file://` before a Windows path would carry backslashes, which git rewrites. */
+  const apiUrl = pathToFileURL(join(root, 'api')).href;
   const bare = join(root, 'api', 'v1', 'git', `${projectId}.git`);
   await mkdir(bare, { recursive: true });
   git(bare, 'init', '--quiet', '--bare', '--initial-branch=main');
@@ -107,7 +108,10 @@ describe('docker-entrypoint.sh', () => {
       const daemonLines = await readFile(join(root, 'daemon.txt'), 'utf8');
       const [token, ...argv] = daemonLines.trimEnd().split('\n');
       expect(token).toBe(pushCredential);
-      expect(argv).toEqual(expect.arrayContaining(['serve', `--workspace=${clone}`, `--relay=${apiUrl}`]));
+      /* The entrypoint is a POSIX script: it appends the project with `/` whatever the workspace's own spelling. */
+      expect(argv).toEqual(
+        expect.arrayContaining(['serve', `--workspace=${join(root, 'workspace')}/${projectId}`, `--relay=${apiUrl}`]),
+      );
       /* The entrypoint alone makes a cloud host: the agent channel is on without
        * an image `ENV`, and a revoked host exits instead of pairing (FX7 D3). */
       expect(argv).toEqual(expect.arrayContaining(['--agentPort=0', '--no-pair']));

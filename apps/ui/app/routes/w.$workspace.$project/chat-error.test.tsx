@@ -10,7 +10,11 @@ import type * as AgentHostModule from '@taucad/agent-host';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { chatTurnNotStartedCode, parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
-import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
+import {
+  ChatError as ChatErrorBanner,
+  ChatErrorAnnouncement,
+  resetFailureAnnouncementsForTest,
+} from '#routes/w.$workspace.$project/chat-error.js';
 import { chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { createActor } from 'xstate';
@@ -154,6 +158,7 @@ describe('ChatError', () => {
   beforeEach(() => {
     debug.enabled = false;
     resumableFailureOverrides.clear();
+    resetFailureAnnouncementsForTest();
     vi.clearAllMocks();
   });
 
@@ -343,6 +348,102 @@ describe('ChatError', () => {
     state = failedRunState('req_2');
     const retried = render(<ChatErrorBanner />);
     expect(decisionIdOf(retried.container)).toBe('run:req_2:1');
+  });
+
+  /* A refused send's turn leaves the transcript, so the chat's failure moves between the slot under the empty transcript
+   * and the last turn. Staging re-check 5: the two copies never coexist (the first is replaced about 50 ms later), and
+   * each became an alert, so the failure was said twice. The chat's one announcement says it once, and stays. */
+  const Places = ({ hasTurn, hasEmpty }: { readonly hasTurn: boolean; readonly hasEmpty: boolean }): ReactNode => (
+    <ChatErrorAnnouncement>
+      {hasEmpty ? (
+        <section data-testid='empty'>
+          <ChatErrorBanner />
+        </section>
+      ) : null}
+      {hasTurn ? (
+        <div data-testid='turn'>
+          <ChatErrorBanner />
+        </div>
+      ) : null}
+    </ChatErrorAnnouncement>
+  );
+  /** Each time an alert gains words: inserted with them, or its words set. */
+  const watchAlerts = (): { readonly said: string[]; readonly stop: () => void } => {
+    const said: string[] = [];
+    const alertOf = (node: Node): Element | undefined =>
+      (node instanceof Element ? node : node.parentElement)?.closest('[role=alert]') ?? undefined;
+    const observer = new MutationObserver((records) => {
+      const changed = new Set<Element>();
+      for (const record of records) {
+        const alert = alertOf(record.target);
+        if (alert !== undefined) {
+          changed.add(alert);
+        }
+        for (const node of record.addedNodes) {
+          if (node instanceof Element) {
+            for (const inner of [node, ...node.querySelectorAll('[role=alert]')]) {
+              if (inner.matches('[role=alert]')) {
+                changed.add(inner);
+              }
+            }
+          }
+        }
+      }
+      for (const alert of changed) {
+        if (alert.isConnected && alert.textContent !== '') {
+          said.push(alert.textContent);
+        }
+      }
+    });
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+    return {
+      said,
+      stop: () => {
+        observer.disconnect();
+      },
+    };
+  };
+
+  it('should say a failure once when its card moves between places in separate commits', async () => {
+    const state = failedRunState('req_1');
+    vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
+    const alerts = watchAlerts();
+    const view = render(<Places hasTurn={false} hasEmpty />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    view.rerender(<Places hasTurn={false} hasEmpty={false} />);
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+    });
+    view.rerender(<Places hasTurn hasEmpty={false} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    alerts.stop();
+
+    expect(alerts.said).toHaveLength(1);
+    const title = screen.getByTestId('turn').querySelector('p')?.textContent ?? '';
+    expect(screen.getByRole('group', { name: title })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(title);
+  });
+
+  it('should not say a failure already said on this page again, and say a new one', () => {
+    let state = failedRunState('req_7');
+    vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
+    const first = render(<Places hasTurn hasEmpty={false} />);
+    expect(screen.getByRole('alert')).not.toBeEmptyDOMElement();
+    first.unmount();
+
+    const again = render(<Places hasTurn hasEmpty={false} />);
+    expect(screen.getByRole('alert')).toBeEmptyDOMElement();
+    again.unmount();
+
+    state = failedRunState('req_8');
+    render(<Places hasTurn hasEmpty={false} />);
+    expect(screen.getByRole('alert')).not.toBeEmptyDOMElement();
   });
 
   it('should identify a refused command by its request (I5)', () => {
@@ -1446,6 +1547,7 @@ describe('ChatError for a run abandoned on a pending model attempt', () => {
   beforeEach(() => {
     debug.enabled = false;
     resumableFailureOverrides.clear();
+    resetFailureAnnouncementsForTest();
     vi.clearAllMocks();
     resetAutoResumes();
     vi.useFakeTimers();

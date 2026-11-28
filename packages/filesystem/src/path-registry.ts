@@ -15,9 +15,14 @@
  * A path no row names is authored, versioned, agent-writable and observed on
  * the UI plane — except inside `.tau`, where the default is
  * {@link reservedTauPathClassification} (P13). The authored `.tau` controls —
- * `.tau/parameters/**`, `.tau/machines/**`, `.tau/skills/**`, `.tau/AGENTS.md` —
- * are rows of their own, which is what keeps that default from swallowing them
- * the way a blanket `.tau` exclusion once did.
+ * `.tau/parameters/**` and `.tau/machines/**` — are rows of their own, which is
+ * what keeps that default from swallowing them the way a blanket `.tau`
+ * exclusion once did.
+ *
+ * The project's agent files are not among them. They sit where every agent
+ * looks for them — `AGENTS.md` at the project root and skills under
+ * `.agents/skills` — so they are unlisted paths, authored and versioned like
+ * any source file, and need neither a row nor an ignore line.
  *
  * Every row is compared as the filesystem folds it rather than as spelled: one
  * rule, no row that is reserved under one spelling and the user's under another.
@@ -139,7 +144,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
    *
    * They lead the table because {@link classify} takes the *first* match: behind
    * the rows below, a store vendored into `node_modules` was the cache's and one
-   * under `.tau/skills` was authored — and therefore versioned, captured into
+   * under `.tau/parameters` was authored — and therefore versioned, captured into
    * every revision (G0-3). */
   /* The workspace binding: root-only, like every other `.tau` member, so the
    * generated block's `/.tau/*` head already excludes it and it needs no line of
@@ -250,26 +255,6 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     anchored: true,
     match: 'root',
     directory: true,
-  },
-  {
-    prefix: '.tau/skills',
-    class: 'authored',
-    versioned: true,
-    agentAccess: 'read-write',
-    watch: 'ui',
-    anchored: true,
-    match: 'root',
-    directory: true,
-  },
-  {
-    prefix: '.tau/AGENTS.md',
-    class: 'authored',
-    versioned: true,
-    agentAccess: 'read-write',
-    watch: 'ui',
-    anchored: true,
-    match: 'root',
-    directory: false,
   },
 
   /* Records are unversioned and travel on their own refs when sync is on.
@@ -469,9 +454,9 @@ const rowClassifications: readonly PathClassification[] = Object.freeze(
  * Every row with its prefix folded, so one comparison answers every spelling.
  *
  * Built once at module load. A row's prefix is a literal this repository owns,
- * and `.tau/AGENTS.md` is the only one the fold rewrites — which is exactly the
- * row whose spelling used to decide whether the agent could read its own
- * instructions file (G0b-8).
+ * and every one of them is its own fold today; folding them here keeps a row
+ * added with another spelling from being reserved under that spelling alone
+ * (G0b-8).
  */
 const foldedRegistry: readonly PathRegistryRow[] = Object.freeze(
   pathRegistry.map((row) => Object.freeze({ ...row, prefix: foldPathSpelling(row.prefix) })),

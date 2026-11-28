@@ -18,6 +18,7 @@ import { joinRelativePath, normalizePath } from '@taucad/utils/path';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { factsConcurrency, getFileContentMetadata, measureContentFacts } from '#content-metadata.js';
 import { directoryConcurrency, mapConcurrent, statConcurrency } from '#concurrency.js';
+import type { IoLane } from '#io-scheduler.js';
 import { workerTimings } from '#worker-timings.js';
 import type { ContentFacts, ContentFactsOptions, FileStatEntry, FileSystemProvider, PathPolicy } from '#types.js';
 import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
@@ -57,6 +58,12 @@ export const isReservedIndexPath = (relative: string): boolean =>
 /** How the indexes reach one root's bytes. @public */
 export type IndexRootResolution = Readonly<{
   provider: FileSystemProvider;
+  /**
+   * A background operation's view of the same provider (fast path FW4): a poll's compare lists through one, so an
+   * interactive call waits behind at most the few listings its lane admitted, and the compare ages once. `provider`
+   * when absent.
+   */
+  background?: () => FileSystemProvider;
   /** The root's provider-relative path. */
   path: string;
   /**
@@ -137,6 +144,56 @@ const readStillHolds = (
 /** Unknown, or text whose line count was not measured. */
 const lacksCount = (facts: ContentFacts | undefined): boolean =>
   facts === undefined || (facts.contentKind === 'text' && facts.lineCount === undefined);
+
+/**
+ * Where a provider path sits under a provider directory, `''` being the provider's root.
+ *
+ * @param directory - The provider directory.
+ * @param path - A provider path.
+ * @returns `path` relative to `directory`, or `undefined` when outside it.
+ */
+const providerRelative = (directory: string, path: string): string | undefined => {
+  if (path === directory) {
+    return '';
+  }
+  if (directory === '') {
+    return path;
+  }
+  return path.startsWith(`${directory}/`) ? path.slice(directory.length + 1) : undefined;
+};
+
+/**
+ * How a root's bytes relate to a removed directory: `'reads'` when the root reads the directory or a directory inside
+ * it, `{ inside }` when the root holds it at `inside`, `undefined` when they are disjoint. On one provider, by path.
+ * Across providers only where neither is another program's: two folders another program edits (a picked folder and
+ * its subfolder, nested Node roots) may overlap, and nothing here can prove they do not, so such a root counts as
+ * reading the removed bytes. Disjoint storage roots of Tau's own (OPFS, IndexedDB, memory) never overlap another.
+ *
+ * @param removed - The removed directory's provider and provider path.
+ * @param at - Where the root reads.
+ * @returns The relation.
+ */
+const mayOverlap = (
+  removed: Readonly<{ provider: FileSystemProvider; path: string }>,
+  at: Readonly<{ provider: FileSystemProvider; path: string }>,
+): 'reads' | Readonly<{ inside: string }> | undefined => {
+  if (at.provider !== removed.provider) {
+    return at.provider.capabilities.externallyEdited === true && removed.provider.capabilities.externallyEdited === true
+      ? 'reads'
+      : undefined;
+  }
+  if (providerRelative(removed.path, at.path) !== undefined) {
+    return 'reads';
+  }
+  const inside = providerRelative(at.path, removed.path);
+  return inside === undefined ? undefined : { inside };
+};
+
+/** One snapshot write in flight: its abort, and the provider directory it writes into once resolved. */
+type WriteRecord = {
+  readonly controller: AbortController;
+  at?: Readonly<{ provider: FileSystemProvider; path: string }>;
+};
 
 /** `relative` of `absolute` under `root`, or `undefined` when outside it. */
 const relativeTo = (root: string, absolute: string): string | undefined => {
@@ -331,6 +388,12 @@ export class ProjectIndexes {
   private readonly _persisting = new Set<Promise<unknown>>();
   /* Aborted by every clear: a write begun before it stores nothing after it. */
   private _cleared = new AbortController();
+  /*
+   * One record per snapshot write in flight: its abort, and where it writes once it has resolved its root. A removal
+   * aborts each write into the removed directory, so a write begun before stores nothing after it, wherever its root
+   * resolves now. Each write removes its own record when it ends.
+   */
+  private readonly _writes = new Set<WriteRecord>();
   /* Set once by `dispose` or `close`: no snapshot write starts after it. */
   private _closed = false;
 
@@ -389,17 +452,18 @@ export class ProjectIndexes {
    * regain, after a sequence gap. Reads no file content.
    *
    * @param root - Absolute root.
+   * @param options - `lane: 'background'` for a compare nobody waits on (a poll's, FW4); a cut's is interactive.
    * @returns What changed and what is racy.
    */
-  public async compare(root: string): Promise<IndexCompareResult> {
+  public async compare(root: string, options?: Readonly<{ lane?: IoLane }>): Promise<IndexCompareResult> {
     const key = normalizePath(root);
     const state = this._states.get(key);
     if (state?.index.isComplete !== true) {
-      /* Opening a root is its compare. */
+      /* Opening a root is its compare, and a reader waits on it. */
       await this.ready(key);
       return this._states.get(key)?.lastCompare ?? { checked: 0, mismatched: [], racy: [] };
     }
-    return this._observe(key, state.index, '');
+    return this._observe(key, state.index, '', options?.lane);
   }
 
   /**
@@ -418,7 +482,8 @@ export class ProjectIndexes {
         .filter(
           (key) => this.get(key) !== undefined && this._resolve(key).provider.capabilities.externallyEdited === true,
         )
-        .map(async (key) => this.compare(key)),
+        /* Nobody waits on a poll's compare call by call: its listings run in the background lane (FW4). */
+        .map(async (key) => this.compare(key, { lane: 'background' })),
     );
   }
 
@@ -591,12 +656,19 @@ export class ProjectIndexes {
     if (this._closed) {
       return 'skipped';
     }
-    const writing = this._persist(normalizePath(root), this._cleared.signal);
+    const record: WriteRecord = { controller: new AbortController() };
+    this._writes.add(record);
+    const writing = this._persist(
+      normalizePath(root),
+      AbortSignal.any([this._cleared.signal, record.controller.signal]),
+      record,
+    );
     this._persisting.add(writing);
     try {
       return await writing;
     } finally {
       this._persisting.delete(writing);
+      this._writes.delete(record);
     }
   }
 
@@ -1250,54 +1322,93 @@ export class ProjectIndexes {
    * @param absolutePath - The mount prefix that changed.
    */
   public evict(absolutePath: string): void {
-    this._forget(absolutePath);
-    const changed = normalizePath(absolutePath);
-    const carried = new Set<string>();
-    for (const [root, state] of this._states) {
-      if (relativeTo(changed, root) !== undefined || relativeTo(root, changed) !== undefined) {
-        clearTimeout(state.persistTimer);
-        this._states.delete(root);
-        if (this._carry(root, state)) {
-          carried.add(root);
+    this._evict(absolutePath, true);
+  }
+
+  /**
+   * Forget what every index knows of a directory a permanent delete removed
+   * (project-library fast-path FW5), where {@link ProjectIndexes.clear} dropped
+   * every index. An index whose root reads the removed directory, or a
+   * directory inside it, is evicted with nothing carried, and a snapshot write
+   * it began stops at its next await before the disk. An index whose root holds
+   * the removed directory records it removed. A root this set cannot resolve is
+   * evicted, as it cannot be shown to read other bytes, and so is a root on
+   * another provider when both are folders another program edits, which may
+   * overlap (see `mayOverlap`). Every other root, which reads none of the
+   * removed bytes, stays warm.
+   *
+   * When the removal did not complete (it threw, or the directory is still
+   * there), nothing is recorded as removed: the readers are evicted all the
+   * same, and a holder marks the directory unknown, so each re-reads what is
+   * really there.
+   *
+   * @param removed - The provider and provider path of the removed directory.
+   * @param outcome - `removed` once the directory is gone; `unsettled` when the removal failed or left it in place.
+   */
+  public forgetRemovedDirectory(
+    removed: Readonly<{ provider: FileSystemProvider; path: string }>,
+    outcome: 'removed' | 'unsettled' = 'removed',
+  ): void {
+    const roots = new Set<string>([
+      ...this._states.keys(),
+      ...this._stored.keys(),
+      ...this._readFacts.keys(),
+      ...this._declaration.keys(),
+      ...this._settled,
+      ...this._expected.keys(),
+      ...this._landing.keys(),
+      ...this._importSeeded.keys(),
+      ...this._importFactsPending,
+    ]);
+    const reading: string[] = [];
+    const holding: Array<Readonly<{ root: string; inside: string }>> = [];
+    for (const root of roots) {
+      let at: Readonly<{ provider: FileSystemProvider; path: string }> | undefined = this._states.get(root)?.opened;
+      if (at === undefined) {
+        try {
+          at = this._resolve(root);
+        } catch {
+          reading.push(root);
+          continue;
         }
       }
-    }
-    for (const [root, stored] of this._stored) {
-      if (relativeTo(changed, root) !== undefined && !carried.has(root) && !stored.carried) {
-        this._stored.delete(root);
-        this._peeking.delete(root);
+      const overlap = mayOverlap(removed, at);
+      if (overlap === 'reads') {
+        reading.push(root);
+      } else if (overlap !== undefined) {
+        holding.push({ root, inside: overlap.inside });
       }
     }
-    for (const root of this._expected.keys()) {
-      if (relativeTo(changed, root) !== undefined) {
-        this._expected.delete(root);
-      }
+    for (const root of reading) {
+      this._evict(root, false);
+      this._importFactsPending.delete(root);
+      this._importSeeded.delete(root);
     }
-    /* The root no longer reads the same bytes: its write is not landed there, and nothing waits on it. */
-    for (const root of this._landing.keys()) {
-      if (relativeTo(changed, root) !== undefined) {
-        this._landing.delete(root);
+    /* A holder the evictions above dropped has nothing left to record into. One that remains records the outcome in its
+     * own index directly, even where the removed directory's logical path is itself a mount prefix, which `removeDirectory`
+     * would leave to the mount's own index: the removal, or, when it did not complete, that the directory is unknown. */
+    for (const { root, inside } of holding) {
+      const path = root === '/' ? `/${inside}` : `${root}/${inside}`;
+      this._forget(path);
+      if (outcome === 'removed') {
+        this._removed(path);
+      }
+      const state = this._states.get(root);
+      if (state !== undefined && !this._excluded(inside)) {
+        if (outcome === 'removed') {
+          state.index.remove(inside);
+        } else {
+          state.index.invalidate(inside);
+        }
+        this._schedulePersist(root);
       }
     }
     this._noteLanding();
-    /*
-     * A root that moved is no longer what the revision layer declared: what waited answers now, a root still mounted
-     * is unknown again and held again when it is configured, and an unmounted one is no revision root.
-     */
-    this.releaseDeclaration(changed);
-    for (const root of this._settled) {
-      if (relativeTo(changed, root) !== undefined) {
-        this._settled.delete(root);
-      }
-    }
-    const mounted = new Set(this._options.mountPrefixes?.() ?? []);
-    for (const root of this._declaration.keys()) {
-      if (relativeTo(changed, root) !== undefined && !carried.has(root)) {
-        if (mounted.has(root)) {
-          this._declaration.set(root, 'unknown');
-        } else {
-          this._declaration.delete(root);
-        }
+    /* A write goes where it resolved when it began, whatever its root resolves to now (a revoked or re-pointed route);
+     * one that has not resolved yet may still resolve there. */
+    for (const { controller, at } of this._writes) {
+      if (at === undefined || mayOverlap(removed, at) === 'reads') {
+        controller.abort();
       }
     }
   }
@@ -1407,6 +1518,63 @@ export class ProjectIndexes {
       }
     }
     this._noteObserved(root, index, changed);
+  }
+
+  private _evict(absolutePath: string, carry: boolean): void {
+    this._forget(absolutePath);
+    const changed = normalizePath(absolutePath);
+    const carried = new Set<string>();
+    for (const [root, state] of this._states) {
+      if (relativeTo(changed, root) !== undefined || relativeTo(root, changed) !== undefined) {
+        clearTimeout(state.persistTimer);
+        this._states.delete(root);
+        if (carry && this._carry(root, state)) {
+          carried.add(root);
+        }
+      }
+    }
+    for (const [root, stored] of this._stored) {
+      if (relativeTo(changed, root) !== undefined && !carried.has(root) && !stored.carried) {
+        this._stored.delete(root);
+        this._peeking.delete(root);
+      }
+    }
+    for (const root of this._expected.keys()) {
+      if (relativeTo(changed, root) !== undefined) {
+        this._expected.delete(root);
+      }
+    }
+    /* The root no longer reads the same bytes: its write is not landed there, and nothing waits on it. */
+    for (const root of this._landing.keys()) {
+      if (relativeTo(changed, root) !== undefined) {
+        this._landing.delete(root);
+      }
+    }
+    this._noteLanding();
+    this._undeclare(changed, carried);
+  }
+
+  /*
+   * A root that moved is no longer what the revision layer declared: what waited answers now, a root still mounted
+   * is unknown again and held again when it is configured, and an unmounted one is no revision root.
+   */
+  private _undeclare(changed: string, carried: ReadonlySet<string>): void {
+    this.releaseDeclaration(changed);
+    for (const root of this._settled) {
+      if (relativeTo(changed, root) !== undefined) {
+        this._settled.delete(root);
+      }
+    }
+    const mounted = new Set(this._options.mountPrefixes?.() ?? []);
+    for (const root of this._declaration.keys()) {
+      if (relativeTo(changed, root) !== undefined && !carried.has(root)) {
+        if (mounted.has(root)) {
+          this._declaration.set(root, 'unknown');
+        } else {
+          this._declaration.delete(root);
+        }
+      }
+    }
   }
 
   /*
@@ -1773,14 +1941,25 @@ export class ProjectIndexes {
 
   /**
    * One observation of a subtree: a head listing per directory, policy
-   * applied before descent, merged with mutations recorded meanwhile.
+   * applied before descent, merged with mutations recorded meanwhile; listed in `lane` (FW4).
    */
-  private async _observe(root: string, index: ProjectIndex, prefix: string): Promise<IndexCompareResult> {
+  // oxlint-disable-next-line max-params -- the observation's root, index and prefix, and the lane its listings run in.
+  private async _observe(
+    root: string,
+    index: ProjectIndex,
+    prefix: string,
+    lane: IoLane = 'interactive',
+  ): Promise<IndexCompareResult> {
     const resolution = this._resolve(root);
     const start = index.beginObservation();
     let rows: ObservedRow[] | undefined;
     try {
-      rows = await this._list(resolution, prefix);
+      rows = await this._list(
+        lane === 'background'
+          ? { ...resolution, provider: resolution.background?.() ?? resolution.provider }
+          : resolution,
+        prefix,
+      );
     } catch (error) {
       index.completeObservation(start, prefix, undefined);
       throw error;
@@ -1906,7 +2085,11 @@ export class ProjectIndexes {
     return resolve(root);
   }
 
-  private async _persist(key: string, cleared: AbortSignal): Promise<'written' | 'stale' | 'skipped' | 'busy'> {
+  private async _persist(
+    key: string,
+    cleared: AbortSignal,
+    record: WriteRecord,
+  ): Promise<'written' | 'stale' | 'skipped' | 'busy'> {
     const state = this._states.get(key);
     if (state === undefined || !state.index.isComplete) {
       return 'skipped';
@@ -1917,6 +2100,7 @@ export class ProjectIndexes {
     if (resolution.persist === undefined) {
       return 'skipped';
     }
+    record.at = { provider: resolution.provider, path: resolution.path };
     /* A snapshot claims every notice its vector names: re-observe what those
      * notices left unknown first, so it never stores a view older than its vector.
      * A pending entry still waiting for its mtime is observed too, so the stored

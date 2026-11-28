@@ -3268,6 +3268,87 @@ the cancelled tools left the system unchanged.
     await host.close();
   });
 
+  /* Windows flushes slowly (`FlushFileBuffers`): an external agent that asks and dies before the request's batch is
+   * durable must still have its request settled by the ending, or the approval stays pending for good (#2398). */
+  it('should settle an external request whose rows are still flushing when the agent dies', async () => {
+    let held: PromiseWithResolvers<void> | undefined;
+    const file = createMemoryLogFile({
+      sync: async () => {
+        await held?.promise;
+      },
+    });
+    const died = Promise.withResolvers<void>();
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        /* Every flush from here on waits for the test: the request's batch is written, not yet durable. */
+        held = Promise.withResolvers<void>();
+        // async-iife: bootstrap -- the agent asks and never waits for the answer: it dies first.
+        void (async (): Promise<void> => {
+          try {
+            await turn.approve({ prompt: 'write hello.txt' });
+          } catch {
+            /* The run ended without an answer. */
+          }
+        })();
+        await died.promise;
+        throw new Error('The agent died with its request outstanding.');
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          funding: { type: 'unfunded' },
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'external-unflushed',
+      }),
+      externalRunners: { acp: externalPort },
+    });
+    const runId = 'run-external-unflushed';
+    const read = async (): Promise<readonly AgentLogEvent[]> => {
+      const log = await file.open();
+      return log.read();
+    };
+
+    await host.admit({
+      chatId: 'chat-external-unflushed',
+      runId,
+      trigger: 'submit',
+      message: { id: 'turn-external-unflushed', role: 'user', content: 'Run this elsewhere.' },
+      config: {
+        systemPrompt: 'unused by an external turn',
+        toolChoice: 'none',
+        agent: { kind: 'acp', id: 'stub-agent' },
+      },
+    });
+    await vi.waitFor(async () => {
+      const events = await read();
+      expect(events.some((event) => event.type === 'interrupt.recorded' && event.phase === 'requested')).toBe(true);
+    });
+    /* The agent dies while the request's flush is held, so its ending reaches M1 before the request's commit. */
+    died.resolve();
+    await flush();
+    held!.resolve();
+
+    await vi.waitFor(async () => {
+      const events = await read();
+      expect(events.some((event) => event.type === 'run.lifecycle' && event.state === 'failed')).toBe(true);
+    });
+    const events = await read();
+    const interrupts = events.flatMap((event) => (event.type === 'interrupt.recorded' ? [event] : []));
+    const requested = interrupts.find((event) => event.phase === 'requested');
+    expect(interrupts.filter((event) => event.phase === 'resolved')).toMatchObject([
+      { interruptId: requested?.interruptId, reason: 'cancelled' },
+    ]);
+    expect(await host.pendingInterrupts(runId)).toEqual([]);
+    await host.close();
+  });
+
   it.each([
     ['a retry the agent offers', ['retry'], true],
     // A usage limit: nothing helps *now*, and what clears it is time.

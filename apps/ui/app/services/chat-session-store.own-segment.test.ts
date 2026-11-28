@@ -22,7 +22,7 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
 import { runHeartbeatMilliseconds } from '@taucad/agent-host';
 import { ChatSessionStore, selectChatTranscript } from '#services/chat-session-store.js';
-import type { ChatSessionDeps } from '#services/chat-session-store.js';
+import type { ChatSessionDeps, HostRoute } from '#services/chat-session-store.js';
 import type * as OwnSegmentSourceModule from '#services/chat-own-segment-source.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirror the environment module's fixed exported names.
@@ -160,7 +160,7 @@ const quietHost = (commands: HostCommand[], reads?: { count: number }) =>
       }) as unknown as AgentHostClient,
   );
 
-const open = (store: ChatSessionStore, connect: () => Promise<AgentHostClient>) => {
+const open = (store: ChatSessionStore, connect: (chatId: string, route?: HostRoute) => Promise<AgentHostClient>) => {
   const unpublish = store.publishProjectHostConnector(projectId, connect);
   const unobserve = store.observe(chatId, projectId);
   const session = store.acquire(chatId, projectId);
@@ -649,9 +649,9 @@ describe('the in-page attach after a stale span (HA-I5)', () => {
       const execution = read?.activeExecution;
       return execution?.kind === 'tau' ? execution.hostId : undefined;
     };
-    const connect = async (): Promise<AgentHostClient> => {
-      /* The connector reads the route first, synchronously, as the real one does. */
-      routes.push(routeOf(store.getChatHostSettings(chatId)));
+    const connect = async (_chatId: string, route?: HostRoute): Promise<AgentHostClient> => {
+      /* The connector reads the settings by the route it is given, as the real one does. */
+      routes.push(routeOf(store.getChatHostSettings(chatId, route)));
       return host();
     };
     const chat = open(store, connect);

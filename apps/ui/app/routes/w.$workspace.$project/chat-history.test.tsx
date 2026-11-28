@@ -19,6 +19,7 @@ import type { CadChatSubmitInput } from '#chat-clients/use-cad-chat-client.js';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { WaitClockProvider } from '@taucad/ui/hooks/use-wait-clock';
+import { arriveFirstMessage, departFirstMessage } from '#lib/departing-first-message.js';
 import type { WaitClock } from '@taucad/ui/hooks/use-wait-clock';
 
 // `useKernel` must NOT be called from chat-history anymore — guard with a
@@ -200,6 +201,7 @@ vi.mock('#routes/w.$workspace.$project/fork-divider.js', () => ({
 
 vi.mock('#routes/w.$workspace.$project/chat-error.js', () => ({
   ChatError: () => <div data-testid='chat-error-adornment' />,
+  ChatErrorAnnouncement: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-title-bar.js', () => ({
@@ -291,6 +293,7 @@ const capturedVirtuoso: {
   itemContent?: (index: number) => React.ReactNode;
   followOutput?: () => 'auto' | false;
   initialTopMostItemIndex?: { index: string; align: string };
+  totalListHeightChanged?: (height: number) => void;
 } = {};
 const scrollToIndexMock = vi.fn();
 const DefaultScroller = ({ children }: { readonly children?: React.ReactNode }): React.JSX.Element => (
@@ -302,6 +305,7 @@ vi.mock('react-virtuoso', () => ({
     readonly initialTopMostItemIndex: { index: string; align: string };
     readonly itemContent: (index: number, item: unknown) => React.ReactNode;
     readonly followOutput: () => 'auto' | false;
+    readonly totalListHeightChanged?: (height: number) => void;
     readonly ref?: React.Ref<{ scrollToIndex: typeof scrollToIndexMock }>;
     readonly components?: {
       readonly EmptyPlaceholder?: React.ComponentType<{ readonly context?: unknown }>;
@@ -314,6 +318,7 @@ vi.mock('react-virtuoso', () => ({
     capturedVirtuoso.totalCount = properties.data.length;
     capturedVirtuoso.itemContent = async (index) => properties.itemContent(index, properties.data[index]);
     capturedVirtuoso.followOutput = properties.followOutput;
+    capturedVirtuoso.totalListHeightChanged = properties.totalListHeightChanged;
     useImperativeHandle(properties.ref, () => ({ scrollToIndex: scrollToIndexMock }), []);
     const items: React.ReactNode[] = [];
     for (let index = 0; index < properties.data.length; index++) {
@@ -1019,5 +1024,70 @@ describe('ChatHistory — transcript wait shape (A15d)', () => {
     renderOverDeferredTranscript(history, undefined, { startedAt: 4200, isRevealed: false });
 
     expect(revealDelay()).toBe(-500);
+  });
+});
+
+/* WP-12 with WP-07 step 5: a new project's first message, on its way from Home, holds the first row's place until the
+ * transcript draws a measured row, so the person's own words never blank through the open. */
+describe('ChatHistory — the first message on its way from Home', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setMockMessages([]);
+    archiveOpen = false;
+    arriveFirstMessage('home/one');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    arriveFirstMessage('home/one');
+  });
+
+  const departingText = (): string | undefined =>
+    document.querySelector('[data-slot=departing-first-message]')?.textContent ?? undefined;
+
+  it('draws it over the loading feed and over an empty answer, never the empty state or the bars', () => {
+    departFirstMessage('home/one', 'A wall bracket');
+    const load = renderOverDeferredTranscript([]);
+
+    expect(departingText()).toBe('A wall bracket');
+    load.resolve();
+    expect(departingText()).toBe('A wall bracket');
+    expect(document.querySelector('[data-slot="panel-empty-state"]')).toBeNull();
+    expect(screen.getByRole('region', { name: 'Chat history' })).toHaveAttribute('aria-busy', 'true');
+    load.unmount();
+  });
+
+  it('leaves once the transcript has measured rows, two frames later', () => {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame'] });
+    departFirstMessage('home/one', 'A wall bracket');
+    const load = renderOverDeferredTranscript([message('u1', 'user')]);
+    load.resolve();
+    expect(departingText()).toBe('A wall bracket');
+
+    act(() => {
+      capturedVirtuoso.totalListHeightChanged?.(0);
+      vi.advanceTimersToNextFrame();
+      vi.advanceTimersToNextFrame();
+    });
+    expect(departingText()).toBe('A wall bracket');
+    act(() => {
+      capturedVirtuoso.totalListHeightChanged?.(98);
+      vi.advanceTimersToNextFrame();
+    });
+    expect(departingText()).toBe('A wall bracket');
+    act(() => {
+      vi.advanceTimersToNextFrame();
+    });
+    expect(departingText()).toBeUndefined();
+    load.unmount();
+  });
+
+  it("does not draw another project's message", () => {
+    departFirstMessage('home/two', 'Not this one');
+    const load = renderOverDeferredTranscript([]);
+
+    expect(departingText()).toBeUndefined();
+    load.unmount();
+    arriveFirstMessage('home/two');
   });
 });

@@ -63,6 +63,7 @@ import type { ImportStagingPort } from '#importer/staging.js';
 import type { HostImportSourcePort } from '#importer/sources.js';
 import type {
   ProjectAbsence,
+  VerifyAbsentLane,
   ProjectDirectoryProbe,
   ProjectDirectoryProbeRequest,
   ProjectDirectoryReading,
@@ -321,6 +322,7 @@ export class WorkspaceFileService {
       watchRegistry: this._watchRegistry,
       projectIndexes: this._projectIndexes,
       pendingSource: () => this._pendingSource,
+      inBackground: (provider, signal) => this._registry.backgroundCalls(provider, signal),
       ...(options.pendingStallMilliseconds === undefined
         ? {}
         : { pendingStallMilliseconds: options.pendingStallMilliseconds }),
@@ -1187,12 +1189,21 @@ export class WorkspaceFileService {
    * Subscribe to filesystem changes matching the request.
    * Identical requests share one underlying subscription (ref-counted).
    *
+   * Each path is resolved as a mount prefix is (`resolveAuthorityPath`): `.`
+   * and `..` segments are resolved.
+   *
    * @param request - paths, recursive, includes/excludes, and filter
    * @param handler - callback for matching WatchEvents
    * @returns unsubscribe function
+   * @throws `VirtualPathError` (`@taucad/utils/path`) for an empty, relative, `//`-prefixed,
+   * backslash or control-character path, or one that escapes `/`.
    */
   public watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void {
-    return this._watchRegistry.watch(request, handler);
+    /* Spelled as mount prefixes are, so a path with `.` or `..` is reset by the routes it resolves into (FW5). */
+    return this._watchRegistry.watch(
+      { ...request, paths: request.paths.map((path) => resolveAuthorityPath(path)) },
+      handler,
+    );
   }
 
   /**
@@ -1322,11 +1333,18 @@ export class WorkspaceFileService {
    * Prove from storage whether any configured root still carries a project id: every root available, every
    * directory's identity record read, under the project's lock. The discovery index is never asked (A1).
    *
+   * The caller says whether a person waits on it (FW4): `sweep`, the default, runs in its own bounded window behind
+   * interactive calls; `background` (the orphan sweep) yields to interactive calls until it holds the id's lock.
+   *
    * @param projectId - The id.
+   * @param options - The sweep's lane.
    * @returns `absent`, `present` with the directories that carry it, or `unknown`.
    */
-  public async verifyAbsent(projectId: string): Promise<ProjectAbsence> {
-    return this._projectDirectories.verifyAbsent(projectId);
+  public async verifyAbsent(
+    projectId: string,
+    options?: Readonly<{ lane?: VerifyAbsentLane }>,
+  ): Promise<ProjectAbsence> {
+    return this._projectDirectories.verifyAbsent(projectId, { lane: options?.lane ?? 'sweep' });
   }
 
   /**
@@ -2215,13 +2233,15 @@ export class WorkspaceFileService {
    * every watcher of a moved route needs.
    *
    * @param prefixes - The mount prefixes that changed. Each evicts its own index
-   * and the one that now covers it; every other root stays warm (W7c).
+   * and the one that now covers it; every other root stays warm (W7c). Each
+   * resets only the watches that can see it (fast-path FW5); `/`, a changed
+   * discovery-root set, resets every watch.
    */
   private _resetTopologyState(prefixes: readonly string[]): void {
     for (const prefix of prefixes) {
       this._projectIndexes.evict(prefix);
     }
-    this._watchRegistry.emitResetAll();
+    this._watchRegistry.emitReset(prefixes);
   }
 
   private async _statToTreeNode(
@@ -2255,6 +2275,7 @@ export class WorkspaceFileService {
    */
   private _indexRoot(root: string): {
     provider: FileSystemProvider;
+    background: () => FileSystemProvider;
     path: string;
     persist?: { lockName: string };
   } {
@@ -2267,6 +2288,7 @@ export class WorkspaceFileService {
       provider.capabilities.trustworthyMtime === true;
     return {
       provider,
+      background: () => this._registry.backgroundOperation(provider),
       path,
       ...(persists ? { persist: { lockName: `tau-index:${entry.storageRootKey}:${path}` } } : {}),
     };

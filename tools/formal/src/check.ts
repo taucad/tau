@@ -411,7 +411,8 @@ export const checkProject = async (context: FormalContext, options: CheckOptions
 
 /**
  * `formal update <projectRoot>`: regenerate every graph and suite; run the owner's tests with
- * `FORMAL_UPDATE=1`, which rewrite drift manifests (refusals apply, FM-R13) and corpus traces;
+ * `FORMAL_UPDATE=1`, which rewrite drift manifests (refusals apply, FM-R13), fill a pending review's
+ * hashes and rewrite corpus traces;
  * then regenerate the Lean goldens from those traces.
  */
 export const updateProject = async (

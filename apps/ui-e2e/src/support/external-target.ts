@@ -395,6 +395,7 @@ export type UiBrowserCommands = {
   uiStartLinkedGithubFixture(): Promise<TargetLinkedGithub>;
   uiStartTauServeFixture(options?: { readonly externalAgents?: boolean | 'codex' }): Promise<TargetTauServeFixture>;
   uiStopTauServeFixture(): Promise<void>;
+  uiRestartTauServeFixture(): Promise<void>;
   uiReleaseTauServeGateway(): Promise<void>;
   uiIsTauServeGatewayHeld(): Promise<boolean>;
   uiReadTauServeFile(relativePath: string): Promise<string | undefined>;
@@ -814,6 +815,7 @@ export const startTauServeFixture = (
   options: { readonly externalAgents?: boolean | 'codex' } = {},
 ): Promise<TargetTauServeFixture> => server.commands.uiStartTauServeFixture(options);
 export const stopTauServeFixture = (): Promise<void> => server.commands.uiStopTauServeFixture();
+export const restartTauServeFixture = (): Promise<void> => server.commands.uiRestartTauServeFixture();
 export const releaseTauServeGateway = (): Promise<void> => server.commands.uiReleaseTauServeGateway();
 export const isTauServeGatewayHeld = (): Promise<boolean> => server.commands.uiIsTauServeGatewayHeld();
 export const readTauServeFile = (relativePath: string): Promise<string | undefined> =>

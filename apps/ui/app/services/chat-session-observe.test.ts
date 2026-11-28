@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandAnswer, HostCommand, ReadAnswer } from '@taucad/agent-host/wire';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { chunksOf } from '#machines/chat-projection.logic.js';
@@ -16,6 +16,13 @@ const unusedHostCommand = async (): Promise<never> => {
 };
 
 describe('ChatSessionStore.observe', () => {
+  /* The remote read retry draws full jitter (HA3); pin it to its ceiling so the delays these rows count are exact. */
+  beforeEach(() => {
+    vi.spyOn(Math, 'random').mockReturnValue(1);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   for (const { ending, sameTurn } of [
     { ending: 'live-ended', sameTurn: false },
     { ending: 'unreadable', sameTurn: false },
@@ -61,8 +68,7 @@ describe('ChatSessionStore.observe', () => {
           answer?.({ status: 'refused', chatId: 'chat_retry_owner', reason: 'unreadable' });
         }
         await Promise.resolve();
-        await vi.advanceTimersByTimeAsync(250);
-        expect(connect).toHaveBeenCalledOnce();
+        // HA3: the redial is the retry's first step (250 ms at the jitter's ceiling); a fenced reread does not dial.
         await vi.advanceTimersByTimeAsync(250);
         expect(connect).toHaveBeenCalledTimes(ending === 'live-ended' ? 2 : 1);
         await vi.advanceTimersByTimeAsync(1000);
@@ -366,6 +372,121 @@ describe('ChatSessionStore.observe', () => {
     unpublish();
     release();
   });
+  describe('host commands on the attachment (WP-12 step 6)', () => {
+    const applied = async (command: HostCommand): Promise<CommandAnswer> => ({
+      commandId: command.commandId,
+      generation: 1,
+      status: 'applied',
+      effect: 'durable',
+      cursor: 2,
+    });
+    const attachedCancel = async (
+      options: Readonly<{
+        placement: (chatId: string) => Promise<{ hostId: string | undefined } | undefined>;
+        hostCommand: (command: HostCommand) => Promise<CommandAnswer>;
+        chatId: string;
+      }>,
+    ) => {
+      const store = new ChatSessionStore({ projectSessions: liveSessions });
+      const release = store.observe(options.chatId, 'project_cmd');
+      const close = vi.fn(async () => undefined);
+      const hostCommand = vi.fn(options.hostCommand);
+      const connect = vi.fn(async () => ({
+        catchUp: writerOwnedCatchUp,
+        read: vi.fn(),
+        subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+          queueMicrotask(() => {
+            parameters[3]?.({
+              status: 'batch',
+              sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+              chatId: options.chatId,
+              cursor: 0,
+              nextCursor: 2,
+              endCursor: 2,
+              events: [lifecycleRow(0, 'admitted', 'run-cmd'), lifecycleRow(1, 'running', 'run-cmd')],
+            });
+          });
+          return vi.fn();
+        },
+        hostCommand,
+        close,
+      }));
+      const unpublish = store.publishProjectHostConnector('project_cmd', connect, { placement: options.placement });
+      await vi.waitFor(() => {
+        expect(store.getAttachmentStatus(options.chatId)).toBe('attached');
+        expect(store.getProjection(options.chatId)?.ledger.position.cursor).toBe(2);
+      });
+      expect(connect).toHaveBeenCalledOnce();
+      const result = await store.cancelProjectedRun(options.chatId);
+      return {
+        result,
+        connect,
+        close,
+        hostCommand,
+        dispose: () => {
+          unpublish();
+          release();
+        },
+      };
+    };
+
+    it('sends a command on the attached client when the connector would dial the same host', async () => {
+      const { result, connect, close, hostCommand, dispose } = await attachedCancel({
+        chatId: 'chat_borrow',
+        placement: async () => ({ hostId: undefined }),
+        hostCommand: applied,
+      });
+      expect(result).toBe('stopped');
+      expect(hostCommand).toHaveBeenCalledOnce();
+      expect(connect).toHaveBeenCalledOnce();
+      expect(close).not.toHaveBeenCalled();
+      dispose();
+    });
+
+    it('dials its own connection when the chat now runs on another host', async () => {
+      const { connect, close, hostCommand, dispose } = await attachedCancel({
+        chatId: 'chat_moved',
+        placement: async () => ({ hostId: 'daemon-elsewhere' }),
+        hostCommand: applied,
+      });
+      expect(hostCommand).toHaveBeenCalledOnce();
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(close).toHaveBeenCalledOnce();
+      dispose();
+    });
+
+    it('dials its own connection when the connector cannot say where it would dial', async () => {
+      const { connect, dispose } = await attachedCancel({
+        chatId: 'chat_unknown_placement',
+        placement: async () => undefined,
+        hostCommand: applied,
+      });
+      expect(connect).toHaveBeenCalledTimes(2);
+      dispose();
+    });
+
+    it('retires an attached client a command failed on, and sends the same key on a dialled one', async () => {
+      let calls = 0;
+      const { result, connect, close, hostCommand, dispose } = await attachedCancel({
+        chatId: 'chat_retire',
+        placement: async () => ({ hostId: undefined }),
+        hostCommand: async (command) => {
+          calls += 1;
+          if (calls === 1) {
+            throw Object.assign(new Error('closed'), { code: 'CLIENT_CLOSED' });
+          }
+          return applied(command);
+        },
+      });
+      expect(result).toBe('stopped');
+      expect(hostCommand).toHaveBeenCalledTimes(2);
+      expect(hostCommand.mock.calls[1]?.[0].commandId).toBe(hostCommand.mock.calls[0]?.[0].commandId);
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(close).toHaveBeenCalledOnce();
+      dispose();
+    });
+  });
+
   it('retains an unreadable fault without retrying the same log forever', async () => {
     const store = new ChatSessionStore({ projectSessions: liveSessions });
     const release = store.observe('chat_unreadable', 'project_1');

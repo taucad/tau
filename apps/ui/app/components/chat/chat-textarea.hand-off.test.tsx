@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => {
     handleAddImage: vi.fn(),
     send: vi.fn(),
     desktopMounts: [] as Array<EarlyChatInput | undefined>,
+    /* The composer's draft actor: a stopped one belongs to a chat session the store has disposed. */
+    draftStatus: 'active' as 'active' | 'stopped',
   };
 });
 
@@ -89,7 +91,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
     session: undefined,
     execution: { execution: { kind: 'native' } },
     runElsewhere: undefined,
-    draftActorRef: { send: mocks.send },
+    draftActorRef: { send: mocks.send, getSnapshot: () => ({ status: mocks.draftStatus }) },
   }),
 }));
 vi.mock('#hooks/use-chat-session.js', () => ({ useChatSessionSnapshot: () => undefined }));
@@ -109,6 +111,7 @@ describe('ChatTextarea hand-off (PL6)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.desktopMounts = [];
+    mocks.draftStatus = 'active';
     resetHandOffStoreForTest();
   });
 
@@ -132,6 +135,33 @@ describe('ChatTextarea hand-off (PL6)', () => {
     ]);
     expect(placeholder.container.querySelector('textarea')).toBeNull();
     expect(screen.queryByText('Composer skeleton')).toBeNull();
+  });
+
+  /* Staging QA, phone composer box: a boundary above the shown chat suspended while the project opened, its session's
+   * last view went and the store disposed it; shown again, the composer rendered once with the disposed session's
+   * stopped draft actor, and the adopted text went into it and was lost. It waits for a live draft. */
+  it('should wait for a live draft before adopting, so a disposed session never takes the native edit', () => {
+    const placeholder = render(<section aria-label='Placeholder'>{slot}</section>);
+    const input = within(placeholder.container).getByRole<HTMLTextAreaElement>('textbox');
+    input.value = 'Make a hinge';
+    input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    mocks.draftStatus = 'stopped';
+
+    const composer = render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOff={target} />);
+
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.desktopMounts).toEqual([]);
+    expect(placeholder.container.querySelector('textarea')).not.toBeNull();
+
+    mocks.draftStatus = 'active';
+    composer.rerender(<ChatTextarea mode='main' onSubmit={vi.fn()} handOff={target} />);
+
+    expect(mocks.send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setDraftText',
+      text: 'Make a hinge',
+      adoptedEdit: true,
+    });
+    expect(mocks.desktopMounts).toEqual([expect.objectContaining({ text: 'Make a hinge', edited: true })]);
   });
 
   it('should hold the skeleton while a composition is open, and adopt once it closes', async () => {

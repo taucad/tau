@@ -33,6 +33,7 @@
     "./components/settings/person-settings": "./src/components/settings/person-settings.tsx",
     "./components/settings/settings-catalogue": "./src/components/settings/settings-catalogue.ts",
     "./components/settings/settings-item": "./src/components/settings/settings-item.tsx",
+    "./components/settings/web-hand-off-row": "./src/components/settings/web-hand-off-row.tsx",
     "./components/settings/settings-section": "./src/components/settings/settings-section.ts",
     "./components/settings/setup-answers-copy": "./src/components/settings/setup-answers-copy.ts",
     "./components/settings/setup-answers-row": "./src/components/settings/setup-answers-row.tsx",

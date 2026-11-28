@@ -39,6 +39,7 @@ const fakeChannel = (answer?: (command: HostCommand) => CommandAnswer | undefine
       }
     },
     parked: () => waiters.size,
+    prewarm: async () => undefined,
     execute: async ({ signal: _signal, ...command }) => {
       commands.push(command);
       const scripted = answer?.(command);

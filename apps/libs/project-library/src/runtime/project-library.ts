@@ -130,7 +130,12 @@ export type ProjectLibraryServices<
     buildSkew: Readonly<{ isSuperseded: () => boolean; subscribe: (listener: () => void) => () => void }>;
     /** The chat store over the facade's record client, which lists the projects the library knows. */
     createChatStore: (
-      options: Readonly<{ client: Facade['recordFiles']; projectIds: () => Promise<readonly string[]> }>,
+      options: Readonly<{
+        client: Facade['recordFiles'];
+        /** The same records in the background lane, for the all-chats reads (FW4). */
+        backgroundClient?: Facade['recordFiles'];
+        projectIds: () => Promise<readonly string[]>;
+      }>,
     ) => ChatStorage;
     /** Drop the project listing an earlier build kept outside the library. */
     clearLegacyListing: () => void;
@@ -389,7 +394,8 @@ export class ProjectLibrary<
   /** The orphan sweep's proofs from storage, remembered while the listing does not change (review M4). */
   readonly #absenceProofs = rememberedAbsenceProofs(async (projectId) => {
     const fileManager = await this.#facade();
-    return fileManager.client.verifyAbsent(projectId);
+    /* Nobody waits on the orphan sweep: its identity sweep runs in the background lane (FW4). */
+    return fileManager.client.verifyAbsent(projectId, { lane: 'background' });
   });
   /** The chat store and its read owner over the facade's record client. */
   #records: LibraryRecords<ChatStorage> | undefined;
@@ -1231,6 +1237,9 @@ export class ProjectLibrary<
     if (recordsChanged) {
       const chatStore = this.#services.createChatStore({
         client: fileManager.recordFiles,
+        ...(fileManager.backgroundRecordFiles === undefined
+          ? {}
+          : { backgroundClient: fileManager.backgroundRecordFiles }),
         projectIds: async () =>
           (this.queryClient.getQueryData<ProjectListing>(['projects'])?.projects ?? []).map((entry) => entry.projectId),
       });
@@ -1618,7 +1627,11 @@ export class ProjectLibrary<
 
   async #buildListing(discovery: ProjectDiscoveryResult): Promise<ProjectListing> {
     const [fileManager, worker] = await Promise.all([this.#facade(), this.getReadiedWorker()]);
-    return buildProjectListing({ recordFiles: fileManager.recordFiles, worker }, discovery, () => this.#recoveries());
+    return buildProjectListing(
+      { recordFiles: fileManager.recordFiles, backgroundRecordFiles: fileManager.backgroundRecordFiles, worker },
+      discovery,
+      () => this.#recoveries(),
+    );
   }
 
   async #registerWorkspace(selection: DirectoryPick, signal: AbortSignal) {

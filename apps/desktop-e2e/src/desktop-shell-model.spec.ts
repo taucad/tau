@@ -231,13 +231,24 @@ it('should evaluate, test, capture and export shell-authored bytes through one r
         }),
       )
       .toBeGreaterThan(4);
-    phase = 'revision marker';
-    const marker = page.locator('[role="status"][aria-label="Save status"]');
-    await expect.poll(async () => marker.allTextContents()).toEqual([expect.stringMatching(/^Saved/u)]);
     const eventsPath = join(root, '.tau/chats', activeChatId(page), 'events.jsonl');
     phase = 'durable settlement';
+    /* The host's durable fact first, so a failure names the side that stalled: no settlement is the host's, a
+     * settlement the marker never shows is the renderer's. */
+    await expect
+      .poll(async () => finalizedTurns(eventsPath), { timeout: 30_000 })
+      .toEqual([expect.objectContaining({ type: 'turn.finalized' })]);
     const settlements = await finalizedTurns(eventsPath);
     expect(settlements).toHaveLength(1);
+    phase = 'revision marker';
+    /* `Saving…` holds until the renderer has the settlement row and the revision client has its card. This poll ran
+     * on Vitest's 1 s default, never chosen: LNX-U26 (job 140636907708) and LNX-D (job 140616774602) both still read
+     * `Saving…` 1.4–1.5 s after `turn.finalized` was durable, when that default ran out. The bound is the 30 s the
+     * settlement above gets; a marker that never settles still fails here. */
+    const marker = page.locator('[role="status"][aria-label="Save status"]');
+    await expect
+      .poll(async () => marker.allTextContents(), { timeout: 30_000 })
+      .toEqual([expect.stringMatching(/^Saved/u)]);
     const settlement = settlements[0]!;
     expect(settlement.changedPaths).toContain('main.scad');
     const recordedTree = await execFileAsync('git', ['-C', root, 'rev-parse', `${settlement.revisionId}^{tree}`]);

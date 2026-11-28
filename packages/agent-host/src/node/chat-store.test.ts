@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { watch } from 'node:fs';
+import { appendFileSync, mkdirSync, rmSync, watch, writeFileSync } from 'node:fs';
 import type * as NodeFileSystemModule from 'node:fs';
-import { link, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import type * as NodeFileSystemPromisesModule from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 import { createNodeAttachmentReader, createNodeChatStore } from '#node.js';
@@ -95,6 +95,50 @@ describe('Node chat source observation', () => {
       for (const unsubscribe of release) {
         unsubscribe();
       }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps observing when a directory in the workspace is replaced by a file of the same name (#2977)', async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'tau-chat-watch-swap-')));
+    const log = join(root, '.tau', 'chats', 'swap', 'events.jsonl');
+    await mkdir(dirname(log), { recursive: true });
+    const onError = vi.fn();
+    let seen: (() => void) | undefined;
+    const controller = new AbortController();
+    try {
+      const binding = chatStoreBinding(createNodeChatStore({ workspaceRoot: root }));
+      await binding.observeBytes!('swap', {
+        signal: controller.signal,
+        onChange: () => seen?.(),
+        onError,
+      });
+      /*
+       * Append to the observed log and wait until the observation reports it. Every watch
+       * shares the process's one inotify queue, which delivers in order, so by then each
+       * event raised by an earlier write has been handled too.
+       */
+      const barrier = async (): Promise<void> => {
+        const reported = Promise.withResolvers<void>();
+        seen = reported.resolve;
+        appendFileSync(log, '\n');
+        await reported.promise;
+        seen = undefined;
+      };
+      mkdirSync(join(root, 'main.ts'));
+      writeFileSync(join(root, 'main.ts', 'child.ts'), 'export {};');
+      await barrier();
+
+      /* In one turn, so the removed directory's own events are handled only once the file stands in its place. */
+      rmSync(join(root, 'main.ts'), { recursive: true });
+      writeFileSync(join(root, 'main.ts'), '');
+      /* The first append can share the swap's batch of events; the second is read only after that batch was handled. */
+      await barrier();
+      await barrier();
+
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      controller.abort();
       await rm(root, { recursive: true, force: true });
     }
   });

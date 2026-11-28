@@ -152,6 +152,11 @@ type Slot = Readonly<{
   steers: readonly string[];
   /** An external request's resolution waiting for its rows. */
   decision?: Readonly<{ commandId: string; resolution: ApprovalResolution }>;
+  /**
+   * The external requests this attempt wrote, including any whose batch is ordered but not yet committed to the
+   * ledger: the ending resolves them too (NoPendingAfterEnd).
+   */
+  asked?: readonly string[];
 }>;
 
 /** One attempt owed settlement (W8). */
@@ -359,6 +364,24 @@ const cancelPending = (ledger: ChatLedger, runId: string, code?: string): LogRow
     resolvedRow({ interruptId, outcome: 'cancelled' }, code === undefined ? {} : { code }),
   );
 
+/** The requests the slot asked that the ledger has neither pending nor resolved: their batch has not committed. */
+const unseenAsks = (ledger: ChatLedger, slot: Slot): readonly string[] => {
+  const entry = ledger.runs[slot.key.runId];
+  return (slot.asked ?? []).filter(
+    (interruptId) =>
+      entry?.pendingInterrupts[interruptId] === undefined && entry?.resolvedInterrupts?.includes(interruptId) !== true,
+  );
+};
+
+/**
+ * The requests an ending attempt holds: the ledger's pending ones, and those it asked whose batch the ledger has not
+ * committed yet (a slow flush lets the driver end first). Every one is resolved `cancelled` (NoPendingAfterEnd).
+ */
+const cancelHeld = (ledger: ChatLedger, slot: Slot): LogRowBody[] => [
+  ...cancelPending(ledger, slot.key.runId),
+  ...unseenAsks(ledger, slot).map((interruptId) => resolvedRow({ interruptId, outcome: 'cancelled' })),
+];
+
 /** The ending batch M1 writes for one attempt (RA-S4): one decider, no transient terminal row (D8). */
 const endingRows = (context: SlotContext): readonly ChatRunRow[] => {
   const { slot, ledger } = context;
@@ -372,7 +395,7 @@ const endingRows = (context: SlotContext): readonly ChatRunRow[] => {
   const deciding = slot.decision?.resolution.interruptId;
   const external =
     slot.kind === 'external'
-      ? cancelPending(ledger, runId).filter((row) => row.type !== 'interrupt.recorded' || row.interruptId !== deciding)
+      ? cancelHeld(ledger, slot).filter((row) => row.type !== 'interrupt.recorded' || row.interruptId !== deciding)
       : [];
   if (ending.reason === 'cancel' && ending.outcome !== 'completed') {
     return [...external, cancelledRow(ledger.runs[runId], ending.withdraw === true, { executed })].map((body) =>
@@ -733,8 +756,11 @@ const request = (
 ): AttemptStep | Readonly<Record<never, never>> => {
   const { runId } = context.slot.key;
   const entry = context.ledger.runs[runId];
-  if (entry?.pendingInterrupts[interruptId] !== undefined) {
-    /* A duplicate of a pending request: the first one stands (L2a D11). */
+  if (
+    entry?.pendingInterrupts[interruptId] !== undefined ||
+    unseenAsks(context.ledger, context.slot).includes(interruptId)
+  ) {
+    /* A duplicate of a pending request, committed or still on its way: the first one stands (L2a D11). */
     return {};
   }
   const next = minted(context, 'request');
@@ -758,7 +784,12 @@ const request = (
   });
   return {
     target: '#awaitingDecision',
-    context: { ...context, seq: next.seq, pending: next.key },
+    context: {
+      ...context,
+      seq: next.seq,
+      pending: next.key,
+      slot: { ...context.slot, asked: [...(context.slot.asked ?? []), interruptId] },
+    },
   };
 };
 

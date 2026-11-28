@@ -249,6 +249,46 @@ describe('ensureWindowsNativeSandbox', () => {
     expect(setup).toHaveBeenCalledTimes(2);
   });
 
+  it('should run the setup again at the next launch after the helper refused one that setup repairs', async () => {
+    const setup = vi.fn<() => Promise<void>>(async () => undefined);
+    /* `status` still reports the install record: an app update replaced the helper, not the setup. */
+    configureWindowsNativeSandbox(options('stale', { installed: async () => true, setup }));
+    const refused = await settled(
+      spawnWindowsNative(await windowsNativeLaunchVector(request), { cwd: request.workingDirectory, env: {} }),
+    );
+    expect(refused.error?.message).toBe(
+      'The Windows sandbox refused the native launch: the sandbox runner needs repair (run setup again)',
+    );
+    expect(setup).not.toHaveBeenCalled();
+
+    await ensureWindowsNativeSandbox();
+    expect(setup).toHaveBeenCalledOnce();
+    await ensureWindowsNativeSandbox();
+    expect(setup).toHaveBeenCalledOnce();
+  });
+
+  it('should ask for setup again by name when a refusal needs it and this process may not run it', async () => {
+    configureWindowsNativeSandbox(options('stale', { installed: async () => true }));
+    await settled(
+      spawnWindowsNative(await windowsNativeLaunchVector(request), { cwd: request.workingDirectory, env: {} }),
+    );
+
+    await expect(ensureWindowsNativeSandbox()).rejects.toThrow(
+      'the Windows sandbox needs to be set up again on this computer, for example after a Tau update',
+    );
+  });
+
+  it('should not ask for setup again after a refusal setup cannot repair', async () => {
+    const setup = vi.fn<() => Promise<void>>(async () => undefined);
+    configureWindowsNativeSandbox(options('refuse', { installed: async () => true, setup }));
+    await settled(
+      spawnWindowsNative(await windowsNativeLaunchVector(request), { cwd: request.workingDirectory, env: {} }),
+    );
+
+    await ensureWindowsNativeSandbox();
+    expect(setup).not.toHaveBeenCalled();
+  });
+
   it('should refuse a launch without a well-formed verified digest', async () => {
     configureWindowsNativeSandbox(options());
     await expect(windowsNativeLaunchVector({ ...request, executableSha256: 'ABC' })).rejects.toThrow(

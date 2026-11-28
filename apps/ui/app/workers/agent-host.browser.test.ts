@@ -56,14 +56,18 @@ const completedBrowserSnapshot = async (
   chatId: string,
   runId: string,
 ): Promise<HostRunSnapshot> =>
-  vi.waitFor(async () => {
-    const answer = await attachBrowserChat(client, chatId);
-    expect(answer).toMatchObject({ status: 'applied', details: { snapshot: { runId, state: 'completed' } } });
-    if (answer.status !== 'applied' || answer.effect !== 'not-applied') {
-      throw new Error('Expected an attached host snapshot.');
-    }
-    return answer.details['snapshot'] as HostRunSnapshot;
-  });
+  vi.waitFor(
+    async () => {
+      const answer = await attachBrowserChat(client, chatId);
+      expect(answer).toMatchObject({ status: 'applied', details: { snapshot: { runId, state: 'completed' } } });
+      if (answer.status !== 'applied' || answer.effect !== 'not-applied') {
+        throw new Error('Expected an attached host snapshot.');
+      }
+      return answer.details['snapshot'] as HostRunSnapshot;
+    },
+    /* The first turn shares its start with the runtime warm-up an admitted turn begins (WP-12 step 7). */
+    { timeout: 10_000, interval: 50 },
+  );
 
 /**
  * A project host opened in this page, as the resident worker opens one on `provide` (RH-S8), and one agent-wire

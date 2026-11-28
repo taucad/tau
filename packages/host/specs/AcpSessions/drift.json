@@ -71,6 +71,7 @@
     "acpSessions.ready.closed": "AdapterExited",
     "acpSessions.ready.idleExpired": "IdleExpired",
     "acpSessions.ready.opened": "Opened",
+    "acpSessions.ready.prewarm": "Prewarm",
     "acpSessions.ready.turnEnded": "TurnEnded",
     "acpSessions.xstate.error.*": "Unmodelled",
     "busy.elicitationComplete": "Stutter",
@@ -84,7 +85,8 @@
     "idle.close": "CloseChat",
     "opening.adapterExited": "AdapterExited",
     "opening.cancel": "Cancel",
-    "opening.close": "Cancel"
+    "opening.close": "Cancel",
+    "opening.lend": "Acquire"
   },
   "alphabet": [
     "acquire",
@@ -105,6 +107,7 @@
     "lentFailed",
     "lentReady",
     "opened",
+    "prewarm",
     "probeModel",
     "recorded",
     "sessionUpdate",
@@ -113,11 +116,11 @@
     "vendorRequest"
   ],
   "specs": {
-    "AcpSessions.tla": "c0f16221de511317348e257d9a1fc798f24cd371321e3cd2e0c40a5e336aedc1"
+    "AcpSessions.tla": "2225d4ddeb6257825f3c67439520e2ed5ec7ef543896ed73c286299f24c82731"
   },
   "tables": {},
   "versions": {
-    "acpSession": "4",
-    "acpSessions": "1"
+    "acpSession": "5",
+    "acpSessions": "2"
   }
 }

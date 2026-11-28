@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { createContext, memo, useCallback, useContext, useMemo, useState } from 'react';
 import type React from 'react';
 import { Bot, CircleAlert, MonitorSmartphone, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
@@ -18,7 +18,7 @@ import {
 import { selectVisibleChatErrorEntry, selectVisibleFailureResumable } from '#utils/run-auto-resume-plan.js';
 import type { AutoResumePlan, AutoResumeTarget } from '#utils/run-auto-resume-plan.js';
 import { useChatAutoResume } from '#hooks/active-chat-provider.js';
-import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
+import { ChatErrorCard, chatErrorReportContext } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-details.js';
 import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
@@ -549,20 +549,75 @@ const countdownOf = (
   kind: 'rateLimit' | 'providerUnavailable',
 ): { countdown?: Readonly<{ resumeAt: number }> } => (waiting?.kind === kind ? { countdown: waiting } : {});
 
+/** The failures said on this page, by decision: each is said once, wherever its card stands. */
+const announcedFailures = new Set<string>();
+
+/** Forget every failure said on this page. */
+export const resetFailureAnnouncementsForTest = (): void => {
+  announcedFailures.clear();
+};
+
+/** Where a chat's failure cards hand their decision and title to the chat's one announcement. */
+const chatErrorSinkContext = createContext<((decisionId: string, title: string) => void) | undefined>(undefined);
+
+/**
+ * The chat's one voice for its failures: a live region that stays in place while the failure's card moves. A refused
+ * send's turn leaves the transcript, so its card is drawn under the empty transcript and then in the last turn, in
+ * separate commits: two cards that were each an alert said the failure twice. Every card below is a group labelled by
+ * its title, and this region says each failure once per page, from whichever card shows it first.
+ *
+ * @param props - The chat's content, whose failure cards report here.
+ * @returns The content and the region.
+ */
+export function ChatErrorAnnouncement({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
+  const decisionId = useChatSelector(selectVisibleChatErrorId);
+  const [said, setSaid] = useState<{ readonly decisionId: string; readonly title: string }>();
+  const sink = useCallback((reported: string, title: string): void => {
+    if (announcedFailures.has(reported)) {
+      return;
+    }
+    announcedFailures.add(reported);
+    setSaid({ decisionId: reported, title });
+  }, []);
+  /* Only the failure on show: once it is gone the region is empty, so the next failure is new text. */
+  const text = said !== undefined && said.decisionId === decisionId ? said.title : '';
+  return (
+    <chatErrorSinkContext.Provider value={sink}>
+      {children}
+      <div role='alert' className='sr-only' data-slot='chat-error-announcement'>
+        {text}
+      </div>
+    </chatErrorSinkContext.Provider>
+  );
+}
+
 /**
  * The run's failure, a decision the phone sheet never folds away (I5, `chat-interface-mobile.tsx`): the marker renders
- * only while a card does.
+ * only while a card does. Under a `ChatErrorAnnouncement` its card is a labelled group and the announcement says it;
+ * elsewhere the card is the alert.
  */
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector(selectVisibleChatError);
   const decisionId = useChatSelector(selectVisibleChatErrorId);
+  const sink = useContext(chatErrorSinkContext);
+  const report = useMemo(
+    () =>
+      sink === undefined || decisionId === undefined
+        ? undefined
+        : (title: string): void => {
+            sink(decisionId, title);
+          },
+    [sink, decisionId],
+  );
   if (!parsedError) {
     return null;
   }
   return (
     <div data-decision='run-error' data-decision-id={decisionId} className='shrink-0'>
-      <ChatErrorBody parsedError={parsedError} className={className} />
+      <chatErrorReportContext.Provider value={report}>
+        <ChatErrorBody parsedError={parsedError} className={className} />
+      </chatErrorReportContext.Provider>
     </div>
   );
 });

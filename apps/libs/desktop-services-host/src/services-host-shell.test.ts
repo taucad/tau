@@ -300,7 +300,7 @@ describe('desktopShellProvider', () => {
       };
     };
 
-    it('keeps the Windows answer unchanged while the flag is off, even with a helper present', async () => {
+    it('has no Windows shell when main turned the sandbox off (TAU_WINDOWS_SHELL_SANDBOX=0), even with a helper present', async () => {
       const environment = { TAU_WINDOWS_SANDBOX_HELPER: await statusHelper(true) };
 
       expect(desktopShellProvider({ platform: 'win32', environment })).toBeUndefined();
@@ -309,8 +309,9 @@ describe('desktopShellProvider', () => {
       ).resolves.toStrictEqual({
         status: 'unavailable',
         code: 'sandbox-unavailable',
-        message: 'The Windows shell sandbox is not part of this Tau build.',
-        recovery: 'Use Tau on macOS or Linux for the shell and Terminal until the Windows sandbox ships.',
+        message: 'The Windows shell sandbox is off or missing in this Tau installation.',
+        recovery:
+          'Reinstall Tau, and start it without TAU_WINDOWS_SHELL_SANDBOX=0, for the shell and Terminal; Tau never starts an uncontained shell.',
       });
     });
 
@@ -340,7 +341,7 @@ describe('desktopShellProvider', () => {
           code: 'provisioning-required',
           message: 'The Windows shell sandbox is not set up on this device.',
           recovery:
-            'Choose Set up in the Terminal and approve the Windows administrator prompt. Tau asks once; then the shell and Terminal work.',
+            'Start the Terminal or choose Set up, and approve the Windows administrator prompt. Tau asks once; then the shell and Terminal work.',
         });
       },
     );
@@ -408,7 +409,7 @@ describe('desktopShellProvider', () => {
       );
 
       it.skipIf(process.platform === 'win32')(
-        'keeps offering setup with a clean message when the person declines the prompt',
+        'answers sandbox-unavailable with a clean message when the person declines the prompt, and asks again at the next use',
         async () => {
           const declined = String.raw`The Windows shell sandbox was not set up: Command failed: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe The operation was canceled by the user.`;
           const { helper } = await installableHelper();
@@ -432,9 +433,10 @@ describe('desktopShellProvider', () => {
 
           await expect(shell.provision()).resolves.toStrictEqual({
             status: 'unavailable',
-            code: 'provisioning-required',
-            message: 'The Windows shell sandbox was not set up: the administrator prompt was declined or setup failed.',
-            recovery: 'Choose Set up to try again. Tau starts no shell until the sandbox is set up.',
+            code: 'sandbox-unavailable',
+            message: 'The Windows shell sandbox is not set up: the administrator prompt was declined or setup failed.',
+            recovery:
+              'Start the Terminal again, or ask the agent again, and approve the Windows administrator prompt. Tau starts no shell until the sandbox is set up.',
             diagnostic: declined,
           });
           await expect(shell.probe()).resolves.toMatchObject({
@@ -442,7 +444,7 @@ describe('desktopShellProvider', () => {
             message: 'The Windows shell sandbox is not set up on this device.',
           });
           await expect(shell.provision()).resolves.toMatchObject({
-            code: 'provisioning-required',
+            code: 'sandbox-unavailable',
           });
           expect(setUps).toBe(2);
         },
@@ -475,6 +477,109 @@ describe('desktopShellProvider', () => {
         expect(setUps).toBe(1);
       });
 
+      it.skipIf(process.platform === 'win32')(
+        'lists a shell whose first agent call runs the setup, asking once per run when it is declined',
+        async () => {
+          const { helper } = await installableHelper();
+          const environment = {
+            TAU_WINDOWS_SHELL_SANDBOX: '1',
+            TAU_WINDOWS_SANDBOX_HELPER: helper,
+          };
+          let setUps = 0;
+          const shell = createDesktopShell({
+            appDataRoots: [appData],
+            platform: 'win32',
+            environment,
+            setUpWindowsSandbox: async (): Promise<WindowsShellSandboxSetup> => {
+              setUps += 1;
+              return {
+                status: 'failed',
+                message: 'The operation was canceled by the user.',
+              };
+            },
+          });
+          const current = shell.forProject(project, new Map([['run-1', { cwd: project }]]));
+          await expect(shell.probe()).resolves.toMatchObject({
+            code: 'provisioning-required',
+          });
+          /* No probe prompts: only a use does. */
+          expect(setUps).toBe(0);
+          const pending = current();
+          expect(pending?.identity).toMatchObject({
+            platform: 'win32',
+            kind: 'powershell',
+          });
+          const run = async (runId: string) =>
+            pending!.run({
+              runId,
+              toolCallId: `call-${runId}`,
+              signal: new AbortController().signal,
+              input: { command: 'git status' },
+            });
+
+          const first = await run('run-1');
+          expect(first).toMatchObject({ status: 'not-started', code: 'shell-unavailable' });
+          expect(first.status === 'not-started' ? first.message : '').toContain(
+            'the administrator prompt was declined or setup failed',
+          );
+          expect(setUps).toBe(1);
+          /* The same run is not asked again; the next run is. */
+          await expect(run('run-1')).resolves.toMatchObject({
+            status: 'not-started',
+            code: 'shell-unavailable',
+          });
+          expect(setUps).toBe(1);
+          await expect(run('run-2')).resolves.toMatchObject({
+            status: 'not-started',
+            code: 'shell-unavailable',
+          });
+          expect(setUps).toBe(2);
+          await expect(
+            pending!.openTerminal({} as unknown as Parameters<NonNullable<typeof pending>['openTerminal']>[0]),
+          ).resolves.toMatchObject({
+            status: 'refused',
+            code: 'provisioning-required',
+          });
+        },
+      );
+
+      it.skipIf(process.platform === 'win32')(
+        'runs the first agent call after its setup succeeds, through the shell the setup made available',
+        async () => {
+          const { helper, install } = await installableHelper();
+          const environment = {
+            TAU_WINDOWS_SHELL_SANDBOX: '1',
+            TAU_WINDOWS_SANDBOX_HELPER: helper,
+          };
+          let setUps = 0;
+          const shell = createDesktopShell({
+            appDataRoots: [appData],
+            platform: 'win32',
+            environment,
+            setUpWindowsSandbox: async (): Promise<WindowsShellSandboxSetup> => {
+              setUps += 1;
+              await install();
+              return { status: 'set-up' };
+            },
+          });
+          const current = shell.forProject(project, new Map([['run-1', { cwd: project }]]));
+          await shell.probe();
+          const output = await current()!.run({
+            runId: 'run-1',
+            toolCallId: 'call-1',
+            signal: new AbortController().signal,
+            input: { command: 'git status' },
+          });
+          expect(setUps).toBe(1);
+          /* Past setup the real probe runs; this Linux host has no Windows PowerShell, so no shell is listed. */
+          expect(output).toMatchObject({
+            status: 'not-started',
+            code: 'shell-unavailable',
+          });
+          expect(current()).toBeUndefined();
+        },
+      );
+
       it('runs no setup where the probe does not ask for one', async () => {
         let setUps = 0;
         const setUpWindowsSandbox = async (): Promise<WindowsShellSandboxSetup> => {
@@ -491,7 +596,7 @@ describe('desktopShellProvider', () => {
         });
         await expect(off.provision()).resolves.toMatchObject({
           code: 'sandbox-unavailable',
-          message: 'The Windows shell sandbox is not part of this Tau build.',
+          message: 'The Windows shell sandbox is off or missing in this Tau installation.',
         });
         const linux = createDesktopShell({
           appDataRoots: [appData],
@@ -535,7 +640,7 @@ describe('windowsSandboxSetupNeeded', () => {
       code: 'provisioning-required',
       message: 'The Windows shell sandbox needs to be set up again on this device, for example after a Tau update.',
       recovery:
-        'Choose Set up in the Terminal and approve the Windows administrator prompt. Tau asks once; then the shell and Terminal work.',
+        'Start the Terminal or choose Set up, and approve the Windows administrator prompt. Tau asks once; then the shell and Terminal work.',
       diagnostic: `The shell sandbox is not available on this device: ${message}\nthe installed runner differs from this helper`,
     });
   });

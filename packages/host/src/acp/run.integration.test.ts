@@ -8,6 +8,7 @@
  * sampled while the agent works (SP-4's measurement, ported into Node).
  */
 
+import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import type { Server } from 'node:http';
@@ -15,7 +16,8 @@ import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
@@ -66,7 +68,7 @@ const fakeAgent: AcpAdapter = {
   displayName: 'Codex',
   /* V5 deleted the pin's default model: with no turn selection the fixture runs
    * its own first model, which is `fakeAgentModel`. */
-  modulePath: new URL('fixtures/fake-agent.ts', import.meta.url).pathname,
+  modulePath: fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url)),
 };
 
 /** The same fixture under a second id, so an agent switch inside a chat is testable. */
@@ -564,7 +566,7 @@ describe('the external agent run kind', () => {
         }),
       )
       .digest('hex');
-    expect(consumed[0]!.root.split('/').at(-1)).toBe(digest);
+    expect(basename(consumed[0]!.root)).toBe(digest);
     const opened = harness.frames.find(
       (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/new"'),
     );
@@ -677,7 +679,7 @@ describe('the external agent run kind', () => {
       (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/new"'),
     );
     expect(opened?.frame).toContain('additionalDirectories');
-    expect(opened?.frame).not.toContain(sourceRoot);
+    expect(opened?.frame).not.toContain(JSON.stringify(sourceRoot).slice(1, -1));
     const publication = (JSON.parse(opened!.frame) as { params: { additionalDirectories: string[] } }).params
       .additionalDirectories[0]!;
     await until(async () => sent(harness.frames, 'session/close') === 1, 'skill session eviction');
@@ -698,7 +700,16 @@ describe('the external agent run kind', () => {
     const restored = harness.frames.find(
       (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/resume"'),
     );
-    expect(restored?.frame).toContain(publication);
+    const sentMethods = harness.frames
+      .filter((frame) => frame.direction === 'client->agent')
+      .map((frame) => (JSON.parse(frame.frame) as { method?: string }).method ?? 'reply');
+    /* Parsed, not matched: JSON escapes a Windows path's backslashes. */
+    expect(
+      restored === undefined
+        ? undefined
+        : (JSON.parse(restored.frame) as { params: { additionalDirectories?: string[] } }).params.additionalDirectories,
+      sentMethods.join(' '),
+    ).toEqual([publication]);
 
     const overridden = await startHarness({ systemSkillBundles: [bundle] });
     const overrideRoot = join(overridden.workspaceRoot, '.agents', 'skills', bundle.slug);
@@ -767,7 +778,7 @@ describe('the external agent run kind', () => {
                   id: 'grok',
                   displayName: 'Grok Build',
                   cli: process.execPath,
-                  args: [new URL('fixtures/fake-agent.ts', import.meta.url).pathname],
+                  args: [fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url))],
                   configEnv: [],
                   // eslint-disable-next-line @typescript-eslint/naming-convention -- fixture environment variable.
                   spawnEnv: { TAU_FAKE_AGENT_MODE: 'grok' },
@@ -1642,7 +1653,11 @@ const openFixture = async (
     cwd,
   });
   closers.push(async () => {
+    /* Gone before its cwd is removed: Windows refuses to remove a live process's working directory (EBUSY). */
+    const { child } = adapter;
+    const exited = child.exitCode === null && child.signalCode === null ? once(child, 'exit') : undefined;
     adapter.close();
+    await exited;
   });
   const handler: Client = {
     sessionUpdate: (params) => {
@@ -1941,7 +1956,7 @@ describe('one ACP session per chat', () => {
         id: 'grok',
         displayName: 'Grok Build',
         cli: process.execPath,
-        args: [new URL('fixtures/fake-agent.ts', import.meta.url).pathname],
+        args: [fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url))],
         configEnv: [],
         // eslint-disable-next-line @typescript-eslint/naming-convention -- fixture environment variable.
         spawnEnv: { TAU_FAKE_AGENT_MODE: operation === 'load' ? 'grok-load' : 'grok' },
@@ -2584,6 +2599,93 @@ describe('restoring a session a cold start lost', () => {
     expect(usageOf(chat.eventsOf('run-2')).at(-1)).toMatchObject({ input: 1200, output: 300, totalTokens: 1500 });
   }, 30_000);
 
+  it('prompts a turn on the session a prewarm opened, whether it lands while the prewarm opens or after (WP-18)', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-prewarm-'));
+    roots.push(workspaceRoot);
+    const frames: AcpWireFrame[] = [];
+    const port = createAcpExternalAgentPort({
+      agents: [fakeAgent],
+      workspaceRoot,
+      onFrame: (frame) => frames.push(frame),
+    });
+    const early = durableChat('chat-prewarm-early');
+    await port.prewarm?.({
+      agentId: 'codex',
+      agent: { kind: 'acp', id: 'codex' },
+      chatId: 'chat-prewarm-early',
+      history: [],
+    });
+    /* The turn lands before the prewarm's `session/new` answers: it is held, then prompted on that session. */
+    await port.run(early.turn('run-early', 'noask'));
+    expect(sent(frames, 'initialize')).toBe(1);
+    expect(sent(frames, 'session/new')).toBe(1);
+    expect(sent(frames, 'session/prompt')).toBe(1);
+
+    const late = durableChat('chat-prewarm-late');
+    await port.prewarm?.({
+      agentId: 'codex',
+      agent: { kind: 'acp', id: 'codex' },
+      chatId: 'chat-prewarm-late',
+      history: [],
+    });
+    await until(async () => sent(frames, 'session/new') === 2, 'the prewarmed session to open');
+    await port.run(late.turn('run-late', 'noask'));
+    expect(sent(frames, 'initialize')).toBe(2);
+    expect(sent(frames, 'session/new')).toBe(2);
+    expect(sent(frames, 'session/prompt')).toBe(2);
+    expect(typeof late.markers.at(-1)?.['acpSessionId']).toBe('string');
+    await port.closeChat?.('chat-prewarm-early');
+    await port.closeChat?.('chat-prewarm-late');
+  }, 30_000);
+
+  it.each([
+    ['session/new', 'auth-required'],
+    ['session/prompt', 'prompt-auth'],
+  ])(
+    'opens no prewarm for an agent whose %s said it is logged out (WP-18)',
+    async (_operation, mode) => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-prewarm-auth-'));
+      roots.push(workspaceRoot);
+      const frames: AcpWireFrame[] = [];
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- fixture environment variable.
+      const loggedOut: AcpAdapter = { ...fakeAgent, spawnEnv: { TAU_FAKE_AGENT_MODE: mode } };
+      const port = createAcpExternalAgentPort({
+        agents: [loggedOut],
+        workspaceRoot,
+        onFrame: (frame) => frames.push(frame),
+      });
+      const prewarm = async (chatId: string): Promise<void> =>
+        port.prewarm?.({ agentId: 'codex', agent: { kind: 'acp', id: 'codex' }, chatId, history: [] });
+      if (mode === 'auth-required') {
+        /* The prewarm's own open learns it: the adapter refuses `session/new` and the prewarm closes. */
+        await prewarm('chat-auth-a');
+        await until(
+          async () => frames.some((frame) => frame.direction === 'agent->client' && frame.frame.includes('-32000')),
+          'the adapter to refuse the session',
+        );
+        /* The refusal closes the child; its report reaches the facade within a few turns of the event loop. */
+        await new Promise((resolve) => {
+          setTimeout(resolve, 200);
+        });
+      } else {
+        /* `session/new` succeeds, so only a turn learns it: its prompt is refused. */
+        await expect(port.run(durableChat('chat-auth-a').turn('run-auth', 'noask'))).rejects.toMatchObject({
+          code: 'EXTERNAL_AGENT_AUTH_REQUIRED',
+        });
+      }
+      const initialized = sent(frames, 'initialize');
+      await prewarm('chat-auth-b');
+      await new Promise((resolve) => {
+        setTimeout(resolve, 300);
+      });
+      /* No adapter process was started for the later prewarms, and none asked to authenticate. */
+      expect(sent(frames, 'initialize')).toBe(initialized);
+      expect(sent(frames, 'authenticate')).toBe(0);
+      await port.closeChat?.('chat-auth-a');
+    },
+    30_000,
+  );
+
   it('falls back to session/load, and appends nothing it replays', async () => {
     const adapter = await withoutCapabilities({ resume: true });
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-load-'));
@@ -2792,7 +2894,7 @@ describe('authentication, initialize and prompt content', () => {
     );
     expect(initialized?.frame).toContain(JSON.stringify(process.execPath));
     expect(JSON.stringify(login)).not.toContain(process.execPath);
-    expect(JSON.stringify(login)).not.toContain(new URL('fixtures/fake-agent.ts', import.meta.url).pathname);
+    expect(JSON.stringify(login)).not.toContain(fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url)));
   }, 30_000);
 
   it('should refuse a raw secret form before SDK normalization can create a plaintext question record', async () => {
@@ -2909,8 +3011,8 @@ describe('authentication, initialize and prompt content', () => {
   }, 30_000);
 
   it("never sends the person block to an external agent, even when the client's system prompt carries one", async () => {
-    /* Only Tau's own agent is told what the person makes and reads. An external agent gets the guidance, skills,
-     * memory and snapshot blocks, never the system prompt, so a client that did put the block there leaks nothing. */
+    /* Only Tau's own agent is told what the person makes and reads. An external agent gets the guidance, skills
+     * and snapshot blocks, never the system prompt, so a client that did put the block there leaks nothing. */
     const harness = await startHarness();
     const person = [
       '<person>',
@@ -2933,13 +3035,14 @@ describe('authentication, initialize and prompt content', () => {
     expect(first).not.toContain('Background about the person');
   }, 60_000);
 
-  it('sends shared ACP guidance once and current CAD context on every prompt, and writes no file', async () => {
+  it('sends shared ACP guidance once and current CAD context on every prompt, never the project AGENTS.md, and writes no file', async () => {
     const harness = await startHarness();
+    const instructions = 'Keep all dimensions in millimetres.';
     const config = {
       systemPrompt: 'You are Tau. The kernel is OpenSCAD.',
       contextPayload: {
         skills: [{ name: 'brep-design', description: 'Design manufacture-ready parts.' }],
-        memory: { 'AGENTS.md': 'Keep all dimensions in millimetres.' },
+        memory: { 'AGENTS.md': instructions },
       },
       snapshot: {
         files: ['main.scad'],
@@ -2965,17 +3068,19 @@ describe('authentication, initialize and prompt content', () => {
     expect(first).not.toContain('tau://system-prompt');
     expect(first).not.toContain('The kernel is OpenSCAD.');
     expect(first).toContain('tau://skills');
-    expect(first).toContain('tau://memory');
-    expect(first).toContain('Keep all dimensions in millimetres.');
     expect(first).toContain('tau://snapshot');
+    /* The agent reads the project's AGENTS.md from its own working directory; Tau does not re-send it. */
+    expect(first).not.toContain('tau://memory');
+    expect(first).not.toContain(instructions);
     /* The snapshot's kernel object (AKS-7) crosses as loose JSON: forwarded as sent, with no reader of its own. */
     expect(first).toContain(JSON.stringify(config.snapshot.kernel).replaceAll('"', String.raw`\"`));
     /* Stable guidance is session-scoped; current project facts accompany each
      * turn so a native→ACP switch cannot leave the vendor on an old snapshot. */
     expect(second).not.toContain('tau://agent-guidance');
     expect(second).toContain('tau://skills');
-    expect(second).toContain('tau://memory');
     expect(second).toContain('tau://snapshot');
+    expect(second).not.toContain('tau://memory');
+    expect(second).not.toContain(instructions);
     expect(second).toContain('second noask');
     /* V12 supersedes the `AGENTS.md` rung: in direct mode the cwd is the user's
      * own project, and Tau writes no control file into it. */
@@ -3057,15 +3162,43 @@ describe('authentication, initialize and prompt content', () => {
       chatId: 'chat-text-context',
       runId: 'run-text-context',
       text: 'noask',
-      config: { contextPayload: { memory: { 'AGENTS.md': 'Prefer symmetric parts.' } } },
+      config: {
+        contextPayload: {
+          skills: [{ name: 'brep-design', description: 'Design manufacture-ready parts.' }],
+          memory: { 'AGENTS.md': 'Prefer symmetric parts.' },
+        },
+      },
     });
 
     const [prompt] = promptFrames(harness.frames);
     expect(prompt).not.toContain('"type":"resource"');
     expect(prompt).toContain('tau://agent-guidance');
-    expect(prompt).toContain('tau://memory');
-    expect(prompt).toContain('Prefer symmetric parts.');
+    expect(prompt).toContain('tau://skills');
+    expect(prompt).toContain('Design manufacture-ready parts.');
+    expect(prompt).not.toContain('tau://memory');
+    expect(prompt).not.toContain('Prefer symmetric parts.');
   }, 30_000);
+
+  it('sends no Tau context block for a memory record alone', async () => {
+    const harness = await startHarness();
+    const instructions = 'Label every hole with its thread size.';
+    const config = { contextPayload: { memory: { 'AGENTS.md': instructions } } };
+
+    await runTurn(harness, { chatId: 'chat-memory-only', runId: 'run-memory-only-1', text: 'noask', config });
+    await runTurn(harness, { chatId: 'chat-memory-only', runId: 'run-memory-only-2', text: 'second noask', config });
+
+    const [first, second] = promptFrames(harness.frames);
+    /* The first prompt carries the session's guidance and nothing for the record. */
+    expect(first?.match(/"type":"resource"/g)).toHaveLength(1);
+    expect(first).toContain('tau://agent-guidance');
+    expect(first).not.toContain('tau://memory');
+    expect(first).not.toContain(instructions);
+    /* A later prompt has no guidance left to send, so the record alone yields no block at all. */
+    expect(second).not.toContain('"type":"resource"');
+    expect(second).not.toContain('tau://');
+    expect(second).not.toContain(instructions);
+    expect(second).toContain('second noask');
+  }, 60_000);
 
   /* W8 TS-S4 (RH-S11): a placed attempt runs where its grant rooted it, not where the host's own checkout map says. */
   it('should open the agent session in the root the placement granted', async () => {
@@ -3247,7 +3380,8 @@ describe('external turns through the revision port', () => {
    */
   const openedCwd = (frames: readonly AcpWireFrame[]): string | undefined => {
     const frame = frames.findLast((entry) => entry.frame.includes('"method":"session/new"'))?.frame;
-    return frame === undefined ? undefined : /"cwd":"([^"]*)"/u.exec(frame)?.[1];
+    /* Parsed, not matched: JSON escapes a Windows path's backslashes. */
+    return frame === undefined ? undefined : (JSON.parse(frame) as { params?: { cwd?: string } }).params?.cwd;
   };
 
   /**

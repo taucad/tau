@@ -10,6 +10,8 @@ import { handOffStore, resetHandOffStoreForTest } from '#components/hand-off/han
 import { frameTabAttribute, writePhoneFrameHint, writeWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { arriveFirstMessage, departFirstMessage } from '#lib/departing-first-message.js';
+import { replayContentSelector } from '#lib/replay-content.lib.js';
 
 /*
  * The persisted `workbenchOpen` lives in the project's own layout record and is read only once the session is live.
@@ -310,6 +312,11 @@ describe('WorkspaceFrame', () => {
     const frame = renderFrame('/w/home/one');
 
     expect(frame.className).toContain(
+      '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*):not([data-mobile-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
+    );
+    /* The phone workspace's own regions (its docks' assertive live region) are not a failure in its place: the box stays
+     * (seen in the production build: the box hid and the typed input lost focus as the phone dock mounted). */
+    expect(frame.className).not.toContain(
       '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
     );
     expect(frame.className).toContain('[&:has([data-chat-lane=hidden])>[data-slot=workspace-frame-composer]]:hidden');
@@ -392,6 +399,75 @@ describe('WorkspaceFrame', () => {
     expect(frame.className).toContain(':not([data-slot=workspace-frame-composer])]:invisible');
   });
 
+  /* WP-12 with WP-07 step 5: a new project's first message, on its way from Home, takes the chat lane's feed from the
+   * frame drawn ahead of the route, so Enter never blanks the person's words. */
+  it("draws the destination's first message in the chat lane's feed while the route is still Home", () => {
+    departFirstMessage('home/two', 'A wall bracket\nfor a pipe');
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    render(
+      <MemoryRouter initialEntries={['/w/home/one']}>
+        <Routes>
+          <Route
+            path='/w/:workspace/:project'
+            element={
+              <WorkspaceFrame isPending pathname='/w/home/two'>
+                <p>home</p>
+              </WorkspaceFrame>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const chatLane = document.querySelector<HTMLElement>('[data-slot=workspace-lane][data-lane=chat]')!;
+    const departing = chatLane.querySelector('[data-slot=departing-first-message]');
+    expect(departing).not.toBeNull();
+    // Session replay blocks the stand-in as it blocks the transcript.
+    expect(departing!.matches(replayContentSelector)).toBe(true);
+    expect([...departing!.querySelectorAll('p')].map((row) => row.textContent)).toEqual([
+      'A wall bracket',
+      'for a pipe',
+    ]);
+    act(() => {
+      arriveFirstMessage('home/two');
+    });
+    expect(chatLane.querySelector('[data-slot=departing-first-message]')).toBeNull();
+  });
+
+  it("draws the destination's first message in the phone frame's chat sheet too", () => {
+    departFirstMessage('home/two', 'A wall bracket');
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    render(
+      <MemoryRouter initialEntries={['/w/home/one']}>
+        <Routes>
+          <Route
+            path='/w/:workspace/:project'
+            element={
+              <WorkspaceFrame isPending pathname='/w/home/two'>
+                <p>home</p>
+              </WorkspaceFrame>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const sheet = document.querySelector<HTMLElement>('[data-slot=workspace-frame-phone] [data-frame-part=sheet]')!;
+    expect(sheet.querySelector('[data-slot=departing-first-message]')?.textContent).toBe('A wall bracket');
+    act(() => {
+      arriveFirstMessage('home/two');
+    });
+    expect(sheet.querySelector('[data-slot=departing-first-message]')).toBeNull();
+  });
+
+  it("does not draw another project's first message", () => {
+    departFirstMessage('home/two', 'A wall bracket');
+    renderFrame('/w/home/one');
+
+    expect(document.querySelector('[data-slot=departing-first-message]')).toBeNull();
+    arriveFirstMessage('home/two');
+  });
+
   // ── A15c: the phone frame (blueprint P-h; C6) ──
 
   /*
@@ -419,8 +495,25 @@ describe('WorkspaceFrame', () => {
     expect(phone!.querySelectorAll('[data-slot=wait-indicator]')).toHaveLength(1);
     const shapes = [...phone!.querySelectorAll<HTMLElement>('[data-frame-part=sheet] [data-slot=project-wait]')];
     expect(shapes.map((shape) => shape.getAttribute('aria-label'))).toEqual(['Chat', 'Parameters', 'Workbench']);
-    expect(shapes.map((shape) => shape.className.includes('hidden'))).toEqual([true, true, true]);
-    expect(shapes[0]!.className).toContain('[[data-frame-tab=chat]_&]:block');
+    expect(shapes.slice(1).map((shape) => shape.className.includes('hidden'))).toEqual([true, true]);
+    /* The chat's shape stands in the live chat surface's box, with its header's and resting composer's boxes, so its
+     * bars do not move at the hand-over (staging re-check 3: 64 px, and 7 bars down to 4). */
+    const chat = phone!.querySelector<HTMLElement>('[data-frame-chat=surface]')!;
+    expect(chat.className).toContain('hidden');
+    expect(chat.className).toContain('[[data-frame-tab=chat]_&]:flex');
+    expect(chat.className).toContain(
+      'h-[calc(var(--frame-sheet-height,0px)_-_var(--spacing)*2_-_var(--nav-offset)_-_1px)]',
+    );
+    expect(chat.contains(shapes[0]!)).toBe(true);
+    expect(chat.querySelector('[data-frame-chat=header]')?.className).toContain('h-15');
+    expect(chat.querySelector('[data-frame-chat=composer]')?.className).toContain('h-11.5');
+    /* Staging re-check 7: a draft grows the composer box upwards, and the live transcript re-lays above it (4 bars to 3,
+     * or 1 with two lines); the frame's kept 4, the last behind the box. Its transcript ends at the box's top. */
+    expect(chat.querySelector('[data-frame-chat=header]')?.className).toContain('[anchor-name:--frame-chat-header]');
+    expect(shapes[0]!.className).toContain(
+      'supports-[anchor-name:--a]:bottom-[anchor(--frame-composer_top,calc(var(--nav-offset)_+_3.375rem))]',
+    );
+    expect(shapes[0]!.className).toContain('supports-[anchor-name:--a]:top-[anchor(--frame-chat-header_bottom)]');
     expect(phone!.innerHTML).not.toMatch(/fade-in|slide-in|animate-in/u);
     const sheet = phone!.querySelector<HTMLElement>('[data-frame-part=sheet]')!;
     expect(sheet.className).toContain('[display:var(--frame-sheet-display,none)]');
@@ -449,6 +542,47 @@ describe('WorkspaceFrame', () => {
     expect(frame.style.getPropertyValue('--frame-sheet-display')).toBe('none');
     expect(frame.style.getPropertyValue('--frame-sheet-height')).toBe('0px');
     expect(document.documentElement.getAttribute(frameTabAttribute)).toBe('model');
+  });
+
+  /* Staging QA 2026-11-27: the phone frame had no composer box, so a phone could not type until the live workspace
+   * showed, 4 to 5 s after Create. The one native input is served on a phone too, at the chat sheet's foot above the
+   * tab bar where the live composer rests (Progressive Loading Policy rule 20), and the live composer adopts it. */
+  it("serves the composer's one native input at the phone chat sheet's foot, above the tab bar", () => {
+    writePhoneFrameHint('home/one', 'chat');
+    const frame = renderFrame('/w/home/one');
+
+    expect(screen.getAllByRole('textbox', { name: 'Chat message' })).toHaveLength(1);
+    const layer = frame.querySelector<HTMLElement>('[data-slot=workspace-frame-composer]')!;
+    /* On a phone the layer shows only while the frame draws the chat sheet, and carries the tab bar's height. */
+    expect(layer.className).not.toMatch(/(?:^|\s)max-md:hidden(?:\s|$)/u);
+    expect(layer.className).toContain('max-md:[:root:not([data-frame-tab=chat])_&]:hidden');
+    expect(layer.className).toContain('[--nav-offset:');
+    /* Above the live sheet (z-40) until the live composer adopts the input, so the input never goes out of sight. */
+    expect(layer.className).toContain('max-md:z-45');
+    /* At rest it is the live phone composer's one row, so nothing moves at the hand-over. */
+    const box = screen.getByRole('textbox', { name: 'Chat message' }).closest('.rounded-2xl')!;
+    expect(box.className).toContain('max-md:[&:not(:focus-within):has(textarea:placeholder-shown)]:min-h-0');
+    /* The phone frame's transcript ends at this box's top, so a draft that grows it moves the bars, as live. */
+    expect(box.className).toContain('[anchor-name:--frame-composer]');
+    expect(box.className).toContain(
+      'max-md:[&:not(:focus-within):has(textarea:placeholder-shown)_[data-slot=composer-bar]]:-mt-6.5',
+    );
+    /* Its column is the sheet's foot: the live surface ends at the tab bar, and the composer rests at its foot. */
+    const column = layer.firstElementChild!;
+    expect(column.className).toContain('max-md:fixed');
+    expect(column.className).toContain('max-md:bottom-(--nav-offset)');
+    /* Once the live phone workspace shows another surface, the box hides and its text waits in the store. */
+    expect(frame.className).toContain(
+      'max-md:[&:has([data-mobile-workspace=ready]:not([data-mobile-tab=chat]))>[data-slot=workspace-frame-composer]]:hidden',
+    );
+  });
+
+  it('serves the phone input for a phone chat sheet even where the wide layout remembers the chat lane closed', () => {
+    writeWideFrameHint('home/one', { ...workbenchOpen, chatOpen: false });
+    writePhoneFrameHint('home/one', 'chat');
+    renderFrame('/w/home/one');
+
+    expect(screen.getAllByRole('textbox', { name: 'Chat message' })).toHaveLength(1);
   });
 
   it('gives each phone part way to the live one in its own box, and the whole phone frame to a failure or notice', () => {

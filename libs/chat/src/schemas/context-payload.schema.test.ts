@@ -143,16 +143,26 @@ describe('contextPayloadSchema', () => {
 });
 
 describe('CH-10 payload caps', () => {
-  it('rejects a memory entry beyond the byte ceiling', () => {
-    const oversized = 'x'.repeat(contextMemoryMaxBytes + 512);
-    const result = contextPayloadSchema.safeParse({ memory: { 'AGENTS.md': oversized } });
-    expect(result.success).toBe(false);
+  it('should cap memory at 32 KiB', () => {
+    expect(contextMemoryMaxBytes).toBe(32_768);
   });
 
-  it('accepts a memory entry at the truncated size including the notice', () => {
-    const truncated = 'x'.repeat(contextMemoryMaxBytes) + '\n[AGENTS.md truncated]';
+  it('should accept a memory entry at the cap followed by the truncation notice', () => {
+    const truncated = `${'x'.repeat(contextMemoryMaxBytes)}\n[AGENTS.md truncated: first ${String(contextMemoryMaxBytes)} bytes retained]`;
     const result = contextPayloadSchema.safeParse({ memory: { 'AGENTS.md': truncated } });
     expect(result.success).toBe(true);
+  });
+
+  it('should accept a memory entry of exactly the cap plus the notice allowance', () => {
+    const result = contextPayloadSchema.safeParse({ memory: { 'AGENTS.md': 'x'.repeat(contextMemoryMaxBytes + 256) } });
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject a memory entry beyond the cap plus the notice allowance', () => {
+    const result = contextPayloadSchema.safeParse({
+      memory: { 'AGENTS.md': 'x'.repeat(contextMemoryMaxBytes + 257) },
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects a skills catalog beyond the entry cap', () => {

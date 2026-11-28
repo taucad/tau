@@ -55,9 +55,11 @@ export type TerminalConcernOptions = {
    */
   readonly shell?: (() => Promise<ShellProbe>) | undefined;
   /**
-   * The shell's one-time setup, then a fresh probe (`DesktopShell.provision` in the services host). Called only for an
-   * `open` frame that carries `setUp` while the probe answers `provisioning-required`: the person chose Set up in pane
-   * chrome. Absent, such a start is refused with the probe's own answer.
+   * The shell's one-time setup, then a fresh probe (`DesktopShell.provision` in the services host). Called once for each
+   * `open` while the probe answers `provisioning-required`: starting the Terminal is the person's own action (D21), so
+   * its first start runs the setup (on Windows, one administrator prompt) whether or not the frame carries `setUp` (the
+   * pane's Set up action). A declined setup refuses that start; the next start asks again. Absent, such a start is
+   * refused with the probe's own answer.
    */
   readonly provision?: (() => Promise<ShellProbe>) | undefined;
   /** Whether main's latest root allowlist still admits a project root. */
@@ -396,13 +398,12 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
         return;
       }
       if (
-        setUp &&
         options.provision !== undefined &&
         probe?.status === 'unavailable' &&
         probe.code === 'provisioning-required'
       ) {
-        /* The person chose Set up: the host may wait on its administrator prompt for minutes. */
-        log('terminal.setup');
+        /* The person started the Terminal or chose Set up: the host may wait on its administrator prompt for minutes. */
+        log('terminal.setup', { requested: setUp });
         probe = await options.provision().catch(() => probe);
         if (isEnded()) {
           return;

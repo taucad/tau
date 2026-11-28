@@ -117,6 +117,13 @@ describe('writeWarmManifest', () => {
       'app/routes/w.$workspace.$project/route.tsx?__react-router-build-client-route': { file: 'assets/project-m.js' },
       'app/routes/w.$workspace.$project/project-live-sessions.tsx': { file: 'assets/sessions-n.js' },
       'app/routes/w.$workspace.$project/chat-interface-mobile.tsx': { file: 'assets/mobile-o.js' },
+      'app/runtime/host-connector.ts': { file: 'assets/host-connector-p.js', imports: ['_react-b.js'] },
+      'app/runtime/session-revisions.ts': { file: 'assets/session-revisions-q.js' },
+      'app/routes/w.$workspace.$project/chat-viewer.tsx': { file: 'assets/chat-viewer-r.js', imports: ['_three-e.js'] },
+      'app/routes/w.$workspace.$project/chat-parameters.tsx': { file: 'assets/chat-parameters-s.js' },
+      'app/components/geometry/loader/metal-morph-spinner.tsx': { file: 'assets/spinner-t.js' },
+      'app/services/part-thumbnail.service.ts': { file: 'assets/thumbnail-u.js' },
+      'app/chat-clients/debug-probes.tsx': { file: 'assets/debug-probes-v.js' },
     };
     writeFileSync(join(clientDirectory, '.vite', 'manifest.json'), JSON.stringify(registryManifest));
     const moduleIdsPath = join(directory, 'client-module-ids.json');
@@ -133,6 +140,13 @@ describe('writeWarmManifest', () => {
         ],
       }),
     );
+    mkdirSync(join(clientDirectory, 'assets'));
+    writeFileSync(
+      join(clientDirectory, 'assets', 'agent-host.worker-w.js'),
+      'import{a}from"./chunk-x.js";await import(`./agent-host.impl-y.js`);await import(`./kernel-z.js`);',
+    );
+    writeFileSync(join(clientDirectory, 'assets', 'chunk-x.js'), 'export const a=1;');
+    writeFileSync(join(clientDirectory, 'assets', 'agent-host.impl-y.js'), 'import{a}from"./chunk-x.js";');
     const written = writeWarmManifest({ clientDirectory, moduleIdsPath });
     expect(JSON.parse(readFileSync(join(clientDirectory, '__shell', 'warm.json'), 'utf8'))).toEqual(written);
     expect(Object.keys(written.classes)).toEqual(['project', 'home']);
@@ -141,5 +155,22 @@ describe('writeWarmManifest', () => {
       expect.arrayContaining(['/assets/project-m.js', '/assets/sessions-n.js', '/assets/mobile-o.js']),
     );
     expect(written.classes['project']).not.toContain('/assets/three-e.js');
+    /* WP-12 step 2: the send tier keeps heavy families and the worker's boot code, never the worker's entry. */
+    expect(Object.keys(written.send ?? {})).toEqual(['project']);
+    expect(written.send?.['project']).toEqual(
+      expect.arrayContaining([
+        '/assets/host-connector-p.js',
+        '/assets/chat-viewer-r.js',
+        '/assets/three-e.js',
+        '/assets/three-e.css',
+        '/assets/agent-host.impl-y.js',
+        '/assets/chunk-x.js',
+      ]),
+    );
+    expect(written.send?.['project']).not.toContain('/assets/agent-host.worker-w.js');
+    expect(written.send?.['project']).not.toContain('/assets/kernel-z.js');
+    for (const href of written.classes['project'] ?? []) {
+      expect(written.send?.['project']).not.toContain(href);
+    }
   });
 });

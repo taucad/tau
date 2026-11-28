@@ -6,8 +6,10 @@ import userEvent from '@testing-library/user-event';
 import type { captureDictation } from '#components/dictation/dictation-capture.js';
 import type { transcribeDictation } from '#components/dictation/dictation-client.js';
 import type { AcpSessionData } from '@taucad/chat';
+import type { CadReference } from '@taucad/chat/references';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { PaintedSendVerdict } from '#components/chat/chat-textarea-desktop.js';
+import { settleQueuedSend } from '#lib/queued-send-outcome.js';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
@@ -378,10 +380,16 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     acpSessionData: AcpSessionData,
     options: {
       canResume?: boolean;
-      handleSubmit?: (text?: string) => Promise<void>;
+      handleSubmit?: (
+        text?: string,
+        references?: readonly CadReference[],
+        options?: Readonly<{ signal?: AbortSignal }>,
+      ) => Promise<void>;
       useTauSkills?: boolean;
       status?: 'ready' | 'submitted' | 'streaming';
       isSubmitting?: boolean;
+      /** Read at each render, as the composer's submit hook would flip it while its submit is in flight. */
+      submitting?: { current: boolean };
       handleCancelClick?: () => void;
       mode?: 'main' | 'edit';
       enableAutoFocus?: boolean;
@@ -410,7 +418,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           enableMobileCollapse={options.enableMobileCollapse}
           isFocused={options.isFocused}
           dragKind={undefined}
-          isSubmitting={options.isSubmitting ?? false}
+          isSubmitting={options.submitting?.current ?? options.isSubmitting ?? false}
           isAttaching={false}
           canResume={canResume}
           inputText={text}
@@ -1002,7 +1010,9 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       await waitFor(() => {
         expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
       });
-      expect(screen.getByRole('status')).toHaveTextContent('Send queued. Press Escape to cancel.');
+      /* Staging QA 2026-11-27 (recheck 3): the served input already said the queued send; adopting it says nothing
+       * again. Send's pending state still shows it. */
+      expect(screen.getByRole('status')).toBeEmptyDOMElement();
       await act(async () => {
         await Promise.resolve();
       });
@@ -1143,6 +1153,203 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     view.rerenderWith(codexSession, 'Make a bracket.', false);
     await Promise.resolve();
     expect(handleSubmit).not.toHaveBeenCalled();
+  });
+
+  /* Staging re-check 4: Escape emptied the status, and an emptied region says nothing. It says the cancellation once,
+   * and the next edit clears it. */
+  it('should say a queued send cancelled on Escape, and clear the words on the next edit', async () => {
+    const view = renderComposer('Make a bracket.', codexSession, {
+      earlyInput: queuedEarlyInput,
+      handleSubmit: vi.fn(asyncNoop),
+      isSubmitDisabled: true,
+    });
+    const box = await waitFor(() => {
+      const queued = view.container.querySelector('[data-queued-send]');
+      expect(queued).not.toBeNull();
+      return queued!;
+    });
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+
+    fireEvent.keyDown(box, { key: 'Escape' });
+
+    expect(screen.getByRole('status')).toHaveTextContent('Send cancelled.');
+    const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+    act(() => {
+      editor!.commands.insertContent(' Twice');
+    });
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+  });
+
+  /* Staging re-check 5: the adopted queued send was replayed as the composer mounted, and its send waited about 2.5 s
+   * on the opening project; Escape found no queued send to cancel, and the send went out. The send the composer
+   * replays stays the person's to cancel until it has been handed to the chat. */
+  it('should cancel an adopted queued send whose replay is still on its way, keep the draft and say so', async () => {
+    const handed = Promise.withResolvers<void>();
+    const handleSubmit = vi.fn(
+      async (_text?: string, _references?: readonly CadReference[], _options?: Readonly<{ signal?: AbortSignal }>) =>
+        handed.promise,
+    );
+    const view = renderComposer('Make a bracket.', codexSession, { earlyInput: queuedEarlyInput, handleSubmit });
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalledOnce();
+    });
+    const box = view.container.querySelector('[data-queued-send]');
+    expect(box).not.toBeNull();
+
+    fireEvent.keyDown(box!, { key: 'Escape' });
+
+    const signal = handleSubmit.mock.calls[0]?.[2]?.signal;
+    expect(signal?.aborted).toBe(true);
+    /* The chat decides (staging re-check 7): until it has, the send stays shown as queued and nothing is said. */
+    expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    await act(async () => {
+      settleQueuedSend(signal, 'cancelled');
+      handed.resolve();
+      await handed.promise;
+    });
+    expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Send cancelled.');
+    const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+    expect(editor!.getText()).toBe('Make a bracket.');
+    expect(handleSubmit).toHaveBeenCalledOnce();
+  });
+
+  /* Staging re-check 7: under load the chat had already taken the send when Escape came, and the page said "Send
+   * cancelled." and then sent it. A send the chat reports as gone is never called cancelled. */
+  it('should say nothing for a send the chat reports as already gone', async () => {
+    const handed = Promise.withResolvers<void>();
+    const handleSubmit = vi.fn(
+      async (_text?: string, _references?: readonly CadReference[], _options?: Readonly<{ signal?: AbortSignal }>) =>
+        handed.promise,
+    );
+    const view = renderComposer('Make a bracket.', codexSession, { earlyInput: queuedEarlyInput, handleSubmit });
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalledOnce();
+    });
+    const box = view.container.querySelector('[data-queued-send]')!;
+    const signal = handleSubmit.mock.calls[0]?.[2]?.signal;
+
+    fireEvent.keyDown(box, { key: 'Escape' });
+    await act(async () => {
+      settleQueuedSend(signal, 'sent');
+      handed.resolve();
+      await handed.promise;
+    });
+
+    expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+  });
+
+  /* Staging re-check 6: the replay's submit locked the editor (`isSubmitting`) as it adopted the focused input, so it
+   * mounted non-editable, focus fell to the page, a click left it there and Escape reached nothing; the send went out
+   * and keys typed meanwhile were lost. The replayed send leaves the editor editable and focused. */
+  describe('a queued send replayed while the submit is in flight', () => {
+    const renderReplaying = () => {
+      const submitting = { current: false };
+      const handed = Promise.withResolvers<void>();
+      const setDraftText = vi.fn();
+      const handleSubmit = vi.fn(
+        async (
+          _text?: string,
+          _references?: readonly CadReference[],
+          _options?: Readonly<{ signal?: AbortSignal }>,
+        ) => {
+          submitting.current = true;
+          return handed.promise;
+        },
+      );
+      const view = renderComposer('Make a bracket.', codexSession, {
+        earlyInput: queuedEarlyInput,
+        handleSubmit,
+        submitting,
+        setDraftText,
+      });
+      return { view, handed, handleSubmit, setDraftText };
+    };
+    const editorOf = (view: ReturnType<typeof renderComposer>) =>
+      view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')!;
+
+    it('should keep the adopted focus in an editable editor, and cancel the send on Escape', async () => {
+      const { view, handed, handleSubmit } = renderReplaying();
+      await waitFor(() => {
+        expect(handleSubmit).toHaveBeenCalledOnce();
+      });
+      view.rerenderWith(codexSession, 'Make a bracket.');
+
+      const editor = editorOf(view);
+      expect(editor).toHaveAttribute('contenteditable', 'true');
+      expect(document.activeElement).toBe(editor);
+
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+
+      const signal = handleSubmit.mock.calls[0]?.[2]?.signal;
+      expect(signal?.aborted).toBe(true);
+      await act(async () => {
+        settleQueuedSend(signal, 'cancelled');
+        handed.resolve();
+        await handed.promise;
+      });
+      expect(screen.getByRole('status')).toHaveTextContent('Send cancelled.');
+      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+      expect(handleSubmit).toHaveBeenCalledOnce();
+      expect(editor.editor!.getText()).toBe('Make a bracket.');
+      view.unmount();
+    });
+
+    it('should take keys typed meanwhile into the draft, cancelling the send as an edit does', async () => {
+      const { view, handed, handleSubmit, setDraftText } = renderReplaying();
+      await waitFor(() => {
+        expect(handleSubmit).toHaveBeenCalledOnce();
+      });
+      view.rerenderWith(codexSession, 'Make a bracket.');
+
+      act(() => {
+        editorOf(view).editor!.commands.insertContent(' Twice');
+      });
+
+      expect(setDraftText).toHaveBeenLastCalledWith('Make a bracket. Twice');
+      const signal = handleSubmit.mock.calls[0]?.[2]?.signal;
+      expect(signal?.aborted).toBe(true);
+      /* Queued until the chat settles it (staging re-check 7: the mark went while the send still went out). */
+      expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+      await act(async () => {
+        settleQueuedSend(signal, 'cancelled');
+        handed.resolve();
+        await handed.promise;
+      });
+      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+      /* An edit's cancellation is not said, as in the native input. */
+      expect(screen.getByRole('status')).toBeEmptyDOMElement();
+      view.unmount();
+    });
+  });
+
+  /* Whatever locks the editor at adoption (Home's long submit), the adopted focus stays in the composer, where Escape
+   * still cancels the queued send. */
+  it('should hand focus to the composer box when the editor is locked at adoption, and cancel on Escape there', async () => {
+    const handleSubmit = vi.fn(asyncNoop);
+    const view = renderComposer('Make a bracket.', codexSession, {
+      earlyInput: queuedEarlyInput,
+      handleSubmit,
+      isSubmitting: true,
+    });
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+    });
+    const box = view.container.querySelector<HTMLElement>('[data-queued-send]')!;
+    expect(view.container.querySelector('.ProseMirror')).toHaveAttribute('contenteditable', 'false');
+    /* A browser drops focus from an element that stops being editable (jsdom keeps it): the box takes it, as a click on
+     * the locked editor also gives it. */
+    expect(document.activeElement).toBe(box);
+    expect(box).toHaveAttribute('tabindex', '-1');
+
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+
+    expect(screen.getByRole('status')).toHaveTextContent('Send cancelled.');
+    expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+    expect(handleSubmit).not.toHaveBeenCalled();
+    view.unmount();
   });
 
   it('should not send for an early input that queued none', async () => {

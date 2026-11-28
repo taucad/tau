@@ -1,3 +1,4 @@
+import { createContext, useContext, useId, useLayoutEffect, useRef } from 'react';
 import type React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
@@ -11,6 +12,13 @@ type ChatErrorCardTone = 'neutral' | 'warning' | 'notice';
  * (DESIGN: the consequence and the action never fold away).
  */
 export const turnSavedSentence = 'Everything up to here is saved.';
+
+/**
+ * Where a card hands its title to be said, when a chat's one announcement says its failure (`ChatErrorAnnouncement`).
+ * The card is then a group labelled by its title, so a failure that moves between places is never a second alert.
+ * Without one, the card is the alert itself.
+ */
+export const chatErrorReportContext = createContext<((title: string) => void) | undefined>(undefined);
 
 const iconClassName: Record<ChatErrorCardTone, string> = {
   neutral: 'text-muted-foreground',
@@ -51,9 +59,21 @@ export function ChatErrorCard({
   children,
   ...properties
 }: ChatErrorCardProps): React.JSX.Element {
+  const report = useContext(chatErrorReportContext);
+  const isAnnounced = report === undefined;
+  const titleId = useId();
+  const titleRef = useRef<HTMLParagraphElement>(null);
+  // Said once per failure: the region keeps the first title it hears, and `report` is new for each failure.
+  useLayoutEffect(() => {
+    const text = titleRef.current?.textContent ?? '';
+    if (report !== undefined && text !== '') {
+      report(text);
+    }
+  }, [report]);
   return (
     <section
-      role='alert'
+      role={isAnnounced ? 'alert' : 'group'}
+      aria-labelledby={isAnnounced ? undefined : titleId}
       data-slot='chat-error-card'
       className={cn('flex min-w-0 flex-col gap-2 rounded-md border bg-muted/40 p-2 text-sm', className)}
       {...properties}
@@ -62,7 +82,9 @@ export function ChatErrorCard({
         <div className='flex min-w-0 flex-1 basis-48 items-start gap-2'>
           {Icon ? <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', iconClassName[tone])} /> : null}
           <div className='min-w-0 flex-1 space-y-1'>
-            <p className='font-medium break-words text-foreground'>{title}</p>
+            <p ref={titleRef} id={titleId} className='font-medium break-words text-foreground'>
+              {title}
+            </p>
             {description ? <div className='text-xs break-words text-muted-foreground'>{description}</div> : null}
           </div>
         </div>

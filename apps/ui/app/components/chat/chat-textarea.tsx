@@ -124,20 +124,30 @@ const DraftImageMarkup = lazyCode(async () => {
  */
 const useComposerMarkUp = ({
   mode,
+  owner,
   markupByAttachment,
   directory,
 }: Readonly<{
   mode: 'main' | 'edit';
+  /** The draft the composer edits now: a choice made for another draft is not this one's. */
+  owner: unknown;
   markupByAttachment: ReturnType<typeof useChatTextareaLogic>['markupByAttachment'];
   directory: ReturnType<typeof useChatTextareaLogic>['attachmentDirectory'];
 }>) => {
   const isOffered = useFeatureState('commentPins') === 'on';
-  const [index, setIndex] = useState<number>();
+  const [chosen, setChosen] = useState<{ index: number; owner: unknown }>();
   const close = useCallback((): void => {
-    setIndex(undefined);
+    setChosen(undefined);
   }, []);
+  const markUpAttachment = useCallback(
+    (index: number): void => {
+      setChosen({ index, owner });
+    },
+    [owner],
+  );
+  const index = chosen?.owner === owner ? chosen.index : undefined;
   return {
-    props: isOffered ? { markUpAttachment: setIndex, markupByAttachment } : {},
+    props: isOffered ? { markUpAttachment, markupByAttachment } : {},
     dialog:
       index === undefined ? null : (
         <Suspense fallback={null}>
@@ -311,6 +321,7 @@ export const ChatTextarea = memo(function ({
   });
   const markUp = useComposerMarkUp({
     mode,
+    owner: draftActorRef,
     markupByAttachment: logic.markupByAttachment,
     directory: logic.attachmentDirectory,
   });

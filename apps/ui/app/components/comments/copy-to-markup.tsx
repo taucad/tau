@@ -1,5 +1,4 @@
-import { Suspense, useCallback, useState } from 'react';
-import { useSelector } from '@xstate/react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { readFileAsDataUrl } from '@taucad/chat-ui/utils/attachment-intake';
 import { toast } from '@taucad/ui/components/sonner';
 import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
@@ -31,11 +30,15 @@ export function useMarkUpCopy(): Readonly<{
   const composer = useOptionalChatComposer();
   const draftRef = composer?.draftActorRef;
   const directories = useChatAttachmentDirectories();
-  const count = useSelector(draftRef, (state) => state?.context.draftAttachments.length ?? 0);
-  // Where the copy will land: the end of the draft's attachments when it was asked for.
-  const [index, setIndex] = useState<number>();
+  // The draft the composer holds now: a copy that finishes after the composer moved to another chat is dropped.
+  const currentDraft = useRef(draftRef);
+  useEffect(() => {
+    currentDraft.current = draftRef;
+  }, [draftRef]);
+  // Where the copy lands, in the draft it was added to.
+  const [opened, setOpened] = useState<{ index: number; draft: typeof draftRef }>();
   const close = useCallback((): void => {
-    setIndex(undefined);
+    setOpened(undefined);
   }, []);
   const execution = composer?.execution.execution;
   const selectedModel = composer?.model.model;
@@ -48,27 +51,34 @@ export function useMarkUpCopy(): Readonly<{
         const response = await fetch(src);
         const blob = await response.blob();
         const dataUrl = await readFileAsDataUrl(blob.type === '' ? new Blob([blob], { type: mediaType }) : blob);
+        if (currentDraft.current !== draftRef) {
+          toast.error('The image was not copied: the chat changed before it was ready. Mark it up again here.');
+          return;
+        }
+        // It lands after the draft's attachments and every image still queued for it.
+        const { draftAttachments, attachmentQueue } = draftRef.getSnapshot().context;
+        const index = draftAttachments.length + attachmentQueue.filter((entry) => entry.target === 'main').length;
         draftRef.send({
           type: 'addDraftAttachment',
           dataUrl,
           model: attachmentModelForExecution(execution, selectedModel),
         });
-        setIndex(count);
+        setOpened({ index, draft: draftRef });
       } catch {
         toast.error("Couldn't copy the image into your message");
       }
     },
-    [count, draftRef, execution, selectedModel],
+    [draftRef, execution, selectedModel],
   );
   const isOffered = isOn && draftRef !== undefined && directories !== undefined;
   return {
     markUp: isOffered ? markUp : undefined,
     dialog:
-      index === undefined || directories === undefined ? null : (
+      opened?.draft !== draftRef || directories === undefined ? null : (
         <Suspense fallback={null}>
           <DraftImageMarkup
             mode='main'
-            attachmentIndex={index}
+            attachmentIndex={opened.index}
             directory={[directories.composer, directories.transcript]}
             finishLabel='Add to chat'
             onClose={close}

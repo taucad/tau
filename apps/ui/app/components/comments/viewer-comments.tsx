@@ -24,7 +24,7 @@ import {
 } from '#components/comments/draft-comments.js';
 import type { PinPlacement } from '#components/comments/draft-comments.js';
 import { useShownComments } from '#components/comments/shown-comments.js';
-import { useRegisterViewerSurface } from '#components/comments/viewer-surfaces.js';
+import { useRegisterViewerSurface } from '#hooks/viewer-surfaces.js';
 import { useFeatureState } from '#flags/use-feature.js';
 import { useOptionalChatComposer } from '#hooks/active-chat-provider.js';
 import { useCad } from '#hooks/use-cad.js';
@@ -118,7 +118,44 @@ const selectPresentedView = (graphicsRef: GraphicsActorRef): { revision: string;
 });
 
 /** A picture being replaced: its tile, dropped once the new one is in, and the record to go back to if it fails. */
-type PictureRetake = Readonly<{ attachment: string; previous: MessageAnnotations | undefined }>;
+type PictureRetake = Readonly<{
+  /** The picture being replaced. */
+  attachment: string;
+  /** The moved pin. */
+  number: number;
+  /** The record before the move, and the record the move set. */
+  previous: MessageAnnotations | undefined;
+  applied: MessageAnnotations;
+}>;
+
+/**
+ * The record after a failed retake: the move undone for its own pin and picture, and every later change kept.
+ *
+ * @param current - The draft's record now.
+ * @param retake - The retake that failed.
+ * @param imageId - The picture entry the retake was for.
+ * @returns The record to set.
+ */
+export const withoutFailedRetake = (
+  current: MessageAnnotations | undefined,
+  retake: PictureRetake,
+  imageId: string,
+): MessageAnnotations | undefined => {
+  if (current === retake.applied || current === undefined || retake.previous === undefined) {
+    return current === retake.applied ? retake.previous : current;
+  }
+  const before = retake.previous.comments.find(({ number }) => number === retake.number);
+  const comments = current.comments.map((comment) =>
+    comment.number === retake.number && before ? { ...before, text: comment.text } : comment,
+  );
+  const oldImage = retake.previous.images.find((image) => image.attachment === retake.attachment);
+  const pinned = new Set(comments.map(({ image }) => image));
+  const images = current.images.filter((image) => image.id !== imageId || pinned.has(image.id));
+  if (oldImage && !images.some((image) => image.id === oldImage.id)) {
+    images.push(oldImage);
+  }
+  return { ...current, comments, images };
+};
 
 /** The camera as the annotations record keeps it: plain JSON. */
 const cameraRecord = (pick: CommentSurfacePick): AnnotationCamera => structuredClone(pick.camera) as AnnotationCamera;
@@ -248,15 +285,17 @@ export function ViewerComments({
   /** Drops the draft's tiles for pictures the record no longer has, the highest index first so none shifts. */
   const dropTiles = useCallback(
     (urls: readonly string[]): void => {
+      // The list as it is now: a capture may have changed it since this render.
+      const current = draftRef?.getSnapshot().context.draftAttachments ?? [];
       const indices = urls
-        .map((url) => (attachments ?? []).findIndex((attachment) => attachmentUrl(attachment) === url))
+        .map((url) => current.findIndex((attachment) => attachmentUrl(attachment) === url))
         .filter((index) => index !== -1)
         .toSorted((a, b) => b - a);
       for (const index of indices) {
         draftRef?.send({ type: 'removeDraftAttachment', index });
       }
     },
-    [attachments, draftRef],
+    [draftRef],
   );
 
   const takePicture = useCallback(
@@ -288,7 +327,9 @@ export function ViewerComments({
         }
       } catch (error) {
         if (retake) {
-          draftRef.send({ type: 'setDraftAnnotations', annotations: retake.previous });
+          // Only the retake's own change goes back: words typed and pins moved meanwhile stay.
+          const current = draftRef.getSnapshot().context.draftAnnotations;
+          draftRef.send({ type: 'setDraftAnnotations', annotations: withoutFailedRetake(current, retake, imageId) });
         }
         toast.error(error instanceof Error ? error.message : "Couldn't take the comment's picture");
       } finally {
@@ -318,7 +359,9 @@ export function ViewerComments({
         void takePicture(
           moved.imageId,
           pick,
-          moved.retakenAttachment === undefined ? undefined : { attachment: moved.retakenAttachment, previous: draft },
+          moved.retakenAttachment === undefined
+            ? undefined
+            : { attachment: moved.retakenAttachment, number, previous: draft, applied: moved.annotations },
         );
       }
     },

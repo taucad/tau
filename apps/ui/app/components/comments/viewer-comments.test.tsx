@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { AnnotationCamera, MessageAnnotations } from '@taucad/chat/annotations';
 import { useCommentPins } from '@taucad/viewer/cad/comment-pins';
 import type { CommentSurfacePick } from '@taucad/viewer/cad/comment-pins';
-import { ViewerCommentHeads, ViewerComments } from '#components/comments/viewer-comments.js';
+import { ViewerCommentHeads, ViewerComments, withoutFailedRetake } from '#components/comments/viewer-comments.js';
 import { ShownCommentsProvider, useShownComments } from '#components/comments/shown-comments.js';
 
 const camera: AnnotationCamera = {
@@ -147,6 +147,40 @@ const sentAnnotations = (): MessageAnnotations | undefined =>
   draft.actor.send.mock.calls
     .map(([event]) => event as { type: string; annotations?: MessageAnnotations })
     .findLast((event) => event.type === 'setDraftAnnotations')?.annotations;
+
+describe('withoutFailedRetake', () => {
+  const previous: MessageAnnotations = {
+    version: 1,
+    comments: [
+      { number: 1, text: 'Taller', image: 'old', model: { point: [0, 0, 0] } },
+      { number: 2, text: 'Here', image: 'old', model: { point: [1, 0, 0] } },
+    ],
+    images: [{ id: 'old', width: 10, height: 10, attachment: 'a-old', forPin: true, view: { camera }, marks: [] }],
+  };
+  const applied: MessageAnnotations = {
+    ...previous,
+    comments: [{ ...previous.comments[0]!, image: 'new', model: { point: [5, 5, 5] } }, previous.comments[1]!],
+    images: [...previous.images, { id: 'new', width: 10, height: 10, forPin: true, marks: [] }],
+  };
+  const retake = { attachment: 'a-old', number: 1, previous, applied };
+
+  it('should restore the earlier record when nothing changed meanwhile', () => {
+    expect(withoutFailedRetake(applied, retake, 'new')).toBe(previous);
+  });
+
+  it('should undo only the moved pin and its new picture, keeping words typed meanwhile', () => {
+    const typed: MessageAnnotations = {
+      ...applied,
+      comments: applied.comments.map((comment) => ({ ...comment, text: `${comment.text}!` })),
+    };
+    const restored = withoutFailedRetake(typed, retake, 'new');
+    expect(restored?.comments).toEqual([
+      { ...previous.comments[0]!, text: 'Taller!' },
+      { ...previous.comments[1]!, text: 'Here!' },
+    ]);
+    expect(restored?.images.map(({ id }) => id)).toEqual(['old']);
+  });
+});
 
 describe('ViewerComments', () => {
   beforeEach(() => {

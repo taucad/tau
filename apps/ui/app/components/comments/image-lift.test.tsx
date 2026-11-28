@@ -3,8 +3,8 @@ import { renderHook } from '@testing-library/react';
 import type { AnnotationView } from '@taucad/chat/annotations';
 import type { CommentPinSurface, CommentSurfacePick } from '@taucad/viewer/cad/comment-pins';
 import { useImageLift } from '#components/comments/image-lift.js';
-import { useRegisterViewerSurface, ViewerSurfacesProvider } from '#components/comments/viewer-surfaces.js';
-import type { ViewerSurfaceEntry } from '#components/comments/viewer-surfaces.js';
+import { useRegisterViewerSurface, ViewerSurfacesProvider } from '#hooks/viewer-surfaces.js';
+import type { ViewerSurfaceEntry } from '#hooks/viewer-surfaces.js';
 
 const view: AnnotationView = {
   path: 'main.ts',

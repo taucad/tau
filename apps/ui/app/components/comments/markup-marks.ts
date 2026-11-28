@@ -118,18 +118,41 @@ const shift = (point: AnnotationVec2, delta: AnnotationVec2): AnnotationVec2 =>
  * @returns The moved mark, kept on the image.
  */
 export function shiftMark(mark: AnnotationMark, grip: MarkGrip, delta: AnnotationVec2): AnnotationMark {
-  if (mark.kind === 'pen') {
-    return { ...mark, points: mark.points.map((point) => shift(point, delta)) };
-  }
-  if (mark.kind === 'arrow' || mark.kind === 'line') {
+  if ((mark.kind === 'arrow' || mark.kind === 'line') && grip !== 'all') {
     return {
       ...mark,
       from: grip === 'to' ? mark.from : { at: shift(mark.from.at, delta) },
       to: grip === 'from' ? mark.to : { at: shift(mark.to.at, delta) },
     };
   }
-  return { ...mark, from: shift(mark.from, delta), to: shift(mark.to, delta) };
+  // A whole mark moves as one: the shared step stops at the image's edge, so the mark keeps its shape.
+  const points = markPoints(mark);
+  const bound = (axis: 0 | 1): number => {
+    const least = Math.min(...points.map((point) => point[axis]));
+    const most = Math.max(...points.map((point) => point[axis]));
+    return Math.min(1 - most, Math.max(-least, delta[axis]));
+  };
+  const step: AnnotationVec2 = [bound(0), bound(1)];
+  const move = (point: AnnotationVec2): AnnotationVec2 => shift(point, step);
+  if (mark.kind === 'pen') {
+    return { ...mark, points: mark.points.map(move) };
+  }
+  if (mark.kind === 'arrow' || mark.kind === 'line') {
+    return { ...mark, from: { at: move(mark.from.at) }, to: { at: move(mark.to.at) } };
+  }
+  return { ...mark, from: move(mark.from), to: move(mark.to) };
 }
+
+/** Every point that places a mark, in image fractions. */
+const markPoints = (mark: AnnotationMark): readonly AnnotationVec2[] => {
+  if (mark.kind === 'pen') {
+    return mark.points;
+  }
+  if (mark.kind === 'arrow' || mark.kind === 'line') {
+    return [mark.from.at, mark.to.at];
+  }
+  return [mark.from, mark.to];
+};
 
 type Pixel = readonly [number, number];
 
@@ -159,11 +182,22 @@ const isOnInk = (
     const corners: Pixel[] = [a, [b[0], a[1]], b, [a[0], b[1]]];
     return corners.some((corner, index) => toSegment(point, corner, corners[(index + 1) % 4]!) <= slop);
   }
+  // The outline as a fine polygon, in image pixels: exact enough for a grab, and a flat ellipse is its segment.
+  const centre: Pixel = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   const rx = Math.abs(b[0] - a[0]) / 2;
   const ry = Math.abs(b[1] - a[1]) / 2;
-  const radial = Math.hypot((point[0] - (a[0] + b[0]) / 2) / (rx || 1), (point[1] - (a[1] + b[1]) / 2) / (ry || 1));
-  return Math.abs(radial - 1) * Math.min(rx, ry) <= slop;
+  const outline = Array.from(
+    { length: ellipseSides },
+    (_, side): Pixel => [
+      centre[0] + rx * Math.cos((side / ellipseSides) * 2 * Math.PI),
+      centre[1] + ry * Math.sin((side / ellipseSides) * 2 * Math.PI),
+    ],
+  );
+  return outline.some((corner, index) => toSegment(point, corner, outline[(index + 1) % ellipseSides]!) <= slop);
 };
+
+/** The sides of the polygon an ellipse's outline is grabbed by. */
+const ellipseSides = 72;
 
 /**
  * The topmost mark whose ink is within `slop` image pixels of a point, and what the press took (D23). Near an end of an
@@ -184,15 +218,14 @@ export function grabMark(
   for (let index = marks.length - 1; index >= 0; index--) {
     const mark = marks[index]!;
     if (mark.kind === 'arrow' || mark.kind === 'line') {
-      const near = (end: AnnotationVec2): boolean => {
+      const away = (end: AnnotationVec2): number => {
         const [x, y] = px(end);
-        return Math.hypot(point[0] - x, point[1] - y) <= slop * 1.5;
+        return Math.hypot(point[0] - x, point[1] - y);
       };
-      if (near(mark.to.at)) {
-        return { index, grip: 'to' };
-      }
-      if (near(mark.from.at)) {
-        return { index, grip: 'from' };
+      // Near both ends of a short mark, the nearer one; on a tie, the tip.
+      const [toAway, fromAway] = [away(mark.to.at), away(mark.from.at)];
+      if (Math.min(toAway, fromAway) <= slop * 1.5) {
+        return { index, grip: toAway <= fromAway ? 'to' : 'from' };
       }
     }
     if (isOnInk(mark, point, { px, slop })) {

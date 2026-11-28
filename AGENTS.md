@@ -60,7 +60,7 @@ Read the owners for each touched concern:
 - TS/JS/declarations: [lint](docs/policy/lint-policy.md), [TypeScript](docs/policy/typescript-policy.md), [JSDoc](docs/policy/jsdoc-policy.md); public APIs also [library API](docs/policy/library-api-policy.md)
 - Tests/specs/harnesses/CI failures: [testing](docs/policy/testing-policy.md); React/jsdom adds [React testing](docs/policy/react-testing-policy.md); TLA+/Lean specs add [formal verification](docs/policy/formal-verification-policy.md)
 - XState: [XState](docs/policy/xstate-policy.md); revision graphs/checkouts/machines/sync also [revisions](docs/policy/revisions-policy.md)
-- React/Tailwind/tokens/accessibility: [DESIGN](docs/policy/design-policy.md), [React](docs/policy/react-policy.md), [UI](docs/policy/ui-policy.md), [color](docs/policy/color-policy.md), [accessibility](docs/policy/accessibility-policy.md), [pages](docs/policy/page-composition-policy.md)
+- React/Tailwind/tokens/a11y: [DESIGN](docs/policy/design-policy.md), [React](docs/policy/react-policy.md), [UI](docs/policy/ui-policy.md), [color](docs/policy/color-policy.md), [a11y](docs/policy/accessibility-policy.md), [pages](docs/policy/page-composition-policy.md), [mobile](docs/policy/mobile-ui-policy.md)
 - Agent capabilities/upgrades/telemetry: [observability](docs/policy/agent-observability-policy.md)
 - Prompts/tools/transcripts/compaction/offloading: [context](docs/policy/context-engineering-policy.md), [filesystem](docs/policy/filesystem-context-policy.md)
 - App-library placement/manifests: [workspace projects](docs/policy/workspace-project-policy.md); use `create-package`

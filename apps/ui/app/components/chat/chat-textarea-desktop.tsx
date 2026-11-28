@@ -168,6 +168,10 @@ type ChatTextareaDesktopProperties = {
   readonly handleTextareaFocus?: () => void;
   readonly handleTextareaBlur: () => void;
   readonly removeAttachment: (index: number) => void;
+  /** Opens mark up on a draft image; absent while comment pins are off. */
+  readonly markUpAttachment?: (index: number) => void;
+  /** The comment numbers pinned on each draft image, by attachment URL. */
+  readonly pinNumbersByAttachment?: ReadonlyMap<string, readonly number[]>;
   /** The draft's comments, drawn under its attachments. */
   readonly comments?: React.ReactNode;
 };
@@ -367,6 +371,8 @@ export const ChatTextareaDesktop = memo(function ({
   handleTextareaFocus,
   handleTextareaBlur,
   removeAttachment,
+  markUpAttachment,
+  pinNumbersByAttachment,
   comments,
 }: ChatTextareaDesktopProperties): React.JSX.Element {
   const catalog = useSkillsCatalogState();
@@ -1021,6 +1027,8 @@ export const ChatTextareaDesktop = memo(function ({
           blockReasonId={blockReasonId}
           size='desktop'
           onRemove={removeAttachment}
+          onMarkUp={markUpAttachment}
+          pinNumbersByAttachment={pinNumbersByAttachment}
         />
         {comments}
 

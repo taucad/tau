@@ -16,6 +16,7 @@ import {
   AttachmentImage,
   useChatAttachmentDirectories,
 } from '#components/chat/attachment-preview.js';
+import { useMarkUpCopy } from '#components/comments/copy-to-markup.js';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import { useProject } from '#hooks/use-project.js';
 import { useAttachmentSource } from '@taucad/chat-ui/hooks/use-attachment-source';
@@ -82,6 +83,8 @@ function ChatMediaImage({
 }): ReactNode {
   const project = useProject({ enableNoContext: true });
   const [isPreviewOpen, setPreviewOpen] = useState(false);
+  const markUpCopy = useMarkUpCopy();
+  const { markUp } = markUpCopy;
   const [isUnavailable, setUnavailable] = useState(false);
   const path = chatAttachmentProjectPath(directory, media.url);
   const markUnavailable = useCallback(() => {
@@ -141,8 +144,16 @@ function ChatMediaImage({
             },
           ]}
           onOpenChange={setPreviewOpen}
+          {...(markUp
+            ? {
+                onMarkUp(image: { readonly src: string; readonly mediaType: string }) {
+                  void markUp(image);
+                },
+              }
+            : {})}
         />
       ) : null}
+      {markUpCopy.dialog}
     </>
   );
 }

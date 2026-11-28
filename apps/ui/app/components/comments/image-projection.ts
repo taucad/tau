@@ -93,3 +93,30 @@ export function isSameCamera(a: AnnotationCamera, b: AnnotationCamera): boolean 
     sameVector(a.up, b.up)
   );
 }
+
+/** A ray in the Tau root frame: where it starts, in metres, and its unit direction. */
+export type ImageRay = Readonly<{ origin: AnnotationVec3; direction: AnnotationVec3 }>;
+
+/**
+ * The ray a kept camera saw a point of its picture along: the inverse of {@link projectToImage}.
+ *
+ * @param camera - The camera the picture was taken with.
+ * @param at - The point, as fractions from the picture's top left.
+ * @returns The ray, in the Tau root frame.
+ */
+export function rayThroughImage(camera: AnnotationCamera, at: AnnotationVec2): ImageRay {
+  const { forward, right, up } = basisOf(camera);
+  const x = at[0] * 2 - 1;
+  const y = 1 - at[1] * 2;
+  const { projection } = camera;
+  if (projection.kind === 'perspective') {
+    const slope = Math.tan((projection.verticalFieldOfView * Math.PI) / 360) / projection.zoom;
+    const along = (index: number): number =>
+      forward[index]! + right[index]! * x * slope * camera.aspect + up[index]! * y * slope;
+    return { origin: camera.position, direction: normalize([along(0), along(1), along(2)]) };
+  }
+  const halfHeight = projection.verticalSpan / projection.zoom / 2;
+  const at3 = (index: number): number =>
+    camera.position[index]! + right[index]! * x * halfHeight * camera.aspect + up[index]! * y * halfHeight;
+  return { origin: [at3(0), at3(1), at3(2)], direction: forward };
+}

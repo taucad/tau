@@ -6,8 +6,8 @@ import { annotationLimits } from '@taucad/chat/annotations';
 import type { AnnotationCamera, AnnotationComment, MessageAnnotations } from '@taucad/chat/annotations';
 import { attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 import { toast } from '@taucad/ui/components/sonner';
-import { randomUuid } from '@taucad/utils/id';
 import { lazyCode } from '@taucad/ui-core/lib/lazy-code';
+import { randomUuid } from '@taucad/utils/id';
 import { CommentPinsProvider, useCommentPins } from '@taucad/viewer/cad/comment-pins';
 import type { CommentPinsHost, CommentSurfacePick, ViewerCommentPin } from '@taucad/viewer/cad/comment-pins';
 import { getGraphicsCameraState } from '@taucad/viewer/graphics/graphics-camera';
@@ -24,6 +24,7 @@ import {
 } from '#components/comments/draft-comments.js';
 import type { PinPlacement } from '#components/comments/draft-comments.js';
 import { useShownComments } from '#components/comments/shown-comments.js';
+import { useRegisterViewerSurface } from '#components/comments/viewer-surfaces.js';
 import { useFeatureState } from '#flags/use-feature.js';
 import { useOptionalChatComposer } from '#hooks/active-chat-provider.js';
 import { useCad } from '#hooks/use-cad.js';
@@ -73,6 +74,9 @@ export type ViewerCommentsValue = Readonly<{
   hideShown: (() => void) | undefined;
   /** The comments whose model has changed since their picture was taken (charter I5). */
   outdated: ReadonlySet<number>;
+  /** What this viewer shows, for a picture of the same scene to find its parts (D22). */
+  scope: ViewerScope;
+  presented: () => { revision: string; scene: string } | undefined;
 }>;
 
 /* The heads and cards, loaded when the viewer first has a comment: most viewers never do. */
@@ -106,6 +110,15 @@ const scopedComments = (
     (comment) => comment.model !== undefined && comment.image !== undefined && shown.has(comment.image),
   );
 };
+
+/** The geometry a viewer shows and its presented scene, read when mark up asks. */
+const selectPresentedView = (graphicsRef: GraphicsActorRef): { revision: string; scene: string } => ({
+  revision: selectPresentedGeometryKey(graphicsRef.getSnapshot()),
+  scene: presentedSceneHash(graphicsRef),
+});
+
+/** A picture being replaced: its tile, dropped once the new one is in, and the record to go back to if it fails. */
+type PictureRetake = Readonly<{ attachment: string; previous: MessageAnnotations | undefined }>;
 
 /** The camera as the annotations record keeps it: plain JSON. */
 const cameraRecord = (pick: CommentSurfacePick): AnnotationCamera => structuredClone(pick.camera) as AnnotationCamera;
@@ -232,8 +245,22 @@ export function ViewerComments({
     [comments],
   );
 
+  /** Drops the draft's tiles for pictures the record no longer has, the highest index first so none shifts. */
+  const dropTiles = useCallback(
+    (urls: readonly string[]): void => {
+      const indices = urls
+        .map((url) => (attachments ?? []).findIndex((attachment) => attachmentUrl(attachment) === url))
+        .filter((index) => index !== -1)
+        .toSorted((a, b) => b - a);
+      for (const index of indices) {
+        draftRef?.send({ type: 'removeDraftAttachment', index });
+      }
+    },
+    [attachments, draftRef],
+  );
+
   const takePicture = useCallback(
-    async (imageId: string, pick: CommentSurfacePick): Promise<void> => {
+    async (imageId: string, pick: CommentSurfacePick, retake?: PictureRetake): Promise<void> => {
       if (!cadRef || !graphicsRef || !imageService || !draftRef || !model) {
         return;
       }
@@ -255,27 +282,20 @@ export function ViewerComments({
           model,
           annotationImageId: imageId,
         });
+        // The old picture goes only once its replacement is in: a failed retake keeps it.
+        if (retake) {
+          dropTiles([retake.attachment]);
+        }
       } catch (error) {
+        if (retake) {
+          draftRef.send({ type: 'setDraftAnnotations', annotations: retake.previous });
+        }
         toast.error(error instanceof Error ? error.message : "Couldn't take the comment's picture");
       } finally {
         projectRef.send({ type: 'releaseGeometryUnit', claimId });
       }
     },
-    [cadRef, captureRendering, draftRef, entryPath, graphicsRef, imageService, model, projectRef],
-  );
-
-  /** Drops the draft's tiles for pictures the record no longer has, the highest index first so none shifts. */
-  const dropTiles = useCallback(
-    (urls: readonly string[]): void => {
-      const indices = urls
-        .map((url) => (attachments ?? []).findIndex((attachment) => attachmentUrl(attachment) === url))
-        .filter((index) => index !== -1)
-        .toSorted((a, b) => b - a);
-      for (const index of indices) {
-        draftRef?.send({ type: 'removeDraftAttachment', index });
-      }
-    },
-    [attachments, draftRef],
+    [cadRef, captureRendering, draftRef, dropTiles, entryPath, graphicsRef, imageService, model, projectRef],
   );
 
   const move = useCallback(
@@ -291,14 +311,15 @@ export function ViewerComments({
         toast.error(`A message holds up to ${annotationLimits.images} commented pictures. Move from an earlier view.`);
         return;
       }
-      // Tiles go first: removing a tile drops its image, and the record set next has none of the dropped ones.
-      dropTiles([
-        ...moved.orphanedAttachments,
-        ...(moved.retakenAttachment === undefined ? [] : [moved.retakenAttachment]),
-      ]);
+      // Empty tiles go first: removing a tile drops its image, and the record set next has none of them.
+      dropTiles(moved.orphanedAttachments);
       draftRef.send({ type: 'setDraftAnnotations', annotations: moved.annotations });
       if (moved.needsPicture) {
-        void takePicture(moved.imageId, pick);
+        void takePicture(
+          moved.imageId,
+          pick,
+          moved.retakenAttachment === undefined ? undefined : { attachment: moved.retakenAttachment, previous: draft },
+        );
       }
     },
     [draft, draftRef, dropTiles, graphicsRef, isReadOnly, scope, takePicture],
@@ -339,24 +360,23 @@ export function ViewerComments({
         toast.error(`A message holds up to ${annotationLimits.images} commented pictures. Pin from an earlier view.`);
         return;
       }
-      // A retaken picture's old tile goes first: removing a tile drops its image, and the record set next has none.
-      const retakenIndex =
-        placed.retakenAttachment === undefined
-          ? -1
-          : (attachments ?? []).findIndex((attachment) => attachmentUrl(attachment) === placed.retakenAttachment);
-      if (retakenIndex !== -1) {
-        draftRef.send({ type: 'removeDraftAttachment', index: retakenIndex });
-      }
       draftRef.send({
         type: 'setDraftAnnotations',
         annotations: placed.annotations,
       });
       setOpenNumber(placed.number);
       if (placed.needsPicture) {
-        void takePicture(placed.imageId, pick);
+        // A retaken picture's old tile stays until the new one is in (takePicture drops it).
+        void takePicture(
+          placed.imageId,
+          pick,
+          placed.retakenAttachment === undefined
+            ? undefined
+            : { attachment: placed.retakenAttachment, previous: draft },
+        );
       }
     },
-    [attachments, draft, draftRef, graphicsRef, hideShown, isEditing, move, movingNumber, scope, takePicture],
+    [draft, draftRef, graphicsRef, hideShown, isEditing, move, movingNumber, scope, takePicture],
   );
 
   const remove = useCallback(
@@ -420,6 +440,8 @@ export function ViewerComments({
     setMovingNumber(undefined);
   }, []);
 
+  const presented = useCallback(() => (graphicsRef ? selectPresentedView(graphicsRef) : undefined), [graphicsRef]);
+
   const host = useMemo<CommentPinsHost | undefined>(
     () => (isEnabled ? { pins, onPlace: handlePlace, onMiss: cancelMove } : undefined),
     [cancelMove, handlePlace, isEnabled, pins],
@@ -440,6 +462,8 @@ export function ViewerComments({
             isReadOnly,
             hideShown: shown === undefined ? undefined : hideShown,
             outdated,
+            scope,
+            presented,
           }
         : undefined,
     [
@@ -475,6 +499,14 @@ export function ViewerComments({
 export function ViewerCommentHeads(): React.JSX.Element | undefined {
   const value = useContext(ViewerCommentsContext);
   const pins = useCommentPins();
+  const scope = value?.scope;
+  const presented = value?.presented;
+  const surface = pins?.heads.surface;
+  const entry = useMemo(
+    () => (scope && presented && surface ? { ...scope, path: scope.entryPath, presented, surface } : undefined),
+    [presented, scope, surface],
+  );
+  useRegisterViewerSurface(entry);
   if (!value || !pins || value.comments.length === 0) {
     return undefined;
   }

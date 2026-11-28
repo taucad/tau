@@ -31,6 +31,7 @@
  */
 
 import { ShownCommentsProvider } from '#components/comments/shown-comments.js';
+import { ViewerSurfacesProvider } from '#components/comments/viewer-surfaces.js';
 import { useActorRef, useSelector } from '@xstate/react';
 import {
   createContext,
@@ -537,7 +538,9 @@ function ActiveChatSessionProvider({
   return (
     <ChatComposerContext.Provider value={composerValue}>
       <ActiveChatSessionContext.Provider value={sessionValue}>
-        <ShownCommentsProvider chatId={chatId}>{children}</ShownCommentsProvider>
+        <ShownCommentsProvider chatId={chatId}>
+          <ViewerSurfacesProvider>{children}</ViewerSurfacesProvider>
+        </ShownCommentsProvider>
       </ActiveChatSessionContext.Provider>
     </ChatComposerContext.Provider>
   );

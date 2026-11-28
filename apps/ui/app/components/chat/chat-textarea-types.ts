@@ -305,6 +305,8 @@ export function useChatTextareaLogic({
   removeAttachment: (index: number) => void;
   /** This composer's draft holds at least one comment. */
   hasDraftComments: boolean;
+  /** The comment numbers pinned on each draft image, by attachment URL, for its tile. */
+  pinNumbersByAttachment: ReadonlyMap<string, readonly number[]>;
   setDraftToolChoice: (choice: ToolSelection) => void;
   setShowContextMenu: (show: boolean) => void;
   setAtSymbolPosition: (position: number) => void;
@@ -386,6 +388,19 @@ export function useChatTextareaLogic({
     mode === 'main' ? state.draftAnnotations : state.editDraftAnnotations,
   );
   const sendBlockReason = attachmentSendBlockReason(attachments, attachmentModel);
+  const pinNumbersByAttachment = useMemo(() => {
+    const numbers = new Map<string, number[]>();
+    for (const image of annotations?.images ?? []) {
+      const pinned = (annotations?.comments ?? []).filter((comment) => comment.image === image.id);
+      if (image.attachment !== undefined && pinned.length > 0) {
+        numbers.set(
+          image.attachment,
+          pinned.map(({ number }) => number),
+        );
+      }
+    }
+    return numbers;
+  }, [annotations]);
   const isAttaching = useDraftSelector((state) => (mode === 'main' ? state.attachingMain : state.attachingEdit));
   const pendingImages = useDraftSelector((state) => (mode === 'main' ? state.pendingMain : state.pendingEdit));
   const canResume =
@@ -953,6 +968,7 @@ export function useChatTextareaLogic({
     focusInput,
     removeAttachment,
     hasDraftComments: (annotations?.comments.length ?? 0) > 0,
+    pinNumbersByAttachment,
     setDraftToolChoice,
     setShowContextMenu,
     setAtSymbolPosition,

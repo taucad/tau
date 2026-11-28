@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { OrthographicCamera, PerspectiveCamera, Vector3 } from 'three';
 import type { AnnotationCamera, AnnotationVec3 } from '@taucad/chat/annotations';
-import { angleBetweenViews, isSameCamera, projectToImage } from '#components/comments/image-projection.js';
+import {
+  angleBetweenViews,
+  isSameCamera,
+  projectToImage,
+  rayThroughImage,
+} from '#components/comments/image-projection.js';
 
 const position: AnnotationVec3 = [0.3, -0.4, 0.25];
 const target: AnnotationVec3 = [0.02, 0.01, 0.03];
@@ -85,5 +90,23 @@ describe('camera comparison', () => {
     const side: AnnotationCamera = { ...perspective, position: [1, 0, 0], target: [0, 0, 0] };
     const top: AnnotationCamera = { ...perspective, position: [0, 0, 1], target: [0, 0, 0], up: [0, 1, 0] };
     expect(angleBetweenViews(side, top)).toBeCloseTo(90, 6);
+  });
+});
+
+describe('rayThroughImage', () => {
+  it.each([
+    ['perspective', perspective],
+    ['orthographic', orthographic],
+  ])('should give a %s ray that projects back to the same picture point', (_, camera) => {
+    const at: [number, number] = [0.3, 0.7];
+    const { origin, direction } = rayThroughImage(camera, at);
+    const point: AnnotationVec3 = [
+      origin[0] + direction[0] * 0.4,
+      origin[1] + direction[1] * 0.4,
+      origin[2] + direction[2] * 0.4,
+    ];
+    const projected = projectToImage(camera, point)!;
+    expect(projected.at[0]).toBeCloseTo(at[0], 6);
+    expect(projected.at[1]).toBeCloseTo(at[1], 6);
   });
 });

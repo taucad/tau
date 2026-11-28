@@ -199,6 +199,7 @@ export function ChatTurnHost(): ReactNode {
                       text: gesture.text,
                       ...(gesture.attachments === undefined ? {} : { attachments: gesture.attachments }),
                       ...(gesture.references === undefined ? {} : { references: gesture.references }),
+                      ...(gesture.annotations === undefined ? {} : { annotations: gesture.annotations }),
                     }),
                   ];
                 })()

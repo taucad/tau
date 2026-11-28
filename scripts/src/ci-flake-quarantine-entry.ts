@@ -157,6 +157,22 @@ export const meetsGatingEntryRule = (identity: IdentityState, shadowTargets = no
   );
 };
 
+/**
+ * Whether an entry an entry branch proposes still stands on the ledger state: its test, in the project whose
+ * `quarantine.json` is at `path`, meets the entry rule on gating events now. A branch pushed on events since retracted
+ * (`flake-ledger.json` `retractions`, testing policy § 16.3), or whose events have left the rule's window, proposes
+ * from evidence the state no longer holds: it is not opened, and the next plan proposes from the state as it is.
+ */
+export const proposalStands =
+  (state: LedgerState, projects: ReadonlyMap<string, WorkspaceProject>, shadowTargets = noShadowTargets) =>
+  (path: string, entry: Readonly<Record<string, unknown>>): boolean => {
+    const { test } = entry;
+    const project = [...projects.values()].find((candidate) => quarantinePath(candidate.root) === path);
+    const identity =
+      typeof test === 'string' && project ? state.identities[`${project.name}${projectSeparator}${test}`] : undefined;
+    return identity !== undefined && meetsGatingEntryRule(identity, shadowTargets);
+  };
+
 const offender = (id: string, identity: IdentityState, shadowTargets: ShadowTargets): Offender => {
   const separator = id.indexOf(projectSeparator);
   return {

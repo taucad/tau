@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { readQuarantine } from '@taucad/vitest-ci/quarantine';
 
 import { artifactRows } from '#ci-flake-ledger-ingest-cli.js';
-import { emptyState, ingestRun, meetsEntryRule, parseOutcomes } from '#ci-flake-ledger-state.js';
+import { applyRetractions, emptyState, ingestRun, meetsEntryRule, parseOutcomes } from '#ci-flake-ledger-state.js';
 import type { FlakeEvent, IdentityState, IngestRun, LedgerState, OutcomeRow } from '#ci-flake-ledger-state.js';
 import {
   applyPlan,
@@ -28,6 +28,7 @@ import {
   returnKey,
   offenders,
   planEntries,
+  proposalStands,
   renderQuarantine,
 } from '#ci-flake-quarantine-entry.js';
 import { identityMarker } from '#flake-regression.js';
@@ -378,7 +379,7 @@ describe('the replay week (FQ-6 acceptance)', () => {
       ],
     });
 
-    const outcome = await reconcileEntryBranches(github, 'main', '2026-11-22');
+    const outcome = await reconcileEntryBranches(github, 'main', { today: '2026-11-22' });
 
     const opened = requests.filter((request) => request.path.endsWith('/pulls'));
     expect(opened.map((request) => request.body)).toEqual([
@@ -397,7 +398,7 @@ describe('the replay week (FQ-6 acceptance)', () => {
       branches: [{ branch: 'flake-quarantine/2026-11-21-aaaaaaaa', pulls: [] }],
     });
 
-    expect(await reconcileEntryBranches(github, 'main', '2026-11-22')).toEqual([
+    expect(await reconcileEntryBranches(github, 'main', { today: '2026-11-22' })).toEqual([
       '`flake-quarantine/2026-11-21-aaaaaaaa` still has no pull request: this token may not open one.',
     ]);
   });
@@ -407,7 +408,7 @@ describe('the replay week (FQ-6 acceptance)', () => {
       branches: [{ branch: 'flake-quarantine/2026-11-01-aaaaaaaa', pulls: [], pushed: '2026-11-01' }],
     });
 
-    expect(await reconcileEntryBranches(github, 'main', '2026-11-22')).toEqual([
+    expect(await reconcileEntryBranches(github, 'main', { today: '2026-11-22' })).toEqual([
       '`flake-quarantine/2026-11-01-aaaaaaaa` holds an expired proposal; it is not opened and reserves nothing.',
     ]);
     expect(requests.some((request) => request.path.endsWith('/pulls'))).toBe(false);
@@ -424,11 +425,49 @@ describe('the replay week (FQ-6 acceptance)', () => {
       ],
     });
 
-    const outcome = await reconcileEntryBranches(github, 'main', '2026-11-23');
+    const outcome = await reconcileEntryBranches(github, 'main', { today: '2026-11-23' });
 
     expect(requests.some((request) => request.method === 'POST')).toBe(false);
     expect(outcome).toEqual([
       '`flake-quarantine/2026-11-21-aaaaaaaa` holds an expired proposal; it is not opened and reserves nothing.',
+    ]);
+  });
+
+  it('should not open an entry branch whose proposed test no longer meets the entry rule after a retraction', async () => {
+    const state = replayWeek();
+    const proposed = [{ test: 'src/store.test.ts > store > should keep the order', expires: '2026-12-06' }];
+    const branches = [{ branch: 'flake-quarantine/2026-11-21-aaaaaaaa', pulls: [], proposed }];
+    // While the events stand, the branch is opened.
+    const standing = fakeGitHub({ branches });
+    expect(
+      await reconcileEntryBranches(standing.github, 'main', {
+        today: '2026-11-22',
+        stands: proposalStands(state, projects),
+      }),
+    ).toEqual(['Opened #9001 for `flake-quarantine/2026-11-21-aaaaaaaa`, which had no pull request.']);
+
+    applyRetractions(
+      state,
+      [
+        {
+          identity: id.order,
+          kinds: ['retry', 'same-hash', 'lineage'],
+          before: '2026-11-23T00:00:00Z',
+          reason: 'Recorded in error.',
+        },
+      ],
+      { now: new Date('2026-11-23T00:00:00Z') },
+    );
+    const { github, requests } = fakeGitHub({ branches });
+
+    const outcome = await reconcileEntryBranches(github, 'main', {
+      today: '2026-11-22',
+      stands: proposalStands(state, projects),
+    });
+
+    expect(requests.some((request) => request.method === 'POST')).toBe(false);
+    expect(outcome).toEqual([
+      '`flake-quarantine/2026-11-21-aaaaaaaa` proposes 1 of 1 entries the ledger state no longer supports; it is not opened and reserves nothing.',
     ]);
   });
 
@@ -504,6 +543,45 @@ describe('the replay week (FQ-6 acceptance)', () => {
 
     expect(result.issues.get(id.order)).toBe(42);
     expect(requests.filter((request) => request.method === 'POST' && request.path.endsWith('/issues'))).toHaveLength(2);
+  });
+});
+
+describe('retractions (testing policy § 16.3)', () => {
+  it('should not admit a test whose events were retracted, and keep admitting the others', () => {
+    const state = replayWeek();
+    expect(plan(state).admitted.map((planned) => planned.id)).toEqual([id.order, id.render]);
+
+    applyRetractions(
+      state,
+      [
+        {
+          identity: id.order,
+          kinds: ['retry', 'same-hash', 'lineage'],
+          before: '2026-11-23T00:00:00Z',
+          reason: 'Recorded in error.',
+        },
+      ],
+      { now: new Date('2026-11-23T00:00:00Z') },
+    );
+
+    const result = plan(state);
+    expect(result.admitted.map((planned) => planned.id)).toEqual([id.render]);
+    expect([...result.refused.map((refusal) => refusal.id), ...result.held]).not.toContain(id.order);
+    expect(
+      proposalStands(state, projects)('packages/host/quarantine.json', {
+        test: 'src/store.test.ts > store > should keep the order',
+      }),
+    ).toBe(false);
+    expect(
+      proposalStands(state, projects)('apps/ui-e2e/quarantine.json', {
+        test: 'src/viewer.spec.ts > viewer > should render the model',
+      }),
+    ).toBe(true);
+    expect(
+      proposalStands(state, projects)('apps/elsewhere/quarantine.json', {
+        test: 'src/viewer.spec.ts > viewer > should render the model',
+      }),
+    ).toBe(false);
   });
 });
 

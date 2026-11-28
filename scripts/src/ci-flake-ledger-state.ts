@@ -34,11 +34,16 @@
  * **Renames.** `flake-ledger.json` `aliases` maps an old identity to its new one; the renaming pull request adds the
  * alias, and the ledger folds the old history into the new identity on its next run (D2, Renames).
  *
+ * **Retractions.** `flake-ledger.json` `retractions` names events recorded in error (a reporter defect, not a flake):
+ * each ingestion drops the matching events and the retried passes they counted, and notes what it dropped in
+ * {@link LedgerState.retractions}, so the entry rule, the release counts, the metrics and the report never see them
+ * and the state says why ({@link applyRetractions}). The state branch is never edited by hand.
+ *
  * The outcome rows write an absent value as JSON `null`; this reader turns it into a missing field, and the state
  * leaves an absent field out.
  */
 import { lineageOf, touchesFailingTest } from '#ci-flake-ledger.js';
-import type { Alias, ComparedFile } from '#ci-flake-ledger.js';
+import type { Alias, ComparedFile, flakeEventKinds, Retraction } from '#ci-flake-ledger.js';
 import type { WorkflowRun } from '#ci-queue-health.js';
 import type { ShadowRowState } from '#ci-shadow-rows.js';
 
@@ -224,7 +229,7 @@ export const variantKey = (variant: OutcomeVariant): string =>
     .filter((part) => part !== '')
     .join(' ');
 
-export type FlakeEventKind = 'retry' | 'same-hash' | 'lineage';
+export type FlakeEventKind = (typeof flakeEventKinds)[number];
 
 /** One flake event of one identity. */
 export type FlakeEvent = {
@@ -410,6 +415,24 @@ export type LedgerState = {
    * `ci-flake-quarantine-release.ts` counts them): the count against the release bar.
    */
   quarantineTracks?: Record<string, ReleaseTrack>;
+  /** The `flake-ledger.json` retractions that dropped events, by {@link retractionKey} ({@link applyRetractions}). */
+  retractions?: Record<string, RetractionRecord>;
+};
+
+/** What one retraction dropped from the state: its audit note. */
+export type RetractionRecord = {
+  /** The identity the events were dropped from (aliases followed). */
+  readonly identity: string;
+  readonly kinds: readonly FlakeEventKind[];
+  readonly before: string;
+  readonly reason: string;
+  readonly issue?: number | undefined;
+  /** When an ingestion first dropped an event for it. */
+  readonly applied: string;
+  /** Events dropped. */
+  events: number;
+  /** Taken off {@link IdentityState.retriedPasses}: the dropped `retry` events, and older ones the event cap evicted. */
+  retriedPasses: number;
 };
 
 export const emptyState = (now: Date): LedgerState => ({
@@ -451,6 +474,7 @@ export const serializeState = (state: LedgerState): string =>
       identities: byKey(state.identities),
       ...(state.shadowRows ? { shadowRows: byKey(state.shadowRows) } : {}),
       ...(state.quarantineTracks ? { quarantineTracks: byKey(state.quarantineTracks) } : {}),
+      ...(state.retractions ? { retractions: byKey(state.retractions) } : {}),
     },
     undefined,
     2,
@@ -583,6 +607,97 @@ export const applyAliases = (state: LedgerState, aliases: readonly Alias[]): str
   }
   state.identities = Object.fromEntries(identities);
   return folded;
+};
+
+/** The key of a retraction in {@link LedgerState.retractions}: its identity and its `before`. */
+export const retractionKey = (retraction: Pick<Retraction, 'identity' | 'before'>): string =>
+  `${retraction.identity} @ ${retraction.before}`;
+
+/** What one retraction did on one ingestion. */
+export type RetractionResult = {
+  readonly identity: string;
+  readonly before: string;
+  /** The identity is not in the state (never tracked, or pruned): nothing to drop. */
+  readonly unknown: boolean;
+  readonly events: number;
+  readonly retriedPasses: number;
+};
+
+/**
+ * Drop the events `flake-ledger.json` retracts (in place): each event of a listed kind of the identity (aliases
+ * followed) whose pass completed before `before`, with the counts it fed: the identity's retried passes and its
+ * variants' event counts. Idempotent: an event once dropped is gone, so a later run drops nothing more.
+ *
+ * Retried passes count every `retry` event, also those the event cap ({@link maximumEvents}) or the age has evicted.
+ * Both evict the oldest, so while a retracted event is still held every evicted one is older than `before` too, and
+ * the retried passes left are exactly the `retry` events left. When every evicted event was such a `retry` (as many
+ * evicted events as evicted retried passes), the variants' event counts and `evictedExecution` markers are reset from
+ * the events left, so `flake-regression.ts` does not read a retracted event as the end of a stable run.
+ */
+export const applyRetractions = (
+  state: LedgerState,
+  retractions: readonly Retraction[],
+  options: { readonly now: Date; readonly aliases?: readonly Alias[] | undefined },
+): RetractionResult[] => {
+  const resolve = aliasResolver(options.aliases ?? []);
+  const results: RetractionResult[] = [];
+  for (const retraction of retractions) {
+    const id = resolve(retraction.identity);
+    const identity = state.identities[id];
+    const kinds = new Set<FlakeEventKind>(retraction.kinds);
+    const cutoff = Date.parse(retraction.before);
+    const dropped = identity?.events.filter((event) => kinds.has(event.kind) && Date.parse(event.at) < cutoff) ?? [];
+    const result = { identity: retraction.identity, before: retraction.before, unknown: identity === undefined };
+    if (!identity || dropped.length === 0) {
+      results.push({ ...result, events: 0, retriedPasses: 0 });
+      continue;
+    }
+    const left = identity.events.filter((event) => !dropped.includes(event));
+    const recorded = Object.values(identity.variants).reduce((sum, variant) => sum + variant.events, 0);
+    const evicted = Math.max(0, recorded - identity.events.length);
+    const evictedRetries = Math.max(
+      0,
+      identity.retriedPasses - identity.events.filter((event) => event.kind === 'retry').length,
+    );
+    const retriedPasses = kinds.has('retry')
+      ? left.filter((event) => event.kind === 'retry').length
+      : identity.retriedPasses;
+    const taken = identity.retriedPasses - retriedPasses;
+    const resetVariants = kinds.has('retry') && evicted === evictedRetries;
+    for (const [key, variant] of Object.entries(identity.variants)) {
+      const remaining = left.filter((event) => event.variant === key).length;
+      if (resetVariants) {
+        variant.events = remaining;
+        delete variant.evictedExecution;
+      } else {
+        variant.events = Math.max(remaining, variant.events - dropped.filter((event) => event.variant === key).length);
+      }
+    }
+    identity.retriedPasses = retriedPasses;
+    identity.events = left;
+    const key = retractionKey(retraction);
+    const record = state.retractions?.[key];
+    if (record) {
+      record.events += dropped.length;
+      record.retriedPasses += taken;
+    } else {
+      state.retractions = {
+        ...state.retractions,
+        [key]: {
+          identity: id,
+          kinds: [...retraction.kinds],
+          before: retraction.before,
+          reason: retraction.reason,
+          ...(retraction.issue === undefined ? {} : { issue: retraction.issue }),
+          applied: options.now.toISOString(),
+          events: dropped.length,
+          retriedPasses: taken,
+        },
+      };
+    }
+    results.push({ ...result, events: dropped.length, retriedPasses: taken });
+  }
+  return results;
 };
 
 /** A run to ingest, as the Actions API lists it, with the attempt it is at. */
@@ -1027,7 +1142,10 @@ export const confirmLineage = (state: LedgerState, candidate: LineageCandidate):
   return event;
 };
 
-/** Drop what has aged out: old ingested runs, stale open failures, old events, and identities quiet for 90 days. */
+/**
+ * Drop what has aged out: old ingested runs, stale open failures, old events, identities quiet for 90 days, and the
+ * notes of retractions whose identity has gone and that are 90 days old.
+ */
 export const pruneState = (state: LedgerState, now: Date): void => {
   const cutoff = (days: number): string => new Date(now.getTime() - days * dayMilliseconds).toISOString();
   const ingestedCutoff = cutoff(ingestedRetentionDays);
@@ -1047,6 +1165,14 @@ export const pruneState = (state: LedgerState, now: Date): void => {
     }
   }
   state.identities = Object.fromEntries(kept);
+  if (state.retractions) {
+    /* A retraction's note stays while its identity does, and at least as long as the events it dropped would have. */
+    state.retractions = Object.fromEntries(
+      Object.entries(state.retractions).filter(
+        ([, record]) => record.identity in state.identities || record.applied >= retentionCutoff,
+      ),
+    );
+  }
 };
 
 /** Events inside the identity's last `executions` executions. */

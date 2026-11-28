@@ -60,6 +60,7 @@ import {
   issueBody,
   issueTitle,
   planEntries,
+  proposalStands,
   pullRequestBody,
   pullRequestTitle,
   quarantinePath,
@@ -141,11 +142,15 @@ type Ref = { readonly ref: string; readonly object: { readonly sha: string } };
 type Pull = { readonly number: number; readonly state: string };
 type ComparedFile = { readonly filename: string; readonly status: string };
 
+/** Whether an entry a branch proposes in the `quarantine.json` at `path` still stands (`proposalStands`). */
+export type ProposalCheck = (path: string, entry: Readonly<Record<string, unknown>>) => boolean;
+
 /**
- * The `quarantine.json` files of every entry branch still in play: one with an open pull request, or with none yet.
- * A branch whose pull request was closed or merged holds nothing pending.
+ * The `quarantine.json` files of every entry branch still in play: one with an open pull request, or with none yet
+ * whose every proposed entry still stands (`stands`). A branch whose pull request was closed or merged holds nothing
+ * pending; neither does one left without a pull request that proposes from evidence the state no longer holds.
  */
-export const readPending = async (github: Client, base: string): Promise<QuarantineText[]> => {
+export const readPending = async (github: Client, base: string, stands?: ProposalCheck): Promise<QuarantineText[]> => {
   const repo = `/repos/${github.repository}`;
   const prefix = `refs/heads/${entryBranchPrefix}`;
   const listed = await github.get<Ref[]>(`${repo}/git/matching-refs/${prefix.slice('refs/'.length, -1)}`);
@@ -159,6 +164,11 @@ export const readPending = async (github: Client, base: string): Promise<Quarant
       `${repo}/pulls?state=all&per_page=10&head=${encodeURIComponent(`${owner}:${branch}`)}`,
     );
     if (pulls.some((pull) => pull.state === 'closed')) {
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a file or two per branch
+    const proposed = stands && pulls.length === 0 ? await proposedEntries(github, reference.object.sha) : [];
+    if (stands && proposed.some(({ path, entry }) => !stands(path, entry))) {
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- one compare per branch
@@ -718,17 +728,21 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
 };
 
 /**
- * The entries a branch's commit adds: those of its `quarantine.json` files that the commit it was built on lacks. A
- * returned entry keeps its first `expires` (FQ-9), so a proposal can expire sooner than 14 days after its push.
+ * The entries a branch's commit adds, with the `quarantine.json` each is in: those its files hold that the commit it
+ * was built on lacks. A returned entry keeps its first `expires` (FQ-9), so a proposal can expire sooner than 14 days
+ * after its push.
  */
-export const proposedEntries = async (github: Client, sha: string): Promise<Array<Record<string, unknown>>> => {
+export const proposedEntries = async (
+  github: Client,
+  sha: string,
+): Promise<Array<{ readonly path: string; readonly entry: Record<string, unknown> }>> => {
   const repo = `/repos/${github.repository}`;
   const commit = await github.get<{
     readonly parents?: ReadonlyArray<{ readonly sha: string }>;
     readonly files?: ReadonlyArray<{ readonly filename: string; readonly status: string }>;
   }>(`${repo}/commits/${sha}`);
   const parent = commit.parents?.[0]?.sha;
-  const added: Array<Record<string, unknown>> = [];
+  const added: Array<{ readonly path: string; readonly entry: Record<string, unknown> }> = [];
   for (const file of commit.files ?? []) {
     if (baseName(file.filename) !== 'quarantine.json' || file.status === 'removed') {
       continue;
@@ -742,7 +756,7 @@ export const proposedEntries = async (github: Client, sha: string): Promise<Arra
     const known = new Set(parseQuarantine(before).entries.map((entry) => JSON.stringify(entry)));
     for (const entry of parseQuarantine(after).entries) {
       if (typeof entry === 'object' && entry !== null && !known.has(JSON.stringify(entry))) {
-        added.push(entry as Record<string, unknown>);
+        added.push({ path: file.filename, entry: entry as Record<string, unknown> });
       }
     }
   }
@@ -752,10 +766,17 @@ export const proposedEntries = async (github: Client, sha: string): Promise<Arra
 /**
  * Open the pull request of every entry branch that has none: a run whose pull request failed, or a token that may not
  * open one, leaves the branch behind, and `readPending` holds its tests, so a later run with a token that may opens it
- * from the branch's own commit. Auto-merge stays with whoever reviews it: this run did not validate that tree. Returns
- * one line per branch.
+ * from the branch's own commit. Auto-merge stays with whoever reviews it: this run did not validate that tree. A branch
+ * with an entry that no longer stands on the ledger state (`stands`: its events were retracted, or left the entry
+ * rule's window) is never opened: its proposal is stale, and the plan proposes afresh from the state. Returns one line
+ * per branch.
  */
-export const reconcileEntryBranches = async (github: Client, base: string, today: string): Promise<string[]> => {
+export const reconcileEntryBranches = async (
+  github: Client,
+  base: string,
+  options: { readonly today: string; readonly stands?: ProposalCheck | undefined },
+): Promise<string[]> => {
+  const { today, stands } = options;
   const repo = `/repos/${github.repository}`;
   const prefix = `refs/heads/${entryBranchPrefix}`;
   const listed = await github.get<Ref[]>(`${repo}/git/matching-refs/${prefix.slice('refs/'.length, -1)}`);
@@ -782,8 +803,15 @@ export const reconcileEntryBranches = async (github: Client, base: string, today
       ? []
       : // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
         await proposedEntries(github, reference.object.sha);
-    if (tooOld || proposed.some((entry) => typeof entry['expires'] === 'string' && entry['expires'] < today)) {
+    if (tooOld || proposed.some(({ entry }) => typeof entry['expires'] === 'string' && entry['expires'] < today)) {
       outcome.push(`\`${branch}\` holds an expired proposal; it is not opened and reserves nothing.`);
+      continue;
+    }
+    const stale = stands ? proposed.filter(({ path, entry }) => !stands(path, entry)) : [];
+    if (stale.length > 0) {
+      outcome.push(
+        `\`${branch}\` proposes ${stale.length} of ${proposed.length} entries the ledger state no longer supports; it is not opened and reserves nothing.`,
+      );
       continue;
     }
     const [title = `test(root): Quarantine entries from ${branch}`, ...rest] = commit.message.split('\n');
@@ -881,8 +909,10 @@ const main = async (args: readonly string[]): Promise<number> => {
   const workspace = await readWorkspace(root);
   const registry = await readShadowRegistry(root);
   const shadowTargets = new Set(registry.rows.map((row) => `${row.project}:${row.target}`));
-  const reconciled = write ? await reconcileEntryBranches(github, values.base, values.today) : [];
-  const pending = offline ? [] : await readPending(github, baseSha);
+  // An entry branch is opened, and reserves its tests, only while each test it proposes still meets the entry rule.
+  const stands = proposalStands(state, workspace.projects, shadowTargets);
+  const reconciled = write ? await reconcileEntryBranches(github, values.base, { today: values.today, stands }) : [];
+  const pending = offline ? [] : await readPending(github, baseSha, stands);
   const returns = offline ? undefined : await readReturns(github, values.today);
   const planned = planEntries({
     state,

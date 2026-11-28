@@ -197,5 +197,27 @@
       "note": "Flaked in runs 44002930803, 44020818775. Owner: the operator; first responder: the flake-fixing agent, which fixes it at the cause by the expiry. No owner issue yet."
     }
   ],
-  "aliases": []
+  "aliases": [],
+  "retractions": [
+    {
+      "identity": "ui › app/routes/w.$workspace.$project/chat-workbench-dockview.test.tsx > workbench adapter record apply (A0.3) > I10: should not land a record apply computed before the person's edit over that edit",
+      "kinds": ["retry"],
+      "before": "2026-11-27T20:10:00Z",
+      "reason": "Recorded in error: before #2937 (b66e73f) the vitest-ci reporters recorded an it.fails test, which passes by failing, as a retried pass. Not a flake.",
+      "issue": 2874
+    },
+    {
+      "identity": "agent-host › src/node/node-event-log.test.ts > Node event log > the kernel writer lock > should admit a writer after the holding worker thread terminates",
+      "kinds": ["retry"],
+      "before": "2026-11-27T20:10:00Z",
+      "reason": "Recorded in error: before #2937 (b66e73f) the vitest-ci reporters recorded an it.fails test, which passes by failing, as a retried pass. Not a flake.",
+      "issue": 2875
+    },
+    {
+      "identity": "xstate-testing › src/inspect.test.ts > guardActors > should fail a test that leaves a dead letter untaken",
+      "kinds": ["retry"],
+      "before": "2026-11-27T20:10:00Z",
+      "reason": "Recorded in error: before #2937 (b66e73f) the vitest-ci reporters recorded an it.fails test, which passes by failing, as a retried pass. Not a flake."
+    }
+  ]
 }

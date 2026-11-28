@@ -10,7 +10,8 @@
 # The state is `ledger.json` on the `flake-ledger` branch, which only this workflow writes, through the Git data API:
 # each ingestion is one commit on the state it read, and the ref moves fast-forward only. It is evidence for the
 # weekly report (`ci-queue-health.yml`) and the quarantine entry rule below; nothing gates on it. Renamed tests are
-# joined through `aliases` in `scripts/src/flake-ledger.json` on `main`.
+# joined through `aliases` in `scripts/src/flake-ledger.json` on `main`, and events recorded in error are dropped
+# through its `retractions` (testing policy § 16.3).
 #
 # Each invocation catches up on every completed run of the last 72 hours it has not ingested, so a run the
 # concurrency group dropped (a pending run is replaced by a newer one) is ingested by the next, and the daily schedule

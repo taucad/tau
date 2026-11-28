@@ -3,9 +3,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { aliasProblems, ledgerProblems } from '#ci-flake-ledger.js';
+import { aliasProblems, ledgerProblems, retractionProblems } from '#ci-flake-ledger.js';
+import type { Retraction } from '#ci-flake-ledger.js';
 import {
   applyAliases,
+  applyRetractions,
   confirmLineage,
   emptyState,
   eventsInLast,
@@ -474,6 +476,183 @@ describe('the entry rule', () => {
     expect(meetsEntryRule(withEvents(300, [80, 150, 290]))).toBe(true);
     expect(meetsEntryRule(withEvents(300, [60, 150, 290]))).toBe(false);
     expect(meetsEntryRule(withEvents(1, [1]))).toBe(false);
+  });
+});
+
+describe('retractions', () => {
+  /** An `it.fails` test the reporter recorded as a retried pass on every execution before the fix (#2937). */
+  const fails = 'host › src/a.test.ts > store > should fail as expected';
+  const fixedAt = '2026-11-20T00:10:00Z';
+  const retraction: Retraction = {
+    identity: fails,
+    kinds: ['retry'],
+    before: fixedAt,
+    reason: 'Recorded in error: before #2937 the reporter recorded an it.fails test as a retried pass.',
+    issue: 2874,
+  };
+  /** One push run an hour from 11-15T00:00Z, the test's row in it, and its ingestion. */
+  const runAt = (n: number): string => new Date(Date.parse('2026-11-15T00:00:00Z') + n * 3_600_000).toISOString();
+  const ingest = (state: LedgerState, n: number, overrides: Partial<OutcomeRow> = {}): void => {
+    ingestRun(state, {
+      run: pushRun(2000 + n, sha(2000 + n), runAt(n).replace('.000Z', 'Z')),
+      rows: [row({ id: fails, run: 2000 + n, hash: String(n), ...overrides })],
+      artifacts: 1,
+      rejected: 0,
+    });
+  };
+  /** `count` retried passes from hour 0, then clean passes up to hour 130 (11-20T10:00Z, after the fix). */
+  const falseRetries = (count: number): LedgerState => {
+    const state = emptyState(now);
+    for (let n = 0; n < count; n += 1) {
+      ingest(state, n, { flaky: true, retryCount: 1, errors: ['Error: Expect test to fail'] });
+    }
+    for (let n = count; n <= 130; n += 1) {
+      ingest(state, n);
+    }
+    return state;
+  };
+
+  it('should drop retracted retries, with the retried passes the event cap had evicted, and note it in the state', () => {
+    const state = falseRetries(110);
+    expect(identity(state, fails)).toMatchObject({ retriedPasses: 110, executions: 131 });
+    expect(identity(state, fails).events).toHaveLength(100);
+    expect(identity(state, fails).variants['linux-x64']).toMatchObject({ events: 110, evictedExecution: 10 });
+    expect(meetsEntryRule(identity(state, fails))).toBe(true);
+
+    const later = new Date('2026-11-21T00:00:00Z');
+    expect(applyRetractions(state, [retraction], { now: later })).toEqual([
+      { identity: fails, before: fixedAt, unknown: false, events: 100, retriedPasses: 110 },
+    ]);
+
+    expect(identity(state, fails)).toMatchObject({ retriedPasses: 0, executions: 131, events: [] });
+    // Every evicted event was a retracted retry: the variant no longer remembers one.
+    expect(identity(state, fails).variants['linux-x64']?.evictedExecution).toBeUndefined();
+    expect(identity(state, fails).variants['linux-x64']).toMatchObject({ events: 0, executions: 131 });
+    expect(meetsEntryRule(identity(state, fails))).toBe(false);
+    expect(state.retractions).toEqual({
+      [`${fails} @ ${fixedAt}`]: {
+        identity: fails,
+        kinds: ['retry'],
+        before: fixedAt,
+        reason: retraction.reason,
+        issue: 2874,
+        applied: later.toISOString(),
+        events: 100,
+        retriedPasses: 110,
+      },
+    });
+    const text = serializeState(state);
+    expect(parseState(text)).toEqual(JSON.parse(text));
+    expect(text).toContain('"retractions"');
+
+    // A later ingestion drops nothing more and leaves the note as it was.
+    const noted = structuredClone(state.retractions);
+    expect(applyRetractions(state, [retraction], { now })).toEqual([
+      { identity: fails, before: fixedAt, unknown: false, events: 0, retriedPasses: 0 },
+    ]);
+    expect(state.retractions).toEqual(noted);
+  });
+
+  it('should keep a same-hash event and every event at or after the cut-off', () => {
+    const state = emptyState(now);
+    // A genuine failure, then its pass on the same hash: a same-hash event before the fix.
+    ingest(state, 0, { state: 'failed', hash: 'h', errors: ['Error: Expect test to fail'] });
+    ingest(state, 1, { hash: 'h' });
+    for (let n = 2; n < 10; n += 1) {
+      ingest(state, n, { flaky: true, retryCount: 1 });
+    }
+    // A retried pass after the cut-off (11-20T00:10Z) is not covered by the retraction.
+    ingest(state, 125, { flaky: true, retryCount: 1 });
+    ingest(state, 126);
+    expect(identity(state, fails).events.map((event) => event.kind)).toEqual([
+      'same-hash',
+      ...Array.from({ length: 9 }, () => 'retry'),
+    ]);
+
+    expect(applyRetractions(state, [retraction], { now })).toEqual([
+      { identity: fails, before: fixedAt, unknown: false, events: 8, retriedPasses: 8 },
+    ]);
+    expect(identity(state, fails).events.map((event) => [event.kind, event.at])).toEqual([
+      ['same-hash', '2026-11-15T01:00:00Z'],
+      ['retry', '2026-11-20T05:00:00Z'],
+    ]);
+    expect(identity(state, fails)).toMatchObject({ retriedPasses: 1, failures: 1 });
+    expect(identity(state, fails).variants['linux-x64']).toMatchObject({ events: 2 });
+    // Two events in the last 80 executions: the kept ones still count.
+    expect(meetsEntryRule(identity(state, fails))).toBe(true);
+  });
+
+  it('should keep the evicted marker when an evicted event was not a retracted retry', () => {
+    const state = emptyState(now);
+    ingest(state, 0, { state: 'failed', hash: 'h' });
+    ingest(state, 1, { hash: 'h' });
+    for (let n = 2; n < 110; n += 1) {
+      ingest(state, n, { flaky: true, retryCount: 1 });
+    }
+    // 109 events: the same-hash one and 8 retries were evicted.
+    expect(identity(state, fails).variants['linux-x64']).toMatchObject({ events: 109 });
+
+    applyRetractions(state, [retraction], { now });
+
+    expect(identity(state, fails)).toMatchObject({ retriedPasses: 0, events: [] });
+    // The evicted events' kinds are not known one by one: they stay counted, and the marker with them.
+    expect(identity(state, fails).variants['linux-x64']).toMatchObject({ events: 9, evictedExecution: 10 });
+  });
+
+  it('should follow an alias, and report a retraction whose identity is not in the state without changing it', () => {
+    const state = falseRetries(3);
+    const renamed = 'host › src/a.test.ts > store > should still fail as expected';
+    applyAliases(state, [{ from: fails, to: renamed }]);
+    const before = serializeState(state);
+
+    expect(applyRetractions(state, [{ ...retraction, identity: 'host › src/gone.test.ts > gone' }], { now })).toEqual([
+      { identity: 'host › src/gone.test.ts > gone', before: fixedAt, unknown: true, events: 0, retriedPasses: 0 },
+    ]);
+    expect(serializeState(state)).toBe(before);
+
+    expect(applyRetractions(state, [retraction], { now, aliases: [{ from: fails, to: renamed }] })).toEqual([
+      { identity: fails, before: fixedAt, unknown: false, events: 3, retriedPasses: 3 },
+    ]);
+    expect(identity(state, renamed)).toMatchObject({ retriedPasses: 0, events: [] });
+    expect(state.retractions?.[`${fails} @ ${fixedAt}`]?.identity).toBe(renamed);
+  });
+
+  it('should keep a retraction note while its identity is tracked or for 90 days', () => {
+    const state = falseRetries(3);
+    applyRetractions(state, [retraction], { now: new Date('2026-11-21T00:00:00Z') });
+    pruneState(state, new Date('2026-12-01T00:00:00Z'));
+    expect(Object.keys(state.retractions ?? {})).toHaveLength(1);
+    pruneState(state, new Date('2027-03-01T00:00:00Z'));
+    expect(state.identities).toEqual({});
+    expect(state.retractions).toEqual({});
+  });
+
+  it('should validate the retractions of flake-ledger.json', () => {
+    expect(retractionProblems([retraction])).toEqual([]);
+    expect(retractionProblems([{ identity: fails, kinds: ['retry'], before: fixedAt, reason: 'r' }])).toEqual([]);
+    const name = `flake-ledger.json retraction "${fails}"`;
+    expect(
+      ledgerProblems({
+        entries: [],
+        retractions: [
+          retraction,
+          retraction,
+          { ...retraction, identity: ' ', before: '2026-11-27T20:10:00Z' },
+          { ...retraction, before: '2026-11-27', kinds: [] },
+          { ...retraction, before: '2026-11-28T00:00:00Z', kinds: ['retry', 'retry'], reason: ' ', issue: 0 },
+          { ...retraction, before: '2026-11-29T00:00:00Z', kinds: ['flaky' as 'retry'] },
+        ],
+      }),
+    ).toEqual([
+      `${name}: listed twice with before ${fixedAt}`,
+      'flake-ledger.json: a retraction has an empty identity',
+      `${name}: kinds must list distinct event kinds of retry, same-hash, lineage`,
+      `${name}: before must be an ISO UTC time, such as 2026-11-27T20:10:00Z`,
+      `${name}: kinds must list distinct event kinds of retry, same-hash, lineage`,
+      `${name}: reason must say why the events are wrong`,
+      `${name}: issue must be an issue number`,
+      `${name}: kinds must list distinct event kinds of retry, same-hash, lineage`,
+    ]);
   });
 });
 

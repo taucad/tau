@@ -3,7 +3,7 @@ title: 'Testing Policy'
 description: 'Writing high-quality tests across the Tau monorepo. Assert observable behavior, error assertions, resource cleanup, mock factories, and async patterns. Covers Vitest, kernel tests, and API tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-11-27'
+updated: '2026-11-28'
 related:
   - docs/policy/react-testing-policy.md
   - docs/policy/typescript-policy.md
@@ -358,6 +358,7 @@ A flake is a pass and a failure of one test on the same inputs (one Nx task hash
 - **Entry.** Each entry names the test, owner, issue, class, quarantine date, expiry date and evidence. The ledger job opens the entry's pull request; it lands through the merge queue without a human when `validate-quarantine` passes. Until it lands, § 16.2 carries the test.
 - **Effect.** The quarantined test runs in the same job as before; its failure is printed, annotated and recorded. Only the task's verdict ignores it.
 - **Who edits it.** Only the ledger job adds, releases or expires entries; a fix never touches them (§ 16.5).
+- **Retraction.** A flake event recorded in error (a reporter defect, not a flake) is removed only by a `retractions` entry in `scripts/src/flake-ledger.json` naming the test, the event kinds, a cut-off time, the reason and the issue when one exists; the next ingestion drops it and notes the retraction in the ledger state. Nobody edits the `flake-ledger` branch by hand.
 
 | Bound                    | Value                                                       | When reached                                                         |
 | ------------------------ | ----------------------------------------------------------- | -------------------------------------------------------------------- |

@@ -285,10 +285,76 @@ export type Ledger = {
    * and the flake ledger's state (`ci-flake-ledger-state.ts`) folds the old history into the new identity.
    */
   readonly aliases?: readonly Alias[];
+  /**
+   * Flake events recorded in error, and why: the flake ledger's state (`ci-flake-ledger-state.ts`) drops each matching
+   * event on its next ingestion and records the retraction (testing policy § 16.3).
+   */
+  readonly retractions?: readonly Retraction[];
 };
 
 /** An old identity and the one it was renamed to (`flake-ledger.json` `aliases`). */
 export type Alias = { readonly from: string; readonly to: string };
+
+/** The kinds of flake event the ledger state records (`ci-flake-ledger-state.ts` `FlakeEventKind`). */
+export const flakeEventKinds = ['retry', 'same-hash', 'lineage'] as const;
+
+/**
+ * Events recorded in error (`flake-ledger.json` `retractions`): every event of one of `kinds` of `identity` whose pass
+ * completed before `before`. For a defect in the recording, such as a reporter bug, never for a flake that was fixed:
+ * a fixed flake is released by the ledger job (testing policy § 16.5).
+ */
+export type Retraction = {
+  /** A ledger identity: `<project> › <file> > … > <title>`. */
+  readonly identity: string;
+  readonly kinds: ReadonlyArray<(typeof flakeEventKinds)[number]>;
+  /** An ISO UTC time (`2026-11-27T20:10:00Z`): events at or after it are kept. */
+  readonly before: string;
+  /** Why the events are wrong, citing the fix. */
+  readonly reason: string;
+  /** The test's owner issue, when it has one. */
+  readonly issue?: number;
+};
+
+const isoTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u;
+
+/** Problems with the retractions: an empty identity or reason, a bad kind, time or issue, or one listed twice. */
+export const retractionProblems = (retractions: readonly Retraction[]): string[] => {
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  for (const retraction of retractions) {
+    const name = `flake-ledger.json retraction "${retraction.identity}"`;
+    if (typeof retraction.identity !== 'string' || retraction.identity.trim() === '') {
+      problems.push('flake-ledger.json: a retraction has an empty identity');
+    }
+    const kinds: readonly unknown[] = Array.isArray(retraction.kinds) ? retraction.kinds : [];
+    if (
+      kinds.length === 0 ||
+      new Set(kinds).size !== kinds.length ||
+      kinds.some((kind) => !(flakeEventKinds as readonly unknown[]).includes(kind))
+    ) {
+      problems.push(`${name}: kinds must list distinct event kinds of ${flakeEventKinds.join(', ')}`);
+    }
+    if (
+      typeof retraction.before !== 'string' ||
+      !isoTime.test(retraction.before) ||
+      Number.isNaN(Date.parse(retraction.before))
+    ) {
+      problems.push(`${name}: before must be an ISO UTC time, such as 2026-11-27T20:10:00Z`);
+    }
+    if (typeof retraction.reason !== 'string' || retraction.reason.trim() === '') {
+      problems.push(`${name}: reason must say why the events are wrong`);
+    }
+    if (retraction.issue !== undefined && (!Number.isSafeInteger(retraction.issue) || retraction.issue <= 0)) {
+      problems.push(`${name}: issue must be an issue number`);
+    }
+    const key = JSON.stringify([retraction.identity, retraction.before]);
+    if (seen.has(key)) {
+      problems.push(`${name}: listed twice with before ${retraction.before}`);
+    }
+    seen.add(key);
+  }
+  return problems;
+};
 
 /** Problems with the aliases: an empty or self alias, an old identity listed twice, or a cycle. */
 export const aliasProblems = (aliases: readonly Alias[]): string[] => {
@@ -327,7 +393,7 @@ const endOfDay = (day: string): number => Date.parse(`${day}T23:59:59.999Z`);
 
 /** Problems with the shape of a ledger: a bad date, owner or key, a duplicate, or an expiry too far out. */
 export const ledgerProblems = (ledger: Ledger): string[] => {
-  const problems: string[] = aliasProblems(ledger.aliases ?? []);
+  const problems: string[] = [...aliasProblems(ledger.aliases ?? []), ...retractionProblems(ledger.retractions ?? [])];
   const seen = new Set<string>();
   for (const entry of ledger.entries) {
     const name = `flake-ledger.json "${entry.key}"`;

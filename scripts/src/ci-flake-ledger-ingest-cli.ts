@@ -7,7 +7,8 @@
  * runs named by `--runs`), downloads each run's `test-outcomes-*` artifacts, counts their outcome rows into the state,
  * confirms lineage pairs through compares, counts the shadow rows' runs (FQ-13, `ci-shadow-rows.ts`; the rows are read
  * from the `project.json` files under `--root`), counts each quarantined test's gating executions toward its release
- * bar (FQ-9, `ci-flake-quarantine-release.ts`; the entries are the `quarantine.json` files under `--root`), and writes the state back as one commit on the branch. A run it did not
+ * bar (FQ-9, `ci-flake-quarantine-release.ts`; the entries are the `quarantine.json` files under `--root`), drops the
+ * events `flake-ledger.json` `retractions` names (`applyRetractions`), and writes the state back as one commit on the branch. A run it did not
  * reach (`--max-runs`, the request budget) is left for the next invocation, which looks back over the same hours, so
  * a `workflow_run` the concurrency group dropped is caught up by the next one or by the daily schedule.
  *
@@ -40,6 +41,7 @@ import { ledgerProblems } from '#ci-flake-ledger.js';
 import type { ComparedFile, Ledger } from '#ci-flake-ledger.js';
 import {
   applyAliases,
+  applyRetractions,
   confirmLineage,
   emptyState,
   ingestRun,
@@ -338,16 +340,30 @@ const main = async (args: readonly string[]): Promise<number> => {
     await rm(directory, { recursive: true, force: true });
   }
 
+  // After the runs, so an event a `--runs` backfill records again from before a retraction's cut-off is dropped too.
+  const retractions = applyRetractions(state, ledger.retractions ?? [], { now, aliases });
+  const retracted = retractions.filter((result) => result.events > 0);
   pruneState(state, now);
   retainShadowRows(state, shadow.rows);
   const droppedTracks = retainQuarantineTracks(state, quarantined);
-  if (!existing || ingested.length > 0 || folded.length > 0 || droppedTracks.length > 0 || openedTracks.length > 0) {
+  if (
+    !existing ||
+    ingested.length > 0 ||
+    folded.length > 0 ||
+    retracted.length > 0 ||
+    droppedTracks.length > 0 ||
+    openedTracks.length > 0
+  ) {
     state.updatedAt = now.toISOString();
     const message = [
       `chore(flake-ledger): Ingest ${ingested.length} CI runs`,
       '',
       ...(ingested.length > 0 ? [`Runs: ${ingested.join(', ')}.`] : []),
       ...(folded.length > 0 ? [`Folded by alias: ${folded.join('; ')}.`] : []),
+      ...retracted.map(
+        (result) =>
+          `Retracted ${result.events} events and ${result.retriedPasses} retried passes of ${result.identity} (before ${result.before}).`,
+      ),
       `Events: ${events.length}.`,
     ].join('\n');
     const written = await store.write(state, message);
@@ -360,6 +376,13 @@ const main = async (args: readonly string[]): Promise<number> => {
     renderShadowMarkdown(state, shadow),
     `This invocation: ${ingested.length} of ${pending.length} pending runs ingested, ${events.length} new events` +
       `${folded.length > 0 ? `, ${folded.length} renamed identities folded` : ''}.`,
+    ...retractions
+      .filter((result) => result.events > 0 || result.unknown)
+      .map((result) =>
+        result.unknown
+          ? `- Retraction of ${result.identity.replaceAll('`', "'")}: no such identity in the state; nothing dropped.`
+          : `- Retracted ${result.events} events and ${result.retriedPasses} retried passes of ${result.identity.replaceAll('`', "'")} (before ${result.before}).`,
+      ),
     ...events
       .slice(0, 50)
       .map(({ id, event }) => `- \`${event.kind}\` ${id.replaceAll('`', "'")} (${event.variant}, run ${event.run})`),

@@ -304,7 +304,8 @@ function WorkspaceFrameLanes({
             <div className='pointer-events-auto mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
               <div
                 className={cn(
-                  'flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md has-[textarea:focus-visible]:focus-outline',
+                  /* The anchor the phone frame's transcript ends at (`frameTranscriptClassName`). */
+                  'flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md [anchor-name:--frame-composer] has-[textarea:focus-visible]:focus-outline',
                   /* On a phone at rest (empty and unfocused) the box is the live phone composer's one row: Add, the
                    * input and Send on one line, the other controls hidden, as its collapsed composer draws it. */
                   'max-md:[&:not(:focus-within):has(textarea:placeholder-shown)]:min-h-0 max-md:[&:not(:focus-within):has(textarea:placeholder-shown)]:rounded-[calc(var(--spacing)*5.5+1px)]',
@@ -331,6 +332,19 @@ function WorkspaceFrameLanes({
     </>
   );
 }
+
+/**
+ * The phone frame's transcript: between the chat header's box and the composer box's top, as the live sheet lays its
+ * transcript out above its composer. A draft grows the box upwards, and the transcript's last bars go with it rather
+ * than sit behind the box (staging re-check 7). Without anchor positioning it keeps the resting composer's box.
+ */
+const frameTranscriptClassName = cn(
+  'mt-1 min-h-0 flex-1',
+  'supports-[anchor-name:--a]:fixed supports-[anchor-name:--a]:h-auto supports-[anchor-name:--a]:flex-none',
+  'supports-[anchor-name:--a]:top-[anchor(--frame-chat-header_bottom)] supports-[anchor-name:--a]:left-[anchor(--frame-chat-header_left)] supports-[anchor-name:--a]:right-[anchor(--frame-chat-header_right)]',
+  /* The box's top, less its own bottom margin's gap; the resting composer's box when the box is not drawn. */
+  'supports-[anchor-name:--a]:bottom-[anchor(--frame-composer_top,calc(var(--nav-offset)_+_3.375rem))]',
+);
 
 /**
  * The phone frame (blueprint P-h, § Editor frame, phone; A15c): the top bar with its controls' places, the viewer's
@@ -402,11 +416,11 @@ function PhoneFrame({ pathname }: { readonly pathname?: string }): React.JSX.Ele
           data-frame-chat='surface'
           className='hidden h-[calc(var(--frame-sheet-height,0px)_-_var(--spacing)*2_-_var(--nav-offset)_-_1px)] shrink-0 flex-col [[data-frame-tab=chat]_&]:flex'
         >
-          <div data-frame-chat='header' className='h-15 shrink-0' />
+          <div data-frame-chat='header' className='h-15 shrink-0 [anchor-name:--frame-chat-header]' />
           {departing === undefined ? (
-            <FrameWaitSkeleton shape='transcript' label='Chat' className='mt-1 min-h-0 flex-1' />
+            <FrameWaitSkeleton shape='transcript' label='Chat' className={frameTranscriptClassName} />
           ) : (
-            <DepartingFirstMessage text={departing} className='mt-1 min-h-0 flex-1' />
+            <DepartingFirstMessage text={departing} className={frameTranscriptClassName} />
           )}
           <div data-frame-chat='composer' className='mx-auto mb-2 h-11.5 w-[calc(100%_-_1rem)] max-w-xl shrink-0' />
         </div>

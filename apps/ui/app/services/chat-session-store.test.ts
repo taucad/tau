@@ -74,6 +74,7 @@ vi.mock('#machines/inspector.js', () => ({
   inspect: undefined,
 }));
 
+const { queuedSendOutcome } = await import('#lib/queued-send-outcome.js');
 const { ChatSessionStore, outboxWaitLineMilliseconds, presentMessages, reconnectingCueMilliseconds } =
   await import('#services/chat-session-store.js');
 const { selectVisibleChatError } = await import('#routes/w.$workspace.$project/chat-error.js');
@@ -4857,11 +4858,13 @@ describe('ChatSessionStore', () => {
       return { store, deps, session, hostCommand, unpublish };
     };
 
-    const queueAdmission = (chatId: string) =>
+    const queueAdmission = (chatId: string, hold?: { readonly started: () => void; readonly release: Promise<void> }) =>
       publishChatTurnAdmission(chatId, async (gesture) => {
         if (gesture.kind !== 'send' || gesture.requestId === undefined) {
           throw new Error('Expected queued send');
         }
+        hold?.started();
+        await hold?.release;
         const command = gesture.command ?? {
           type: 'start',
           commandId: gesture.requestId,
@@ -5591,6 +5594,31 @@ describe('ChatSessionStore', () => {
     });
 
     describe('a send with nothing running (chat UX F1, F2)', () => {
+      /* The queue write lands and the record's watcher wakes the outbox; the write's own promise returns only later. */
+      const watchedWrite = ({
+        store,
+        client,
+        path,
+        chatId,
+      }: {
+        readonly store: StoreType;
+        readonly client: MemoryClient;
+        readonly path: string;
+        readonly chatId: string;
+      }) => {
+        const persisted = Promise.withResolvers<void>();
+        const write = client.writeFile.bind(client);
+        let isFirst = true;
+        vi.spyOn(client, 'writeFile').mockImplementation(async (target, data) => {
+          await write(target, data);
+          if (isFirst && target === path) {
+            isFirst = false;
+            store.retryMessageQueue(chatId);
+            await persisted.promise;
+          }
+        });
+        return persisted;
+      };
       const pending = <T>() => {
         let resolve!: (value: T) => void;
         const promise = new Promise<T>((_resolve) => {
@@ -6022,6 +6050,95 @@ describe('ChatSessionStore', () => {
         }
       });
 
+      /* Staging re-check 7: the composer replays a send queued during an open with a signal. The queue write lands, the
+       * record's watcher wakes the outbox, and the outbox admits the send before the write's own promise returns; an
+       * Escape or an edit then reached `requestTurn` after the write, which took the entry out of the record while the
+       * outbox, under the delivery lock, sent it anyway. Past the write, the cancel takes the send back as Stop does. */
+      it('should take back a send the outbox is admitting, keep the draft and report it cancelled', async () => {
+        const chatId = 'composer_cancel_admitting';
+        const projectId = 'departing_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const admitting = Promise.withResolvers<void>();
+        const admitted = Promise.withResolvers<void>();
+        const unadmit = queueAdmission(chatId, { started: admitting.resolve, release: admitted.promise });
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          session.draftActorRef.send({ type: 'setDraftText', text: 'queued_during_open abc' });
+          const persisted = watchedWrite({
+            store,
+            client: deps.client,
+            path: chatMessageQueuePath(projectId, chatId),
+            chatId,
+          });
+          const cancel = new AbortController();
+
+          const requested = store.requestTurn(chatId, queuedGesture('queued_during_open'), { signal: cancel.signal });
+          await admitting.promise;
+          cancel.abort();
+          persisted.resolve();
+          /* Admission waits on the opening project (seconds on staging): the cancel settles first. */
+          await vi.waitFor(() => {
+            expect(queuedSendOutcome(cancel.signal)).toBeDefined();
+          });
+          admitted.resolve();
+          await requested;
+
+          await vi.waitFor(() => {
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({ items: [] });
+            expect(store.isStopping(chatId)).toBe(false);
+          });
+          await settle();
+          expect(hostCommand).not.toHaveBeenCalled();
+          /* Taken back, not failed: no queue error and no failed turn (locally the old removal failed the delivery). */
+          expect(session.messageQueueRef.getSnapshot().context.error).toBeUndefined();
+          expect(session.stateActorRef.getSnapshot().context.failureReason).toBeUndefined();
+          expect(queuedSendOutcome(cancel.signal)).toBe('cancelled');
+          expect(session.draftActorRef.getSnapshot().context.draftText).toBe('queued_during_open abc');
+          expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      it('should report a send its host was already handed as sent, and leave it to Stop', async () => {
+        const chatId = 'composer_cancel_handed';
+        const projectId = 'departing_project';
+        const { store, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        const handed = Promise.withResolvers<void>();
+        const answered = Promise.withResolvers<void>();
+        hostCommand.mockImplementationOnce(async (command) => {
+          handed.resolve();
+          await answered.promise;
+          return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 3 };
+        });
+        const unadmit = queueAdmission(chatId);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          const persisted = watchedWrite({
+            store,
+            client: deps.client,
+            path: chatMessageQueuePath(projectId, chatId),
+            chatId,
+          });
+          const cancel = new AbortController();
+
+          const requested = store.requestTurn(chatId, queuedGesture('already_handed'), { signal: cancel.signal });
+          persisted.resolve();
+          await handed.promise;
+          cancel.abort();
+          await requested;
+          answered.resolve();
+
+          expect(queuedSendOutcome(cancel.signal)).toBe('sent');
+          expect(hostCommand).toHaveBeenCalledOnce();
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
       it('should return a send its host refused without applying it to the composer, sent once (H-1)', async () => {
         const chatId = 'departing_host_refusal';
         const projectId = 'departing_project';
@@ -6234,6 +6351,43 @@ describe('ChatSessionStore', () => {
           expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
           expect(session.messageQueueRef.getSnapshot().context.items.map(({ id }) => id)).toEqual(['closing']);
           expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+        } finally {
+          unadmit();
+          unpublish();
+          store.release(chatId);
+        }
+      });
+
+      /* Staging re-check 7: a refused send kept in the outbox (the composer held other text) named its reason in the
+       * strip as the gateway's raw JSON, read aloud as a second alert. The chat's failure region already says why. */
+      it("should say a kept refused send wasn't sent without the failure's raw text", async () => {
+        const chatId = 'departing_refused_coded';
+        const projectId = 'departing_project';
+        const { store, session, unpublish } = await open(chatId, projectId);
+        const coded = JSON.stringify({
+          category: 'auth',
+          title: 'Authentication Error',
+          message: 'Sign in to use Opus 5.5.',
+          code: 'AUTH_REQUIRED',
+        });
+        let refuse: (error: Error) => void = () => undefined;
+        const refusal = new Promise<never>((_resolve, reject) => {
+          refuse = reject;
+        });
+        const unadmit = publishChatTurnAdmission(chatId, async () => refusal);
+        try {
+          publishLogRows(store, chatId, [...runningRows('old'), lifecycleRow(2, 'completed', 'old')]);
+          await store.requestTurn(chatId, queuedGesture('refused_coded'));
+          await vi.waitFor(() => {
+            expect(session.stateActorRef.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
+          });
+          session.draftActorRef.send({ type: 'setDraftText', text: 'refused_coded abc' });
+          refuse(new Error(coded));
+          await vi.waitFor(() => {
+            expect(session.messageQueueRef.getSnapshot().context.error).toBeDefined();
+          });
+          expect(session.stateActorRef.getSnapshot().context.failureReason).toContain('Authentication Error');
+          expect(session.messageQueueRef.getSnapshot().context.error).toBe('This message wasn’t sent.');
         } finally {
           unadmit();
           unpublish();

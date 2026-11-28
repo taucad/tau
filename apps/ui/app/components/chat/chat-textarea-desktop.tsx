@@ -48,6 +48,7 @@ import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components
 import { ChatDropOverlay, useChatDropZone } from '#components/chat/chat-drop-zone.js';
 import type { ChatDragEvent } from '#components/chat/chat-drop-zone.js';
 import type { DraftAttachment, PendingDraftImage } from '@taucad/chat-ui/hooks/draft.machine';
+import { queuedSendOutcome } from '#lib/queued-send-outcome.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
 import { noteBrowserComposerFocused } from '#services/agent-host-client.js';
@@ -399,8 +400,11 @@ export const ChatTextareaDesktop = memo(function ({
   /* P4: Enter pressed in the native input before this existed is one send, made once the editor holds the adopted
    * text and sending is permitted (below). Any edit cancels it, as one in the native input would. */
   const queuedSubmitRef = useRef(earlyInput?.submitQueued === true);
-  /* The replay of that send while it is on its way to the chat; aborting it cancels the send. */
+  /* The replay of that send while it is on its way to the chat; aborting it asks the chat to cancel the send, which it
+   * does only while no host has been handed it (`queuedSendOutcome`). */
   const replayingRef = useRef<AbortController | undefined>(undefined);
+  /* The replay Escape asked to cancel: its cancellation is said once the chat confirms it (staging re-check 7). */
+  const escapedReplayRef = useRef<AbortController | undefined>(undefined);
   /* While it is, the submit it runs is in flight, and the editor stays the person's: the send waits on the opening
    * project for seconds, and they can still cancel it, by Escape or an edit (staging re-check 6). */
   const [isReplayingQueuedSend, setIsReplayingQueuedSend] = useState(false);
@@ -422,11 +426,15 @@ export const ChatTextareaDesktop = memo(function ({
   }, []);
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
-      /* An edit cancels the queued send, also while its replay is on its way: the text stays in the draft. */
+      /* An edit cancels the queued send, also while its replay is on its way: the text stays in the draft. A replay
+       * stays shown as queued until the chat has settled it, since it may already have gone. */
       const replaying = replayingRef.current;
-      replayingRef.current = undefined;
-      replaying?.abort();
-      cancelQueuedSubmit();
+      if (replaying === undefined) {
+        cancelQueuedSubmit();
+      } else {
+        replaying.abort();
+        escapedReplayRef.current = undefined;
+      }
       setIsQueuedSendCancelled(false);
       unconfirmedTextsRef.current.push(content.text);
       setDraftText(content.text);
@@ -810,6 +818,13 @@ export const ChatTextareaDesktop = memo(function ({
         }
         setIsReplayingQueuedSend(false);
         setIsQueuedSubmitShown(false);
+        /* Said only when the chat took it back, or it never reached the chat; a send already on its way is not
+         * called cancelled, and Stop is the person's then. */
+        const outcome = queuedSendOutcome(replaying.signal) ?? (replaying.signal.aborted ? 'cancelled' : 'sent');
+        if (escapedReplayRef.current === replaying) {
+          escapedReplayRef.current = undefined;
+          setIsQueuedSendCancelled(outcome === 'cancelled');
+        }
       }
     };
     void replay();
@@ -830,9 +845,15 @@ export const ChatTextareaDesktop = memo(function ({
         return;
       }
       const replaying = replayingRef.current;
-      if (queuedSubmitRef.current || replaying !== undefined) {
-        replayingRef.current = undefined;
-        replaying?.abort();
+      if (replaying !== undefined) {
+        /* The chat decides: the status speaks once the replay settles, and only if it was taken back. */
+        if (!replaying.signal.aborted) {
+          escapedReplayRef.current = replaying;
+          replaying.abort();
+        }
+        return;
+      }
+      if (queuedSubmitRef.current) {
         cancelQueuedSubmit();
         setIsQueuedSendCancelled(true);
       }

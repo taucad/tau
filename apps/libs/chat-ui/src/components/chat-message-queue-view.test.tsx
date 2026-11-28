@@ -145,6 +145,24 @@ describe('queued message adornment', () => {
     rerender(<ChatMessageQueueView {...props} items={props.items} sendingId='one' />);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
+  /* Staging re-check 7: a refused send's notice was a second alert beside the chat's own failure region. */
+  it("should not alert an outbox error the chat's failure region already says, keeping its Retry", async () => {
+    const onRetry = vi.fn();
+    const user = userEvent.setup();
+    render(<ChatMessageQueueView {...fixture({ error: 'This message wasn’t sent.', onRetry })} isErrorAnnounced />);
+
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText('This message wasn’t sent.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it('should alert an outbox error nothing else says', () => {
+    render(<ChatMessageQueueView {...fixture({ error: 'This message wasn’t sent. Try again.' })} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('This message wasn’t sent. Try again.');
+  });
+
   it('should make uncertain deliveries immutable and expose a retry action', async () => {
     const user = userEvent.setup();
     const props = fixture({ sendingId: 'one', error: 'Waiting for acknowledgement' });

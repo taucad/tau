@@ -52,6 +52,8 @@ import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import { waitUnlessGone } from '@taucad/ui-core/lib/xstate.lib';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { chatReadReporter } from '#lib/chat-read-reporting.js';
+import { settleQueuedSend } from '#lib/queued-send-outcome.js';
+import type { QueuedSendOutcome } from '#lib/queued-send-outcome.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type {
   ChatRequest,
@@ -184,7 +186,17 @@ export const isDocumentActive = (): boolean =>
  *
  * @public
  */
-export type StopOrigin = 'stop-button' | 'stop-shortcut' | 'close-chat' | 'new-turn' | 'project-close';
+export type StopOrigin =
+  | 'stop-button'
+  | 'stop-shortcut'
+  | 'close-chat'
+  | 'new-turn'
+  | 'project-close'
+  /* The composer cancelled a send it replays (Escape or an edit) after the send reached the outbox. */
+  | 'composer-cancel';
+
+/** What a send taken back becomes: offered back to the composer (Stop), or dropped, since the composer holds it. */
+type WithdrawalDisposition = 'offer' | 'drop';
 
 /* Renderer console reaches the desktop log, where it lines up with the ledger's cancel row by command id. */
 const logStop = (command: HostCommand, origin: StopOrigin | undefined): void => {
@@ -2254,6 +2266,7 @@ export class ChatSessionStore {
     /* Read anew at each step: the person can cancel while any of the awaits below is pending. */
     const isCancelled = (): boolean => options?.signal?.aborted === true;
     if (isCancelled()) {
+      settleQueuedSend(options?.signal, 'cancelled');
       return;
     }
     /* Set by the write when it queued this send (a holder: the write's callback runs inside the await). */
@@ -2270,15 +2283,24 @@ export class ChatSessionStore {
       return { ...current, items: [...current.items, item] };
     });
     if (isCancelled()) {
-      /* Cancelled after its write and before the queue was woken: take it out again, as an unsent entry's removal. */
-      if (queuedHere.value) {
-        record = await session.messageQueueStore.update((current) => ({
-          ...current,
-          items: current.items.filter((entry) => entry.id !== item.id),
-        }));
-        this.#loadOutbox(session, record);
+      if (!queuedHere.value) {
+        settleQueuedSend(options?.signal, 'cancelled');
+        return;
       }
-      return;
+      /* Cancelled after its write. The write is the outbox's as soon as it lands (its watcher wakes delivery before this
+       * await returns), so the entry is taken back as Stop takes back a send no host has been handed, or under the
+       * delivery lock while it is still unsent; a plain removal raced a delivery already under way (staging
+       * re-check 7). Past that, it went: the page never says it was cancelled. */
+      this.#loadOutbox(session, record);
+      const outcome = await this.#takeBackWrittenSend(session, item.id);
+      settleQueuedSend(options?.signal, outcome);
+      if (outcome === 'cancelled') {
+        return;
+      }
+      record = session.outboxRecord ?? record;
+    } else {
+      /* Past here a cancel no longer reaches the send. */
+      settleQueuedSend(options?.signal, 'sent');
     }
     /* The thread or the strip shows it from the write on, even while a delivery elsewhere holds the outbox. */
     this.#loadOutbox(session, record);
@@ -2605,8 +2627,12 @@ export class ChatSessionStore {
     }
     /* Only the person's own Stop takes a send back; closing a chat or a project, or a new turn, lets it go out. */
     const personal = origin === 'stop-button' || origin === 'stop-shortcut';
-    if (personal && !session.commandInFlight && this.#withdrawDepartingSend(session, origin)) {
-      return;
+    if (personal && !session.commandInFlight) {
+      const withdrawal = this.#withdrawDepartingSend(session, origin);
+      if (withdrawal !== undefined) {
+        void withdrawal;
+        return;
+      }
     }
     /* A send its host refused with a wait never ran: Stop takes it back between its re-sends. */
     if (personal && !session.commandInFlight && session.hostWait !== undefined) {
@@ -3418,7 +3444,9 @@ export class ChatSessionStore {
     return {
       items: current.items,
       status: 'blocked',
-      error: reason === undefined ? 'This message wasn’t sent. Try again.' : `This message wasn’t sent: ${reason}`,
+      /* The chat's failure region says why (with the parsed failure, once): the strip names only what did not happen.
+       * The reason is the failure as recorded, a coded one as raw JSON (staging re-check 7). */
+      error: reason === undefined ? 'This message wasn’t sent. Try again.' : 'This message wasn’t sent.',
     };
   }
 
@@ -3671,12 +3699,20 @@ export class ChatSessionStore {
    * started instead, so the request is never both sent and back in the composer. A send whose command is already
    * prepared or in flight is not this: it is stopped like any run.
    *
-   * @returns `true` when the Stop was this, so no run is cancelled now.
+   * @param session - The chat.
+   * @param origin - The gesture that asked.
+   * @param disposition - Whether the send goes back to the composer (Stop) or is dropped (the composer holds it).
+   * @returns The withdrawal, settling to what became of the send, or `undefined` when the Stop was not this, so a run
+   *   is cancelled instead.
    */
-  #withdrawDepartingSend(session: InternalSession, origin: StopOrigin): boolean {
+  #withdrawDepartingSend(
+    session: InternalSession,
+    origin: StopOrigin,
+    disposition: WithdrawalDisposition = 'offer',
+  ): Promise<QueuedSendOutcome> | undefined {
     const { departing } = session;
     if (departing === undefined || departing.command !== undefined || session.stop?.withdrawing !== undefined) {
-      return false;
+      return undefined;
     }
     const snapshot = session.stateActorRef.getSnapshot();
     const held = snapshot.context.pendingGesture;
@@ -3686,7 +3722,7 @@ export class ChatSessionStore {
       (held.queueId ?? held.message.id) === departing.id;
     /* Past admission the command is being prepared: only a cancel can stop it now. */
     if (!admitting && (isLive(snapshot) || session.commandInFlight)) {
-      return false;
+      return undefined;
     }
     logFacts('info', '[ChatSessionStore] queued send withdrawn', {
       chatId: session.chatId,
@@ -3705,8 +3741,47 @@ export class ChatSessionStore {
     }
     this.#refreshDeparting(session);
     this.#chatTopics.get(session.chatId)?.emit();
-    void this.#finishWithdrawal(session, departing);
-    return true;
+    return this.#finishWithdrawal(session, departing, { disposition });
+  }
+
+  /**
+   * Take back a send the composer cancelled after its queue write: as Stop takes back the departing send, or, for one
+   * still queued behind other work, by removing it under the delivery lock while it is unsent. The composer kept its
+   * text, so nothing is offered back.
+   *
+   * @returns `cancelled` when no host was handed it, else `sent`.
+   */
+  async #takeBackWrittenSend(session: InternalSession, id: string): Promise<QueuedSendOutcome> {
+    this.#refreshDeparting(session);
+    if (session.departing?.id === id) {
+      return (await this.#withdrawDepartingSend(session, 'composer-cancel', 'drop')) ?? 'sent';
+    }
+    /* A holder: the write's callback runs inside the await. */
+    const taken = { removed: false };
+    try {
+      const after = await session.messageQueueStore.exclusive(async () =>
+        session.messageQueueStore.update((current) => {
+          const entry = current.items.find((candidate) => candidate.id === id);
+          if (entry === undefined || entry.command !== undefined || entry.steer !== undefined) {
+            return current;
+          }
+          taken.removed = true;
+          return { ...current, items: current.items.filter((candidate) => candidate.id !== id) };
+        }),
+      );
+      if (this.#sessions.get(session.chatId) === session) {
+        this.#loadOutbox(session, after);
+      }
+    } catch (error) {
+      console.warn('[ChatSessionStore] a cancelled send could not be taken back', session.chatId, error);
+      return 'sent';
+    }
+    logFacts('info', '[ChatSessionStore] queued send cancelled', {
+      chatId: session.chatId,
+      messageId: id,
+      removed: taken.removed,
+    });
+    return taken.removed ? 'cancelled' : 'sent';
   }
 
   /**
@@ -3760,7 +3835,7 @@ export class ChatSessionStore {
     session.stop = { origin, withdrawing: entry.id, target: wait.runId, sent: undefined, cancelId: undefined };
     this.#refreshDeparting(session);
     this.#chatTopics.get(session.chatId)?.emit();
-    await this.#finishWithdrawal(session, entry, wait);
+    await this.#finishWithdrawal(session, entry, { waited: wait });
   }
 
   /**
@@ -3768,55 +3843,79 @@ export class ChatSessionStore {
    * stays at the head of the outbox, held, and so does the work queued behind it: as behind a stopped run, that goes
    * out only with Send now. Then the composer is offered it ({@link ChatSessionStore.#offerToComposer}).
    */
-  async #finishWithdrawal(session: InternalSession, departing: QueuedChatMessage, waited?: HostWait): Promise<void> {
+  async #finishWithdrawal(
+    session: InternalSession,
+    departing: QueuedChatMessage,
+    {
+      waited,
+      disposition = 'offer',
+    }: { readonly waited?: HostWait; readonly disposition?: WithdrawalDisposition } = {},
+  ): Promise<QueuedSendOutcome> {
     let record: ChatMessageQueueRecord;
     try {
       record = await session.messageQueueStore.exclusive(async () =>
-        session.messageQueueStore.update((current) =>
-          current.items.some((item) => item.id === departing.id && this.#unsent(session, item, waited))
-            ? {
-                ...current,
-                items: current.items.map((item) =>
-                  item.id === departing.id
-                    ? parkSend(unprepared(item))
-                    : item.command === undefined && item.steer === undefined
-                      ? parkSend(item)
-                      : item,
-                ),
-              }
-            : current,
-        ),
+        session.messageQueueStore.update((current) => {
+          if (!current.items.some((item) => item.id === departing.id && this.#unsent(session, item, waited))) {
+            return current;
+          }
+          /* Dropped: the composer kept the text, and the work queued behind it goes on as it would have. */
+          if (disposition === 'drop') {
+            return { ...current, items: current.items.filter((item) => item.id !== departing.id) };
+          }
+          return {
+            ...current,
+            items: current.items.map((item) =>
+              item.id === departing.id
+                ? parkSend(unprepared(item))
+                : item.command === undefined && item.steer === undefined
+                  ? parkSend(item)
+                  : item,
+            ),
+          };
+        }),
       );
     } catch (error) {
       /* Nothing changed: the Stop did not land, so it is let go and offered again, and the send goes on as it was. */
       console.warn('[ChatSessionStore] a withdrawn send could not be held', session.chatId, error);
       this.#releaseStop(session);
       this.#refreshDeparting(session);
-      return;
+      return 'sent';
     }
     if (this.#sessions.get(session.chatId) === session) {
       this.#loadOutbox(session, record);
     }
     const kept = record.items.find((item) => item.id === departing.id);
-    if (kept?.held === true && kept.command === undefined) {
+    let outcome: QueuedSendOutcome = 'sent';
+    if (disposition === 'drop' && kept === undefined && record.afterRunId !== departing.requestId) {
+      /* Taken out under the delivery lock before any host was handed it. */
+      if (waited !== undefined) {
+        this.#letGoOfWaitingTurn(session, waited);
+      }
+      this.#releaseStop(session);
+      outcome = 'cancelled';
+    } else if (disposition === 'offer' && kept?.held === true && kept.command === undefined) {
       if (waited !== undefined) {
         this.#letGoOfWaitingTurn(session, waited);
       }
       await this.#offerToComposer(session, kept);
       this.#releaseStop(session);
-    } else if (kept !== undefined || record.afterRunId === departing.requestId) {
+      outcome = 'cancelled';
+    } else if (disposition === 'offer' && (kept !== undefined || record.afterRunId === departing.requestId)) {
       /* Another page prepared or handed it over first: its run is the one to stop, whenever the log has it. */
       if (session.stop?.withdrawing === departing.id) {
         session.stop = { ...session.stop, withdrawing: undefined };
       }
       void this.#cancelSessionRun(session, departing.requestId);
     } else {
-      /* Removed from another page: nothing is left to stop. */
+      /* Removed from another page, or (dropped) already handed over: nothing is left to stop here. The composer's
+       * cancel says nothing then, and Stop stays the person's. */
       this.#releaseStop(session);
     }
+    this.#refreshDeparting(session);
     if (session.messageQueueRef.getSnapshot().status === 'active') {
       session.messageQueueRef.send({ type: 'refresh' });
     }
+    return outcome;
   }
 
   /**

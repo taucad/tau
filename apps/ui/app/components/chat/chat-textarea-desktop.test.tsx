@@ -9,6 +9,7 @@ import type { AcpSessionData } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { PaintedSendVerdict } from '#components/chat/chat-textarea-desktop.js';
+import { settleQueuedSend } from '#lib/queued-send-outcome.js';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
@@ -1197,17 +1198,47 @@ describe('ChatTextareaDesktop draft rehydration', () => {
 
     fireEvent.keyDown(box!, { key: 'Escape' });
 
-    expect(handleSubmit.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
+    const signal = handleSubmit.mock.calls[0]?.[2]?.signal;
+    expect(signal?.aborted).toBe(true);
+    /* The chat decides (staging re-check 7): until it has, the send stays shown as queued and nothing is said. */
+    expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    await act(async () => {
+      settleQueuedSend(signal, 'cancelled');
+      handed.resolve();
+      await handed.promise;
+    });
     expect(view.container.querySelector('[data-queued-send]')).toBeNull();
     expect(screen.getByRole('status')).toHaveTextContent('Send cancelled.');
     const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
     expect(editor!.getText()).toBe('Make a bracket.');
+    expect(handleSubmit).toHaveBeenCalledOnce();
+  });
+
+  /* Staging re-check 7: under load the chat had already taken the send when Escape came, and the page said "Send
+   * cancelled." and then sent it. A send the chat reports as gone is never called cancelled. */
+  it('should say nothing for a send the chat reports as already gone', async () => {
+    const handed = Promise.withResolvers<void>();
+    const handleSubmit = vi.fn(
+      async (_text?: string, _references?: readonly CadReference[], _options?: Readonly<{ signal?: AbortSignal }>) =>
+        handed.promise,
+    );
+    const view = renderComposer('Make a bracket.', codexSession, { earlyInput: queuedEarlyInput, handleSubmit });
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalledOnce();
+    });
+    const box = view.container.querySelector('[data-queued-send]')!;
+    const signal = handleSubmit.mock.calls[0]?.[2]?.signal;
+
+    fireEvent.keyDown(box, { key: 'Escape' });
     await act(async () => {
+      settleQueuedSend(signal, 'sent');
       handed.resolve();
       await handed.promise;
     });
-    expect(handleSubmit).toHaveBeenCalledOnce();
-    expect(screen.getByRole('status')).toHaveTextContent('Send cancelled.');
+
+    expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
   });
 
   /* Staging re-check 6: the replay's submit locked the editor (`isSubmitting`) as it adopted the focused input, so it
@@ -1252,13 +1283,15 @@ describe('ChatTextareaDesktop draft rehydration', () => {
 
       fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
 
-      expect(handleSubmit.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
-      expect(screen.getByRole('status')).toHaveTextContent('Send cancelled.');
-      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+      const signal = handleSubmit.mock.calls[0]?.[2]?.signal;
+      expect(signal?.aborted).toBe(true);
       await act(async () => {
+        settleQueuedSend(signal, 'cancelled');
         handed.resolve();
         await handed.promise;
       });
+      expect(screen.getByRole('status')).toHaveTextContent('Send cancelled.');
+      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
       expect(handleSubmit).toHaveBeenCalledOnce();
       expect(editor.editor!.getText()).toBe('Make a bracket.');
       view.unmount();
@@ -1276,12 +1309,18 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       });
 
       expect(setDraftText).toHaveBeenLastCalledWith('Make a bracket. Twice');
-      expect(handleSubmit.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
-      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+      const signal = handleSubmit.mock.calls[0]?.[2]?.signal;
+      expect(signal?.aborted).toBe(true);
+      /* Queued until the chat settles it (staging re-check 7: the mark went while the send still went out). */
+      expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
       await act(async () => {
+        settleQueuedSend(signal, 'cancelled');
         handed.resolve();
         await handed.promise;
       });
+      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+      /* An edit's cancellation is not said, as in the native input. */
+      expect(screen.getByRole('status')).toBeEmptyDOMElement();
       view.unmount();
     });
   });

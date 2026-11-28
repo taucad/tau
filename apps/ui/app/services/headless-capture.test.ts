@@ -172,6 +172,25 @@ describe('headless capture adapter', () => {
     });
   });
 
+  it('draws a pin picture on the light background, with no label, axes or scale bar', async () => {
+    const exportImage = vi.fn<ExportImage>(async (_job) => [webp(1600, 900)]);
+
+    await captureSettledCadImages({
+      cadSnapshot: snapshot(gltf),
+      cameraState,
+      imageService: { export: exportImage },
+      recipe: { purpose: 'pin', mode: 'current' },
+    });
+
+    const job = exportImage.mock.calls[0]![0];
+    if (job.sourceFormat !== 'glb') {
+      throw new Error('Expected a GLB job');
+    }
+    expect(job.exportOptions).toMatchObject({ background: '#fafafa' });
+    expect(job.exportOptions).not.toHaveProperty('label');
+    expect(job.exportOptions).not.toHaveProperty('axes');
+  });
+
   it.each([
     ['x', [1, 0, 0]],
     ['y', [0, 1, 0]],

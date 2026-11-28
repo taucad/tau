@@ -507,6 +507,13 @@ describe('WorkspaceFrame', () => {
     expect(chat.contains(shapes[0]!)).toBe(true);
     expect(chat.querySelector('[data-frame-chat=header]')?.className).toContain('h-15');
     expect(chat.querySelector('[data-frame-chat=composer]')?.className).toContain('h-11.5');
+    /* Staging re-check 7: a draft grows the composer box upwards, and the live transcript re-lays above it (4 bars to 3,
+     * or 1 with two lines); the frame's kept 4, the last behind the box. Its transcript ends at the box's top. */
+    expect(chat.querySelector('[data-frame-chat=header]')?.className).toContain('[anchor-name:--frame-chat-header]');
+    expect(shapes[0]!.className).toContain(
+      'supports-[anchor-name:--a]:bottom-[anchor(--frame-composer_top,calc(var(--nav-offset)_+_3.375rem))]',
+    );
+    expect(shapes[0]!.className).toContain('supports-[anchor-name:--a]:top-[anchor(--frame-chat-header_bottom)]');
     expect(phone!.innerHTML).not.toMatch(/fade-in|slide-in|animate-in/u);
     const sheet = phone!.querySelector<HTMLElement>('[data-frame-part=sheet]')!;
     expect(sheet.className).toContain('[display:var(--frame-sheet-display,none)]');
@@ -555,6 +562,8 @@ describe('WorkspaceFrame', () => {
     /* At rest it is the live phone composer's one row, so nothing moves at the hand-over. */
     const box = screen.getByRole('textbox', { name: 'Chat message' }).closest('.rounded-2xl')!;
     expect(box.className).toContain('max-md:[&:not(:focus-within):has(textarea:placeholder-shown)]:min-h-0');
+    /* The phone frame's transcript ends at this box's top, so a draft that grows it moves the bars, as live. */
+    expect(box.className).toContain('[anchor-name:--frame-composer]');
     expect(box.className).toContain(
       'max-md:[&:not(:focus-within):has(textarea:placeholder-shown)_[data-slot=composer-bar]]:-mt-6.5',
     );

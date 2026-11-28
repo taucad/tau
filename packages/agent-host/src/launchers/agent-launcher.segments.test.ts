@@ -1934,7 +1934,7 @@ describe('a chat continued on a second device', () => {
       const after = rowsOf(await readFile(ownLog(root), 'utf8')).slice(before);
       expect(after.filter((row) => row.type !== 'run.heartbeat')).toEqual([]);
       await rm(unreadable, { recursive: true });
-      await expect(launcher.execute(approve)).resolves.toMatchObject({ status: 'applied' });
+      await expect(sendOnceSettled(launcher, approve)).resolves.toMatchObject({ status: 'applied' });
     });
 
     /*
@@ -1995,7 +1995,7 @@ describe('a chat continued on a second device', () => {
       );
 
       approved = true;
-      const approval = await launcher.execute({
+      const approval = await sendOnceSettled(launcher, {
         type: 'resolve-interrupt',
         commandId: key(),
         payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },

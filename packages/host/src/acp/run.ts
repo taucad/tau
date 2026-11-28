@@ -20,7 +20,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -161,7 +161,15 @@ export type AcpExternalAgentPortOptions = {
  */
 const skillLayouts = ['.agents/skills', '.claude/skills'] as const;
 
-const publishSystemSkills = async (
+/**
+ * Publish the host's system skill bundles once per content version, under the config directory.
+ *
+ * @param bundles - The bundles to publish.
+ * @param signal - Aborts the publication.
+ * @returns The published root, or `undefined` when there is nothing to publish.
+ * @internal
+ */
+export const publishSystemSkills = async (
   bundles: readonly HostSystemSkillBundle[] | undefined,
   signal: AbortSignal,
 ): Promise<{ readonly root: string } | undefined> => {
@@ -217,7 +225,17 @@ const publishSystemSkills = async (
     try {
       await rename(stagingRoot, root);
     } catch (error) {
-      if (!isRecord(error) || (error['code'] !== 'EEXIST' && error['code'] !== 'ENOTEMPTY')) {
+      /* Windows refuses to rename a directory onto an existing one with EPERM, not ENOTEMPTY. */
+      const published =
+        isRecord(error) &&
+        (error['code'] === 'EEXIST' ||
+          error['code'] === 'ENOTEMPTY' ||
+          (error['code'] === 'EPERM' &&
+            (await stat(root).then(
+              (entry) => entry.isDirectory(),
+              () => false,
+            ))));
+      if (!published) {
         throw error;
       }
       for (const [path, fingerprint] of verified) {

@@ -15,7 +15,7 @@
  */
 
 import { lstatSync, readdirSync, watch } from 'node:fs';
-import type { FSWatcher } from 'node:fs';
+import type { Dirent, FSWatcher } from 'node:fs';
 import { join, sep } from 'node:path';
 
 /** A running tree watch. @public */
@@ -79,7 +79,14 @@ const watchTreeNatively = (root: string, listener: TreeWatchListener): TreeWatch
       fail(rootGone(root));
       return;
     }
-    listener.change(filename?.split(sep).join('/'));
+    const path = filename?.split(sep).join('/');
+    listener.change(path);
+    /* Windows reports a directory moved in from elsewhere as that one name, never the entries it brings with it
+     * (windows-2025, job 140661874260: `moved` without `moved/nested` or `moved/nested/a.ts`), so each is reported
+     * here, as the Linux watch reports a directory it finds. */
+    if (process.platform === 'win32' && event === 'rename' && path !== undefined && path !== '') {
+      reportEntries(root, path, listener);
+    }
   });
   watcher.on('error', fail);
   return {
@@ -88,6 +95,36 @@ const watchTreeNatively = (root: string, listener: TreeWatchListener): TreeWatch
       watcher.close();
     },
   };
+};
+
+/**
+ * Report every entry under `relative`, when it is a directory now; a tree that moves on while it is read reports
+ * what it still holds.
+ *
+ * @param root - The watched root.
+ * @param relative - The directory, relative to the root and `/`-separated.
+ * @param listener - Told of each entry.
+ */
+const reportEntries = (root: string, relative: string, listener: TreeWatchListener): void => {
+  if (lookAt(join(root, ...relative.split('/')))?.directory !== true) {
+    return;
+  }
+  const pending = [relative];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(join(root, ...next.split('/')), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const child = `${next}/${entry.name}`;
+      listener.change(child);
+      if (entry.isDirectory()) {
+        pending.push(child);
+      }
+    }
+  }
 };
 
 /**

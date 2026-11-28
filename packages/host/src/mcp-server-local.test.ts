@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto';
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, normalize, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -87,7 +87,7 @@ const serve = async (
 /** `_meta` as Codex 0.157 sends it: the folder as a `file:` URL, or a raw value to test refusals. */
 const codexMeta = (folder: string) => ({
   'codex/sandbox-state-meta': {
-    sandboxCwd: folder.startsWith('/') ? pathToFileURL(folder).href : folder,
+    sandboxCwd: isAbsolute(folder) ? pathToFileURL(folder).href : folder,
   },
 });
 
@@ -163,10 +163,12 @@ describe('serveLocalHostMcp', () => {
 
   it('should work in the folder a call names, else the default folder', async () => {
     const { dispatch, invocations, checkouts, local } = await serve(ready);
+    /* The folder as this platform spells it: `D:\thread\project` on Windows, whose file URL carries the drive. */
+    const folder = resolve('/thread/project');
     try {
       await dispatch(evaluate, {
         toolCallId: 'a',
-        meta: codexMeta('/thread/project'),
+        meta: codexMeta(folder),
       });
       await dispatch(evaluate, {
         toolCallId: 'b',
@@ -175,12 +177,12 @@ describe('serveLocalHostMcp', () => {
       await dispatch(evaluate, { toolCallId: 'c' });
 
       expect(invocations.map(({ runId, toolName }) => ({ runId, toolName }))).toEqual([
-        { runId: 'mcp:/thread/project', toolName: toolName.evaluateModel },
+        { runId: `mcp:${folder}`, toolName: toolName.evaluateModel },
         { runId: 'mcp:/default', toolName: toolName.evaluateModel },
         { runId: 'mcp:/default', toolName: toolName.evaluateModel },
       ]);
-      expect(checkouts.get('mcp:/thread/project')).toEqual({
-        cwd: '/thread/project',
+      expect(checkouts.get(`mcp:${folder}`)).toEqual({
+        cwd: folder,
       });
     } finally {
       await local.close();
@@ -270,7 +272,7 @@ describe('serveLocalHostMcp', () => {
       });
       absolutePath = z.object({ images: z.array(filedSchema) }).parse(capture).images[0]?.absolutePath ?? '';
       expect(absolutePath.startsWith(join(tmpdir(), 'tau-mcp-'))).toBe(true);
-      expect(absolutePath.endsWith(image.path)).toBe(true);
+      expect(absolutePath.endsWith(normalize(image.path))).toBe(true);
       expect(await readFile(absolutePath)).toEqual(bytes);
     } finally {
       await local.close();

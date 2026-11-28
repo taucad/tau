@@ -1,5 +1,93 @@
 # Changelog
 
+## 0.16.0 (2026-11-28)
+
+### Features
+
+- feat(ui): Comment pins on a phone, pins on composer tiles, a light pin picture, and the mark up review fixes (#3020) (a84213144)
+- feat(formal): Acknowledge reviewed sources with one review file per change (#3013) (c464e7274)
+- feat(chat)!: Raise the AGENTS.md cap to 32 KiB and drop the line cut (#3012) (5ff767799)
+- feat(filesystem): Reset only the watches a topology change can reach (FW5) (#2997) (1781e8aed)
+- feat(ui): Keep no attachment state for a chat read from its file (HA2) (#2916) (a04dd4385)
+- feat(python-kernel-core): Seal and run Build123d on Windows x64 (#2528) (cbf1e037f)
+- feat(filesystem): Rank background provider calls behind interactive ones (FW4) (#2976) (046741121)
+- feat(filesystem)!: Retire the .tau/AGENTS.md and .tau/skills registry rows (#2975) (7104d6697)
+- feat(ui): Read a chat's own segment from the file and attach its settled run (HA1) (#2900) (8c6111685)
+- feat(billing-ui): Show credits left and never credit holds (#2910) (a66096021)
+- feat(api-auth): Prune Tau Desktop's rotated refresh tokens in the nightly maintenance pass (#2983) (3d6b1335d)
+- feat(sandbox): Contain Windows native workers through the sandbox helper (#2527) (8392365d2)
+- feat(api): Bill a stopped model step for what it used (D-3) (#2938) (7b181aca8)
+- feat(revisions)!: Generate only the ignore lines stock Git needs, and stage under .tau/staging (#2909) (2ecef2c1c)
+- feat(api-auth): Accept Tau Desktop's access token on Tau routes and keep governance on the web (#2962) (32a6ce135)
+- feat(api-auth): Add the OAuth provider for Tau Desktop sign-in (#2947) (15b2895a7)
+- feat(filesystem): Prove copies by probe and decide a delete under its lock (FW3) (#2934) (77007d9e0)
+- feat(agent-tools)!: Follow the Agent Skills spec for skill frontmatter (#2922) (fa1a34f04)
+- feat(ui)!: Read project instructions from a root AGENTS.md (#2919) (753bd5a71)
+- feat(ui): Report chat read failures and pin the reattach harness (HA0) (#2869) (43d5b5ac6)
+- feat(filesystem): Keep a discovery index that nominates while storage decides (FW2) (#2898) (f20a70475)
+- feat(api-llm-gateway): Default every reasoning model to medium effort (#2868) (66ca9bb22)
+- feat(filesystem): Count discovery scans and hold library mutations to a budget (FW0) (#2867) (9f8dc6f40)
+- feat(ui): Pin comments on the model for the chat, behind the comment pins flag (#2881) (6eef56b86)
+- feat(ui): Show the chat transcript without the AI SDK (T4) (#2846) (dccd460f0)
+- feat(ui): Fold every finished turn with the time it worked (#2860) (72f23cd2d)
+- feat(vitest-ci): Recorded retry in every Vitest config (FQ-4) (#2848) (d720510dd)
+- feat(vitest-ci): Per-project quarantine.json, the reporter's verdict and validate-quarantine (FQ-5) (#2847) (d2dfede9f)
+- feat(ui): Show the chat transcript as a synchronous fold of the projection (T2) (#2843) (bf3ba8cb5)
+- feat(telemetry): Carry tool-result delivery and admission phases on agent.turn (B4) (#2839) (6bccb9b0e)
+- feat(ui): Keep an open host's deployment answer fresh before a send (C7) (#2838) (dba203f81)
+- feat(vitest-ci): Record one outcome row per test execution in every Vitest config (FQ-1) (#2824) (425b9beee)
+
+### Fixes
+
+- fix(agent-host): Resolve an external request still flushing when its run ends (#3018) (9f4f1e550)
+- fix(host): Make the host unit suite pass on Windows (#2398) (3ff5dc980)
+- fix(agent-host): Keep observing chats when a workspace directory becomes a file (#2995) (94b52a37d)
+- fix(revisions): Re-head the checkout a landed merge moved before the next cut (#3004) (909ef943c)
+- fix(ui): Retry a lost remote read inside the host attachment (HA3) (#2920) (55ad58eb1)
+- fix(vitest-ci): Never record an expected failure as a retried pass (#2937) (b66e73f26)
+- fix(revisions): Pull again when the move stream's tail settles after the open pull (#2523) (9973c0483)
+- fix(filesystem): Make worker spans readable from the page (#2014) (#2437) (c86e34395)
+- fix(api): Load the OAuth provider with its own zod in the built API (#2960) (eaf64ad63)
+- fix(api-billing): Keep operator-closed unattributed cases closed and make tier U a warning (#2946) (df85105ff)
+- fix(ui): Unify thumbnail, preview and capture framing, and fix the e2e thumbnail, model-pane and headless capture rows (#2483) (4f10b162a)
+- fix(root): Close twenty-six chat defects found by the launch audit (#2815) (84698890a)
+- fix(ui): Hold a send its host refuses with a wait, and drop a queued prompt restored as a draft (#2880) (6fc9cb54b)
+- fix(ui): Send straight into the thread when nothing runs, and let Stop take a pending send back (#2814) (0e2ca356c)
+- fix(billing): remove the GPT-5 generation and bill Gemini 4 at standard price (#2871) (a643c2140)
+- fix(project-library): Delete one copy of a duplicated project by its folder (W0) (#2831) (6252c602b)
+- fix(desktop): Make the W9 packaged rows pass: real offline launch, safe mode in the native host (#2821) (1f18426ae)
+- fix(archive-core): Outlast a two-minute DNS failure on every CI download (#2825) (bfd3ec8e3)
+- fix(host): Keep an ACP adapter's last stderr in its exit report; make replicad.kernel.test work from a fresh checkout (#2809) (58e877b9e)
+- fix(revisions): Refuse Tau Cloud sync in safe mode (W9 R5) (#2800) (9bac31444)
+
+### Performance
+
+- perf(host): Prewarm the ACP adapter when the agent is selected (WP-18 step 1) (#2993) (da9fd4ed3)
+- perf(agent-host): Parse each row once, fold the ledger incrementally, and write compact chat logs (WP-10 A5, WP-11, WP-17) (#2943) (d2d86dadf)
+- perf(agent-observability): Reuse an undecided purposes answer too (WP-02) (#2966) (cafd4acec)
+- perf(agent-host): Mark each leg of a chat turn on the performance timeline (WP-00) (#2905) (f480fbc95)
+- perf(filesystem): Walk a warm statTree's nodes once, with no entry per file (#2475) (e5c4be40c)
+- perf(billing): Read a chat's receipts in one batch request on reopen (WP-13) (#2928) (204c5b705)
+- perf(agent-observability): Reuse a recent granted purposes answer for 10 s (WP-02) (#2929) (f7a9c58f6)
+- perf: Hold from the settled prefix, gzip gateway bodies and share the OpenAI cache key (WP-15) (#2923) (2b58d92a4)
+- perf(agent-host): Pipelined durability barrier on OPFS, Node and the provider leg (WP-10 step B) (#2921) (f839ddbfb)
+- perf(ui): Publish live chat changes once per frame and make the selector view cheap (WP-06) (#2914) (9d1231f9b)
+- perf(api): Warm connections and one-transaction model admission (WP-05, WP-14) (#2907) (70fb0d893)
+- perf(agent-host): Write a batch of log rows with one fence check and one flush (WP-10 step A) (#2912) (4593df4d2)
+- perf(ui): Bound the agent host's code load and read consent once per moment (WP-02, WP-03) (#2903) (4dbf5f342)
+- perf(agent-host): Conflate live deltas at the source, one per block per frame (WP-08) (#2901) (f866862d2)
+- perf(project-library): Drop the discovery scans nothing needs (#2896) (58a372f56)
+- perf(ui): Name a new project while its prompt is written (C1) (#2840) (84dbf8e6f)
+
+### Other changes
+
+- ci(formal): Give api-billing's nightly checks shards and three-attempts a 4 GB heap (#2986) (e9798f30b)
+- Revert the WP-16 step economy prompt guidance and record its measurement (#2985) (17d6bd697)
+- Ask the agent to write a step's files together and update the task list beside its next call (#2979) (09be7ffc8)
+- Keep the chat id out of the system prompt so new chats share the OpenAI cache (#2970) (8afe99eb4)
+- ci(root): Add the Windows unit lane and gate merges on it (R2) (#2389) (d4f7651b1)
+- ci(root): Move CI to Node 26 LTS and keep a Node 24 floor lane (#2764) (914e58791)
+
 ## 0.15.0 (2026-11-24)
 
 ### Features

@@ -16,6 +16,8 @@ export type ChatMessageQueueProps = {
   readonly items: readonly QueuedChatMessage[];
   readonly sendingId?: string;
   readonly error?: string;
+  /** The chat's one failure region already says `error`'s failure: the strip shows it without a second alert. */
+  readonly isErrorAnnounced?: boolean;
   readonly onEdit: (id: string, text: string | undefined) => Promise<void>;
   readonly onSteer: (id: string) => Promise<void>;
   readonly onMove: (id: string, beforeId: string | undefined) => Promise<void>;
@@ -27,6 +29,7 @@ export function ChatMessageQueueView({
   items,
   sendingId,
   error,
+  isErrorAnnounced = false,
   onEdit,
   onSteer,
   onMove,
@@ -385,7 +388,7 @@ export function ChatMessageQueueView({
       </ul>
       {visibleError !== undefined || error !== undefined ? (
         <div
-          role='alert'
+          role={visibleError === undefined && isErrorAnnounced ? undefined : 'alert'}
           className={cn(
             'flex items-start gap-2 px-2 py-2 text-xs text-muted-foreground',
             items.length > 0 && 'border-t',

@@ -421,8 +421,8 @@ export type LedgerState = {
 
 /** What one retraction dropped from the state: its audit note. */
 export type RetractionRecord = {
-  /** The identity the events were dropped from (aliases followed). */
-  readonly identity: string;
+  /** The identity the events were dropped from; a later alias moves it to the new identity. */
+  identity: string;
   readonly kinds: readonly FlakeEventKind[];
   readonly before: string;
   readonly reason: string;
@@ -606,6 +606,9 @@ export const applyAliases = (state: LedgerState, aliases: readonly Alias[]): str
     folded.push(id);
   }
   state.identities = Object.fromEntries(identities);
+  for (const record of Object.values(state.retractions ?? {})) {
+    record.identity = resolve(record.identity);
+  }
   return folded;
 };
 
@@ -629,10 +632,14 @@ export type RetractionResult = {
  * variants' event counts. Idempotent: an event once dropped is gone, so a later run drops nothing more.
  *
  * Retried passes count every `retry` event, also those the event cap ({@link maximumEvents}) or the age has evicted.
- * Both evict the oldest, so while a retracted event is still held every evicted one is older than `before` too, and
- * the retried passes left are exactly the `retry` events left. When every evicted event was such a `retry` (as many
- * evicted events as evicted retried passes), the variants' event counts and `evictedExecution` markers are reset from
- * the events left, so `flake-regression.ts` does not read a retracted event as the end of a stable run.
+ * Both evict the oldest recorded, so when the events held start before `before` and none after it was recorded ahead
+ * of one before it, every evicted event is older than `before` too, and the retried passes left are exactly the `retry` events left. When every evicted
+ * event was such a `retry` (as many evicted events as evicted retried passes), the variants' event counts and
+ * `evictedExecution` markers are reset from the events left, so `flake-regression.ts` does not read a retracted event
+ * as the end of a stable run. Without that evidence (a backfill recorded out of order, or every retracted event already
+ * evicted) only the events held are dropped: an evicted event cannot be dated, so it is left counted. A quarantined
+ * test's release track (`quarantineTracks`) is not recounted: it keeps no per-run detail to recount from, and a
+ * retracted failure there can only delay a release, never bring one forward.
  */
 export const applyRetractions = (
   state: LedgerState,
@@ -653,17 +660,26 @@ export const applyRetractions = (
       continue;
     }
     const left = identity.events.filter((event) => !dropped.includes(event));
+    const droppedRetries = dropped.filter((event) => event.kind === 'retry').length;
+    // The evicted events were recorded before every event held. They are all older than the cut-off when the events held
+    // start before it and none after it was recorded ahead of one before it (no backfill came in across the cut-off).
+    const before = identity.events.map((event) => Date.parse(event.at) < cutoff);
+    const firstAfter = before.indexOf(false);
+    const evictedBefore = before[0] === true && (firstAfter === -1 || !before.slice(firstAfter).includes(true));
     const recorded = Object.values(identity.variants).reduce((sum, variant) => sum + variant.events, 0);
     const evicted = Math.max(0, recorded - identity.events.length);
     const evictedRetries = Math.max(
       0,
       identity.retriedPasses - identity.events.filter((event) => event.kind === 'retry').length,
     );
-    const retriedPasses = kinds.has('retry')
-      ? left.filter((event) => event.kind === 'retry').length
-      : identity.retriedPasses;
+    let { retriedPasses } = identity;
+    if (kinds.has('retry')) {
+      retriedPasses = evictedBefore
+        ? left.filter((event) => event.kind === 'retry').length
+        : Math.max(0, retriedPasses - droppedRetries);
+    }
     const taken = identity.retriedPasses - retriedPasses;
-    const resetVariants = kinds.has('retry') && evicted === evictedRetries;
+    const resetVariants = kinds.has('retry') && evictedBefore && evicted === evictedRetries;
     for (const [key, variant] of Object.entries(identity.variants)) {
       const remaining = left.filter((event) => event.variant === key).length;
       if (resetVariants) {

@@ -159,14 +159,14 @@ const fakeGitHub = (
         const pulls: unknown = options.branches?.find(({ branch }) => branch === head)?.pulls ?? [];
         return pulls as T;
       }
-      if (path.includes('/tau/commits/head-')) {
-        const branch = path.slice(path.indexOf('/commits/head-') + '/commits/head-'.length);
+      if (path.includes('/tau/compare/main...head-')) {
+        const branch = /\.\.\.head-([^?]+)/u.exec(path)?.[1];
         const proposed = options.branches?.find((entry) => entry.branch === branch)?.proposed;
-        const commit: unknown = {
-          parents: [{ sha: 'parent' }],
+        const compare: unknown = {
+          merge_base_commit: { sha: 'parent' },
           files: proposed ? [{ filename: 'packages/host/quarantine.json', status: 'modified' }] : [],
         };
-        return commit as T;
+        return compare as T;
       }
       if (path.includes('/git/commits/head-')) {
         const branch = path.slice(path.indexOf('/git/commits/head-') + '/git/commits/head-'.length);
@@ -468,6 +468,34 @@ describe('the replay week (FQ-6 acceptance)', () => {
     expect(requests.some((request) => request.method === 'POST')).toBe(false);
     expect(outcome).toEqual([
       '`flake-quarantine/2026-11-21-aaaaaaaa` proposes 1 of 1 entries the ledger state no longer supports; it is not opened and reserves nothing.',
+    ]);
+  });
+
+  it('should name an open pull request whose entries the ledger state no longer supports, and leave it open', async () => {
+    const state = replayWeek();
+    applyRetractions(
+      state,
+      [{ identity: id.order, kinds: ['retry', 'same-hash', 'lineage'], before: '2026-11-23T00:00:00Z', reason: 'r' }],
+      { now: new Date('2026-11-23T00:00:00Z') },
+    );
+    const { github, requests } = fakeGitHub({
+      branches: [
+        {
+          branch: 'flake-quarantine/2026-11-21-aaaaaaaa',
+          pulls: [{ number: 5, state: 'open' }],
+          proposed: [{ test: 'src/store.test.ts > store > should keep the order', expires: '2026-12-06' }],
+        },
+      ],
+    });
+
+    const outcome = await reconcileEntryBranches(github, 'main', {
+      today: '2026-11-22',
+      stands: proposalStands(state, projects),
+    });
+
+    expect(requests.some((request) => request.method !== 'GET')).toBe(false);
+    expect(outcome).toEqual([
+      '`flake-quarantine/2026-11-21-aaaaaaaa` has open pull request #5, but the ledger state no longer supports 1 of its 1 entries: close it; its tests stay reserved until it closes.',
     ]);
   });
 

@@ -599,6 +599,30 @@ describe('retractions', () => {
     expect(identity(state, fails).variants['linux-x64']).toMatchObject({ events: 9, evictedExecution: 10 });
   });
 
+  it('should drop only the events held when a backfill came in out of order, or every retracted one was evicted', () => {
+    const state = emptyState(now);
+    const retry = { flaky: true, retryCount: 1 };
+    ingest(state, 0, retry);
+    for (let n = 121; n <= 221; n += 1) {
+      ingest(state, n, retry);
+    }
+    // Every retracted event is evicted: nothing can be dated, so nothing is dropped.
+    expect(applyRetractions(state, [retraction], { now })).toEqual([
+      { identity: fails, before: fixedAt, unknown: false, events: 0, retriedPasses: 0 },
+    ]);
+    expect(identity(state, fails).retriedPasses).toBe(102);
+    // A `--runs` backfill records one more retry from before the cut-off, out of order.
+    ingest(state, 1, retry);
+
+    expect(applyRetractions(state, [retraction], { now })).toEqual([
+      { identity: fails, before: fixedAt, unknown: false, events: 1, retriedPasses: 1 },
+    ]);
+    // The evicted events cannot be dated: they stay counted, and so do all 101 retries after the cut-off.
+    expect(identity(state, fails).retriedPasses).toBe(102);
+    expect(identity(state, fails).events).toHaveLength(99);
+    expect(identity(state, fails).variants['linux-x64']?.evictedExecution).toBeDefined();
+  });
+
   it('should follow an alias, and report a retraction whose identity is not in the state without changing it', () => {
     const state = falseRetries(3);
     const renamed = 'host › src/a.test.ts > store > should still fail as expected';
@@ -615,6 +639,19 @@ describe('retractions', () => {
     ]);
     expect(identity(state, renamed)).toMatchObject({ retriedPasses: 0, events: [] });
     expect(state.retractions?.[`${fails} @ ${fixedAt}`]?.identity).toBe(renamed);
+  });
+
+  it('should move a retraction note to the identity a later alias folds its test into', () => {
+    const state = falseRetries(3);
+    applyRetractions(state, [retraction], { now });
+    const renamed = 'host › src/a.test.ts > store > should still fail as expected';
+
+    applyAliases(state, [{ from: fails, to: renamed }]);
+
+    expect(state.retractions?.[`${fails} @ ${fixedAt}`]?.identity).toBe(renamed);
+    pruneState(state, new Date('2027-01-10T00:00:00Z'));
+    expect(state.identities[renamed]).toBeDefined();
+    expect(Object.keys(state.retractions ?? {})).toHaveLength(1);
   });
 
   it('should keep a retraction note while its identity is tracked or for 90 days', () => {

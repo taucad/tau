@@ -148,7 +148,9 @@ export type ProposalCheck = (path: string, entry: Readonly<Record<string, unknow
 /**
  * The `quarantine.json` files of every entry branch still in play: one with an open pull request, or with none yet
  * whose every proposed entry still stands (`stands`). A branch whose pull request was closed or merged holds nothing
- * pending; neither does one left without a pull request that proposes from evidence the state no longer holds.
+ * pending; neither does one left without a pull request that proposes from evidence the state no longer holds. An open
+ * pull request keeps its tests reserved whatever the state, so no test is proposed twice; `reconcileEntryBranches`
+ * names one whose evidence no longer stands.
  */
 export const readPending = async (github: Client, base: string, stands?: ProposalCheck): Promise<QuarantineText[]> => {
   const repo = `/repos/${github.repository}`;
@@ -167,7 +169,7 @@ export const readPending = async (github: Client, base: string, stands?: Proposa
       continue;
     }
     // oxlint-disable-next-line no-await-in-loop -- a file or two per branch
-    const proposed = stands && pulls.length === 0 ? await proposedEntries(github, reference.object.sha) : [];
+    const proposed = stands && pulls.length === 0 ? await proposedEntries(github, base, reference.object.sha) : [];
     if (stands && proposed.some(({ path, entry }) => !stands(path, entry))) {
       continue;
     }
@@ -728,22 +730,23 @@ export const applyPlan = async (github: Client, plan: EntryPlan, context: ApplyC
 };
 
 /**
- * The entries a branch's commit adds, with the `quarantine.json` each is in: those its files hold that the commit it
- * was built on lacks. A returned entry keeps its first `expires` (FQ-9), so a proposal can expire sooner than 14 days
- * after its push.
+ * The entries a branch adds against `base`, with the `quarantine.json` each is in: those its files hold at `sha` that
+ * they lack where the branch left `base`, over every commit of the branch. A returned entry keeps its first `expires`
+ * (FQ-9), so a proposal can expire sooner than 14 days after its push.
  */
 export const proposedEntries = async (
   github: Client,
+  base: string,
   sha: string,
 ): Promise<Array<{ readonly path: string; readonly entry: Record<string, unknown> }>> => {
   const repo = `/repos/${github.repository}`;
-  const commit = await github.get<{
-    readonly parents?: ReadonlyArray<{ readonly sha: string }>;
+  const compare = await github.get<{
+    readonly merge_base_commit?: { readonly sha: string };
     readonly files?: ReadonlyArray<{ readonly filename: string; readonly status: string }>;
-  }>(`${repo}/commits/${sha}`);
-  const parent = commit.parents?.[0]?.sha;
+  }>(`${repo}/compare/${encodeURIComponent(base)}...${sha}?per_page=100`);
+  const parent = compare.merge_base_commit?.sha;
   const added: Array<{ readonly path: string; readonly entry: Record<string, unknown> }> = [];
-  for (const file of commit.files ?? []) {
+  for (const file of compare.files ?? []) {
     if (baseName(file.filename) !== 'quarantine.json' || file.status === 'removed') {
       continue;
     }
@@ -788,6 +791,19 @@ export const reconcileEntryBranches = async (
     const pulls = await github.get<Pull[]>(
       `${repo}/pulls?state=all&per_page=10&head=${encodeURIComponent(`${owner}:${branch}`)}`,
     );
+    const open = pulls.find((pull) => pull.state === 'open');
+    if (open && stands) {
+      // An open pull request is left to its reviewer, and keeps its tests reserved so none is proposed twice; one whose
+      // evidence no longer stands is named, to be closed.
+      // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
+      const proposed = await proposedEntries(github, base, reference.object.sha);
+      const stale = proposed.filter(({ path, entry }) => !stands(path, entry));
+      if (stale.length > 0) {
+        outcome.push(
+          `\`${branch}\` has open pull request #${open.number}, but the ledger state no longer supports ${stale.length} of its ${proposed.length} entries: close it; its tests stay reserved until it closes.`,
+        );
+      }
+    }
     if (pulls.length > 0) {
       continue;
     }
@@ -802,7 +818,7 @@ export const reconcileEntryBranches = async (
     const proposed = tooOld
       ? []
       : // oxlint-disable-next-line no-await-in-loop -- few branches, one at a time
-        await proposedEntries(github, reference.object.sha);
+        await proposedEntries(github, base, reference.object.sha);
     if (tooOld || proposed.some(({ entry }) => typeof entry['expires'] === 'string' && entry['expires'] < today)) {
       outcome.push(`\`${branch}\` holds an expired proposal; it is not opened and reserves nothing.`);
       continue;

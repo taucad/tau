@@ -34,6 +34,8 @@ function FileManagerWrapper({ children }: { readonly children: ReactNode }): Rea
 const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: FileManagerWrapper });
 
 beforeEach(() => {
+  // A tile's drawing is TileMarkup's own test; here the canvas has no context, whichever test loads it first.
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
   let created = 0;
   vi.stubGlobal(
     'URL',
@@ -48,6 +50,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -86,8 +89,6 @@ describe('ChatTextareaAttachmentRail', () => {
   });
 
   it('should draw the pins and marks of a marked up image over its tile only', async () => {
-    // The drawing itself is TileMarkup's test; here only where it sits.
-    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
     render(
       <ChatTextareaAttachmentRail
         attachments={images}
@@ -116,7 +117,6 @@ describe('ChatTextareaAttachmentRail', () => {
     const drawing = await screen.findByTestId('tile-markup');
     expect(drawing.closest('button')).toHaveAccessibleName('Open uploaded image 2');
     expect(screen.getAllByTestId('tile-markup')).toHaveLength(1);
-    getContext.mockRestore();
   });
 
   it('should offer no mark up while comment pins are off', () => {

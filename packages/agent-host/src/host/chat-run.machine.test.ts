@@ -428,6 +428,25 @@ describe('chatRun races (W7.r1)', () => {
     expect(harness.actor.getSnapshot().value).toEqual({ idle: 'free' });
   });
 
+  /* NoPendingAfterEnd (ChatRunSlot.tla): the driver ends before the request's batch commits (a slow flush, #2398).
+   * The ending still resolves the request its rows ordered, so no approval outlives its run. */
+  it('should resolve a request whose batch has not committed when the external run ends', async () => {
+    const harness = createChatRunHarness();
+    await toRunning(harness, 'external');
+    await harness.drive({ type: 'approvalRequested', interruptId: 'interrupt-1', request: { prompt: 'May I?' } });
+    await harness.report('failed');
+    await harness.commit();
+    await harness.commit();
+
+    const interrupts = harness.log.rows.filter((event) => event.type === 'interrupt.recorded');
+    expect(interrupts.map((event) => [event.interruptId, event.phase])).toEqual([
+      ['interrupt-1', 'requested'],
+      ['interrupt-1', 'resolved'],
+    ]);
+    expect(Object.keys(harness.log.ledger().runs['run-1']?.pendingInterrupts ?? {})).toEqual([]);
+    expect(harness.actor.getSnapshot().value).toEqual({ idle: 'free' });
+  });
+
   // P3: without placement, a resume opens attempt 2, so the first driver's late report ends nothing.
   it('should drop a stale driver report after a resume without placement', async () => {
     const clock = new StepClock();

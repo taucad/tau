@@ -22,22 +22,26 @@ export type MemoryLogFile = Readonly<{ open: () => Promise<EventLogAppender> }>;
 /**
  * One log file shared by every appender a test opens: each sees the others' writes, as two hosts on one file do.
  *
- * @param options - `segments`: the other devices' segments beside it, read at each open and refresh (XD1).
+ * @param options - `segments`: the other devices' segments beside it, read at each open and refresh (XD1). `sync`:
+ * a flush the test controls; with it the file also takes a batch's bytes as one unflushed `write`, as Node's does
+ * (WP-10 step A), and `sync` is what makes them durable.
  */
 export const createMemoryLogFile = (
-  options: Readonly<{ segments?: EventLogStorage['segments'] }> = {},
+  options: Readonly<{ segments?: EventLogStorage['segments']; sync?: () => Promise<void> }> = {},
 ): MemoryLogFile => {
   let bytes = new Uint8Array(new ArrayBuffer(0));
+  const append: EventLogStorage['append'] = async (next) => {
+    const combined = new Uint8Array(bytes.byteLength + next.byteLength);
+    combined.set(bytes);
+    combined.set(next, bytes.byteLength);
+    bytes = combined;
+  };
   return {
     open: async () => {
       const storage: EventLogStorage = {
         read: async () => bytes,
-        append: async (next) => {
-          const combined = new Uint8Array(bytes.byteLength + next.byteLength);
-          combined.set(bytes);
-          combined.set(next, bytes.byteLength);
-          bytes = combined;
-        },
+        append,
+        ...(options.sync === undefined ? {} : { write: append, sync: options.sync }),
         truncate: async (size) => {
           bytes = bytes.slice(0, size);
         },
